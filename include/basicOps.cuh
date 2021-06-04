@@ -26,7 +26,7 @@ typedef enum Operations_t
 } Operations_t;
 
 template <int action> void elementWise(float *A, float *out, int n, float scalar);
-void estimateQuantiles(float *A, float *code, float offset, int n);
+template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
 
 
 #endif

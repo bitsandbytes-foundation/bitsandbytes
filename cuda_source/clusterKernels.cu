@@ -6,6 +6,8 @@
 #include <cub/block/block_discontinuity.cuh>
 #include <cub/block/block_store.cuh>
 
+#define HLF_MAX 65504
+
 template __global__ void kElementWise<ksmul>(const float *A, const float *B, float *out, const float scalar, int size);
 template<int operation> __global__ void kElementWise(const float *A, const float *B, float *out, const float scalar, int size)
 {
@@ -85,23 +87,26 @@ __device__ unsigned char quantize(float* smem_code, float x)
 #define NUM 4
 #define NUM_BLOCK 4096
 
+template __global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n);
+template __global__ void kEstimateQuantiles(half *__restrict__ const A, float *code, const float offset, const half max_val, const int n);
+template<typename T>
 __launch_bounds__(TH, 1)
-__global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const int n)
+__global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset, const T max_val, const int n)
 {
   const int n_full = (NUM_BLOCK*(n/NUM_BLOCK)) + (n % NUM_BLOCK == 0 ? 0 : NUM_BLOCK);
   int valid_items = (blockIdx.x+1 == gridDim.x) ? n - (blockIdx.x*NUM_BLOCK) : NUM_BLOCK;
   const int base_idx = (blockIdx.x * NUM_BLOCK);
   const float reciprocal_num_blocks = 1.0f/(n < 4096 ? 1.0f : (n/NUM_BLOCK));
 
-  float vals[NUM];
+  T vals[NUM];
 
-  typedef cub::BlockRadixSort<float, TH, NUM, cub::NullType, 4, true, cub::BLOCK_SCAN_RAKING> BlockRadixSort;
-  typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+  typedef cub::BlockRadixSort<T, TH, NUM, cub::NullType, 4, true, cub::BLOCK_SCAN_RAKING> BlockRadixSort;
+  typedef cub::BlockLoad<T, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
 
   __shared__ union {
       typename LoadFloat::TempStorage loadf;
       typename BlockRadixSort::TempStorage sort;
-      short smem_qidx[NUM_BLOCK];
+      int smem_qidx[NUM_BLOCK];
   } temp_storage;
 
   if(threadIdx.x < 256 && blockIdx.x == 0)
@@ -118,7 +123,8 @@ __global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, con
 
       #pragma unroll 4
       for(int j = 0; j < NUM; j++)
-            vals[j] = FLT_MAX;
+          //vals[j] = max_val;
+          vals[j] = FLT_MAX;
 
       __syncthreads();
       LoadFloat(temp_storage.loadf).Load(&(A[i]), vals, valid_items);
@@ -141,8 +147,8 @@ __global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, con
       if(threadIdx.x < 256)
       {
           float q_interval = (1.0f-(2.0f*offset))/255.0f;
-          short local_idx = round(((offset+(threadIdx.x*q_interval))*(valid_items-1)));
-          temp_storage.smem_qidx[local_idx] = (short)threadIdx.x;
+          int local_idx = round(((offset+(threadIdx.x*q_interval))*(valid_items-1)));
+          temp_storage.smem_qidx[local_idx] = threadIdx.x;
       }
 
       __syncthreads();

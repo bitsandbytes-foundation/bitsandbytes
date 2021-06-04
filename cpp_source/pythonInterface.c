@@ -7,13 +7,14 @@
 
 #include <basicOps.cuh>
 
-void scalarMul2(float *A, float *out, int n, float scalar){ elementWise<ksmul>(A, out, n, scalar); }
+void estimateQuantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles<float>(A, code, offset, n); }
+void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles<half>(A, code, offset, n); }
 
 
 extern "C"
 {
-  void ffscalar_mul(float *A, float *out, int n, float scalar){ scalarMul2(A, out, n, scalar); }
-	void estimate_quantiles(float *A, float *code, float offset, int n){ estimateQuantiles(A, code, offset, n); }
+	void estimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
+	void estimate_quantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles_fp16(A, code, offset, n); }
 }
 
 

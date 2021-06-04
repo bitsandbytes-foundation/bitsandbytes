@@ -3,6 +3,7 @@
 #include <hdf5.h>
 #include <cuda_profiler_api.h>
 #include <cub/device/device_scan.cuh>
+#include <limits>
 
 using std::cout;
 using std::endl;
@@ -14,10 +15,12 @@ template <int action> void elementWise(float *A, float *out, int n, float scalar
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-void estimateQuantiles(float *A, float *code, float offset, int n)
+template void estimateQuantiles(half *A, float *code, float offset, int n);
+template void estimateQuantiles(float *A, float *code, float offset, int n);
+template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
 {
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
-  kEstimateQuantiles<<<blocks, 1024>>>(A, code, offset, n);
+  kEstimateQuantiles<T><<<blocks, 1024>>>(A, code, offset, std::numeric_limits<T>::max(), n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
