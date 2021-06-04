@@ -14,6 +14,8 @@
 #define clusterKernels
 
 template<int operation> __global__ void kElementWise(const float *A, const float *B, float *out, const float scalar, int size);
+__global__ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n);
+__global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const int n);
 
 #endif
 
