@@ -24,3 +24,19 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
   kEstimateQuantiles<T><<<blocks, 1024>>>(A, code, offset, std::numeric_limits<T>::max(), n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
+
+void quantize(float *code, float *A, unsigned char *out, int n)
+{
+  int blocks = n/1024;
+  blocks = n % 1024 == 0 ? blocks : blocks + 1;
+  kQuantize<<<blocks, 1024>>>(code, A, out, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+void dequantize(float *code, unsigned char *A, float *out, int n)
+{
+  int blocks = n/1024;
+  blocks = n % 1024 == 0 ? blocks : blocks + 1;
+  kDequantize<<<blocks, 1024>>>(code, A, out, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}

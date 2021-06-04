@@ -28,6 +28,8 @@ typedef enum Operations_t
 template <int action> void elementWise(float *A, float *out, int n, float scalar);
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
 
+void quantize(float *code, float *A, unsigned char *out, int n);
+void dequantize(float *code, unsigned char *A, float *out, int n);
 
 #endif
 

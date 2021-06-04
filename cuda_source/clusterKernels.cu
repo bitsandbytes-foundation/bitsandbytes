@@ -123,8 +123,7 @@ __global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const f
 
       #pragma unroll 4
       for(int j = 0; j < NUM; j++)
-          //vals[j] = max_val;
-          vals[j] = FLT_MAX;
+          vals[j] = max_val;
 
       __syncthreads();
       LoadFloat(temp_storage.loadf).Load(&(A[i]), vals, valid_items);
@@ -195,6 +194,24 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
 
       __syncthreads();
       StoreChar(storec).Store(&(out[i]), qvals, valid_items);
-
   }
+}
+
+__global__ void kDequantize(float *code, unsigned char *A, float *out, const int n)
+{
+	const unsigned int numThreads = blockDim.x * gridDim.x;
+	const int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+	__shared__ float smem_code[256];
+	if(threadIdx.x < 256)
+	{
+		smem_code[threadIdx.x] = code[threadIdx.x];
+	}
+
+	__syncthreads();
+
+	for (int i = idx;i < n; i += numThreads)
+	{
+		out[i] = smem_code[A[i]];
+	}
 }
