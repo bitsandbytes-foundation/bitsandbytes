@@ -1,5 +1,5 @@
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
 
 
 
@@ -16,7 +16,7 @@ setup(
     license = "MIT",
     keywords = "gpu",
     url = "http://packages.python.org/bitsandbytes",
-    packages=['bitsandbytes'],
+    packages=find_packages(),
     package_data={'': ['libClusterNet.so']},
     long_description=read('README.md'),
     classifiers=[

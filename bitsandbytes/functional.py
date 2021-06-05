@@ -2,6 +2,7 @@ import torch
 import os
 import ctypes as ct
 
+torch.optim.Adam
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libClusterNet.so')
 
 def get_ptr(A: torch.Tensor) -> ct.c_void_p:
@@ -136,6 +137,6 @@ def adam_update(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: 
     '''
 
     if g.dtype == torch.float32 and state1.dtype == torch.float32:
-        lib.cadam32(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
+        lib.cadam32bit(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
                     ct.c_int32(step), ct.c_float(lr), ct.c_int32(g.numel()))

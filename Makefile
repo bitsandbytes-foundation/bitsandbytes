@@ -26,7 +26,7 @@ LIB := -L /usr/local/cuda/lib64 -lcudart -lcuda -lcublas -lcurand -lcusparse -lh
 COMPUTE_CAPABILITY := -gencode arch=compute_75,code=sm_75 # Turing
 
 all: $(ROOT_DIR)/dependencies/cub $(BUILD_DIR) $(HOME)/anaconda3
-	nvcc $(COMPUTE_CAPABILITY) -Xcompiler '-fPIC' -dc $(FILES) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
+	nvcc $(COMPUTE_CAPABILITY) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
 	nvcc $(COMPUTE_CAPABILITY) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/basicOps.o $(BUILD_DIR)/clusterKernels.o -o $(BUILD_DIR)/link.o 
 	$(GPP) -std=c++11 -shared -fPIC $(INCLUDE) $(BUILD_DIR)/basicOps.o $(BUILD_DIR)/clusterKernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libClusterNet.so $(LIB)
 

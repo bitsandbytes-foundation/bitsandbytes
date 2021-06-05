@@ -41,17 +41,18 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template void optimizer_32bit_2State<float, adam>(float* p, float* g, 
+template void optimizer_32bit_2State<float, adam>(float* g, float* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const int n);
-template<typename T, int OPTIMIZER> void optimizer_32bit_2State(T* p, T* g, 
+template<typename T, int OPTIMIZER> void optimizer_32bit_2State(T* g, T* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const int n)
 {
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
-  kOptimizer_32bit_2State<T, adam><<<blocks, 1024>>>(p, g, state1, state2, beta1, beta2, eps, weight_decay, step, lr, n);
+  kOptimizer_32bit_2State<T, adam><<<blocks, 1024>>>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
+	cudaDeviceSynchronize();
 }

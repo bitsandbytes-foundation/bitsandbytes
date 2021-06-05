@@ -215,35 +215,37 @@ __global__ void kDequantize(float *code, unsigned char *A, float *out, const int
 
 
 
+#define NUM_PER_THREAD 4
 
-template __global__ void kOptimizer_32bit_2State<float, adam>(float* p, float* g, float* state1, float* state2,
+template __global__ void kOptimizer_32bit_2State<float, adam>(float* g, float* p, float* state1, float* state2,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const int n);
 template<typename T, int OPTIMIZER>
-__global__ void kOptimizer_32bit_2State(T* p, T* g, 
+__launch_bounds__(TH, 1)
+__global__ void kOptimizer_32bit_2State(T* g, T* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const int n)
 {
 
-  const int n_full = ((TH*NUM)*(n/(TH*NUM))) + (n % (TH*NUM) == 0 ? 0 : (TH*NUM));
-  const int base_idx = (blockIdx.x * blockDim.x * NUM);
-  int valid_items = n - base_idx > (TH*NUM) ? (TH*NUM) : n - base_idx;
+  const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
+  const int base_idx = (blockIdx.x * blockDim.x * NUM_PER_THREAD);
+  int valid_items = n - base_idx > (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - base_idx;
 
-  T g_vals[NUM];
-  T p_vals[NUM];
+  T g_vals[NUM_PER_THREAD];
+  T p_vals[NUM_PER_THREAD];
 
-  float s1_vals[NUM];
-  float s2_vals[NUM];
+  float s1_vals[NUM_PER_THREAD];
+  float s2_vals[NUM_PER_THREAD];
 
   const float correction1 = 1.0f - powf(beta1, step);
   const float correction2 = sqrtf(1.0f - powf(beta2, step));
   const float step_size = -lr*correction2/correction1;
 
-  typedef cub::BlockLoad<T, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-  typedef cub::BlockStore<T, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
+  typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
+  typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
 
-  typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  typedef cub::BlockStore<float, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
+  typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+  typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
 
   __shared__ union {
       typename Load::TempStorage load;
@@ -252,13 +254,12 @@ __global__ void kOptimizer_32bit_2State(T* p, T* g,
       typename StoreFloat::TempStorage storef;
   } temp_storage;
 
-  for (unsigned int i = base_idx; i < n_full; i += TH*NUM)
+  for (unsigned int i = base_idx; i < n_full; i += blockDim.x*TH*NUM_PER_THREAD)
   {
-      if((i + (threadIdx.x*NUM) + NUM) > n){ continue; }
+      valid_items = n - i > (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
       __syncthreads();
       Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
-
       __syncthreads();
       LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
       __syncthreads();
@@ -266,19 +267,22 @@ __global__ void kOptimizer_32bit_2State(T* p, T* g,
       __syncthreads();
       Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
 
-      # pragma unroll 4
-      for(unsigned int j = 0; j < NUM; j++)
+      if((i + (threadIdx.x*NUM_PER_THREAD) + NUM_PER_THREAD) <= n)
       {
-          switch(OPTIMIZER)
-          {
-              case adam: 
-                  s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
-                  s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
-                  p_vals[j] = ((float)p_vals[j]) + step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2)));
-                  break;
-              case momentum: 
-                  break;
-          }
+        # pragma unroll 4
+        for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
+        {
+            switch(OPTIMIZER)
+            {
+                case adam: 
+                    s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
+                    s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
+                    p_vals[j] = ((float)p_vals[j]) + (step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2))));
+                    break;
+                case momentum: 
+                    break;
+            }
+        }
       }
 
       __syncthreads();
@@ -287,6 +291,6 @@ __global__ void kOptimizer_32bit_2State(T* p, T* g,
       StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
       __syncthreads();
       StoreFloat(temp_storage.storef).Store(&(state2[i]), s2_vals, valid_items);
-
+        __syncthreads();
   }
 }
