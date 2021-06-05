@@ -37,3 +37,10 @@ def test_quantization():
     diff = torch.abs(A1-A2).mean().item()
     assert diff < 0.001
     torch.testing.assert_allclose(A1, A2, atol=5e-3, rtol=0)
+
+    A1 = torch.randn(1024, 1024, device='cuda')
+    code = F.estimate_quantiles(A1)
+    C = F.quantize(code, A1)
+    A2 = F.dequantize(code, C)
+    diff = torch.abs(A1-A2).mean().item()
+    assert diff < 0.01

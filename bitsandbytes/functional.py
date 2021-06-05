@@ -100,3 +100,42 @@ def dequantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> t
     if out is None: out = torch.zeros_like(A, dtype=torch.float32)
     lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
     return out
+
+
+def adam_update(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
+                beta1: float, beta2: float, eps: float, weight_decay: float,
+                step: int, lr: float) -> None:
+    '''
+    Performs an inplace Adam update.
+
+    Universal Adam update for 32/8-bit state and 32/16-bit gradients/weights.
+    Uses AdamW formulation if weight decay > 0.0.
+
+    Parameters
+    ----------
+    g : torch.Tensor
+        Gradient tensor.
+    p : torch.Tensor
+        Parameter tensor.
+    state1 : torch.Tensor
+        Adam state 1.
+    state2 : torch.Tensor
+        Adam state 2.
+    beta1 : float
+        Adam beta1.
+    beta2 : float
+        Adam beta2.
+    eps : float
+        Adam epsilon.
+    weight_decay : float
+        Weight decay.
+    step : int
+        Current optimizer step.
+    lr : float
+        The learning rate.
+    '''
+
+    if g.dtype == torch.float32 and state1.dtype == torch.float32:
+        lib.cadam32(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
+                    ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
+                    ct.c_int32(step), ct.c_float(lr), ct.c_int32(g.numel()))
