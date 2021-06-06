@@ -56,8 +56,8 @@ def test_adam32bit(dim1, dim2, gtype):
             adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
             rm_path(path)
             torch.testing.assert_allclose(p1, p2)
-            torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], adam2.state[p2]['state1'], atol=0, rtol=0.0)
-            torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], adam2.state[p2]['state2'], atol=0, rtol=0.0)
+            torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], adam2.state[p2]['state1'], atol=1e-6, rtol=1e-5)
+            torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], adam2.state[p2]['state2'], atol=1e-6, rtol=1e-5)
 
 
 
