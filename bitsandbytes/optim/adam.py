@@ -11,7 +11,7 @@ class MockArgs(object):
 class Adam(Optimizer8bit):
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-            weight_decay=0, amsgrad=False, args=None, override_with_args=False):
+            weight_decay=0, amsgrad=False, optim_bits=32, args=None, override_with_args=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -28,7 +28,7 @@ class Adam(Optimizer8bit):
 
         if args is None:
             args = {}
-            args['optim_bits'] = 8
+            args['optim_bits'] = optim_bits
             args['adam8bits_offset'] = 1/512
             args['percentile_clipping'] = 100
 
@@ -60,7 +60,6 @@ class Adam(Optimizer8bit):
         if p.numel() % 4 != 0:
             raise ValueError(f'Parameter tensors need to have a multiple of 4: {p.shape}')
 
-        print(dtype)
         if dtype == torch.float32 or (dtype == torch.uint8 and p.numel() < 4096):
             state['state1'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)
             state['state2'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)

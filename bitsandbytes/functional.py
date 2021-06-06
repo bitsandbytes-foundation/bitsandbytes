@@ -137,6 +137,12 @@ def adam_update(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: 
     '''
 
     if g.dtype == torch.float32 and state1.dtype == torch.float32:
-        lib.cadam32bit(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
+        lib.cadam32bit_g32(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
                     ct.c_int32(step), ct.c_float(lr), ct.c_int32(g.numel()))
+    elif g.dtype == torch.float16 and state1.dtype == torch.float32:
+        lib.cadam32bit_g16(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
+                    ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
+                    ct.c_int32(step), ct.c_float(lr), ct.c_int32(g.numel()))
+    else:
+        raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')

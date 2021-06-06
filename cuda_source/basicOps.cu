@@ -41,6 +41,10 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+template void optimizer_32bit_2State<half, adam>(half* g, half* p, 
+                float* state1, float* state2,
+                const float beta1, const float beta2, const float eps, const float weight_decay,
+                const int step, const float lr, const int n);
 template void optimizer_32bit_2State<float, adam>(float* g, float* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,

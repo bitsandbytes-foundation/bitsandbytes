@@ -217,6 +217,8 @@ __global__ void kDequantize(float *code, unsigned char *A, float *out, const int
 
 #define NUM_PER_THREAD 4
 
+template __global__ void kOptimizer_32bit_2State<half, adam>(half* g, half* p, float* state1, float* state2,
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const int n);
 template __global__ void kOptimizer_32bit_2State<float, adam>(float* g, float* p, float* state1, float* state2,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const int n);
 template<typename T, int OPTIMIZER>
