@@ -229,7 +229,7 @@ __global__ void kOptimizer_32bit_2State(T* g, T* p,
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
   const int base_idx = (blockIdx.x * blockDim.x * NUM_PER_THREAD);
-  int valid_items = n - base_idx > (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - base_idx;
+  int valid_items = 0;
 
   T g_vals[NUM_PER_THREAD];
   T p_vals[NUM_PER_THREAD];
@@ -254,9 +254,9 @@ __global__ void kOptimizer_32bit_2State(T* g, T* p,
       typename StoreFloat::TempStorage storef;
   } temp_storage;
 
-  for (unsigned int i = base_idx; i < n_full; i += blockDim.x*TH*NUM_PER_THREAD)
+  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*TH*NUM_PER_THREAD)
   {
-      valid_items = n - i > (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
+      valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : i + (TH*NUM_PER_THREAD) - n;
 
       __syncthreads();
       Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);

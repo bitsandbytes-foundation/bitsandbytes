@@ -1,8 +1,12 @@
+import os
+import time
+import shutil
+import uuid
 import pytest
 import torch
 import bitsandbytes as bnb
-import time
 
+from os.path import join
 from itertools import product
 
 
@@ -14,7 +18,7 @@ def get_temp_dir():
 def rm_path(path):
     shutil.rmtree(path)
 
-dim1 = [1024, 4096]
+dim1 = [1024]
 dim2 = [32, 1024, 4097]
 gtype = [torch.float32]
 values = list(product(dim1,dim2, gtype))
@@ -42,18 +46,18 @@ def test_adam32bit(dim1, dim2, gtype):
         adam2.step()
         adam1.step()
 
-        torch.testing.assert_allclose(p1, p2, atol=1e-6, rtol=1e-5)
         torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], adam2.state[p2]['state1'], atol=1e-6, rtol=1e-5)
         torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], adam2.state[p2]['state2'], atol=1e-6, rtol=1e-5)
+        torch.testing.assert_allclose(p1, p2, atol=1e-6, rtol=1e-5)
 
-        #if i % 10 == 0 and i > 0:
-        #    path = get_temp_dir()
-        #    torch.save(adam2.state_dict(),join(path, 'opt.pt'))
-        #    adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
-        #    rm_path(path)
-        #    torch.testing.assert_allclose(p1, p2)
-        #    torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], adam2.state[p2]['state1'], atol=0, rtol=0.0)
-        #    torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], adam2.state[p2]['state2'], atol=0, rtol=0.0)
+        if i % 10 == 0 and i > 0:
+            path = get_temp_dir()
+            torch.save(adam2.state_dict(),join(path, 'opt.pt'))
+            adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
+            rm_path(path)
+            torch.testing.assert_allclose(p1, p2)
+            torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], adam2.state[p2]['state1'], atol=0, rtol=0.0)
+            torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], adam2.state[p2]['state2'], atol=0, rtol=0.0)
 
 
 

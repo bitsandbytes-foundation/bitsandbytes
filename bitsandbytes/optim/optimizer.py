@@ -1,4 +1,9 @@
+import torch
 from torch.optim import Optimizer
+from copy import deepcopy
+from itertools import chain
+from collections import defaultdict
+from torch._six import container_abcs
 
 class Optimizer8bit(Optimizer):
 
