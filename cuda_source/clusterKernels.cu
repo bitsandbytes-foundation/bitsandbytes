@@ -258,7 +258,7 @@ __global__ void kOptimizer_32bit_2State(T* g, T* p,
 
   for (unsigned int i = base_idx; i < n_full; i += gridDim.x*TH*NUM_PER_THREAD)
   {
-      valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : i + (TH*NUM_PER_THREAD) - n;
+      valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
       __syncthreads();
       Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);

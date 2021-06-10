@@ -1,6 +1,5 @@
 #include <basicOps.cuh>
 #include <clusterKernels.cuh>
-#include <hdf5.h>
 #include <cuda_profiler_api.h>
 #include <cub/device/device_scan.cuh>
 #include <limits>
