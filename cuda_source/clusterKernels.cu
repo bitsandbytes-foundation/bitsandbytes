@@ -218,15 +218,15 @@ __global__ void kDequantize(float *code, unsigned char *A, float *out, const int
 #define NUM_PER_THREAD 4
 
 template __global__ void kOptimizer_32bit_2State<half, adam>(half* g, half* p, float* state1, float* state2,
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const int n);
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const int n);
 template __global__ void kOptimizer_32bit_2State<float, adam>(float* g, float* p, float* state1, float* state2,
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const int n);
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const int n);
 template<typename T, int OPTIMIZER>
 __launch_bounds__(TH, 1)
 __global__ void kOptimizer_32bit_2State(T* g, T* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
-                const int step, const float lr, const int n)
+                const int step, const float lr, const bool is_sparse, const int n)
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
@@ -277,9 +277,12 @@ __global__ void kOptimizer_32bit_2State(T* g, T* p,
             switch(OPTIMIZER)
             {
                 case adam: 
-                    s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
-                    s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
-                    p_vals[j] = ((float)p_vals[j]) + (step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2))));
+                    if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
+                    {
+                      s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
+                      s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
+                      p_vals[j] = ((float)p_vals[j]) + (step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2))));
+                    }
                     break;
                 case momentum: 
                     break;

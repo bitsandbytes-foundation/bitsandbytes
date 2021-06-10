@@ -5,10 +5,65 @@ from itertools import chain
 from collections import defaultdict
 from torch._six import container_abcs
 
+class MockArgs(object):
+    def __init__(self, initial_data):
+        for key in initial_data:
+            setattr(self, key, initial_data[key])
+
+
+class GlobalOptimManager(object):
+    _instance = None
+
+    def __init__(self):
+        raise RuntimeError('Call get_instance() instead')
+
+    def initialize(self):
+        self.p2config = {}
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls.__new__(cls)
+            cls._instance.initialize()
+        return cls._instance
+
+    def override_config(self, parameters, key=None, value=None, key_value_dict=None):
+        '''
+        Overrides initial optimizer config for specific parameters.
+
+        The key-values of the optimizer config for the input parameters are overidden
+        This can be both, optimizer parameters like "betas", or "lr" or it can be
+        8-bit specific paramters like "is_sparse", "optim_bits", "percentile_clipping".
+
+        Parameters
+        ----------
+        parameters : torch.Tensor or list(torch.Tensors)
+            The input parameters.
+        key : str
+            The hyperparamter to override.
+        value : object
+            The value for the hyperparamters.
+        key_value_dict : dict
+            A dictionary with multiple key-values to override.
+        '''
+        if isinstance(parameters, torch.nn.Parameter):
+            parameters = [parameters]
+        if isinstance(parameters, torch.Tensor):
+            parameters = [parameters]
+        if key is not None and value is not None:
+            assert key_value_dict is None
+            key_value_dict = {key: value}
+
+        if key_value_dict is not None:
+            for p in parameters:
+                self.p2config[id(p)] = key_value_dict
+
+
 class Optimizer8bit(Optimizer):
 
     def __init__(self, params, defaults):
         super(Optimizer8bit, self).__init__(params, defaults)
+        self.mng = GlobalOptimManager.get_instance()
         self.non_castable_tensor_keys = set(
                 ['qtbl1', 'qtbl2',
                  'max1', 'max2',

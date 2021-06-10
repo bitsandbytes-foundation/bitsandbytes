@@ -1,17 +1,12 @@
 import torch
 from torch.optim import Optimizer
-from bitsandbytes.optim.optimizer import Optimizer8bit
+from bitsandbytes.optim.optimizer import Optimizer8bit, MockArgs
 import bitsandbytes.functional as F
-
-class MockArgs(object):
-    def __init__(self, initial_data):
-        for key in initial_data:
-            setattr(self, key, initial_data[key])
 
 class Adam(Optimizer8bit):
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-            weight_decay=0, amsgrad=False, optim_bits=32, args=None, override_with_args=False):
+            weight_decay=0, amsgrad=False, optim_bits=32, is_sparse=False, args=None, override_with_args=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -23,7 +18,7 @@ class Adam(Optimizer8bit):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad)
+                        weight_decay=weight_decay, amsgrad=amsgrad, is_sparse=is_sparse)
         super(Adam, self).__init__(params, defaults)
 
         if args is None:
@@ -31,6 +26,7 @@ class Adam(Optimizer8bit):
             args['optim_bits'] = optim_bits
             args['adam8bits_offset'] = 1/512
             args['percentile_clipping'] = 100
+            args['is_sparse'] = is_sparse
 
             self.args = MockArgs(args)
         else:
@@ -71,20 +67,32 @@ class Adam(Optimizer8bit):
 
         if self.args.percentile_clipping < 100:
             state['gnorm_vec'] = torch.zeros((100,), device=p.device)
-        #if self.args.unorm != 'none':
-            #state['unorm_vec'] = torch.zeros((100,), device=p.device)
 
+    def get_config(self, p, group):
+        config = {}
+        config['betas'] = group['betas']
+        config['eps'] = group['eps']
+        config['weight_decay'] = group['weight_decay']
+        config['lr'] = group['lr']
+        config['is_sparse'] = self.args.is_sparse
+
+        if id(p) in self.mng.p2config:
+            config.update(self.mng.p2config[id(p)])
+        return config
 
     @torch.no_grad()
     def update_step(self, group, p_id, p):
         state = self.state[p]
         grad = p.grad
-        beta1, beta2 = group['betas']
+
+        config = self.get_config(p, group)
 
         state['step'] += 1
         step = state['step']
 
-        F.adam_update(grad, p, state['state1'], state['state2'], beta1, beta2, group['eps'], group['weight_decay'], step, group['lr'])
+        F.adam_update(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
+                      config['eps'], config['weight_decay'], step, config['lr'],
+                      is_sparse=config['is_sparse'])
 
     @torch.no_grad()
     def step(self, closure=None):

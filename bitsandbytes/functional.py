@@ -5,6 +5,31 @@ import ctypes as ct
 torch.optim.Adam
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libClusterNet.so')
 
+def create_dynamic_map():
+    '''
+    Creates the dynamic quantiztion map.
+
+    The dynamic data type is made up of a dynamic exponent and
+    fraction. As the exponent increase from 0 to -7 the number
+    of bits available for the fraction shrinks.
+
+    For more details see
+    (8-Bit Approximations for Parallelism in Deep Learning)[https://arxiv.org/abs/1511.04561]
+    '''
+
+    n = 7
+
+    data = []
+    for i in range(n):
+        a = torch.linspace(0.1, 1, 2**i+1)
+        data += ((10**(-6+i))*(a[:-1]+a[1:])/2).tolist()
+        data += (-(a[:-1]+a[1:])/2).tolist()
+
+    data.append(0)
+    data.append(1.0)
+    data.sort()
+    return torch.Tensor(data)
+
 def get_ptr(A: torch.Tensor) -> ct.c_void_p:
     '''
     Get the ctypes pointer from a PyTorch Tensor.
@@ -105,7 +130,7 @@ def dequantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> t
 
 def adam_update(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float, weight_decay: float,
-                step: int, lr: float) -> None:
+                step: int, lr: float, is_sparse: bool = False) -> None:
     '''
     Performs an inplace Adam update.
 
@@ -134,15 +159,17 @@ def adam_update(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: 
         Current optimizer step.
     lr : float
         The learning rate.
+    is_sparse : bool
+        If the gradient can be sparse or not.
     '''
 
     if g.dtype == torch.float32 and state1.dtype == torch.float32:
         lib.cadam32bit_g32(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
-                    ct.c_int32(step), ct.c_float(lr), ct.c_int32(g.numel()))
+                    ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.float32:
         lib.cadam32bit_g16(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
-                    ct.c_int32(step), ct.c_float(lr), ct.c_int32(g.numel()))
+                    ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_int32(g.numel()))
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')

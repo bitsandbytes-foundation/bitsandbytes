@@ -14,12 +14,12 @@ void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimate
 void adam32bit_g32(float *g, float *p,
                float* state1, float* state2,
                const float beta1, const float beta2, const float eps, const float weight_decay,
-               const int step, const float lr, const int n){ optimizer_32bit_2State<float, 0>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, n); }
+               const int step, const float lr, const bool is_sparse, const int n){ optimizer_32bit_2State<float, 0>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n); }
 
 void adam32bit_g16(half *g, half *p,
                float* state1, float* state2,
                const float beta1, const float beta2, const float eps, const float weight_decay,
-               const int step, const float lr, const int n){ optimizer_32bit_2State<half, 0>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, n); }
+               const int step, const float lr, const bool is_sparse, const int n){ optimizer_32bit_2State<half, 0>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n); }
 
 extern "C"
 {
@@ -30,11 +30,11 @@ extern "C"
 	void cadam32bit_g32(float *g, float *p,
 								 float* state1, float* state2,
 								 const float beta1, const float beta2, const float eps, const float weight_decay,
-								 const int step, const float lr, const int n){ adam32bit_g32(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, n); }
+								 const int step, const float lr, const bool is_sparse, const int n){ adam32bit_g32(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n); }
 	void cadam32bit_g16(half *g, half *p,
 								 float* state1, float* state2,
 								 const float beta1, const float beta2, const float eps, const float weight_decay,
-								 const int step, const float lr, const int n){ adam32bit_g16(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, n); }
+								 const int step, const float lr, const bool is_sparse, const int n){ adam32bit_g16(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n); }
 }
 
 

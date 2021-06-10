@@ -42,7 +42,7 @@ void dequantize(float *code, unsigned char *A, float *out, int n);
 template<typename T, int OPTIMIZER> void optimizer_32bit_2State(T* g, T* p, 
                 float* state1, float* state2,
                 float beta1, float beta2, float eps, float weight_decay,
-                int step, float lr, int n);
+                int step, float lr, const bool is_sparse, int n);
 
 #endif
 
