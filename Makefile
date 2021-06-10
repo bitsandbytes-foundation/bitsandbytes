@@ -16,14 +16,13 @@ BUILD_DIR:= $(ROOT_DIR)/cuda_build
 FILES := $(ROOT_DIR_CU)/basicOps.cu $(ROOT_DIR_CU)/clusterKernels.cu
 FILES_CPP := $(ROOT_DIR_CCP)/pythonInterface.c
 
-# General compilation flags
-
-INCLUDE :=  -I /usr/local/cuda/include -I $(ROOT_DIR)/include -I $(ANACONDA_HOME)/include -I $(ROOT_DIR)/dependencies/cub
-LIB := -L /usr/local/cuda/lib64 -lcudart -lcuda -lcublas -lcurand -lcusparse -lhdf5 -L $(ANACONDA_HOME)/lib
+INCLUDE :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/include -I $(ANACONDA_HOME)/include -I $(ROOT_DIR)/dependencies/cub
+LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcuda -lcublas -lcurand -lcusparse -lhdf5 -L $(ANACONDA_HOME)/lib
 
 # NVIDIA NVCC compilation flags
-#COMPUTE_CAPABILITY := -gencode arch=compute_52,code=sm_52 # Maxwell
-COMPUTE_CAPABILITY := -gencode arch=compute_75,code=sm_75 # Turing
+COMPUTE_CAPABILITY := -gencode arch=compute_70,code=sm_70 # Volta
+COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
+COMPUTE_CAPABILITY += -gencode arch=compute_75,code=sm_75 # Turing
 
 all: $(ROOT_DIR)/dependencies/cub $(BUILD_DIR) $(HOME)/anaconda3
 	nvcc $(COMPUTE_CAPABILITY) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
