@@ -269,25 +269,22 @@ __global__ void kOptimizer_32bit_2State(T* g, T* p,
       __syncthreads();
       Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
 
-      if((i + (threadIdx.x*NUM_PER_THREAD) + NUM_PER_THREAD) <= n)
+      # pragma unroll 4
+      for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
       {
-        # pragma unroll 4
-        for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
-        {
-            switch(OPTIMIZER)
-            {
-                case adam: 
-                    if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
-                    {
-                      s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
-                      s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
-                      p_vals[j] = ((float)p_vals[j]) + (step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2))));
-                    }
-                    break;
-                case momentum: 
-                    break;
-            }
-        }
+          switch(OPTIMIZER)
+          {
+              case adam: 
+                  if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
+                  {
+                    s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
+                    s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
+                    p_vals[j] = ((float)p_vals[j]) + (step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2))));
+                  }
+                  break;
+              case momentum: 
+                  break;
+          }
       }
 
       __syncthreads();

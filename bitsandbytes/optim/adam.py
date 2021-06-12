@@ -53,8 +53,6 @@ class Adam(Optimizer8bit):
 
         state = self.state[p]
         state['step'] = 0
-        if p.numel() % 4 != 0:
-            raise ValueError(f'Parameter tensors need to have a multiple of 4: {p.shape}')
 
         if dtype == torch.float32 or (dtype == torch.uint8 and p.numel() < 4096):
             state['state1'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)
@@ -93,6 +91,7 @@ class Adam(Optimizer8bit):
         F.adam_update(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
                       config['eps'], config['weight_decay'], step, config['lr'],
                       is_sparse=config['is_sparse'])
+
 
     @torch.no_grad()
     def step(self, closure=None):
