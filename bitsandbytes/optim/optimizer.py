@@ -18,7 +18,10 @@ class GlobalOptimManager(object):
         raise RuntimeError('Call get_instance() instead')
 
     def initialize(self):
-        self.p2config = {}
+        self.pid2config = {}
+        self.index2config = {}
+        self.optimizer = None
+        self.uses_config_override = False
 
     @classmethod
     def get_instance(cls):
@@ -26,6 +29,16 @@ class GlobalOptimManager(object):
             cls._instance = cls.__new__(cls)
             cls._instance.initialize()
         return cls._instance
+
+    def register_parameters(self, params):
+        param_groups = list(params)
+        if not isinstance(param_groups[0], dict):
+            param_groups = [{'params': param_groups}]
+
+        for group_index, group in enumerate(param_groups):
+            for p_index, p in enumerate(group['params']):
+                if id(p) in self.pid2config:
+                    self.index2config[(group_index, p_index)] = self.pid2config[id(p)]
 
     def override_config(self, parameters, key=None, value=None, key_value_dict=None):
         '''
@@ -46,6 +59,7 @@ class GlobalOptimManager(object):
         key_value_dict : dict
             A dictionary with multiple key-values to override.
         '''
+        self.uses_config_override = True
         if isinstance(parameters, torch.nn.Parameter):
             parameters = [parameters]
         if isinstance(parameters, torch.Tensor):
@@ -56,7 +70,7 @@ class GlobalOptimManager(object):
 
         if key_value_dict is not None:
             for p in parameters:
-                self.p2config[id(p)] = key_value_dict
+                self.pid2config[id(p)] = key_value_dict
 
 
 class Optimizer8bit(Optimizer):

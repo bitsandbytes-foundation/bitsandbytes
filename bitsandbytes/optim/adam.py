@@ -44,7 +44,7 @@ class Adam(Optimizer8bit):
                 self.keep_32_bit.add(p.data.storage().data_ptr())
 
     @torch.no_grad()
-    def init_state(self, group, p_id, p):
+    def init_state(self, group, p, gindex, pindex):
         if self.args.optim_bits == 32:
             dtype = torch.float32
         elif self.args.optim_bits == 8:
@@ -66,7 +66,7 @@ class Adam(Optimizer8bit):
         if self.args.percentile_clipping < 100:
             state['gnorm_vec'] = torch.zeros((100,), device=p.device)
 
-    def get_config(self, p, group):
+    def get_config(self, gindex, pindex, group):
         config = {}
         config['betas'] = group['betas']
         config['eps'] = group['eps']
@@ -74,16 +74,16 @@ class Adam(Optimizer8bit):
         config['lr'] = group['lr']
         config['is_sparse'] = self.args.is_sparse
 
-        if id(p) in self.mng.p2config:
-            config.update(self.mng.p2config[id(p)])
+        if (gindex, pindex) in self.mng.index2config:
+            config.update(self.mng.index2config[(gindex, pindex)])
         return config
 
     @torch.no_grad()
-    def update_step(self, group, p_id, p):
+    def update_step(self, group, p, gindex, pindex):
         state = self.state[p]
         grad = p.grad
 
-        config = self.get_config(p, group)
+        config = self.get_config(gindex, pindex, group)
 
         state['step'] += 1
         step = state['step']
@@ -107,15 +107,15 @@ class Adam(Optimizer8bit):
                 loss = closure()
 
         overflows = []
-        for group in self.param_groups:
-            for p_id, p in enumerate(group['params']):
+        for gindex, group in enumerate(self.param_groups):
+            for pindex, p in enumerate(group['params']):
                 if p.grad is None:
                     continue
                 state = self.state[p]
                 if len(state) == 0:
-                    self.init_state(group, p_id, p)
+                    self.init_state(group, p, gindex, pindex)
 
-                self.update_step(group, p_id, p)
+                self.update_step(group, p, gindex, pindex)
 
         return loss
 

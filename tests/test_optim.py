@@ -81,8 +81,8 @@ names = ['dim1_{0}_dim2_{1}_gtype_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, gtype", values, ids=names)
 def test_global_config(dim1, dim2, gtype):
     if dim1 == 1 and dim2 == 1: return
-    p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
-    p2 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
+    p1 = torch.randn(dim1,dim2, device='cpu', dtype=gtype)*0.1
+    p2 = torch.randn(dim1,dim2, device='cpu', dtype=gtype)*0.1
     mask = torch.rand_like(p2) < 0.1
     beta1 = 0.9
     beta2 = 0.999
@@ -91,6 +91,10 @@ def test_global_config(dim1, dim2, gtype):
 
     bnb.optim.GlobalOptimManager.get_instance().initialize()
     bnb.optim.GlobalOptimManager.get_instance().override_config(p2, 'is_sparse', True)
+
+    bnb.optim.GlobalOptimManager.get_instance().register_parameters([p1, p2])
+    p1 = p1.cuda()
+    p2 = p2.cuda()
 
     adam2 = bnb.optim.Adam([p1, p2], lr, (beta1, beta2), eps)
 
