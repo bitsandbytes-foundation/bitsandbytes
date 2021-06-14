@@ -128,7 +128,7 @@ def dequantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> t
     return out
 
 
-def adam_update(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
+def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float, weight_decay: float,
                 step: int, lr: float, is_sparse: bool = False) -> None:
     '''

@@ -58,10 +58,11 @@ class Adam(Optimizer8bit):
             state['state1'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)
             state['state2'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)
         elif dtype == torch.uint8:
-            state['qtbl1'] = torch.zeros((256,), dtype=torch.float32, device=p.device)
-            state['qtbl2'] = torch.zeros((256,), dtype=torch.float32, device=p.device)
+            state['qmap1'] = torch.zeros((256,), dtype=torch.float32, device=p.device)
             state['max1'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
             state['max2'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
+            state['new_max1'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
+            state['new_max2'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
 
         if self.args.percentile_clipping < 100:
             state['gnorm_vec'] = torch.zeros((100,), device=p.device)
@@ -88,9 +89,10 @@ class Adam(Optimizer8bit):
         state['step'] += 1
         step = state['step']
 
-        F.adam_update(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
-                      config['eps'], config['weight_decay'], step, config['lr'],
-                      is_sparse=config['is_sparse'])
+        if state['state1'].dtype == torch.float:
+            F.adam_update_32bit(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
+                          config['eps'], config['weight_decay'], step, config['lr'],
+                          is_sparse=config['is_sparse'])
 
 
     @torch.no_grad()

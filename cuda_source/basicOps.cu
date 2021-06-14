@@ -7,15 +7,6 @@
 using std::cout;
 using std::endl;
 
-template void elementWise<ksmul>(float *A, float *out, int n, float scalar);
-template <int action> void elementWise(float *A, float *out, int n, float scalar)
-{
-  kElementWise<action><<<n/THREADS_PER_BLOCKS + 1, THREADS_PER_BLOCKS>>>(A, NULL, out,scalar, n);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-template void estimateQuantiles(half *A, float *code, float offset, int n);
-template void estimateQuantiles(float *A, float *code, float offset, int n);
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
 {
   int blocks = n/4096;
@@ -40,14 +31,6 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template void optimizer_32bit_2State<half, adam>(half* g, half* p, 
-                float* state1, float* state2,
-                const float beta1, const float beta2, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const int n);
-template void optimizer_32bit_2State<float, adam>(float* g, float* p, 
-                float* state1, float* state2,
-                const float beta1, const float beta2, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const int n);
 template<typename T, int OPTIMIZER> void optimizer_32bit_2State(T* g, T* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
@@ -55,6 +38,53 @@ template<typename T, int OPTIMIZER> void optimizer_32bit_2State(T* g, T* p,
 {
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
-  kOptimizer_32bit_2State<T, adam><<<blocks, 1024>>>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n);
+  kOptimizer_32bit_2State<T, ADAM><<<blocks, 1024>>>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
+
+template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g,
+                unsigned char* state1, unsigned char* state2,
+                float beta1, float beta2,
+                float eps, int step, float lr, 
+                float* quantiles1, float* quantiles2,
+                float* new_quantiles1, float* new_quantiles2,
+                float gnorm_scale, 
+                float* max1, float* max2, float* new_max1, float* new_max2,
+                float weight_decay,
+                int n)
+{
+  int blocks = n/4096;
+  blocks = n % 4096 == 0 ? blocks : blocks + 1;
+  kPreconditionOptimizerStatic8bit2State<T, ADAM><<<blocks, 256>>>(p, g, state1, state2, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+  kOptimizerStatic8bit2State<T, ADAM><<<blocks, 1024>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
+                                                        quantiles1, quantiles2, new_quantiles1, new_quantiles2, gnorm_scale, max1, max2, new_max1, new_max2, weight_decay, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+
+//==============================================================
+//                   TEMPLATE DEFINITIONS
+//==============================================================
+
+template void estimateQuantiles(half *A, float *code, float offset, int n);
+template void estimateQuantiles(float *A, float *code, float offset, int n);
+
+template void optimizer_32bit_2State<half, ADAM>(half* g, half* p, 
+                float* state1, float* state2,
+                const float beta1, const float beta2, const float eps, const float weight_decay,
+                const int step, const float lr, const bool is_sparse, const int n);
+template void optimizer_32bit_2State<float, ADAM>(float* g, float* p, 
+                float* state1, float* state2,
+                const float beta1, const float beta2, const float eps, const float weight_decay,
+                const int step, const float lr, const bool is_sparse, const int n);
+
+template void optimizerStatic8bit2State<half, ADAM>(half* p, half* g, unsigned char* state1, unsigned char* state2,
+                float beta1, float beta2,
+                float eps, int step, float lr, 
+                float* quantiles1, float* quantiles2,
+                float* new_quantiles1, float* new_quantiles2,
+                float gnorm_scale, 
+                float* max1, float* max2, float* new_max1, float* new_max2,
+                float weight_decay,
+                int n);

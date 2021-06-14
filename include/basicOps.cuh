@@ -27,12 +27,11 @@ typedef enum Operations_t
 
 typedef enum Optimizer_t
 {
-	adam = 0,
+	ADAM = 0,
 	momentum = 1,
 } Optimizer_t;
 
 
-template <int action> void elementWise(float *A, float *out, int n, float scalar);
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
 
 void quantize(float *code, float *A, unsigned char *out, int n);
@@ -43,6 +42,16 @@ template<typename T, int OPTIMIZER> void optimizer_32bit_2State(T* g, T* p,
                 float* state1, float* state2,
                 float beta1, float beta2, float eps, float weight_decay,
                 int step, float lr, const bool is_sparse, int n);
+
+template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g, unsigned char* state1, unsigned char* state2,
+                float beta1, float beta2,
+                float eps, int step, float lr, 
+                float* quantiles1, float* quantiles2,
+                float* new_quantiles1, float* new_quantiles2,
+                float gnorm_scale, 
+                float* max1, float* max2, float* new_max1, float* new_max2,
+                float weight_decay,
+                int n);
 
 #endif
 
