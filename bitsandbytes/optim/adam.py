@@ -33,6 +33,10 @@ class Adam(Optimizer8bit):
             self.args = args
 
         self.keep_32_bit = set()
+        self.name2qmap = {}
+        if self.args.optim_bits == 8:
+            self.name2qmap['dynamic'] = F.create_dynamic_map(signed=True)
+            self.name2qmap['udynamic'] = F.create_dynamic_map(signed=False)
 
 
     def set_state_bits(self, model, keep32type=[torch.nn.Embedding], keep32smaller=4096):
@@ -54,11 +58,19 @@ class Adam(Optimizer8bit):
         state = self.state[p]
         state['step'] = 0
 
+
         if dtype == torch.float32 or (dtype == torch.uint8 and p.numel() < 4096):
             state['state1'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)
             state['state2'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)
         elif dtype == torch.uint8:
-            state['qmap1'] = torch.zeros((256,), dtype=torch.float32, device=p.device)
+            if state['step'] == 0:
+                self.name2qmap['dynamic'] = self.name2qmap['dynamic'].to(p.device)
+                self.name2qmap['udynamic'] = self.name2qmap['udynamic'].to(p.device)
+
+            state['state1'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.uint8, device=p.device)
+            state['state2'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.uint8, device=p.device)
+            state['qmap1'] = self.name2qmap['dynamic']
+            state['qmap2'] = self.name2qmap['udynamic']
             state['max1'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
             state['max2'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
             state['new_max1'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
@@ -91,8 +103,16 @@ class Adam(Optimizer8bit):
 
         if state['state1'].dtype == torch.float:
             F.adam_update_32bit(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
-                          config['eps'], config['weight_decay'], step, config['lr'],
-                          is_sparse=config['is_sparse'])
+                          config['eps'], step, config['lr'],
+                          config['weight_decay'], is_sparse=config['is_sparse'])
+        elif state['state1'].dtype == torch.uint8:
+            F.adam_update_8bit(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
+                          config['eps'],  step, config['lr'],
+                          state['qmap1'], state['qmap2'], state['max1'], state['max2'], state['new_max1'], state['new_max2'],
+                          config['weight_decay'], is_sparse=config['is_sparse'])
+            # swap maxes
+            state['max1'], state['new_max1'] = state['new_max1'], state['max1']
+            state['max2'], state['new_max2'] = state['new_max2'], state['max2']
 
 
     @torch.no_grad()
@@ -127,9 +147,7 @@ class Adam32bit(Adam):
         super(Adam32bit, self).__init__(params, lr, betas, eps, weight_decay, amsgrad, args, override_with_args)
         self.args.optim_bits = 32
 
-class Adam8bit(Adam):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-            weight_decay=0, amsgrad=False, args=None, override_with_args=False):
-        super(Adam32bit, self).__init__(params, lr, betas, eps, weight_decay, amsgrad, args, override_with_args)
-        self.args.optim_bits = 8
+def Adam8bit(params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+        weight_decay=0, amsgrad=False, optim_bits=8, is_sparse=False, args=None, override_with_args=False):
+    return Adam(params, lr, betas, eps, weight_decay, amsgrad, 8, is_sparse, args, override_with_args)
 

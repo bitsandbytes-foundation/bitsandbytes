@@ -79,10 +79,9 @@ class Optimizer8bit(Optimizer):
         super(Optimizer8bit, self).__init__(params, defaults)
         self.mng = GlobalOptimManager.get_instance()
         self.non_castable_tensor_keys = set(
-                ['qtbl1', 'qtbl2',
+                ['qmap1', 'qmap2',
                  'max1', 'max2',
-                 'scale1', 'scale2',
-                 'overflow_count', 'unorm_vec', 'gnorm_vec',
+                 'new_max1', 'new_max2',
                  'state1', 'state2'])
 
     def __setstate__(self, state):

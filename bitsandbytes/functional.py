@@ -5,7 +5,7 @@ import ctypes as ct
 torch.optim.Adam
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libClusterNet.so')
 
-def create_dynamic_map():
+def create_dynamic_map(signed=True):
     '''
     Creates the dynamic quantiztion map.
 
@@ -21,9 +21,12 @@ def create_dynamic_map():
 
     data = []
     for i in range(n):
-        a = torch.linspace(0.1, 1, 2**i+1)
-        data += ((10**(-6+i))*(a[:-1]+a[1:])/2).tolist()
-        data += (-(a[:-1]+a[1:])/2).tolist()
+        fraction_items = 2**i+1 if signed else 2**(i+1)+1
+        boundaries = torch.linspace(0.1, 1, fraction_items)
+        means = (boundaries[:-1]+boundaries[1:])/2.0
+        data += ((10**(-6+i))*means).tolist()
+        if signed:
+            data += (-(10**(-6+i))*means).tolist()
 
     data.append(0)
     data.append(1.0)
@@ -101,6 +104,9 @@ def quantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> tor
     lib.cquantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
     return out
 
+def dequantize_with_absmax(code: torch.Tensor, absmax:torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
+    out = dequantize(code, A, out)
+    return out*absmax
 
 def dequantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
     '''
@@ -129,8 +135,8 @@ def dequantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> t
 
 
 def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
-                beta1: float, beta2: float, eps: float, weight_decay: float,
-                step: int, lr: float, is_sparse: bool = False) -> None:
+                beta1: float, beta2: float, eps: float,
+                step: int, lr: float, weight_decay: float=0.0, is_sparse: bool = False) -> None:
     '''
     Performs an inplace Adam update.
 
@@ -171,5 +177,72 @@ def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, st
         lib.cadam32bit_g16(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
                     ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_int32(g.numel()))
+    else:
+        raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
+
+
+def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
+                beta1: float, beta2: float, eps: float,
+                step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
+                max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
+                weight_decay: float=0.0, is_sparse: bool=False) -> None:
+    '''
+    Performs an inplace Adam update.
+
+    Universal Adam update for 32/8-bit state and 32/16-bit gradients/weights.
+    Uses AdamW formulation if weight decay > 0.0.
+
+    Parameters
+    ----------
+    g : torch.Tensor
+        Gradient tensor.
+    p : torch.Tensor
+        Parameter tensor.
+    state1 : torch.Tensor
+        Adam state 1.
+    state2 : torch.Tensor
+        Adam state 2.
+    beta1 : float
+        Adam beta1.
+    beta2 : float
+        Adam beta2.
+    eps : float
+        Adam epsilon.
+    weight_decay : float
+        Weight decay.
+    step : int
+        Current optimizer step.
+    lr : float
+        The learning rate.
+    is_sparse : bool
+        If the gradient can be sparse or not.
+    qmap1 : torch.Tensor
+        Quantization map for first Adam state.
+    qmap2 : torch.Tensor
+        Quantization map for second Adam state.
+    max1 : torch.Tensor
+        Max value for first Adam state update.
+    max2 : torch.Tensor
+        Max value for second Adam state update.
+    new_max1 : torch.Tensor
+        Max value for the next Adam update of the first state.
+    new_max2 : torch.Tensor
+        Max value for the next Adam update of the second state.
+    '''
+
+    if g.dtype == torch.float32 and state1.dtype == torch.uint8:
+        lib.coptimizer_static_8bit_2state_g32(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+                    ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
+                    ct.c_int32(step), ct.c_float(lr),
+                    get_ptr(qmap1), get_ptr(qmap2),
+                    get_ptr(max1), get_ptr(max2), get_ptr(new_max1), get_ptr(new_max2),
+                    ct.c_float(weight_decay),ct.c_int32(g.numel()))
+    elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
+        lib.coptimizer_static_8bit_2state_g16(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+                    ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
+                    ct.c_int32(step), ct.c_float(lr),
+                    get_ptr(qmap1), get_ptr(qmap2),
+                    get_ptr(max1), get_ptr(max2), get_ptr(new_max1), get_ptr(new_max2),
+                    ct.c_float(weight_decay),ct.c_int32(g.numel()))
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')

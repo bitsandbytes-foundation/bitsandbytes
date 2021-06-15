@@ -47,8 +47,6 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g,
                 float beta1, float beta2,
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,
-                float* new_quantiles1, float* new_quantiles2,
-                float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
                 int n)
@@ -58,7 +56,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g,
   kPreconditionOptimizerStatic8bit2State<T, ADAM><<<blocks, 256>>>(p, g, state1, state2, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
   kOptimizerStatic8bit2State<T, ADAM><<<blocks, 1024>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
-                                                        quantiles1, quantiles2, new_quantiles1, new_quantiles2, gnorm_scale, max1, max2, new_max1, new_max2, weight_decay, n);
+                                                        quantiles1, quantiles2, 1.0f, max1, max2, new_max1, new_max2, weight_decay, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -83,8 +81,14 @@ template void optimizerStatic8bit2State<half, ADAM>(half* p, half* g, unsigned c
                 float beta1, float beta2,
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,
-                float* new_quantiles1, float* new_quantiles2,
-                float gnorm_scale, 
+                float* max1, float* max2, float* new_max1, float* new_max2,
+                float weight_decay,
+                int n);
+
+template void optimizerStatic8bit2State<float, ADAM>(float* p, float* g, unsigned char* state1, unsigned char* state2,
+                float beta1, float beta2,
+                float eps, int step, float lr, 
+                float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
                 int n);

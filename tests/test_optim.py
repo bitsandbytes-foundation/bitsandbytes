@@ -5,6 +5,7 @@ import uuid
 import pytest
 import torch
 import bitsandbytes as bnb
+import bitsandbytes.functional as F
 
 from os.path import join
 from itertools import product
@@ -133,3 +134,88 @@ def test_global_config(dim1, dim2, gtype):
             assert ((adam2.state[p1]['state1'][mask]- og_s11)==0.0).sum() == 0.0
             assert ((adam2.state[p1]['state2'][mask]- og_s21)==0.0).sum() == 0.0
 
+
+
+dim1 = [1024]
+dim2 = [32, 1024, 4097]
+gtype = [torch.float32, torch.float16]
+values = list(product(dim1,dim2, gtype))
+names = ['dim1_{0}_dim2_{1}_gtype_{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, gtype", values, ids=names)
+def test_adam8bit(dim1, dim2, gtype):
+    if dim1 == 1 and dim2 == 1: return
+    p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
+    p2 = p1.clone()
+    p1 = p1.float()
+    beta1 = 0.9
+    beta2 = 0.999
+    lr = 0.001
+    eps = 1e-8
+
+
+    adam1 = torch.optim.Adam([p1], lr, (beta1, beta2), eps)
+    adam2 = bnb.optim.Adam8bit([p2], lr, (beta1, beta2), eps)
+
+    if gtype == torch.float32:
+        atol, rtol = 3e-3, 1e-3
+        patol, prtol = 1e-5, 1e-3
+
+    else:
+        atol, rtol = 3e-3, 1e-3
+        patol, prtol = 1e-5, 1e-3
+
+
+    for i in range(50):
+        g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01
+        p1.grad = g.float()
+        p2.grad = g.clone()
+
+        adam2.step()
+        adam1.step()
+
+        s1 = F.dequantize_with_absmax(adam2.state[p2]['qmap1'], adam2.state[p2]['max1'], adam2.state[p2]['state1'])
+        s2 = F.dequantize_with_absmax(adam2.state[p2]['qmap2'], adam2.state[p2]['max2'], adam2.state[p2]['state2'])
+        torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], s1, atol=atol, rtol=rtol)
+        torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], s2, atol=atol, rtol=rtol)
+        torch.testing.assert_allclose(p1, p2.float(), atol=patol, rtol=prtol)
+
+        err  = torch.abs(p1-p2)
+        relerr = err/torch.abs(p1)
+        assert err.mean() < 0.0001
+        assert relerr.mean() < 0.001
+
+        if i % 10 == 0 and i > 0:
+            s1cpy = s1.clone()
+            s2cpy = s2.clone()
+            raws1cpy = adam2.state[p2]['state1'].clone()
+            raws2cpy = adam2.state[p2]['state2'].clone()
+            qmap1 = adam2.state[p2]['qmap1'].clone()
+            qmap2 = adam2.state[p2]['qmap2'].clone()
+
+            path = get_temp_dir()
+            torch.save(adam2.state_dict(),join(path, 'opt.pt'))
+            adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
+            rm_path(path)
+            torch.testing.assert_allclose(raws1cpy, adam2.state[p2]['state1'])
+            torch.testing.assert_allclose(raws2cpy, adam2.state[p2]['state2'])
+            torch.testing.assert_allclose(qmap1, adam2.state[p2]['qmap1'])
+            torch.testing.assert_allclose(qmap2, adam2.state[p2]['qmap2'])
+
+
+            s1 = F.dequantize_with_absmax(adam2.state[p2]['qmap1'], adam2.state[p2]['max1'], adam2.state[p2]['state1'])
+            s2 = F.dequantize_with_absmax(adam2.state[p2]['qmap2'], adam2.state[p2]['max2'], adam2.state[p2]['state2'])
+
+            torch.testing.assert_allclose(s1cpy, s1)
+            torch.testing.assert_allclose(s2cpy, s2)
+
+            torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], s1, atol=atol, rtol=rtol)
+            torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], s2, atol=atol, rtol=rtol)
+            torch.testing.assert_allclose(p1, p2.float(), atol=patol, rtol=prtol)
+
+        # the parameters diverge quickly. Here we keep them close
+        # together so we can test against the Adam error
+        p1.data = p1.data.to(gtype).float()
+        p2.copy_(p1.data)
+        adam1.state[p1]['exp_avg'].copy_(s1.data)
+        adam1.state[p1]['exp_avg_sq'].copy_(s2.data)
+        torch.testing.assert_allclose(p1.to(gtype), p2)

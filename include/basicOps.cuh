@@ -47,8 +47,6 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g, u
                 float beta1, float beta2,
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,
-                float* new_quantiles1, float* new_quantiles2,
-                float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
                 int n);

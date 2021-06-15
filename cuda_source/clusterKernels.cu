@@ -400,7 +400,6 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                float* __restrict__ const new_quantiles1, float* __restrict__ const new_quantiles2,
                 const float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
@@ -432,9 +431,6 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 
     __shared__ float smem_quantiles1[256];
     __shared__ float smem_quantiles2[256];
-    __shared__ float smem_new_quantiles1[256];
-    __shared__ float smem_new_quantiles2[256];
-
 
     __shared__ union {
         typename LoadT::TempStorage loadh;
@@ -450,14 +446,6 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         else
             smem_quantiles2[threadIdx.x-256] = quantiles2[threadIdx.x-256];
     }
-    else
-    {
-        if(threadIdx.x < 768)
-            smem_new_quantiles1[threadIdx.x-512] = new_quantiles1[threadIdx.x-512];
-        else
-            smem_new_quantiles2[threadIdx.x-768] = new_quantiles2[threadIdx.x-768];
-    }
-
 
     __syncthreads();
 
@@ -484,11 +472,11 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 
             m_val[j] = (m_val[j]*beta1) + (((1.0f-beta1)*g_val));
 
-            c1s[j] = quantize(smem_new_quantiles1, m_val[j]*new_max_val1);
+            c1s[j] = quantize(smem_quantiles1, m_val[j]*new_max_val1);
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
-            if(signbit(smem_new_quantiles1[c1s[j]]) != signbit(m_val[j]))
+            if(signbit(smem_quantiles1[c1s[j]]) != signbit(m_val[j]))
             {
               if(m_val[j] > 0.0f)
                   c1s[j] += 1;
@@ -499,7 +487,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
             r_val[j] = smem_quantiles2[c2s[j]];
             r_val[j] = r_val[j]*max2[0];
             r_val[j] = (r_val[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
-            c2s[j] = quantize(smem_new_quantiles2, r_val[j]*new_max_val2);
+            c2s[j] = quantize(smem_quantiles2, r_val[j]*new_max_val2);
         }
 
         # pragma unroll 4
@@ -540,11 +528,26 @@ template __global__ void kPreconditionOptimizerStatic8bit2State<half, ADAM>(half
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 const int n);
 
+template __global__ void kPreconditionOptimizerStatic8bit2State<float, ADAM>(float* p, float* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2,
+                const float beta1, const float beta2,
+                const float eps, const int step, 
+                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
+                float* max1, float* max2, float* new_max1, float* new_max2,
+                const int n);
+
 template __global__ void kOptimizerStatic8bit2State<half, ADAM>(half* p, half* const g, unsigned char* state1, unsigned char* state2,
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                float* __restrict__ const new_quantiles1, float* __restrict__ const new_quantiles2,
+                const float gnorm_scale, 
+                float* max1, float* max2, float* new_max1, float* new_max2,
+                float weight_decay,
+                const int n);
+
+template __global__ void kOptimizerStatic8bit2State<float, ADAM>(float* p, float* const g, unsigned char* state1, unsigned char* state2,
+                const float beta1, const float beta2,
+                const float eps, const int step, const float lr,
+                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 const float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,

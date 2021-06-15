@@ -32,7 +32,6 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr, 
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                float* __restrict__ const new_quantiles1, float* __restrict__ const new_quantiles2,
                 const float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay, const int n);
