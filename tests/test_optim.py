@@ -59,6 +59,9 @@ def test_adam32bit(dim1, dim2, gtype):
         if i % 10 == 0 and i > 0:
             path = get_temp_dir()
             torch.save(adam2.state_dict(),join(path, 'opt.pt'))
+            del adam2
+            adam2 = None
+            adam2 = bnb.optim.Adam([p2])
             adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
             rm_path(path)
             torch.testing.assert_allclose(p1, p2.float(), atol=atol, rtol=rtol)
@@ -194,6 +197,9 @@ def test_adam8bit(dim1, dim2, gtype):
 
             path = get_temp_dir()
             torch.save(adam2.state_dict(),join(path, 'opt.pt'))
+            del adam2
+            adam2 = None
+            adam2 = bnb.optim.Adam8bit([p2])
             adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
             rm_path(path)
             torch.testing.assert_allclose(raws1cpy, adam2.state[p2]['state1'])
