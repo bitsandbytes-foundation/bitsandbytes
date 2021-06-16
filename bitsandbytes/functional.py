@@ -246,3 +246,25 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
                     ct.c_float(weight_decay),ct.c_int32(g.numel()))
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
+
+
+def percentile_clipping(grad: torch.Tensor, gnorm_vec: torch.Tensor, step: int, percentile: int=5):
+    """Applies percentile clipping
+
+    grad: torch.Tensor
+        The gradient tensor.
+    gnorm_vec: torch.Tensor
+        Vector of gradient norms. 100 elements expected.
+    step: int
+        The current optimiation steps (number of past gradient norms).
+
+    """
+    if grad.dtype == torch.float32:
+        lib.cpercentile_clipping_g32(get_ptr(grad), get_ptr(gnorm_vec), ct.c_int32(step), ct.c_int32(grad.numel()))
+    elif grad.dtype == torch.float16:
+        lib.cpercentile_clipping_g16(get_ptr(grad), get_ptr(gnorm_vec), ct.c_int32(step), ct.c_int32(grad.numel()))
+    else:
+        raise ValueError(f'Gradient type {grad.dtype} not supported!')
+
+    vals, idx = torch.sort(gnorm_vec)
+    return torch.sqrt(vals[percentile])

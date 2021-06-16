@@ -60,6 +60,14 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g,
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n)
+{
+  int blocks = n/2048;
+  blocks = n % 2048 == 0 ? blocks : blocks + 1;
+  kPercentileClipping<T, 2048, 4><<<blocks, 512>>>(g, gnorm_vec, step, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
@@ -92,3 +100,6 @@ template void optimizerStatic8bit2State<float, ADAM>(float* p, float* g, unsigne
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
                 int n);
+
+template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
+template void percentileClipping(half * g, float *gnorm_vec, int step, const int n);

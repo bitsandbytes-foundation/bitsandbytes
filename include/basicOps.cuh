@@ -51,6 +51,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g, u
                 float weight_decay,
                 int n);
 
+template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);
+
 #endif
 
 

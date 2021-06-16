@@ -5,6 +5,7 @@
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_discontinuity.cuh>
 #include <cub/block/block_store.cuh>
+#include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
 #define HLF_MAX 65504
@@ -507,6 +508,54 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
     }
 }
 
+
+template<typename T, int BLOCK_SIZE, int NUM_VALS>
+__global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n)
+{
+  const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
+  int valid_items = 0;
+
+  typedef cub::BlockReduce<float, BLOCK_SIZE/NUM_VALS> BlockReduce;
+  typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+
+  __shared__ typename BlockReduce::TempStorage reduce;
+
+  __shared__ typename LoadT::TempStorage loadT;
+  T vals[NUM_VALS];
+  float local_sum = 0.0f;
+
+  if(blockIdx.x == 0 and threadIdx.x == 0)
+    gnorm_vec[step % 100] = 0.0f;
+
+  for (unsigned int i = (blockIdx.x * BLOCK_SIZE); i < n_full; i += gridDim.x*BLOCK_SIZE)
+  {
+      valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
+      local_sum = 0.0f;
+
+      __syncthreads();
+      LoadT(loadT).Load(&(g[i]), vals, valid_items, (T)0.0f);
+
+     #pragma unroll NUM_VALS
+     for(int j = 0; j < NUM_VALS; j++)
+       local_sum += ((float)vals[j])*((float)vals[j]);
+
+    local_sum = BlockReduce(reduce).Sum(local_sum, valid_items);
+    if(threadIdx.x == 0)
+    {
+      if(step == 0)
+      {
+        // initialize with the same norm for all positions
+        //#pragma unroll 10
+        for(int j = 0; j < 100; j++)
+          atomicAdd(&gnorm_vec[j], local_sum);
+      }
+      else
+          atomicAdd(&gnorm_vec[step % 100], local_sum);
+    }
+
+  }
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
@@ -553,4 +602,6 @@ template __global__ void kOptimizerStatic8bit2State<float, ADAM>(float* p, float
                 float weight_decay,
                 const int n);
 
+template __global__ void kPercentileClipping<float, 2048, 4>(float * __restrict__ g, float *gnorm_vec, int step, const int n);
+template __global__ void kPercentileClipping<half, 2048, 4>(half * __restrict__ g, float *gnorm_vec, int step, const int n);
 

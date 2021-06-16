@@ -36,6 +36,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay, const int n);
 
+template<typename T, int BLOCK_SIZE, int NUM_VALS> __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n);
 
 #endif
 

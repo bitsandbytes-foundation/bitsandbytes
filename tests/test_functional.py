@@ -44,3 +44,32 @@ def test_quantization():
     A2 = F.dequantize(code, C)
     diff = torch.abs(A1-A2).mean().item()
     assert diff < 0.01
+
+
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=['float', 'half'])
+def test_percentile_clipping(gtype):
+    gnorm_vec1 = torch.zeros(100, device='cuda')
+    gnorm_vec2 = torch.zeros(100, device='cuda')
+    n = 4
+    step = 0
+    percentile=5
+    for i in range(1000):
+        g = torch.randn(n, n, dtype=gtype, device='cuda')
+        clip2 = F.percentile_clipping(g, gnorm_vec2, step, percentile=percentile)
+
+        gnorm = torch.norm(g.float())
+        if step == 0:
+            gnorm_vec1[:] = gnorm
+        else:
+            gnorm_vec1[step % 100] = gnorm
+
+        vals, idx = torch.sort(gnorm_vec1)
+        clip1 = vals[percentile]
+
+        torch.testing.assert_allclose(gnorm_vec1, torch.sqrt(gnorm_vec2))
+        torch.testing.assert_allclose(clip1, clip2)
+        step += 1
+
+
+
+

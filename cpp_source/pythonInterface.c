@@ -49,6 +49,8 @@ void optimizer_static_8bit_2state_g32(float* p, float* g, unsigned char* state1,
 			                                  quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, n);
 }
 
+void percentileClipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping<float>(g, gnorm_vec, step, n); }
+void percentileClipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping<half>(g, gnorm_vec, step, n); }
 
 extern "C"
 {
@@ -86,6 +88,8 @@ extern "C"
 			                                 quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, n);
   }
 
+	void cpercentile_clipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping_g32(g, gnorm_vec, step, n); }
+	void cpercentile_clipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping_g16(g, gnorm_vec, step, n); }
 }
 
 
