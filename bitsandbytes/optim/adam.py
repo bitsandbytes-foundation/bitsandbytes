@@ -34,10 +34,11 @@ class Adam(Optimizer8bit):
 
         self.keep_32_bit = set()
         self.name2qmap = {}
-        if self.args.optim_bits == 8:
-            self.name2qmap['dynamic'] = F.create_dynamic_map(signed=True)
-            self.name2qmap['udynamic'] = F.create_dynamic_map(signed=False)
+        if self.args.optim_bits == 8: self.fill_qmap()
 
+    def fill_qmap(self):
+        self.name2qmap['dynamic'] = F.create_dynamic_map(signed=True)
+        self.name2qmap['udynamic'] = F.create_dynamic_map(signed=False)
 
     def set_state_bits(self, model, keep32type=[torch.nn.Embedding], keep32smaller=4096):
         for module, p in model.named_modules():
@@ -49,21 +50,23 @@ class Adam(Optimizer8bit):
 
     @torch.no_grad()
     def init_state(self, group, p, gindex, pindex):
-        if self.args.optim_bits == 32:
+        config = self.get_config(gindex, pindex, group)
+
+        if config['optim_bits'] == 32:
             dtype = torch.float32
-        elif self.args.optim_bits == 8:
+        elif config['optim_bits'] == 8:
             dtype = torch.uint8
-        else: raise NotImplementedError('Amount of Adam bits not supported')
+        else: raise NotImplementedError(f'Amount of optimizer bits not supported: {config["optim_bits"]}')
 
         state = self.state[p]
         state['step'] = 0
-
 
         if dtype == torch.float32 or (dtype == torch.uint8 and p.numel() < 4096):
             state['state1'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)
             state['state2'] = torch.zeros_like(p, memory_format=torch.preserve_format, dtype=torch.float32, device=p.device)
         elif dtype == torch.uint8:
             if state['step'] == 0:
+                if 'dynamic' not in self.name2qmap: self.fill_qmap()
                 self.name2qmap['dynamic'] = self.name2qmap['dynamic'].to(p.device)
                 self.name2qmap['udynamic'] = self.name2qmap['udynamic'].to(p.device)
 
@@ -86,6 +89,7 @@ class Adam(Optimizer8bit):
         config['weight_decay'] = group['weight_decay']
         config['lr'] = group['lr']
         config['is_sparse'] = self.args.is_sparse
+        config['optim_bits'] = self.args.optim_bits
 
         if (gindex, pindex) in self.mng.index2config:
             config.update(self.mng.index2config[(gindex, pindex)])
