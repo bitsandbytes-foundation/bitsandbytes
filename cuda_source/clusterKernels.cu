@@ -263,6 +263,10 @@ __global__ void kOptimizer_32bit_2State(T* g, T* p,
 
       # pragma unroll 4
       for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
+        g_vals[j] = gnorm_scale*((float)g_vals[j]);
+
+      # pragma unroll 4
+      for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
       {
           switch(OPTIMIZER)
           {
@@ -363,6 +367,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
         for(int j = 0; j < NUM8BIT; j++)
         {
             g_val = g_vals[j];
+            g_val *= gnorm_scale;
             m_vals[j] = smem_quantiles1[m_c1[j]]*max1[0]*beta1;
             m_vals[j] += (1.0f-beta1)*g_val;
 
@@ -373,6 +378,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
         for(int j = 0; j < NUM8BIT; j++)
         {
             g_val = g_vals[j];
+            g_val *= gnorm_scale;
             r_vals[j] = smem_quantiles2[r_c2[j]]*max2[0]*beta2;
             r_vals[j] += (1.0f-beta2)*g_val*g_val;
             local_max_r = fmaxf(local_max_r, fabsf(r_vals[j]));
