@@ -6,7 +6,8 @@ import bitsandbytes.functional as F
 class Adam(Optimizer8bit):
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-            weight_decay=0, amsgrad=False, optim_bits=32, is_sparse=False, args=None, override_with_args=False):
+            weight_decay=0, amsgrad=False, optim_bits=32, is_sparse=False, args=None, override_with_args=False,
+            min_8bit_size=4096, percentile_clipping=100):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -27,6 +28,8 @@ class Adam(Optimizer8bit):
             args['adam8bits_offset'] = 1/512
             args['percentile_clipping'] = 100
             args['is_sparse'] = is_sparse
+            args['min_8bit_size'] = min_8bit_size
+            args['percentile_clipping'] = percentile_clipping
 
             self.args = MockArgs(args)
         else:
@@ -40,13 +43,20 @@ class Adam(Optimizer8bit):
         self.name2qmap['dynamic'] = F.create_dynamic_map(signed=True)
         self.name2qmap['udynamic'] = F.create_dynamic_map(signed=False)
 
-    def set_state_bits(self, model, keep32type=[torch.nn.Embedding], keep32smaller=4096):
-        for module, p in model.named_modules():
-            if any([isinstance(module, t) for t in keep32type]):
-                for p2 in module.parameters():
-                    self.keep_32_bit.add(p2.data.storage().data_ptr())
-            if p.numel() < keep32smaller:
-                self.keep_32_bit.add(p.data.storage().data_ptr())
+    def get_config(self, gindex, pindex, group):
+        config = {}
+        config['betas'] = group['betas']
+        config['eps'] = group['eps']
+        config['weight_decay'] = group['weight_decay']
+        config['lr'] = group['lr']
+        config['is_sparse'] = self.args.is_sparse
+        config['optim_bits'] = self.args.optim_bits
+        config['min_8bit_size'] = self.args.min_8bit_size
+        config['percentile_clipping'] = self.args.percentile_clipping
+
+        if (gindex, pindex) in self.mng.index2config:
+            config.update(self.mng.index2config[(gindex, pindex)])
+        return config
 
     @torch.no_grad()
     def init_state(self, group, p, gindex, pindex):
@@ -57,6 +67,8 @@ class Adam(Optimizer8bit):
         elif config['optim_bits'] == 8:
             dtype = torch.uint8
         else: raise NotImplementedError(f'Amount of optimizer bits not supported: {config["optim_bits"]}')
+
+        if p.numel() < config['min_8bit_size']: dtype = torch.float32
 
         state = self.state[p]
         state['step'] = 0
@@ -79,21 +91,8 @@ class Adam(Optimizer8bit):
             state['new_max1'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
             state['new_max2'] = torch.zeros((1,), dtype=torch.float32, device=p.device)
 
-        if self.args.percentile_clipping < 100:
+        if config['percentile_clipping'] < 100:
             state['gnorm_vec'] = torch.zeros((100,), device=p.device)
-
-    def get_config(self, gindex, pindex, group):
-        config = {}
-        config['betas'] = group['betas']
-        config['eps'] = group['eps']
-        config['weight_decay'] = group['weight_decay']
-        config['lr'] = group['lr']
-        config['is_sparse'] = self.args.is_sparse
-        config['optim_bits'] = self.args.optim_bits
-
-        if (gindex, pindex) in self.mng.index2config:
-            config.update(self.mng.index2config[(gindex, pindex)])
-        return config
 
     @torch.no_grad()
     def update_step(self, group, p, gindex, pindex):
@@ -104,6 +103,11 @@ class Adam(Optimizer8bit):
 
         state['step'] += 1
         step = state['step']
+
+        if config['percentile_clipping'] < 100:
+            current_gnorm, clip_value, gnorm_scale = F.percentile_clipping(grad, state['gnorm_vec'], step, config['percentile_clipping'])
+        else:
+            gnorm_scale = 1.0
 
         if state['state1'].dtype == torch.float:
             F.adam_update_32bit(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],

@@ -41,7 +41,7 @@ void dequantize(float *code, unsigned char *A, float *out, int n);
 template<typename T, int OPTIMIZER> void optimizer_32bit_2State(T* g, T* p, 
                 float* state1, float* state2,
                 float beta1, float beta2, float eps, float weight_decay,
-                int step, float lr, const bool is_sparse, int n);
+                int step, float lr, const bool is_sparse, const float gnorm_scale, int n);
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g, unsigned char* state1, unsigned char* state2,
                 float beta1, float beta2,
@@ -49,7 +49,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit2State(T* p, T* g, u
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
-                int n);
+                const float gnorm_scale, int n);
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);
 

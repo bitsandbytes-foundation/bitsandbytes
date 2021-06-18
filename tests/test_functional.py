@@ -54,21 +54,23 @@ def test_percentile_clipping(gtype):
     step = 0
     percentile=5
     for i in range(1000):
+        step += 1
         g = torch.randn(n, n, dtype=gtype, device='cuda')
-        clip2 = F.percentile_clipping(g, gnorm_vec2, step, percentile=percentile)
+        gnorm1, clip2, gnorm_scale = F.percentile_clipping(g, gnorm_vec2, step, percentile=percentile)
+        assert gnorm_scale == 1.0 if gnorm1 < clip2 else clip2/gnorm1
 
-        gnorm = torch.norm(g.float())
-        if step == 0:
-            gnorm_vec1[:] = gnorm
+        gnorm2 = torch.norm(g.float())
+        if step == 1:
+            gnorm_vec1[:] = gnorm2
         else:
-            gnorm_vec1[step % 100] = gnorm
+            gnorm_vec1[step % 100] = gnorm2
 
         vals, idx = torch.sort(gnorm_vec1)
         clip1 = vals[percentile]
 
         torch.testing.assert_allclose(gnorm_vec1, torch.sqrt(gnorm_vec2))
         torch.testing.assert_allclose(clip1, clip2)
-        step += 1
+        torch.testing.assert_allclose(gnorm1, gnorm2)
 
 
 

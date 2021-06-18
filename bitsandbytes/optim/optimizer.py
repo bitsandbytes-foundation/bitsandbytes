@@ -70,7 +70,8 @@ class GlobalOptimManager(object):
 
         if key_value_dict is not None:
             for p in parameters:
-                self.pid2config[id(p)] = key_value_dict
+                if id(p) in self.pid2config:self.pid2config[id(p)].update(key_value_dict)
+                else: self.pid2config[id(p)] = key_value_dict
 
 
 class Optimizer8bit(Optimizer):

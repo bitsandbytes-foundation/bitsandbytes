@@ -136,7 +136,7 @@ def dequantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> t
 
 def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float,
-                step: int, lr: float, weight_decay: float=0.0, is_sparse: bool = False) -> None:
+                step: int, lr: float, weight_decay: float=0.0, is_sparse: bool = False, gnorm_scale: float=1.0) -> None:
     '''
     Performs an inplace Adam update.
 
@@ -167,16 +167,18 @@ def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, st
         The learning rate.
     is_sparse : bool
         If the gradient can be sparse or not.
+    gnorm_scale : float
+        The factor to rescale the gradient to the max clip value.
     '''
 
     if g.dtype == torch.float32 and state1.dtype == torch.float32:
         lib.cadam32bit_g32(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
-                    ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_int32(g.numel()))
+                    ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.float32:
         lib.cadam32bit_g16(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
-                    ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_int32(g.numel()))
+                    ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
@@ -185,7 +187,7 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
                 beta1: float, beta2: float, eps: float,
                 step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
                 max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
-                weight_decay: float=0.0, is_sparse: bool=False) -> None:
+                weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0) -> None:
     '''
     Performs an inplace Adam update.
 
@@ -228,6 +230,8 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
         Max value for the next Adam update of the first state.
     new_max2 : torch.Tensor
         Max value for the next Adam update of the second state.
+    gnorm_scale : float
+        The factor to rescale the gradient to the max clip value.
     '''
 
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
@@ -236,14 +240,14 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
                     ct.c_int32(step), ct.c_float(lr),
                     get_ptr(qmap1), get_ptr(qmap2),
                     get_ptr(max1), get_ptr(max2), get_ptr(new_max1), get_ptr(new_max2),
-                    ct.c_float(weight_decay),ct.c_int32(g.numel()))
+                    ct.c_float(weight_decay),ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
         lib.coptimizer_static_8bit_2state_g16(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr),
                     get_ptr(qmap1), get_ptr(qmap2),
                     get_ptr(max1), get_ptr(max2), get_ptr(new_max1), get_ptr(new_max2),
-                    ct.c_float(weight_decay),ct.c_int32(g.numel()))
+                    ct.c_float(weight_decay),ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
@@ -266,5 +270,12 @@ def percentile_clipping(grad: torch.Tensor, gnorm_vec: torch.Tensor, step: int, 
     else:
         raise ValueError(f'Gradient type {grad.dtype} not supported!')
 
+    current_gnorm = torch.sqrt(gnorm_vec[step % 100])
     vals, idx = torch.sort(gnorm_vec)
-    return torch.sqrt(vals[percentile])
+    clip_value = torch.sqrt(vals[percentile])
+    gnorm_scale = 1.0
+
+    if current_gnorm > clip_value:
+        gnorm_scale = clip_value/current_gnorm
+
+    return current_gnorm, clip_value, gnorm_scale

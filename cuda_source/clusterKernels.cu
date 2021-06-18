@@ -218,7 +218,7 @@ __launch_bounds__(TH, 1)
 __global__ void kOptimizer_32bit_2State(T* g, T* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const int n)
+                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
@@ -301,7 +301,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
                 const float eps, const int step,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                const int n)
+                const float gnorm_scale, const int n)
 {
     const int n_full = gridDim.x * NUM_PER_BLOCK;
     const int base_idx = (blockIdx.x * blockDim.x * NUM_PER_THREAD);
@@ -401,10 +401,9 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                const float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
-                const int n)
+                const float gnorm_scale, const int n)
 {
 
     const int n_full = (blockDim.x * gridDim.x)*NUM_PER_THREAD2;
@@ -542,7 +541,7 @@ __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int st
     local_sum = BlockReduce(reduce).Sum(local_sum, valid_items);
     if(threadIdx.x == 0)
     {
-      if(step == 0)
+      if(step == 1)
       {
         // initialize with the same norm for all positions
         //#pragma unroll 10
@@ -565,9 +564,9 @@ template __global__ void kEstimateQuantiles(float *__restrict__ const A, float *
 template __global__ void kEstimateQuantiles(half *__restrict__ const A, float *code, const float offset, const half max_val, const int n);
 
 template __global__ void kOptimizer_32bit_2State<half, ADAM>(half* g, half* p, float* state1, float* state2,
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const int n);
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
 template __global__ void kOptimizer_32bit_2State<float, ADAM>(float* g, float* p, float* state1, float* state2,
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const int n);
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
 
 
 template __global__ void kPreconditionOptimizerStatic8bit2State<half, ADAM>(half* p, half* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2,
@@ -575,6 +574,7 @@ template __global__ void kPreconditionOptimizerStatic8bit2State<half, ADAM>(half
                 const float eps, const int step, 
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
+                const float gnorm_scale, 
                 const int n);
 
 template __global__ void kPreconditionOptimizerStatic8bit2State<float, ADAM>(float* p, float* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2,
@@ -582,25 +582,25 @@ template __global__ void kPreconditionOptimizerStatic8bit2State<float, ADAM>(flo
                 const float eps, const int step, 
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
+                const float gnorm_scale, 
                 const int n);
 
 template __global__ void kOptimizerStatic8bit2State<half, ADAM>(half* p, half* const g, unsigned char* state1, unsigned char* state2,
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                const float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
+                const float gnorm_scale, 
                 const int n);
 
 template __global__ void kOptimizerStatic8bit2State<float, ADAM>(float* p, float* const g, unsigned char* state1, unsigned char* state2,
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                const float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
-                const int n);
+                const float gnorm_scale, const int n);
 
 template __global__ void kPercentileClipping<float, 2048, 4>(float * __restrict__ g, float *gnorm_vec, int step, const int n);
 template __global__ void kPercentileClipping<half, 2048, 4>(half * __restrict__ g, float *gnorm_vec, int step, const int n);

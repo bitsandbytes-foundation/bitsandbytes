@@ -13,7 +13,7 @@ template<typename T, int OPTIMIZER>
 __global__ void kOptimizer_32bit_2State(T* g, T* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const int n);
+                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
 
 
 template<typename T, int OPTIMIZER>
@@ -23,7 +23,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
                 const float eps, const int step, 
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                const int n);
+                const float gnorm_scale, const int n);
 
 
 template<typename T, int OPTIMIZER>
@@ -32,9 +32,8 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr, 
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                const float gnorm_scale, 
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                float weight_decay, const int n);
+                float weight_decay, const float gnorm_scale, const int n);
 
 template<typename T, int BLOCK_SIZE, int NUM_VALS> __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n);
 

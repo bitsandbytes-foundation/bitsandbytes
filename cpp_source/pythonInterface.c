@@ -20,22 +20,24 @@ void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimate
 void adam32bit_g32(float *g, float *p,
                float* state1, float* state2,
                const float beta1, const float beta2, const float eps, const float weight_decay,
-               const int step, const float lr, const bool is_sparse, const int n){ optimizer_32bit_2State<float, ADAM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n); }
+               const int step, const float lr, const bool is_sparse, float gnorm_scale, const int n)
+{ optimizer_32bit_2State<float, ADAM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
 
 void adam32bit_g16(half *g, half *p,
                float* state1, float* state2,
                const float beta1, const float beta2, const float eps, const float weight_decay,
-               const int step, const float lr, const bool is_sparse, const int n){ optimizer_32bit_2State<half, ADAM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n); }
+               const int step, const float lr, const bool is_sparse, float gnorm_scale, const int n)
+{ optimizer_32bit_2State<half, ADAM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
 
 void optimizer_static_8bit_2state_g16(half* p, half* g, unsigned char* state1, unsigned char* state2,
                 float beta1, float beta2,
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                float weight_decay, int n)
+                float weight_decay, float gnorm_scale, int n)
 { 
 	optimizerStatic8bit2State<half, ADAM>(g, p, state1, state2, beta1, beta2, eps, step, lr,
-			                                  quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, n);
+			                                  quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
 }
 
 void optimizer_static_8bit_2state_g32(float* p, float* g, unsigned char* state1, unsigned char* state2,
@@ -43,10 +45,10 @@ void optimizer_static_8bit_2state_g32(float* p, float* g, unsigned char* state1,
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                float weight_decay, int n)
+                float weight_decay, float gnorm_scale, int n)
 { 
 	optimizerStatic8bit2State<float, ADAM>(g, p, state1, state2, beta1, beta2, eps, step, lr,
-			                                  quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, n);
+			                                  quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
 }
 
 void percentileClipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping<float>(g, gnorm_vec, step, n); }
@@ -61,20 +63,22 @@ extern "C"
 	void cadam32bit_g32(float *g, float *p,
 								 float* state1, float* state2,
 								 const float beta1, const float beta2, const float eps, const float weight_decay,
-								 const int step, const float lr, const bool is_sparse, const int n){ adam32bit_g32(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n); }
+								 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
+	{ adam32bit_g32(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
 	void cadam32bit_g16(half *g, half *p,
 								 float* state1, float* state2,
 								 const float beta1, const float beta2, const float eps, const float weight_decay,
-								 const int step, const float lr, const bool is_sparse, const int n){ adam32bit_g16(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, n); }
+								 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
+	{ adam32bit_g16(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
 	void coptimizer_static_8bit_2state_g16(half* p, half* g, unsigned char* state1, unsigned char* state2,
                 float beta1, float beta2,
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                float weight_decay, int n)
+                float weight_decay, float gnorm_scale, int n)
   { 
 	    optimizer_static_8bit_2state_g16(g, p, state1, state2, beta1, beta2, eps, step, lr,
-			                                 quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, n);
+			                                 quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
   }
 
 	void coptimizer_static_8bit_2state_g32(float* p, float* g, unsigned char* state1, unsigned char* state2,
@@ -82,10 +86,10 @@ extern "C"
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                float weight_decay, int n)
+                float weight_decay, float gnorm_scale, int n)
   { 
 	    optimizer_static_8bit_2state_g32(g, p, state1, state2, beta1, beta2, eps, step, lr,
-			                                 quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, n);
+			                                 quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
   }
 
 	void cpercentile_clipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping_g32(g, gnorm_vec, step, n); }
