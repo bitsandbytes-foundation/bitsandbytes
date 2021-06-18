@@ -283,5 +283,12 @@ def test_adam_percentile_clipping(dim1, dim2, gtype, optim_bits):
             torch.testing.assert_allclose(adam1.state[p1]['state2'], adam2.state[p2]['state2'], atol=2, rtol=1e-3)
             adam1.state[p1]['state1'].copy_(adam2.state[p2]['state1'])
             adam1.state[p1]['state2'].copy_(adam2.state[p2]['state2'])
+        if i % 10 == 0 and i > 0:
+            path = get_temp_dir()
+            torch.save(adam2.state_dict(),join(path, 'opt.pt'))
+            del adam2
+            adam2 = None
+            adam2 = bnb.optim.Adam([p2], lr, (beta1, beta2), eps, optim_bits=optim_bits, percentile_clipping=5)
+            adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
 
 

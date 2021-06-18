@@ -106,6 +106,7 @@ class Adam(Optimizer8bit):
 
         if config['percentile_clipping'] < 100:
             current_gnorm, clip_value, gnorm_scale = F.percentile_clipping(grad, state['gnorm_vec'], step, config['percentile_clipping'])
+            #print(current_gnorm, clip_value, gnorm_scale, step, pindex)
         else:
             gnorm_scale = 1.0
 

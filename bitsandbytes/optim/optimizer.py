@@ -83,7 +83,8 @@ class Optimizer8bit(Optimizer):
                 ['qmap1', 'qmap2',
                  'max1', 'max2',
                  'new_max1', 'new_max2',
-                 'state1', 'state2'])
+                 'state1', 'state2',
+                 'gnorm_vec'])
 
     def __setstate__(self, state):
         super(Optimizer8bit, self).__setstate__(state)
