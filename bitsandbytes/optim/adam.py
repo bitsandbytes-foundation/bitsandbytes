@@ -38,6 +38,7 @@ class Adam(Optimizer8bit):
         self.keep_32_bit = set()
         self.name2qmap = {}
         if self.args.optim_bits == 8: self.fill_qmap()
+        self.checked_if_on_gpu = False
 
     def fill_qmap(self):
         self.name2qmap['dynamic'] = F.create_dynamic_map(signed=True)
@@ -106,7 +107,6 @@ class Adam(Optimizer8bit):
 
         if config['percentile_clipping'] < 100:
             current_gnorm, clip_value, gnorm_scale = F.percentile_clipping(grad, state['gnorm_vec'], step, config['percentile_clipping'])
-            #print(current_gnorm, clip_value, gnorm_scale, step, pindex)
         else:
             gnorm_scale = 1.0
 
@@ -123,6 +123,15 @@ class Adam(Optimizer8bit):
             state['max1'], state['new_max1'] = state['new_max1'], state['max1']
             state['max2'], state['new_max2'] = state['new_max2'], state['max2']
 
+    def to_gpu(self):
+        self.checked_if_on_gpu = True
+        for gindex, group in enumerate(self.param_groups):
+            for pindex, p in enumerate(group['params']):
+                if p in self.state:
+                    values = self.state[p]
+                    for k, v in values.items():
+                        if isinstance(v, torch.Tensor):
+                            self.state[p][k] = v.to(p.device)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -138,6 +147,8 @@ class Adam(Optimizer8bit):
                 loss = closure()
 
         overflows = []
+
+        if not self.checked_if_on_gpu: self.to_gpu() # needed for fairseq pure fp16 training
         for gindex, group in enumerate(self.param_groups):
             for pindex, p in enumerate(group['params']):
                 if p.grad is None:

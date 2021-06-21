@@ -125,13 +125,12 @@ class Optimizer8bit(Optimizer):
                     value = value.to(param.dtype)
                 return value
             elif isinstance(value, dict):
-                new_value = {}
                 for k, v in value.items():
                     if k in self.non_castable_tensor_keys:
-                        new_value[k] = v.to(param.device)
+                        value[k] = v.to(param.device)
                     else:
-                        new_value[k] = cast(param, v)
-                return new_value
+                        value[k] = cast(param, v)
+                return value
             elif isinstance(value, container_abcs.Iterable):
                 return type(value)(cast(param, v) for v in value)
             else:
