@@ -9,7 +9,7 @@ def read(fname):
 
 setup(
     name = f"bitsandbytes-cuda{os.environ['CUDA_VERSION']}",
-    version = "0.0.8",
+    version = "0.0.14",
     author = "Tim Dettmers",
     author_email = "tim.dettmers@gmail.com",
     description = ("Numpy-like library for GPUs."),
