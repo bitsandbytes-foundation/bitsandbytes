@@ -2,8 +2,7 @@ import torch
 from torch.optim import Optimizer
 from copy import deepcopy
 from itertools import chain
-from collections import defaultdict
-from torch._six import container_abcs
+from collections import defaultdict, abc as container_abcs
 
 class MockArgs(object):
     def __init__(self, initial_data):
