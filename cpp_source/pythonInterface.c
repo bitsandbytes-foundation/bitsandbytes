@@ -8,6 +8,7 @@
 #include <basicOps.cuh>
 
 #define ADAM 0
+#define MOMENTUM 1
 
 // We cannot call templated code from C, so we wrap the template in a C compatible call here if necessary.
 //===================================================================================
@@ -16,6 +17,18 @@
 
 void estimateQuantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles<float>(A, code, offset, n); }
 void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles<half>(A, code, offset, n); }
+
+void momentum32bit_g32(float *g, float *p,
+               float* state1, float* state2,
+               const float beta1, const float beta2, const float eps, const float weight_decay,
+               const int step, const float lr, const bool is_sparse, float gnorm_scale, const int n)
+{ optimizer_32bit<float, MOMENTUM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
+
+void momentum32bit_g16(half *g, half *p,
+               float* state1, float* state2,
+               const float beta1, const float beta2, const float eps, const float weight_decay,
+               const int step, const float lr, const bool is_sparse, float gnorm_scale, const int n)
+{ optimizer_32bit<half, MOMENTUM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
 
 void adam32bit_g32(float *g, float *p,
                float* state1, float* state2,
@@ -70,6 +83,18 @@ extern "C"
 								 const float beta1, const float beta2, const float eps, const float weight_decay,
 								 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
 	{ adam32bit_g16(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
+
+	void cmomentum32bit_g32(float *g, float *p,
+								 float* state1, float* state2,
+								 const float beta1, const float beta2, const float eps, const float weight_decay,
+								 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
+	{ momentum32bit_g32(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
+	void cmomentum32bit_g16(half *g, half *p,
+								 float* state1, float* state2,
+								 const float beta1, const float beta2, const float eps, const float weight_decay,
+								 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
+	{ momentum32bit_g16(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
+
 	void coptimizer_static_8bit_2state_g16(half* p, half* g, unsigned char* state1, unsigned char* state2,
                 float beta1, float beta2,
                 float eps, int step, float lr, 

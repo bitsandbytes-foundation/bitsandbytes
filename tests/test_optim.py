@@ -20,25 +20,30 @@ def get_temp_dir():
 def rm_path(path):
     shutil.rmtree(path)
 
+str2optimizers = {}
+str2optimizers['adam'] = (torch.optim.Adam, bnb.optim.Adam)
+str2optimizers['momentum'] = (lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9), lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9))
+
+str2statenames = {}
+str2statenames['adam'] = [('exp_avg', 'state1'), ('exp_avg_sq', 'state2')]
+str2statenames['momentum'] = [('momentum_buffer', 'state1')]
+
 dim1 = [1024]
-dim2 = [32, 1024, 4097]
+dim2 = [32, 1024, 4097, 1]
 gtype = [torch.float32, torch.float16]
-values = list(product(dim1,dim2, gtype))
-names = ['dim1_{0}_dim2_{1}_gtype_{2}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2, gtype", values, ids=names)
-def test_adam32bit(dim1, dim2, gtype):
+optimizer_names = ['adam', 'momentum']
+values = list(product(dim1,dim2, gtype, optimizer_names))
+names = ['dim1_{0}_dim2_{1}_gtype_{2}_optims_{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
+def test_adam32bit(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1: return
     p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
     p2 = p1.clone()
     p1 = p1.float()
-    beta1 = 0.9
-    beta2 = 0.999
-    lr = 0.001
-    eps = 1e-8
 
 
-    adam1 = torch.optim.Adam([p1], lr, (beta1, beta2), eps)
-    adam2 = bnb.optim.Adam([p2], lr, (beta1, beta2), eps)
+    torch_optimizer = str2optimizers[optim_name][0]([p1])
+    bnb_optimizer = str2optimizers[optim_name][1]([p2])
 
     if gtype == torch.float32:
         atol, rtol = 1e-6, 1e-5
@@ -51,23 +56,23 @@ def test_adam32bit(dim1, dim2, gtype):
         p1.grad = g.float()
         p2.grad = g.clone()
 
-        adam2.step()
-        adam1.step()
+        bnb_optimizer.step()
+        torch_optimizer.step()
 
-        torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], adam2.state[p2]['state1'], atol=atol, rtol=rtol)
-        torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], adam2.state[p2]['state2'], atol=atol, rtol=rtol)
+        for name1, name2 in str2statenames[optim_name]:
+            torch.testing.assert_allclose(torch_optimizer.state[p1][name1], bnb_optimizer.state[p2][name2], atol=atol, rtol=rtol)
 
         if i % 10 == 0 and i > 0:
             path = get_temp_dir()
-            torch.save(adam2.state_dict(),join(path, 'opt.pt'))
-            del adam2
-            adam2 = None
-            adam2 = bnb.optim.Adam([p2])
-            adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
+            torch.save(bnb_optimizer.state_dict(),join(path, 'opt.pt'))
+            del bnb_optimizer
+            bnb_optimizer = None
+            bnb_optimizer = str2optimizers[optim_name][1]([p2])
+            bnb_optimizer.load_state_dict(torch.load(join(path, 'opt.pt')))
             rm_path(path)
             torch.testing.assert_allclose(p1, p2.float(), atol=atol, rtol=rtol)
-            torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], adam2.state[p2]['state1'], atol=atol, rtol=rtol)
-            torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], adam2.state[p2]['state2'], atol=atol, rtol=rtol)
+            for name1, name2 in str2statenames[optim_name]:
+                torch.testing.assert_allclose(torch_optimizer.state[p1][name1], bnb_optimizer.state[p2][name2], atol=atol, rtol=rtol)
 
         if gtype == torch.float16:
             # the adam buffers should also be close because they are 32-bit
@@ -290,5 +295,6 @@ def test_adam_percentile_clipping(dim1, dim2, gtype, optim_bits):
             adam2 = None
             adam2 = bnb.optim.Adam([p2], lr, (beta1, beta2), eps, optim_bits=optim_bits, percentile_clipping=5)
             adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
+
 
 

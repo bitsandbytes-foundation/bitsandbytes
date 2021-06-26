@@ -42,7 +42,8 @@ def get_ptr(A: torch.Tensor) -> ct.c_void_p:
     A : torch.tensor
         The PyTorch tensor.
     '''
-    return ct.c_void_p(A.data.storage().data_ptr())
+    if A is None: return None
+    else: return ct.c_void_p(A.data.storage().data_ptr())
 
 def estimate_quantiles(A: torch.Tensor, out: torch.Tensor=None, offset: float=1/512) -> torch.Tensor:
     '''
@@ -134,6 +135,42 @@ def dequantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> t
     return out
 
 
+str2optimizer32bit = {}
+str2optimizer32bit['adam'] = (lib.cadam32bit_g32, lib.cadam32bit_g16)
+str2optimizer32bit['momentum'] = (lib.cmomentum32bit_g32, lib.cmomentum32bit_g16)
+
+def momentum_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, weight_decay: float, momentum: float, lr: float, dampening: float, nesterov: bool,
+                          step: int, is_sparse: bool, gnorm_scale: float):
+    '''
+    Performance inplace SGD Momentum update.
+
+    Parameters
+    ----------
+    g : torch.Tensor
+        The gradient
+    p : torch.Tensor
+        The paramter/weight tensor.
+    state1 : torch.Tensor
+        The momentum buffer/optimizer state.
+    weight_decay : float
+        Weight decay / L2 penalty value.
+    momentum : float
+        Momentum value.
+    lr : float
+        The learning rate
+    dampening : float
+        Dampening constant.
+    nesterov : bool
+        Whether to use nesterov momentum.
+    step : int
+        Current optimizer step.
+    is_sparse : bool
+        If the gradient can be sparse or not.
+    gnorm_scale : float
+        The factor to rescale the gradient to the max clip value.
+    '''
+    optimizer_update_32bit('momentum', g, p, state1, momentum, 0.0, step, lr, None, dampening, weight_decay, is_sparse, gnorm_scale)
+
 def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float,
                 step: int, lr: float, weight_decay: float=0.0, is_sparse: bool = False, gnorm_scale: float=1.0) -> None:
@@ -170,13 +207,57 @@ def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, st
     gnorm_scale : float
         The factor to rescale the gradient to the max clip value.
     '''
+    optimizer_update_32bit('adam', g, p, state1, beta1, eps, step, lr, state2, beta2, weight_decay, is_sparse, gnorm_scale)
+
+
+def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor,
+                beta1: float, eps: float, step: int, lr: float,
+                state2: torch.Tensor=None, beta2: float=0.0,
+                weight_decay: float=0.0, is_sparse: bool = False, gnorm_scale: float=1.0) -> None:
+    '''
+    Performs an inplace optimizer update with one or two optimizer states.
+
+    Universal optimizer update for 32-bit state and 32/16-bit gradients/weights.
+
+    Parameters
+    ----------
+    optimizer_name : str
+        The name of the optimizer: {adam}.
+    g : torch.Tensor
+        Gradient tensor.
+    p : torch.Tensor
+        Parameter tensor.
+    state1 : torch.Tensor
+        Optimizer state 1.
+    beta1 : float
+        Optimizer beta1.
+    eps : float
+        Optimizer epsilon.
+    weight_decay : float
+        Weight decay.
+    step : int
+        Current optimizer step.
+    lr : float
+        The learning rate.
+    state2 : torch.Tensor
+        Optimizer state 2.
+    beta2 : float
+        Optimizer beta2.
+    is_sparse : bool
+        If the gradient can be sparse or not.
+    gnorm_scale : float
+        The factor to rescale the gradient to the max clip value.
+    '''
+
+    if optimizer_name not in str2optimizer32bit:
+        raise NotImplementError(f'Optimizer not implemented: {optimizer_name}. Choices: {",".join(str2optimizer32bit.keys())}')
 
     if g.dtype == torch.float32 and state1.dtype == torch.float32:
-        lib.cadam32bit_g32(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
+        str2optimizer32bit[optimizer_name][0](get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
                     ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.float32:
-        lib.cadam32bit_g16(get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
+        str2optimizer32bit[optimizer_name][1](get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
                     ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     else:
