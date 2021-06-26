@@ -7,8 +7,8 @@ make clean
 module load cuda/9.2
 module load gcc/7.3.0
 CUDA_HOME=/public/apps/cuda/9.2
-CUDA_VERSION=92 python -m build
 make
+CUDA_VERSION=92 python -m build
 python -m twine upload --repository testpypi dist/* --verbose
 module unload cuda
 
@@ -19,8 +19,8 @@ rm -rf dist build
 make clean
 module load cuda/10.1
 CUDA_HOME=/public/apps/cuda/10.1
-CUDA_VERSION=101 python -m build
 make cuda10x
+CUDA_VERSION=101 python -m build
 python -m twine upload --repository testpypi dist/* --verbose
 module unload cuda
 
@@ -28,8 +28,8 @@ rm -rf dist build
 make clean
 module load cuda/10.2
 CUDA_HOME=/public/apps/cuda/10.2/
-CUDA_VERSION=102 python -m build
 make cuda10x
+CUDA_VERSION=102 python -m build
 python -m twine upload --repository testpypi dist/* --verbose
 module unload cuda
 
@@ -38,8 +38,8 @@ rm -rf dist build
 make clean
 module load cuda/11.0
 CUDA_HOME=/public/apps/cuda/11.0
-CUDA_VERSION=110 python -m build
 make cuda110
+CUDA_VERSION=110 python -m build
 python -m twine upload --repository testpypi dist/* --verbose
 module unload cuda
 
@@ -47,15 +47,15 @@ rm -rf dist build
 make clean
 module load cuda/11.1
 CUDA_HOME=/public/apps/cuda/11.1
-CUDA_VERSION=111 python -m build
 make cuda111
+CUDA_VERSION=111 python -m build
 python -m twine upload --repository testpypi dist/* --verbose
 module unload cuda
 
 rm -rf dist build
 make clean
 CUDA_HOME=/private/home/timdettmers/git/autoswap/local/cuda-11.3
-CUDA_VERSION=113 python -m build
 make cuda113
+CUDA_VERSION=113 python -m build
 python -m twine upload --repository testpypi dist/* --verbose
 module unload cuda

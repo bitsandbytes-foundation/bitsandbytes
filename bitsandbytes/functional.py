@@ -3,7 +3,7 @@ import os
 import ctypes as ct
 
 torch.optim.Adam
-lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libClusterNet.so')
+lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libBitsNBytes.so')
 
 def create_dynamic_map(signed=True):
     '''

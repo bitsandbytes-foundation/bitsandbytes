@@ -21,13 +21,13 @@ void adam32bit_g32(float *g, float *p,
                float* state1, float* state2,
                const float beta1, const float beta2, const float eps, const float weight_decay,
                const int step, const float lr, const bool is_sparse, float gnorm_scale, const int n)
-{ optimizer_32bit_2State<float, ADAM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
+{ optimizer_32bit<float, ADAM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
 
 void adam32bit_g16(half *g, half *p,
                float* state1, float* state2,
                const float beta1, const float beta2, const float eps, const float weight_decay,
                const int step, const float lr, const bool is_sparse, float gnorm_scale, const int n)
-{ optimizer_32bit_2State<half, ADAM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
+{ optimizer_32bit<half, ADAM>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); }
 
 void optimizer_static_8bit_2state_g16(half* p, half* g, unsigned char* state1, unsigned char* state2,
                 float beta1, float beta2,
@@ -36,7 +36,7 @@ void optimizer_static_8bit_2state_g16(half* p, half* g, unsigned char* state1, u
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay, float gnorm_scale, int n)
 { 
-	optimizerStatic8bit2State<half, ADAM>(g, p, state1, state2, beta1, beta2, eps, step, lr,
+	optimizerStatic8bit<half, ADAM>(g, p, state1, state2, beta1, beta2, eps, step, lr,
 			                                  quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
 }
 
@@ -47,7 +47,7 @@ void optimizer_static_8bit_2state_g32(float* p, float* g, unsigned char* state1,
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay, float gnorm_scale, int n)
 { 
-	optimizerStatic8bit2State<float, ADAM>(g, p, state1, state2, beta1, beta2, eps, step, lr,
+	optimizerStatic8bit<float, ADAM>(g, p, state1, state2, beta1, beta2, eps, step, lr,
 			                                  quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
 }
 
