@@ -194,7 +194,7 @@ def test_adam8bit(dim1, dim2, gtype, optim_name):
         torch.testing.assert_allclose(p1, p2.float(), atol=patol, rtol=prtol)
         dequant_states = []
         for name1, name2, qmap, max_val in str2statenames[optim_name]:
-            s1 = F.dequantize_with_absmax(bnb_optimizer.state[p2][qmap], bnb_optimizer.state[p2][max_val], bnb_optimizer.state[p2][name2])
+            s1 = F.dequantize(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2])
             num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)==0
             assert num_not_close.sum().item() < 10
             #torch.testing.assert_allclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)
@@ -222,7 +222,7 @@ def test_adam8bit(dim1, dim2, gtype, optim_name):
                 torch.testing.assert_allclose(raws1cpy, bnb_optimizer.state[p2][name2])
                 torch.testing.assert_allclose(qmap1, bnb_optimizer.state[p2][qmap])
 
-                s1 = F.dequantize_with_absmax(bnb_optimizer.state[p2][qmap], bnb_optimizer.state[p2][max_val], bnb_optimizer.state[p2][name2])
+                s1 = F.dequantize(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2])
                 torch.testing.assert_allclose(s1cpy, s1)
 
                 num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)==0

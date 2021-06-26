@@ -4,6 +4,7 @@ import ctypes as ct
 
 torch.optim.Adam
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libBitsNBytes.so')
+name2qmap = {}
 
 def create_dynamic_map(signed=True):
     '''
@@ -80,7 +81,28 @@ def estimate_quantiles(A: torch.Tensor, out: torch.Tensor=None, offset: float=1/
         raise NotImplementError(f'Not supported data type {A.dtype}')
     return out
 
-def quantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
+
+def quantize(A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
+    if code is None:
+        if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
+        code = name2qmap['dynamic']
+        code = code.to(A.device)
+
+    absmax = torch.abs(A).max()
+    inp = A/absmax
+    out = quantize_no_absmax(code, inp, out)
+    return absmax, out
+
+def dequantize(absmax:torch.Tensor, A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
+    if code is None:
+        if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
+        code = name2qmap['dynamic']
+        code = code.to(A.device)
+
+    out = dequantize_no_absmax(code, A, out)
+    return out*absmax
+
+def quantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
     '''
     Quantizes input tensor to 8-bit.
 
@@ -105,11 +127,7 @@ def quantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> tor
     lib.cquantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
     return out
 
-def dequantize_with_absmax(code: torch.Tensor, absmax:torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
-    out = dequantize(code, A, out)
-    return out*absmax
-
-def dequantize(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
+def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
     '''
     Dequantizes the 8-bit tensor to 32-bit.
 
