@@ -139,6 +139,10 @@ str2optimizer32bit = {}
 str2optimizer32bit['adam'] = (lib.cadam32bit_g32, lib.cadam32bit_g16)
 str2optimizer32bit['momentum'] = (lib.cmomentum32bit_g32, lib.cmomentum32bit_g16)
 
+str2optimizer8bit = {}
+str2optimizer8bit['adam'] = (lib.cadam_static_8bit_g32, lib.cadam_static_8bit_g16)
+str2optimizer8bit['momentum'] = (lib.cmomentum_static_8bit_g32, lib.cmomentum_static_8bit_g16)
+
 def momentum_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, weight_decay: float, momentum: float, lr: float, dampening: float, nesterov: bool,
                           step: int, is_sparse: bool, gnorm_scale: float):
     '''
@@ -263,8 +267,15 @@ def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor,
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
-
 def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
+                beta1: float, beta2: float, eps: float,
+                step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
+                max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
+                weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0) -> None:
+    optimizer_update_8bit('adam', g, p, state1, state2, beta1, beta2, eps, step, lr, qmap1, qmap2, max1, max2, new_max1, new_max2, weight_decay, is_sparse, gnorm_scale)
+
+
+def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float,
                 step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
                 max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
@@ -277,6 +288,8 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
 
     Parameters
     ----------
+    optimizer_name : str
+        The name of the optimizer. Choices {adam, momentum}
     g : torch.Tensor
         Gradient tensor.
     p : torch.Tensor
@@ -316,14 +329,14 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
     '''
 
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-        lib.cadam_static_8bit_g32(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+        str2optimizer8bit[optimizer_name][0](get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr),
                     get_ptr(qmap1), get_ptr(qmap2),
                     get_ptr(max1), get_ptr(max2), get_ptr(new_max1), get_ptr(new_max2),
                     ct.c_float(weight_decay),ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        lib.cadam_static_8bit_g16(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+        str2optimizer8bit[optimizer_name][1](get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr),
                     get_ptr(qmap1), get_ptr(qmap2),

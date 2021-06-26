@@ -23,19 +23,23 @@ def rm_path(path):
 str2optimizers = {}
 str2optimizers['adam'] = (torch.optim.Adam, bnb.optim.Adam)
 str2optimizers['momentum'] = (lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9), lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9))
+str2optimizers['adam8bit'] = (torch.optim.Adam, bnb.optim.Adam8bit)
+str2optimizers['momentum8bit'] = (lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9), lambda pxx: bnb.optim.SGD8bit(pxx, 0.01, 0.9))
 
 str2statenames = {}
 str2statenames['adam'] = [('exp_avg', 'state1'), ('exp_avg_sq', 'state2')]
 str2statenames['momentum'] = [('momentum_buffer', 'state1')]
+str2statenames['adam8bit'] = [('exp_avg', 'state1', 'qmap1', 'max1'), ('exp_avg_sq', 'state2', 'qmap2', 'max2')]
+str2statenames['momentum8bit'] = [('momentum_buffer', 'state1', 'qmap1', 'max1')]
 
 dim1 = [1024]
 dim2 = [32, 1024, 4097, 1]
 gtype = [torch.float32, torch.float16]
 optimizer_names = ['adam', 'momentum']
 values = list(product(dim1,dim2, gtype, optimizer_names))
-names = ['dim1_{0}_dim2_{1}_gtype_{2}_optims_{3}'.format(*vals) for vals in values]
+names = ['dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
-def test_adam32bit(dim1, dim2, gtype, optim_name):
+def test_optimizer32bit(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1: return
     p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
     p2 = p1.clone()
@@ -53,7 +57,7 @@ def test_adam32bit(dim1, dim2, gtype, optim_name):
 
     for i in range(50):
         g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01
-        p1.grad = g.float()
+        p1.grad = g.clone().float()
         p2.grad = g.clone()
 
         bnb_optimizer.step()
@@ -156,22 +160,18 @@ def test_global_config(dim1, dim2, gtype):
 dim1 = [1024]
 dim2 = [32, 1024, 4097]
 gtype = [torch.float32, torch.float16]
-values = list(product(dim1,dim2, gtype))
-names = ['dim1_{0}_dim2_{1}_gtype_{2}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2, gtype", values, ids=names)
-def test_adam8bit(dim1, dim2, gtype):
+optimizer_names = ['adam8bit', 'momentum8bit']
+values = list(product(dim1,dim2, gtype, optimizer_names))
+names = ['dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
+def test_adam8bit(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1: return
     p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
     p2 = p1.clone()
     p1 = p1.float()
-    beta1 = 0.9
-    beta2 = 0.999
-    lr = 0.001
-    eps = 1e-8
 
-
-    adam1 = torch.optim.Adam([p1], lr, (beta1, beta2), eps)
-    adam2 = bnb.optim.Adam8bit([p2], lr, (beta1, beta2), eps)
+    torch_optimizer = str2optimizers[optim_name][0]([p1])
+    bnb_optimizer = str2optimizers[optim_name][1]([p2])
 
     if gtype == torch.float32:
         atol, rtol = 3e-3, 1e-3
@@ -182,19 +182,24 @@ def test_adam8bit(dim1, dim2, gtype):
         patol, prtol = 1e-5, 1e-3
 
 
+    print('')
     for i in range(50):
         g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01
-        p1.grad = g.float()
+        p1.grad = g.clone().float()
         p2.grad = g.clone()
 
-        adam2.step()
-        adam1.step()
+        bnb_optimizer.step()
+        torch_optimizer.step()
 
-        s1 = F.dequantize_with_absmax(adam2.state[p2]['qmap1'], adam2.state[p2]['max1'], adam2.state[p2]['state1'])
-        s2 = F.dequantize_with_absmax(adam2.state[p2]['qmap2'], adam2.state[p2]['max2'], adam2.state[p2]['state2'])
-        torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], s1, atol=atol, rtol=rtol)
-        torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], s2, atol=atol, rtol=rtol)
         torch.testing.assert_allclose(p1, p2.float(), atol=patol, rtol=prtol)
+        dequant_states = []
+        for name1, name2, qmap, max_val in str2statenames[optim_name]:
+            s1 = F.dequantize_with_absmax(bnb_optimizer.state[p2][qmap], bnb_optimizer.state[p2][max_val], bnb_optimizer.state[p2][name2])
+            num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)==0
+            assert num_not_close.sum().item() < 10
+            #torch.testing.assert_allclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)
+            dequant_states.append(s1.clone())
+
 
         err  = torch.abs(p1-p2)
         relerr = err/torch.abs(p1)
@@ -202,43 +207,35 @@ def test_adam8bit(dim1, dim2, gtype):
         assert relerr.mean() < 0.001
 
         if i % 10 == 0 and i > 0:
-            s1cpy = s1.clone()
-            s2cpy = s2.clone()
-            raws1cpy = adam2.state[p2]['state1'].clone()
-            raws2cpy = adam2.state[p2]['state2'].clone()
-            qmap1 = adam2.state[p2]['qmap1'].clone()
-            qmap2 = adam2.state[p2]['qmap2'].clone()
+            for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
+                s1cpy = s.clone()
+                raws1cpy = bnb_optimizer.state[p2][name2].clone()
+                qmap1 = bnb_optimizer.state[p2][qmap].clone()
 
-            path = get_temp_dir()
-            torch.save(adam2.state_dict(),join(path, 'opt.pt'))
-            del adam2
-            adam2 = None
-            adam2 = bnb.optim.Adam8bit([p2])
-            adam2.load_state_dict(torch.load(join(path, 'opt.pt')))
-            rm_path(path)
-            torch.testing.assert_allclose(raws1cpy, adam2.state[p2]['state1'])
-            torch.testing.assert_allclose(raws2cpy, adam2.state[p2]['state2'])
-            torch.testing.assert_allclose(qmap1, adam2.state[p2]['qmap1'])
-            torch.testing.assert_allclose(qmap2, adam2.state[p2]['qmap2'])
+                path = get_temp_dir()
+                torch.save(bnb_optimizer.state_dict(),join(path, 'opt.pt'))
+                del bnb_optimizer
+                bnb_optimizer = None
+                bnb_optimizer = str2optimizers[optim_name][1]([p2])
+                bnb_optimizer.load_state_dict(torch.load(join(path, 'opt.pt')))
+                rm_path(path)
+                torch.testing.assert_allclose(raws1cpy, bnb_optimizer.state[p2][name2])
+                torch.testing.assert_allclose(qmap1, bnb_optimizer.state[p2][qmap])
 
+                s1 = F.dequantize_with_absmax(bnb_optimizer.state[p2][qmap], bnb_optimizer.state[p2][max_val], bnb_optimizer.state[p2][name2])
+                torch.testing.assert_allclose(s1cpy, s1)
 
-            s1 = F.dequantize_with_absmax(adam2.state[p2]['qmap1'], adam2.state[p2]['max1'], adam2.state[p2]['state1'])
-            s2 = F.dequantize_with_absmax(adam2.state[p2]['qmap2'], adam2.state[p2]['max2'], adam2.state[p2]['state2'])
-
-            torch.testing.assert_allclose(s1cpy, s1)
-            torch.testing.assert_allclose(s2cpy, s2)
-
-            torch.testing.assert_allclose(adam1.state[p1]['exp_avg'], s1, atol=atol, rtol=rtol)
-            torch.testing.assert_allclose(adam1.state[p1]['exp_avg_sq'], s2, atol=atol, rtol=rtol)
+                num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)==0
+                assert num_not_close.sum().item() < 10
             torch.testing.assert_allclose(p1, p2.float(), atol=patol, rtol=prtol)
 
         # the parameters diverge quickly. Here we keep them close
         # together so we can test against the Adam error
         p1.data = p1.data.to(gtype).float()
         p2.copy_(p1.data)
-        adam1.state[p1]['exp_avg'].copy_(s1.data)
-        adam1.state[p1]['exp_avg_sq'].copy_(s2.data)
         torch.testing.assert_allclose(p1.to(gtype), p2)
+        for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
+            torch_optimizer.state[p1][name1].copy_(s.data)
 
 
 

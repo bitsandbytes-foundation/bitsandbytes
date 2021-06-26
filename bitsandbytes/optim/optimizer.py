@@ -402,10 +402,12 @@ class Optimizer1State(Optimizer8bit):
             gnorm_scale = 1.0
 
         if state['state1'].dtype == torch.float:
-                F.optimizer_update_32bit(self.optimizer_name, grad, p, state['state1'], config['betas'][0], config['eps'], step, config['lr'],
-                        None, 0.0, config['weight_decay'], config['is_sparse'], gnorm_scale)
+            F.optimizer_update_32bit(self.optimizer_name, grad, p, state['state1'], config['betas'][0], config['eps'], step, config['lr'],
+                    None, 0.0, config['weight_decay'], config['is_sparse'], gnorm_scale)
 
         elif state['state1'].dtype == torch.uint8:
-            raise NotImplementedError('not implemented yet')
+            F.optimizer_update_8bit(self.optimizer_name, grad, p, state['state1'], None, config['betas'][0], config['betas'][1],
+                    config['eps'], step, config['lr'], state['qmap1'], None, state['max1'], None, state['new_max1'], None,
+                    config['weight_decay'], config['is_sparse'], gnorm_scale)
 
-
+            state['max1'], state['new_max1'] = state['new_max1'], state['max1']

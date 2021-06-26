@@ -15,7 +15,7 @@ class SGD8bit(Optimizer1State):
             min_8bit_size=4096, percentile_clipping=100):
         if momentum == 0:
             raise NotImplementError(f'SGD without momentum is not supported!')
-        super(SGD, self).__init__('momentum', params, lr, (momentum, dampening), 0.0,
+        super(SGD8bit, self).__init__('momentum', params, lr, (momentum, dampening), 0.0,
                 weight_decay, 8, is_sparse, args, min_8bit_size, percentile_clipping)
 
 class SGD32bit(Optimizer1State):
@@ -24,5 +24,5 @@ class SGD32bit(Optimizer1State):
             min_8bit_size=4096, percentile_clipping=100):
         if momentum == 0:
             raise NotImplementError(f'SGD without momentum is not supported!')
-        super(SGD, self).__init__('momentum', params, lr, (momentum, dampening), 0.0,
+        super(SGD32bit, self).__init__('momentum', params, lr, (momentum, dampening), 0.0,
                 weight_decay, 32, is_sparse, args, min_8bit_size, percentile_clipping)

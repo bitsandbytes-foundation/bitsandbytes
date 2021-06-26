@@ -439,7 +439,6 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
             g_val *= gnorm_scale;
             s1_vals[j] = smem_quantiles1[m_c1[j]]*max1[0]*beta1;
             s1_vals[j] += (1.0f-beta1)*g_val;
-
             local_max_s1 = fmaxf(local_max_s1, fabsf(s1_vals[j]));
         }
 
@@ -628,7 +627,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
 
     __syncthreads();
 
-    for (unsigned int i = base_idx; i < n_full; i += NUM_THREADS*gridDim.x*NUM8BIT)
+    for (unsigned int i = base_idx; i < n_full; i += gridDim.x*NUM_THREADS*NUM8BIT)
     {
         valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
@@ -642,19 +641,21 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
         {
             g_val = g_vals[j];
             g_val *= gnorm_scale;
-            s1_vals[j] = smem_quantiles1[m_c1[j]]*max1[0]*beta1;
+            s1_vals[j] = smem_quantiles1[m_c1[j]]*max1[0];
             switch(OPTIMIZER)
             {
                 case MOMENTUM: 
                     //TODO: if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
-                    {
+                    //{
                       if(step == 1)
-                        s1_vals[j] = g_vals[j];
+                        s1_vals[j] = (float)g_vals[j];
                       else
                         s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
-                    }
-                    //break;
+                    //}
+                    break;
             }
+
+            local_max_s1 = fmaxf(local_max_s1, fabsf(s1_vals[j]));
         }
     }
 
@@ -721,6 +722,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         {
             g_val = float(g_vals[j]);
             g_val *= gnorm_scale;
+            s1_vals[j] = smem_quantiles1[c1s[j]]*max1[0];
 
             switch(OPTIMIZER)
             {
