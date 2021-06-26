@@ -316,14 +316,14 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
     '''
 
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-        lib.coptimizer_static_8bit_2state_g32(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+        lib.cadam_static_8bit_g32(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr),
                     get_ptr(qmap1), get_ptr(qmap2),
                     get_ptr(max1), get_ptr(max2), get_ptr(new_max1), get_ptr(new_max2),
                     ct.c_float(weight_decay),ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        lib.coptimizer_static_8bit_2state_g16(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+        lib.cadam_static_8bit_g16(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr),
                     get_ptr(qmap1), get_ptr(qmap2),

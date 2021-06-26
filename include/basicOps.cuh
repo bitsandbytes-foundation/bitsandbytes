@@ -37,7 +37,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
 void quantize(float *code, float *A, unsigned char *out, int n);
 void dequantize(float *code, unsigned char *A, float *out, int n);
 
-template<typename T, int OPTIMIZER> void optimizer_32bit(T* g, T* p, 
+template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
                 float* state1, float* state2,
                 float beta1, float beta2, float eps, float weight_decay,
                 int step, float lr, const bool is_sparse, const float gnorm_scale, int n);

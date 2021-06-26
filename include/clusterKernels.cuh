@@ -10,7 +10,7 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
 __global__ void kDequantize(float *code, unsigned char *A, float *out, const int n);
 
 template<typename T, int OPTIMIZER>
-__global__ void kOptimizer_32bit_1State(T* g, T* p, 
+__global__ void kOptimizer32bit1State(T* g, T* p, 
                 float* state1, 
                 const float beta1, const float eps, const float weight_decay,
                 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
@@ -36,7 +36,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 float weight_decay, const float gnorm_scale, const int n);
 
 template<typename T, int OPTIMIZER>
-__global__ void kOptimizer_32bit_2State(T* g, T* p, 
+__global__ void kOptimizer32bit2State(T* g, T* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
