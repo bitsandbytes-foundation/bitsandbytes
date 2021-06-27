@@ -461,6 +461,11 @@ def optimizer_update_8bit_blockwise(optimizer_name: str, g: torch.Tensor, p: tor
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr), get_ptr(qmap1), get_ptr(qmap2),
                     get_ptr(absmax1), get_ptr(absmax2), ct.c_float(weight_decay), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
+    elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
+        lib.coptimizer_static_8bit_blockwise_fp16(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+                    ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
+                    ct.c_int32(step), ct.c_float(lr), get_ptr(qmap1), get_ptr(qmap2),
+                    get_ptr(absmax1), get_ptr(absmax2), ct.c_float(weight_decay), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 

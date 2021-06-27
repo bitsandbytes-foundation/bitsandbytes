@@ -170,6 +170,9 @@ MAKE_optimizerStatic8bit(MOMENTUM, float)
 template void optimizerStatic8bitBlockwise<float, ADAM>(float* p, float* g,
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, int n);
+template void optimizerStatic8bitBlockwise<half, ADAM>(half* p, half* g,
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 
+                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, int n);
 
 template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
 template void percentileClipping(half * g, float *gnorm_vec, int step, const int n);

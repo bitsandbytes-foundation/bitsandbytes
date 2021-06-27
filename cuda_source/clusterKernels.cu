@@ -1153,3 +1153,11 @@ template __global__ void kOptimizerStatic8bit2StateBlockwise<float, ADAM, 4096, 
                 float* absmax1, float* absmax2, 
                 float weight_decay,
                 const float gnorm_scale, const int n);
+
+template __global__ void kOptimizerStatic8bit2StateBlockwise<half, ADAM, 4096, 4>(half* p, half* __restrict__ const g, unsigned char* state1, unsigned char* state2,
+                const float beta1, const float beta2,
+                const float eps, const int step, const float lr,
+                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
+                float* absmax1, float* absmax2, 
+                float weight_decay,
+                const float gnorm_scale, const int n);

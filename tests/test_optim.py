@@ -204,7 +204,7 @@ def test_adam8bit(dim1, dim2, gtype, optim_name):
             else:
                 s1 = F.dequantize(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2])
             num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)==0
-            assert num_not_close.sum().item() < 10
+            assert num_not_close.sum().item() < 15
             dequant_states.append(s1.clone())
 
 
@@ -239,7 +239,7 @@ def test_adam8bit(dim1, dim2, gtype, optim_name):
                 torch.testing.assert_allclose(s1cpy, s1)
 
                 num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)==0
-                assert num_not_close.sum().item() < 10
+                assert num_not_close.sum().item() < 15
             torch.testing.assert_allclose(p1, p2.float(), atol=patol, rtol=prtol)
 
         # the parameters diverge quickly. Here we keep them close
