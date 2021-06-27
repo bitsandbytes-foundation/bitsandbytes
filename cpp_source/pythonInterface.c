@@ -50,6 +50,12 @@ MAKE_FUNC8(adam, ADAM, half, 16)
 MAKE_FUNC8(momentum, MOMENTUM, float, 32)
 MAKE_FUNC8(momentum, MOMENTUM, half, 16)
 
+void optimizerStatic8bitBlockwise_fp32(float* p, float* g,
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 
+                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, int n)
+{	optimizerStatic8bitBlockwise<float, ADAM>(p, g, state1, state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, n); }
+
+
 void percentileClipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping<float>(g, gnorm_vec, step, n); }
 void percentileClipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping<half>(g, gnorm_vec, step, n); }
 
@@ -97,6 +103,11 @@ extern "C"
 	MAKE_CFUNC8(adam, half, 16)
 	MAKE_CFUNC8(momentum, float, 32)
 	MAKE_CFUNC8(momentum, half, 16)
+
+  void coptimizer_static_8bit_blockwise_fp32(float* p, float* g,
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 
+                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, int n)
+  {	optimizerStatic8bitBlockwise_fp32(p, g, state1, state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, n); }
 
 	void cpercentile_clipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping_g32(g, gnorm_vec, step, n); }
 	void cpercentile_clipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping_g16(g, gnorm_vec, step, n); }
