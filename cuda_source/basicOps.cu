@@ -31,6 +31,22 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+template <typename T> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, const int n)
+{
+  int blocks = n/4096;
+  blocks = n % 4096 == 0 ? blocks : blocks + 1;
+  kQuantizeBlockwise<T, 4096, 4><<<blocks, 1024>>>(code, A, absmax, out, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, const int n)
+{
+  int blocks = n/4096;
+  blocks = n % 4096 == 0 ? blocks : blocks + 1;
+  kDequantizeBlockwise<T, 4096, 4><<<blocks, 1024>>>(code, A, absmax, out, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
                 float* state1, float* state2,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
@@ -102,6 +118,11 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
 
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);
+
+template void quantizeBlockwise<half>(float * code, half *A, float *absmax, unsigned char *out, const int n);
+template void quantizeBlockwise<float>(float * code, float *A, float *absmax, unsigned char *out, const int n);
+template void dequantizeBlockwise<half>(float *code, unsigned char *A, float *absmax, half *out, const int n);
+template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *absmax, float *out, const int n);
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \

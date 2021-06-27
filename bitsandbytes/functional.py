@@ -81,6 +81,93 @@ def estimate_quantiles(A: torch.Tensor, out: torch.Tensor=None, offset: float=1/
         raise NotImplementError(f'Not supported data type {A.dtype}')
     return out
 
+def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
+    '''
+    Quantize tensor A in blocks of size 4096 values.
+
+    Quantizes tensor A by dividing it into blocks of 4096 values.
+    Then the absolute maximum value within these blocks is calculated
+    for the non-linear quantization.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        The input tensor.
+    code : torch.Tensor
+        The quantization map.
+    absmax : torch.Tensor
+        The absmax values.
+    out : torch.Tensor
+        The output tensor (8-bit).
+
+    Returns
+    -------
+    torch.Tensor:
+        The 8-bit tensor.
+    '''
+
+    if code is None:
+        if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
+        code = name2qmap['dynamic']
+        code = code.to(A.device)
+
+    if absmax is None:
+        n = A.numel()
+        blocks = n//4096
+        blocks += 1 if n % 4096 > 0 else 0
+        absmax = torch.zeros((blocks,), device=A.device)
+
+    if out is None: out = torch.zeros_like(A, dtype=torch.uint8)
+
+    if A.dtype == torch.float32:
+        lib.cquantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+    elif A.dtype == torch.float16:
+        lib.cquantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+    else:
+        raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
+
+    return absmax, out
+
+def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
+    '''
+    Dequantizes blockwise quantized values.
+
+    Dequantizes the tensor A with maximum absolute values absmax in
+    blocks of size 4096.
+
+    Parameters
+    ----------
+    absmax : torch.Tensor
+        The absmax values.
+    A : torch.Tensor
+        The input 8-bit tensor.
+    code : torch.Tensor
+        The quantization map.
+    out : torch.Tensor
+        Dequantized output tensor (default: float32)
+
+
+    Returns
+    -------
+    torch.Tensor:
+        Dequantized tensor (default: float32)
+    '''
+    if code is None:
+        if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
+        code = name2qmap['dynamic']
+        code = code.to(A.device)
+
+    if out is None: out = torch.zeros_like(A, dtype=torch.float32)
+
+    if out.dtype == torch.float32:
+        lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+    elif out.dtype == torch.float16:
+        lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+    else:
+        raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
+
+    return out
+
 
 def quantize(A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
     if code is None:

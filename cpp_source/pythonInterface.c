@@ -53,12 +53,21 @@ MAKE_FUNC8(momentum, MOMENTUM, half, 16)
 void percentileClipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping<float>(g, gnorm_vec, step, n); }
 void percentileClipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping<half>(g, gnorm_vec, step, n); }
 
+void quantizeBlockwise_fp16(float * code, half *A, float *absmax, unsigned char *out, const int n){ quantizeBlockwise<half>(code, A, absmax, out, n); }
+void quantizeBlockwise_fp32(float * code, float *A, float *absmax, unsigned char *out, const int n){ quantizeBlockwise<float>(code, A, absmax, out, n); }
+void dequantizeBlockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, const int n){ dequantizeBlockwise<half>(code, A, absmax, out, n); }
+void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, const int n){ dequantizeBlockwise<float>(code, A, absmax, out, n); }
+
 extern "C"
 {
 	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
 	void cestimate_quantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles_fp16(A, code, offset, n); }
 	void cquantize(float *code, float *A, unsigned char *out, int n){ quantize(code, A, out, n); }
 	void cdequantize(float *code, unsigned char *A, float *out, int n){ dequantize(code, A, out, n); }
+  void cquantize_blockwise_fp16(float * code, half *A, float *absmax, unsigned char *out, const int n){ quantizeBlockwise_fp16(code, A, absmax, out, n); }
+  void cquantize_blockwise_fp32(float * code, float *A, float *absmax, unsigned char *out, const int n){ quantizeBlockwise_fp32(code, A, absmax, out, n); }
+  void cdequantize_blockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, const int n){ dequantizeBlockwise_fp16(code, A, absmax, out, n); }
+  void cdequantize_blockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, const int n){ dequantizeBlockwise_fp32(code, A, absmax, out, n); }
 
 	#define MAKE_CFUNC32(name, gtype, gbits) \
 	void c##name##32bit_g##gbits(gtype *g, gtype *p, \

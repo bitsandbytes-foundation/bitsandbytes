@@ -167,6 +167,7 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
   typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
   typedef cub::BlockStore<unsigned char, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
 
+
   __shared__ typename LoadFloat::TempStorage loadf;
   __shared__ typename StoreChar::TempStorage storec;
   __shared__ float smem_code[256];
@@ -189,6 +190,113 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
       StoreChar(storec).Store(&(out[i]), qvals, valid_items);
   }
 }
+
+template<typename T, int BLOCK_SIZE, int NUM_PER_TH>
+__launch_bounds__(TH, 4)
+__global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, const int n)
+{
+  const int n_full = gridDim.x * BLOCK_SIZE;
+  int valid_items = 0;
+  const int base_idx = (blockIdx.x * BLOCK_SIZE);
+
+  T vals[NUM];
+  unsigned char qvals[NUM];
+  float local_abs_max = -FLT_MAX;
+
+  typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+  typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+  typedef cub::BlockReduce<float, BLOCK_SIZE> BlockReduce;
+
+  __shared__ typename LoadT::TempStorage loadt;
+  __shared__ typename StoreChar::TempStorage storec;
+  __shared__ typename BlockReduce::TempStorage reduce;
+  __shared__ float smem_code[256];
+  __shared__ float smem_absmax_value[1];
+
+  if(threadIdx.x < 256)
+    smem_code[threadIdx.x] = code[threadIdx.x];
+
+  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
+  {
+      valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
+      local_abs_max = -FLT_MAX;
+
+      __syncthreads();
+      LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
+
+    // 1. compute local max
+    // 2. broadcast local max
+    // 3. normalize inputs and quantize
+
+     #pragma unroll NUM_PER_TH
+     for(int j = 0; j < NUM_PER_TH; j++)
+        local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
+
+     local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Max(), valid_items);
+
+
+     if(threadIdx.x == 0)
+       smem_absmax_value[0] = local_abs_max;
+
+     __syncthreads();
+
+     if(threadIdx.x == 0)
+       absmax[i/BLOCK_SIZE] = local_abs_max;
+     else
+       local_abs_max = smem_absmax_value[0];
+
+     __syncwarp();
+
+     local_abs_max = 1.0f/local_abs_max;
+
+     #pragma unroll NUM_PER_TH
+     for(int j = 0; j < NUM_PER_TH; j++)
+        qvals[j] = quantize(smem_code, ((float)vals[j])*local_abs_max);
+
+     __syncthreads();
+     StoreChar(storec).Store(&(out[i]), qvals, valid_items);
+  }
+}
+
+template<typename T, int BLOCK_SIZE, int NUM_PER_TH>
+__global__ void kDequantizeBlockwise(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, T *out, const int n)
+{
+
+  const int n_full = gridDim.x * BLOCK_SIZE;
+  int valid_items = 0;
+  const int base_idx = (blockIdx.x * BLOCK_SIZE);
+
+  T vals[NUM];
+  unsigned char qvals[NUM];
+  float local_abs_max = -FLT_MAX;
+
+  typedef cub::BlockLoad<unsigned char, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+  typedef cub::BlockStore<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+
+  __shared__ typename LoadChar::TempStorage loadchar;
+  __shared__ typename StoreT::TempStorage storet;
+  __shared__ float smem_code[256];
+
+  if(threadIdx.x < 256)
+    smem_code[threadIdx.x] = code[threadIdx.x];
+
+  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
+  {
+      valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
+      local_abs_max = absmax[i/BLOCK_SIZE];
+
+      __syncthreads();
+      LoadChar(loadchar).Load(&(A[i]), qvals, valid_items, 128);
+
+      #pragma unroll NUM_PER_TH
+      for(int j = 0; j < NUM_PER_TH; j++)
+        vals[j] = smem_code[qvals[j]]*local_abs_max;
+
+      __syncthreads();
+      StoreT(storet).Store(&(out[i]), vals, valid_items);
+  }
+}
+
 
 __global__ void kDequantize(float *code, unsigned char *A, float *out, const int n)
 {
@@ -879,3 +987,7 @@ MAKE_optimizerStatic8bit2State(ADAM, float)
 template __global__ void kPercentileClipping<float, 2048, 4>(float * __restrict__ g, float *gnorm_vec, int step, const int n);
 template __global__ void kPercentileClipping<half, 2048, 4>(half * __restrict__ g, float *gnorm_vec, int step, const int n);
 
+template __global__ void kQuantizeBlockwise<half, 4096, 4>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, const int n);
+template __global__ void kQuantizeBlockwise<float, 4096, 4>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, const int n);
+template __global__ void kDequantizeBlockwise<half, 4096, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, half *out, const int n);
+template __global__ void kDequantizeBlockwise<float, 4096, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, float *out, const int n);
