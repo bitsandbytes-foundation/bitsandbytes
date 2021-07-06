@@ -12,9 +12,15 @@ __global__ void kDequantize(float *code, unsigned char *A, float *out, const int
 template<typename T, int BLOCK_SIZE, int NUM_PER_TH> __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, const int n);
 template<typename T, int BLOCK_SIZE, int NUM_PER_TH> __global__ void kDequantizeBlockwise(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, T *out, const int n);
 
+template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
+__global__ void kPreconditionOptimizer32bit1State(T* g, T* p, 
+                float* state1, float *unorm,
+                const float beta1, const float eps, const float weight_decay,
+                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
+
 template<typename T, int OPTIMIZER>
 __global__ void kOptimizer32bit1State(T* g, T* p, 
-                float* state1, 
+                float* state1,  float *unorm, const float max_unorm,
                 const float beta1, const float eps, const float weight_decay,
                 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
 

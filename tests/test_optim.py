@@ -11,6 +11,8 @@ import bitsandbytes.functional as F
 from os.path import join
 from itertools import product
 
+import apex
+
 
 def get_temp_dir():
     path = '/tmp/autoswap/{0}'.format(str(uuid.uuid4()))
@@ -23,6 +25,7 @@ def rm_path(path):
 str2optimizers = {}
 str2optimizers['adam'] = (torch.optim.Adam, bnb.optim.Adam)
 str2optimizers['momentum'] = (lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9), lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9))
+str2optimizers['lars'] = (lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9), lambda pxx: bnb.optim.LARS(pxx, 0.01, 0.9))
 str2optimizers['rmsprop'] = (lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9), lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9))
 str2optimizers['adam8bit'] = (torch.optim.Adam, bnb.optim.Adam8bit)
 str2optimizers['momentum8bit'] = (lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9), lambda pxx: bnb.optim.SGD8bit(pxx, 0.01, 0.9))
@@ -33,6 +36,7 @@ str2optimizers['adam8bit_blockwise'] = (torch.optim.Adam, lambda pxx: bnb.optim.
 str2statenames = {}
 str2statenames['adam'] = [('exp_avg', 'state1'), ('exp_avg_sq', 'state2')]
 str2statenames['momentum'] = [('momentum_buffer', 'state1')]
+str2statenames['lars'] = [('momentum_buffer', 'state1')]
 str2statenames['rmsprop'] = [('square_avg', 'state1')]
 str2statenames['adam8bit'] = [('exp_avg', 'state1', 'qmap1', 'max1'), ('exp_avg_sq', 'state2', 'qmap2', 'max2')]
 str2statenames['adam8bit_blockwise'] = [('exp_avg', 'state1', 'qmap1', 'absmax1'), ('exp_avg_sq', 'state2', 'qmap2', 'absmax2')]
@@ -42,7 +46,7 @@ str2statenames['rmsprop8bit'] = [('square_avg', 'state1', 'qmap1', 'max1')]
 dim1 = [1024]
 dim2 = [32, 1024, 4097, 1]
 gtype = [torch.float32, torch.float16]
-optimizer_names = ['adam', 'momentum', 'rmsprop']
+optimizer_names = ['adam', 'momentum', 'rmsprop', 'lars']
 values = list(product(dim1,dim2, gtype, optimizer_names))
 names = ['dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
@@ -93,6 +97,8 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
             p1.data = p1.data.half().float()
             p2.copy_(p1.data)
             torch.testing.assert_allclose(p1.half(), p2)
+        if optim_name == 'lars':
+            assert bnb_optimizer.state[p2]['unorm_vec'] > 0.0
 
 dim1 = [1024]
 dim2 = [32, 1024, 4097]

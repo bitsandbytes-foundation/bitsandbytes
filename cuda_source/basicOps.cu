@@ -11,6 +11,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
 {
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
+	CUDA_CHECK_RETURN(cudaMemset(code, 0, 256*sizeof(float)));
   kEstimateQuantiles<T><<<blocks, 1024>>>(A, code, offset, std::numeric_limits<T>::max(), n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -48,7 +49,7 @@ template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, flo
 }
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
-                float* state1, float* state2,
+                float* state1, float* state2, float *unorm, float max_unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
 {
@@ -61,9 +62,13 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 			break;
 		case MOMENTUM:
     case RMSPROP:
-			kOptimizer32bit1State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, beta1, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
-			break;
-		default:
+      if(max_unorm > 0.0f)
+			{ 
+				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
+				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 4><<<blocks, 1024>>>(g, p, state1, unorm, beta1, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
+			}
+
+			kOptimizer32bit1State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, unorm, max_unorm, beta1, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
 			break;
 	}
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
@@ -83,8 +88,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 	switch(OPTIMIZER)
 	{
 		case ADAM:
-			//CUDA_CHECK_RETURN(cudaMemset(new_max1, 0.0f, 1))
-			//CUDA_CHECK_RETURN(cudaMemset(new_max2, 0.0f, 1))
+			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
+			CUDA_CHECK_RETURN(cudaMemset(new_max2, 0, 1*sizeof(float)));
 			kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, state2, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			kOptimizerStatic8bit2State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
@@ -93,6 +98,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 		break;
 		case MOMENTUM:
     case RMSPROP:
+			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
 			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, beta1, eps, step, quantiles1, max1, new_max1, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			kOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, beta1, eps, step, lr,
@@ -125,6 +131,7 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
 {
   int blocks = n/2048;
   blocks = n % 2048 == 0 ? blocks : blocks + 1;
+	CUDA_CHECK_RETURN(cudaMemset(&gnorm_vec[step % 100], 0, 1*sizeof(float)));
   kPercentileClipping<T, 2048, 4><<<blocks, 512>>>(g, gnorm_vec, step, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -144,8 +151,8 @@ template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *a
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
-                float* state1, float* state2,\
-                const float beta1, const float beta2, const float eps, const float weight_decay,\
+                float* state1, float* state2, float* unorm, float max_unorm, \
+                const float beta1, const float beta2, const float eps, const float weight_decay, \
                 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
 
 MAKE_optimizer32bit(ADAM, half)
@@ -154,7 +161,6 @@ MAKE_optimizer32bit(MOMENTUM, half)
 MAKE_optimizer32bit(MOMENTUM, float)
 MAKE_optimizer32bit(RMSPROP, half)
 MAKE_optimizer32bit(RMSPROP, float)
-
 
 #define MAKE_optimizerStatic8bit(name, gtype) \
 template void optimizerStatic8bit<gtype, name>(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \

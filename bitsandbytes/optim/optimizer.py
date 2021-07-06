@@ -88,7 +88,8 @@ class Optimizer8bit(Optimizer):
                  'max1', 'max2',
                  'new_max1', 'new_max2',
                  'state1', 'state2',
-                 'gnorm_vec', 'absmax1', 'absmax2'])
+                 'gnorm_vec', 'absmax1', 'absmax2',
+                 'unorm_vec'])
 
         if optim_bits == 8: self.fill_qmap()
 
@@ -215,6 +216,7 @@ class Optimizer8bit(Optimizer):
         config['min_8bit_size'] = self.args.min_8bit_size
         config['percentile_clipping'] = self.args.percentile_clipping
         config['block_wise'] = self.args.block_wise
+        config['max_unorm'] = self.args.max_unorm
 
         if (gindex, pindex) in self.mng.index2config:
             config.update(self.mng.index2config[(gindex, pindex)])
@@ -229,7 +231,7 @@ class Optimizer8bit(Optimizer):
 class Optimizer2State(Optimizer8bit):
     def __init__(self, optimizer_name, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
             weight_decay=0.0, optim_bits=32, is_sparse=False, args=None,
-            min_8bit_size=4096, percentile_clipping=100, block_wise=False):
+            min_8bit_size=4096, percentile_clipping=100, block_wise=False, max_unorm=0.0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -251,6 +253,7 @@ class Optimizer2State(Optimizer8bit):
             args['min_8bit_size'] = min_8bit_size
             args['percentile_clipping'] = percentile_clipping
             args['block_wise'] = block_wise
+            args['max_unorm'] = max_unorm
 
             self.args = MockArgs(args)
         else:
@@ -304,6 +307,9 @@ class Optimizer2State(Optimizer8bit):
         if config['percentile_clipping'] < 100:
             state['gnorm_vec'] = torch.zeros((100,), device=p.device)
 
+        if config['max_unorm'] > 0.0:
+            state['unorm_vec'] = torch.zeros((1,), device=p.device)
+
     @torch.no_grad()
     def update_step(self, group, p, gindex, pindex):
         state = self.state[p]
@@ -341,7 +347,7 @@ class Optimizer2State(Optimizer8bit):
 class Optimizer1State(Optimizer8bit):
     def __init__(self, optimizer_name, params, lr=1e-3, betas=(0.9, 0.0), eps=1e-8,
             weight_decay=0.0, optim_bits=32, is_sparse=False, args=None,
-            min_8bit_size=4096, percentile_clipping=100, block_wise=False):
+            min_8bit_size=4096, percentile_clipping=100, block_wise=False, max_unorm=0.0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -363,6 +369,7 @@ class Optimizer1State(Optimizer8bit):
             args['min_8bit_size'] = min_8bit_size
             args['percentile_clipping'] = percentile_clipping
             args['block_wise'] = block_wise
+            args['max_unorm'] = max_unorm
 
             self.args = MockArgs(args)
         else:
@@ -400,6 +407,10 @@ class Optimizer1State(Optimizer8bit):
         if config['percentile_clipping'] < 100:
             state['gnorm_vec'] = torch.zeros((100,), device=p.device)
 
+        if config['max_unorm'] > 0.0:
+            state['unorm_vec'] = torch.zeros((1,), device=p.device)
+
+
     @torch.no_grad()
     def update_step(self, group, p, gindex, pindex):
         state = self.state[p]
@@ -417,7 +428,8 @@ class Optimizer1State(Optimizer8bit):
 
         if state['state1'].dtype == torch.float:
             F.optimizer_update_32bit(self.optimizer_name, grad, p, state['state1'], config['betas'][0], config['eps'], step, config['lr'],
-                    None, 0.0, config['weight_decay'], config['is_sparse'], gnorm_scale)
+                    None, 0.0, config['weight_decay'], config['is_sparse'], gnorm_scale,
+                    state['unorm_vec'] if config['max_unorm'] > 0.0 else None, max_unorm=config['max_unorm'])
 
         elif state['state1'].dtype == torch.uint8:
             F.optimizer_update_8bit(self.optimizer_name, grad, p, state['state1'], None, config['betas'][0], config['betas'][1],

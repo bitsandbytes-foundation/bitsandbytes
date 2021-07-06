@@ -2,7 +2,7 @@ import torch
 import os
 import ctypes as ct
 
-torch.optim.Adam
+torch.nn.utils.clip_grad_norm_
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libBitsNBytes.so')
 name2qmap = {}
 
@@ -10,6 +10,7 @@ str2optimizer32bit = {}
 str2optimizer32bit['adam'] = (lib.cadam32bit_g32, lib.cadam32bit_g16)
 str2optimizer32bit['momentum'] = (lib.cmomentum32bit_g32, lib.cmomentum32bit_g16)
 str2optimizer32bit['rmsprop'] = (lib.crmsprop32bit_g32, lib.crmsprop32bit_g16)
+str2optimizer32bit['lars'] = (lib.cmomentum32bit_g32, lib.cmomentum32bit_g16)
 
 str2optimizer8bit = {}
 str2optimizer8bit['adam'] = (lib.cadam_static_8bit_g32, lib.cadam_static_8bit_g16)
@@ -325,7 +326,8 @@ def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, st
 def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor,
                 beta1: float, eps: float, step: int, lr: float,
                 state2: torch.Tensor=None, beta2: float=0.0,
-                weight_decay: float=0.0, is_sparse: bool = False, gnorm_scale: float=1.0) -> None:
+                weight_decay: float=0.0, is_sparse: bool = False, gnorm_scale: float=1.0,
+                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
     '''
     Performs an inplace optimizer update with one or two optimizer states.
 
@@ -365,11 +367,11 @@ def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor,
         raise NotImplementError(f'Optimizer not implemented: {optimizer_name}. Choices: {",".join(str2optimizer32bit.keys())}')
 
     if g.dtype == torch.float32 and state1.dtype == torch.float32:
-        str2optimizer32bit[optimizer_name][0](get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
+        str2optimizer32bit[optimizer_name][0](get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2), get_ptr(unorm_vec), ct.c_float(max_unorm),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
                     ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.float32:
-        str2optimizer32bit[optimizer_name][1](get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2),
+        str2optimizer32bit[optimizer_name][1](get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2), get_ptr(unorm_vec), ct.c_float(max_unorm),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
                     ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     else:

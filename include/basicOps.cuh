@@ -30,6 +30,7 @@ typedef enum Optimizer_t
 	ADAM = 0,
 	MOMENTUM = 1,
   RMSPROP = 2,
+  LARS = 3,
 } Optimizer_t;
 
 
@@ -41,7 +42,7 @@ template <typename T> void quantizeBlockwise(float * code, T *A, float *absmax, 
 template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, const int n);
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
-                float* state1, float* state2,
+                float* state1, float* state2, float *unorm, float max_unorm,
                 float beta1, float beta2, float eps, float weight_decay,
                 int step, float lr, const bool is_sparse, const float gnorm_scale, int n);
 
