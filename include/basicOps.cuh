@@ -29,6 +29,7 @@ typedef enum Optimizer_t
 {
 	ADAM = 0,
 	MOMENTUM = 1,
+  RMSPROP = 2,
 } Optimizer_t;
 
 

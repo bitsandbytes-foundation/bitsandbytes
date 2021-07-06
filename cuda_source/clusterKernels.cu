@@ -455,7 +455,15 @@ __global__ void kOptimizer32bit1State(T* g, T* p,
                       s1_vals[j] = (float)g_vals[j];
                     else
                       s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
+
                     p_vals[j] = ((float)p_vals[j]) + (-lr*(s1_vals[j]));
+                  }
+                  break;
+              case RMSPROP: 
+                  if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
+                  {
+                    s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j]));
+                    p_vals[j] = ((float)p_vals[j]) - (lr*__fdividef((float)g_vals[j],sqrtf((float)s1_vals[j])+eps));
                   }
                   break;
           }
@@ -1075,10 +1083,14 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 template __global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n);
 template __global__ void kEstimateQuantiles(half *__restrict__ const A, float *code, const float offset, const half max_val, const int n);
 
-template __global__ void kOptimizer32bit1State<half, MOMENTUM>(half* g, half* p, float* state1, 
-    const float beta1, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
-template __global__ void kOptimizer32bit1State<float, MOMENTUM>(float* g, float* p, float* state1, 
-    const float beta1, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
+#define MAKE_Optimizer32bit1State(oname, gtype) \
+template __global__ void kOptimizer32bit1State<gtype, oname>(gtype* g, gtype* p, float* state1,  \
+    const float beta1, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n); \
+
+MAKE_Optimizer32bit1State(MOMENTUM, half)
+MAKE_Optimizer32bit1State(MOMENTUM, float)
+MAKE_Optimizer32bit1State(RMSPROP, half)
+MAKE_Optimizer32bit1State(RMSPROP, float)
 
 template __global__ void kOptimizer32bit2State<half, ADAM>(half* g, half* p, float* state1, float* state2,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);

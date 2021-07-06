@@ -9,6 +9,7 @@
 
 #define ADAM 0
 #define MOMENTUM 1
+#define RMSPROP 2
 
 // We cannot call templated code from C, so we wrap the template in a C compatible call here if necessary.
 // We use macro functions to expand all the different optimizers. Looks ugly, and is ugly, but its better than to 
@@ -32,6 +33,8 @@ MAKE_FUNC32(momentum, MOMENTUM, float, 32)
 MAKE_FUNC32(momentum, MOMENTUM, half, 16)
 MAKE_FUNC32(adam, ADAM, float, 32)
 MAKE_FUNC32(adam, ADAM, half, 16)
+MAKE_FUNC32(rmsprop, RMSPROP, float, 32)
+MAKE_FUNC32(rmsprop, RMSPROP, half, 16)
 
 #define MAKE_FUNC8(fname, oname, gtype, gbits) \
 void fname##_static_8bit_g##gbits(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
@@ -90,6 +93,8 @@ extern "C"
 	MAKE_CFUNC32(adam, half, 16)
 	MAKE_CFUNC32(momentum, float, 32)
 	MAKE_CFUNC32(momentum, half, 16)
+	MAKE_CFUNC32(rmsprop, float, 32)
+	MAKE_CFUNC32(rmsprop, half, 16)
 
 	#define MAKE_CFUNC8(name, gtype, gbits) \
 	void c##name##_static_8bit_g##gbits(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \

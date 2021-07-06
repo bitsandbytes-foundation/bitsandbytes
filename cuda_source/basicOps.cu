@@ -60,6 +60,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 			kOptimizer32bit2State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, state2, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
 			break;
 		case MOMENTUM:
+    case RMSPROP:
 			kOptimizer32bit1State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, beta1, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
 			break;
 		default:
@@ -147,10 +148,12 @@ template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
                 const float beta1, const float beta2, const float eps, const float weight_decay,\
                 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
 
-MAKE_optimizer32bit(ADAM, float)
 MAKE_optimizer32bit(ADAM, half)
-MAKE_optimizer32bit(MOMENTUM, float)
+MAKE_optimizer32bit(ADAM, float)
 MAKE_optimizer32bit(MOMENTUM, half)
+MAKE_optimizer32bit(MOMENTUM, float)
+MAKE_optimizer32bit(RMSPROP, half)
+MAKE_optimizer32bit(RMSPROP, float)
 
 
 #define MAKE_optimizerStatic8bit(name, gtype) \
