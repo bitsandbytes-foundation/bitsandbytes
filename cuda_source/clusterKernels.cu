@@ -314,12 +314,92 @@ __global__ void kDequantize(float *code, unsigned char *A, float *out, const int
 
 
 
+template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
+__launch_bounds__(BLOCK_SIZE/NUM_VALS, 1)
+__global__ void kPreconditionOptimizer32bit2State(T* g, T* p, 
+                float* state1, float* state2, float *unorm,
+                const float beta1, const float beta2, const float eps, const float weight_decay,
+                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
+{
+
+  const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
+  const int base_idx = (blockIdx.x * blockDim.x * NUM_VALS);
+  int valid_items = 0;
+
+  T g_vals[NUM_VALS];
+
+  float s1_vals[NUM_VALS];
+  float s2_vals[NUM_VALS];
+
+  const float correction1 = 1.0f/(1.0f - powf(beta1, step));
+  const float correction2 = 1.0f/(1.0f - powf(beta2, step));
+
+  typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
+  typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+  typedef cub::BlockReduce<float, BLOCK_SIZE/NUM_VALS> BlockReduce;
+
+  __shared__ union {
+      typename Load::TempStorage load;
+      typename LoadFloat::TempStorage loadf;
+      typename BlockReduce::TempStorage reduce;
+  } temp_storage;
+
+  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
+  {
+      valid_items = n - i >= (BLOCK_SIZE) ? (BLOCK_SIZE) : n - i;
+
+      __syncthreads();
+      Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, 0.0f);
+      __syncthreads();
+      LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items, 0.0f);
+      __syncthreads();
+      LoadFloat(temp_storage.loadf).Load(&(state2[i]), s2_vals, valid_items, 0.0f);
+
+      # pragma unroll NUM_VALS
+      for(unsigned int j = 0; j < NUM_VALS; j++)
+        g_vals[j] = gnorm_scale*((float)g_vals[j]);
+
+      # pragma unroll NUM_VALS
+      for(unsigned int j = 0; j < NUM_VALS; j++)
+      {
+          switch(OPTIMIZER)
+          {
+              case ADAM: 
+                  if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
+                  {
+                    s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
+                    s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
+                    s1_vals[j] *= correction1;
+                    s2_vals[j] *= correction2;
+                    s1_vals[j] = s1_vals[j]/(sqrtf(s2_vals[j])+eps); // update
+                    s1_vals[j] *= s1_vals[j]; // update l2 norm (update*update)
+                  }
+                  break;
+          }
+      }
+
+      # pragma unroll NUM_VALS-1
+      for(unsigned int j = 1; j < NUM_VALS; j++)
+          s1_vals[0] += s1_vals[j];
+
+      __syncthreads();
+      s1_vals[0] = BlockReduce(temp_storage.reduce).Sum(s1_vals[0]);
+
+      if(threadIdx.x == 0)
+        atomicAdd(&unorm[0], s1_vals[0]);
+
+      __syncwarp();
+  }
+}
+
+
+
 #define NUM_PER_THREAD 4
 
 template<typename T, int OPTIMIZER>
 __launch_bounds__(TH, 1)
 __global__ void kOptimizer32bit2State(T* g, T* p, 
-                float* state1, float* state2,
+                float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
 {
@@ -327,7 +407,7 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
   const int base_idx = (blockIdx.x * blockDim.x * NUM_PER_THREAD);
   int valid_items = 0;
-
+  float update_scale = 0.0f;
   T g_vals[NUM_PER_THREAD];
   T p_vals[NUM_PER_THREAD];
 
@@ -337,6 +417,14 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
   const float correction1 = 1.0f - powf(beta1, step);
   const float correction2 = sqrtf(1.0f - powf(beta2, step));
   const float step_size = -lr*correction2/correction1;
+
+  if(max_unorm > 0.0f)
+  {
+    update_scale = max_unorm > 0.0f ? sqrtf(unorm[0]) : 1.0f;
+    if(update_scale > max_unorm*param_norm){ update_scale = (max_unorm*param_norm)/update_scale; }
+    else{ update_scale = 1.0f; }
+  }
+  else{ update_scale = 1.0f; }
 
   typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
   typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
@@ -378,7 +466,7 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
                   {
                     s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
                     s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
-                    p_vals[j] = ((float)p_vals[j]) + (step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2))));
+                    p_vals[j] = ((float)p_vals[j]) + (update_scale*step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2))));
                   }
                   break;
           }
@@ -390,87 +478,6 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
       StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
       __syncthreads();
       StoreFloat(temp_storage.storef).Store(&(state2[i]), s2_vals, valid_items);
-  }
-}
-
-template<typename T, int OPTIMIZER>
-__launch_bounds__(TH, 1)
-__global__ void kOptimizer32bit1State(T *g, T *p, 
-                float *state1, float *unorm, const float max_unorm,
-                const float beta1, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
-{
-
-  const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
-  const int base_idx = (blockIdx.x * blockDim.x * NUM_PER_THREAD);
-  int valid_items = 0;
-  float update_scale = unorm == NULL ? 0.0f : unorm[0];
-  if(update_scale > max_unorm){ update_scale = max_unorm/update_scale; }
-  else{ update_scale = 1.0f; }
-
-  T g_vals[NUM_PER_THREAD];
-  T p_vals[NUM_PER_THREAD];
-
-  float s1_vals[NUM_PER_THREAD];
-
-  typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-  typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
-
-  typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
-
-  __shared__ union {
-      typename Load::TempStorage load;
-      typename Store::TempStorage store;
-      typename LoadFloat::TempStorage loadf;
-      typename StoreFloat::TempStorage storef;
-  } temp_storage;
-
-  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*TH*NUM_PER_THREAD)
-  {
-      valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
-
-      __syncthreads();
-      Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
-      __syncthreads();
-      LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
-      __syncthreads();
-      Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
-
-      # pragma unroll 4
-      for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
-        g_vals[j] = gnorm_scale*((float)g_vals[j]);
-
-      # pragma unroll 4
-      for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
-      {
-          switch(OPTIMIZER)
-          {
-              case MOMENTUM: 
-                  if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
-                  {
-                    if(step == 1)
-                      s1_vals[j] = (float)g_vals[j];
-                    else
-                      s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
-
-                    p_vals[j] = ((float)p_vals[j]) + update_scale*(-lr*(s1_vals[j]));
-                  }
-                  break;
-              case RMSPROP: 
-                  if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
-                  {
-                    s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j]));
-                    p_vals[j] = ((float)p_vals[j]) - update_scale*(lr*__fdividef((float)g_vals[j],sqrtf((float)s1_vals[j])+eps));
-                  }
-                  break;
-          }
-      }
-
-      __syncthreads();
-      Store(temp_storage.store).Store(&(p[i]), p_vals, valid_items);
-      __syncthreads();
-      StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
   }
 }
 
@@ -553,6 +560,92 @@ __global__ void kPreconditionOptimizer32bit1State(T* g, T* p,
   }
 }
 
+template<typename T, int OPTIMIZER>
+__launch_bounds__(TH, 1)
+__global__ void kOptimizer32bit1State(T *g, T *p, 
+                float *state1, float *unorm, const float max_unorm, const float param_norm,
+                const float beta1, const float eps, const float weight_decay,
+                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
+{
+
+  const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
+  const int base_idx = (blockIdx.x * blockDim.x * NUM_PER_THREAD);
+  int valid_items = 0;
+  float update_scale = 0.0f;
+
+  if(max_unorm > 0.0f)
+  {
+    update_scale = max_unorm > 0.0f ? sqrtf(unorm[0]) : 1.0f;
+    if(update_scale > max_unorm*param_norm+eps){ update_scale = (max_unorm*param_norm+eps)/update_scale; }
+    else{ update_scale = 1.0f; }
+  }
+  else{ update_scale = 1.0f; }
+
+  T g_vals[NUM_PER_THREAD];
+  T p_vals[NUM_PER_THREAD];
+
+  float s1_vals[NUM_PER_THREAD];
+
+  typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
+  typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
+
+  typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+  typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
+
+  __shared__ union {
+      typename Load::TempStorage load;
+      typename Store::TempStorage store;
+      typename LoadFloat::TempStorage loadf;
+      typename StoreFloat::TempStorage storef;
+  } temp_storage;
+
+  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*TH*NUM_PER_THREAD)
+  {
+      valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
+
+      __syncthreads();
+      Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
+      __syncthreads();
+      LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
+      __syncthreads();
+      Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
+
+      # pragma unroll 4
+      for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
+        g_vals[j] = gnorm_scale*((float)g_vals[j]);
+
+      # pragma unroll 4
+      for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
+      {
+          switch(OPTIMIZER)
+          {
+              case MOMENTUM: 
+                  if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
+                  {
+                    if(step == 1)
+                      s1_vals[j] = (float)g_vals[j];
+                    else
+                      s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
+
+                    p_vals[j] = ((float)p_vals[j]) + update_scale*(-lr*(s1_vals[j]));
+                  }
+                  break;
+              case RMSPROP: 
+                  if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
+                  {
+                    s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j]));
+                    p_vals[j] = ((float)p_vals[j]) - update_scale*(lr*__fdividef((float)g_vals[j],sqrtf((float)s1_vals[j])+eps));
+                  }
+                  break;
+          }
+      }
+
+      __syncthreads();
+      Store(temp_storage.store).Store(&(p[i]), p_vals, valid_items);
+      __syncthreads();
+      StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
+  }
+}
 
 
 #define NUM8BIT 16
@@ -1163,7 +1256,7 @@ MAKE_PreconditionOptimizer32bit1State(RMSPROP, half)
 MAKE_PreconditionOptimizer32bit1State(RMSPROP, float)
 
 #define MAKE_Optimizer32bit1State(oname, gtype) \
-template __global__ void kOptimizer32bit1State<gtype, oname>(gtype* g, gtype* p, float* state1, float *unorm, const float max_unorm, \
+template __global__ void kOptimizer32bit1State<gtype, oname>(gtype* g, gtype* p, float* state1, float *unorm, const float max_unorm, const float param_norm, \
     const float beta1, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n); \
 
 MAKE_Optimizer32bit1State(MOMENTUM, half)
@@ -1171,9 +1264,18 @@ MAKE_Optimizer32bit1State(MOMENTUM, float)
 MAKE_Optimizer32bit1State(RMSPROP, half)
 MAKE_Optimizer32bit1State(RMSPROP, float)
 
-template __global__ void kOptimizer32bit2State<half, ADAM>(half* g, half* p, float* state1, float* state2,
+#define MAKE_PreconditionOptimizer32bit2State(oname, gtype) \
+template __global__ void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 4>(gtype* g, gtype* p,  \
+                float* state1, float* state2, float *unorm, \
+                const float beta1, const float beta2, const float eps, const float weight_decay, \
+                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n); \
+
+MAKE_PreconditionOptimizer32bit2State(ADAM, half)
+MAKE_PreconditionOptimizer32bit2State(ADAM, float)
+
+template __global__ void kOptimizer32bit2State<half, ADAM>(half* g, half* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
-template __global__ void kOptimizer32bit2State<float, ADAM>(float* g, float* p, float* state1, float* state2,
+template __global__ void kOptimizer32bit2State<float, ADAM>(float* g, float* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
 
 #define MAKE_PreconditionStatic8bit1State(oname, gtype) \

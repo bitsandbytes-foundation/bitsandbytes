@@ -327,7 +327,8 @@ class Optimizer2State(Optimizer8bit):
 
         if state['state1'].dtype == torch.float:
             F.optimizer_update_32bit(self.optimizer_name, grad, p, state['state1'], config['betas'][0], config['eps'], step, config['lr'],
-                    state['state2'], config['betas'][1], config['weight_decay'], config['is_sparse'], gnorm_scale)
+                    state['state2'], config['betas'][1], config['weight_decay'], config['is_sparse'], gnorm_scale,
+                    state['unorm_vec'] if config['max_unorm'] > 0.0 else None, max_unorm=config['max_unorm'])
 
         elif state['state1'].dtype == torch.uint8 and not config['block_wise']:
             F.adam_update_8bit(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],

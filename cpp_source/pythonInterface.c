@@ -24,10 +24,10 @@ void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimate
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
 void fname##32bit_g##gbits(gtype *g, gtype *p, \
-               float* state1, float* state2, float *unorm, float max_unorm, \
+               float* state1, float* state2, float *unorm, float max_unorm, float param_norm, \
                const float beta1, const float beta2, const float eps, const float weight_decay, \
                const int step, const float lr, const bool is_sparse, float gnorm_scale, const int n) \
-{ optimizer32bit<gtype, oname>(g, p, state1, state2, unorm, max_unorm, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); } \
+{ optimizer32bit<gtype, oname>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); } \
 
 MAKE_FUNC32(momentum, MOMENTUM, float, 32)
 MAKE_FUNC32(momentum, MOMENTUM, half, 16)
@@ -86,10 +86,10 @@ extern "C"
 
 	#define MAKE_CFUNC32(name, gtype, gbits) \
 	void c##name##32bit_g##gbits(gtype *g, gtype *p, \
-								 float* state1, float* state2, float *unorm, float max_unorm, \
+								 float* state1, float* state2, float *unorm, float max_unorm, float param_norm, \
 								 const float beta1, const float beta2, const float eps, const float weight_decay, \
 								 const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n) \
-	{ name##32bit_g##gbits(g, p, state1, state2, unorm, max_unorm, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); } \
+	{ name##32bit_g##gbits(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n); } \
 
 	MAKE_CFUNC32(adam, float, 32)
 	MAKE_CFUNC32(adam, half, 16)
