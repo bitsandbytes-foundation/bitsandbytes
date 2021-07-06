@@ -52,6 +52,8 @@ MAKE_FUNC8(adam, ADAM, float, 32)
 MAKE_FUNC8(adam, ADAM, half, 16)
 MAKE_FUNC8(momentum, MOMENTUM, float, 32)
 MAKE_FUNC8(momentum, MOMENTUM, half, 16)
+MAKE_FUNC8(rmsprop, RMSPROP, float, 32)
+MAKE_FUNC8(rmsprop, RMSPROP, half, 16)
 
 void optimizerStatic8bitBlockwise_fp32(float* p, float* g,
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 
@@ -112,6 +114,8 @@ extern "C"
 	MAKE_CFUNC8(adam, half, 16)
 	MAKE_CFUNC8(momentum, float, 32)
 	MAKE_CFUNC8(momentum, half, 16)
+	MAKE_CFUNC8(rmsprop, float, 32)
+	MAKE_CFUNC8(rmsprop, half, 16)
 
   void coptimizer_static_8bit_blockwise_fp32(float* p, float* g,
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 

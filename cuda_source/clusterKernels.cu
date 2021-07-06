@@ -769,6 +769,9 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                         s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
                     //}
                     break;
+              case RMSPROP: 
+                    s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
+                  break;
             }
 
             local_max_s1 = fmaxf(local_max_s1, fabsf(s1_vals[j]));
@@ -843,17 +846,21 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
             switch(OPTIMIZER)
             {
                 case MOMENTUM: 
-                    //TODO: if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
-                    //{
-                      if(step == 1)
-                        s1_vals[j] = g_vals[j];
-                      else
-                        s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
+                  //TODO: if(!is_sparse || ((float)g_vals[j] != 0.0f && is_sparse))
+                  //{
+                    if(step == 1)
+                      s1_vals[j] = g_vals[j];
+                    else
+                      s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
 
-                      //TODO: if(weight_decay > 0.0f)
-                      p_vals[j] = ((float)p_vals[j]) + (-lr*(s1_vals[j]));
-                    //}
-                    break;
+                    //TODO: if(weight_decay > 0.0f)
+                    p_vals[j] = ((float)p_vals[j]) + (-lr*(s1_vals[j]));
+                  //}
+                  break;
+              case RMSPROP: 
+                  s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
+                  p_vals[j] = ((float)p_vals[j]) - (lr*__fdividef(g_val,sqrtf(s1_vals[j])+eps));
+                  break;
             }
 
             c1s[j] = quantize(smem_quantiles1, s1_vals[j]*new_max_val1);
@@ -1108,19 +1115,8 @@ template __global__ void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gt
 
 MAKE_PreconditionStatic8bit1State(MOMENTUM, half)
 MAKE_PreconditionStatic8bit1State(MOMENTUM, float)
-
-#define MAKE_PreconditionStatic8bit2State(oname, gtype) \
-template __global__ void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2, \
-                const float beta1, const float beta2, \
-                const float eps, const int step,  \
-                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
-                float* max1, float* max2, float* new_max1, float* new_max2, \
-                const float gnorm_scale,  \
-                const int n); \
-
-MAKE_PreconditionStatic8bit2State(ADAM, half)
-MAKE_PreconditionStatic8bit2State(ADAM, float)
-
+MAKE_PreconditionStatic8bit1State(RMSPROP, half)
+MAKE_PreconditionStatic8bit1State(RMSPROP, float)
 
 #define MAKE_optimizerStatic8bit1State(oname, gtype) \
 template __global__ void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1,  \
@@ -1134,6 +1130,20 @@ template __global__ void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtyp
 
 MAKE_optimizerStatic8bit1State(MOMENTUM, half)
 MAKE_optimizerStatic8bit1State(MOMENTUM, float)
+MAKE_optimizerStatic8bit1State(RMSPROP, half)
+MAKE_optimizerStatic8bit1State(RMSPROP, float)
+
+#define MAKE_PreconditionStatic8bit2State(oname, gtype) \
+template __global__ void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2, \
+                const float beta1, const float beta2, \
+                const float eps, const int step,  \
+                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
+                float* max1, float* max2, float* new_max1, float* new_max2, \
+                const float gnorm_scale,  \
+                const int n); \
+
+MAKE_PreconditionStatic8bit2State(ADAM, half)
+MAKE_PreconditionStatic8bit2State(ADAM, float)
 
 #define MAKE_optimizerStatic8bit2State(oname, gtype) \
 template __global__ void kOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1, unsigned char* state2, \

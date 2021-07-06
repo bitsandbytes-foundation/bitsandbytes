@@ -92,7 +92,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
 		case MOMENTUM:
-			//CUDA_CHECK_RETURN(cudaMemset(new_max1, 0.0f, 1))
+    case RMSPROP:
 			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, beta1, eps, step, quantiles1, max1, new_max1, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			kOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, beta1, eps, step, lr,
@@ -169,6 +169,8 @@ MAKE_optimizerStatic8bit(ADAM, half)
 MAKE_optimizerStatic8bit(ADAM, float)
 MAKE_optimizerStatic8bit(MOMENTUM, half)
 MAKE_optimizerStatic8bit(MOMENTUM, float)
+MAKE_optimizerStatic8bit(RMSPROP, half)
+MAKE_optimizerStatic8bit(RMSPROP, float)
 
 template void optimizerStatic8bitBlockwise<float, ADAM>(float* p, float* g,
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 

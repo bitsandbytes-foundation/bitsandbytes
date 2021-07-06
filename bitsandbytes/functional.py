@@ -6,6 +6,16 @@ torch.optim.Adam
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libBitsNBytes.so')
 name2qmap = {}
 
+str2optimizer32bit = {}
+str2optimizer32bit['adam'] = (lib.cadam32bit_g32, lib.cadam32bit_g16)
+str2optimizer32bit['momentum'] = (lib.cmomentum32bit_g32, lib.cmomentum32bit_g16)
+str2optimizer32bit['rmsprop'] = (lib.crmsprop32bit_g32, lib.crmsprop32bit_g16)
+
+str2optimizer8bit = {}
+str2optimizer8bit['adam'] = (lib.cadam_static_8bit_g32, lib.cadam_static_8bit_g16)
+str2optimizer8bit['momentum'] = (lib.cmomentum_static_8bit_g32, lib.cmomentum_static_8bit_g16)
+str2optimizer8bit['rmsprop'] = (lib.crmsprop_static_8bit_g32, lib.crmsprop_static_8bit_g16)
+
 def create_dynamic_map(signed=True):
     '''
     Creates the dynamic quantiztion map.
@@ -240,14 +250,6 @@ def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=
     return out
 
 
-str2optimizer32bit = {}
-str2optimizer32bit['adam'] = (lib.cadam32bit_g32, lib.cadam32bit_g16)
-str2optimizer32bit['momentum'] = (lib.cmomentum32bit_g32, lib.cmomentum32bit_g16)
-str2optimizer32bit['rmsprop'] = (lib.crmsprop32bit_g32, lib.crmsprop32bit_g16)
-
-str2optimizer8bit = {}
-str2optimizer8bit['adam'] = (lib.cadam_static_8bit_g32, lib.cadam_static_8bit_g16)
-str2optimizer8bit['momentum'] = (lib.cmomentum_static_8bit_g32, lib.cmomentum_static_8bit_g16)
 
 def momentum_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, weight_decay: float, momentum: float, lr: float, dampening: float, nesterov: bool,
                           step: int, is_sparse: bool, gnorm_scale: float):
