@@ -908,6 +908,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
     int valid_items = n - (blockIdx.x*NUM_PER_BLOCK) > NUM_PER_BLOCK ? NUM_PER_BLOCK : n - (blockIdx.x*NUM_PER_BLOCK);
     float g_val = 0.0f;
     float local_max_s1 = -FLT_MAX;
+    float local_unorm = 0.0f;
 
     float s1_vals[NUM8BIT];
     T g_vals[NUM8BIT];
@@ -958,6 +959,8 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                       else
                         s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
                     //}
+                    if(unorm != NULL)
+                      local_unorm += s1_vals[j]*s1_vals[j];
                     break;
               case RMSPROP: 
                     s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
@@ -971,6 +974,12 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
     __syncthreads();
     local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, cub::Max(), valid_items);
     if(threadIdx.x == 0){ atomicMax(&new_max1[0], local_max_s1); }
+    if(unorm != NULL)
+    {
+      __syncthreads();
+      local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, cub::Sum(), valid_items);
+      if(threadIdx.x == 0){ atomicAdd(&unorm[0], local_unorm); }
+    }
 
 }
 
@@ -992,6 +1001,15 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
     float g_val = 0.0f;
     float s1_vals[NUM_PER_THREAD2];
     float new_max_val1 = 1.0f/new_max1[0];
+    float update_scale = 1.0f;
+
+    if(max_unorm > 0.0f)
+    {
+      update_scale = max_unorm > 0.0f ? sqrtf(unorm[0]) : 1.0f;
+      if(update_scale > max_unorm*param_norm){ update_scale = (max_unorm*param_norm)/update_scale; }
+      else{ update_scale = 1.0f; }
+    }
+    else{ update_scale = 1.0f; }
 
     unsigned char c1s[NUM_PER_THREAD2];
     T p_vals[NUM_PER_THREAD2];
@@ -1045,7 +1063,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                       s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]);
 
                     //TODO: if(weight_decay > 0.0f)
-                    p_vals[j] = ((float)p_vals[j]) + (-lr*(s1_vals[j]));
+                    p_vals[j] = ((float)p_vals[j]) + (-lr*update_scale*(s1_vals[j]));
                   //}
                   break;
               case RMSPROP: 

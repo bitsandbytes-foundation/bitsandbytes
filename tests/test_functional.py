@@ -59,7 +59,7 @@ def test_dynamic_quantization():
         absmax, C = F.quantize(A1)
         A2 = F.dequantize(absmax, C)
         diff = torch.abs(A1-A2).mean().item()
-        assert diff < 0.013
+        assert diff < 0.0135
 
 
 def test_dynamic_blockwise_quantization():
