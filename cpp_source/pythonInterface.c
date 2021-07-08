@@ -38,13 +38,14 @@ MAKE_FUNC32(rmsprop, RMSPROP, half, 16)
 
 #define MAKE_FUNC8(fname, oname, gtype, gbits) \
 void fname##_static_8bit_g##gbits(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
+								float *unorm, float max_unorm, float param_norm, \
                 float beta1, float beta2, \
                 float eps, int step, float lr,  \
                 float* quantiles1, float* quantiles2, \
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 float weight_decay, float gnorm_scale, int n) \
 {  \
-	optimizerStatic8bit<gtype, oname>(g, p, state1, state2, beta1, beta2, eps, step, lr, \
+	optimizerStatic8bit<gtype, oname>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, \
 			                                  quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n); \
 } \
 
@@ -100,13 +101,14 @@ extern "C"
 
 	#define MAKE_CFUNC8(name, gtype, gbits) \
 	void c##name##_static_8bit_g##gbits(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
+                float *unorm, float max_unorm, float param_norm, \
                 float beta1, float beta2, \
                 float eps, int step, float lr,  \
                 float* quantiles1, float* quantiles2, \
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 float weight_decay, float gnorm_scale, int n) \
   {  \
-	    name##_static_8bit_g##gbits(g, p, state1, state2, beta1, beta2, eps, step, lr, \
+	    name##_static_8bit_g##gbits(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, \
 			                                 quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n); \
   } \
 

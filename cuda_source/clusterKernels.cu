@@ -656,6 +656,7 @@ template<typename T, int OPTIMIZER>
 __global__ void
 __launch_bounds__(NUM_THREADS, 2)
 kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2,
+                float *unorm,
                 const float beta1, const float beta2,
                 const float eps, const int step,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
@@ -668,6 +669,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
     float g_val = 0.0f;
     float local_max_s1 = -FLT_MAX;
     float local_max_s2 = -FLT_MAX;
+    float local_unorm = 0.0f;
 
     float s2_vals[NUM8BIT];
     float s1_vals[NUM8BIT];
@@ -729,17 +731,37 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
             s2_vals[j] += (1.0f-beta2)*g_val*g_val;
             local_max_s2 = fmaxf(local_max_s2, fabsf(s2_vals[j]));
         }
-        __syncthreads();
+
+        if(unorm != NULL)
+        {
+          #pragma unroll 16
+          for(int j = 0; j < NUM8BIT; j++)
+          {
+            float correction1 = __fdividef(1.0f, 1.0f - powf(beta1, step));
+            float correction2 = __fdividef(1.0f, 1.0f - powf(beta2, step));
+            s1_vals[j] *= correction1;
+            s2_vals[j] *= correction2;
+            float update_val = s1_vals[j]/(sqrtf(s2_vals[j])+eps); // update
+            local_unorm += update_val*update_val;
+          }
+        }
     }
 
+    __syncthreads();
     local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, cub::Max(), valid_items);
     __syncthreads();
     local_max_s2 = BlockReduce(temp_storage.reduce).Reduce(local_max_s2, cub::Max(), valid_items);
+    if(unorm != NULL)
+    {
+      __syncthreads();
+      local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, cub::Sum(), valid_items);
+    }
 
     if(threadIdx.x == 0)
     {
         atomicMax(&new_max1[0], local_max_s1);
         atomicMax(&new_max2[0], local_max_s2);
+        if(unorm != NULL){ atomicAdd(&unorm[0], local_unorm); }
     }
 }
 
@@ -750,6 +772,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
 template<typename T, int OPTIMIZER>
 __global__ void
 kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned char* state2,
+                const float *unorm, const float max_unorm, const float param_norm, \
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
@@ -770,6 +793,15 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
     //const float step_size = -lr*correction2/correction1;
     float new_max_val1 = 1.0f/new_max1[0];
     float new_max_val2 = 1.0f/new_max2[0];
+    float update_scale = 1.0f;
+
+    if(max_unorm > 0.0f)
+    {
+      update_scale = max_unorm > 0.0f ? sqrtf(unorm[0]) : 1.0f;
+      if(update_scale > max_unorm*param_norm){ update_scale = (max_unorm*param_norm)/update_scale; }
+      else{ update_scale = 1.0f; }
+    }
+    else{ update_scale = 1.0f; }
 
     unsigned char c1s[NUM_PER_THREAD2];
     unsigned char c2s[NUM_PER_THREAD2];
@@ -845,7 +877,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         # pragma unroll 4
         for(unsigned int j = 0; j < NUM_PER_THREAD2; j++)
         {
-            p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(correction2*eps))))));
+            p_vals[j] = (T)(((float)p_vals[j]) + ((update_scale*step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(correction2*eps))))));
             if(weight_decay > 0.0f)
                 p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
         }
@@ -864,6 +896,7 @@ template<typename T, int OPTIMIZER>
 __global__ void
 __launch_bounds__(NUM_THREADS, 2)
 kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, 
+                float *unorm,
                 const float beta1, 
                 const float eps, const int step,
                 float* __restrict__ const quantiles1, 
@@ -944,6 +977,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
 template<typename T, int OPTIMIZER>
 __global__ void
 kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
+                const float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, 
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, 
@@ -1280,6 +1314,7 @@ template __global__ void kOptimizer32bit2State<float, ADAM>(float* g, float* p, 
 
 #define MAKE_PreconditionStatic8bit1State(oname, gtype) \
 template __global__ void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1,  \
+                float *unorm,  \
                 const float beta1,  \
                 const float eps, const int step,  \
                 float* __restrict__ const quantiles1,  \
@@ -1294,6 +1329,7 @@ MAKE_PreconditionStatic8bit1State(RMSPROP, float)
 
 #define MAKE_optimizerStatic8bit1State(oname, gtype) \
 template __global__ void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1,  \
+                const float *unorm, const float max_unorm, const float param_norm, \
                 const float beta1,  \
                 const float eps, const int step, const float lr, \
                 float* __restrict__ const quantiles1,  \
@@ -1309,6 +1345,7 @@ MAKE_optimizerStatic8bit1State(RMSPROP, float)
 
 #define MAKE_PreconditionStatic8bit2State(oname, gtype) \
 template __global__ void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2, \
+                float *unorm, \
                 const float beta1, const float beta2, \
                 const float eps, const int step,  \
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
@@ -1321,6 +1358,7 @@ MAKE_PreconditionStatic8bit2State(ADAM, float)
 
 #define MAKE_optimizerStatic8bit2State(oname, gtype) \
 template __global__ void kOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1, unsigned char* state2, \
+                const float *unorm, const float max_unorm, const float param_norm, \
                 const float beta1, const float beta2, \
                 const float eps, const int step, const float lr, \
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \

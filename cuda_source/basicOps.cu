@@ -84,6 +84,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
                 unsigned char* state1, unsigned char* state2,
+                float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2,
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,
@@ -93,23 +94,26 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 {
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
+
+  if(max_unorm > 0.0f){ CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float))); }
+
 	switch(OPTIMIZER)
 	{
 		case ADAM:
 			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
 			CUDA_CHECK_RETURN(cudaMemset(new_max2, 0, 1*sizeof(float)));
-			kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, state2, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n);
+			kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
-			kOptimizerStatic8bit2State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
+			kOptimizerStatic8bit2State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
 																														quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
 		case MOMENTUM:
     case RMSPROP:
 			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
-			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, beta1, eps, step, quantiles1, max1, new_max1, gnorm_scale, n);
+			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, unorm, beta1, eps, step, quantiles1, max1, new_max1, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
-			kOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, beta1, eps, step, lr,
+			kOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, eps, step, lr,
 																														quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
@@ -172,6 +176,7 @@ MAKE_optimizer32bit(RMSPROP, float)
 
 #define MAKE_optimizerStatic8bit(name, gtype) \
 template void optimizerStatic8bit<gtype, name>(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
+                float *unorm, float max_unorm, float param_norm, \
                 float beta1, float beta2, \
                 float eps, int step, float lr,  \
                 float* quantiles1, float* quantiles2, \

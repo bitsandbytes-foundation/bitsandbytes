@@ -47,6 +47,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 int step, float lr, const bool is_sparse, const float gnorm_scale, int n);
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g, unsigned char* state1, unsigned char* state2,
+                float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2,
                 float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2,

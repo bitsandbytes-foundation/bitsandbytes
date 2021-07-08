@@ -386,15 +386,17 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
                 beta1: float, beta2: float, eps: float,
                 step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
                 max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
-                weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0) -> None:
-    optimizer_update_8bit('adam', g, p, state1, state2, beta1, beta2, eps, step, lr, qmap1, qmap2, max1, max2, new_max1, new_max2, weight_decay, is_sparse, gnorm_scale)
+                weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0,
+                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
+    optimizer_update_8bit('adam', g, p, state1, state2, beta1, beta2, eps, step, lr, qmap1, qmap2, max1, max2, new_max1, new_max2, weight_decay, is_sparse, gnorm_scale, unorm_vec, max_unorm)
 
 
 def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float,
                 step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
                 max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
-                weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0) -> None:
+                weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0,
+                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
     '''
     Performs an inplace Adam update.
 
@@ -443,8 +445,13 @@ def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor,
         The factor to rescale the gradient to the max clip value.
     '''
 
+    param_norm = 0.0
+    if max_unorm > 0.0:
+        param_norm = torch.norm(p.data.float())
+
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
         str2optimizer8bit[optimizer_name][0](get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+                    get_ptr(unorm_vec), ct.c_float(max_unorm), ct.c_float(param_norm),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr),
                     get_ptr(qmap1), get_ptr(qmap2),
@@ -452,6 +459,7 @@ def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor,
                     ct.c_float(weight_decay),ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
         str2optimizer8bit[optimizer_name][1](get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+                    get_ptr(unorm_vec), ct.c_float(max_unorm), ct.c_float(param_norm),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr),
                     get_ptr(qmap1), get_ptr(qmap2),

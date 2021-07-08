@@ -334,7 +334,8 @@ class Optimizer2State(Optimizer8bit):
             F.adam_update_8bit(grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
                           config['eps'],  step, config['lr'],
                           state['qmap1'], state['qmap2'], state['max1'], state['max2'], state['new_max1'], state['new_max2'],
-                          config['weight_decay'], is_sparse=config['is_sparse'], gnorm_scale=gnorm_scale)
+                          config['weight_decay'], is_sparse=config['is_sparse'], gnorm_scale=gnorm_scale,
+                          unorm_vec=state['unorm_vec'] if config['max_unorm'] > 0.0 else None, max_unorm=config['max_unorm'])
             # swap maxes
             state['max1'], state['new_max1'] = state['new_max1'], state['max1']
             state['max2'], state['new_max2'] = state['new_max2'], state['max2']

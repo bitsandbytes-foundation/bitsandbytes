@@ -39,6 +39,7 @@ __global__ void kOptimizer32bit1State(T* g, T* p,
 template<typename T, int OPTIMIZER>
 __global__ void
 kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, 
+                float *unorm,
                 const float beta1, 
                 const float eps, const int step, 
                 float* __restrict__ const quantiles1, 
@@ -49,6 +50,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
 template<typename T, int OPTIMIZER>
 __global__ void
 kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1, 
+                const float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, 
                 const float eps, const int step, const float lr, 
                 float* __restrict__ const quantiles1, 
@@ -60,6 +62,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
 template<typename T, int OPTIMIZER>
 __global__ void
 kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2,
+                float *unorm,
                 const float beta1, const float beta2,
                 const float eps, const int step, 
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
@@ -70,6 +73,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
 template<typename T, int OPTIMIZER>
 __global__ void
 kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned char* state2,
+                const float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr, 
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
