@@ -189,6 +189,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
     p2 = p1.clone()
     p1 = p1.float()
+    blocksize = 2048
 
     torch_optimizer = str2optimizers[optim_name][0]([p1])
     bnb_optimizer = str2optimizers[optim_name][1]([p2])
@@ -217,7 +218,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         for name1, name2, qmap, max_val in str2statenames[optim_name]:
             #print(bnb_optimizer.state[p2][max_val], name1)
             if 'blockwise' in optim_name:
-                s1 = F.dequantize_blockwise(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2])
+                s1 = F.dequantize_blockwise(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2], blocksize=blocksize)
             else:
                 s1 = F.dequantize(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2])
             num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol)==0
@@ -250,7 +251,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
                 torch.testing.assert_allclose(qmap1, bnb_optimizer.state[p2][qmap])
 
                 if 'blockwise' in optim_name:
-                    s1 = F.dequantize_blockwise(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2])
+                    s1 = F.dequantize_blockwise(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2], blocksize=blocksize)
                 else:
                     s1 = F.dequantize(code=bnb_optimizer.state[p2][qmap], absmax=bnb_optimizer.state[p2][max_val], A=bnb_optimizer.state[p2][name2])
                 torch.testing.assert_allclose(s1cpy, s1)
@@ -328,3 +329,33 @@ def test_adam_percentile_clipping(dim1, dim2, gtype, optim_bits):
 
 
 
+
+dim1 = [4096]
+dim2 = [4096]
+gtype = [torch.float32, torch.float16]
+optimizer_names = ['adam8bit_blockwise']
+values = list(product(dim1,dim2, gtype, optimizer_names))
+names = ['dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
+def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
+    if dim1 == 1 and dim2 == 1: return
+    p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
+
+
+    bnb_optimizer = str2optimizers[optim_name][1]([p1])
+
+    g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01
+    p1.grad = g
+    for i in range(5000):
+        if i == 100:
+            # 100 iterations for burn-in
+            torch.cuda.synchronize()
+            t0 = time.time()
+
+        bnb_optimizer.step()
+
+    torch.cuda.synchronize()
+
+    s = time.time()-t0
+    print(s)
+    assert s < 3.6

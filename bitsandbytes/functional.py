@@ -142,7 +142,7 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.T
 
     return absmax, out
 
-def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
+def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None, blocksize: int=4096) -> torch.Tensor:
     '''
     Dequantizes blockwise quantized values.
 
@@ -173,10 +173,13 @@ def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tens
 
     if out is None: out = torch.zeros_like(A, dtype=torch.float32)
 
+    if blocksize not in [2048, 4096]:
+        raise ValueError(f'The blockwise of {blocksize} is not supported. Supported values: [2048 4096]')
+
     if out.dtype == torch.float32:
-        lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+        lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
     elif out.dtype == torch.float16:
-        lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+        lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
     else:
         raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
 

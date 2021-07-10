@@ -71,8 +71,9 @@ void percentileClipping_g16(half * g, float *gnorm_vec, int step, const int n){ 
 
 void quantizeBlockwise_fp16(float * code, half *A, float *absmax, unsigned char *out, const int n){ quantizeBlockwise<half>(code, A, absmax, out, n); }
 void quantizeBlockwise_fp32(float * code, float *A, float *absmax, unsigned char *out, const int n){ quantizeBlockwise<float>(code, A, absmax, out, n); }
-void dequantizeBlockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, const int n){ dequantizeBlockwise<half>(code, A, absmax, out, n); }
-void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, const int n){ dequantizeBlockwise<float>(code, A, absmax, out, n); }
+
+void dequantizeBlockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n){ dequantizeBlockwise<half>(code, A, absmax, out, blocksize, n); } \
+void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float>(code, A, absmax, out, blocksize, n); }
 
 extern "C"
 {
@@ -82,8 +83,8 @@ extern "C"
 	void cdequantize(float *code, unsigned char *A, float *out, int n){ dequantize(code, A, out, n); }
   void cquantize_blockwise_fp16(float * code, half *A, float *absmax, unsigned char *out, const int n){ quantizeBlockwise_fp16(code, A, absmax, out, n); }
   void cquantize_blockwise_fp32(float * code, float *A, float *absmax, unsigned char *out, const int n){ quantizeBlockwise_fp32(code, A, absmax, out, n); }
-  void cdequantize_blockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, const int n){ dequantizeBlockwise_fp16(code, A, absmax, out, n); }
-  void cdequantize_blockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, const int n){ dequantizeBlockwise_fp32(code, A, absmax, out, n); }
+  void cdequantize_blockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n){ dequantizeBlockwise_fp16(code, A, absmax, out, blocksize, n); }
+  void cdequantize_blockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise_fp32(code, A, absmax, out, blocksize, n); }
 
 	#define MAKE_CFUNC32(name, gtype, gbits) \
 	void c##name##32bit_g##gbits(gtype *g, gtype *p, \

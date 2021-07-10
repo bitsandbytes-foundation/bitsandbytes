@@ -23,59 +23,215 @@ __device__ float atomicMax(float* address, float val) {
   return __int_as_float(old);
 }
 
-/**
- * @brief Quantizes x with the quantization map smem_code.
- *
- * @return returns quantized number.
- */
+__device__ float atomicMin(float* address, float val) {
+  int* address_as_i = reinterpret_cast<int*>(address);
+  int old = *address_as_i, assumed;
+  do {
+    assumed = old;
+    old = atomicCAS(
+        reinterpret_cast<int*>(address), assumed,
+        __float_as_int(fminf(val, __int_as_float(assumed))));
+  } while (assumed != old);
+  return __int_as_float(old);
+}
+
 __device__ unsigned char quantize(float* smem_code, float x)
 {
-    unsigned char pivot = 127;
-    unsigned char upper_pivot = 255;
-    unsigned char lower_pivot = 0;
+    int pivot = 127;
+    int upper_pivot = 255;
+    int lower_pivot = 0;
+
+    float val = smem_code[pivot];
+    float lower = -1.0f;
+    float upper = 1.0f;
 
     // i>>=1 = {64, 32, 16, 8, 4, 2, 1}
     for(int i = 64; i > 0; i>>=1)
     {
-        if(x > smem_code[pivot])
+        if(x > val)
         {
             lower_pivot = pivot;
+            lower = val;
             pivot+=i;
         }
         else
         {
             upper_pivot = pivot;
+            upper = val;
             pivot-=i;
         }
+        val = smem_code[pivot];
     }
+    if(upper_pivot == 255)
+        upper = smem_code[upper_pivot];
+    if(lower_pivot == 0)
+        lower = smem_code[lower_pivot];
 
-    if(pivot == upper_pivot)
+    float d1, d2, d3;
+    d1 = fabsf(x-lower);
+    d2 = fabsf(x-val);
+    d3 = fabsf(x-upper);
+
+    if(d1 < d2) return lower_pivot;
+    else if(d3 < d2) return upper_pivot;
+    else return pivot;
+}
+
+// the dynamic type goes from:
+// values 0 to 32: 5.5e-07 to 0.011406250298023224
+// boudary value: 0.0128125 
+// values 32 to 64: 0.014218750409781933 to 0.10703125596046448
+// boudary value:  0.1140625
+// values 64 to 96: 0.12109375 to 0.5570312738418579
+// boudary value:  0.5640625
+// values 96 to 128: 0.5710937976837158 to 1.0
+__device__ void quantize_atomic(float *temp, float* smem_code, float *x, int *out)
+{
+  int sign = 0;
+  float absx = 0.0f;
+  float err = 0.0f;
+  int quadrant = 0;
+  int lane_id = threadIdx.x % 32;
+  int warp_id = threadIdx.x/32;
+
+  // 1. determine quadrant
+  // 2. compute errors
+  // 3. find min error via atomics
+  // 4. compare if local error is equal to min error
+  // 5. write char index of min index
+
+  for(int i = 0; i < 32; i++)
+  {
+
+    absx = x[i];
+    sign = signbit(x[i]);
+    if(lane_id == 0){ temp[warp_id] = -FLT_MAX; }
+    __syncwarp();
+
+    // 1. determine quadrant
+    // 2. compute errors
+    if(absx < 0.1140625)
     {
-        if(fabsf(smem_code[pivot]-x) <= fabsf(smem_code[lower_pivot]-x))
-            return pivot;
-        else
-            return lower_pivot;
+      if(absx > 0.0128125)
+      {
+        quadrant = 1;
+        err = fabsf(absx-smem_code[128 + 32 + (threadIdx.x % 32)]);
+      }
+      else
+      {
+        quadrant = 0;
+        err = fabsf(absx-smem_code[128 + (threadIdx.x % 32)]);
+      }
     }
-    else if(pivot == lower_pivot)
+    else if(absx < 0.5640625)
     {
-        if(fabsf(smem_code[upper_pivot]-x) <= fabsf(smem_code[lower_pivot]-x))
-            return upper_pivot;
-        else
-            return lower_pivot;
+      quadrant = 2;
+      err = fabsf(absx-smem_code[128 + 64 + (threadIdx.x % 32)]);
     }
     else
     {
-        if(fabsf(smem_code[pivot]-x) <= fabsf(smem_code[upper_pivot]-x))
-            if(fabsf(smem_code[pivot]-x) <= fabsf(smem_code[lower_pivot]-x))
-                return pivot;
-            else
-                return lower_pivot;
-        else
-            if(fabsf(smem_code[upper_pivot]-x) <= fabsf(smem_code[lower_pivot]-x))
-                return upper_pivot;
-            else
-                return lower_pivot;
+      quadrant = 3;
+      err = fabsf(absx-smem_code[128 + 96 + (threadIdx.x % 32)]);
     }
+
+    // 3. find min error via atomics
+    atomicMin(&temp[warp_id], err);
+    __syncwarp();
+
+    // 4. compare if local error is equal to min error
+    if(err == temp[warp_id])
+    {
+      // 5. write char index of min index
+      // 32 offset for each quadrant
+      // signbit is 1 if negative
+      out[i] = lane_id + (32*quadrant) + (sign == 0 ? 128 : 0);
+    }
+  }
+}
+
+__device__ unsigned char quantize_offset(float* smem_code, int lane, float x)
+{
+    int pivot = 127+lane-16;
+    int upper_pivot = 255;
+    int lower_pivot = 0;
+
+    float val = smem_code[pivot];
+    float lower = -1.0f;
+    float upper = 1.0f;
+
+    while((lower_pivot != pivot) && (upper_pivot != pivot))
+    {
+        if(x > val)
+        {
+            lower_pivot = pivot;
+            lower = val;
+            pivot = (upper_pivot+pivot) >> 1;
+        }
+        else
+        {
+            upper_pivot = pivot;
+            upper = val;
+            pivot = (lower_pivot+pivot) >> 1;
+        }
+        val = smem_code[pivot];
+        //if((lower_pivot+1 == pivot) && (pivot+1 == upper_pivot)){ break; }
+    }
+
+    if(upper_pivot == 255)
+        upper = smem_code[upper_pivot];
+    if(lower_pivot == 0)
+        lower = smem_code[lower_pivot];
+
+    float d1, d2, d3;
+    d1 = fabsf(x-lower);
+    d2 = fabsf(x-val);
+    d3 = fabsf(x-upper);
+
+    if(d1 < d2) return lower_pivot;
+    else if(d3 < d2) return upper_pivot;
+    else return pivot;
+}
+
+__device__ unsigned char quantize_2D(float smem_code[][257], int id, float x)
+{
+    int pivot = x > 0.0 ? 191 : 63;
+    int upper_pivot = x > 0.0 ? 255 : 127;
+    int lower_pivot = x > 0.0 ? 127 : 0;
+
+    float val = smem_code[id][pivot];
+    float lower = -1.0f;
+    float upper = 1.0f;
+
+    // i>>=1 = {32, 16, 8, 4, 2, 1}
+    for(int i = 32; i > 0; i>>=1)
+    {
+        if(x > val)
+        {
+            lower_pivot = pivot;
+            lower = val;
+            pivot+=i;
+        }
+        else
+        {
+            upper_pivot = pivot;
+            upper = val;
+            pivot-=i;
+        }
+        val = smem_code[id][pivot];
+    }
+    if(upper_pivot == 255)
+        upper = smem_code[id][upper_pivot];
+    if(lower_pivot == 0)
+        lower = smem_code[id][lower_pivot];
+
+    float d1, d2, d3;
+    d1 = fabsf(x-lower);
+    d2 = fabsf(x-val);
+    d3 = fabsf(x-upper);
+
+    if(d1 < d2) return lower_pivot;
+    else if(d3 < d2) return upper_pivot;
+    else return pivot;
 }
 
 #define TH 1024
@@ -253,7 +409,7 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
   }
 }
 
-template<typename T, int BLOCK_SIZE, int NUM_PER_TH>
+template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH>
 __global__ void kDequantizeBlockwise(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, T *out, const int n)
 {
 
@@ -265,8 +421,8 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * __restrict__ c
   unsigned char qvals[NUM];
   float local_abs_max = -FLT_MAX;
 
-  typedef cub::BlockLoad<unsigned char, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
-  typedef cub::BlockStore<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+  typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+  typedef cub::BlockStore<T, THREADS, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
   __shared__ typename LoadChar::TempStorage loadchar;
   __shared__ typename StoreT::TempStorage storet;
@@ -1137,8 +1293,9 @@ __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int st
 }
 
 
+#define LANES 2
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
-__launch_bounds__(1024, 1)
+__launch_bounds__(256, 3)
 __global__ void
 kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,
                 const float beta1, const float beta2,
@@ -1149,23 +1306,24 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
                 const float gnorm_scale, const int n)
 {
 
+    //const int n_full = n + (n%BLOCK_SIZE);
     const int n_full = gridDim.x * BLOCK_SIZE;
-    const int base_idx = (blockIdx.x * blockDim.x * N_PER_TH);
+    const int base_idx = (blockIdx.x * BLOCK_SIZE);
     int valid_items = 0;
     float g_val = 0.0f;
     float s1_vals[N_PER_TH];
     float s2_vals[N_PER_TH];
+    // 2-5%
     const float correction1 = 1.0f - powf(beta1, step);
     const float correction2 = sqrtf(1.0f - powf(beta2, step));
     const float step_size = -lr*correction2/correction1;
-    float local_abs_max1 = -FLT_MAX;
-    float local_abs_max2 = -FLT_MAX;
+    const int lane_id = threadIdx.x % LANES;
     float new_local_abs_max1 = -FLT_MAX;
     float new_local_abs_max2 = -FLT_MAX;
 
     unsigned char c1s[N_PER_TH];
     unsigned char c2s[N_PER_TH];
-    T p_vals[N_PER_TH];
+    //T p_vals[N_PER_TH];
     T g_vals[N_PER_TH];
     typedef cub::BlockLoad<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
     typedef cub::BlockLoad<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
@@ -1173,8 +1331,10 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     typedef cub::BlockStore<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
     typedef cub::BlockStore<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
-    __shared__ float smem_quantiles1[256];
-    __shared__ float smem_quantiles2[256];
+    //__shared__ float smem_quantiles1[256];
+    //__shared__ float smem_quantiles2[256];
+    __shared__ float smem_quantiles1[LANES][257];
+    __shared__ float smem_quantiles2[LANES][257];
     typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce1;
     typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce2;
     __shared__ typename BlockReduce1::TempStorage reduce1;
@@ -1187,82 +1347,112 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         typename LoadChar::TempStorage loadc;
         typename StoreChar::TempStorage storec;
         typename StoreT::TempStorage storeh;
+        //float quantiles[8][257];
     } temp_storage;
+    // init: 0.2 -> 0.23
 
-    if(threadIdx.x < 512)
+    // 0.23 -> 0.23
+    if(BLOCK_SIZE/N_PER_TH >= 512)
     {
-        if(threadIdx.x < 256)
-            smem_quantiles1[threadIdx.x] = quantiles1[threadIdx.x];
-        else
-            smem_quantiles2[threadIdx.x-256] = quantiles2[threadIdx.x-256];
+      //if(threadIdx.x < 512)
+      //{
+      //    if(threadIdx.x < 256)
+      //        smem_quantiles1[threadIdx.x] = quantiles1[threadIdx.x];
+      //    else
+      //        smem_quantiles2[threadIdx.x-256] = quantiles2[threadIdx.x-256];
+      //}
+    }
+    else
+    {
+        //smem_quantiles1[threadIdx.x] = quantiles1[threadIdx.x];
+        //smem_quantiles2[threadIdx.x] = quantiles2[threadIdx.x];
+        smem_quantiles1[0][threadIdx.x] = quantiles1[threadIdx.x];
+        smem_quantiles2[0][threadIdx.x] = quantiles2[threadIdx.x];
+        __syncthreads();
+        # pragma unroll
+        for(unsigned int j = 1; j < LANES; j++)
+        {
+          smem_quantiles1[j][threadIdx.x] = smem_quantiles1[0][threadIdx.x];
+          smem_quantiles2[j][threadIdx.x] = smem_quantiles2[0][threadIdx.x];
+        }
     }
 
     __syncthreads();
 
     for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
     {
-        valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
+        // loads: 0.23 -> 0.85/1.44
+        valid_items = n - i >= BLOCK_SIZE ? BLOCK_SIZE : n - i;
+        __syncthreads();
         LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
         __syncthreads();
         LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
         __syncthreads();
-        LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 128);
-        __syncthreads();
-        LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
+        LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 0);
+        //LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
 
-        local_abs_max1 = absmax1[i/BLOCK_SIZE];
-        local_abs_max2 = absmax2[i/BLOCK_SIZE];
         new_local_abs_max1 = -FLT_MAX;
         new_local_abs_max2 = -FLT_MAX;
 
+        //  update: 2.48/1.57 -> 2.51/1.60
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
             g_val = float(g_vals[j]);
             g_val *= gnorm_scale;
-            s1_vals[j] = smem_quantiles1[c1s[j]]*local_abs_max1;
+            s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
             s1_vals[j] = (s1_vals[j]*beta1) + (((1.0f-beta1)*g_val));
 
-            s2_vals[j] = smem_quantiles2[c2s[j]]*local_abs_max2;
+            s2_vals[j] = smem_quantiles2[lane_id][c2s[j]]*absmax2[i/BLOCK_SIZE];
             s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
 
             new_local_abs_max1 = fmaxf(new_local_abs_max1, fabsf(s1_vals[j]));
             new_local_abs_max2 = fmaxf(new_local_abs_max2, fabsf(s2_vals[j]));
         }
 
+
+        //  reduce: 2.51/1.60 -> 2.67/1.69
         new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, cub::Max());
         new_local_abs_max2 = BlockReduce2(reduce2).Reduce(new_local_abs_max2, cub::Max());
 
-       if(threadIdx.x == 0)
-       {
-         smem_exchange1[0] = new_local_abs_max1;
-         smem_exchange2[0] = new_local_abs_max2;
-       }
+        if(threadIdx.x == 0)
+        {
+          smem_exchange1[0] = new_local_abs_max1;
+          smem_exchange2[0] = new_local_abs_max2;
+        }
 
-       __syncthreads();
+        __syncthreads();
 
-       if(threadIdx.x == 0)
-       {
-         absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
-         absmax2[i/BLOCK_SIZE] = new_local_abs_max2;
-       }
-       else
-       {
-         new_local_abs_max1 = smem_exchange1[0];
-         new_local_abs_max2 = smem_exchange2[0];
-       }
+        if(threadIdx.x == 0)
+        {
+          absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
+          absmax2[i/BLOCK_SIZE] = new_local_abs_max2;
+        }
+        else
+        {
+          new_local_abs_max1 = smem_exchange1[0];
+          new_local_abs_max2 = smem_exchange2[0];
+        }
 
-       __syncwarp();
+        __syncwarp();
 
-        # pragma unroll N_PER_TH
+        //  quantizaztion: 2.67/1.70  -> 4.8/4.0
+        //  quantizaztion: 2.67/1.70  -> 3.5/3.5
+        # pragma unroll N_PER_TH 
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            c1s[j] = quantize(smem_quantiles1, s1_vals[j]/new_local_abs_max1);
-            c2s[j] = quantize(smem_quantiles2, s2_vals[j]/new_local_abs_max2);
+            //c1s[j] = quantize_2D<8, 257>(temp_storage.quantiles, threadIdx.x % 8,__fdividef(s1_vals[j],new_local_abs_max1));
+            //c2s[j] = quantize_2D<8, 257>(temp_storage.quantiles, threadIdx.x % 8,__fdividef(s2_vals[j],new_local_abs_max2));
+            c1s[j] = quantize_2D(smem_quantiles1, lane_id,__fdividef(s1_vals[j],new_local_abs_max1));
+            c2s[j] = quantize_2D(smem_quantiles2, lane_id,__fdividef(s2_vals[j],new_local_abs_max2));
+            //c1s[j] = quantize(smem_quantiles1, __fdividef(s1_vals[j],new_local_abs_max1));
+            //c2s[j] = quantize(smem_quantiles2, __fdividef(s2_vals[j],new_local_abs_max2));
+            //c1s[j] = quantize_offset(smem_quantiles1[0], threadIdx.x % 32, __fdividef(s1_vals[j],new_local_abs_max1));
+            //c2s[j] = quantize_offset(smem_quantiles2[0], threadIdx.x % 32, __fdividef(s2_vals[j],new_local_abs_max2));
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
-            if(signbit(smem_quantiles1[c1s[j]]) != signbit(s1_vals[j]))
+            if(signbit(smem_quantiles1[lane_id][c1s[j]]) != signbit(s1_vals[j]))
             {
               if(s1_vals[j] > 0.0f)
                   c1s[j] += 1;
@@ -1271,15 +1461,23 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
             }
         }
 
+        __syncthreads();
+        LoadT(temp_storage.loadh).Load(&(p[i]), g_vals, valid_items, (T)0.0f);
+        //  reduce: 2.67/1.69 -> 2.67/1.70
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(correction2*eps))))));
+            //p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(__fdividef(s1_vals[j],(sqrtf(s2_vals[j])+(correction2*eps)))))));
+            //if(weight_decay > 0.0f)
+            //    p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
+            g_vals[j] = (T)(((float)g_vals[j]) + ((step_size*(__fdividef(s1_vals[j],(sqrtf(s2_vals[j])+(correction2*eps)))))));
             if(weight_decay > 0.0f)
-                p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
+                g_vals[j] = ((float)g_vals[j])*(1.0f-(lr*weight_decay));
         }
 
-        StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
+        //  store: 0.85/1.44 -> 2.48/1.57
+        //StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
+        StoreT(temp_storage.storeh).Store(&(p[i]), g_vals, valid_items);
         __syncthreads();
         StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
         __syncthreads();
@@ -1393,23 +1591,37 @@ template __global__ void kPercentileClipping<half, 2048, 4>(half * __restrict__ 
 
 template __global__ void kQuantizeBlockwise<half, 4096, 4>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, const int n);
 template __global__ void kQuantizeBlockwise<float, 4096, 4>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, const int n);
-template __global__ void kDequantizeBlockwise<half, 4096, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, half *out, const int n);
-template __global__ void kDequantizeBlockwise<float, 4096, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, float *out, const int n);
+
+template __global__ void kDequantizeBlockwise<half, 4096, 1024, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, half *out, const int n);
+template __global__ void kDequantizeBlockwise<float, 4096, 1024, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, float *out, const int n);
+template __global__ void kDequantizeBlockwise<half, 2048, 512, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, half *out, const int n);
+template __global__ void kDequantizeBlockwise<float, 2048, 512, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, float *out, const int n);
 
 
 
-template __global__ void kOptimizerStatic8bit2StateBlockwise<float, ADAM, 4096, 4>(float* p, float* __restrict__ const g, unsigned char* state1, unsigned char* state2,
-                const float beta1, const float beta2,
-                const float eps, const int step, const float lr,
-                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                float* absmax1, float* absmax2, 
-                float weight_decay,
-                const float gnorm_scale, const int n);
+#define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \
+template __global__ void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_per_thread>(gtype* p, gtype* __restrict__ const g, unsigned char* state1, unsigned char* state2, \
+                const float beta1, const float beta2, \
+                const float eps, const int step, const float lr, \
+                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
+                float* absmax1, float* absmax2,  \
+                float weight_decay, \
+                const float gnorm_scale, const int n); \
 
-template __global__ void kOptimizerStatic8bit2StateBlockwise<half, ADAM, 4096, 4>(half* p, half* __restrict__ const g, unsigned char* state1, unsigned char* state2,
-                const float beta1, const float beta2,
-                const float eps, const int step, const float lr,
-                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                float* absmax1, float* absmax2, 
-                float weight_decay,
-                const float gnorm_scale, const int n);
+
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 4)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 2048, 4)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 4096, 4)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 4096, 4)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 4096, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 4096, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 4096, 16)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 4096, 16)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 8192, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 8192, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 8192, 16)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 8192, 16)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 4096, 32)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 4096, 32)

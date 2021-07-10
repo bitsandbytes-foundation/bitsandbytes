@@ -293,8 +293,12 @@ class Optimizer2State(Optimizer8bit):
 
             if config['block_wise']:
                 n = p.numel()
-                blocks = n//4096
-                blocks += 1 if n % 4096 > 0 else 0
+                #blocks = n//8192
+                #blocks += 1 if n % 8192 > 0 else 0
+                #blocks = n//4096
+                #blocks += 1 if n % 4096 > 0 else 0
+                blocks = n//2048
+                blocks += 1 if n % 2048 > 0 else 0
 
                 state['absmax1'] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)
                 state['absmax2'] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)

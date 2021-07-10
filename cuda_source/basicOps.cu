@@ -3,6 +3,7 @@
 #include <cuda_profiler_api.h>
 #include <cub/device/device_scan.cuh>
 #include <limits>
+#include <cudaProfiler.h>
 
 using std::cout;
 using std::endl;
@@ -40,11 +41,14 @@ template <typename T> void quantizeBlockwise(float * code, T *A, float *absmax, 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, const int n)
+template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int blocksize, const int n)
 {
-  int blocks = n/4096;
-  blocks = n % 4096 == 0 ? blocks : blocks + 1;
-  kDequantizeBlockwise<T, 4096, 4><<<blocks, 1024>>>(code, A, absmax, out, n);
+  int blocks = n/blocksize;
+  blocks = n % blocksize == 0 ? blocks : blocks + 1;
+  if(blocksize == 4096)
+    kDequantizeBlockwise<T, 4096, 1024, 4><<<blocks, 4096/4>>>(code, A, absmax, out, n);
+  else if(blocksize == 2048)
+    kDequantizeBlockwise<T, 2048, 512, 4><<<blocks, 2048/4>>>(code, A, absmax, out, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -122,16 +126,20 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 	}
 }
 
+#define BLOCKSIZE 2048
+#define NUM 8
+
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, int n)
 {
-  int blocks = n/4096;
-  blocks = n % 4096 == 0 ? blocks : blocks + 1;
+
+  int blocks = n/BLOCKSIZE;
+  blocks = n % BLOCKSIZE == 0 ? blocks : blocks + 1;
 	switch(OPTIMIZER)
 	{
 		case ADAM:
-			kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, 4096, 4><<<blocks, 1024>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
+			kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE, NUM><<<blocks, BLOCKSIZE/NUM>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
 																														quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
@@ -158,8 +166,8 @@ template void estimateQuantiles(float *A, float *code, float offset, int n);
 
 template void quantizeBlockwise<half>(float * code, half *A, float *absmax, unsigned char *out, const int n);
 template void quantizeBlockwise<float>(float * code, float *A, float *absmax, unsigned char *out, const int n);
-template void dequantizeBlockwise<half>(float *code, unsigned char *A, float *absmax, half *out, const int n);
-template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *absmax, float *out, const int n);
+template void dequantizeBlockwise<half>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
+template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
