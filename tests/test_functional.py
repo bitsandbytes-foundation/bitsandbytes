@@ -36,8 +36,8 @@ def test_quantile_quantization():
         C = F.quantize_no_absmax(code, A1)
         A2 = F.dequantize_no_absmax(code, C)
         diff = torch.abs(A1-A2).mean().item()
-        assert diff < 0.001
         torch.testing.assert_allclose(A1, A2, atol=5e-3, rtol=0)
+        assert diff < 0.001
 
         A1 = torch.randn(1024, 1024, device='cuda')
         code = F.estimate_quantiles(A1)
@@ -48,18 +48,18 @@ def test_quantile_quantization():
 
 def test_dynamic_quantization():
     for i in range(100):
-        A1 = torch.rand(1024, 1024, device='cuda')
-        absmax, C = F.quantize(A1)
-        A2 = F.dequantize(absmax, C)
-        diff = torch.abs(A1-A2).mean().item()
-        assert diff < 0.004
-        torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
-
         A1 = torch.randn(1024, 1024, device='cuda')
         absmax, C = F.quantize(A1)
         A2 = F.dequantize(absmax, C)
         diff = torch.abs(A1-A2).mean().item()
         assert diff < 0.0135
+
+        A1 = torch.rand(1024, 1024, device='cuda')
+        absmax, C = F.quantize(A1)
+        A2 = F.dequantize(absmax, C)
+        diff = torch.abs(A1-A2).mean().item()
+        torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+        assert diff < 0.004
 
 
 def test_dynamic_blockwise_quantization():

@@ -67,14 +67,26 @@ __device__ unsigned char quantize(float* smem_code, float x)
     if(lower_pivot == 0)
         lower = smem_code[lower_pivot];
 
-    float d1, d2, d3;
-    d1 = fabsf(x-lower);
-    d2 = fabsf(x-val);
-    d3 = fabsf(x-upper);
-
-    if(d1 < d2) return lower_pivot;
-    else if(d3 < d2) return upper_pivot;
-    else return pivot;
+    if(x > val)
+    {
+      float d2, d3;
+      d2 = fabsf(x-val);
+      d3 = fabsf(x-upper);
+      if(d3 < d2)
+        return upper_pivot;
+      else
+        return pivot;
+    }
+    else
+    {
+      float d1, d2;
+      d1 = fabsf(x-lower);
+      d2 = fabsf(x-val);
+      if(d1 < d2)
+        return lower_pivot;
+      else
+        return pivot;
+    }
 }
 
 // the dynamic type goes from:
@@ -194,9 +206,10 @@ __device__ unsigned char quantize_offset(float* smem_code, int lane, float x)
 
 __device__ unsigned char quantize_2D(float smem_code[][257], int id, float x)
 {
-    int pivot = x > 0.0 ? 191 : 63;
-    int upper_pivot = x > 0.0 ? 255 : 127;
-    int lower_pivot = x > 0.0 ? 127 : 0;
+    //bool is_positive = x > 0.0f;
+    int pivot = x > 0.0f ? 191 : 63;
+    int upper_pivot = x > 0.0f > 0.0 ? 255 : 127;
+    int lower_pivot = x > 0.0f > 0.0 ? 127 : 0;
 
     float val = smem_code[id][pivot];
     float lower = -1.0f;
@@ -219,19 +232,31 @@ __device__ unsigned char quantize_2D(float smem_code[][257], int id, float x)
         }
         val = smem_code[id][pivot];
     }
-    if(upper_pivot == 255)
+    if(upper_pivot == 255 || upper_pivot == 127)
         upper = smem_code[id][upper_pivot];
-    if(lower_pivot == 0)
+    if(lower_pivot == 0 || lower_pivot == 127)
         lower = smem_code[id][lower_pivot];
 
-    float d1, d2, d3;
-    d1 = fabsf(x-lower);
-    d2 = fabsf(x-val);
-    d3 = fabsf(x-upper);
-
-    if(d1 < d2) return lower_pivot;
-    else if(d3 < d2) return upper_pivot;
-    else return pivot;
+    if(x > val)
+    {
+      float d2, d3;
+      d2 = fabsf(x-val);
+      d3 = fabsf(x-upper);
+      if(d3 < d2)
+        return upper_pivot;
+      else
+        return pivot;
+    }
+    else
+    {
+      float d1, d2;
+      d1 = fabsf(x-lower);
+      d2 = fabsf(x-val);
+      if(d1 < d2)
+        return lower_pivot;
+      else
+        return pivot;
+    }
 }
 
 #define TH 1024
@@ -314,6 +339,7 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
 
   float vals[NUM];
   unsigned char qvals[NUM];
+  //const int lane_id = threadIdx.x % 2;
 
   typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
   typedef cub::BlockStore<unsigned char, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
@@ -322,9 +348,15 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
   __shared__ typename LoadFloat::TempStorage loadf;
   __shared__ typename StoreChar::TempStorage storec;
   __shared__ float smem_code[256];
+  //__shared__ float smem_code[2][257];
 
   if(threadIdx.x < 256)
+  {
     smem_code[threadIdx.x] = code[threadIdx.x];
+    //smem_code[0][threadIdx.x] = code[threadIdx.x];
+    //smem_code[1][threadIdx.x] = smem_code[0][threadIdx.x];
+  }
+
 
   for (unsigned int i = base_idx; i < n_full; i += gridDim.x*NUM_BLOCK)
   {
@@ -333,9 +365,10 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
       __syncthreads();
       LoadFloat(loadf).Load(&(A[i]), vals, valid_items);
 
-     #pragma unroll 4
-     for(int j = 0; j < NUM; j++)
+      #pragma unroll 4
+      for(int j = 0; j < NUM; j++)
         qvals[j] = quantize(smem_code, vals[j]);
+        //qvals[j] = quantize_2D(smem_code, lane_id, vals[j]);
 
       __syncthreads();
       StoreChar(storec).Store(&(out[i]), qvals, valid_items);
@@ -1368,7 +1401,6 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         //smem_quantiles2[threadIdx.x] = quantiles2[threadIdx.x];
         smem_quantiles1[0][threadIdx.x] = quantiles1[threadIdx.x];
         smem_quantiles2[0][threadIdx.x] = quantiles2[threadIdx.x];
-        __syncthreads();
         # pragma unroll
         for(unsigned int j = 1; j < LANES; j++)
         {
@@ -1436,30 +1468,6 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
         __syncwarp();
 
-        //  quantizaztion: 2.67/1.70  -> 4.8/4.0
-        //  quantizaztion: 2.67/1.70  -> 3.5/3.5
-        # pragma unroll N_PER_TH 
-        for(unsigned int j = 0; j < N_PER_TH; j++)
-        {
-            //c1s[j] = quantize_2D<8, 257>(temp_storage.quantiles, threadIdx.x % 8,__fdividef(s1_vals[j],new_local_abs_max1));
-            //c2s[j] = quantize_2D<8, 257>(temp_storage.quantiles, threadIdx.x % 8,__fdividef(s2_vals[j],new_local_abs_max2));
-            c1s[j] = quantize_2D(smem_quantiles1, lane_id,__fdividef(s1_vals[j],new_local_abs_max1));
-            c2s[j] = quantize_2D(smem_quantiles2, lane_id,__fdividef(s2_vals[j],new_local_abs_max2));
-            //c1s[j] = quantize(smem_quantiles1, __fdividef(s1_vals[j],new_local_abs_max1));
-            //c2s[j] = quantize(smem_quantiles2, __fdividef(s2_vals[j],new_local_abs_max2));
-            //c1s[j] = quantize_offset(smem_quantiles1[0], threadIdx.x % 32, __fdividef(s1_vals[j],new_local_abs_max1));
-            //c2s[j] = quantize_offset(smem_quantiles2[0], threadIdx.x % 32, __fdividef(s2_vals[j],new_local_abs_max2));
-
-            // make sure state1 term has still the same sign after quantization
-            // (not needed for state2 term which has only positive values)
-            if(signbit(smem_quantiles1[lane_id][c1s[j]]) != signbit(s1_vals[j]))
-            {
-              if(s1_vals[j] > 0.0f)
-                  c1s[j] += 1;
-              else
-                  c1s[j] -= 1;
-            }
-        }
 
         __syncthreads();
         LoadT(temp_storage.loadh).Load(&(p[i]), g_vals, valid_items, (T)0.0f);
@@ -1477,12 +1485,32 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
         //  store: 0.85/1.44 -> 2.48/1.57
         //StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
+        __syncthreads();
         StoreT(temp_storage.storeh).Store(&(p[i]), g_vals, valid_items);
+        //  quantizaztion: 2.67/1.70  -> 4.8/4.0
+        //  quantizaztion: 2.67/1.70  -> 3.5/3.5
+        //  quantizaztion: 2.67/1.70  -> 3.4/3.3
+        # pragma unroll N_PER_TH 
+        for(unsigned int j = 0; j < N_PER_TH; j++)
+        {
+            c1s[j] = quantize_2D(smem_quantiles1, lane_id,__fdividef(s1_vals[j],new_local_abs_max1));
+            c2s[j] = quantize_2D(smem_quantiles2, lane_id,__fdividef(s2_vals[j],new_local_abs_max2));
+
+            // make sure state1 term has still the same sign after quantization
+            // (not needed for state2 term which has only positive values)
+            if(signbit(smem_quantiles1[lane_id][c1s[j]]) != signbit(s1_vals[j]))
+            {
+              if(s1_vals[j] > 0.0f)
+                  c1s[j] += 1;
+              else
+                  c1s[j] -= 1;
+            }
+        }
+
         __syncthreads();
         StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
         __syncthreads();
         StoreChar(temp_storage.storec).Store(&(state2[i]), c2s, valid_items);
-        __syncthreads();
     }
 }
 
