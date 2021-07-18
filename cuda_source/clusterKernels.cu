@@ -299,7 +299,7 @@ __global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const f
 
       #pragma unroll 4
       for(int j = 0; j < NUM; j++)
-          vals[j] *= reciprocal_num_blocks;
+          vals[j] = ((float)vals[j]) * reciprocal_num_blocks;
 
 
       __syncthreads();

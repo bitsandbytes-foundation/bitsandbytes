@@ -236,6 +236,9 @@ class Optimizer2State(Optimizer8bit):
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {}".format(eps))
+        if isinstance(betas, str):
+            betas = eval(betas)
+            print(betas, 'parsed')
         for i in range(len(betas)):
             if not 0.0 <= betas[i] < 1.0:
                 raise ValueError(f"Invalid beta parameter at index {i}: {betas[i]}")
