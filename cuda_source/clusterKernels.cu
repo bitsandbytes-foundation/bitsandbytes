@@ -7,6 +7,7 @@
 #include <cub/block/block_store.cuh>
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
+#include <math_constants.h>
 
 #define HLF_MAX 65504
 
@@ -37,15 +38,17 @@ __device__ float atomicMin(float* address, float val) {
 
 __device__ unsigned char quantize(float* smem_code, float x)
 {
+    if(x > 1.0f) return 255; 
+    if(x < -1.0f) return 0;
     int pivot = 127;
     int upper_pivot = 255;
     int lower_pivot = 0;
 
-    float val = smem_code[pivot];
     float lower = -1.0f;
     float upper = 1.0f;
 
-    // i>>=1 = {64, 32, 16, 8, 4, 2, 1}
+    float val = smem_code[pivot];
+    // i>>=1 = {32, 16, 8, 4, 2, 1}
     for(int i = 64; i > 0; i>>=1)
     {
         if(x > val)
@@ -62,6 +65,7 @@ __device__ unsigned char quantize(float* smem_code, float x)
         }
         val = smem_code[pivot];
     }
+
     if(upper_pivot == 255)
         upper = smem_code[upper_pivot];
     if(lower_pivot == 0)
@@ -69,20 +73,20 @@ __device__ unsigned char quantize(float* smem_code, float x)
 
     if(x > val)
     {
-      float d2, d3;
-      d2 = fabsf(x-val);
-      d3 = fabsf(x-upper);
-      if(d3 < d2)
+      //float midpoint = (upper+val)*0.5f;
+      float midpoint = scalblnf(upper+val, -1);
+      if(x > midpoint)
+      {
         return upper_pivot;
+      }
       else
         return pivot;
     }
     else
     {
-      float d1, d2;
-      d1 = fabsf(x-lower);
-      d2 = fabsf(x-val);
-      if(d1 < d2)
+      //float midpoint = (lower+val)*0.5f;
+      float midpoint = scalblnf(lower+val, -1);
+      if(x < midpoint)
         return lower_pivot;
       else
         return pivot;
@@ -161,7 +165,7 @@ __device__ void quantize_atomic(float *temp, float* smem_code, float *x, int *ou
   }
 }
 
-__device__ unsigned char quantize_offset(float* smem_code, int lane, float x)
+__device__ unsigned char quantize_offset(float* __restrict__ const smem_code, int lane, float x)
 {
     int pivot = 127+lane-16;
     int upper_pivot = 255;
@@ -204,55 +208,49 @@ __device__ unsigned char quantize_offset(float* smem_code, int lane, float x)
     else return pivot;
 }
 
-__device__ unsigned char quantize_2D(float smem_code[][257], int id, float x)
+template <int SIGNED>
+__device__ unsigned char quantize_2D(float *__restrict__ quadrants, float *__restrict__ const smem_code, int id, float x)
 {
-    //bool is_positive = x > 0.0f;
-    int pivot = x > 0.0f ? 191 : 63;
-    int upper_pivot = x > 0.0f > 0.0 ? 255 : 127;
-    int lower_pivot = x > 0.0f > 0.0 ? 127 : 0;
+    int pivot = 127;
+    int upper_pivot = 255;
+    int lower_pivot = 0;
 
-    float val = smem_code[id][pivot];
-    float lower = -1.0f;
+    float lower = SIGNED ? -1.0f : 0.0f;
     float upper = 1.0f;
+    float midpoint;
+    float val = quadrants[1];
 
     // i>>=1 = {32, 16, 8, 4, 2, 1}
-    for(int i = 32; i > 0; i>>=1)
+    for(int i = 64; i > 0; i>>=1)
     {
         if(x > val)
         {
             lower_pivot = pivot;
             lower = val;
             pivot+=i;
+            val = i == 64 ? quadrants[2] : smem_code[pivot];
         }
         else
         {
             upper_pivot = pivot;
             upper = val;
             pivot-=i;
+            val = i == 64 ? quadrants[0] : smem_code[pivot];
         }
-        val = smem_code[id][pivot];
     }
-    if(upper_pivot == 255 || upper_pivot == 127)
-        upper = smem_code[id][upper_pivot];
-    if(lower_pivot == 0 || lower_pivot == 127)
-        lower = smem_code[id][lower_pivot];
 
     if(x > val)
     {
-      float d2, d3;
-      d2 = fabsf(x-val);
-      d3 = fabsf(x-upper);
-      if(d3 < d2)
+      midpoint = (upper+val)*0.5f;
+      if(x > midpoint)
         return upper_pivot;
       else
         return pivot;
     }
     else
     {
-      float d1, d2;
-      d1 = fabsf(x-lower);
-      d2 = fabsf(x-val);
-      if(d1 < d2)
+      midpoint = (lower+val)*0.5f;
+      if(x < midpoint)
         return lower_pivot;
       else
         return pivot;
@@ -385,7 +383,8 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
 
   T vals[NUM];
   unsigned char qvals[NUM];
-  float local_abs_max = -FLT_MAX;
+  //float local_abs_max = -FLT_MAX;
+  float local_abs_max = 0.0f;
 
   typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
   typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
@@ -404,6 +403,7 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
   {
       valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
       local_abs_max = -FLT_MAX;
+      //local_abs_max = 0.0f;
 
       __syncthreads();
       LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
@@ -415,12 +415,19 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
      #pragma unroll NUM_PER_TH
      for(int j = 0; j < NUM_PER_TH; j++)
         local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
+        //local_abs_max += (float)fabsf(vals[j]);
 
      local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Max(), valid_items);
+     //local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Sum(), valid_items);
 
 
      if(threadIdx.x == 0)
+     {
+       // 99% trimmed max
+       //local_abs_max = local_abs_max*(3.291f/3.84f);
+       //local_abs_max = (local_abs_max/4096.0f)*sqrtf(CUDART_PI_F)/sqrtf(2.0f)*2.57;
        smem_absmax_value[0] = local_abs_max;
+     }
 
      __syncthreads();
 
@@ -1327,6 +1334,7 @@ __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int st
 
 
 #define LANES 2
+#define QUAD 3
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
 __launch_bounds__(256, 3)
 __global__ void
@@ -1353,6 +1361,8 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     const int lane_id = threadIdx.x % LANES;
     float new_local_abs_max1 = -FLT_MAX;
     float new_local_abs_max2 = -FLT_MAX;
+    float quadrants1[QUAD];
+    float quadrants2[QUAD];
 
     unsigned char c1s[N_PER_TH];
     unsigned char c2s[N_PER_TH];
@@ -1410,6 +1420,14 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     }
 
     __syncthreads();
+
+    #pragma unroll
+    for(int k = 0; k < QUAD; k++)
+    {
+      quadrants1[k] = smem_quantiles1[lane_id][(k*256/(QUAD+1)) + (256/(QUAD+1)-1)];
+      quadrants2[k] = smem_quantiles2[lane_id][(k*256/(QUAD+1)) + (256/(QUAD+1)-1)];
+    }
+
 
     for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
     {
@@ -1493,8 +1511,24 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         # pragma unroll N_PER_TH 
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            c1s[j] = quantize_2D(smem_quantiles1, lane_id,__fdividef(s1_vals[j],new_local_abs_max1));
-            c2s[j] = quantize_2D(smem_quantiles2, lane_id,__fdividef(s2_vals[j],new_local_abs_max2));
+            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], lane_id,__fdividef(s1_vals[j],new_local_abs_max1));
+            c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id], lane_id,__fdividef(s2_vals[j],new_local_abs_max2));
+            //c1s[j] = quantize(smem_quantiles1[lane_id], __fdividef(s1_vals[j],new_local_abs_max1));
+            //c2s[j] = quantize(smem_quantiles2[lane_id],__fdividef(s2_vals[j],new_local_abs_max2));
+            //c1s[j] = quantize_offset(smem_quantiles1[lane_id], threadIdx.x % 32,__fdividef(s1_vals[j],new_local_abs_max1));
+            //c2s[j] = quantize_offset(smem_quantiles2[lane_id], threadIdx.x % 32,__fdividef(s2_vals[j],new_local_abs_max2));
+            //float x = __fdividef(s1_vals[j],new_local_abs_max1);
+            //if(x > 0.0f)
+            //  c1s[j] = quantize<1>(smem_quantiles1[lane_id], x);
+            //else
+            //  c1s[j] = quantize<0>(smem_quantiles1[lane_id], x);
+
+            //x = __fdividef(s2_vals[j],new_local_abs_max2);
+
+            //if(x > 0.0f)
+            //  c2s[j] = quantize<1>(smem_quantiles2[lane_id], x);
+            //else
+            //  c2s[j] = quantize<0>(smem_quantiles2[lane_id], x);
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)

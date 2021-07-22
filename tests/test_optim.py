@@ -269,8 +269,8 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
             torch_optimizer.state[p1][name1].copy_(s.data)
 
-    #print(sum(errors)/50.0)
-    #print(sum(relerrors)/50.0)
+    print(sum(errors)/len(errors))
+    print(sum(relerrors)/len(relerrors))
 
 
 
@@ -358,23 +358,8 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
         bnb_optimizer.step()
 
     torch.cuda.synchronize()
-
     s = time.time()-t0
     print(s)
     assert s < 3.6
 
-    #pytorch_optimizer = str2optimizers[optim_name][0]([p2])
-    #g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01
-    #p2.grad = g.float()
-    #for i in range(5000):
-    #    if i == 100:
-    #        # 100 iterations for burn-in
-    #        torch.cuda.synchronize()
-    #        t0 = time.time()
 
-    #    pytorch_optimizer.step()
-
-    #torch.cuda.synchronize()
-
-    #s = time.time()-t0
-    #print('pytorch', s)
