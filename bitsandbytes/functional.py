@@ -197,11 +197,7 @@ def quantize(A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -
         code = name2qmap['dynamic']
         code = code.to(A.device)
 
-    norm = math.sqrt(math.pi)/math.sqrt(2)
-    mean = torch.abs(A).mean()
-    absmax = mean*norm*3.0
-    #absmax = torch.abs(A).max()
-    #absmax = 
+    absmax = torch.abs(A).max()
     inp = A/absmax
     out = quantize_no_absmax(code, inp, out)
     return absmax, out

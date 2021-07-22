@@ -62,13 +62,13 @@ def test_dynamic_quantization():
     print(sum(diffs)/len(diffs))
     print(sum(reldiffs)/len(reldiffs))
 
-    #for i in range(100):
-    #    A1 = torch.rand(1024, 1024, device='cuda')
-    #    absmax, C = F.quantize(A1)
-    #    A2 = F.dequantize(absmax, C)
-    #    diff = torch.abs(A1-A2).mean().item()
-    #    torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
-    #    assert diff < 0.004
+    for i in range(100):
+        A1 = torch.rand(1024, 1024, device='cuda')
+        absmax, C = F.quantize(A1)
+        A2 = F.dequantize(absmax, C)
+        diff = torch.abs(A1-A2).mean().item()
+        torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+        assert diff < 0.004
 
 
 def test_dynamic_blockwise_quantization():
@@ -86,16 +86,16 @@ def test_dynamic_blockwise_quantization():
     print(sum(diffs)/len(diffs))
     print(sum(reldiffs)/len(reldiffs))
 
-    #diffs = []
-    #for i in range(100):
-    #    A1 = torch.rand(1024, 1024, device='cuda')
-    #    absmax, C = F.quantize_blockwise(A1)
-    #    A2 = F.dequantize_blockwise(absmax, C)
-    #    diff = torch.abs(A1-A2).mean().item()
-    #    assert diff < 0.0033
-    #    diffs.append(diff)
-    #    torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
-    #print(sum(diffs)/len(diffs))
+    diffs = []
+    for i in range(100):
+        A1 = torch.rand(1024, 1024, device='cuda')
+        absmax, C = F.quantize_blockwise(A1)
+        A2 = F.dequantize_blockwise(absmax, C)
+        diff = torch.abs(A1-A2).mean().item()
+        assert diff < 0.0033
+        diffs.append(diff)
+        torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+    print(sum(diffs)/len(diffs))
 
 
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=['float', 'half'])

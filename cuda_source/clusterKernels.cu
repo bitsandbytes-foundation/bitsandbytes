@@ -38,8 +38,6 @@ __device__ float atomicMin(float* address, float val) {
 
 __device__ unsigned char quantize(float* smem_code, float x)
 {
-    if(x > 1.0f) return 255; 
-    if(x < -1.0f) return 0;
     int pivot = 127;
     int upper_pivot = 255;
     int lower_pivot = 0;
@@ -73,8 +71,7 @@ __device__ unsigned char quantize(float* smem_code, float x)
 
     if(x > val)
     {
-      //float midpoint = (upper+val)*0.5f;
-      float midpoint = scalblnf(upper+val, -1);
+      float midpoint = (upper+val)*0.5f;
       if(x > midpoint)
       {
         return upper_pivot;
@@ -84,8 +81,7 @@ __device__ unsigned char quantize(float* smem_code, float x)
     }
     else
     {
-      //float midpoint = (lower+val)*0.5f;
-      float midpoint = scalblnf(lower+val, -1);
+      float midpoint = (lower+val)*0.5f;
       if(x < midpoint)
         return lower_pivot;
       else
@@ -403,7 +399,6 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
   {
       valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
       local_abs_max = -FLT_MAX;
-      //local_abs_max = 0.0f;
 
       __syncthreads();
       LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
@@ -415,19 +410,12 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
      #pragma unroll NUM_PER_TH
      for(int j = 0; j < NUM_PER_TH; j++)
         local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
-        //local_abs_max += (float)fabsf(vals[j]);
 
      local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Max(), valid_items);
-     //local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Sum(), valid_items);
 
 
      if(threadIdx.x == 0)
-     {
-       // 99% trimmed max
-       //local_abs_max = local_abs_max*(3.291f/3.84f);
-       //local_abs_max = (local_abs_max/4096.0f)*sqrtf(CUDART_PI_F)/sqrtf(2.0f)*2.57;
        smem_absmax_value[0] = local_abs_max;
-     }
 
      __syncthreads();
 
