@@ -269,8 +269,8 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
             torch_optimizer.state[p1][name1].copy_(s.data)
 
-    print(sum(errors)/len(errors))
-    print(sum(relerrors)/len(relerrors))
+    #print(sum(errors)/len(errors))
+    #print(sum(relerrors)/len(relerrors))
 
 
 

@@ -1501,22 +1501,6 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         {
             c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], lane_id,__fdividef(s1_vals[j],new_local_abs_max1));
             c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id], lane_id,__fdividef(s2_vals[j],new_local_abs_max2));
-            //c1s[j] = quantize(smem_quantiles1[lane_id], __fdividef(s1_vals[j],new_local_abs_max1));
-            //c2s[j] = quantize(smem_quantiles2[lane_id],__fdividef(s2_vals[j],new_local_abs_max2));
-            //c1s[j] = quantize_offset(smem_quantiles1[lane_id], threadIdx.x % 32,__fdividef(s1_vals[j],new_local_abs_max1));
-            //c2s[j] = quantize_offset(smem_quantiles2[lane_id], threadIdx.x % 32,__fdividef(s2_vals[j],new_local_abs_max2));
-            //float x = __fdividef(s1_vals[j],new_local_abs_max1);
-            //if(x > 0.0f)
-            //  c1s[j] = quantize<1>(smem_quantiles1[lane_id], x);
-            //else
-            //  c1s[j] = quantize<0>(smem_quantiles1[lane_id], x);
-
-            //x = __fdividef(s2_vals[j],new_local_abs_max2);
-
-            //if(x > 0.0f)
-            //  c2s[j] = quantize<1>(smem_quantiles2[lane_id], x);
-            //else
-            //  c2s[j] = quantize<0>(smem_quantiles2[lane_id], x);
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)

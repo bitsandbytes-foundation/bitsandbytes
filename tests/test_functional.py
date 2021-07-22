@@ -59,8 +59,8 @@ def test_dynamic_quantization():
         diffs.append(diff.mean().item())
         reldiffs.append(reldiff.mean().item())
         assert diff.mean().item() < 0.0135
-    print(sum(diffs)/len(diffs))
-    print(sum(reldiffs)/len(reldiffs))
+    #print(sum(diffs)/len(diffs))
+    #print(sum(reldiffs)/len(reldiffs))
 
     for i in range(100):
         A1 = torch.rand(1024, 1024, device='cuda')
@@ -83,8 +83,8 @@ def test_dynamic_blockwise_quantization():
         diffs.append(diff.mean().item())
         reldiffs.append(reldiff.mean().item())
         #assert diff < 0.011
-    print(sum(diffs)/len(diffs))
-    print(sum(reldiffs)/len(reldiffs))
+    #print(sum(diffs)/len(diffs))
+    #print(sum(reldiffs)/len(reldiffs))
 
     diffs = []
     for i in range(100):
@@ -95,7 +95,7 @@ def test_dynamic_blockwise_quantization():
         assert diff < 0.0033
         diffs.append(diff)
         torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
-    print(sum(diffs)/len(diffs))
+    #print(sum(diffs)/len(diffs))
 
 
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=['float', 'half'])
