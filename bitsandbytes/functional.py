@@ -264,7 +264,7 @@ def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=
 
 
 def momentum_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, weight_decay: float, momentum: float, lr: float, dampening: float, nesterov: bool,
-                          step: int, is_sparse: bool, gnorm_scale: float):
+                          step: int, gnorm_scale: float):
     '''
     Performance inplace SGD Momentum update.
 
@@ -288,16 +288,14 @@ def momentum_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor
         Whether to use nesterov momentum.
     step : int
         Current optimizer step.
-    is_sparse : bool
-        If the gradient can be sparse or not.
     gnorm_scale : float
         The factor to rescale the gradient to the max clip value.
     '''
-    optimizer_update_32bit('momentum', g, p, state1, momentum, 0.0, step, lr, None, dampening, weight_decay, is_sparse, gnorm_scale)
+    optimizer_update_32bit('momentum', g, p, state1, momentum, 0.0, step, lr, None, dampening, weight_decay, gnorm_scale)
 
 def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float,
-                step: int, lr: float, weight_decay: float=0.0, is_sparse: bool = False, gnorm_scale: float=1.0) -> None:
+                step: int, lr: float, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
     '''
     Performs an inplace Adam update.
 
@@ -326,18 +324,16 @@ def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, st
         Current optimizer step.
     lr : float
         The learning rate.
-    is_sparse : bool
-        If the gradient can be sparse or not.
     gnorm_scale : float
         The factor to rescale the gradient to the max clip value.
     '''
-    optimizer_update_32bit('adam', g, p, state1, beta1, eps, step, lr, state2, beta2, weight_decay, is_sparse, gnorm_scale)
+    optimizer_update_32bit('adam', g, p, state1, beta1, eps, step, lr, state2, beta2, weight_decay, gnorm_scale)
 
 
 def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor,
                 beta1: float, eps: float, step: int, lr: float,
                 state2: torch.Tensor=None, beta2: float=0.0,
-                weight_decay: float=0.0, is_sparse: bool = False, gnorm_scale: float=1.0,
+                weight_decay: float=0.0, gnorm_scale: float=1.0,
                 unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
     '''
     Performs an inplace optimizer update with one or two optimizer states.
@@ -368,8 +364,6 @@ def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor,
         Optimizer state 2.
     beta2 : float
         Optimizer beta2.
-    is_sparse : bool
-        If the gradient can be sparse or not.
     gnorm_scale : float
         The factor to rescale the gradient to the max clip value.
     '''
@@ -384,11 +378,11 @@ def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor,
     if g.dtype == torch.float32 and state1.dtype == torch.float32:
         str2optimizer32bit[optimizer_name][0](get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2), get_ptr(unorm_vec), ct.c_float(max_unorm),
                     ct.c_float(param_norm), ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
-                    ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
+                    ct.c_int32(step), ct.c_float(lr), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.float32:
         str2optimizer32bit[optimizer_name][1](get_ptr(g), get_ptr(p), get_ptr(state1), get_ptr(state2), get_ptr(unorm_vec), ct.c_float(max_unorm),
                     ct.c_float(param_norm), ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps), ct.c_float(weight_decay),
-                    ct.c_int32(step), ct.c_float(lr), ct.c_bool(is_sparse), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
+                    ct.c_int32(step), ct.c_float(lr), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
@@ -396,16 +390,16 @@ def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, sta
                 beta1: float, beta2: float, eps: float,
                 step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
                 max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
-                weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0,
+                weight_decay: float=0.0, gnorm_scale: float=1.0,
                 unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
-    optimizer_update_8bit('adam', g, p, state1, state2, beta1, beta2, eps, step, lr, qmap1, qmap2, max1, max2, new_max1, new_max2, weight_decay, is_sparse, gnorm_scale, unorm_vec, max_unorm)
+    optimizer_update_8bit('adam', g, p, state1, state2, beta1, beta2, eps, step, lr, qmap1, qmap2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, unorm_vec, max_unorm)
 
 
 def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float,
                 step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
                 max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
-                weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0,
+                weight_decay: float=0.0, gnorm_scale: float=1.0,
                 unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
     '''
     Performs an inplace Adam update.
@@ -437,8 +431,6 @@ def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor,
         Current optimizer step.
     lr : float
         The learning rate.
-    is_sparse : bool
-        If the gradient can be sparse or not.
     qmap1 : torch.Tensor
         Quantization map for first Adam state.
     qmap2 : torch.Tensor
@@ -482,7 +474,7 @@ def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor,
 def optimizer_update_8bit_blockwise(optimizer_name: str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
                 beta1: float, beta2: float, eps: float,
                 step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
-                absmax1: torch.Tensor, absmax2: torch.Tensor, weight_decay: float=0.0, is_sparse: bool=False, gnorm_scale: float=1.0) -> None:
+                absmax1: torch.Tensor, absmax2: torch.Tensor, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
 
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
         lib.coptimizer_static_8bit_blockwise_fp32(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),

@@ -16,25 +16,25 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPreconditionOptimizer32bit2State(T* g, T* p, 
                 float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
+                const int step, const float lr, const float gnorm_scale, const int n);
 
 template<typename T, int OPTIMIZER>
 __global__ void kOptimizer32bit2State(T* g, T* p, 
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
+                const int step, const float lr, const float gnorm_scale, const int n);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPreconditionOptimizer32bit1State(T* g, T* p, 
                 float* state1, float *unorm,
                 const float beta1, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
+                const int step, const float lr, const float gnorm_scale, const int n);
 
 template<typename T, int OPTIMIZER>
 __global__ void kOptimizer32bit1State(T* g, T* p, 
                 float* state1,  float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
+                const int step, const float lr, const float gnorm_scale, const int n);
 
 template<typename T, int OPTIMIZER>
 __global__ void
@@ -44,6 +44,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                 const float eps, const int step, 
                 float* __restrict__ const quantiles1, 
                 float* max1, float* new_max1, 
+                const float weight_decay,
                 const float gnorm_scale, const int n);
 
 

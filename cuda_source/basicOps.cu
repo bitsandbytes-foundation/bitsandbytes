@@ -13,7 +13,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
 	CUDA_CHECK_RETURN(cudaMemset(code, 0, 256*sizeof(float)));
-  kEstimateQuantiles<T><<<blocks, 1024>>>(A, code, offset, std::numeric_limits<T>::max(), n);
+  kEstimateQuantiles<T><<<blocks, 512>>>(A, code, offset, std::numeric_limits<T>::max(), n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -55,7 +55,7 @@ template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, flo
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
-                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n)
+                const int step, const float lr, const float gnorm_scale, const int n)
 {
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
@@ -65,10 +65,10 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       if(max_unorm > 0.0f)
 			{ 
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
-        kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 4><<<blocks, 1024>>>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
+        kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<blocks, 512>>>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
       }
-			kOptimizer32bit2State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
+			kOptimizer32bit2State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
 		case MOMENTUM:
@@ -76,11 +76,11 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       if(max_unorm > 0.0f)
 			{ 
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
-				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 4><<<blocks, 1024>>>(g, p, state1, unorm, beta1, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
+				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<blocks, 512>>>(g, p, state1, unorm, beta1, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			}
 
-			kOptimizer32bit1State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, eps, weight_decay, step, lr, is_sparse, gnorm_scale, n);
+			kOptimizer32bit1State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, eps, weight_decay, step, lr, gnorm_scale, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
 	}
@@ -115,7 +115,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 		case MOMENTUM:
     case RMSPROP:
 			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
-			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, unorm, beta1, eps, step, quantiles1, max1, new_max1, gnorm_scale, n);
+			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, unorm, beta1, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			kOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, eps, step, lr,
 																														quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
@@ -173,7 +173,7 @@ template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *a
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
                 float* state1, float* state2, float* unorm, float max_unorm, float param_norm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const bool is_sparse, const float gnorm_scale, const int n);
+                const int step, const float lr, const float gnorm_scale, const int n);
 
 MAKE_optimizer32bit(ADAM, half)
 MAKE_optimizer32bit(ADAM, float)

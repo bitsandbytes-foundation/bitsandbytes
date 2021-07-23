@@ -44,7 +44,7 @@ template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, flo
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2, float eps, float weight_decay,
-                int step, float lr, const bool is_sparse, const float gnorm_scale, int n);
+                int step, float lr, const float gnorm_scale, int n);
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g, unsigned char* state1, unsigned char* state2,
                 float *unorm, float max_unorm, float param_norm,

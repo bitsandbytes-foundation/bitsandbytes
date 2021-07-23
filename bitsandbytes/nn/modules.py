@@ -15,8 +15,6 @@ class StableEmbedding(torch.nn.Embedding):
         super(StableEmbedding, self).__init__(num_embeddings, embedding_dim, padding_idx, max_norm, norm_type, scale_grad_by_freq, False, _weight)
         self.norm = torch.nn.LayerNorm(embedding_dim)
         GlobalOptimManager.get_instance().register_parameters(self.weight)
-        if sparse:
-            GlobalOptimManager.get_instance().override_config(self.weight, 'is_sparse', True)
         GlobalOptimManager.get_instance().override_config(self.weight, 'optim_bits', 32)
 
     def reset_parameters(self) -> None:

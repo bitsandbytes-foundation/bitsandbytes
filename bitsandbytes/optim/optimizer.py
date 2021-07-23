@@ -47,7 +47,7 @@ class GlobalOptimManager(object):
 
         The key-values of the optimizer config for the input parameters are overidden
         This can be both, optimizer parameters like "betas", or "lr" or it can be
-        8-bit specific paramters like "is_sparse", "optim_bits", "percentile_clipping".
+        8-bit specific paramters like "optim_bits", "percentile_clipping".
 
         Parameters
         ----------
@@ -211,7 +211,6 @@ class Optimizer8bit(Optimizer):
         config['eps'] = group['eps']
         config['weight_decay'] = group['weight_decay']
         config['lr'] = group['lr']
-        config['is_sparse'] = self.args.is_sparse
         config['optim_bits'] = self.args.optim_bits
         config['min_8bit_size'] = self.args.min_8bit_size
         config['percentile_clipping'] = self.args.percentile_clipping
@@ -230,7 +229,7 @@ class Optimizer8bit(Optimizer):
 
 class Optimizer2State(Optimizer8bit):
     def __init__(self, optimizer_name, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-            weight_decay=0.0, optim_bits=32, is_sparse=False, args=None,
+            weight_decay=0.0, optim_bits=32, args=None,
             min_8bit_size=4096, percentile_clipping=100, block_wise=False, max_unorm=0.0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -245,14 +244,13 @@ class Optimizer2State(Optimizer8bit):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, is_sparse=is_sparse)
+                        weight_decay=weight_decay)
         super(Optimizer2State, self).__init__(params, defaults, optim_bits)
 
         if args is None:
             args = {}
             args['optim_bits'] = optim_bits
             args['percentile_clipping'] = 100
-            args['is_sparse'] = is_sparse
             args['min_8bit_size'] = min_8bit_size
             args['percentile_clipping'] = percentile_clipping
             args['block_wise'] = block_wise
@@ -334,14 +332,14 @@ class Optimizer2State(Optimizer8bit):
 
         if state['state1'].dtype == torch.float:
             F.optimizer_update_32bit(self.optimizer_name, grad, p, state['state1'], config['betas'][0], config['eps'], step, config['lr'],
-                    state['state2'], config['betas'][1], config['weight_decay'], config['is_sparse'], gnorm_scale,
+                    state['state2'], config['betas'][1], config['weight_decay'], gnorm_scale,
                     state['unorm_vec'] if config['max_unorm'] > 0.0 else None, max_unorm=config['max_unorm'])
 
         elif state['state1'].dtype == torch.uint8 and not config['block_wise']:
             F.optimizer_update_8bit(self.optimizer_name, grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
                           config['eps'],  step, config['lr'],
                           state['qmap1'], state['qmap2'], state['max1'], state['max2'], state['new_max1'], state['new_max2'],
-                          config['weight_decay'], is_sparse=config['is_sparse'], gnorm_scale=gnorm_scale,
+                          config['weight_decay'], gnorm_scale=gnorm_scale,
                           unorm_vec=state['unorm_vec'] if config['max_unorm'] > 0.0 else None, max_unorm=config['max_unorm'])
 
             # swap maxes
@@ -351,12 +349,12 @@ class Optimizer2State(Optimizer8bit):
             F.optimizer_update_8bit_blockwise('adam', grad, p, state['state1'], state['state2'], config['betas'][0], config['betas'][1],
                           config['eps'],  step, config['lr'],
                           state['qmap1'], state['qmap2'], state['absmax1'], state['absmax2'],
-                          config['weight_decay'], is_sparse=config['is_sparse'], gnorm_scale=gnorm_scale)
+                          config['weight_decay'], gnorm_scale=gnorm_scale)
 
 
 class Optimizer1State(Optimizer8bit):
     def __init__(self, optimizer_name, params, lr=1e-3, betas=(0.9, 0.0), eps=1e-8,
-            weight_decay=0.0, optim_bits=32, is_sparse=False, args=None,
+            weight_decay=0.0, optim_bits=32, args=None,
             min_8bit_size=4096, percentile_clipping=100, block_wise=False, max_unorm=0.0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -368,14 +366,13 @@ class Optimizer1State(Optimizer8bit):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, is_sparse=is_sparse)
+                        weight_decay=weight_decay)
         super(Optimizer1State, self).__init__(params, defaults, optim_bits)
 
         if args is None:
             args = {}
             args['optim_bits'] = optim_bits
             args['percentile_clipping'] = 100
-            args['is_sparse'] = is_sparse
             args['min_8bit_size'] = min_8bit_size
             args['percentile_clipping'] = percentile_clipping
             args['block_wise'] = block_wise
@@ -438,13 +435,13 @@ class Optimizer1State(Optimizer8bit):
 
         if state['state1'].dtype == torch.float:
             F.optimizer_update_32bit(self.optimizer_name, grad, p, state['state1'], config['betas'][0], config['eps'], step, config['lr'],
-                    None, 0.0, config['weight_decay'], config['is_sparse'], gnorm_scale,
+                    None, 0.0, config['weight_decay'], gnorm_scale,
                     state['unorm_vec'] if config['max_unorm'] > 0.0 else None, max_unorm=config['max_unorm'])
 
         elif state['state1'].dtype == torch.uint8:
             F.optimizer_update_8bit(self.optimizer_name, grad, p, state['state1'], None, config['betas'][0], config['betas'][1],
                     config['eps'], step, config['lr'], state['qmap1'], None, state['max1'], None, state['new_max1'], None,
-                    config['weight_decay'], config['is_sparse'], gnorm_scale,
+                    config['weight_decay'], gnorm_scale,
                     state['unorm_vec'] if config['max_unorm'] > 0.0 else None, max_unorm=config['max_unorm'])
 
             state['max1'], state['new_max1'] = state['new_max1'], state['max1']
