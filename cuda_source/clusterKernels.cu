@@ -938,6 +938,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
 
 template<typename T, int OPTIMIZER>
 __global__ void
+__launch_bounds__(NUM_THREADS2, 1)
 kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned char* state2,
                 const float *unorm, const float max_unorm, const float param_norm, \
                 const float beta1, const float beta2,
@@ -1007,7 +1008,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         __syncthreads();
         LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
         __syncthreads();
-        LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 128);
+        LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 0);
         __syncthreads();
         LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items);
 

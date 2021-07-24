@@ -476,6 +476,7 @@ def optimizer_update_8bit_blockwise(optimizer_name: str, g: torch.Tensor, p: tor
                 step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
                 absmax1: torch.Tensor, absmax2: torch.Tensor, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
 
+
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
         lib.coptimizer_static_8bit_blockwise_fp32(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
