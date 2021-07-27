@@ -22,6 +22,13 @@ def rm_path(path):
     shutil.rmtree(path)
 
 str2optimizers = {}
+str2optimizers['adam_pytorch'] = (None, torch.optim.Adam, bnb.optim.Adam)
+str2optimizers['adam_apex'] = (None, apex.optimizers.FusedAdam, bnb.optim.Adam)
+str2optimizers['momentum_apex'] = (None, lambda pxx: apex.optimizers.FusedSGD(pxx, 0.01, 0.9), bnb.optim.Adam)
+str2optimizers['momentum_pytorch'] = (None, lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9), bnb.optim.Adam)
+str2optimizers['lamb_apex'] = (None, lambda pxx: apex.optimizers.FusedLAMB(pxx, weight_decay=0.00, use_nvlamb=True), bnb.optim.Adam)
+str2optimizers['lars_apex'] = (None, lambda pxx: apex.parallel.LARC.LARC(apex.optimizers.FusedSGD(pxx, 0.01, 0.9)), bnb.optim.Adam)
+
 str2optimizers['adam'] = (torch.optim.Adam, bnb.optim.Adam)
 str2optimizers['fused_adam'] = (apex.optimizers.FusedAdam, bnb.optim.Adam)
 str2optimizers['momentum'] = (lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9), lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9))
@@ -312,6 +319,10 @@ dim1 = [4096]
 dim2 = [4096]
 gtype = [torch.float32, torch.float16]
 #optimizer_names = ['adam8bit_blockwise', 'adam8bit', 'lamb8bit']
+#optimizer_names = ['adam8bit_blockwise', 'adam_apex', 'adam8bit', 'adam', 'adam_pytorch']
+#optimizer_names = ['momentum_apex', 'momentum8bit', 'momentum_pytorch']
+#optimizer_names = ['lamb_apex', 'lamb8bit']
+#optimizer_names = ['lars_apex', 'lars8bit']
 optimizer_names = ['adam8bit_blockwise']
 values = list(product(dim1,dim2, gtype, optimizer_names))
 names = ['dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}'.format(*vals) for vals in values]
@@ -319,7 +330,6 @@ names = ['dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}'.format(*vals) for vals in value
 def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1: return
     p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
-    p2 = p1.clone().float()
 
 
     bnb_optimizer = str2optimizers[optim_name][1]([p1])
@@ -327,7 +337,7 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01
     p1.grad = g
     for i in range(5000):
-        if i == 100:
+        if i == 500:
             # 100 iterations for burn-in
             torch.cuda.synchronize()
             t0 = time.time()
@@ -336,7 +346,9 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
 
     torch.cuda.synchronize()
     s = time.time()-t0
-    print(s)
-    assert s < 3.9
+    print('')
+    params = 4500*4096*4096
+    print(optim_name, gtype, s/params)
+    #assert s < 3.9
 
 

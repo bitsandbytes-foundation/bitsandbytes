@@ -39,7 +39,8 @@ __device__ float atomicMin(float* address, float val) {
   return __int_as_float(old);
 }
 
-__device__ unsigned char quantize(float* smem_code, float x)
+template <int STOCHASTIC>
+__device__ unsigned char dQuantize(float* smem_code, float x)
 {
     int pivot = 127;
     int upper_pivot = 255;
@@ -93,6 +94,7 @@ __device__ unsigned char quantize(float* smem_code, float x)
 }
 
 // the dynamic type goes from:
+
 // values 0 to 32: 5.5e-07 to 0.011406250298023224
 // boudary value: 0.0128125 
 // values 32 to 64: 0.014218750409781933 to 0.10703125596046448
@@ -208,7 +210,7 @@ __device__ unsigned char quantize_offset(float* __restrict__ const smem_code, in
 }
 
 template <int SIGNED>
-__device__ unsigned char quantize_2D(float *__restrict__ quadrants, float *__restrict__ const smem_code, int id, float x)
+__device__ __forceinline__ unsigned char quantize_2D(float *__restrict__ quadrants, float *__restrict__ const smem_code, float x)
 {
     int pivot = 127;
     int upper_pivot = 255;
@@ -218,6 +220,8 @@ __device__ unsigned char quantize_2D(float *__restrict__ quadrants, float *__res
     float upper = 1.0f;
     float midpoint;
     float val = quadrants[1];
+    int local_pivot = 1;
+    int offset = 1;
 
     // i>>=1 = {32, 16, 8, 4, 2, 1}
     for(int i = 64; i > 0; i>>=1)
@@ -227,15 +231,19 @@ __device__ unsigned char quantize_2D(float *__restrict__ quadrants, float *__res
             lower_pivot = pivot;
             lower = val;
             pivot+=i;
-            val = i == 64 ? quadrants[2] : smem_code[pivot];
+            //val = i == 64 ? quadrants[2] : smem_code[pivot];
+            local_pivot += offset;
         }
         else
         {
             upper_pivot = pivot;
             upper = val;
             pivot-=i;
-            val = i == 64 ? quadrants[0] : smem_code[pivot];
+            //val = i == 64 ? quadrants[0] : smem_code[pivot];
+            local_pivot -= offset;
         }
+        val = i >= 64 ? quadrants[local_pivot] : smem_code[pivot];
+        offset -= 1;
     }
 
     if(x > val)
@@ -254,6 +262,131 @@ __device__ unsigned char quantize_2D(float *__restrict__ quadrants, float *__res
       else
         return pivot;
     }
+}
+
+template <int SIGNED>
+__device__ __forceinline__ unsigned char quantize_quadrant(int QUADRANT, float *__restrict__ const smem_code, float x, float lower, float midpoint, float upper)
+{
+    int lower_pivot = QUADRANT*16-1 - 0;
+    int pivot = QUADRANT*16-1 + 16;
+    int upper_pivot = QUADRANT*16-1 + 31;
+
+    float val = midpoint;
+
+    // i>>=1 = {32, 16, 8, 4, 2, 1}
+    for(int i = 16; i > 0; i>>=1)
+    {
+        if(x > val)
+        {
+            lower_pivot = pivot;
+            lower = val;
+            pivot+=i;
+        }
+        else
+        {
+            upper_pivot = pivot;
+            upper = val;
+            pivot-=i;
+        }
+        val = smem_code[pivot];
+    }
+
+    if(x > val)
+    {
+      midpoint = (upper+val)*0.5f;
+      if(x > midpoint)
+        return upper_pivot;
+      else
+        return pivot;
+    }
+    else
+    {
+      midpoint = (lower+val)*0.5f;
+      if(x < midpoint)
+        return lower_pivot;
+      else
+        return pivot;
+    }
+}
+
+template<typename T, int BLOCK_SIZE, int NUM_MAX>
+__global__ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, const int n)
+{
+  typedef cub::WarpReduce<T> WarpReduce;
+  __shared__ typename WarpReduce::TempStorage temp_storage;
+  typedef cub::BlockLoad<T, BLOCK_SIZE/8 , 8, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+  __shared__ typename LoadT::TempStorage loadt;
+
+  const int warp_idx = threadIdx.x/32;
+  const int valid_items = n - (blockIdx.x*BLOCK_SIZE) > BLOCK_SIZE ? BLOCK_SIZE : n - (blockIdx.x*BLOCK_SIZE);
+
+  //  BLOCK_SIZE/32 == number of warps
+  __shared__ int smem_max_indices[8*BLOCK_SIZE/32];
+  __shared__ float smem_max_values[8*BLOCK_SIZE/32];
+
+  T values[8];
+  T max1 = -64000.0f;
+  T max2 = -64000.0f;
+  int max_idx1 = -1;
+  int max_idx2 = -1;
+  int sign1 = -1;
+  int sign2 = -1;
+
+  // 1. load 8 values per thread
+  // 2. compute 2-max in registers (64 max per warp)
+  // 3. do warp reduction + broadcast back
+  // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+  // 5. Repeat (3) 8 times for top 8 values in 256
+  // 6. store with byte index
+
+  LoadT(loadt).Load(&(A[(blockIdx.x*BLOCK_SIZE)]), values, valid_items, (T)0.0f);
+  #pragma unroll 8
+  for(int i = 0; i < 8; i++)
+  {
+    T absval = fabsf(values[i]);
+    if(absval > max1)
+    {
+      max1 = values[i];
+      sign1 = signbit(values[i]);
+      max_idx1 = 8*threadIdx.x + i;
+    }
+    else if(absval > max2)
+    {
+      max2 = values[i];
+      sign2 = signbit(values[i]);
+      max_idx2 = 8*threadIdx.x + i;
+    }
+  }
+
+  float warp_max;
+  for(int i = 0; i < 8; i++)
+  {
+    // 3. do warp reduction + broadcast back
+    warp_max = WarpReduce(temp_storage).Reduce(max1, cub::Max());
+    warp_max = cub::ShuffleIndex<32>(warp_max, 0, 0xffffffff);
+
+    // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+    if(warp_max == max1)
+    {
+      smem_max_values[warp_idx*8 + i] = sign1 != 0 ? -max1 : max1;
+      smem_max_indices[warp_idx*8 + i] = max_idx1;
+
+      sign1 = sign2;
+      max1 = max2;
+      max_idx1 = max_idx2;
+
+      max2 = -64000.0f;
+    }
+    __syncwarp();
+  }
+
+  if(threadIdx.x % 32 < 8)
+  {
+    // offset: 8 values per 256 input values
+    // 
+    int offset = BLOCK_SIZE*blockIdx.x*BLOCK_SIZE/32*8;
+  }
+
 }
 
 #define THREADS_ESTIMATE 512
@@ -364,7 +497,7 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
 
       #pragma unroll 4
       for(int j = 0; j < NUM; j++)
-        qvals[j] = quantize(smem_code, vals[j]);
+        qvals[j] = dQuantize<0>(smem_code, vals[j]);
         //qvals[j] = quantize_2D(smem_code, lane_id, vals[j]);
 
       __syncthreads();
@@ -433,7 +566,7 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
 
      #pragma unroll NUM_PER_TH
      for(int j = 0; j < NUM_PER_TH; j++)
-        qvals[j] = quantize(smem_code, ((float)vals[j])*local_abs_max);
+        qvals[j] = dQuantize<0>(smem_code, ((float)vals[j])*local_abs_max);
 
      __syncthreads();
      StoreChar(storec).Store(&(out[i]), qvals, valid_items);
@@ -663,7 +796,7 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
 }
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
-__launch_bounds__(TH, 1)
+__launch_bounds__(BLOCK_SIZE/NUM_VALS, 1)
 __global__ void kPreconditionOptimizer32bit1State(T* g, T* p, 
                 float* state1, float *unorm,
                 const float beta1, const float eps, const float weight_decay,
@@ -1024,7 +1157,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 
             s1_vals[j] = (s1_vals[j]*beta1) + (((1.0f-beta1)*g_val));
 
-            c1s[j] = quantize(smem_quantiles1, s1_vals[j]*new_max_val1);
+            c1s[j] = dQuantize<0>(smem_quantiles1, s1_vals[j]*new_max_val1);
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
@@ -1039,7 +1172,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
             s2_vals[j] = smem_quantiles2[c2s[j]];
             s2_vals[j] = s2_vals[j]*max2[0];
             s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
-            c2s[j] = quantize(smem_quantiles2, s2_vals[j]*new_max_val2);
+            c2s[j] = dQuantize<0>(smem_quantiles2, s2_vals[j]*new_max_val2);
         }
 
         # pragma unroll 4
@@ -1234,7 +1367,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                   break;
             }
 
-            c1s[j] = quantize(smem_quantiles1, s1_vals[j]*new_max_val1);
+            c1s[j] = dQuantize<0>(smem_quantiles1, s1_vals[j]*new_max_val1);
 
             // make sure state1 term has still the same sign after quantization
             if(signbit(smem_quantiles1[c1s[j]]) != signbit(s1_vals[j]))
@@ -1321,9 +1454,9 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     float s1_vals[N_PER_TH];
     float s2_vals[N_PER_TH];
     // 2-5%
-    const float correction1 = 1.0f - powf(beta1, step);
-    const float correction2 = sqrtf(1.0f - powf(beta2, step));
-    const float step_size = -lr*correction2/correction1;
+    const float correction1 = 1.0f - __powf(beta1, step);
+    const float correction2 = sqrtf(1.0f -__powf(beta2, step));
+    const float step_size = __fdividef(-lr*correction2,correction1);
     const int lane_id = threadIdx.x % LANES;
     float new_local_abs_max1 = -FLT_MAX;
     float new_local_abs_max2 = -FLT_MAX;
@@ -1430,9 +1563,6 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
           new_local_abs_max2 = smem_exchange2[0];
         }
 
-        __syncwarp();
-
-
         __syncthreads();
         LoadT(temp_storage.loadh).Load(&(p[i]), g_vals, valid_items, (T)0.0f);
         //  reduce: 2.67/1.69 -> 2.67/1.70
@@ -1447,12 +1577,13 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         //  store: 0.85/1.44 -> 2.48/1.57
         __syncthreads();
         StoreT(temp_storage.storeh).Store(&(p[i]), g_vals, valid_items);
+
         //  quantizaztion: 2.67/1.70  -> 3.4/3.3
         # pragma unroll N_PER_TH 
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], lane_id,__fdividef(s1_vals[j],new_local_abs_max1));
-            c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id], lane_id,__fdividef(s2_vals[j],new_local_abs_max2));
+            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], __fdividef(s1_vals[j],new_local_abs_max1));
+            c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id], __fdividef(s2_vals[j],new_local_abs_max2));
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
@@ -1476,6 +1607,8 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
+template __device__ unsigned char dQuantize<0>(float* smem_code, float x);
+template __device__ unsigned char dQuantize<1>(float* smem_code, float x);
 
 template __global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n);
 template __global__ void kEstimateQuantiles(half *__restrict__ const A, float *code, const float offset, const half max_val, const int n);
