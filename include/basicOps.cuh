@@ -38,7 +38,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
 
 void quantize(float *code, float *A, unsigned char *out, int n);
 void dequantize(float *code, unsigned char *A, float *out, int n);
-template <typename T> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, const int n);
+template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
 template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n);
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 

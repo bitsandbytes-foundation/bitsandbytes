@@ -40,7 +40,7 @@ __device__ float atomicMin(float* address, float val) {
 }
 
 template <int STOCHASTIC>
-__device__ unsigned char dQuantize(float* smem_code, float x)
+__device__ unsigned char dQuantize(float* smem_code, const float rand, float x)
 {
     int pivot = 127;
     int upper_pivot = 255;
@@ -73,140 +73,44 @@ __device__ unsigned char dQuantize(float* smem_code, float x)
     if(lower_pivot == 0)
         lower = smem_code[lower_pivot];
 
-    if(x > val)
+    if(!STOCHASTIC)
     {
-      float midpoint = (upper+val)*0.5f;
-      if(x > midpoint)
+      if(x > val)
       {
-        return upper_pivot;
-      }
-      else
-        return pivot;
-    }
-    else
-    {
-      float midpoint = (lower+val)*0.5f;
-      if(x < midpoint)
-        return lower_pivot;
-      else
-        return pivot;
-    }
-}
-
-// the dynamic type goes from:
-
-// values 0 to 32: 5.5e-07 to 0.011406250298023224
-// boudary value: 0.0128125 
-// values 32 to 64: 0.014218750409781933 to 0.10703125596046448
-// boudary value:  0.1140625
-// values 64 to 96: 0.12109375 to 0.5570312738418579
-// boudary value:  0.5640625
-// values 96 to 128: 0.5710937976837158 to 1.0
-__device__ void quantize_atomic(float *temp, float* smem_code, float *x, int *out)
-{
-  int sign = 0;
-  float absx = 0.0f;
-  float err = 0.0f;
-  int quadrant = 0;
-  int lane_id = threadIdx.x % 32;
-  int warp_id = threadIdx.x/32;
-
-  // 1. determine quadrant
-  // 2. compute errors
-  // 3. find min error via atomics
-  // 4. compare if local error is equal to min error
-  // 5. write char index of min index
-
-  for(int i = 0; i < 32; i++)
-  {
-
-    absx = x[i];
-    sign = signbit(x[i]);
-    if(lane_id == 0){ temp[warp_id] = -FLT_MAX; }
-    __syncwarp();
-
-    // 1. determine quadrant
-    // 2. compute errors
-    if(absx < 0.1140625)
-    {
-      if(absx > 0.0128125)
-      {
-        quadrant = 1;
-        err = fabsf(absx-smem_code[128 + 32 + (threadIdx.x % 32)]);
-      }
-      else
-      {
-        quadrant = 0;
-        err = fabsf(absx-smem_code[128 + (threadIdx.x % 32)]);
-      }
-    }
-    else if(absx < 0.5640625)
-    {
-      quadrant = 2;
-      err = fabsf(absx-smem_code[128 + 64 + (threadIdx.x % 32)]);
-    }
-    else
-    {
-      quadrant = 3;
-      err = fabsf(absx-smem_code[128 + 96 + (threadIdx.x % 32)]);
-    }
-
-    // 3. find min error via atomics
-    atomicMin(&temp[warp_id], err);
-    __syncwarp();
-
-    // 4. compare if local error is equal to min error
-    if(err == temp[warp_id])
-    {
-      // 5. write char index of min index
-      // 32 offset for each quadrant
-      // signbit is 1 if negative
-      out[i] = lane_id + (32*quadrant) + (sign == 0 ? 128 : 0);
-    }
-  }
-}
-
-__device__ unsigned char quantize_offset(float* __restrict__ const smem_code, int lane, float x)
-{
-    int pivot = 127+lane-16;
-    int upper_pivot = 255;
-    int lower_pivot = 0;
-
-    float val = smem_code[pivot];
-    float lower = -1.0f;
-    float upper = 1.0f;
-
-    while((lower_pivot != pivot) && (upper_pivot != pivot))
-    {
-        if(x > val)
+        float midpoint = (upper+val)*0.5f;
+        if(x > midpoint)
         {
-            lower_pivot = pivot;
-            lower = val;
-            pivot = (upper_pivot+pivot) >> 1;
+          return upper_pivot;
         }
         else
-        {
-            upper_pivot = pivot;
-            upper = val;
-            pivot = (lower_pivot+pivot) >> 1;
-        }
-        val = smem_code[pivot];
-        //if((lower_pivot+1 == pivot) && (pivot+1 == upper_pivot)){ break; }
+          return pivot;
+      }
+      else
+      {
+        float midpoint = (lower+val)*0.5f;
+        if(x < midpoint)
+          return lower_pivot;
+        else
+          return pivot;
+      }
     }
-
-    if(upper_pivot == 255)
-        upper = smem_code[upper_pivot];
-    if(lower_pivot == 0)
-        lower = smem_code[lower_pivot];
-
-    float d1, d2, d3;
-    d1 = fabsf(x-lower);
-    d2 = fabsf(x-val);
-    d3 = fabsf(x-upper);
-
-    if(d1 < d2) return lower_pivot;
-    else if(d3 < d2) return upper_pivot;
-    else return pivot;
+    else
+    {
+      if(x > val)
+      {
+        float dist_to_upper = fabsf(upper-x);
+        float dist_full = upper-val;
+        if(rand >= dist_to_upper/dist_full) return upper_pivot;
+        else return pivot;
+      }
+      else
+      {
+        float dist_to_lower = fabsf(lower-x);
+        float dist_full = val-lower;
+        if(rand >= dist_to_lower/dist_full) return lower_pivot;
+        else return pivot;
+      }
+    }
 }
 
 template <int SIGNED>
@@ -474,7 +378,6 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
   typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
   typedef cub::BlockStore<unsigned char, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
 
-
   __shared__ typename LoadFloat::TempStorage loadf;
   __shared__ typename StoreChar::TempStorage storec;
   __shared__ float smem_code[256];
@@ -490,39 +393,46 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
 
   for (unsigned int i = base_idx; i < n_full; i += gridDim.x*NUM_BLOCK)
   {
+      // number of values already processed in blocks +
+      // number of values already processed in this block +
+      // rand_offset % mod value
       valid_items = n - i > NUM_BLOCK ? NUM_BLOCK : n - i;
 
       __syncthreads();
       LoadFloat(loadf).Load(&(A[i]), vals, valid_items);
 
+
       #pragma unroll 4
       for(int j = 0; j < NUM; j++)
-        qvals[j] = dQuantize<0>(smem_code, vals[j]);
-        //qvals[j] = quantize_2D(smem_code, lane_id, vals[j]);
+          qvals[j] = dQuantize<0>(smem_code, 0.0f, vals[j]);
 
       __syncthreads();
       StoreChar(storec).Store(&(out[i]), qvals, valid_items);
   }
 }
 
-template<typename T, int BLOCK_SIZE, int NUM_PER_TH>
+template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC>
 __launch_bounds__(TH, 4)
-__global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, const int n)
+__global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n)
 {
   const int n_full = gridDim.x * BLOCK_SIZE;
   int valid_items = 0;
   const int base_idx = (blockIdx.x * BLOCK_SIZE);
 
   T vals[NUM];
+  float rand_vals[NUM];
   unsigned char qvals[NUM];
   //float local_abs_max = -FLT_MAX;
   float local_abs_max = 0.0f;
+  int local_rand_idx = 0;
 
   typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
   typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
   typedef cub::BlockReduce<float, BLOCK_SIZE/NUM_PER_TH> BlockReduce;
+  typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
 
   __shared__ typename LoadT::TempStorage loadt;
+  __shared__ typename LoadFloat::TempStorage loadf;
   __shared__ typename StoreChar::TempStorage storec;
   __shared__ typename BlockReduce::TempStorage reduce;
   __shared__ float smem_code[256];
@@ -533,43 +443,53 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
 
   for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
   {
-      valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
-      local_abs_max = -FLT_MAX;
+    valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
+    local_abs_max = -FLT_MAX;
 
-      __syncthreads();
-      LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
+    __syncthreads();
+    LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
 
     // 1. compute local max
     // 2. broadcast local max
     // 3. normalize inputs and quantize
 
-     #pragma unroll NUM_PER_TH
-     for(int j = 0; j < NUM_PER_TH; j++)
-        local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
+    #pragma unroll NUM_PER_TH
+    for(int j = 0; j < NUM_PER_TH; j++)
+       local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
 
-     local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Max(), valid_items);
+    local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Max(), valid_items);
 
+    if(threadIdx.x == 0)
+      smem_absmax_value[0] = local_abs_max;
 
-     if(threadIdx.x == 0)
-       smem_absmax_value[0] = local_abs_max;
+    __syncthreads();
 
-     __syncthreads();
+    if(threadIdx.x == 0)
+      absmax[i/BLOCK_SIZE] = local_abs_max;
+    else
+      local_abs_max = smem_absmax_value[0];
 
-     if(threadIdx.x == 0)
-       absmax[i/BLOCK_SIZE] = local_abs_max;
-     else
-       local_abs_max = smem_absmax_value[0];
+    __syncwarp();
 
-     __syncwarp();
+    local_abs_max = 1.0f/local_abs_max;
 
-     local_abs_max = 1.0f/local_abs_max;
+    if(STOCHASTIC)
+    {
+      local_rand_idx = ((blockIdx.x*NUM_BLOCK) + (threadIdx.x*NUM) + rand_offset) % (1024-4);
+      LoadFloat(loadf).Load(&rand[local_rand_idx], rand_vals, BLOCK_SIZE, 0);
+    }
 
-     #pragma unroll NUM_PER_TH
-     for(int j = 0; j < NUM_PER_TH; j++)
-        qvals[j] = dQuantize<0>(smem_code, ((float)vals[j])*local_abs_max);
+    #pragma unroll NUM_PER_TH
+    for(int j = 0; j < NUM_PER_TH; j++)
+    {
+      if(!STOCHASTIC)
+       qvals[j] = dQuantize<0>(smem_code, 0.0f, ((float)vals[j])*local_abs_max);
+      else
+       qvals[j] = dQuantize<1>(smem_code, rand_vals[j], ((float)vals[j])*local_abs_max);
+    }
 
-     __syncthreads();
-     StoreChar(storec).Store(&(out[i]), qvals, valid_items);
+    __syncthreads();
+    StoreChar(storec).Store(&(out[i]), qvals, valid_items);
   }
 }
 
@@ -1157,7 +1077,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 
             s1_vals[j] = (s1_vals[j]*beta1) + (((1.0f-beta1)*g_val));
 
-            c1s[j] = dQuantize<0>(smem_quantiles1, s1_vals[j]*new_max_val1);
+            c1s[j] = dQuantize<0>(smem_quantiles1, 0.0f, s1_vals[j]*new_max_val1);
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
@@ -1172,7 +1092,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
             s2_vals[j] = smem_quantiles2[c2s[j]];
             s2_vals[j] = s2_vals[j]*max2[0];
             s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
-            c2s[j] = dQuantize<0>(smem_quantiles2, s2_vals[j]*new_max_val2);
+            c2s[j] = dQuantize<0>(smem_quantiles2, 0.0f, s2_vals[j]*new_max_val2);
         }
 
         # pragma unroll 4
@@ -1367,7 +1287,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                   break;
             }
 
-            c1s[j] = dQuantize<0>(smem_quantiles1, s1_vals[j]*new_max_val1);
+            c1s[j] = dQuantize<0>(smem_quantiles1, 0.0f, s1_vals[j]*new_max_val1);
 
             // make sure state1 term has still the same sign after quantization
             if(signbit(smem_quantiles1[c1s[j]]) != signbit(s1_vals[j]))
@@ -1607,8 +1527,8 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __device__ unsigned char dQuantize<0>(float* smem_code, float x);
-template __device__ unsigned char dQuantize<1>(float* smem_code, float x);
+template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
+template __device__ unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
 
 template __global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n);
 template __global__ void kEstimateQuantiles(half *__restrict__ const A, float *code, const float offset, const half max_val, const int n);
@@ -1709,8 +1629,10 @@ MAKE_optimizerStatic8bit2State(ADAM, float)
 template __global__ void kPercentileClipping<float, 2048, 4>(float * __restrict__ g, float *gnorm_vec, int step, const int n);
 template __global__ void kPercentileClipping<half, 2048, 4>(half * __restrict__ g, float *gnorm_vec, int step, const int n);
 
-template __global__ void kQuantizeBlockwise<half, 4096, 4>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, const int n);
-template __global__ void kQuantizeBlockwise<float, 4096, 4>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, const int n);
+template __global__ void kQuantizeBlockwise<half, 4096, 4, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 4096, 4, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 4096, 4, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 4096, 4, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
 
 template __global__ void kDequantizeBlockwise<half, 4096, 1024, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, half *out, const int n);
 template __global__ void kDequantizeBlockwise<float, 4096, 1024, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, float *out, const int n);

@@ -33,11 +33,11 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template <typename T> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, const int n)
+template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float *rand, int rand_offset, const int n)
 {
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
-  kQuantizeBlockwise<T, 4096, 4><<<blocks, 1024>>>(code, A, absmax, out, n);
+  kQuantizeBlockwise<T, 4096, 4, STOCHASTIC><<<blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -164,8 +164,10 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);
 
-template void quantizeBlockwise<half>(float * code, half *A, float *absmax, unsigned char *out, const int n);
-template void quantizeBlockwise<float>(float * code, float *A, float *absmax, unsigned char *out, const int n);
+template void quantizeBlockwise<half, 0>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
+template void quantizeBlockwise<float, 0>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
+template void quantizeBlockwise<half, 1>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
+template void quantizeBlockwise<float, 1>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
 template void dequantizeBlockwise<half>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
 template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
 

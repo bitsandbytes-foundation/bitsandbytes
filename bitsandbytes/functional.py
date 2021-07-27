@@ -1,4 +1,5 @@
 import os
+import random
 import math
 import ctypes as ct
 import torch
@@ -100,7 +101,7 @@ def estimate_quantiles(A: torch.Tensor, out: torch.Tensor=None, offset: float=1/
         raise NotImplementError(f'Not supported data type {A.dtype}')
     return out
 
-def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
+def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.Tensor=None, rand=None, out: torch.Tensor=None) -> torch.Tensor:
     '''
     Quantize tensor A in blocks of size 4096 values.
 
@@ -116,6 +117,8 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.T
         The quantization map.
     absmax : torch.Tensor
         The absmax values.
+    rand : torch.Tensor
+        The tensor for stochastic rounding.
     out : torch.Tensor
         The output tensor (8-bit).
 
@@ -138,12 +141,22 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.T
 
     if out is None: out = torch.zeros_like(A, dtype=torch.uint8)
 
-    if A.dtype == torch.float32:
-        lib.cquantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
-    elif A.dtype == torch.float16:
-        lib.cquantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+    if rand is not None:
+        assert rand.numel() >= 1024
+        rand_offset = random.randint(0, 1023)
+        if A.dtype == torch.float32:
+            lib.cquantize_blockwise_stochastic_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), get_ptr(rand), ct.c_int32(rand_offset), ct.c_int(A.numel()))
+        elif A.dtype == torch.float16:
+            lib.cquantize_blockwise_stochastic_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), get_ptr(rand), ct.c_int32(rand_offset), ct.c_int(A.numel()))
+        else:
+            raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
     else:
-        raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
+        if A.dtype == torch.float32:
+            lib.cquantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+        elif A.dtype == torch.float16:
+            lib.cquantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+        else:
+            raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
 
     return absmax, out
 
