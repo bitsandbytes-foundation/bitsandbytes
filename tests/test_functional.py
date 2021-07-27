@@ -107,6 +107,9 @@ def test_dynamic_blockwise_stochastic_quantization():
         absmax, C2 = F.quantize_blockwise(A1)
         # a maximunm distance of quantized values of 1
         torch.testing.assert_allclose(C1, C2, atol=1, rtol=0)
+        fraction_smaller = (C1<C2).float().sum()/C1.numel()
+        fraction_larger = (C1>C2).float().sum()/C1.numel()
+        torch.testing.assert_allclose(fraction_larger, fraction_smaller, atol=0.01, rtol=0)
 
 
 
