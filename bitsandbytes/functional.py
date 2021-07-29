@@ -6,7 +6,24 @@ import torch
 
 torch.nn.utils.clip_grad_norm_
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libBitsNBytes.so')
+lib.get_context.restype = ct.c_void_p
 name2qmap = {}
+
+class CUBLAS_Context(object):
+    _instance = None
+
+    def __init__(self):
+        raise RuntimeError('Call get_instance() instead')
+
+    def initialize(self):
+        self.context = ct.c_void_p(lib.get_context())
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls.__new__(cls)
+            cls._instance.initialize()
+        return cls._instance
 
 str2optimizer32bit = {}
 str2optimizer32bit['adam'] = (lib.cadam32bit_g32, lib.cadam32bit_g16)
@@ -546,3 +563,35 @@ def percentile_clipping(grad: torch.Tensor, gnorm_vec: torch.Tensor, step: int, 
         gnorm_scale = clip_value/current_gnorm
 
     return current_gnorm, clip_value, gnorm_scale
+
+
+def mmi(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor=None):
+    assert A.dtype == torch.int8
+    assert B.dtype == torch.int8
+    assert len(A.shape) == 2 and len(B.shape) == 2
+    if not torch.cuda.is_initialized(): torch.cuda.init()
+
+    if out is None: out = torch.zeros(A.shape[0], B.shape[1], dtype=torch.int32, device=A.device)
+    # B^T @ A^T = C^T
+    # [kn, mk -> nm]
+
+	#cublasStatus_t Stat = cublasSgemm(Blas, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, &Alpha, dev_B, ldb, dev_A, lda, &Beta, dev_C, ldc)
+
+    transposed_A = not A.is_contiguous()
+    transposed_B = not B.is_contiguous()
+    m = B.shape[1]
+    n = A.shape[0]
+    k = B.shape[0]
+    lda = B.shape[1]
+    ldb = A.shape[1]
+    ldc = B.shape[1]
+
+    ptr2 = CUBLAS_Context.get_instance().context
+
+    lib.cgemmi(ptr2, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
+               get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
+
+    return out
+
+
+

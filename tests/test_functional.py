@@ -1,9 +1,46 @@
 import pytest
+import time
 import torch
 
 from itertools import product
 
 from bitsandbytes import functional as F
+
+class Timer(object):
+    def __init__(self):
+        self.starts = {}
+        self.ends = {}
+        self.agg = {}
+
+    def tick(self, name='default'):
+        if name not in self.starts:
+            self.starts[name] = torch.cuda.Event(enable_timing=True)
+            self.ends[name] = torch.cuda.Event(enable_timing=True)
+            self.starts[name].record()
+        else:
+            ms = self.tock(name, evict=True, print_ms=False)
+
+    def tock(self, name='default', evict=True, print_ms=True):
+        if name in self.ends:
+            self.ends[name].record()
+            torch.cuda.synchronize()
+            ms = self.starts[name].elapsed_time(self.ends[name])
+            if name not in self.agg: self.agg[name] = 0.0
+            self.agg[name] += ms
+            if evict:
+                self.starts.pop(name)
+                self.ends.pop(name)
+
+        if print_ms and name in self.agg:
+            print('{0} took: {1:.5f}s'.format(name, self.agg[name]/1000.0))
+
+        return self.agg[name]
+
+    def reset(self):
+        self.starts  = {}
+        self.ends = {}
+        self.agg = {}
+        print('Resetting benchmark data')
 
 def setup():
     pass
@@ -140,5 +177,47 @@ def test_percentile_clipping(gtype):
         torch.testing.assert_allclose(gnorm1, gnorm2)
 
 
+dim1 = torch.randint(1,1024*4, size=(4,)).tolist()
+dim2 = torch.randint(1,1024*4, size=(4,)).tolist()
+values = list(product(dim1,dim2))
+names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2", values, ids=names)
+def test_igemm(dim1, dim2):
+    dim1 = dim1 - (dim1 % 32)
+    dim2 = dim2 - (dim2 % 32)
+    for i in range(100):
+        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+        B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
+        #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
+        #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
+        out = F.mmi(A, B)
+        out2 = torch.mm(A.float(), B.float())
+        torch.testing.assert_allclose(out.float(), out2)
 
+
+def test_igemm_bench():
+    dim1 = 4096*2
+    dim2 = 4096*2
+    A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+    B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
+    C = torch.zeros(dim1, dim1, device=A.device, dtype=torch.int32)
+
+    t = Timer()
+
+
+    A = torch.randn(dim1, dim2, device='cuda')
+    B = torch.randn(dim1, dim2, device='cuda')
+    A = A.half()
+    B = B.half()
+    C = torch.zeros(dim1, dim1, device=A.device, dtype=torch.half)
+
+    for i in range(500):
+        if i == 100:
+            t.reset()
+            t.tick('total time')
+
+        #F.mmi(A, B, out=C)
+        torch.mm(A, B, out=C)
+
+    t.tock('total time')
 

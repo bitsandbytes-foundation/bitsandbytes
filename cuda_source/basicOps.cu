@@ -156,6 +156,32 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+#define UNSIGNED_CHAR 0
+
+void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
+{
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+	cublasStatus_t status;
+  //cublasHandle_t handle2;
+  //cublasCreate_v2(&handle2);
+  //cout << handle << endl;
+
+			status = cublasGemmEx(context->m_handle,
+					transposeA ? CUBLAS_OP_T : CUBLAS_OP_N,
+					transposeB ? CUBLAS_OP_T : CUBLAS_OP_N,
+					m, n,	k,
+					&alpha, A, CUDA_R_8I, lda, B, CUDA_R_8I, ldb, &beta,
+					C, CUDA_R_32I, ldc,
+          CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+
+    if (status != CUBLAS_STATUS_SUCCESS)
+    {
+      std::cout << "CUBLAS ERROR: Status " << status << std::endl;
+    }
+
+
+}
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

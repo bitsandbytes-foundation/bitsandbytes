@@ -331,7 +331,6 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1: return
     p1 = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.1
 
-
     bnb_optimizer = str2optimizers[optim_name][1]([p1])
 
     g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01

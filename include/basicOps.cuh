@@ -9,6 +9,7 @@
 
 #include <cuda_runtime_api.h>
 #include <cuda_fp16.h>
+#include <cublas_v2.h>
 
 #define CUDA_CHECK_RETURN(value) {                      \
   cudaError_t _m_cudaStat = value;                    \
@@ -32,6 +33,21 @@ typedef enum Optimizer_t
   RMSPROP = 2,
   LARS = 3,
 } Optimizer_t;
+
+
+class Context
+{
+    public:
+				cublasHandle_t m_handle;
+
+				Context()
+				{
+					cublasHandle_t handle;
+					cublasCreate_v2(&handle);
+					m_handle = handle;
+				}
+
+};
 
 
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
@@ -60,6 +76,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, int n);
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);
+
+void gemmex(Context * context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
 
 #endif
 

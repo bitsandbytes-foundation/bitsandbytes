@@ -7,6 +7,7 @@
 
 #include <basicOps.cuh>
 
+
 #define ADAM 0
 #define MOMENTUM 1
 #define RMSPROP 2
@@ -79,6 +80,11 @@ void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, floa
 
 extern "C"
 {
+	struct CUDA_Context
+	{
+		cublasHandle_t handle;
+	};
+
 	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
 	void cestimate_quantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles_fp16(A, code, offset, n); }
 	void cquantize(float *code, float *A, unsigned char *out, int n){ quantize(code, A, out, n); }
@@ -137,6 +143,11 @@ extern "C"
 
 	void cpercentile_clipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping_g32(g, gnorm_vec, step, n); }
 	void cpercentile_clipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping_g16(g, gnorm_vec, step, n); }
+	void cgemmi(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
+	{ 
+		gemmex(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc); }
+
+	Context *get_context(){ return new Context(); }
 }
 
 
