@@ -183,8 +183,8 @@ values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_igemm(dim1, dim2):
-    dim1 = dim1 - (dim1 % 32)
-    dim2 = dim2 - (dim2 % 32)
+    dim1 = dim1 - (dim1 % 64)
+    dim2 = dim2 - (dim2 % 64)
     for i in range(100):
         A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
         B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
@@ -196,23 +196,24 @@ def test_igemm(dim1, dim2):
 
 
 def test_igemm_bench():
-    dim1 = 4096*2
-    dim2 = 4096*2
+    dim1 = 1024*20
+    dim2 = 1024*20
+    dim3 = 1024*20
     A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-    B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
-    C = torch.zeros(dim1, dim1, device=A.device, dtype=torch.int32)
+    B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
+    C = torch.zeros(dim1, dim3, device=A.device, dtype=torch.int32)
 
     t = Timer()
-
-
     A = torch.randn(dim1, dim2, device='cuda')
-    B = torch.randn(dim1, dim2, device='cuda')
+    B = torch.randn(dim2, dim3, device='cuda')
     A = A.half()
     B = B.half()
-    C = torch.zeros(dim1, dim1, device=A.device, dtype=torch.half)
+    C = torch.zeros(dim1, dim3, device=A.device, dtype=B.dtype)
 
-    for i in range(500):
-        if i == 100:
+
+
+    for i in range(25):
+        if i == 5:
             t.reset()
             t.tick('total time')
 
