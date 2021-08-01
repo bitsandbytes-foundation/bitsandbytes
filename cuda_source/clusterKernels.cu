@@ -1523,6 +1523,164 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     }
 }
 
+
+#define LANES 2
+#define QUAD 3
+template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
+__launch_bounds__(256, 3)
+__global__ void
+kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char* state1,
+                const float beta1, const float beta2,
+                const float eps, const int step, const float lr,
+                float* __restrict__ const quantiles1,
+                float* absmax1,
+                float weight_decay,
+                const float gnorm_scale, const int n)
+{
+
+    //const int n_full = n + (n%BLOCK_SIZE);
+    const int n_full = gridDim.x * BLOCK_SIZE;
+    const int base_idx = (blockIdx.x * BLOCK_SIZE);
+    int valid_items = 0;
+    float g_val = 0.0f;
+    float s1_vals[N_PER_TH];
+    // 2-5%
+    const int lane_id = threadIdx.x % LANES;
+    float new_local_abs_max1 = -FLT_MAX;
+    float quadrants1[QUAD];
+
+    unsigned char c1s[N_PER_TH];
+    T g_vals[N_PER_TH];
+		T p_vals[N_PER_TH];
+
+    typedef cub::BlockLoad<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef cub::BlockLoad<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+
+    typedef cub::BlockStore<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+    typedef cub::BlockStore<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+
+    __shared__ float smem_quantiles1[LANES][257];
+    typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce1;
+    __shared__ typename BlockReduce1::TempStorage reduce1;
+    __shared__ float smem_exchange1[1];
+
+    __shared__ union {
+        typename LoadT::TempStorage loadh;
+        typename LoadChar::TempStorage loadc;
+        typename StoreChar::TempStorage storec;
+        typename StoreT::TempStorage storeh;
+    } temp_storage;
+    // init: 0.2 -> 0.23
+
+    // 0.23 -> 0.23
+		smem_quantiles1[0][threadIdx.x] = quantiles1[threadIdx.x];
+		# pragma unroll
+		for(unsigned int j = 1; j < LANES; j++)
+			smem_quantiles1[j][threadIdx.x] = smem_quantiles1[0][threadIdx.x];
+
+    __syncthreads();
+
+    #pragma unroll
+    for(int k = 0; k < QUAD; k++)
+      quadrants1[k] = smem_quantiles1[lane_id][(k*256/(QUAD+1)) + (256/(QUAD+1)-1)];
+
+
+    for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
+    {
+        // loads: 0.23 -> 0.85/1.44
+        valid_items = n - i >= BLOCK_SIZE ? BLOCK_SIZE : n - i;
+        __syncthreads();
+        LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
+        __syncthreads();
+        LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
+        __syncthreads();
+        LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
+
+        new_local_abs_max1 = -FLT_MAX;
+
+        //  update: 2.48/1.57 -> 2.51/1.60
+        # pragma unroll N_PER_TH
+        for(unsigned int j = 0; j < N_PER_TH; j++)
+        {
+            g_val = float(g_vals[j]);
+            g_val *= gnorm_scale;
+            if(weight_decay > 0.0f)
+              g_val += ((float)p_vals[j])*weight_decay;
+
+						s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
+
+            switch(OPTIMIZER)
+            {
+                case MOMENTUM: 
+                  if(step == 1)
+                    s1_vals[j] = g_val;
+                  else
+										s1_vals[j] = (s1_vals[j]*beta1) + g_val;
+                  break;
+								case RMSPROP: 
+									s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
+									break;
+            }
+
+            new_local_abs_max1 = fmaxf(new_local_abs_max1, fabsf(s1_vals[j]));
+        }
+
+
+        //  reduce: 2.51/1.60 -> 2.67/1.69
+        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, cub::Max());
+
+        if(threadIdx.x == 0)
+          smem_exchange1[0] = new_local_abs_max1;
+
+        __syncthreads();
+
+        if(threadIdx.x == 0)
+          absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
+        else
+          new_local_abs_max1 = smem_exchange1[0];
+
+        //  reduce: 2.67/1.69 -> 2.67/1.70
+        # pragma unroll N_PER_TH
+        for(unsigned int j = 0; j < N_PER_TH; j++)
+				{
+            switch(OPTIMIZER)
+            {
+                case MOMENTUM: 
+									p_vals[j] = ((float)p_vals[j]) - lr*(s1_vals[j]);
+									break;
+								case RMSPROP: 
+									g_val = g_vals[j];
+									p_vals[j] = ((float)p_vals[j]) - lr*(__fdividef(g_val, sqrtf(s1_vals[j])+eps));
+									break;
+            }
+				}
+
+        //  store: 0.85/1.44 -> 2.48/1.57
+        __syncthreads();
+        StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
+
+        //  quantizaztion: 2.67/1.70  -> 3.4/3.3
+        # pragma unroll N_PER_TH 
+        for(unsigned int j = 0; j < N_PER_TH; j++)
+        {
+            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], __fdividef(s1_vals[j],new_local_abs_max1));
+
+            // make sure state1 term has still the same sign after quantization
+            // (not needed for state2 term which has only positive values)
+            if(signbit(smem_quantiles1[lane_id][c1s[j]]) != signbit(s1_vals[j]))
+            {
+              if(s1_vals[j] > 0.0f)
+                  c1s[j] += 1;
+              else
+                  c1s[j] -= 1;
+            }
+        }
+
+        __syncthreads();
+        StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
+    }
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
@@ -1650,6 +1808,20 @@ template __global__ void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block
                 float weight_decay, \
                 const float gnorm_scale, const int n); \
 
-
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 2048, 8)
+
+#define MAKE_OptimizerStatic8bit1StateBlockwise(oname, gtype, block_size, num_per_thread) \
+template __global__ void kOptimizerStatic8bit1StateBlockwise<gtype, oname, block_size, num_per_thread>( \
+		gtype* p, gtype* __restrict__ const g, unsigned char* state1, \
+                const float beta1, const float beta2, \
+                const float eps, const int step, const float lr, \
+                float* __restrict__ const quantiles1, \
+                float* absmax1, \
+                float weight_decay, \
+                const float gnorm_scale, const int n); \
+
+MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, half, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, half, 2048, 8)
