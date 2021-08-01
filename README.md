@@ -109,3 +109,8 @@ The following features that are still missing are currently planned for the rele
  - generalize 8-bit quantization methods to n-bit quantization
  - fast 8-bit optimizers which use 0.1% more memory but should improve optimization speed by ~50% (except for LAMB and LARS)
  - your favorite feature
+
+
+## Release History:
+
+0.0.21: Added blockwise Momentum and RMSProp.
