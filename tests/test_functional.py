@@ -1,6 +1,7 @@
 import pytest
 import time
 import torch
+import einops
 
 from itertools import product
 
@@ -195,10 +196,101 @@ def test_igemm(dim1, dim2):
         torch.testing.assert_allclose(out.float(), out2)
 
 
+def quant(x):
+    max1 = torch.abs(x).max()
+    x = torch.round(x/max1*127)
+    return max1, x.to(torch.int8)
+
+def dequant(c, maxC):
+    return c.float()*(maxC/127)
+
+def mm_dequant(maxA, maxB, C):
+    return C.float()*(maxA/127)*(maxB/127)
+
+def quant_multi(x, dim):
+    max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
+    max1[max1==0] = 1.0
+    x = torch.round(x/max1*127)
+    return max1, x.to(torch.int8)
+
+def quant_multi_chunk(x, dim, chunk_size=32):
+    if dim==1:
+        x_chunked = einops.rearrange(x, '(c a) b -> c a b', c=chunk_size)
+        max1 = torch.amax(torch.abs(x_chunked), dim=dim+1, keepdim=True)
+        max1 = torch.tile(max1, (1, 1, x.shape[1]))
+        max1 = max1.view(x.shape)
+    elif dim==0:
+        x_chunked = einops.rearrange(x, 'a (b c) -> a b c', c=chunk_size)
+        max1 = torch.amax(torch.abs(x_chunked), dim=dim, keepdim=True)
+        max1 = torch.tile(max1, (x.shape[0], 1, 1))
+        max1 = max1.view(x.shape)
+    max1[max1==0] = 1.0
+    x = torch.round(x/max1*127)
+    return max1, x.to(torch.int8)
+
+def quant_minmax(A):
+    minA = A.min()
+    maxA = A.max()
+
+def mean(xx):
+    return sum(xx)/float(len(xx))
+
+#dim1 = torch.randint(1,1024*4, size=(4,)).tolist()
+#dim2 = torch.randint(1,1024*4, size=(4,)).tolist()
+dim1 = [1024*2]
+dim2 = [1024*16]
+methods = [(lambda x, dim: quant(x), lambda x, dim: quant(x), dequant, dequant, mm_dequant)]
+methods.append((quant_multi, quant_multi, dequant, dequant, mm_dequant))
+#methods.append((lambda x: quant_multi_chunk(x, dim=-1), lambda x: quant_multi_chunk(x, dim=0), dequant, dequant, mm_dequant))
+method_names = ['linear', 'vectorwise']
+batched = [False, True]
+values = list(product(dim1,dim2, methods, batched))
+values_names = list(product(dim1,dim2, method_names, batched))
+names = ['dim1_{0}_dim2_{1}_quant_{2}_batched_{3}'.format(*vals) for vals in values_names]
+@pytest.mark.parametrize("dim1, dim2, quant_methods, batched", values, ids=names)
+def test_igemm_approx(dim1, dim2, quant_methods, batched):
+    dim1 = dim1 - (dim1 % 32)
+    dim2 = dim2 - (dim2 % 32)
+    errors = []
+    relerrors = []
+    print('')
+    for i in range(5):
+        if batched:
+            A = torch.normal(0, 0.5, size=(32, dim1, dim2//32), device='cuda')
+            B = torch.normal(0, 0.5, size=(32, dim2//32, dim1), device='cuda')
+            maxA, Ac = quant_methods[0](A, 2)
+            maxB, Bc = quant_methods[1](B, 1)
+        else:
+            A = torch.normal(0, 0.5, size=(dim1, dim2), device='cuda')
+            B = torch.normal(0, 0.5, size=(dim2, dim1), device='cuda')
+            maxA, Ac = quant_methods[0](A, 1)
+            maxB, Bc = quant_methods[1](B, 0)
+        torch.testing.assert_allclose(quant_methods[2](maxA, Ac), A, atol=0.025, rtol=0.05)
+        if batched:
+            out2 = torch.bmm(A, B)
+            C = torch.bmm(Ac.float(), Bc.float())
+        else:
+            out2 = torch.mm(A, B)
+            C = F.mmi(Ac, Bc)
+        out = quant_methods[4](maxA, maxB, C)
+        std = out2.std()
+        out/= std
+        out2/= std
+        err = torch.abs(out-out2)
+        relerr = err/torch.abs(out2)
+        errors.append(err.mean().item())
+        relerrors.append(relerr.mean().item())
+    print(mean(errors))
+    print(mean(relerrors))
+
+
+
+
+
 def test_igemm_bench():
-    dim1 = 1024*20
-    dim2 = 1024*20
-    dim3 = 1024*20
+    dim1 = 4096*1
+    dim2 = 4096*1
+    dim3 = 4096*1
     A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
     B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
     C = torch.zeros(dim1, dim3, device=A.device, dtype=torch.int32)
@@ -212,13 +304,8 @@ def test_igemm_bench():
 
 
 
-    for i in range(25):
-        if i == 5:
-            t.reset()
-            t.tick('total time')
+    for i in range(128):
 
         #F.mmi(A, B, out=C)
         torch.mm(A, B, out=C)
-
-    t.tock('total time')
 

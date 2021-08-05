@@ -21,11 +21,12 @@ INCLUDE :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/include -I $(ANACONDA_HOME)/i
 LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcuda -lcublas -lcurand -lcusparse -L $(ANACONDA_HOME)/lib
 
 # NVIDIA NVCC compilation flags
-COMPUTE_CAPABILITY := -gencode arch=compute_50,code=sm_50 # Maxwell
-COMPUTE_CAPABILITY += -gencode arch=compute_52,code=sm_52 # Maxwell
-COMPUTE_CAPABILITY += -gencode arch=compute_61,code=sm_61 # Pascal
-COMPUTE_CAPABILITY += -gencode arch=compute_70,code=sm_70 # Volta
-COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
+#COMPUTE_CAPABILITY := -gencode arch=compute_50,code=sm_50 # Maxwell
+#COMPUTE_CAPABILITY += -gencode arch=compute_52,code=sm_52 # Maxwell
+#COMPUTE_CAPABILITY += -gencode arch=compute_61,code=sm_61 # Pascal
+#COMPUTE_CAPABILITY += -gencode arch=compute_70,code=sm_70 # Volta
+#COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
+COMPUTE_CAPABILITY := -gencode arch=compute_75,code=sm_75 # Volta 
 
 all: $(ROOT_DIR)/dependencies/cub $(BUILD_DIR) $(HOME)/anaconda3
 	$(NVCC) $(COMPUTE_CAPABILITY) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
