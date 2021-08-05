@@ -114,3 +114,4 @@ The following features that are still missing are currently planned for the rele
 ## Release History:
 
 0.0.21: Added blockwise Momentum and RMSProp.
+0.0.22: Added blockwise Momentum and RMSProp.
