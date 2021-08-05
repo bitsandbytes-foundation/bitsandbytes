@@ -1,5 +1,6 @@
 import pytest
 import torch
+import bitsandbytes as bnb
 
 from itertools import product
 
@@ -138,6 +139,11 @@ def test_percentile_clipping(gtype):
         torch.testing.assert_allclose(gnorm_vec1, torch.sqrt(gnorm_vec2))
         torch.testing.assert_allclose(clip1, clip2)
         torch.testing.assert_allclose(gnorm1, gnorm2)
+
+
+def test_stable_embedding():
+    layer = bnb.nn.StableEmbedding(1024, 1024)
+    layer.reset_parameters()
 
 
 
