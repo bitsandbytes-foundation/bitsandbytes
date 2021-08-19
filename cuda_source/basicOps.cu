@@ -1,9 +1,7 @@
 #include <basicOps.cuh>
 #include <clusterKernels.cuh>
-#include <cuda_profiler_api.h>
 #include <cub/device/device_scan.cuh>
 #include <limits>
-#include <cudaProfiler.h>
 
 using std::cout;
 using std::endl;
