@@ -510,33 +510,33 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
     return current_gnorm, clip_value, gnorm_scale
 
 
-def mmi(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor=None):
+def matmuli(A: Tensor, B: Tensor, out: Tensor=None):
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
-    assert len(A.shape) == 2 and len(B.shape) == 2
+    assert len(A.shape) in [2, 3] and len(B.shape) == 2
     if not torch.cuda.is_initialized(): torch.cuda.init()
 
-    if out is None: out = torch.zeros(A.shape[0], B.shape[1], dtype=torch.int32, device=A.device)
-    # B^T @ A^T = C^T
-    # [kn, mk -> nm]
-
-	#cublasStatus_t Stat = cublasSgemm(Blas, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, &Alpha, dev_B, ldb, dev_A, lda, &Beta, dev_C, ldc)
+    if len(A.shape) == 2:
+        if out is None: out = torch.zeros(A.shape[0], B.shape[1], dtype=torch.int32, device=A.device)
+        n = A.shape[0]
+        ldb = A.shape[1]
+    elif len(A.shape) == 3:
+        if out is None: out = torch.zeros(A.shape[0], A.shape[1], B.shape[1], dtype=torch.int32, device=A.device)
+        n = A.shape[0]*A.shape[1]
+        ldb = A.shape[2]
 
     transposed_A = not A.is_contiguous()
     transposed_B = not B.is_contiguous()
     m = B.shape[1]
-    n = A.shape[0]
     k = B.shape[0]
     lda = B.shape[1]
-    ldb = A.shape[1]
     ldc = B.shape[1]
 
-    ptr2 = CUBLAS_Context.get_instance().context
+    ptr = CUBLAS_Context.get_instance().context
 
-    lib.cgemmi(ptr2, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
+    # B^T @ A^T = C^T
+    # [kn, mk -> nm] 
+    lib.cgemmi(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
-
     return out
-
-
 
