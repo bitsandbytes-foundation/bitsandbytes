@@ -3,10 +3,14 @@ import random
 import math
 import ctypes as ct
 import torch
+from torch import Tensor
+from typing import Tuple
 
 torch.nn.utils.clip_grad_norm_
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libBitsNBytes.so')
 name2qmap = {}
+
+''' C FUNCTIONS FOR OPTIMIZERS '''
 
 str2optimizer32bit = {}
 str2optimizer32bit['adam'] = (lib.cadam32bit_g32, lib.cadam32bit_g16)
@@ -72,9 +76,9 @@ def create_dynamic_map(signed=True, n=7):
     data.append(0)
     data.append(1.0)
     data.sort()
-    return torch.Tensor(data)
+    return Tensor(data)
 
-def get_ptr(A: torch.Tensor) -> ct.c_void_p:
+def get_ptr(A: Tensor) -> ct.c_void_p:
     '''
     Get the ctypes pointer from a PyTorch Tensor.
 
@@ -82,21 +86,26 @@ def get_ptr(A: torch.Tensor) -> ct.c_void_p:
     ----------
     A : torch.tensor
         The PyTorch tensor.
+
+    Returns
+    -------
+    ctypes.c_void_p
     '''
     if A is None: return None
     else: return ct.c_void_p(A.data.storage().data_ptr())
 
-def estimate_quantiles(A: torch.Tensor, out: torch.Tensor=None, offset: float=1/512) -> torch.Tensor:
+def estimate_quantiles(A: Tensor, out: Tensor=None, offset: float=1/512) -> Tensor:
     '''
     Estimates 256 equidistant quantiles on the input tensor eCDF.
 
     Uses SRAM-Quantiles algorithm to quickly estimate 256 equidistant quantiles
     via the eCDF of the input tensor `A`. This is a fast but approximate algorithm
     and the extreme quantiles close to 0 and 1 have high variance / large estimation
-    errors. These large errors can be circumnavigated by using the offset variable.
-    Default offset value of 1/512 ensures minimum entropy encoding. An offset value
-    of 0.01 to 0.02 usually has a much lower error. Given an offset of 0.02 equidistance
-    points in the range [0.02, 0.98] are used for the quantiles.
+    errors. These large errors can be avoided by using the offset variable which trims
+    the distribution. The default offset value of 1/512 ensures minimum entropy encoding -- it
+    trims 1/512 = 0.2% from each side of the distrivution. An offset value of 0.01 to 0.02
+    usually has a much lower error but is not a minimum entropy encoding. Given an offset
+    of 0.02 equidistance points in the range [0.02, 0.98] are used for the quantiles.
 
     Parameters
     ----------
@@ -121,7 +130,7 @@ def estimate_quantiles(A: torch.Tensor, out: torch.Tensor=None, offset: float=1/
         raise NotImplementError(f'Not supported data type {A.dtype}')
     return out
 
-def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.Tensor=None, rand=None, out: torch.Tensor=None) -> torch.Tensor:
+def quantize_blockwise(A: Tensor, code: Tensor=None, absmax: Tensor=None, rand=None, out: Tensor=None) -> Tensor:
     '''
     Quantize tensor A in blocks of size 4096 values.
 
@@ -146,6 +155,8 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.T
     -------
     torch.Tensor:
         The 8-bit tensor.
+    tuple(torch.Tensor, torch.Tensor):
+        The quantization state to undo the quantization.
     '''
 
     if code is None:
@@ -178,9 +189,11 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.T
         else:
             raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
 
-    return absmax, out
+    return out, (absmax, code)
 
-def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None, blocksize: int=4096) -> torch.Tensor:
+def dequantize_blockwise(A: Tensor, quant_state: Tuple[Tensor, Tensor]=None,
+                         absmax: Tensor=None, code: Tensor=None, out: Tensor=None,
+                         blocksize: int=4096) -> Tensor:
     '''
     Dequantizes blockwise quantized values.
 
@@ -189,10 +202,12 @@ def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tens
 
     Parameters
     ----------
-    absmax : torch.Tensor
-        The absmax values.
     A : torch.Tensor
         The input 8-bit tensor.
+    quant_state : tuple(torch.Tensor, torch.Tensor)
+        Tuple of code and absmax values. 
+    absmax : torch.Tensor
+        The absmax values.
     code : torch.Tensor
         The quantization map.
     out : torch.Tensor
@@ -204,27 +219,29 @@ def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tens
     torch.Tensor:
         Dequantized tensor (default: float32)
     '''
-    if code is None:
+    assert quant_state is not None or absmax is not None
+    if code is None and quant_state is None:
         if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
         code = name2qmap['dynamic']
         code = code.to(A.device)
 
     if out is None: out = torch.zeros_like(A, dtype=torch.float32)
+    if quant_state is None: quant_state = (absmax, code)
 
     if blocksize not in [2048, 4096]:
         raise ValueError(f'The blockwise of {blocksize} is not supported. Supported values: [2048 4096]')
 
     if out.dtype == torch.float32:
-        lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+        lib.cdequantize_blockwise_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
     elif out.dtype == torch.float16:
-        lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+        lib.cdequantize_blockwise_fp16(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
     else:
         raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
 
     return out
 
 
-def quantize(A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
+def quantize(A: Tensor, code: Tensor=None, out: Tensor=None) -> Tensor:
     if code is None:
         if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
         code = name2qmap['dynamic']
@@ -232,19 +249,21 @@ def quantize(A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -
 
     absmax = torch.abs(A).max()
     inp = A/absmax
-    out = quantize_no_absmax(code, inp, out)
-    return absmax, out
+    out = quantize_no_absmax(inp, code, out)
+    return out, (absmax, code)
 
-def dequantize(absmax:torch.Tensor, A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
-    if code is None:
+def dequantize(A: Tensor, quant_state: Tuple[Tensor, Tensor]=None, absmax: Tensor=None, code: Tensor=None, out: Tensor=None) -> Tensor:
+    assert quant_state is not None or absmax is not None
+    if code is None and quant_state is None:
         if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
         code = name2qmap['dynamic']
         code = code.to(A.device)
 
-    out = dequantize_no_absmax(code, A, out)
-    return out*absmax
+    if quant_state is None: quant_state = (absmax, code)
+    out = dequantize_no_absmax(A, quant_state[1], out)
+    return out*quant_state[0]
 
-def quantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
+def quantize_no_absmax(A: Tensor, code: Tensor, out: Tensor=None) -> Tensor:
     '''
     Quantizes input tensor to 8-bit.
 
@@ -253,10 +272,10 @@ def quantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=No
 
     Parameters
     ----------
-    code : torch.Tensor
-        The quantization map.
     A : torch.Tensor
         The input tensor.
+    code : torch.Tensor
+        The quantization map.
     out : torch.Tensor, optional
         The output tensor. Needs to be of type byte.
 
@@ -269,7 +288,7 @@ def quantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=No
     lib.cquantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
     return out
 
-def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
+def dequantize_no_absmax(A: Tensor, code: Tensor, out: Tensor=None) -> Tensor:
     '''
     Dequantizes the 8-bit tensor to 32-bit.
 
@@ -278,10 +297,10 @@ def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=
 
     Parameters
     ----------
-    code : torch.Tensor
-        The quantization map.
     A : torch.Tensor
         The 8-bit input tensor.
+    code : torch.Tensor
+        The quantization map.
     out : torch.Tensor
         The 32-bit output tensor.
 
@@ -294,80 +313,11 @@ def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=
     lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
     return out
 
-
-
-def momentum_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, weight_decay: float, momentum: float, lr: float, dampening: float, nesterov: bool,
-                          step: int, gnorm_scale: float):
-    '''
-    Performance inplace SGD Momentum update.
-
-    Parameters
-    ----------
-    g : torch.Tensor
-        The gradient
-    p : torch.Tensor
-        The paramter/weight tensor.
-    state1 : torch.Tensor
-        The momentum buffer/optimizer state.
-    weight_decay : float
-        Weight decay / L2 penalty value.
-    momentum : float
-        Momentum value.
-    lr : float
-        The learning rate
-    dampening : float
-        Dampening constant.
-    nesterov : bool
-        Whether to use nesterov momentum.
-    step : int
-        Current optimizer step.
-    gnorm_scale : float
-        The factor to rescale the gradient to the max clip value.
-    '''
-    optimizer_update_32bit('momentum', g, p, state1, momentum, 0.0, step, lr, None, dampening, weight_decay, gnorm_scale)
-
-def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
-                beta1: float, beta2: float, eps: float,
-                step: int, lr: float, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
-    '''
-    Performs an inplace Adam update.
-
-    Universal Adam update for 32/8-bit state and 32/16-bit gradients/weights.
-    Uses AdamW formulation if weight decay > 0.0.
-
-    Parameters
-    ----------
-    g : torch.Tensor
-        Gradient tensor.
-    p : torch.Tensor
-        Parameter tensor.
-    state1 : torch.Tensor
-        Adam state 1.
-    state2 : torch.Tensor
-        Adam state 2.
-    beta1 : float
-        Adam beta1.
-    beta2 : float
-        Adam beta2.
-    eps : float
-        Adam epsilon.
-    weight_decay : float
-        Weight decay.
-    step : int
-        Current optimizer step.
-    lr : float
-        The learning rate.
-    gnorm_scale : float
-        The factor to rescale the gradient to the max clip value.
-    '''
-    optimizer_update_32bit('adam', g, p, state1, beta1, eps, step, lr, state2, beta2, weight_decay, gnorm_scale)
-
-
-def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor,
+def optimizer_update_32bit(optimizer_name:str, g: Tensor, p: Tensor, state1: Tensor,
                 beta1: float, eps: float, step: int, lr: float,
-                state2: torch.Tensor=None, beta2: float=0.0,
+                state2: Tensor=None, beta2: float=0.0,
                 weight_decay: float=0.0, gnorm_scale: float=1.0,
-                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
+                unorm_vec: Tensor=None, max_unorm: float=0.0) -> None:
     '''
     Performs an inplace optimizer update with one or two optimizer states.
 
@@ -419,21 +369,12 @@ def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor,
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
-def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
+def optimizer_update_8bit(optimizer_name: str, g: Tensor, p: Tensor, state1: Tensor, state2: Tensor,
                 beta1: float, beta2: float, eps: float,
-                step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
-                max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
+                step: int, lr: float, qmap1: Tensor, qmap2: Tensor,
+                max1: Tensor, max2: Tensor, new_max1: Tensor, new_max2: Tensor,
                 weight_decay: float=0.0, gnorm_scale: float=1.0,
-                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
-    optimizer_update_8bit('adam', g, p, state1, state2, beta1, beta2, eps, step, lr, qmap1, qmap2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, unorm_vec, max_unorm)
-
-
-def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
-                beta1: float, beta2: float, eps: float,
-                step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
-                max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
-                weight_decay: float=0.0, gnorm_scale: float=1.0,
-                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
+                unorm_vec: Tensor=None, max_unorm: float=0.0) -> None:
     '''
     Performs an inplace Adam update.
 
@@ -504,10 +445,10 @@ def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor,
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
 
-def optimizer_update_8bit_blockwise(optimizer_name: str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
+def optimizer_update_8bit_blockwise(optimizer_name: str, g: Tensor, p: Tensor, state1: Tensor, state2: Tensor,
                 beta1: float, beta2: float, eps: float,
-                step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
-                absmax1: torch.Tensor, absmax2: torch.Tensor, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
+                step: int, lr: float, qmap1: Tensor, qmap2: Tensor,
+                absmax1: Tensor, absmax2: Tensor, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
 
 
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
@@ -524,7 +465,7 @@ def optimizer_update_8bit_blockwise(optimizer_name: str, g: torch.Tensor, p: tor
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
 
-def percentile_clipping(grad: torch.Tensor, gnorm_vec: torch.Tensor, step: int, percentile: int=5):
+def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: int=5):
     """Applies percentile clipping
 
     grad: torch.Tensor

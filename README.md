@@ -111,7 +111,12 @@ The following features that are still missing are currently planned for the rele
  - your favorite feature
 
 
-## Release History:
+## Release History
 
-0.0.21: Added blockwise Momentum and RMSProp.
-0.0.22: Added blockwise Momentum and RMSProp.
+- 0.0.22: Added blockwise Momentum and RMSProp.
+- 0.0.23: 
+  - unified quantization API
+
+## License
+
+The majority of bitsandbytes is licensed under MIT, however portions of the project are available under separate license terms: Pytorch is licensed under the BSD license.

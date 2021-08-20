@@ -34,15 +34,15 @@ def test_quantile_quantization():
     for i in range(100):
         A1 = torch.randn(1024, 1024, device='cuda')
         code = F.estimate_quantiles(A1)
-        C = F.quantize_no_absmax(code, A1)
-        A2 = F.dequantize_no_absmax(code, C)
+        C = F.quantize_no_absmax(A1, code)
+        A2 = F.dequantize_no_absmax(C, code)
         diff = torch.abs(A1-A2).mean().item()
         assert diff < 0.0075
 
         A1 = torch.rand(1024, 1024, device='cuda')
         code = F.estimate_quantiles(A1)
-        C = F.quantize_no_absmax(code, A1)
-        A2 = F.dequantize_no_absmax(code, C)
+        C = F.quantize_no_absmax(A1, code)
+        A2 = F.dequantize_no_absmax(C, code)
         diff = torch.abs(A1-A2).mean().item()
         torch.testing.assert_allclose(A1, A2, atol=5e-3, rtol=0)
         assert diff < 0.001
@@ -53,8 +53,8 @@ def test_dynamic_quantization():
     reldiffs = []
     for i in range(100):
         A1 = torch.randn(1024, 1024, device='cuda')
-        absmax, C = F.quantize(A1)
-        A2 = F.dequantize(absmax, C)
+        C, S = F.quantize(A1)
+        A2 = F.dequantize(C, S)
         diff = torch.abs(A1-A2)
         reldiff = diff/torch.abs(A1+1e-8)
         diffs.append(diff.mean().item())
@@ -65,8 +65,8 @@ def test_dynamic_quantization():
 
     for i in range(100):
         A1 = torch.rand(1024, 1024, device='cuda')
-        absmax, C = F.quantize(A1)
-        A2 = F.dequantize(absmax, C)
+        C, S = F.quantize(A1)
+        A2 = F.dequantize(C, S)
         diff = torch.abs(A1-A2).mean().item()
         torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
         assert diff < 0.004
@@ -77,8 +77,8 @@ def test_dynamic_blockwise_quantization():
     reldiffs = []
     for i in range(100):
         A1 = torch.randn(1024, 1024, device='cuda')
-        absmax, C = F.quantize_blockwise(A1)
-        A2 = F.dequantize_blockwise(absmax, C)
+        C, S = F.quantize_blockwise(A1)
+        A2 = F.dequantize_blockwise(C, S)
         diff = torch.abs(A1-A2)
         reldiff = diff/torch.abs(A1+1e-8)
         diffs.append(diff.mean().item())
@@ -90,8 +90,8 @@ def test_dynamic_blockwise_quantization():
     diffs = []
     for i in range(100):
         A1 = torch.rand(1024, 1024, device='cuda')
-        absmax, C = F.quantize_blockwise(A1)
-        A2 = F.dequantize_blockwise(absmax, C)
+        C, S = F.quantize_blockwise(A1)
+        A2 = F.dequantize_blockwise(C, S)
         diff = torch.abs(A1-A2).mean().item()
         assert diff < 0.0033
         diffs.append(diff)
@@ -104,8 +104,8 @@ def test_dynamic_blockwise_stochastic_quantization():
     rand = torch.rand(1024).cuda()
     for i in range(100):
         A1 = torch.randn(1024, 1024, device='cuda')
-        absmax, C1 = F.quantize_blockwise(A1, rand=rand)
-        absmax, C2 = F.quantize_blockwise(A1)
+        C1, S1 = F.quantize_blockwise(A1, rand=rand)
+        C2, S2 = F.quantize_blockwise(A1)
         # a maximunm distance of quantized values of 1
         torch.testing.assert_allclose(C1, C2, atol=1, rtol=0)
         fraction_smaller = (C1<C2).float().sum()/C1.numel()

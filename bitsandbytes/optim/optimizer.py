@@ -1,7 +1,6 @@
 import torch
 import bitsandbytes.functional as F
 
-from torch.optim import Optimizer
 from copy import deepcopy
 from itertools import chain
 from collections import defaultdict, abc as container_abcs
@@ -75,7 +74,7 @@ class GlobalOptimManager(object):
                 else: self.pid2config[id(p)] = key_value_dict
 
 
-class Optimizer8bit(Optimizer):
+class Optimizer8bit(torch.optim.Optimizer):
 
     def __init__(self, params, defaults, optim_bits=32):
         super(Optimizer8bit, self).__init__(params, defaults)
