@@ -10,7 +10,7 @@ class LARS(Optimizer1State):
         if momentum == 0:
             raise NotImplementError(f'LARS without momentum is not supported!')
         super(LARS, self).__init__('lars', params, lr, (momentum, dampening), 0.0,
-                weight_decay, optim_bits, args, min_8bit_size, percentile_clipping, max_unorm=max_unorm)
+                weight_decay, optim_bits, args, min_8bit_size, percentile_clipping, max_unorm=max_unorm, block_wise=False)
 
 class LARS8bit(Optimizer1State):
     def __init__(self, params, lr, momentum=0, dampening=0,
@@ -19,7 +19,7 @@ class LARS8bit(Optimizer1State):
         if momentum == 0:
             raise NotImplementError(f'LARS without momentum is not supported!')
         super(LARS8bit, self).__init__('lars', params, lr, (momentum, dampening), 0.0,
-                weight_decay, 8, args, min_8bit_size, percentile_clipping, max_unorm=max_unorm)
+                weight_decay, 8, args, min_8bit_size, percentile_clipping, max_unorm=max_unorm, block_wise=False)
 
 class LARS32bit(Optimizer1State):
     def __init__(self, params, lr, momentum=0, dampening=0,
@@ -28,7 +28,7 @@ class LARS32bit(Optimizer1State):
         if momentum == 0:
             raise NotImplementError(f'LARS without momentum is not supported!')
         super(LARS32bit, self).__init__('lars', params, lr, (momentum, dampening), 0.0,
-                weight_decay, 32, args, min_8bit_size, percentile_clipping, max_unorm=max_unorm)
+                weight_decay, 32, args, min_8bit_size, percentile_clipping, max_unorm=max_unorm, block_wise=False)
 
 
 class PytorchLARS(Optimizer):

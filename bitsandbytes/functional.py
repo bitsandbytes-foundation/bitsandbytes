@@ -3,9 +3,10 @@ import random
 import math
 import ctypes as ct
 import torch
+from torch import Tensor
+from typing import Tuple
 
-torch.nn.utils.clip_grad_norm_
-lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libBitsNBytes.so')
+lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libbitsandbytes.so')
 lib.get_context.restype = ct.c_void_p
 name2qmap = {}
 
@@ -25,6 +26,8 @@ class CUBLAS_Context(object):
             cls._instance.initialize()
         return cls._instance
 
+''' C FUNCTIONS FOR OPTIMIZERS '''
+
 str2optimizer32bit = {}
 str2optimizer32bit['adam'] = (lib.cadam32bit_g32, lib.cadam32bit_g16)
 str2optimizer32bit['momentum'] = (lib.cmomentum32bit_g32, lib.cmomentum32bit_g16)
@@ -38,6 +41,11 @@ str2optimizer8bit['momentum'] = (lib.cmomentum_static_8bit_g32, lib.cmomentum_st
 str2optimizer8bit['rmsprop'] = (lib.crmsprop_static_8bit_g32, lib.crmsprop_static_8bit_g16)
 str2optimizer8bit['lamb'] = (lib.cadam_static_8bit_g32, lib.cadam_static_8bit_g16)
 str2optimizer8bit['lars'] = (lib.cmomentum_static_8bit_g32, lib.cmomentum_static_8bit_g16)
+
+str2optimizer8bit_blockwise = {}
+str2optimizer8bit_blockwise['adam'] = (lib.cadam_8bit_blockwise_fp32, lib.cadam_8bit_blockwise_fp16)
+str2optimizer8bit_blockwise['momentum'] = (lib.cmomentum_8bit_blockwise_fp32, lib.cmomentum_8bit_blockwise_fp16)
+str2optimizer8bit_blockwise['rmsprop'] = (lib.crmsprop_8bit_blockwise_fp32, lib.crmsprop_8bit_blockwise_fp16)
 
 optimal_normal = [-0.9939730167388916, -0.8727636337280273, -0.8097418546676636, -0.7660024166107178, -0.7318882346153259, -0.6793879270553589, -0.657649040222168, -0.6385974884033203, -0.6211113333702087, -0.5901028513908386, -0.5762918591499329, -0.5630806684494019, -0.5509274005889893, -0.5394591689109802, -0.5283197164535522, -0.517780065536499, -0.5074946284294128, -0.4980469048023224, -0.48867011070251465, -0.48003149032592773, -0.47125306725502014, -0.4629971981048584, -0.4547359049320221, -0.446626216173172, -0.43902668356895447, -0.43158355355262756, -0.4244747757911682, -0.4173796474933624, -0.41038978099823, -0.4055633544921875, -0.4035947024822235, -0.39701032638549805, -0.39057496190071106, -0.38439232110977173, -0.3782760500907898, -0.3721940815448761, -0.3661896586418152, -0.3604033589363098, -0.354605108499527, -0.34892538189888, -0.34320303797721863, -0.3376772701740265, -0.3323028087615967, -0.3269782066345215, -0.32166096568107605, -0.316457599401474, -0.3112771809101105, -0.3061025142669678, -0.30106794834136963, -0.2961243987083435, -0.2912728488445282, -0.28644347190856934, -0.28165507316589355, -0.2769731283187866, -0.2722635865211487, -0.26779335737228394, -0.26314786076545715, -0.2586647868156433, -0.2541804611682892, -0.2496625930070877, -0.24527113139629364, -0.24097171425819397, -0.23659978806972504, -0.23218469321727753, -0.22799566388130188, -0.22380566596984863, -0.21965542435646057, -0.2154538631439209, -0.2113603949546814, -0.20735277235507965, -0.20334717631340027, -0.19932441413402557, -0.19530178606510162, -0.19136647880077362, -0.18736697733402252, -0.18337111175060272, -0.17951400578022003, -0.1757056713104248, -0.17182783782482147, -0.1680615097284317, -0.16431649029254913, -0.16053077578544617, -0.15685945749282837, -0.15298527479171753, -0.1493264138698578, -0.14566898345947266, -0.14188314974308014, -0.13819937407970428, -0.1344561129808426, -0.1306886374950409, -0.1271020770072937, -0.12346585839986801, -0.11981867253780365, -0.11614970862865448, -0.11256207525730133, -0.10889036953449249, -0.10525048524141312, -0.1016591489315033, -0.09824034571647644, -0.09469068050384521, -0.0911419615149498, -0.08773849159479141, -0.08416644483804703, -0.08071305602788925, -0.07720902562141418, -0.07371306419372559, -0.07019119709730148, -0.06673648208379745, -0.06329209357500076, -0.059800852090120316, -0.0564190037548542, -0.05296570807695389, -0.049522045999765396, -0.04609023034572601, -0.04262964054942131, -0.039246633648872375, -0.03577171266078949, -0.03236335143446922, -0.028855687007308006, -0.02542758360505104, -0.022069433704018593, -0.018754752352833748, -0.015386369079351425, -0.01194947212934494, -0.008439815603196621, -0.004995611496269703, -0.0016682245768606663, 0.0, 0.0015510577941313386, 0.005062474869191647, 0.008417150937020779, 0.011741090565919876, 0.015184164978563786, 0.018582714721560478, 0.02204744517803192, 0.025471193715929985, 0.02889077737927437, 0.0323684960603714, 0.03579240292310715, 0.039281025528907776, 0.0427563451230526, 0.04619763046503067, 0.04968220740556717, 0.05326594039797783, 0.05679265409708023, 0.060245808213949203, 0.06372645497322083, 0.06721872836351395, 0.0706876739859581, 0.0742349922657013, 0.07774098962545395, 0.08123527467250824, 0.08468879014253616, 0.08810535818338394, 0.09155989438295364, 0.09498448669910431, 0.0985206812620163, 0.10206405073404312, 0.10563778132200241, 0.10921968519687653, 0.11284469068050385, 0.11653254181146622, 0.12008969485759735, 0.12368203699588776, 0.1272617131471634, 0.13089501857757568, 0.134552001953125, 0.1382799744606018, 0.14194637537002563, 0.14563234150409698, 0.14930322766304016, 0.15303383767604828, 0.1567956507205963, 0.16050070524215698, 0.16431072354316711, 0.16813558340072632, 0.17204202711582184, 0.1758781224489212, 0.17973239719867706, 0.1836014688014984, 0.18753431737422943, 0.19138391315937042, 0.19535475969314575, 0.19931404292583466, 0.20333819091320038, 0.20738255977630615, 0.21152682602405548, 0.21568812429904938, 0.21978361904621124, 0.22393859922885895, 0.22814159095287323, 0.23241068422794342, 0.23675410449504852, 0.24123944342136383, 0.24569889903068542, 0.2500703036785126, 0.25904011726379395, 0.26349544525146484, 0.2682226300239563, 0.272907555103302, 0.2774306833744049, 0.28220856189727783, 0.2869136929512024, 0.2916390895843506, 0.29649388790130615, 0.30142995715141296, 0.3065022826194763, 0.3114383816719055, 0.31648796796798706, 0.3216581642627716, 0.32700115442276, 0.3322487473487854, 0.33778008818626404, 0.3431521952152252, 0.3487405776977539, 0.3543166518211365, 0.3601346015930176, 0.36605337262153625, 0.37217751145362854, 0.378179669380188, 0.3843980133533478, 0.3906566798686981, 0.39714935421943665, 0.40357843041419983, 0.4104187488555908, 0.4171563684940338, 0.42418959736824036, 0.43136918544769287, 0.4389212429523468, 0.44673123955726624, 0.45457619428634644, 0.4627031683921814, 0.47130417823791504, 0.4798591434955597, 0.48897242546081543, 0.4979848861694336, 0.5, 0.5076631307601929, 0.5177803635597229, 0.5282770991325378, 0.5392990112304688, 0.5506287813186646, 0.5632893443107605, 0.5764452815055847, 0.5903191566467285, 0.6051878333091736, 0.6209936141967773, 0.6382884979248047, 0.6573970913887024, 0.6795773506164551, 0.7037051916122437, 0.7327037453651428, 0.7677436470985413, 0.8111193776130676, 0.875165581703186, 1.0]
 
@@ -84,9 +92,9 @@ def create_dynamic_map(signed=True, n=7):
     data.append(0)
     data.append(1.0)
     data.sort()
-    return torch.Tensor(data)
+    return Tensor(data)
 
-def get_ptr(A: torch.Tensor) -> ct.c_void_p:
+def get_ptr(A: Tensor) -> ct.c_void_p:
     '''
     Get the ctypes pointer from a PyTorch Tensor.
 
@@ -94,21 +102,26 @@ def get_ptr(A: torch.Tensor) -> ct.c_void_p:
     ----------
     A : torch.tensor
         The PyTorch tensor.
+
+    Returns
+    -------
+    ctypes.c_void_p
     '''
     if A is None: return None
     else: return ct.c_void_p(A.data.storage().data_ptr())
 
-def estimate_quantiles(A: torch.Tensor, out: torch.Tensor=None, offset: float=1/512) -> torch.Tensor:
+def estimate_quantiles(A: Tensor, out: Tensor=None, offset: float=1/512) -> Tensor:
     '''
     Estimates 256 equidistant quantiles on the input tensor eCDF.
 
     Uses SRAM-Quantiles algorithm to quickly estimate 256 equidistant quantiles
     via the eCDF of the input tensor `A`. This is a fast but approximate algorithm
     and the extreme quantiles close to 0 and 1 have high variance / large estimation
-    errors. These large errors can be circumnavigated by using the offset variable.
-    Default offset value of 1/512 ensures minimum entropy encoding. An offset value
-    of 0.01 to 0.02 usually has a much lower error. Given an offset of 0.02 equidistance
-    points in the range [0.02, 0.98] are used for the quantiles.
+    errors. These large errors can be avoided by using the offset variable which trims
+    the distribution. The default offset value of 1/512 ensures minimum entropy encoding -- it
+    trims 1/512 = 0.2% from each side of the distrivution. An offset value of 0.01 to 0.02
+    usually has a much lower error but is not a minimum entropy encoding. Given an offset
+    of 0.02 equidistance points in the range [0.02, 0.98] are used for the quantiles.
 
     Parameters
     ----------
@@ -133,7 +146,7 @@ def estimate_quantiles(A: torch.Tensor, out: torch.Tensor=None, offset: float=1/
         raise NotImplementError(f'Not supported data type {A.dtype}')
     return out
 
-def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.Tensor=None, rand=None, out: torch.Tensor=None) -> torch.Tensor:
+def quantize_blockwise(A: Tensor, code: Tensor=None, absmax: Tensor=None, rand=None, out: Tensor=None) -> Tensor:
     '''
     Quantize tensor A in blocks of size 4096 values.
 
@@ -158,6 +171,8 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.T
     -------
     torch.Tensor:
         The 8-bit tensor.
+    tuple(torch.Tensor, torch.Tensor):
+        The quantization state to undo the quantization.
     '''
 
     if code is None:
@@ -190,9 +205,11 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor=None, absmax: torch.T
         else:
             raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
 
-    return absmax, out
+    return out, (absmax, code)
 
-def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None, blocksize: int=4096) -> torch.Tensor:
+def dequantize_blockwise(A: Tensor, quant_state: Tuple[Tensor, Tensor]=None,
+                         absmax: Tensor=None, code: Tensor=None, out: Tensor=None,
+                         blocksize: int=4096) -> Tensor:
     '''
     Dequantizes blockwise quantized values.
 
@@ -201,10 +218,12 @@ def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tens
 
     Parameters
     ----------
-    absmax : torch.Tensor
-        The absmax values.
     A : torch.Tensor
         The input 8-bit tensor.
+    quant_state : tuple(torch.Tensor, torch.Tensor)
+        Tuple of code and absmax values. 
+    absmax : torch.Tensor
+        The absmax values.
     code : torch.Tensor
         The quantization map.
     out : torch.Tensor
@@ -216,27 +235,29 @@ def dequantize_blockwise(absmax: torch.Tensor, A: torch.Tensor, code: torch.Tens
     torch.Tensor:
         Dequantized tensor (default: float32)
     '''
-    if code is None:
+    assert quant_state is not None or absmax is not None
+    if code is None and quant_state is None:
         if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
         code = name2qmap['dynamic']
         code = code.to(A.device)
 
     if out is None: out = torch.zeros_like(A, dtype=torch.float32)
+    if quant_state is None: quant_state = (absmax, code)
 
     if blocksize not in [2048, 4096]:
         raise ValueError(f'The blockwise of {blocksize} is not supported. Supported values: [2048 4096]')
 
     if out.dtype == torch.float32:
-        lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+        lib.cdequantize_blockwise_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
     elif out.dtype == torch.float16:
-        lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+        lib.cdequantize_blockwise_fp16(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
     else:
         raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
 
     return out
 
 
-def quantize(A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
+def quantize(A: Tensor, code: Tensor=None, out: Tensor=None) -> Tensor:
     if code is None:
         if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
         code = name2qmap['dynamic']
@@ -244,19 +265,21 @@ def quantize(A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -
 
     absmax = torch.abs(A).max()
     inp = A/absmax
-    out = quantize_no_absmax(code, inp, out)
-    return absmax, out
+    out = quantize_no_absmax(inp, code, out)
+    return out, (absmax, code)
 
-def dequantize(absmax:torch.Tensor, A: torch.Tensor, code: torch.Tensor=None, out: torch.Tensor=None) -> torch.Tensor:
-    if code is None:
+def dequantize(A: Tensor, quant_state: Tuple[Tensor, Tensor]=None, absmax: Tensor=None, code: Tensor=None, out: Tensor=None) -> Tensor:
+    assert quant_state is not None or absmax is not None
+    if code is None and quant_state is None:
         if 'dynamic' not in name2qmap: name2qmap['dynamic'] = create_dynamic_map().to(A.device)
         code = name2qmap['dynamic']
         code = code.to(A.device)
 
-    out = dequantize_no_absmax(code, A, out)
-    return out*absmax
+    if quant_state is None: quant_state = (absmax, code)
+    out = dequantize_no_absmax(A, quant_state[1], out)
+    return out*quant_state[0]
 
-def quantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
+def quantize_no_absmax(A: Tensor, code: Tensor, out: Tensor=None) -> Tensor:
     '''
     Quantizes input tensor to 8-bit.
 
@@ -265,10 +288,10 @@ def quantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=No
 
     Parameters
     ----------
-    code : torch.Tensor
-        The quantization map.
     A : torch.Tensor
         The input tensor.
+    code : torch.Tensor
+        The quantization map.
     out : torch.Tensor, optional
         The output tensor. Needs to be of type byte.
 
@@ -281,7 +304,7 @@ def quantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=No
     lib.cquantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
     return out
 
-def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=None) -> torch.Tensor:
+def dequantize_no_absmax(A: Tensor, code: Tensor, out: Tensor=None) -> Tensor:
     '''
     Dequantizes the 8-bit tensor to 32-bit.
 
@@ -290,10 +313,10 @@ def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=
 
     Parameters
     ----------
-    code : torch.Tensor
-        The quantization map.
     A : torch.Tensor
         The 8-bit input tensor.
+    code : torch.Tensor
+        The quantization map.
     out : torch.Tensor
         The 32-bit output tensor.
 
@@ -306,80 +329,11 @@ def dequantize_no_absmax(code: torch.Tensor, A: torch.Tensor, out: torch.Tensor=
     lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
     return out
 
-
-
-def momentum_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, weight_decay: float, momentum: float, lr: float, dampening: float, nesterov: bool,
-                          step: int, gnorm_scale: float):
-    '''
-    Performance inplace SGD Momentum update.
-
-    Parameters
-    ----------
-    g : torch.Tensor
-        The gradient
-    p : torch.Tensor
-        The paramter/weight tensor.
-    state1 : torch.Tensor
-        The momentum buffer/optimizer state.
-    weight_decay : float
-        Weight decay / L2 penalty value.
-    momentum : float
-        Momentum value.
-    lr : float
-        The learning rate
-    dampening : float
-        Dampening constant.
-    nesterov : bool
-        Whether to use nesterov momentum.
-    step : int
-        Current optimizer step.
-    gnorm_scale : float
-        The factor to rescale the gradient to the max clip value.
-    '''
-    optimizer_update_32bit('momentum', g, p, state1, momentum, 0.0, step, lr, None, dampening, weight_decay, gnorm_scale)
-
-def adam_update_32bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
-                beta1: float, beta2: float, eps: float,
-                step: int, lr: float, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
-    '''
-    Performs an inplace Adam update.
-
-    Universal Adam update for 32/8-bit state and 32/16-bit gradients/weights.
-    Uses AdamW formulation if weight decay > 0.0.
-
-    Parameters
-    ----------
-    g : torch.Tensor
-        Gradient tensor.
-    p : torch.Tensor
-        Parameter tensor.
-    state1 : torch.Tensor
-        Adam state 1.
-    state2 : torch.Tensor
-        Adam state 2.
-    beta1 : float
-        Adam beta1.
-    beta2 : float
-        Adam beta2.
-    eps : float
-        Adam epsilon.
-    weight_decay : float
-        Weight decay.
-    step : int
-        Current optimizer step.
-    lr : float
-        The learning rate.
-    gnorm_scale : float
-        The factor to rescale the gradient to the max clip value.
-    '''
-    optimizer_update_32bit('adam', g, p, state1, beta1, eps, step, lr, state2, beta2, weight_decay, gnorm_scale)
-
-
-def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor,
+def optimizer_update_32bit(optimizer_name:str, g: Tensor, p: Tensor, state1: Tensor,
                 beta1: float, eps: float, step: int, lr: float,
-                state2: torch.Tensor=None, beta2: float=0.0,
+                state2: Tensor=None, beta2: float=0.0,
                 weight_decay: float=0.0, gnorm_scale: float=1.0,
-                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
+                unorm_vec: Tensor=None, max_unorm: float=0.0) -> None:
     '''
     Performs an inplace optimizer update with one or two optimizer states.
 
@@ -431,21 +385,12 @@ def optimizer_update_32bit(optimizer_name:str, g: torch.Tensor, p: torch.Tensor,
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
-def adam_update_8bit(g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
+def optimizer_update_8bit(optimizer_name: str, g: Tensor, p: Tensor, state1: Tensor, state2: Tensor,
                 beta1: float, beta2: float, eps: float,
-                step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
-                max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
+                step: int, lr: float, qmap1: Tensor, qmap2: Tensor,
+                max1: Tensor, max2: Tensor, new_max1: Tensor, new_max2: Tensor,
                 weight_decay: float=0.0, gnorm_scale: float=1.0,
-                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
-    optimizer_update_8bit('adam', g, p, state1, state2, beta1, beta2, eps, step, lr, qmap1, qmap2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, unorm_vec, max_unorm)
-
-
-def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
-                beta1: float, beta2: float, eps: float,
-                step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
-                max1: torch.Tensor, max2: torch.Tensor, new_max1: torch.Tensor, new_max2: torch.Tensor,
-                weight_decay: float=0.0, gnorm_scale: float=1.0,
-                unorm_vec: torch.Tensor=None, max_unorm: float=0.0) -> None:
+                unorm_vec: Tensor=None, max_unorm: float=0.0) -> None:
     '''
     Performs an inplace Adam update.
 
@@ -516,19 +461,19 @@ def optimizer_update_8bit(optimizer_name: str, g: torch.Tensor, p: torch.Tensor,
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
 
-def optimizer_update_8bit_blockwise(optimizer_name: str, g: torch.Tensor, p: torch.Tensor, state1: torch.Tensor, state2: torch.Tensor,
+def optimizer_update_8bit_blockwise(optimizer_name: str, g: Tensor, p: Tensor, state1: Tensor, state2: Tensor,
                 beta1: float, beta2: float, eps: float,
-                step: int, lr: float, qmap1: torch.Tensor, qmap2: torch.Tensor,
-                absmax1: torch.Tensor, absmax2: torch.Tensor, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
+                step: int, lr: float, qmap1: Tensor, qmap2: Tensor,
+                absmax1: Tensor, absmax2: Tensor, weight_decay: float=0.0, gnorm_scale: float=1.0) -> None:
 
 
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-        lib.coptimizer_static_8bit_blockwise_fp32(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+        str2optimizer8bit_blockwise[optimizer_name][0](get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr), get_ptr(qmap1), get_ptr(qmap2),
                     get_ptr(absmax1), get_ptr(absmax2), ct.c_float(weight_decay), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        lib.coptimizer_static_8bit_blockwise_fp16(get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
+        str2optimizer8bit_blockwise[optimizer_name][1](get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr), get_ptr(qmap1), get_ptr(qmap2),
                     get_ptr(absmax1), get_ptr(absmax2), ct.c_float(weight_decay), ct.c_float(gnorm_scale), ct.c_int32(g.numel()))
@@ -536,7 +481,7 @@ def optimizer_update_8bit_blockwise(optimizer_name: str, g: torch.Tensor, p: tor
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')
 
 
-def percentile_clipping(grad: torch.Tensor, gnorm_vec: torch.Tensor, step: int, percentile: int=5):
+def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: int=5):
     """Applies percentile clipping
 
     grad: torch.Tensor

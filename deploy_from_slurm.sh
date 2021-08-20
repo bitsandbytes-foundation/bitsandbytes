@@ -12,6 +12,15 @@ CUDA_VERSION=92 python -m build
 python -m twine upload --repository testpypi dist/* --verbose
 module unload cuda
 
+
+rm -rf dist build
+make clean
+module load cuda/10.0
+CUDA_HOME=/public/apps/cuda/10.0
+make cuda10x
+CUDA_VERSION=100 python -m build
+python -m twine upload --repository testpypi dist/* --verbose
+module unload cuda
 module unload gcc
 module load gcc/8.4
 

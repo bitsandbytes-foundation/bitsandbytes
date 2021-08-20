@@ -21,6 +21,17 @@ class StableEmbedding(torch.nn.Embedding):
         torch.nn.init.xavier_uniform_(self.weight)
         self._fill_padding_idx_with_zero()
 
+    ''' !!! This is a redefinition of _fill_padding_idx_with_zero in torch.nn.Embedding
+        to make the Layer compatible with Pytorch < 1.9.
+        This means that if this changes in future PyTorch releases this need to change too
+        which is cumbersome. However, with this we can ensure compatibility with previous
+        PyTorch releases.
+    '''
+    def _fill_padding_idx_with_zero(self) -> None:
+        if self.padding_idx is not None:
+            with torch.no_grad():
+                self.weight[self.padding_idx].fill_(0)
+
     def forward(self, input: Tensor) -> Tensor:
         emb = F.embedding(
             input, self.weight, self.padding_idx, self.max_norm,
