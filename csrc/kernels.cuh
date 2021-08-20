@@ -1,8 +1,8 @@
 #include <float.h>
-#include <basicOps.cuh>
+#include <ops.cuh>
 
-#ifndef clusterKernels
-#define clusterKernels
+#ifndef kernels
+#define kernels
 
 template<typename T>__global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset, const T max_val, const int n);
 

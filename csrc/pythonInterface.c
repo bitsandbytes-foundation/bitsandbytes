@@ -1,11 +1,4 @@
-/*
- * export.c
- *
- *  Created on: Nov 24, 2015
- *      Author: tim
- */
-
-#include <basicOps.cuh>
+#include <ops.cuh>
 
 // We cannot call templated code from C, so we wrap the template in a C compatible call here if necessary.
 // We use macro functions to expand all the different optimizers. Looks ugly, and is ugly, but its better than to 

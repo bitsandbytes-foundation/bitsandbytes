@@ -1,5 +1,5 @@
-#include <basicOps.cuh>
-#include <clusterKernels.cuh>
+#include <ops.cuh>
+#include <kernels.cuh>
 #include <cub/device/device_scan.cuh>
 #include <limits>
 

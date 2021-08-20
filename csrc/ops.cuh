@@ -1,6 +1,6 @@
 
-#ifndef basicOps_H
-#define basicOps_H
+#ifndef ops_H
+#define ops_H
 
 #include <stdio.h>
 #include <iostream>

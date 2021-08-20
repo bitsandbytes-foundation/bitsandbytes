@@ -8,3 +8,4 @@ v0.0.22:
 v0.0.23:
 
 - Unified quantization API: each quantization function now returns `Q, S` where `Q` is the quantized tensor and `S` the quantization state which may hold absolute max values, a quantization map or more. For dequantization all functions now accept the inputs `Q, S` so that `Q` is dequantized with the quantization state `S`.
+- Fixed an issue where the CUDA 11.1 binary was not compiled with the right headers

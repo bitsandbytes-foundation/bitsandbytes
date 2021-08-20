@@ -6,8 +6,7 @@ import torch
 from torch import Tensor
 from typing import Tuple
 
-torch.nn.utils.clip_grad_norm_
-lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libBitsNBytes.so')
+lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libbitsandbytes.so')
 name2qmap = {}
 
 ''' C FUNCTIONS FOR OPTIMIZERS '''

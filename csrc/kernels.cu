@@ -1,5 +1,4 @@
-#include <clusterKernels.cuh>
-//#include <cub/cub.cuh>
+#include <kernels.cuh>
 #include <cub/block/block_radix_sort.cuh>
 #include <cub/warp/warp_reduce.cuh>
 #include <cub/block/block_load.cuh>
