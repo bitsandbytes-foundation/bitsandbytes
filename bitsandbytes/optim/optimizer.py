@@ -229,7 +229,7 @@ class Optimizer8bit(torch.optim.Optimizer):
 class Optimizer2State(Optimizer8bit):
     def __init__(self, optimizer_name, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
             weight_decay=0.0, optim_bits=32, args=None,
-            min_8bit_size=4096, percentile_clipping=100, block_wise=False, max_unorm=0.0):
+            min_8bit_size=4096, percentile_clipping=100, block_wise=True, max_unorm=0.0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -350,7 +350,7 @@ class Optimizer2State(Optimizer8bit):
 class Optimizer1State(Optimizer8bit):
     def __init__(self, optimizer_name, params, lr=1e-3, betas=(0.9, 0.0), eps=1e-8,
             weight_decay=0.0, optim_bits=32, args=None,
-            min_8bit_size=4096, percentile_clipping=100, block_wise=False, max_unorm=0.0):
+            min_8bit_size=4096, percentile_clipping=100, block_wise=True, max_unorm=0.0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
