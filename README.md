@@ -43,7 +43,7 @@ wget https://gist.githubusercontent.com/TimDettmers/1f5188c6ee6ed69d211b7fe4e381
 
 ### Using the 8-bit Optimizers
 
-bitsandbytes is designed to be easy to use. To get started with 8-bit optimizers, it is sufficient to replace your old optimizer with the 8-bit optimizer in the following way:
+With bitsandbytes 8-bit optimizers can be used by changing a single line of code in your codebase. For NLP models we recommend also to use the StableEmbedding layers (see below) which improves results and helps with stable 8-bit optimization.  To get started with 8-bit optimizers, it is sufficient to replace your old optimizer with the 8-bit optimizer in the following way:
 ```python
 import bitsandbytes as bnb
 
