@@ -7,6 +7,8 @@ from itertools import product
 
 from bitsandbytes import functional as F
 
+torch.set_printoptions(precision=4, sci_mode=False)
+
 class Timer(object):
     def __init__(self):
         self.starts = {}
@@ -332,3 +334,49 @@ def test_matmuli(seq_dim, hidden_dim, batch_dim):
         out2 = torch.matmul(A.float(), B.float())
         out = F.matmuli(A, B)
         torch.testing.assert_allclose(out.float(), out2)
+
+
+seq_dim = torch.randint(32,512, size=(2,)).tolist()
+hidden_dim = torch.randint(32,1024*4, size=(2,)).tolist()
+batch_dim = torch.randint(2,16, size=(2,)).tolist()
+values = list(product(seq_dim,hidden_dim,batch_dim))
+names = ['seq_dim{0}_hidden_dim{1}_batch_dim{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim", values, ids=names)
+def test_minmax_imatmul(seq_dim, hidden_dim, batch_dim):
+
+    def min_max(x):
+        maxA = torch.amax(x, dim=2, keepdim=True)
+        minA = torch.amin(x, dim=2, keepdim=True)
+        scale = (maxA-minA)/2.0
+        return (127*(x-minA-scale)/scale).to(torch.int8), minA, scale
+
+    seq_dim = seq_dim - (seq_dim % 16)
+    hidden_dim = hidden_dim - (hidden_dim % 16)
+    batch_dim = batch_dim - (batch_dim % 2)
+    print('')
+    errs = []
+    relerrs = []
+    for i in range(100):
+        A = torch.abs(torch.normal(0, 0.5, size=(batch_dim, seq_dim, hidden_dim), device='cuda')) + 0.2
+        B = torch.normal(0, 0.5, size=(hidden_dim, 1024), device='cuda')
+        out2 = torch.matmul(A.float(), B.float())
+        maxB, Bc = quant_multi(B, dim=0)
+        Ac, minA, scale = min_max(A)
+        out = F.matmuli(Ac, Bc)
+        out = out.float()
+        offset = B.sum(0)*(minA+scale)
+        out = (out*maxB*scale/(127*127))+offset
+
+        std = out2.std()
+        out2 /= std
+        out /= std
+
+        err = torch.abs(out-out2)
+        relerr = err/(torch.abs(out2)+1e-8)
+
+        errs.append(err.mean().item())
+        relerrs.append(relerr.mean().item())
+    #assert mean(errs) < 0.01
+    #assert mean(relerrs) < 0.01
+    print(mean(errs))
+    print(mean(relerrs))
