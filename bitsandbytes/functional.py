@@ -510,11 +510,16 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
     return current_gnorm, clip_value, gnorm_scale
 
 
-def matmuli(A: Tensor, B: Tensor, out: Tensor=None):
+def imatmul(A: Tensor, B: Tensor, out: Tensor=None):
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
     assert len(A.shape) in [2, 3] and len(B.shape) == 2
     if not torch.cuda.is_initialized(): torch.cuda.init()
+    transposed_A = False
+    if A.shape[-1] == B.shape[0] and B.stride()[0] == B.shape[1]: transposed_B = False
+    elif A.shape[-1] == B.shape[0] and B.stride()[1] == B.shape[0]: transposed_B = True
+    else:
+        raise ValueError(f'Misaligned matrices with shapes A x B: {A.shape} x {B.shape}')
 
     if len(A.shape) == 2:
         if out is None: out = torch.zeros(A.shape[0], B.shape[1], dtype=torch.int32, device=A.device)
@@ -525,11 +530,10 @@ def matmuli(A: Tensor, B: Tensor, out: Tensor=None):
         n = A.shape[0]*A.shape[1]
         ldb = A.shape[2]
 
-    transposed_A = not A.is_contiguous()
-    transposed_B = not B.is_contiguous()
+
     m = B.shape[1]
     k = B.shape[0]
-    lda = B.shape[1]
+    lda = B.stride()[(1 if transposed_B else 0)]
     ldc = B.shape[1]
 
     ptr = CUBLAS_Context.get_instance().context

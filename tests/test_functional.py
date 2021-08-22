@@ -193,7 +193,7 @@ def test_igemm(dim1, dim2):
         B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
         #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
         #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
-        out = F.matmuli(A, B)
+        out = F.imatmul(A, B)
         out2 = torch.mm(A.float(), B.float())
         torch.testing.assert_allclose(out.float(), out2)
 
@@ -273,7 +273,7 @@ def test_igemm_approx(dim1, dim2, quant_methods, batched):
             C = torch.bmm(Ac.float(), Bc.float())
         else:
             out2 = torch.mm(A, B)
-            C = F.matmuli(Ac, Bc)
+            C = F.imatmul(Ac, Bc)
         out = quant_methods[4](maxA, maxB, C)
         std = out2.std()
         out/= std
@@ -316,33 +316,38 @@ def test_stable_embedding():
 
 
 
-seq_dim = torch.randint(32,512, size=(4,)).tolist()
-hidden_dim = torch.randint(32,1024*4, size=(4,)).tolist()
-batch_dim = torch.randint(2,16, size=(4,)).tolist()
-values = list(product(seq_dim,hidden_dim,batch_dim))
-names = ['seq_dim{0}_hidden_dim{1}_batch_dim{2}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim", values, ids=names)
-def test_matmuli(seq_dim, hidden_dim, batch_dim):
+n = 2
+seq_dim = torch.randint(32,512, size=(n,)).tolist()
+hidden_dim = torch.randint(32,1024*4, size=(n,)).tolist()
+batch_dim = torch.randint(2,16, size=(n,)).tolist()
+transpose = [False, True]
+values = list(product(seq_dim,hidden_dim,batch_dim, transpose))
+names = ['seq_dim{0}_hidden_dim{1}_batch_dim{2},transpose{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim, transpose", values, ids=names)
+def test_imatmul(seq_dim, hidden_dim, batch_dim, transpose):
     seq_dim = seq_dim - (seq_dim % 32)
     hidden_dim = hidden_dim - (hidden_dim % 32)
     batch_dim = batch_dim - (batch_dim % 2)
     for i in range(100):
         A = torch.randint(-128, 127, size=(batch_dim, seq_dim, hidden_dim), device='cuda').to(torch.int8)
-        B = torch.randint(-128, 127, size=(hidden_dim, seq_dim), device='cuda').to(torch.int8)
-        #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
-        #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
+        shapeB = ((seq_dim, hidden_dim) if transpose else (hidden_dim, seq_dim))
+        B = torch.randint(-128, 127, size=shapeB, device='cuda').to(torch.int8)
+        if transpose: B = B.t()
         out2 = torch.matmul(A.float(), B.float())
-        out = F.matmuli(A, B)
+        out = F.imatmul(A, B)
+
         torch.testing.assert_allclose(out.float(), out2)
 
 
-seq_dim = torch.randint(32,512, size=(2,)).tolist()
-hidden_dim = torch.randint(32,1024*4, size=(2,)).tolist()
-batch_dim = torch.randint(2,16, size=(2,)).tolist()
-values = list(product(seq_dim,hidden_dim,batch_dim))
-names = ['seq_dim{0}_hidden_dim{1}_batch_dim{2}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim", values, ids=names)
-def test_minmax_imatmul(seq_dim, hidden_dim, batch_dim):
+n = 3
+seq_dim = torch.randint(32,512, size=(n,)).tolist()
+hidden_dim = torch.randint(32,1024*4, size=(n,)).tolist()
+batch_dim = torch.randint(2,16, size=(n,)).tolist()
+transpose = [False, True]
+values = list(product(seq_dim,hidden_dim,batch_dim, transpose))
+names = ['seq_dim={0}_hidden_dim={1}_batch_dim={2}_transpose{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim, transpose", values, ids=names)
+def test_minmax_imatmul(seq_dim, hidden_dim, batch_dim, transpose):
 
     def min_max(x):
         maxA = torch.amax(x, dim=2, keepdim=True)
@@ -358,14 +363,25 @@ def test_minmax_imatmul(seq_dim, hidden_dim, batch_dim):
     relerrs = []
     for i in range(100):
         A = torch.abs(torch.normal(0, 0.5, size=(batch_dim, seq_dim, hidden_dim), device='cuda')) + 0.2
-        B = torch.normal(0, 0.5, size=(hidden_dim, 1024), device='cuda')
-        out2 = torch.matmul(A.float(), B.float())
-        maxB, Bc = quant_multi(B, dim=0)
+        if transpose:
+            B = torch.normal(0, 0.5, size=(1024, hidden_dim), device='cuda')
+        else:
+            B = torch.normal(0, 0.5, size=(hidden_dim, 1024), device='cuda')
         Ac, minA, scale = min_max(A)
-        out = F.matmuli(Ac, Bc)
-        out = out.float()
-        offset = B.sum(0)*(minA+scale)
-        out = (out*maxB*scale/(127*127))+offset
+        if transpose:
+            maxB, Bc = quant_multi(B, dim=(1 if transpose else 0))
+            out = F.imatmul(Ac, Bc.t())
+            out2 = torch.matmul(A,B.t())
+            offset = B.t().sum(0)*(minA+scale)
+            out = out.float()
+            out = (out*maxB.t()*scale/(127*127))+offset
+        else:
+            maxB, Bc = quant_multi(B, dim=0)
+            offset = B.sum(0)*(minA+scale)
+            out = F.imatmul(Ac, Bc)
+            out2 = torch.matmul(A,B)
+            out = out.float()
+            out = (out*maxB*scale/(127*127))+offset
 
         std = out2.std()
         out2 /= std
@@ -376,7 +392,7 @@ def test_minmax_imatmul(seq_dim, hidden_dim, batch_dim):
 
         errs.append(err.mean().item())
         relerrs.append(relerr.mean().item())
-    #assert mean(errs) < 0.01
-    #assert mean(relerrs) < 0.01
     print(mean(errs))
     print(mean(relerrs))
+    assert mean(errs) < 0.01
+    assert mean(relerrs) < 0.3
