@@ -513,28 +513,45 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
 def imatmul(A: Tensor, B: Tensor, out: Tensor=None):
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
-    assert len(A.shape) in [2, 3] and len(B.shape) == 2
+    assert len(A.shape) in [2, 3] and len(B.shape) in [2, 3]
     if not torch.cuda.is_initialized(): torch.cuda.init()
     transposed_A = False
-    if A.shape[-1] == B.shape[0] and B.stride()[0] == B.shape[1]: transposed_B = False
-    elif A.shape[-1] == B.shape[0] and B.stride()[1] == B.shape[0]: transposed_B = True
-    else:
-        raise ValueError(f'Misaligned matrices with shapes A x B: {A.shape} x {B.shape}')
+    if len(B.shape) == 2:
+        if A.shape[-1] == B.shape[0] and B.stride()[0] == B.shape[1]: transposed_B = False
+        elif A.shape[-1] == B.shape[0] and B.stride()[1] == B.shape[0]: transposed_B = True
+        else:
+            raise ValueError(f'Misaligned matrices with shapes A x B: {A.shape} x {B.shape} with strideB: {B.stride()}')
+        if len(A.shape) == 2:
+            if out is None: out = torch.zeros(A.shape[0], B.shape[1], dtype=torch.int32, device=A.device)
+            n = A.shape[0]
+            ldb = A.shape[1]
+        elif len(A.shape) == 3 and len(B.shape) == 2:
+            if out is None: out = torch.zeros(A.shape[0], A.shape[1], B.shape[1], dtype=torch.int32, device=A.device)
+            n = A.shape[0]*A.shape[1]
+            ldb = A.shape[2]
 
-    if len(A.shape) == 2:
-        if out is None: out = torch.zeros(A.shape[0], B.shape[1], dtype=torch.int32, device=A.device)
-        n = A.shape[0]
-        ldb = A.shape[1]
-    elif len(A.shape) == 3:
-        if out is None: out = torch.zeros(A.shape[0], A.shape[1], B.shape[1], dtype=torch.int32, device=A.device)
-        n = A.shape[0]*A.shape[1]
-        ldb = A.shape[2]
 
+        m = B.shape[1]
+        k = B.shape[0]
+        lda = B.stride()[(1 if transposed_B else 0)]
+        ldc = B.shape[1]
+    elif len(B.shape) == 3:
+        assert len(A.shape) == 3
+        if not (A.shape[0] == B.shape[0] and A.shape[1] == B.shape[1]):
+            raise ValueError(f'Only bsi,bso->io supported for tensor contractions, but dims for A x B were: {A.shape} x {B.shape}')
 
-    m = B.shape[1]
-    k = B.shape[0]
-    lda = B.stride()[(1 if transposed_B else 0)]
-    ldc = B.shape[1]
+        if out is None: out = torch.zeros(A.shape[-1], B.shape[-1], dtype=torch.int32, device=A.device)
+        transposed_A = True
+        transposed_B = False
+
+        m = B.shape[2]
+        n = A.shape[2]
+        k = B.shape[0]*B.shape[1]
+
+        ldb = A.stride()[1]
+        lda = B.stride()[1]
+        ldc = B.shape[2]
+
 
     ptr = CUBLAS_Context.get_instance().context
 

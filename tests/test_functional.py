@@ -316,7 +316,7 @@ def test_stable_embedding():
 
 
 
-n = 2
+n = 3
 seq_dim = torch.randint(32,512, size=(n,)).tolist()
 hidden_dim = torch.randint(32,1024*4, size=(n,)).tolist()
 batch_dim = torch.randint(2,16, size=(n,)).tolist()
@@ -338,6 +338,25 @@ def test_imatmul(seq_dim, hidden_dim, batch_dim, transpose):
 
         torch.testing.assert_allclose(out.float(), out2)
 
+
+n = 3
+seq_dim = torch.randint(32,512, size=(n,)).tolist()
+hidden_dim = torch.randint(32,1024*4, size=(n,)).tolist()
+batch_dim = torch.randint(2,16, size=(n,)).tolist()
+values = list(product(seq_dim,hidden_dim,batch_dim))
+names = ['seq_dim{0}_hidden_dim{1}_batch_dim{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim", values, ids=names)
+def test_imatmul_dim3(seq_dim, hidden_dim, batch_dim):
+    seq_dim = seq_dim - (seq_dim % 32)
+    hidden_dim = hidden_dim - (hidden_dim % 32)
+    batch_dim = batch_dim - (batch_dim % 2)
+    for i in range(100):
+        A = torch.randint(-128, 127, size=(batch_dim, seq_dim, hidden_dim), device='cuda').to(torch.int8)
+        B = torch.randint(-128, 127, size=(batch_dim, seq_dim, 1024), device='cuda').to(torch.int8)
+        out2 = torch.einsum('bsi, bso->io', A.float(), B.float())
+        out = F.imatmul(A, B)
+
+        torch.testing.assert_allclose(out.float(), out2)
 
 n = 3
 seq_dim = torch.randint(32,512, size=(n,)).tolist()
