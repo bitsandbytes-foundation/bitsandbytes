@@ -175,9 +175,6 @@ void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, in
   const void * alpha = &falpha;
   const void * beta = &fbeta;
 	cublasStatus_t status;
-  //cublasHandle_t handle2;
-  //cublasCreate_v2(&handle2);
-  //cout << handle << endl;
 
 			status = cublasGemmEx(context->m_handle,
 					transposeA ? CUBLAS_OP_T : CUBLAS_OP_N,
@@ -192,6 +189,35 @@ void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, in
       std::cout << "CUBLAS ERROR: Status " << status << std::endl;
     }
 
+}
+
+void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc, 
+                    long long int strideA, long long int strideB, long long int strideC, int batchCount)
+{
+  const int falpha = 1;
+  const int fbeta = 0;
+  const void * alpha = &falpha;
+  const void * beta = &fbeta;
+	cublasStatus_t status;
+
+  //cout << transposeA << transposeB << endl;
+  //printf("%i %i %i\n", m,n,k);
+  //printf("%i %i %i\n", lda,ldb,ldc);
+  //printf("%i %i %i\n", strideA, strideB, strideC);
+  //printf("%i\n", batchCount);
+
+			status = cublasGemmStridedBatchedEx(context->m_handle,
+					transposeA ? CUBLAS_OP_T : CUBLAS_OP_N,
+					transposeB ? CUBLAS_OP_T : CUBLAS_OP_N,
+					m, n,	k,
+					alpha, A, CUDA_R_8I, lda, (long long int)strideA, B, CUDA_R_8I, ldb, (long long int)strideB, beta,
+					C, CUDA_R_32I, ldc, (long long int)strideC, batchCount,
+          CUDA_R_32I, CUBLAS_GEMM_DEFAULT);
+
+    if (status != CUBLAS_STATUS_SUCCESS)
+    {
+      std::cout << "CUBLAS ERROR: Status " << status << std::endl;
+    }
 
 }
 

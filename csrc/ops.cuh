@@ -78,6 +78,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);
 
 void gemmex(Context * context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
+void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc, 
+                    long long int strideA, long long int strideB, long long int strideC, int batchCount);
 
 #endif
 

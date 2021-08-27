@@ -516,6 +516,15 @@ def imatmul(A: Tensor, B: Tensor, out: Tensor=None):
     assert len(A.shape) in [2, 3] and len(B.shape) in [2, 3]
     if not torch.cuda.is_initialized(): torch.cuda.init()
     transposed_A = False
+    # this is a mess: cuBLAS expect column major, but PyTorch is row major.
+    # So to perform the matrix multiplication, we have to treat A, B, and C matrices
+    # (transpose of row major is column major)
+    # This means we compute B^T A^T = C^T and we explicitly switch the dimensions of each of these
+
+    # matrices in the input arguments for cuBLAS
+    # column major: A @ B = C: [m, k] @ [k, n] = [m, n]
+    # row major: B^T @ A^T = C^T: [m, k] @ [k, n] = [m, n]
+    # column major with row major layout: B^T @ A^T = C^T: [k, m] @ [n, k] = [n, m]
     if len(B.shape) == 2:
         if A.shape[-1] == B.shape[0] and B.stride()[0] == B.shape[1]: transposed_B = False
         elif A.shape[-1] == B.shape[0] and B.stride()[1] == B.shape[0]: transposed_B = True
@@ -556,8 +565,52 @@ def imatmul(A: Tensor, B: Tensor, out: Tensor=None):
     ptr = CUBLAS_Context.get_instance().context
 
     # B^T @ A^T = C^T
-    # [kn, mk -> nm] 
+    # [km, nk -> mn] 
     lib.cgemmi(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
     return out
 
+
+def ibmm(A: Tensor, B: Tensor, out: Tensor=None):
+    assert A.dtype == torch.int8
+    assert B.dtype == torch.int8
+    assert len(A.shape) == 3 and len(B.shape) == 3
+    assert A.shape[0] == B.shape[0]
+    if not torch.cuda.is_initialized(): torch.cuda.init()
+
+    num_batch = A.shape[0]
+    transposed_A = False
+    if A.shape[-1] == B.shape[1] and B.stride()[1] == B.shape[2]: transposed_B = False
+    elif A.shape[-1] == B.shape[1] and B.stride()[2] == B.shape[1]: transposed_B = True
+    else:
+        raise ValueError(f'Misaligned matrices with shapes A x B: {A.shape} x {B.shape} with strideB: {B.stride()}')
+
+    if out is None: out = torch.zeros(num_batch, A.shape[1], B.shape[2], dtype=torch.int32, device=A.device)
+
+    # this is a mess: cuBLAS expect column major, but PyTorch is row major.
+    # So to perform the matrix multiplication, we have to treat A, B, and C matrices
+    # (transpose of row major is column major)
+    # This means we compute B^T A^T = C^T and we explicitly switch the dimensions of each of these
+    # matrices in the input arguments for cuBLAS
+
+    # column major: A @ B = C: [batch, m, k] @ [batch, k, n] = [batch, m, n]
+    # row major: B^T @ A^T = C^T: [batch, m, k] @ [batch, k, n] = [batch, m, n]
+    # column major with row major layout: B^T @ A^T = C^T: [batch, k, m] @ [batch, n, k] = [batch, n, m]
+    n = A.shape[1]
+    m = B.shape[2]
+    k = B.shape[1]
+
+    lda = n
+    ldb = k
+    ldc = n
+
+    strideA = B.shape[1]*B.shape[2]
+    strideB = A.shape[1]*A.shape[2]
+    strideC = A.shape[1]*B.shape[2]
+
+    ptr = CUBLAS_Context.get_instance().context
+
+    lib.cbatched_gemmi(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
+               get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc),
+               ct.c_long(strideA), ct.c_long(strideB), ct.c_long(strideC), ct.c_uint32(num_batch))
+    return out
