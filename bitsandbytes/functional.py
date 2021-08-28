@@ -510,10 +510,13 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
     return current_gnorm, clip_value, gnorm_scale
 
 
-def imatmul(A: Tensor, B: Tensor, out: Tensor=None):
+def gemmi(A: Tensor, B: Tensor, out: Tensor=None):
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
     assert len(A.shape) in [2, 3] and len(B.shape) in [2, 3]
+    if len(A.shape) == 3 and len(B.shape) == 3:
+        if A.shape[0] == B.shape[0] and A.shape[2] == B.shape[1]:
+            return batched_gemmi(A, B, out)
     if not torch.cuda.is_initialized(): torch.cuda.init()
     transposed_A = False
     # this is a mess: cuBLAS expect column major, but PyTorch is row major.
@@ -571,7 +574,7 @@ def imatmul(A: Tensor, B: Tensor, out: Tensor=None):
     return out
 
 
-def ibmm(A: Tensor, B: Tensor, out: Tensor=None):
+def batched_gemmi(A: Tensor, B: Tensor, out: Tensor=None):
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
     assert len(A.shape) == 3 and len(B.shape) == 3
@@ -614,3 +617,48 @@ def ibmm(A: Tensor, B: Tensor, out: Tensor=None):
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc),
                ct.c_long(strideA), ct.c_long(strideB), ct.c_long(strideC), ct.c_uint32(num_batch))
     return out
+
+C = 127.49
+
+def vectorwise_quant(x, dim=1, quant_type='vector'):
+    if quant_type == 'linear':
+        max1 = torch.abs(x).max().float()
+        xq = torch.round(x/max1*127).to(torch.int8)
+        return xq, max1
+    elif quant_type == 'vector':
+        max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
+        xq = torch.round(x/max1*C).to(torch.int8)
+        return xq, max1
+    elif quant_type == 'min-max':
+        maxA = torch.amax(x, dim=dim, keepdim=True).float()
+        minA = torch.amin(x, dim=dim, keepdim=True).float()
+        scale = (maxA-minA)/2.0
+        xq = torch.round(127*(x-minA-scale)/scale).to(torch.int8)
+        return xq, (minA.float(), scale.float())
+    else: return None
+
+def vectorwise_dequant(xq, max1, quant_type='vector'):
+    if quant_type == 'vector':
+        x = (xq/C*max1).to(torch.float32)
+        return x
+    else: return None
+
+def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
+    if quant_type == 'linear':
+        norm = S1*S2/(C*C)
+        # double cast needed to prevent overflows
+        return (xq.float()*norm).to(dtype)
+    elif quant_type == 'vector':
+        x = xq.float()
+        #if len(xq.shape) == 2 and len(S1.shape) == 3: S1 = S1.squeeze(0)
+        #if len(xq.shape) == 2 and len(S2.shape) == 3: S2 = S2.squeeze(0)
+        #print(x.shape, S1.shape, S2.shape)
+        print(x.shape, S1.shape)
+        if len(S1.shape) == 2:
+            x *= S1/C
+        else:
+            x *= S1/C
+        print(x.shape, S2.shape)
+        x *= S2/C
+        return x.to(dtype)
+    else: return None
