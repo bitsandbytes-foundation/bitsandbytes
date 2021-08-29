@@ -340,6 +340,7 @@ def test_igemm(seq_dim, hidden_dim, batch_dim, transpose):
 
 
 n = 3
+k = 25
 seq_dim = torch.randint(32,512, size=(n,)).tolist()
 hidden_dim = torch.randint(32,1024*4, size=(n,)).tolist()
 batch_dim = torch.randint(2,16, size=(n,)).tolist()
@@ -350,7 +351,7 @@ def test_igemm_dim3(seq_dim, hidden_dim, batch_dim):
     seq_dim = seq_dim - (seq_dim % 32)
     hidden_dim = hidden_dim - (hidden_dim % 32)
     batch_dim = batch_dim - (batch_dim % 2)
-    for i in range(100):
+    for i in range(25):
         A = torch.randint(-128, 127, size=(batch_dim, seq_dim, hidden_dim), device='cuda').to(torch.int8)
         B = torch.randint(-128, 127, size=(batch_dim, seq_dim, 1024), device='cuda').to(torch.int8)
         out2 = torch.einsum('bsi, bso->io', A.float(), B.float())
@@ -360,6 +361,7 @@ def test_igemm_dim3(seq_dim, hidden_dim, batch_dim):
         torch.testing.assert_allclose(out.float(), out2)
 
 n = 3
+k = 50
 seq_dim = torch.randint(32,512, size=(n,)).tolist()
 hidden_dim = torch.randint(32,1024*4, size=(n,)).tolist()
 batch_dim = torch.randint(2,16, size=(n,)).tolist()
@@ -378,13 +380,12 @@ def test_minmax_igemm(seq_dim, hidden_dim, batch_dim, transpose):
     seq_dim = seq_dim - (seq_dim % 16)
     hidden_dim = hidden_dim - (hidden_dim % 16)
     batch_dim = batch_dim - (batch_dim % 2)
-    print('')
     errs = []
     relerrs = []
     errs2 = []
     relerrs2 = []
-    for i in range(100):
-        A = torch.abs(torch.normal(0.0, 0.5, size=(batch_dim, seq_dim, hidden_dim), device='cuda')) + 0.2
+    for i in range(k):
+        A = torch.normal(0.0, 0.5, size=(batch_dim, seq_dim, hidden_dim), device='cuda')
         if transpose:
             B = torch.normal(0, 0.5, size=(1024, hidden_dim), device='cuda')
         else:
@@ -414,29 +415,29 @@ def test_minmax_igemm(seq_dim, hidden_dim, batch_dim, transpose):
             out3 = mm_dequant(maxA, maxB, out3)
 
         std = out2.std()
-        #out2 /= std
-        #out /= std
-        #out3 /= std
+        out2 /= std
+        out /= std
+        out3 /= std
 
         err = torch.abs(out-out2)
-        relerr = err/(torch.abs(out2)+1e-8)
+        relerr = err/(torch.abs(out2)+1e-7)
 
         err2 = torch.abs(out3-out2)
-        relerr2 = err2/(torch.abs(out2)+1e-8)
+        relerr2 = err2/(torch.abs(out2)+1e-7)
 
         errs.append(err.mean().item())
         relerrs.append(relerr.mean().item())
         errs2.append(err2.mean().item())
         relerrs2.append(relerr2.mean().item())
-    print(mean(errs))
-    print(mean(relerrs))
-    print(mean(errs2))
-    print(mean(relerrs2))
-    #assert mean(errs) < 0.01
-    #assert mean(relerrs) < 0.3
+    #print(mean(errs))
+    #print(mean(relerrs))
+    #print(mean(errs2))
+    #print(mean(relerrs2))
+    assert mean(errs) < 0.015
+    assert mean(relerrs) < 0.3
 
 n = 2
-k = 100
+k = 25
 dim1 = torch.randint(1,64, size=(n,)).tolist()
 dim2 = torch.randint(32,128, size=(n,)).tolist()
 dim3 = torch.randint(32,256, size=(n,)).tolist()
