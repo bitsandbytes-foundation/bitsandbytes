@@ -447,7 +447,6 @@ def test_ibmm(dim1, dim2, dim3, dim4):
     dim2 = dim2 - (dim2 % 16)
     dim3 = dim3 - (dim3 % 16)
     dim4 = dim4 - (dim4 % 16)
-    print(dim1, dim2, dim3, dim4)
     for i in range(k):
         A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device='cuda').to(torch.int8)
         B = torch.randint(-128, 127, size=(dim1, dim3, dim4), device='cuda').to(torch.int8)

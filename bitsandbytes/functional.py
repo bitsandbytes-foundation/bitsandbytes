@@ -603,13 +603,13 @@ def batched_gemmi(A: Tensor, B: Tensor, out: Tensor=None):
     m = B.shape[2]
     k = B.shape[1]
 
-    lda = n
+    lda = m
     ldb = k
-    ldc = n
+    ldc = m
 
     strideA = B.shape[1]*B.shape[2]
     strideB = A.shape[1]*A.shape[2]
-    strideC = A.shape[1]*B.shape[2]
+    strideC = out.shape[1]*out.shape[2]
 
     ptr = CUBLAS_Context.get_instance().context
 
@@ -650,15 +650,10 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
         return (xq.float()*norm).to(dtype)
     elif quant_type == 'vector':
         x = xq.float()
-        #if len(xq.shape) == 2 and len(S1.shape) == 3: S1 = S1.squeeze(0)
-        #if len(xq.shape) == 2 and len(S2.shape) == 3: S2 = S2.squeeze(0)
-        #print(x.shape, S1.shape, S2.shape)
-        print(x.shape, S1.shape)
         if len(S1.shape) == 2:
             x *= S1/C
         else:
             x *= S1/C
-        print(x.shape, S2.shape)
         x *= S2/C
         return x.to(dtype)
     else: return None
