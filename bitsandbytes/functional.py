@@ -510,15 +510,77 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
     return current_gnorm, clip_value, gnorm_scale
 
 
-def gemmi(A: Tensor, B: Tensor, out: Tensor=None):
-    assert A.dtype == torch.int8
-    assert B.dtype == torch.int8
-    assert len(A.shape) in [2, 3] and len(B.shape) in [2, 3]
+def check_matmul(A, B, out, transposed_A, transposed_B):
+    if not torch.cuda.is_initialized(): torch.cuda.init()
+    if A.dtype != torch.int8 or B.dtype != torch.int8:
+        raise TypeError(f'Expected torch.int8 input tensors A and B, but got {A.dtype} and {B.dtype}')
+
+    sA = A.shape
+    sB = B.shape
+    tA = transposed_A
+    tB = transposed_B
+
+    correct = True
+
+    if len(sA) == 2 and len(sB) == 2:
+        if not tA and not tB and A.shape[1] != B.shape[0]: correct = False
+        elif tA and not tB and A.shape[0] != B.shape[0]: correct = False
+        elif tA and tB and A.shape[0] != B.shape[1]: correct = False
+        elif not tA and tB and A.shape[1] != B.shape[1]: correct = False
+    elif len(sA) == 3 and len(sB) == 2:
+        if not tA and not tB and A.shape[2] != B.shape[0]: correct = False
+        elif tA and not tB and A.shape[1] != B.shape[0]: correct = False
+        elif tA and tB and A.shape[1] != B.shape[1]: correct = False
+        elif not tA and tB and A.shape[2] != B.shape[1]: correct = False
+    elif len(sA) == 3 and len(sB) == 3:
+        if not tA and not tB and A.shape[2] != B.shape[1]: correct = False
+        elif tA and not tB and A.shape[1] != B.shape[1]: correct = False
+        elif tA and tB and A.shape[1] != B.shape[2]: correct = False
+        elif not tA and tB and A.shape[2] != B.shape[2]: correct = False
+
+    if out is not None:
+        sout = out.shape
+        # special case common in backprop
+        if not correct and len(sA) == 3 and len(sB) == 3:
+            if (sout[0] == sA[2] and sout[1] == sB[2] and
+                  sA[0] == sB[0] and   sA[1] == sB[1]):
+                correct = True
+    else:
+        if len(sA) == 2 and len(sB) == 2:
+            if not tA and not tB: sout = (sA[0], sB[1])
+            elif tA and tB: sout = (sA[1], sB[0])
+            elif tA and not tB: sout = (sA[1], sB[1])
+            elif not tA and tB: sout = (sA[0], sB[0])
+        elif len(sA) == 3 and len(sB) == 2:
+            if not tA and not tB: sout = (sA[0], sA[1], sB[1])
+            elif tA and tB: sout = (sA[0], sA[2], sB[0])
+            elif tA and not tB: sout = (sA[0], sA[2], sB[1])
+            elif not tA and tB: sout = (sA[0], sA[1], sB[0])
+        elif len(sA) == 3 and len(sB) == 3:
+            if not tA and not tB: sout = (sA[0], sA[1], sB[2])
+            elif tA and tB: sout = (sA[0], sA[2], sB[1])
+            elif tA and not tB: sout = (sA[0], sA[2], sB[2])
+            elif not tA and tB: sout = (sA[0], sA[1], sB[1])
+
+
+    if not correct:
+        raise ValueError(f'Tensor dimensions incorrect for matrix mulitiplication: A x B: {sA} x {sB} with transpose for A x B: {tA} x {tB}.')
+
+    return sout
+
+def igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transposed_B=False):
+    sout = check_matmul(A, B, out, transposed_A, transposed_B)
+    if out is None: out = torch.zeros(size=sout, dtype=torch.int32, device=A.device)
     if len(A.shape) == 3 and len(B.shape) == 3:
         if A.shape[0] == B.shape[0] and A.shape[2] == B.shape[1]:
-            return batched_gemmi(A, B, out)
-    if not torch.cuda.is_initialized(): torch.cuda.init()
-    transposed_A = False
+            return batched_igemm(A, B, out)
+
+    sA = A.shape
+    sB = B.shape
+    if transposed_A and len(sA) == 2: sA = (sA[1], sA[0])
+    elif transposed_A and len(sA) == 3: sA = (sA[0], sA[2], sA[0])
+    if transposed_B and len(sB) == 2: sB = (sB[1], sB[0])
+    elif transposed_B and len(sB) == 3: sB = (sB[0], sB[2], sB[0])
     # this is a mess: cuBLAS expect column major, but PyTorch is row major.
     # So to perform the matrix multiplication, we have to treat A, B, and C matrices
     # (transpose of row major is column major)
@@ -528,67 +590,55 @@ def gemmi(A: Tensor, B: Tensor, out: Tensor=None):
     # column major: A @ B = C: [m, k] @ [k, n] = [m, n]
     # row major: B^T @ A^T = C^T: [m, k] @ [k, n] = [m, n]
     # column major with row major layout: B^T @ A^T = C^T: [k, m] @ [n, k] = [n, m]
-    if len(B.shape) == 2:
+    if len(sB) == 2:
         if A.shape[-1] == B.shape[0] and B.stride()[0] == B.shape[1]: transposed_B = False
         elif A.shape[-1] == B.shape[0] and B.stride()[1] == B.shape[0]: transposed_B = True
-        else:
-            raise ValueError(f'Misaligned matrices with shapes A x B: {A.shape} x {B.shape} with strideB: {B.stride()}')
-        if len(A.shape) == 2:
-            if out is None: out = torch.zeros(A.shape[0], B.shape[1], dtype=torch.int32, device=A.device)
-            n = A.shape[0]
-            ldb = A.shape[1]
-        elif len(A.shape) == 3 and len(B.shape) == 2:
-            if out is None: out = torch.zeros(A.shape[0], A.shape[1], B.shape[1], dtype=torch.int32, device=A.device)
-            n = A.shape[0]*A.shape[1]
-            ldb = A.shape[2]
+        if len(sA) == 2:
+            n = sA[0]
+            ldb = sA[1]
+        elif len(sA) == 3 and len(sB) == 2:
+            n = sA[0]*sA[1]
+            ldb = sA[2]
 
 
-        m = B.shape[1]
-        k = B.shape[0]
+        m = sB[1]
+        k = sB[0]
         lda = B.stride()[(1 if transposed_B else 0)]
-        ldc = B.shape[1]
-    elif len(B.shape) == 3:
-        assert len(A.shape) == 3
-        if not (A.shape[0] == B.shape[0] and A.shape[1] == B.shape[1]):
-            raise ValueError(f'Only bsi,bso->io supported for tensor contractions, but dims for A x B were: {A.shape} x {B.shape}')
+        ldc = sB[1]
+    elif len(sB) == 3:
+        # special case
+        assert len(sA) == 3
+        if not (sA[0] == sB[0] and sA[1] == sB[1]):
+            raise ValueError(f'Only bsi,bso->io supported for tensor contractions, but dims for A x B were: {sA} x {sB}')
 
-        if out is None: out = torch.zeros(A.shape[-1], B.shape[-1], dtype=torch.int32, device=A.device)
         transposed_A = True
         transposed_B = False
 
-        m = B.shape[2]
-        n = A.shape[2]
-        k = B.shape[0]*B.shape[1]
+        m = sB[2]
+        n = sA[2]
+        k = sB[0]*sB[1]
 
-        ldb = A.stride()[1]
-        lda = B.stride()[1]
-        ldc = B.shape[2]
+        lda = m
+        ldb = sA[2]
+        ldc = m
 
 
     ptr = CUBLAS_Context.get_instance().context
 
     # B^T @ A^T = C^T
     # [km, nk -> mn] 
-    lib.cgemmi(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
+    lib.cigemm(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
     return out
 
 
-def batched_gemmi(A: Tensor, B: Tensor, out: Tensor=None):
-    assert A.dtype == torch.int8
-    assert B.dtype == torch.int8
-    assert len(A.shape) == 3 and len(B.shape) == 3
-    assert A.shape[0] == B.shape[0]
-    if not torch.cuda.is_initialized(): torch.cuda.init()
-
-    num_batch = A.shape[0]
-    transposed_A = False
+def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transposed_B=False):
+    if not len(A.shape) == 3 or not len(B.shape) == 3:
+        raise ValueError(f'Expected 3-dimensional tensors for bmm, but got shapes A and B: {A.shape} and {B.shape}')
+    sout = check_matmul(A, B, out, transposed_A, transposed_B)
+    if out is None: out = torch.zeros(size=sout, dtype=torch.int32, device=A.device)
     if A.shape[-1] == B.shape[1] and B.stride()[1] == B.shape[2]: transposed_B = False
     elif A.shape[-1] == B.shape[1] and B.stride()[2] == B.shape[1]: transposed_B = True
-    else:
-        raise ValueError(f'Misaligned matrices with shapes A x B: {A.shape} x {B.shape} with strideB: {B.stride()}')
-
-    if out is None: out = torch.zeros(num_batch, A.shape[1], B.shape[2], dtype=torch.int32, device=A.device)
 
     # this is a mess: cuBLAS expect column major, but PyTorch is row major.
     # So to perform the matrix multiplication, we have to treat A, B, and C matrices
@@ -599,21 +649,22 @@ def batched_gemmi(A: Tensor, B: Tensor, out: Tensor=None):
     # column major: A @ B = C: [batch, m, k] @ [batch, k, n] = [batch, m, n]
     # row major: B^T @ A^T = C^T: [batch, m, k] @ [batch, k, n] = [batch, m, n]
     # column major with row major layout: B^T @ A^T = C^T: [batch, k, m] @ [batch, n, k] = [batch, n, m]
+    num_batch = A.shape[0]
     n = A.shape[1]
     m = B.shape[2]
     k = B.shape[1]
 
-    lda = m
+    lda = B.stride()[2 if transposed_B else 1]
     ldb = k
     ldc = m
 
     strideA = B.shape[1]*B.shape[2]
     strideB = A.shape[1]*A.shape[2]
-    strideC = out.shape[1]*out.shape[2]
+    strideC = A.shape[1]*B.shape[2]
 
     ptr = CUBLAS_Context.get_instance().context
 
-    lib.cbatched_gemmi(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
+    lib.cbatched_igemm(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc),
                ct.c_long(strideA), ct.c_long(strideB), ct.c_long(strideC), ct.c_uint32(num_batch))
     return out
@@ -650,9 +701,12 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
         return (xq.float()*norm).to(dtype)
     elif quant_type == 'vector':
         x = xq.float()
+        #if len(S1.shape) == 3: S1 = S1.squeeze(0)
+        #if len(S2.shape) == 3: S1 = S2.squeeze(0)
         if len(S1.shape) == 2:
             x *= S1/C
         else:
+            if x.shape[0] == S1.shape[1]: S1 = S1.t()
             x *= S1/C
         x *= S2/C
         return x.to(dtype)
