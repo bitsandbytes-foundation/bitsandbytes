@@ -251,7 +251,7 @@ values = list(product(dim1,dim2, methods, batched))
 values_names = list(product(dim1,dim2, method_names, batched))
 names = ['dim1_{0}_dim2_{1}_quant_{2}_batched_{3}'.format(*vals) for vals in values_names]
 @pytest.mark.parametrize("dim1, dim2, quant_methods, batched", values, ids=names)
-def test_igemm_approx(dim1, dim2, quant_methods, batched):
+def test_approx_igemm(dim1, dim2, quant_methods, batched):
     dim1 = dim1 - (dim1 % 32)
     dim2 = dim2 - (dim2 % 32)
     errors = []
@@ -318,23 +318,33 @@ def test_stable_embedding():
 
 
 n = 3
-seq_dim = torch.randint(32,512, size=(n,)).tolist()
+k = 100
 hidden_dim = torch.randint(32,1024*4, size=(n,)).tolist()
-batch_dim = torch.randint(2,16, size=(n,)).tolist()
-transpose = [False, True]
-values = list(product(seq_dim,hidden_dim,batch_dim, transpose))
-names = ['seq_dim{0}_hidden_dim{1}_batch_dim{2},transpose{3}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim, transpose", values, ids=names)
-def test_igemm(seq_dim, hidden_dim, batch_dim, transpose):
-    seq_dim = seq_dim - (seq_dim % 32)
+batch_dim = torch.randint(16,1024, size=(n,)).tolist()
+transpose = [(False, False), (False, True), (True, False), (True, True)]
+values = list(product(hidden_dim,batch_dim, transpose))
+names = ['hidden_dim_{0}_batch_dim_{1},transpose_{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("hidden_dim, batch_dim, transpose", values, ids=names)
+def test_igemm(hidden_dim, batch_dim, transpose):
     hidden_dim = hidden_dim - (hidden_dim % 32)
-    batch_dim = batch_dim - (batch_dim % 2)
-    for i in range(100):
-        A = torch.randint(-128, 127, size=(batch_dim, seq_dim, hidden_dim), device='cuda').to(torch.int8)
-        shapeB = ((32*random.randint(1, 4), hidden_dim) if transpose else (hidden_dim, 32*random.randint(1, 4)))
+    batch_dim = batch_dim - (batch_dim % 16)
+    for i in range(k):
+        shapeA = (batch_dim, hidden_dim) if not transpose[0] else (hidden_dim, batch_dim)
+        shapeB = ((32*random.randint(1, 4), hidden_dim) if transpose[1] else (hidden_dim, 32*random.randint(1, 4)))
+        A = torch.randint(-128, 127, size=shapeA, device='cuda').to(torch.int8)
         B = torch.randint(-128, 127, size=shapeB, device='cuda').to(torch.int8)
-        out2 = torch.matmul(A.float(), B.t().float() if transpose else B.float())
-        out = F.igemm(A, B.t() if transpose else B)
+        if not transpose[0] and not transpose[1]:
+            out2 = torch.matmul(A.float(), B.float())
+            out = F.igemm(A, B)
+        elif not transpose[0] and transpose[1]:
+            out2 = torch.matmul(A.float(), B.t().float())
+            out = F.igemm(A, B.t())
+        elif transpose[0] and not transpose[1]:
+            out2 = torch.matmul(A.t().float(), B.float())
+            out = F.igemm(A.t(), B)
+        elif transpose[0] and transpose[1]:
+            out2 = torch.matmul(A.t().float(), B.t().float())
+            out = F.igemm(A.t(), B.t())
 
         torch.testing.assert_allclose(out.float(), out2)
 
@@ -347,7 +357,7 @@ batch_dim = torch.randint(2,16, size=(n,)).tolist()
 values = list(product(seq_dim,hidden_dim,batch_dim))
 names = ['seq_dim{0}_hidden_dim{1}_batch_dim{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim", values, ids=names)
-def test_igemm_dim3(seq_dim, hidden_dim, batch_dim):
+def test_dim3_igemm(seq_dim, hidden_dim, batch_dim):
     seq_dim = seq_dim - (seq_dim % 32)
     hidden_dim = hidden_dim - (hidden_dim % 32)
     batch_dim = batch_dim - (batch_dim % 2)
@@ -442,7 +452,7 @@ dim1 = torch.randint(1,64, size=(n,)).tolist()
 dim2 = torch.randint(32,128, size=(n,)).tolist()
 dim3 = torch.randint(32,256, size=(n,)).tolist()
 dim4 = torch.randint(32,256, size=(n,)).tolist()
-transpose = [False, True]
+transpose = [(False, False), (True, False), (False, True), (True, True)]
 values = list(product(dim1,dim2,dim3,dim4,transpose))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_transpose_{4}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, transpose", values, ids=names)
@@ -451,12 +461,23 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
     dim3 = dim3 - (dim3 % 16)
     dim4 = dim4 - (dim4 % 16)
     for i in range(k):
+        shapeA = (dim1, dim3, dim2) if transpose[0] else (dim1, dim2, dim3)
+        shapeB = (dim1, dim4, dim3) if transpose[1] else (dim1, dim3, dim4)
         A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device='cuda').to(torch.int8)
-        shapeB = (dim1, dim4, dim3) if transpose else (dim1, dim3, dim4)
         B = torch.randint(-128, 127, size=shapeB, device='cuda').to(torch.int8)
-        if transpose: B = B.permute([0, 2, 1])
-        out2 = torch.bmm(A.float(), B.float())
-        out = F.igemm(A, B)
+
+        if not transpose[0] and not transpose[1]:
+            out2 = torch.bmm(A.float(), B.float())
+            out = F.igemm(A, B)
+        elif not transpose[0] and transpose[1]:
+            out2 = torch.bmm(A.float(), B.permute([0, 2, 1]).float())
+            out = F.igemm(A, B.permute([0, 2, 1]))
+        elif transpose[0] and not transpose[1]:
+            out2 = torch.bmm(A.permute([0, 2, 1]).float(), B.float())
+            out = F.igemm(A.permute([0, 2, 1]), B)
+        elif transpose[0] and transpose[1]:
+            out2 = torch.bmm(A.permute([0, 2, 1]).float(), B.permute([0, 2, 1]).float())
+            out = F.igemm(A.permute([0, 2, 1]), B.permute([0, 2, 1]))
         torch.testing.assert_allclose(out.float(), out2.float())
 
 n = 1

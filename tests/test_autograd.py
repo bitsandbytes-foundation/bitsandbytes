@@ -15,12 +15,14 @@ funcs = [(torch.mm, bnb.mm), (torch.bmm, bnb.bmm), (torch.matmul, bnb.matmul)]
 str_funcs = ['mm', 'bmm', 'matmul']
 req_grad = [(False, False), (True, False), (True, True), (False, True)]
 req_grad_str = ['FF', 'TF', 'TT', 'FT']
+transpose = [(False, False), (False, True), (True, True), (True, False)]
+str_transpose = ['FF', 'FT', 'TT', 'TF']
 dtype = [torch.float32, torch.float16]
-values = list(product(dim1,dim2,dim3,dim4,funcs, dtype, req_grad))
-str_values = list(product(dim1,dim2,dim3,dim4,str_funcs, dtype, req_grad_str))
-names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_func_{4}_dtype_{5}_requires_grad_{6}'.format(*vals) for vals in str_values]
-@pytest.mark.parametrize("dim1, dim2, dim3, dim4, funcs, dtype, req_grad", values, ids=names)
-def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad):
+values = list(product(dim1,dim2,dim3,dim4,funcs, dtype, req_grad, transpose))
+str_values = list(product(dim1,dim2,dim3,dim4,str_funcs, dtype, req_grad_str, str_transpose))
+names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_func_{4}_dtype_{5}_requires_grad_{6}_transpose_{7}'.format(*vals) for vals in str_values]
+@pytest.mark.parametrize("dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose", values, ids=names)
+def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
     dim2 = dim2 - (dim2 % 16)
     dim3 = dim3 - (dim3 % 16)
     dim4 = dim4 - (dim4 % 16)
@@ -28,13 +30,25 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad):
 
         # normal multiply
         if funcs[0] in [torch.mm, torch.matmul]:
-            A = torch.randn(size=(dim2, dim3), device='cuda', requires_grad=req_grad[0])
-            B = torch.randn(size=(dim3, dim4), device='cuda', requires_grad=req_grad[1])
+            dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
+            dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
+            A = torch.randn(size=dimA, device='cuda', requires_grad=req_grad[0])
+            B = torch.randn(size=dimB, device='cuda', requires_grad=req_grad[1])
             target = torch.randn(size=(dim2, dim4), device='cuda', requires_grad=req_grad[1])
             torch.nn.init.xavier_uniform_(B)
 
-            out_torch = funcs[0](A, B)
-            out_bnb = funcs[1](A, B)
+            if not transpose[0] and not transpose[1]:
+                out_torch = funcs[0](A, B)
+                out_bnb = funcs[1](A, B)
+            elif not transpose[0] and transpose[1]:
+                out_torch = funcs[0](A, B.t())
+                out_bnb = funcs[1](A, B.t())
+            elif transpose[0] and not transpose[1]:
+                out_torch = funcs[0](A.t(), B)
+                out_bnb = funcs[1](A.t(), B)
+            elif transpose[0] and transpose[1]:
+                out_torch = funcs[0](A.t(), B.t())
+                out_bnb = funcs[1](A.t(), B.t())
 
             n = out_bnb.numel()
             idx = torch.isclose(out_bnb, out_torch, atol=0.01, rtol=0.1)
@@ -113,13 +127,18 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad):
         if funcs[0] in [torch.matmul]:
             dim1 = dim1 - (dim1 % 16)
             A = torch.randn(size=(dim1, dim2, dim3), device='cuda', requires_grad=req_grad[0])
-            B = torch.randn(size=(dim3, dim4), device='cuda', requires_grad=req_grad[1])
+            dimB = (dim4, dim3) if transpose[1] else (dim3, dim4)
+            B = torch.randn(size=dimB, device='cuda', requires_grad=req_grad[1])
             target = torch.randn(size=(dim1, dim2, dim4), device='cuda', requires_grad=req_grad[1])
             torch.nn.init.xavier_uniform_(B)
 
             #out_torch = torch.einsum('bsi,io->bso',A, B)
-            out_torch = funcs[0](A, B)
-            out_bnb = funcs[1](A, B)
+            if transpose[1]:
+                out_torch = funcs[0](A, B.t())
+                out_bnb = funcs[1](A, B.t())
+            else:
+                out_torch = funcs[0](A, B)
+                out_bnb = funcs[1](A, B)
 
             n = out_bnb.numel()
             idx = torch.isclose(out_bnb, out_torch, atol=0.01, rtol=0.1)

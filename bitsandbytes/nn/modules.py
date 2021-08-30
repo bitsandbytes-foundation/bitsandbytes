@@ -47,8 +47,8 @@ class Linear8bit(nn.Linear):
 
     def forward(self, x):
         out = bnb.matmul(x, self.weight.t())
-        #if self.bias is not None:
-            #out += self.bias.unsqueeze(0).expand_as(out)
+        if self.bias is not None:
+            out += self.bias.unsqueeze(0).expand_as(out)
         return out
 
 

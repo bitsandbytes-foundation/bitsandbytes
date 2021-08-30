@@ -591,11 +591,13 @@ def igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transposed
     # row major: B^T @ A^T = C^T: [m, k] @ [k, n] = [m, n]
     # column major with row major layout: B^T @ A^T = C^T: [k, m] @ [n, k] = [n, m]
     if len(sB) == 2:
-        if A.shape[-1] == B.shape[0] and B.stride()[0] == B.shape[1]: transposed_B = False
-        elif A.shape[-1] == B.shape[0] and B.stride()[1] == B.shape[0]: transposed_B = True
+        if  B.stride()[0] == B.shape[1]: transposed_B = False
+        elif B.stride()[1] == B.shape[0]: transposed_B = True
+        if A.stride()[0] == A.shape[1]: transposed_A = False
+        elif A.stride()[1] == A.shape[0]: transposed_A = True
         if len(sA) == 2:
             n = sA[0]
-            ldb = sA[1]
+            ldb = A.stride()[1 if transposed_A else 0]
         elif len(sA) == 3 and len(sB) == 2:
             n = sA[0]*sA[1]
             ldb = sA[2]
@@ -669,7 +671,7 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
                ct.c_long(strideA), ct.c_long(strideB), ct.c_long(strideC), ct.c_uint32(num_batch))
     return out
 
-C = 127.49
+C = 127
 
 def vectorwise_quant(x, dim=1, quant_type='vector'):
     if quant_type == 'linear':
