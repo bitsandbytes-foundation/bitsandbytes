@@ -319,15 +319,17 @@ def test_stable_embedding():
 
 n = 3
 k = 100
-hidden_dim = torch.randint(32,1024*4, size=(n,)).tolist()
-batch_dim = torch.randint(16,1024, size=(n,)).tolist()
+hidden_dim = torch.randint(32,256, size=(n,)).tolist()
+batch_dim = torch.randint(16,256, size=(n,)).tolist()
+seq_dim = torch.randint(16,256, size=(n,)).tolist()
 transpose = [(False, False), (False, True), (True, False), (True, True)]
-values = list(product(hidden_dim,batch_dim, transpose))
-names = ['hidden_dim_{0}_batch_dim_{1},transpose_{2}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("hidden_dim, batch_dim, transpose", values, ids=names)
-def test_igemm(hidden_dim, batch_dim, transpose):
+values = list(product(hidden_dim,batch_dim, transpose, seq_dim))
+names = ['hidden_dim_{0}_batch_dim_{1},transpose_{2}_seq_dim_{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("hidden_dim, batch_dim, transpose, seq_dim", values, ids=names)
+def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
     hidden_dim = hidden_dim - (hidden_dim % 32)
     batch_dim = batch_dim - (batch_dim % 16)
+    seq_dim = seq_dim - (seq_dim % 16)
     for i in range(k):
         shapeA = (batch_dim, hidden_dim) if not transpose[0] else (hidden_dim, batch_dim)
         shapeB = ((32*random.randint(1, 4), hidden_dim) if transpose[1] else (hidden_dim, 32*random.randint(1, 4)))
@@ -345,6 +347,20 @@ def test_igemm(hidden_dim, batch_dim, transpose):
         elif transpose[0] and transpose[1]:
             out2 = torch.matmul(A.t().float(), B.t().float())
             out = F.igemm(A.t(), B.t())
+
+        torch.testing.assert_allclose(out.float(), out2)
+
+    for i in range(k):
+        shapeA = (batch_dim, seq_dim, hidden_dim)
+        shapeB = ((32*random.randint(1, 4), hidden_dim) if transpose[1] else (hidden_dim, 32*random.randint(1, 4)))
+        A = torch.randint(-128, 127, size=shapeA, device='cuda').to(torch.int8)
+        B = torch.randint(-128, 127, size=shapeB, device='cuda').to(torch.int8)
+        if not transpose[0] and not transpose[1]:
+            out2 = torch.matmul(A.float(), B.float())
+            out = F.igemm(A, B)
+        elif not transpose[0] and transpose[1]:
+            out2 = torch.matmul(A.float(), B.t().float())
+            out = F.igemm(A, B.t())
 
         torch.testing.assert_allclose(out.float(), out2)
 
@@ -463,7 +479,7 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
     for i in range(k):
         shapeA = (dim1, dim3, dim2) if transpose[0] else (dim1, dim2, dim3)
         shapeB = (dim1, dim4, dim3) if transpose[1] else (dim1, dim3, dim4)
-        A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device='cuda').to(torch.int8)
+        A = torch.randint(-128, 127, size=shapeA, device='cuda').to(torch.int8)
         B = torch.randint(-128, 127, size=shapeB, device='cuda').to(torch.int8)
 
         if not transpose[0] and not transpose[1]:

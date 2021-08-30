@@ -593,8 +593,13 @@ def igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transposed
     if len(sB) == 2:
         if  B.stride()[0] == B.shape[1]: transposed_B = False
         elif B.stride()[1] == B.shape[0]: transposed_B = True
-        if A.stride()[0] == A.shape[1]: transposed_A = False
-        elif A.stride()[1] == A.shape[0]: transposed_A = True
+        if len(A.shape) == 2:
+            if A.stride()[0] == A.shape[1]: transposed_A = False
+            elif A.stride()[1] == A.shape[0]: transposed_A = True
+        else:
+            if A.stride()[1] == A.shape[2]: transposed_A = False
+            elif A.stride()[2] == A.shape[1]: transposed_A = True
+
         if len(sA) == 2:
             n = sA[0]
             ldb = A.stride()[1 if transposed_A else 0]
@@ -639,8 +644,10 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
         raise ValueError(f'Expected 3-dimensional tensors for bmm, but got shapes A and B: {A.shape} and {B.shape}')
     sout = check_matmul(A, B, out, transposed_A, transposed_B)
     if out is None: out = torch.zeros(size=sout, dtype=torch.int32, device=A.device)
-    if A.shape[-1] == B.shape[1] and B.stride()[1] == B.shape[2]: transposed_B = False
-    elif A.shape[-1] == B.shape[1] and B.stride()[2] == B.shape[1]: transposed_B = True
+    if B.stride()[1] == B.shape[2]: transposed_B = False
+    elif B.stride()[2] == B.shape[1]: transposed_B = True
+    if A.stride()[1] == A.shape[2]: transposed_A = False
+    elif A.stride()[2] == A.shape[1]: transposed_A = True
 
     # this is a mess: cuBLAS expect column major, but PyTorch is row major.
     # So to perform the matrix multiplication, we have to treat A, B, and C matrices
@@ -657,7 +664,7 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
     k = B.shape[1]
 
     lda = B.stride()[2 if transposed_B else 1]
-    ldb = k
+    ldb = A.stride()[2 if transposed_A else 1]
     ldc = m
 
     strideA = B.shape[1]*B.shape[2]

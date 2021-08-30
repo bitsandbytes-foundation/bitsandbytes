@@ -132,7 +132,6 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
             target = torch.randn(size=(dim1, dim2, dim4), device='cuda', requires_grad=req_grad[1])
             torch.nn.init.xavier_uniform_(B)
 
-            #out_torch = torch.einsum('bsi,io->bso',A, B)
             if transpose[1]:
                 out_torch = funcs[0](A, B.t())
                 out_bnb = funcs[1](A, B.t())
