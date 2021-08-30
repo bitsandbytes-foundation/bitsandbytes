@@ -42,14 +42,10 @@ class MatMul8bit(torch.autograd.Function):
                 # bs -> sb
                 permute_dim = [1, 0]
             if len(B.shape) == 2 and len(A.shape) == 3:
-                #qgrad_output, S1 = F.vectorwise_quant(grad_output.view(-1, grad_output.shape[2]), dim=0, quant_type=quant_type)
-                #qA, S2 = F.vectorwise_quant(A.view(-1, A.shape[2]), dim=0, quant_type=quant_type)
-                qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=[0, 1], quant_type=quant_type)
-                qA, S2 = F.vectorwise_quant(A, dim=[0, 1], quant_type=quant_type)
-                igrad_B = torch.zeros_like(B, dtype=torch.int32)
-                F.igemm(qA, qgrad_output, out=igrad_B)
-                #print(qA.shape, qgrad_output.shape)
-                grad_B = F.vectorwise_mm_dequant(igrad_B, S2.permute([0, 2, 1]), S1, grad_output.dtype, quant_type)
+                qgrad_output, S1 = F.vectorwise_quant(grad_output.view(-1, grad_output.shape[2]), dim=0, quant_type=quant_type)
+                qA, S2 = F.vectorwise_quant(A.view(-1, A.shape[2]), dim=0, quant_type=quant_type)
+                igrad_B = F.igemm(qA.t(), qgrad_output)
+                grad_B = F.vectorwise_mm_dequant(igrad_B, S2.t(), S1, grad_output.dtype, quant_type)
             else:
                 qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
                 qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
