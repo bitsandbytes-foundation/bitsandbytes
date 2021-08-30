@@ -12,15 +12,15 @@ class MatMul8bit(torch.autograd.Function):
         iout = F.igemm(qA, qB)
         output = F.vectorwise_mm_dequant(iout, SA, SB, A.dtype, quant_type)
 
-        if A.requires_grad and B.requires_grad:
-            ctx.save_for_backward(A, B)
-        # in some rare cases, the following cases can save some memory
-        elif A.requires_grad and not B.requires_grad:
-            ctx.save_for_backward(None, B)
-        elif not A.requires_grad and B.requires_grad:
-            ctx.save_for_backward(A, None)
-        else:
-            ctx.save_for_backward(None, None)
+        #if A.requires_grad or B.requires_grad:
+        ctx.save_for_backward(A, B)
+        ## in some rare cases, the following cases can save some memory
+        #elif A.requires_grad and not B.requires_grad:
+        #    ctx.save_for_backward(None, B)
+        #elif not A.requires_grad and B.requires_grad:
+        #    ctx.save_for_backward(A, None)
+        #else:
+        #    ctx.save_for_backward(None, None)
 
         ctx.quant_type = quant_type
 
@@ -32,7 +32,7 @@ class MatMul8bit(torch.autograd.Function):
         quant_type = ctx.quant_type
         grad_A = grad_B = None
 
-        if A is not None:
+        if B.requires_grad:
             if len(A.shape) == 3:
                 dims = [0, 1]
                 # bsi -> ibs
@@ -41,12 +41,18 @@ class MatMul8bit(torch.autograd.Function):
                 dims = [0]
                 # bs -> sb
                 permute_dim = [1, 0]
-            qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
-            qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
-            igrad_B = F.igemm(qA.permute(permute_dim), qgrad_output)
-            grad_B = F.vectorwise_mm_dequant(igrad_B, S2.permute(permute_dim), S1, grad_output.dtype, quant_type)
+            if len(B.shape) == 2 and len(A.shape) == 3:
+                qgrad_output, S1 = F.vectorwise_quant(grad_output.view(-1, grad_output.shape[2]), dim=0, quant_type=quant_type)
+                qA, S2 = F.vectorwise_quant(A.view(-1, A.shape[2]), dim=0, quant_type=quant_type)
+                igrad_B = F.igemm(qA.t(), qgrad_output)
+                grad_B = F.vectorwise_mm_dequant(igrad_B, S2.t(), S1, grad_output.dtype, quant_type)
+            else:
+                qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
+                qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
+                igrad_B = F.igemm(qA.permute(permute_dim), qgrad_output)
+                grad_B = F.vectorwise_mm_dequant(igrad_B, S2.permute(permute_dim), S1, grad_output.dtype, quant_type)
 
-        if B is not None:
+        if A.requires_grad:
             if len(grad_output.shape) == 3: dims = [2]
             else: dims = [1]
 

@@ -1,8 +1,10 @@
 import torch
+import bitsandbytes as bnb
 
 from typing import Optional
 
 from torch import Tensor
+from torch import nn
 from torch.nn.parameter import Parameter
 import torch.nn.functional as F
 
@@ -38,3 +40,15 @@ class StableEmbedding(torch.nn.Embedding):
             self.norm_type, self.scale_grad_by_freq, self.sparse)
 
         return self.norm(emb)
+
+class Linear8bit(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True, quant_type='linear'):
+        super(Linear8bit, self).__init__(input_features, output_features, bias)
+
+    def forward(self, x):
+        out = bnb.matmul(x, self.weight.t())
+        #if self.bias is not None:
+            #out += self.bias.unsqueeze(0).expand_as(out)
+        return out
+
+

@@ -1,1 +1,1 @@
-from .modules import StableEmbedding
+from .modules import StableEmbedding, Linear8bit

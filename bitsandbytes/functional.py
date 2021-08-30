@@ -701,12 +701,11 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
         return (xq.float()*norm).to(dtype)
     elif quant_type == 'vector':
         x = xq.float()
-        #if len(S1.shape) == 3: S1 = S1.squeeze(0)
-        #if len(S2.shape) == 3: S1 = S2.squeeze(0)
+        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
         if len(S1.shape) == 2:
             x *= S1/C
         else:
-            if x.shape[0] == S1.shape[1]: S1 = S1.t()
             x *= S1/C
         x *= S2/C
         return x.to(dtype)

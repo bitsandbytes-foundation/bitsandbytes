@@ -7,10 +7,10 @@ from itertools import product
 
 n = 1
 k = 25
-dim1 = torch.randint(1,64, size=(n,)).tolist()
-dim2 = torch.randint(32,128, size=(n,)).tolist()
-dim3 = torch.randint(32,256, size=(n,)).tolist()
-dim4 = torch.randint(32,256, size=(n,)).tolist()
+dim1 = torch.randint(16,64, size=(n,)).tolist()
+dim2 = torch.randint(32,96, size=(n,)).tolist()
+dim3 = torch.randint(32,96, size=(n,)).tolist()
+dim4 = torch.randint(32,96, size=(n,)).tolist()
 funcs = [(torch.mm, bnb.mm), (torch.bmm, bnb.bmm), (torch.matmul, bnb.matmul)]
 str_funcs = ['mm', 'bmm', 'matmul']
 req_grad = [(False, False), (True, False), (True, True), (False, True)]
@@ -111,11 +111,13 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad):
                 assert (idx==0).sum().item() < n*0.02
 
         if funcs[0] in [torch.matmul]:
+            dim1 = dim1 - (dim1 % 16)
             A = torch.randn(size=(dim1, dim2, dim3), device='cuda', requires_grad=req_grad[0])
             B = torch.randn(size=(dim3, dim4), device='cuda', requires_grad=req_grad[1])
             target = torch.randn(size=(dim1, dim2, dim4), device='cuda', requires_grad=req_grad[1])
             torch.nn.init.xavier_uniform_(B)
 
+            #out_torch = torch.einsum('bsi,io->bso',A, B)
             out_torch = funcs[0](A, B)
             out_bnb = funcs[1](A, B)
 
