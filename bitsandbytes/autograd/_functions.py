@@ -42,6 +42,7 @@ class MatMul8bit(torch.autograd.Function):
                 # bs -> sb
                 permute_dim = [1, 0]
             if len(B.shape) == 2 and len(A.shape) == 3:
+                grad_output = grad_output.contiguous()
                 qgrad_output, S1 = F.vectorwise_quant(grad_output.view(-1, grad_output.shape[2]), dim=0, quant_type=quant_type)
                 qA, S2 = F.vectorwise_quant(A.view(-1, A.shape[2]), dim=0, quant_type=quant_type)
                 igrad_B = F.igemm(qA.t(), qgrad_output)

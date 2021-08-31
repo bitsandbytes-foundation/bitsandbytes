@@ -678,7 +678,7 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
                ct.c_long(strideA), ct.c_long(strideB), ct.c_long(strideC), ct.c_uint32(num_batch))
     return out
 
-C = 127
+C = 127.0
 
 def vectorwise_quant(x, dim=1, quant_type='vector'):
     if quant_type == 'linear':

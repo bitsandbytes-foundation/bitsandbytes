@@ -46,9 +46,7 @@ class Linear8bit(nn.Linear):
         super(Linear8bit, self).__init__(input_features, output_features, bias)
 
     def forward(self, x):
-        out = bnb.matmul(x, self.weight.t())
-        if self.bias is not None:
-            out += self.bias.unsqueeze(0).expand_as(out)
-        return out
+        return bnb.nn.functional.linear8bit(x, self.weight, self.bias)
+
 
 
