@@ -17,6 +17,7 @@ from torch.nn import _reduction as _Reduction
 from torch.nn import grad  # noqa: F401
 from torch.nn.modules import utils
 from torch.nn.modules.utils import _single, _pair, _triple, _list_with_default
+from torch.nn.functional import linear
 
 Tensor = torch.Tensor
 
@@ -338,7 +339,7 @@ def multi_head_attention_forward8bit(
     attn_output_weights = torch.nn.functional.dropout(attn_output_weights, p=dropout_p, training=training)
 
     if 'bmm' in attention_type:
-        attn_output = bnb.matmul(attn_output_weights, v)
+        attn_output = bnb.bmm(attn_output_weights, v)
     else:
         attn_output = torch.bmm(attn_output_weights, v)
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]

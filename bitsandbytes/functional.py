@@ -644,10 +644,50 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
         raise ValueError(f'Expected 3-dimensional tensors for bmm, but got shapes A and B: {A.shape} and {B.shape}')
     sout = check_matmul(A, B, out, transposed_A, transposed_B)
     if out is None: out = torch.zeros(size=sout, dtype=torch.int32, device=A.device)
-    if B.stride()[1] == B.shape[2]: transposed_B = False
-    elif B.stride()[2] == B.shape[1]: transposed_B = True
-    if A.stride()[1] == A.shape[2]: transposed_A = False
-    elif A.stride()[2] == A.shape[1]: transposed_A = True
+
+    if B.is_contiguous():
+        lda = B.stride()[1]
+        transposed_A = False
+    else:
+        s = B.stride()
+        if s[0] != B.shape[0]:
+            #print('ERROR')
+            #print(s, B.shape, 'B')
+            B = B.contiguous()
+            lda = B.stride()[1]
+        elif s[2] == B.shape[1]:
+            transposed_A = True
+            lda = B.stride()[2]
+        else:
+            if s[2] == 1:
+                B = B.contiguous()
+                lda = B.stride()[1]
+            elif s[1] == 1:
+                B = B.contiguous()
+                lda = B.stride()[1]
+            else:
+                #print('copy b')
+                #print(s, B.shape)
+                B = B.contiguous()
+                lda = B.stride()[1]
+
+    if A.is_contiguous():
+        ldb = A.stride()[1]
+        transposed_B = False
+    else:
+        s = A.stride()
+        if s[0] != A.shape[0]:
+            A = A.contiguous()
+            ldb = A.stride()[1]
+            transposed_B = False
+        elif s[2] == A.shape[1]:
+            ldb = A.stride()[2]
+            transposed_B = True
+        else:
+            #print('copy a')
+            A = A.contiguous()
+            ldb = A.stride()[1]
+            transposed_B = False
 
     # this is a mess: cuBLAS expect column major, but PyTorch is row major.
     # So to perform the matrix multiplication, we have to treat A, B, and C matrices
@@ -663,8 +703,6 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
     m = B.shape[2]
     k = B.shape[1]
 
-    lda = B.stride()[2 if transposed_B else 1]
-    ldb = A.stride()[2 if transposed_A else 1]
     ldc = m
 
     strideA = B.shape[1]*B.shape[2]
