@@ -21,6 +21,11 @@ class MatMul8bit(torch.autograd.Function):
         #    ctx.save_for_backward(A, None)
         #else:
         #    ctx.save_for_backward(None, None)
+        #if torch.rand(1) < 0.01:
+        #    with torch.no_grad():
+        #        out2 = torch.matmul(A, B)
+        #        err = torch.abs(output-out2)
+        #        print(err.mean().item(), 'output')
 
         ctx.quant_type = quant_type
 
@@ -54,6 +59,13 @@ class MatMul8bit(torch.autograd.Function):
                 igrad_B = F.igemm(qA.permute(permute_dim), qgrad_output)
                 grad_B = F.vectorwise_mm_dequant(igrad_B, S2.permute(permute_dim), S1, grad_output.dtype, quant_type)
 
+            #if torch.rand(1) < 0.01:
+            #    with torch.no_grad():
+            #        grad_B2 = torch.matmul(A.permute(permute_dim), grad_output)
+            #        err = torch.abs(grad_B-grad_B2)
+            #        print(err.mean().item(), 'grad_B')
+            #        del grad_B2, err
+
         if A.requires_grad:
             if len(grad_output.shape) == 3: dims = [2]
             else: dims = [1]
@@ -73,6 +85,13 @@ class MatMul8bit(torch.autograd.Function):
             qB, S3 = F.vectorwise_quant(B, dim=dim_B, quant_type=quant_type)
             igrad_A = F.igemm(qgrad_output, qB.permute(permute_dim))
             grad_A = F.vectorwise_mm_dequant(igrad_A, S1, S3.permute(permute_dim), grad_output.dtype, quant_type)
+
+            #if torch.rand(1) < 0.01:
+            #    with torch.no_grad():
+            #        grad_A2 = torch.matmul(grad_output, B.permute(permute_dim))
+            #        err = torch.abs(grad_A-grad_A2)
+            #        print(err.mean().item(), 'grad_A')
+            #        del grad_A2, err
 
         return grad_A, grad_B, None, None
 

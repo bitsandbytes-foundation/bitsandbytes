@@ -55,7 +55,8 @@ def multi_head_attention_forward8bit(
     v_proj_weight: Optional[Tensor] = None,
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
-    attention_type='off'
+    attention_type='off',
+    norms=None
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -140,7 +141,7 @@ def multi_head_attention_forward8bit(
             k_proj_weight=k_proj_weight,
             v_proj_weight=v_proj_weight,
             static_k=static_k,
-            static_v=static_v,
+            static_v=static_v
         )
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
@@ -233,11 +234,22 @@ def multi_head_attention_forward8bit(
                 k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
                 v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
         else:
-            q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias)
-            k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias)
-            v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias)
+            if 'linear' in attention_type:
+                q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias)
+                k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias)
+                v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias)
+            else:
+                q = linear(query, q_proj_weight_non_opt, in_proj_bias)
+                k = linear(key, k_proj_weight_non_opt, in_proj_bias)
+                v = linear(value, v_proj_weight_non_opt, in_proj_bias)
 
-    q = q * scaling
+    if norms is not None:
+        #q = q * scaling
+        #k = k * scaling
+        q = norms[0](q)
+        k = norms[1](k)
+    else:
+        q = q * scaling
 
     if attn_mask is not None:
         assert (
@@ -315,7 +327,7 @@ def multi_head_attention_forward8bit(
         if key_padding_mask is not None:
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
-    if 'bmm' in attention_type:
+    if 'bmm1' in attention_type:
         attn_output_weights = bnb.bmm(q, k.transpose(1, 2))
     else:
         attn_output_weights = torch.bmm(q, k.transpose(1, 2))
@@ -338,7 +350,7 @@ def multi_head_attention_forward8bit(
     attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
     attn_output_weights = torch.nn.functional.dropout(attn_output_weights, p=dropout_p, training=training)
 
-    if 'bmm' in attention_type:
+    if 'bmm2' in attention_type:
         attn_output = bnb.bmm(attn_output_weights, v)
     else:
         attn_output = torch.bmm(attn_output_weights, v)
