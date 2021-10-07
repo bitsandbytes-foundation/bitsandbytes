@@ -13,19 +13,19 @@ def read(fname):
 
 setup(
     name = f"bitsandbytes-cuda{os.environ['CUDA_VERSION']}",
-    version = "0.0.23",
+    version = "0.0.24",
     author = "Tim Dettmers",
-    author_email = "tim.dettmers@gmail.com",
-    description = ("Numpy-like library for GPUs."),
+    author_email = "dettmers@cs.washington.edu",
+    description = ("8-bit optimizers and quantization routines."),
     license = "MIT",
-    keywords = "gpu",
+    keywords = "gpu optimizers optimization 8-bit quantization compression",
     url = "http://packages.python.org/bitsandbytes",
     packages=find_packages(),
     package_data={'': ['libbitsandbytes.so']},
     long_description=read('README.md'),
     long_description_content_type = 'text/markdown',
     classifiers=[
-        "Development Status :: 1 - Planning",
+        "Development Status :: 4 - Beta",
         'Topic :: Scientific/Engineering :: Artificial Intelligence'
     ],
 )

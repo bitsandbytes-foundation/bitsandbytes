@@ -21,3 +21,4 @@ Features:
 v0.0.24:
 
 - Fixed a bug where a float/half conversion led to a compilation error for CUDA 11.1 on Turning GPUs.
+- removed Apex dependency for bnb LAMB
