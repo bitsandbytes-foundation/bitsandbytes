@@ -52,6 +52,7 @@ $(BUILD_DIR):
 
 $(ROOT_DIR)/dependencies/cub:
 	git clone https://github.com/NVlabs/cub $(ROOT_DIR)/dependencies/cub
+	cd dependencies/cub; git checkout 1.11.0
 
 clean:
 	rm cuda_build/* ./bitsandbytes/libbitsandbytes.so
