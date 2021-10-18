@@ -1,6 +1,7 @@
 import os
 import random
 import math
+import time
 import ctypes as ct
 import torch
 from torch import Tensor
@@ -9,6 +10,49 @@ from typing import Tuple
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libbitsandbytes.so')
 lib.get_context.restype = ct.c_void_p
 name2qmap = {}
+
+
+class Timer(object):
+    def __init__(self):
+        self.starts = {}
+        self.ends = {}
+        self.agg = {}
+
+    def tick(self, name='default'):
+        if name not in self.starts:
+            #self.starts[name] = torch.cuda.Event(enable_timing=True)
+            #self.starts[name].record()
+            self.starts[name] = time.time()
+        else:
+            ms = self.tock(name, print_ms=False)
+            self.tick(name)
+            if name not in self.agg: self.agg[name] = 0.0
+            self.agg[name] += ms
+
+    def tock(self, name='default', print_ms=False):
+        if name not in self.starts: return 0.0
+        if name in self.starts:
+            ms = time.time() - self.starts[name]
+            self.starts.pop(name)
+
+        if name in self.agg:
+            agg_ms = self.agg.pop(name) + ms
+        else:
+            agg_ms = ms
+
+        if print_ms:
+            print('{0} took: {1:.5f}s'.format(name, agg_ms))
+
+        return agg_ms
+
+    def reset(self):
+        self.starts  = {}
+        self.agg = {}
+        print('Resetting benchmark data')
+        torch.save
+
+
+
 
 class CUBLAS_Context(object):
     _instance = None
@@ -727,6 +771,16 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
         max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
         xq = torch.round(x/max1*C).to(torch.int8)
         return xq, max1
+    elif quant_type == 'truncated-vector':
+        with torch.no_grad():
+            absx = torch.abs(x)
+            max1 = torch.amax(absx, dim=dim, keepdim=True)
+            max1 = max1*0.7
+            idx = (absx > max1.expand_as(absx))
+            sign = torch.sign(x[idx])
+            x[idx] = max1.expand_as(absx)[idx]*sign
+            xq = torch.round(x/max1*C).to(torch.int8)
+        return xq, max1
     elif quant_type == 'min-max':
         maxA = torch.amax(x, dim=dim, keepdim=True).float()
         minA = torch.amin(x, dim=dim, keepdim=True).float()
@@ -746,7 +800,7 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
         norm = S1*S2/(C*C)
         # double cast needed to prevent overflows
         return (xq.float()*norm).to(dtype)
-    elif quant_type == 'vector':
+    elif quant_type in ['truncated-vector', 'vector']:
         x = xq.float()
         if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
         if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)

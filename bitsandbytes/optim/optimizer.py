@@ -261,6 +261,7 @@ class Optimizer2State(Optimizer8bit):
 
         self.optimizer_name = optimizer_name
 
+
     @torch.no_grad()
     def init_state(self, group, p, gindex, pindex):
         config = self.get_config(gindex, pindex, group)

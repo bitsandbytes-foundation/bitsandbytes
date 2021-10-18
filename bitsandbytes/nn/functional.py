@@ -17,10 +17,10 @@ from torch.nn import _reduction as _Reduction
 from torch.nn import grad  # noqa: F401
 from torch.nn.modules import utils
 from torch.nn.modules.utils import _single, _pair, _triple, _list_with_default
-from torch.nn.functional import linear
+from torch.nn.functional import linear, hardtanh
+import torch.distributed as dist
 
 Tensor = torch.Tensor
-
 
 
 def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
@@ -56,7 +56,12 @@ def multi_head_attention_forward8bit(
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
     attention_type='off',
-    norms=None
+    norms=None,
+    quant_type='vector',
+    attention_func=None,
+    temperature=1.0,
+    attention_bmm_bits='16,16,8',
+    args = None
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -147,6 +152,7 @@ def multi_head_attention_forward8bit(
     assert embed_dim == embed_dim_to_check
     # allow MHA to have different sizes for the feature dimension
     assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
+
 
     head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
@@ -244,8 +250,8 @@ def multi_head_attention_forward8bit(
                 v = linear(value, v_proj_weight_non_opt, in_proj_bias)
 
     if norms is not None:
-        #q = q * scaling
-        #k = k * scaling
+        #q = norms[0](q)/3.0
+        #k = norms[1](k)/3.0
         q = norms[0](q)
         k = norms[1](k)
     else:
@@ -328,34 +334,115 @@ def multi_head_attention_forward8bit(
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
     if 'bmm1' in attention_type:
-        attn_output_weights = bnb.bmm(q, k.transpose(1, 2))
+        if attention_func is None:
+            pass
+        elif attention_func == 'hardtanh':
+            q = torch.nn.functional.hardtanh(q).clone()
+            k = torch.nn.functional.hardtanh(k).clone()
+        elif attention_func == 'elu':
+            q = torch.nn.functional.elu(q).clone()
+            k = torch.nn.functional.elu(k).clone()
+        elif attention_func == 'hardswish':
+            q = torch.nn.functional.hardswish(q).clone()
+            k = torch.nn.functional.hardswish(k).clone()
+        elif attention_func == 'logistic':
+            q = torch.nn.functional.sigmoid(q).clone()
+            k = torch.nn.functional.sigmoid(k).clone()
+        else:
+            raise ValueError(f'Activation function not supported for attention: {attention_func}')
+
+        num_splits = getattr(args, 'num_splits', 1)
+        if num_splits > 1:
+            split_size = q.shape[2]//num_splits
+            subq = torch.split(q, split_size, dim=2)
+            subk = torch.split(k, split_size, dim=2)
+            if num_splits == 2:
+                attn_output_weights = bnb.bmm(subq[0], subk[0].transpose(1, 2)) + bnb.bmm(subq[1], subk[1].transpose(1, 2))
+            elif num_splits == 4:
+                attn_output_weights = bnb.bmm(subq[0], subk[0].transpose(1, 2)) + bnb.bmm(subq[1], subk[1].transpose(1, 2)) + \
+                              bnb.bmm(subq[2], subk[2].transpose(1, 2)) + bnb.bmm(subq[3], subk[3].transpose(1, 2))
+            else:
+                raise ValueError(f'Num splits not supported: num_splite={num_splits}')
+        else:
+            #attn_output_weights = bnb.bmm(q, k.transpose(1, 2), None, quant_type, attention_bmm_bits)
+            attn_output_weights = bnb.bmm(q, k.transpose(1, 2))
     else:
         attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
-    if attn_mask is not None:
-        if attn_mask.dtype == torch.bool:
-            attn_output_weights.masked_fill_(attn_mask, float("-inf"))
-        else:
-            attn_output_weights += attn_mask
 
-    if key_padding_mask is not None:
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        attn_output_weights = attn_output_weights.masked_fill(
-            key_padding_mask.unsqueeze(1).unsqueeze(2),
-            float("-inf"),
-        )
-        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+    if temperature != 1.0:
+        #attn_output_weights = (attn_output_weights*0.1)
+        attn_output_weights += 1e-2
+        attn_output_weights = attn_output_weights.float()
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_output_weights.masked_fill_(attn_mask, 0.0)
+            else:
+                attn_output_weights *= (attn_mask==0).float()
+                #attn_output_weights += attn_mask
 
-    attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
+
+        if key_padding_mask is not None:
+            attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+            attn_output_weights = attn_output_weights.masked_fill(
+                key_padding_mask.unsqueeze(1).unsqueeze(2),
+                0.0,
+            )
+            attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+
+        attn_output_weights = (attn_output_weights*attn_output_weights)
+        #attn_output_weights = torch.sqrt(attn_output_weights-torch.max(attn_output_weights, dim=-1, keepdim=True).values)
+        #attn_output_weights = torch.sqrt(attn_output_weights-torch.max(attn_output_weights, dim=-1, keepdim=True).values)
+        #attn_output_weights = torch.abs(torch.nn.functional.elu(attn_output_weights))
+        #attn_output_weights = torch.pow(torch.abs(attn_output_weights),4.0)
+        #attn_output_weights = torch.pow(1.5, attn_output_weights)
+        #attn_output_weights = torch.log(1+torch.abs(attn_output_weights))
+        #attn_output_weights = torch.abs(torch.nn.functional.hardswish(attn_output_weights))
+        norm = torch.sum(attn_output_weights, dim=-1, keepdim=True)
+        attn_output_weights = attn_output_weights / (norm.expand_as(attn_output_weights))
+        #print(torch.isinf(attn_output_weights).sum(),  torch.isnan(attn_output_weights).sum(), 'post')
+        #print(attn_output_weights[0, 10, :10])
+        #print(torch.max(attn_output_weights), torch.min(attn_output_weights))
+        attn_output_weights = attn_output_weights.half()
+    else:
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_output_weights.masked_fill_(attn_mask, float("-inf"))
+            else:
+                attn_output_weights += attn_mask
+        if key_padding_mask is not None:
+            attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+            attn_output_weights = attn_output_weights.masked_fill(
+                key_padding_mask.unsqueeze(1).unsqueeze(2),
+                float("-inf"),
+            )
+            attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+
+        attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
+        #if not dist.is_initialized() or dist.get_rank() == 0:
     attn_output_weights = torch.nn.functional.dropout(attn_output_weights, p=dropout_p, training=training)
 
     if 'bmm2' in attention_type:
-        attn_output = bnb.bmm(attn_output_weights, v)
+        num_splits = getattr(args, 'num_splits', 1)
+        if num_splits > 1:
+            split_size = attn_output_weights.shape[2]//num_splits
+            subattn = torch.split(attn_output_weights, split_size, dim=2)
+            subv = torch.split(v, split_size, dim=1)
+            if num_splits == 2:
+                attn_output = bnb.bmm(subattn[0], subv[0]) + bnb.bmm(subattn[1], subv[1])
+            elif num_splits == 4:
+                attn_output = bnb.bmm(subattn[0], subv[0]) + bnb.bmm(subattn[1], subv[1]) + \
+                              bnb.bmm(subattn[2], subv[2]) + bnb.bmm(subattn[3], subv[3])
+            else:
+                raise ValueError(f'Num splits not supported: num_splite={num_splits}')
+        else:
+            attn_output = bnb.bmm(attn_output_weights, v)
     else:
         attn_output = torch.bmm(attn_output_weights, v)
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+
     if 'linear' in attention_type:
         attn_output = linear8bit(attn_output, out_proj_weight, out_proj_bias)
     else:

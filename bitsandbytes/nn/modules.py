@@ -42,7 +42,7 @@ class StableEmbedding(torch.nn.Embedding):
         return self.norm(emb)
 
 class Linear8bit(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, quant_type='linear'):
+    def __init__(self, input_features, output_features, bias=True, quant_type='vector'):
         super(Linear8bit, self).__init__(input_features, output_features, bias)
 
     def forward(self, x):

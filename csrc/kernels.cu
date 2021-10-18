@@ -831,15 +831,20 @@ __global__ void kOptimizer32bit1State(T *g, T *p,
       valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
       __syncthreads();
-      Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
+      Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
       __syncthreads();
-      LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
+      LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items, (T)0.0f);
       __syncthreads();
-      Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
+      Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
 
       # pragma unroll 4
       for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
+      {
         g_vals[j] = gnorm_scale*((float)g_vals[j]);
+        if(weight_decay > 0.0f)
+          g_vals[j] += ((float)p_vals[j])*weight_decay;
+      }
+
 
       # pragma unroll 4
       for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
@@ -1167,6 +1172,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
         {
             g_val = g_vals[j];
             g_val *= gnorm_scale;
+
             s1_vals[j] = smem_quantiles1[m_c1[j]]*max1[0];
             switch(OPTIMIZER)
             {
