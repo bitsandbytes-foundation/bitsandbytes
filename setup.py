@@ -17,7 +17,7 @@ setup(
     keywords = "gpu",
     url = "http://packages.python.org/bitsandbytes",
     packages=find_packages(),
-    package_data={'': ['libBitsNBytes.so']},
+    package_data={'': ['libbitsandbytes.so']},
     long_description=read('README.md'),
     long_description_content_type = 'text/markdown',
     classifiers=[

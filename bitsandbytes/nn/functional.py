@@ -30,6 +30,23 @@ def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> 
     return out
 
 
+def truncate_tensor(x, low, high, mode='zero'):
+    with torch.no_grad():
+        if mode == 'clamp':
+            with torch.no_grad():
+                quantx = bnb.functional.estimate_quantiles(x)
+                x.clamp_(quantx[low], quantx[high])
+        elif mode == 'zero':
+            assert low == 0
+            with torch.no_grad():
+                absx = torch.abs(x)
+                quantx = bnb.functional.estimate_quantiles(absx)
+                x[absx <= quantx[high]] = 0.0
+        else:
+            raise ValueError(f'Unknown truncation mode: {mode}')
+    return x
+
+
 # copied from PyTorch
 def multi_head_attention_forward8bit(
     query: Tensor,
@@ -231,6 +248,10 @@ def multi_head_attention_forward8bit(
         if in_proj_bias is not None:
             #print('g+')
             if 'linear' in attention_type:
+                if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
+                    query = truncate_tensor(query, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
+                    key = truncate_tensor(key, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
+                    value = truncate_tensor(value, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
                 q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
                 k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
                 v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
@@ -240,6 +261,10 @@ def multi_head_attention_forward8bit(
                 v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
         else:
             if 'linear' in attention_type:
+                if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
+                    query = truncate_tensor(query, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
+                    key = truncate_tensor(key, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
+                    value = truncate_tensor(value, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
                 q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias)
                 k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias)
                 v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias)
@@ -253,7 +278,7 @@ def multi_head_attention_forward8bit(
         #k = norms[1](k)/3.0
         q = norms[0](q)
         k = norms[1](k)
-        #v = norms[2](v)
+        v = norms[2](v)
     else:
         q = q * scaling
 
@@ -353,23 +378,8 @@ def multi_head_attention_forward8bit(
 
         if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
             low, high, mode = args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode
-            if mode == 'clamp':
-                with torch.no_grad():
-                    quantq = bnb.functional.estimate_quantiles(q)
-                    quantk = bnb.functional.estimate_quantiles(k)
-                    q.clamp_(quantq[low], quantq[high])
-                    k.clamp_(quantk[low], quantk[high])
-            elif mode == 'zero':
-                assert low == 0
-                with torch.no_grad():
-                    absq = torch.abs(q)
-                    absk = torch.abs(k)
-                    quantq = bnb.functional.estimate_quantiles(absq)
-                    quantk = bnb.functional.estimate_quantiles(absk)
-                    q[absq <= quantq[high]] = 0.0
-                    k[absk <= quantk[high]] = 0.0
-            else:
-                raise ValueError(f'Unknown truncation mode: {mode}')
+            k = truncate_tensor(k, low, high, mode)
+            q = truncate_tensor(q, low, high, mode)
 
         num_splits = getattr(args, 'num_splits', 1)
         if num_splits > 1:
@@ -427,6 +437,8 @@ def multi_head_attention_forward8bit(
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
 
     if 'linear' in attention_type:
+        if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
+            attn_output = truncate_tensor(attn_output, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
         attn_output = linear8bit(attn_output, out_proj_weight, out_proj_bias)
     else:
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
