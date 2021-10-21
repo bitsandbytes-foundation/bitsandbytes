@@ -23,8 +23,14 @@ import torch.distributed as dist
 Tensor = torch.Tensor
 
 
-def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
-    out = bnb.matmul(input, weight.t())
+def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, num_splits=1) -> Tensor:
+    if num_splits == 2:
+        split_size = input.shape[-1]//2
+        split_inp = torch.split(input, split_size, dim=2)
+        split_weight = torch.split(weight, split_size, dim=1)
+        out = bnb.matmul(split_inp[0], split_weight[0].t()) + bnb.matmul(split_inp[1], split_weight[1].t())
+    else:
+        out = bnb.matmul(input, weight.t())
     if bias is not None:
         out += bias.unsqueeze(0).expand_as(out)
     return out
@@ -44,6 +50,22 @@ def truncate_tensor(x, low, high, mode='zero'):
                 x[absx <= quantx[high]] = 0.0
         else:
             raise ValueError(f'Unknown truncation mode: {mode}')
+    return x
+
+def apply_squash_func(x, attention_func):
+    if attention_func is None or attention_func == '':
+        pass
+    elif attention_func == 'hardtanh':
+        x = torch.nn.functional.hardtanh(x).clone()
+    elif attention_func == 'elu':
+        x = torch.nn.functional.elu(x).clone()
+    elif attention_func == 'hardswish':
+        x = torch.nn.functional.hardswish(x).clone()
+    elif attention_func == 'logistic':
+        x = torch.nn.functional.sigmoid(x).clone()
+    else:
+        raise ValueError(f'Activation function not supported for attention: {attention_func}')
+
     return x
 
 
@@ -246,7 +268,6 @@ def multi_head_attention_forward8bit(
         assert len1 == embed_dim and len2 == value.size(-1)
 
         if in_proj_bias is not None:
-            #print('g+')
             if 'linear' in attention_type:
                 if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
                     query = truncate_tensor(query, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
@@ -256,9 +277,19 @@ def multi_head_attention_forward8bit(
                 k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
                 v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
             else:
-                q = linear(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
-                k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
-                v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
+                if 'q' in attention_type:
+                    query = apply_squash_func(query, args.attention_func)
+                    q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim], num_splits=args.num_splits)
+                else:
+                    q = linear(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
+                if 'k' in attention_type:
+                    k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
+                else:
+                    k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
+                if 'v' in attention_type:
+                    v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
+                else:
+                    v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
         else:
             if 'linear' in attention_type:
                 if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
@@ -269,9 +300,18 @@ def multi_head_attention_forward8bit(
                 k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias)
                 v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias)
             else:
-                q = linear(query, q_proj_weight_non_opt, in_proj_bias)
-                k = linear(key, k_proj_weight_non_opt, in_proj_bias)
-                v = linear(value, v_proj_weight_non_opt, in_proj_bias)
+                if 'q' in attention_type:
+                    q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias)
+                else:
+                    q = linear(query, q_proj_weight_non_opt, in_proj_bias)
+                if 'k' in attention_type:
+                    k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias)
+                else:
+                    k = linear(key, k_proj_weight_non_opt, in_proj_bias)
+                if 'v' in attention_type:
+                    v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias)
+                else:
+                    v = linear(value, v_proj_weight_non_opt, in_proj_bias)
 
     if norms is not None:
         #q = norms[0](q)/3.0
@@ -436,7 +476,7 @@ def multi_head_attention_forward8bit(
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
 
-    if 'linear' in attention_type:
+    if 'linear' in attention_type or 'out' in attention_type:
         if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
             attn_output = truncate_tensor(attn_output, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
         attn_output = linear8bit(attn_output, out_proj_weight, out_proj_bias)
