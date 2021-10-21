@@ -486,13 +486,13 @@ def optimizer_update_8bit_blockwise(optimizer_name: str, g: Tensor, p: Tensor, s
         str2optimizer8bit_blockwise[optimizer_name][0](get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr), get_ptr(qmap1), get_ptr(qmap2),
-                    get_ptr(absmax1), get_ptr(absmax2), ct.c_float(weight_decay), ct.c_float(gnorm_scale), 
+                    get_ptr(absmax1), get_ptr(absmax2), ct.c_float(weight_decay), ct.c_float(gnorm_scale),
                     ct.c_bool(skip_zeros), ct.c_int32(g.numel()))
     elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
         str2optimizer8bit_blockwise[optimizer_name][1](get_ptr(p), get_ptr(g), get_ptr(state1), get_ptr(state2),
                     ct.c_float(beta1), ct.c_float(beta2), ct.c_float(eps),
                     ct.c_int32(step), ct.c_float(lr), get_ptr(qmap1), get_ptr(qmap2),
-                    get_ptr(absmax1), get_ptr(absmax2), ct.c_float(weight_decay), ct.c_float(gnorm_scale), 
+                    get_ptr(absmax1), get_ptr(absmax2), ct.c_float(weight_decay), ct.c_float(gnorm_scale),
                     ct.c_bool(skip_zeros), ct.c_int32(g.numel()))
     else:
         raise ValueError(f'Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}')

@@ -110,7 +110,7 @@ extern "C"
                 float eps, int step, float lr,  \
                 float* quantiles1, float* quantiles2, \
                 float* max1, float* max2, float* new_max1, float* new_max2, \
-                float weight_decay, float gnorm_scale, bool skip_zeros, int n) \
+                float weight_decay, float gnorm_scale, int n) \
   {  \
 	    name##_static_8bit_g##gbits(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, \
 			                                 quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n); \
