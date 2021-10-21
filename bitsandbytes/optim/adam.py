@@ -2,6 +2,7 @@
 #   
 # This source code is licensed under the MIT license found in the 
 # LICENSE file in the root directory of this source tree.
+import torch
 from bitsandbytes.optim.optimizer import Optimizer2State
 import bitsandbytes.functional as F
 
@@ -49,7 +50,7 @@ class AnalysisAdam(torch.optim.Optimizer):
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
 
-    .. _Adam\: A Method for Stochastic Optimization:
+    .. _Adam: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
@@ -192,6 +193,7 @@ class AnalysisAdam(torch.optim.Optimizer):
                         C2 = F.quantize_no_absmax(exp_avg_sq, code=code2)
                         state2 = F.dequantize_no_absmax(C2, code2)
                     elif self.analysis == 'my-quantization-routine':
+                        pass
                         # 1. get code
                         # 2. quantize
                         # 3. dequantize
