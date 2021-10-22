@@ -84,6 +84,10 @@ For upcoming features and changes and full history see [Patch Notes](CHANGELOG.m
 
 1. RuntimeError: CUDA error: no kernel image is available for execution on the device. [Solution](errors_and_solutions.md#No-kernel-image-available)
 
+## Compile from source
+
+To compile from source, please follow the [compile_from_source.md](compile_from_source.md) instructions.
+
 ## License
 
 The majority of bitsandbytes is licensed under MIT, however portions of the project are available under separate license terms: Pytorch is licensed under the BSD license.
