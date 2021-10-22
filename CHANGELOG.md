@@ -29,8 +29,12 @@ Features:
  - Added `skip_zeros` for block-wise and 32-bit optimizers. This ensures correct updates for sparse gradients and sparse models.
  - Added support for Kepler GPUs. (#4)
  - Added Analysis Adam to track 8-bit vs 32-bit quantization errors over time.
+ - Make compilation more user friendly.
 
 Bug fixes:
  - fixed "undefined symbol: \_\_fatbinwrap_38" error for P100 GPUs on CUDA 10.1 (#5)
+
+Docs:
+ - Added docs with instructions to compile from source.
 
 
