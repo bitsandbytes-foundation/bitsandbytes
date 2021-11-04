@@ -1,6 +1,7 @@
 MKFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 ROOT_DIR := $(patsubst %/,%,$(dir $(MKFILE_PATH)))
 
+CUDA_HOME :=/usr/local/cuda-11.5
 GPP:= /usr/bin/g++
 NVCC := $(CUDA_HOME)/bin/nvcc
 ###########################################
@@ -17,7 +18,8 @@ LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcuda -lcublas -lcurand -lcusparse -L $(C
 # NVIDIA NVCC compilation flags
 #COMPUTE_CAPABILITY := -gencode arch=compute_50,code=sm_50 # Maxwell
 #COMPUTE_CAPABILITY += -gencode arch=compute_52,code=sm_52 # Maxwell
-COMPUTE_CAPABILITY := -gencode arch=compute_70,code=sm_70 # Volta
+#COMPUTE_CAPABILITY := -gencode arch=compute_70,code=sm_70 # Volta
+COMPUTE_CAPABILITY := -gencode arch=compute_75,code=sm_75 # Turing
 
 all: $(ROOT_DIR)/dependencies/cub $(BUILD_DIR)
 	echo $(CONDA_PREFIX)

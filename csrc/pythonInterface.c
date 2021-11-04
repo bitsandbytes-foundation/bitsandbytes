@@ -77,11 +77,6 @@ void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, floa
 
 extern "C"
 {
-	struct CUDA_Context
-	{
-		cublasHandle_t handle;
-	};
-
 	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
 	void cestimate_quantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles_fp16(A, code, offset, n); }
 	void cquantize(float *code, float *A, unsigned char *out, int n){ quantize(code, A, out, n); }
@@ -150,7 +145,11 @@ extern "C"
 			               long strideA, long strideB, long strideC, int batchCount)
 	{ strided_gemmex(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc, strideA, strideB, strideC, batchCount); }
 
+	void cigemmLt(ContextLt *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
+	{ igemmLt(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc); }
+
 	Context *get_context(){ return new Context(); }
+	ContextLt *get_contextLt(){ return new ContextLt(); }
 }
 
 

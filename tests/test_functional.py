@@ -198,6 +198,23 @@ def test_igemm(dim1, dim2):
         out2 = torch.mm(A.float(), B.float())
         torch.testing.assert_allclose(out.float(), out2)
 
+dim1 = torch.randint(32,1024*4, size=(4,)).tolist()
+dim2 = torch.randint(32,1024*4, size=(4,)).tolist()
+values = list(product(dim1,dim2))
+names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2", values, ids=names)
+def test_igemmLt(dim1, dim2):
+    dim1 = dim1 - (dim1 % 32)
+    dim2 = dim2 - (dim2 % 32)
+    for i in range(100):
+        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+        B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
+        #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
+        #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
+        out = F.igemmLt(A, B)
+        out2 = torch.mm(A.float(), B.float())
+        torch.testing.assert_allclose(out.float(), out2)
+
 
 def quant(x):
     max1 = torch.abs(x).max()
@@ -299,17 +316,24 @@ def test_igemm_bench():
     C = torch.zeros(dim1, dim3, device=A.device, dtype=torch.int32)
 
     t = Timer()
-    A = torch.randn(dim1, dim2, device='cuda')
-    B = torch.randn(dim2, dim3, device='cuda')
-    A = A.half()
-    B = B.half()
-    C = torch.zeros(dim1, dim3, device=A.device, dtype=B.dtype)
-
+    #A = torch.randn(dim1, dim2, device='cuda')
+    #B = torch.randn(dim2, dim3, device='cuda')
+    #A = A.half()
+    #B = B.half()
+    #C = torch.zeros(dim1, dim3, device=A.device, dtype=B.dtype)
 
 
     for i in range(128):
-        #F.mmi(A, B, out=C)
-        torch.mm(A, B, out=C)
+        F.igemm(A, B, out=C)
+        #torch.mm(A, B, out=C)
+
+    torch.cuda.synchronize()
+
+    t.tick()
+    for i in range(1280):
+        F.igemm(A, B, out=C)
+        #torch.mm(A, B, out=C)
+    t.tock()
 
 def test_stable_embedding():
     layer = bnb.nn.StableEmbedding(1024, 1024)

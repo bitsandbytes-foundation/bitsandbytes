@@ -11,8 +11,8 @@ dim1 = torch.randint(16,64, size=(n,)).tolist()
 dim2 = torch.randint(32,96, size=(n,)).tolist()
 dim3 = torch.randint(32,96, size=(n,)).tolist()
 dim4 = torch.randint(32,96, size=(n,)).tolist()
-funcs = [(torch.mm, bnb.mm), (torch.bmm, bnb.bmm), (torch.matmul, bnb.matmul)]
-str_funcs = ['mm', 'bmm', 'matmul']
+funcs = [(torch.bmm, bnb.bmm), (torch.matmul, bnb.matmul)]
+str_funcs = ['bmm', 'matmul']
 req_grad = [(False, False), (True, False), (True, True), (False, True)]
 req_grad_str = ['FF', 'TF', 'TT', 'FT']
 transpose = [(False, False), (False, True), (True, True), (True, False)]

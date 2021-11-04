@@ -10,6 +10,7 @@
 #include <cuda_runtime_api.h>
 #include <cuda_fp16.h>
 #include <cublas_v2.h>
+#include <cublasLt.h>
 
 #define CUDA_CHECK_RETURN(value) {                      \
   cudaError_t _m_cudaStat = value;                    \
@@ -49,6 +50,20 @@ class Context
 
 };
 
+class ContextLt
+{
+    public:
+				cublasLtHandle_t m_handle;
+
+				ContextLt()
+				{
+					cublasLtHandle_t handle;
+					cublasLtCreate(&handle);
+					m_handle = handle;
+				}
+
+};
+
 
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
 
@@ -77,6 +92,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);
 
+void igemmLt(ContextLt *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
 void gemmex(Context * context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
 void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc, 
                     long long int strideA, long long int strideB, long long int strideC, int batchCount);
