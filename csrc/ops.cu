@@ -239,38 +239,45 @@ int roundoff(int v, int d) {
     return (v + d - 1) / d * d;
 }
 
-void igemmLt(ContextLt *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
+void igemmLt(Context *context, bool transposeA, bool transposeB, int m, int n, int k, const void *A, const void *B, void *C, int lda, int ldb, int ldc)
 {
 
-	//cublasStatus_t status;
-	cublasLtHandle_t ltHandle = context->m_handle;
+	cublasLtHandle_t ltHandle = (cublasLtHandle_t)context->m_handle;
 
 	cublasLtMatmulDesc_t matmulDesc = NULL;
 	cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
-	int32_t alpha = 1, beta = 0;
 	cublasOperation_t opTranspose = CUBLAS_OP_T;
+	const void *D = C;
+
+  const int falpha = 1;
+  const int fbeta = 0;
+  const void * alpha = &falpha;
+  const void * beta = &fbeta;
 
 	cublasLtMatrixTransformDesc_t transformDesc = NULL;
 	int8_t *Atransform = NULL, *Btransform = NULL;
 	int32_t *Ctransform                   = NULL;
 	cublasLtMatrixLayout_t AtransformDesc = NULL, BtransformDesc = NULL, CtransformDesc = NULL;
 	float transformAlpha = 1.0f, transformBeta = 0.0f;
+	cublasLtOrder_t order_COL = CUBLASLT_ORDER_COL;
 	cublasLtOrder_t order_COL32       = CUBLASLT_ORDER_COL32;
 	cublasLtOrder_t order_COL4_4R2_8C = CUBLASLT_ORDER_COL4_4R2_8C;
 
-	int ldatransform = 32 * m;
-	int ldbtransform = 32 * roundoff(n, 8);
-	int ldctransform = 32 * m;
+	//int ldatransform = 32 * m;
+	//int ldbtransform = 32 * roundoff(n, 8);
+	//int ldctransform = 32 * m;
 
-	checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Atransform), sizeof(int8_t) * roundoff(k, 32) / 32 * ldatransform));
-	checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Btransform), sizeof(int8_t) * roundoff(k, 32) / 32 * ldbtransform));
-	checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Ctransform), sizeof(int32_t) * roundoff(n, 32) / 32 * ldctransform));
+	//checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Atransform), sizeof(int8_t) * roundoff(k, 32) / 32 * ldatransform));
+	//checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Btransform), sizeof(int8_t) * roundoff(k, 32) / 32 * ldbtransform));
+	//checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Ctransform), sizeof(int32_t) * roundoff(n, 32) / 32 * ldctransform));
 
-	checkCublasStatus(cublasLtMatrixTransformDescCreate(&transformDesc, CUDA_R_32F));
+	//checkCublasStatus(cublasLtMatrixTransformDescCreate(&transformDesc, CUDA_R_32F));
 
 	checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32I));
-	// tensor op igemm kernels only support NT gemm
-	checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opTranspose, sizeof(opTranspose)));
+	if(transposeA)
+		checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opTranspose, sizeof(opTranspose)));
+	if(transposeB)
+		checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opTranspose, sizeof(opTranspose)));
 
 	// ---------------------------------------------------------------------------------------------
 	// create descriptors for original matrices
@@ -282,55 +289,33 @@ void igemmLt(ContextLt *context, bool transposeA, bool transposeB, int m, int n,
 	// ---------------------------------------------------------------------------------------------
 	// create descriptors for transformed matrices
 
-	checkCublasStatus(cublasLtMatrixLayoutCreate(&AtransformDesc, CUDA_R_8I, m, k, ldatransform));
-	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(AtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL32, sizeof(order_COL32)));
+	cout << m << " " << n << " " << k << endl;
+	checkCublasStatus(cublasLtMatrixLayoutCreate(&AtransformDesc, CUDA_R_8I, m, k, lda));
+	checkCublasStatus(cublasLtMatrixLayoutCreate(&BtransformDesc, CUDA_R_8I, n, k, ldb));
+	checkCublasStatus(cublasLtMatrixLayoutCreate(&CtransformDesc, CUDA_R_32I, m, n, ldc));
 
-	// data memory order is set to CUBLASLT_ORDER_COL4_4R2_8C in order to achieve best performance on Turing devices.
-	// for best performance on Ampere, consider setting the memory order to CUBLASLT_ORDER_COL32_2R_4R4.
-	checkCublasStatus(cublasLtMatrixLayoutCreate(&BtransformDesc, CUDA_R_8I, n, k, ldbtransform));
-	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(BtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL4_4R2_8C, sizeof(order_COL4_4R2_8C)));
-
-	checkCublasStatus(cublasLtMatrixLayoutCreate(&CtransformDesc, CUDA_R_32I, m, n, ldctransform));
-	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(CtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL32, sizeof(order_COL32)));
-
-	// ---------------------------------------------------------------------------------------------
-	// transforms and computation
-
-	checkCublasStatus(cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, A, Adesc, &transformBeta, NULL, NULL, Atransform, AtransformDesc, 0));
-
-	// B matrix is non-transposed, but transposed matrix is needed - add transpose operation in matrix transform.
-	checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(transformDesc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose)));
-
-	checkCublasStatus(cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, B, Bdesc, &transformBeta, NULL, NULL, Btransform, BtransformDesc, 0));
+	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(AtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL, sizeof(order_COL)));
+	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(BtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL, sizeof(order_COL)));
+	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(CtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL, sizeof(order_COL)));
 
 	// no need to transform C matrix as beta is assumed to be 0
-	checkCublasStatus(cublasLtMatmul(ltHandle,
-																	 matmulDesc,
-																	 &alpha,
-																	 Atransform,
-																	 AtransformDesc,
-																	 Btransform,
-																	 BtransformDesc,
-																	 &beta,
-																	 Ctransform,
-																	 CtransformDesc,
-																	 Ctransform,
-																	 CtransformDesc,
-																	 NULL,
-																	 NULL,
-																	 0,
-																	 0));
-
-	//opTranspose = CUBLAS_OP_N;
-	//checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(transformDesc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose)));
-
-	// transform outputs to COL order
-	//checkCublasStatus(cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, Ctransform, CtransformDesc, &transformBeta, NULL, NULL, C, Cdesc, 0));
-
-	//if (status != CUBLAS_STATUS_SUCCESS)
-	//{
-	//	std::cout << "CUBLAS ERROR: Status " << status << std::endl;
-	//}
+ checkCublasStatus(cublasLtMatmul(ltHandle,
+  															 matmulDesc,
+  															 alpha,
+  															 A,
+  															 AtransformDesc,
+  															 B,
+  															 BtransformDesc,
+  															 beta,
+  															 D,
+  															 CtransformDesc,
+  															 C,
+  															 CtransformDesc,
+  															 NULL,
+  															 NULL,
+  															 0,
+  															 0));
+ 
 }
 
 //==============================================================

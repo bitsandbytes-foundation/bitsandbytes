@@ -145,11 +145,10 @@ extern "C"
 			               long strideA, long strideB, long strideC, int batchCount)
 	{ strided_gemmex(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc, strideA, strideB, strideC, batchCount); }
 
-	void cigemmLt(ContextLt *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
+	void cigemmLt(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
 	{ igemmLt(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc); }
 
 	Context *get_context(){ return new Context(); }
-	ContextLt *get_contextLt(){ return new ContextLt(); }
 }
 
 

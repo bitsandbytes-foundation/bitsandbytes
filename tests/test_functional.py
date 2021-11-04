@@ -207,10 +207,11 @@ def test_igemmLt(dim1, dim2):
     dim1 = dim1 - (dim1 % 32)
     dim2 = dim2 - (dim2 % 32)
     for i in range(100):
-        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-        B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
+        A = torch.randint(-128, 127, size=(32, 32), device='cuda').to(torch.int8)
+        B = torch.randint(-128, 127, size=(32, 32), device='cuda').to(torch.int8)
         #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
         #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
+        print(A.shape, B.shape)
         out = F.igemmLt(A, B)
         out2 = torch.mm(A.float(), B.float())
         torch.testing.assert_allclose(out.float(), out2)

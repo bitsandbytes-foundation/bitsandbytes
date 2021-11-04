@@ -62,7 +62,6 @@ class CUBLAS_Context(object):
 
     def initialize(self):
         self.context = ct.c_void_p(lib.get_context())
-        self.contextLt = ct.c_void_p(lib.get_contextLt())
 
     @classmethod
     def get_instance(cls):
@@ -687,9 +686,6 @@ def igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transposed
 def igemmLt(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transposed_B=False):
     sout = check_matmul(A, B, out, transposed_A, transposed_B)
     if out is None: out = torch.zeros(size=sout, dtype=torch.int32, device=A.device)
-    if len(A.shape) == 3 and len(B.shape) == 3:
-        if A.shape[0] == B.shape[0] and A.shape[2] == B.shape[1]:
-            return batched_igemm(A, B, out)
 
     sA = A.shape
     sB = B.shape
@@ -746,10 +742,11 @@ def igemmLt(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transpos
         ldc = m
 
 
-    ptr = CUBLAS_Context.get_instance().contextLt
+    ptr = CUBLAS_Context.get_instance().context
 
     # B^T @ A^T = C^T
     # [km, nk -> mn] 
+    print(transposed_A, transposed_B, m, n, k, lda, ldb, ldc)
     lib.cigemmLt(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
     return out
