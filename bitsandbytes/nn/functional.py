@@ -19,6 +19,7 @@ from torch.nn.modules import utils
 from torch.nn.modules.utils import _single, _pair, _triple, _list_with_default
 from torch.nn.functional import linear, hardtanh
 import torch.distributed as dist
+import einops
 
 Tensor = torch.Tensor
 
@@ -33,6 +34,44 @@ def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, num
         out = bnb.matmul(input, weight.t())
     if bias is not None:
         out += bias.unsqueeze(0).expand_as(out)
+    return out
+
+def sparse_decomposed_linear8bit(x: Tensor, weight: Tensor, bias: Optional[Tensor] = None, qval : float = None, num_splits=1, sparse_decomp=True, percentage=10) -> Tensor:
+    if not sparse_decomp: return linear8bit(x, weight, bias)
+    if qval is None:
+        quant = bnb.functional.estimate_quantiles(torch.abs(x), offset=0.0)
+        qval = quant[-percentage]
+    bottom = x*(torch.abs(x)<qval).to(x.dtype)
+    top = x*(torch.abs(x)>= qval).to(x.dtype)
+    q = bnb.matmul(bottom, weight.t())
+    out = q + linear(top, weight, bias)
+
+    return out
+
+def sparse_bmm_full(a, b, sparse_decomp=True, percentage=3):
+    absa = torch.abs(a)
+    quant = bnb.functional.estimate_quantiles(absa, offset=0.0)
+    qval = quant[-percentage]
+    bottomA = a*(absa<qval).to(a.dtype)
+    topA = a*(absa>= qval).to(a.dtype)
+
+    absb = torch.abs(b)
+    quant = bnb.functional.estimate_quantiles(absb, offset=0.0)
+    qval = quant[-percentage]
+    bottomB = b*(absb<qval).to(a.dtype)
+    topB = b*(absb>= qval).to(a.dtype)
+
+    out = bnb.bmm(bottomA, bottomB) + torch.bmm(bottomA, topB) + torch.bmm(topA, bottomB) + torch.bmm(topA, topB)
+    return out
+
+def sparse_bmm_half(a, b, sparse_decomp=True, percentage=3):
+    absa = torch.abs(a)
+    quant = bnb.functional.estimate_quantiles(absa, offset=0.0)
+    qval = quant[-percentage]
+    bottomA = a*(absa<qval).to(a.dtype)
+    topA = a*(absa>= qval).to(a.dtype)
+
+    out = bnb.bmm(bottomA, b) + torch.bmm(topA, b)
     return out
 
 
@@ -68,6 +107,19 @@ def apply_squash_func(x, attention_func):
 
     return x
 
+def causal_conv2d(x, conv_weight, conv_bias, num_heads):
+    # x = [s, b, h]
+
+    x = einops.rearrange(x, 's b (h H)->s b h H', H=num_heads)
+    x = torch.nn.functional.pad(x, [0, 0, 0, 0, 0, 0, 2, 0], mode='constant', value=0.0)
+    conv_out = torch.einsum('sbhi,hoi->sboi', x[:-2], conv_weight[0])
+    conv_out = conv_out + torch.einsum('sbhi,hoi->sboi', x[1:-1], conv_weight[1])
+    conv_out = conv_out + torch.einsum('sbhi,hoi->sboi', x[2:], conv_weight[2])
+    #x = torch.nn.functional.conv2d(x, conv_weight, bias=conv_bias, stride=(1, 1), padding=(1, 0), groups=num_heads)
+    x = einops.rearrange(conv_out, 's b h H -> s (b H) h', H=num_heads)
+    return x.transpose(0, 1)
+
+
 
 # copied from PyTorch
 def multi_head_attention_forward8bit(
@@ -99,7 +151,12 @@ def multi_head_attention_forward8bit(
     quant_type='vector',
     attention_func=None,
     attention_bmm_bits='16,16,8',
-    args = None
+    args = None,
+    convs = None,
+    head_scales = None,
+    iters = 0,
+    sparse_decomp = False,
+    attn_scales = None
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -191,6 +248,23 @@ def multi_head_attention_forward8bit(
     # allow MHA to have different sizes for the feature dimension
     assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
+    perc = 6
+    if args is not None:
+        perc = getattr(args, 'sparse_perc', 6)
+
+    # top magnitude of the distribution in steps of 1/256, so 2.56 steps per percent
+    perc = int(2.56*perc)
+
+    if attn_scales is not None:
+        key = key * torch.sigmoid(attn_scales[0](key)).expand_as(key)
+        query = query * torch.sigmoid(attn_scales[1](query)).expand_as(query)
+        value = value * torch.sigmoid(attn_scales[2](value)).expand_as(value)
+
+        #key = attn_scales[3](key)
+        #query = attn_scales[4](query)
+        #value = attn_scales[5](value)
+
+
 
     head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
@@ -199,6 +273,7 @@ def multi_head_attention_forward8bit(
     if not use_separate_proj_weight:
         if (query is key or torch.equal(query, key)) and (key is value or torch.equal(key, value)):
             # self-attention
+            print('ERROR')
             q, k, v = linear8bit(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
         elif key is value or torch.equal(key, value):
@@ -210,6 +285,7 @@ def multi_head_attention_forward8bit(
             _w = in_proj_weight[_start:_end, :]
             if _b is not None:
                 _b = _b[_start:_end]
+            print('ERROR')
             q = linear8bit(query, _w, _b)
 
             if key is None:
@@ -225,6 +301,7 @@ def multi_head_attention_forward8bit(
                 _w = in_proj_weight[_start:, :]
                 if _b is not None:
                     _b = _b[_start:]
+                print('ERROR')
                 k, v = linear8bit(key, _w, _b).chunk(2, dim=-1)
 
         else:
@@ -235,6 +312,7 @@ def multi_head_attention_forward8bit(
             _w = in_proj_weight[_start:_end, :]
             if _b is not None:
                 _b = _b[_start:_end]
+            print('ERROR')
             q = linear8bit(query, _w, _b)
 
             # This is inline in_proj function with in_proj_weight and in_proj_bias
@@ -244,6 +322,7 @@ def multi_head_attention_forward8bit(
             _w = in_proj_weight[_start:_end, :]
             if _b is not None:
                 _b = _b[_start:_end]
+            print('ERROR')
             k = linear8bit(key, _w, _b)
 
             # This is inline in_proj function with in_proj_weight and in_proj_bias
@@ -253,6 +332,7 @@ def multi_head_attention_forward8bit(
             _w = in_proj_weight[_start:, :]
             if _b is not None:
                 _b = _b[_start:]
+            print('ERROR')
             v = linear8bit(value, _w, _b)
     else:
         q_proj_weight_non_opt = torch.jit._unwrap_optional(q_proj_weight)
@@ -267,27 +347,39 @@ def multi_head_attention_forward8bit(
         len1, len2 = v_proj_weight_non_opt.size()
         assert len1 == embed_dim and len2 == value.size(-1)
 
+        #val, idx = torch.sort(torch.abs(query[:, 0]), dim=1, descending=True)
+        #print(query.shape, val.shape)
+        #for i in range(val.shape[0]):
+            #print(i, val[i,  :7].data)
+
         if in_proj_bias is not None:
             if 'linear' in attention_type:
                 if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
                     query = truncate_tensor(query, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
                     key = truncate_tensor(key, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
                     value = truncate_tensor(value, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
-                q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
-                k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
-                v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
+                #q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
+                #k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
+                #v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
+                q = sparse_decomposed_linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim],sparse_decomp=sparse_decomp, percentage=perc)
+                k = sparse_decomposed_linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)],sparse_decomp=sparse_decomp, percentage=perc)
+                v = sparse_decomposed_linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :],sparse_decomp=sparse_decomp, percentage=perc)
             else:
                 if 'q' in attention_type:
                     query = apply_squash_func(query, args.attention_func)
-                    q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim], num_splits=args.num_splits)
+                    #q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim], num_splits=args.num_splits)
+                    q = sparse_decomposed_linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim],num_splits=args.num_splits, sparse_decomp=sparse_decomp, percentage=perc)
                 else:
                     q = linear(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
                 if 'k' in attention_type:
-                    k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
+                    #k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
+                    k = sparse_decomposed_linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)],sparse_decomp=sparse_decomp, percentage=perc)
                 else:
                     k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
+
                 if 'v' in attention_type:
-                    v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
+                    #v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
+                    v = sparse_decomposed_linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :],sparse_decomp=sparse_decomp, percentage=perc)
                 else:
                     v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
         else:
@@ -296,19 +388,25 @@ def multi_head_attention_forward8bit(
                     query = truncate_tensor(query, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
                     key = truncate_tensor(key, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
                     value = truncate_tensor(value, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
+                print('ERROR')
                 q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias)
                 k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias)
                 v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias)
             else:
                 if 'q' in attention_type:
+                    print('ERROR')
                     q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias)
                 else:
                     q = linear(query, q_proj_weight_non_opt, in_proj_bias)
+
                 if 'k' in attention_type:
+                    print('ERROR')
                     k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias)
                 else:
                     k = linear(key, k_proj_weight_non_opt, in_proj_bias)
+
                 if 'v' in attention_type:
+                    print('ERROR')
                     v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias)
                 else:
                     v = linear(value, v_proj_weight_non_opt, in_proj_bias)
@@ -367,11 +465,19 @@ def multi_head_attention_forward8bit(
         assert bias_k is None
         assert bias_v is None
 
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
-    if k is not None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-    if v is not None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+    if 'primer' in attention_type:
+        #q = causal_conv2d(q, convs[0].weight, convs[0].bias, num_heads)
+        #k = causal_conv2d(k, convs[1].weight, convs[1].bias, num_heads)
+        #v = causal_conv2d(v, convs[2].weight, convs[2].bias, num_heads)
+        q = causal_conv2d(q, (convs[0], convs[1], convs[2]), None, num_heads)
+        k = causal_conv2d(k, (convs[3], convs[4], convs[5]), None, num_heads)
+        v = causal_conv2d(v, (convs[6], convs[7], convs[8]), None, num_heads)
+    else:
+        q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+        if k is not None:
+            k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        if v is not None:
+            v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
 
     if static_k is not None:
         assert static_k.size(0) == bsz * num_heads
@@ -397,6 +503,7 @@ def multi_head_attention_forward8bit(
             attn_mask = pad(attn_mask, (0, 1))
         if key_padding_mask is not None:
             key_padding_mask = pad(key_padding_mask, (0, 1))
+
 
     if 'bmm1' in attention_type:
         if attention_func is None or attention_func == '':
@@ -434,8 +541,11 @@ def multi_head_attention_forward8bit(
             else:
                 raise ValueError(f'Num splits not supported: num_splite={num_splits}')
         else:
-            #attn_output_weights = bnb.bmm(q, k.transpose(1, 2), None, quant_type, attention_bmm_kits)
-            attn_output_weights = bnb.bmm(q, k.transpose(1, 2))
+            if sparse_decomp:
+                #attn_output_weights = sparse_bmm_half(q, k.transpose(1, 2), percentage=perc)
+                attn_output_weights = sparse_bmm_full(q, k.transpose(1, 2), percentage=perc)
+            else:
+                attn_output_weights = bnb.bmm(q, k.transpose(1, 2))
     else:
         attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
@@ -470,18 +580,29 @@ def multi_head_attention_forward8bit(
             else:
                 raise ValueError(f'Num splits not supported: num_splite={num_splits}')
         else:
-            attn_output = bnb.bmm(attn_output_weights, v)
+            if sparse_decomp:
+                #attn_output = sparse_bmm_half(attn_output_weights, v, percentage=perc)
+                attn_output = sparse_bmm_full(attn_output_weights, v, percentage=perc)
+            else:
+                attn_output = bnb.bmm(attn_output_weights, v)
     else:
         attn_output = torch.bmm(attn_output_weights, v)
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
+
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+
 
     if 'linear' in attention_type or 'out' in attention_type:
         if args.attn_trunc_low > 0 or args.attn_trunc_high < 100:
             attn_output = truncate_tensor(attn_output, args.attn_trunc_low, args.attn_trunc_high, args.attn_trunc_mode)
-        attn_output = linear8bit(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = sparse_decomposed_linear8bit(attn_output, out_proj_weight, out_proj_bias, sparse_decomp=sparse_decomp, percentage=perc)
     else:
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+
+    if 'normformer' in attention_type:
+        attn_output = einops.rearrange(attn_output,'s b (h H)-> s b h H', H=num_heads)
+        attn_output = attn_output*head_scales.expand_as(attn_output)
+        attn_output = einops.rearrange(attn_output, 's b h H -> s b (h H)')
 
     if need_weights:
         # average attention weights over heads
