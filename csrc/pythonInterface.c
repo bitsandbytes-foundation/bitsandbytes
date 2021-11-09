@@ -149,6 +149,44 @@ extern "C"
 	{ igemmLt(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc); }
 
 	Context *get_context(){ return new Context(); }
+
+	void cgemmtest(Context *context, int m, int n, int k,
+                   const int8_t *A,
+                   int lda,
+                   const int8_t *B,
+                   int ldb,
+                   int32_t *C,
+                   int ldc){
+LtIgemmTensor((cublasLtHandle_t) context->m_handle,
+                   m,
+                   n,
+                   k,
+                   A,
+                   lda,
+                   B,
+                   ldb,
+                   C,
+                   ldc); }
+
+
+		void ctest()
+		{
+    TestBench<int8_t, int32_t> props(4096*1, 4096*1, 4096*1);
+    props.run([&props] {
+        LtIgemmTensor(props.ltHandle,
+                    props.m,
+                    props.n,
+                    props.k,
+                    props.Adev,
+                    props.m,
+                    props.Bdev,
+                    props.k,
+                    props.Cdev,
+                    props.m);
+				});
+		}
+
+
 }
 
 

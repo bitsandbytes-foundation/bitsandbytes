@@ -13,7 +13,7 @@ FILES_CUDA := $(CSRC)/ops.cu $(CSRC)/kernels.cu
 FILES_CPP := $(CSRC)/pythonInterface.c
 
 INCLUDE :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/csrc -I $(CONDA_PREFIX)/include -I $(ROOT_DIR)/dependencies/cub
-LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcuda -lcublas -lcurand -lcusparse -L $(CONDA_PREFIX)/lib
+LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcuda -lcublas -lcublasLt -lcurand -lcusparse -L $(CONDA_PREFIX)/lib
 
 # NVIDIA NVCC compilation flags
 #COMPUTE_CAPABILITY := -gencode arch=compute_50,code=sm_50 # Maxwell

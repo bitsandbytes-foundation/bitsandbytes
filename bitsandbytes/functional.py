@@ -746,9 +746,22 @@ def igemmLt(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transpos
 
     # B^T @ A^T = C^T
     # [km, nk -> mn] 
-    print(transposed_A, transposed_B, m, n, k, lda, ldb, ldc)
-    lib.cigemmLt(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
-               get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
+    #print(A.dtype, B.dtype, out.dtype)
+    #print(A.device, B.device, out.device)
+    #lib.cigemmLt(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
+               #get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
+
+
+    m = ct.c_int32(m)
+    n = ct.c_int32(n)
+    k = ct.c_int32(k)
+    lda = ct.c_int32(lda)
+    ldb = ct.c_int32(ldb)
+    ldc = ct.c_int32(ldc)
+    ptrA = get_ptr(A)
+    ptrB = get_ptr(B)
+    ptrC = get_ptr(out)
+    lib.cgemmtest(ptr, m, n, k, ptrB, lda, ptrA, ldb, ptrC, ldc)
     return out
 
 
@@ -880,3 +893,22 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
         x *= S2/C
         return x.to(dtype)
     else: return None
+
+
+def igemm_test(A, B, C):
+    ptr = CUBLAS_Context.get_instance().context
+    ptrA = get_ptr(A)
+    ptrB = get_ptr(B)
+    ptrC = get_ptr(C)
+    m = A.shape[0]
+    n = B.shape[1]
+    k = A.shape[1]
+    m = ct.c_int32(m)
+    n = ct.c_int32(n)
+    k = ct.c_int32(k)
+    lda = m
+    ldb = k
+    ldc = m
+
+    lib.cigemmLt(ptr, ct.c_bool(False), ct.c_bool(False), m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+    #lib.cgemmtest(ptr, m, n, k, ptrA, lda, ptrB, ldb, ptrC, ldc)
