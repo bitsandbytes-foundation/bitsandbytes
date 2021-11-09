@@ -310,35 +310,6 @@ def test_approx_igemm(dim1, dim2, quant_methods, batched):
 
 
 
-def test_igemm_bench():
-    dim1 = 4096*1
-    dim2 = 4096*1
-    dim3 = 4096*1
-    A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-    B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
-    C = torch.zeros(dim1, dim3, device=A.device, dtype=torch.int32)
-
-    t = Timer()
-    A = torch.randn(dim1, dim2, device='cuda')
-    B = torch.randn(dim2, dim3, device='cuda')
-    A = A.half()
-    B = B.half()
-    C = torch.zeros(dim1, dim3, device=A.device, dtype=B.dtype)
-
-
-    for i in range(128):
-        #F.igemm(A, B, out=C)
-        #F.igemmLt(A, B, out=C)
-        torch.mm(A, B, out=C)
-
-    torch.cuda.synchronize()
-
-    #t.tick()
-    for i in range(1280):
-        #F.igemm(A, B, out=C)
-        #F.igemmLt(A, B, out=C)
-        torch.mm(A, B, out=C)
-    #t.tock()
 
 def test_stable_embedding():
     layer = bnb.nn.StableEmbedding(1024, 1024)
@@ -543,3 +514,44 @@ def test_vector_quant(dim1, dim2, dim3):
         torch.testing.assert_allclose(A1, A, atol=0.01, rtol=0.1)
 
 
+
+def test_igemm_bench():
+    batch = 4
+    seq = 2048
+    model = 4*1024
+    factor = 8
+    hidden = factor*model
+    dim1 = batch*seq
+    dim2 = hidden
+    dim3 = model
+    A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+    B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
+    C = torch.zeros(dim1, dim3, device=A.device, dtype=torch.int32)
+
+    A = torch.randn(dim1, dim2, device='cuda')
+    B = torch.randn(dim2, dim3, device='cuda')
+    A = A.half()
+    B = B.half()
+    C = torch.zeros(dim1, dim3, device=A.device, dtype=B.dtype)
+
+
+    for i in range(128):
+        torch.mm(A, B, out=C)
+
+    torch.cuda.synchronize()
+
+    for i in range(1280):
+        torch.mm(A, B, out=C)
+
+    A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+    B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
+    C = torch.zeros(dim1, dim3, device=A.device, dtype=torch.int32)
+
+    for i in range(128):
+        F.igemmLt(A, B, out=C)
+
+    torch.cuda.synchronize()
+
+    #t.tick()
+    for i in range(1280):
+        F.igemmLt(A, B, out=C)
