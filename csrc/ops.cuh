@@ -36,6 +36,7 @@ typedef enum Optimizer_t
 	MOMENTUM = 1,
   RMSPROP = 2,
   LARS = 3,
+  ADAGRAD = 4,
 } Optimizer_t;
 
 
