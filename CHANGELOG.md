@@ -38,3 +38,7 @@ Docs:
  - Added docs with instructions to compile from source.
 
 
+### 0.26.0:
+
+Features:
+ - Added Adagrad (without grad clipping) as 32-bit and 8-bit block-wise optimizer
