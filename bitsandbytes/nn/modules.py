@@ -15,8 +15,8 @@ from bitsandbytes.optim import GlobalOptimManager
 class StableEmbedding(torch.nn.Embedding):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
-                 sparse: bool = True, _weight: Optional[Tensor] = None) -> None:
-        super(StableEmbedding, self).__init__(num_embeddings, embedding_dim, padding_idx, max_norm, norm_type, scale_grad_by_freq, False, _weight)
+                 sparse: bool = False, _weight: Optional[Tensor] = None) -> None:
+        super(StableEmbedding, self).__init__(num_embeddings, embedding_dim, padding_idx, max_norm, norm_type, scale_grad_by_freq, sparse, _weight)
         self.norm = torch.nn.LayerNorm(embedding_dim)
         GlobalOptimManager.get_instance().register_parameters(self.weight)
         GlobalOptimManager.get_instance().override_config(self.weight, 'optim_bits', 32)
