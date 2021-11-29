@@ -19,16 +19,15 @@ INCLUDE :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/csrc -I $(CONDA_PREFIX)/inclu
 LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcuda -lcublas -lcurand -lcusparse -L $(CONDA_PREFIX)/lib
 
 # NVIDIA NVCC compilation flags
-#COMPUTE_CAPABILITY := -gencode arch=compute_35,code=sm_35 # Kepler 
-#COMPUTE_CAPABILITY += -gencode arch=compute_37,code=sm_37 # Kepler 
-#COMPUTE_CAPABILITY += -gencode arch=compute_50,code=sm_50 # Maxwell
-#COMPUTE_CAPABILITY += -gencode arch=compute_52,code=sm_52 # Maxwell
-#COMPUTE_CAPABILITY += -gencode arch=compute_60,code=sm_60 # Pascal
-#COMPUTE_CAPABILITY += -gencode arch=compute_61,code=sm_61 # Pascal
-#COMPUTE_CAPABILITY += -gencode arch=compute_70,code=sm_70 # Volta
-#COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
-#COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
-COMPUTE_CAPABILITY := -gencode arch=compute_75,code=sm_75 # Volta 
+COMPUTE_CAPABILITY := -gencode arch=compute_35,code=sm_35 # Kepler 
+COMPUTE_CAPABILITY += -gencode arch=compute_37,code=sm_37 # Kepler 
+COMPUTE_CAPABILITY += -gencode arch=compute_50,code=sm_50 # Maxwell
+COMPUTE_CAPABILITY += -gencode arch=compute_52,code=sm_52 # Maxwell
+COMPUTE_CAPABILITY += -gencode arch=compute_60,code=sm_60 # Pascal
+COMPUTE_CAPABILITY += -gencode arch=compute_61,code=sm_61 # Pascal
+COMPUTE_CAPABILITY += -gencode arch=compute_70,code=sm_70 # Volta
+COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
+COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
 
 # CUDA 9.2 supports CC 3.0, but CUDA >= 11.0 does not
 CC_CUDA92 := -gencode arch=compute_30,code=sm_30
