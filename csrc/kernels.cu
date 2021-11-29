@@ -720,6 +720,9 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
 										s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
 										p_vals[j] = ((float)p_vals[j]) + (update_scale*step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(eps*correction2))));
+
+                    if(weight_decay > 0.0f)
+                        p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
 									}
                   break;
           }

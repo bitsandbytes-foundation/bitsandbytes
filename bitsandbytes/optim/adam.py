@@ -28,7 +28,6 @@ class Adam32bit(Optimizer2State):
                 weight_decay, 32, args, min_8bit_size, percentile_clipping, block_wise)
 
 
-
 class AnalysisAdam(torch.optim.Optimizer):
     """Adam that performs 8-bit vs 32-bit error analysis.
 

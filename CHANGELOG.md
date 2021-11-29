@@ -42,3 +42,7 @@ Docs:
 
 Features:
  - Added Adagrad (without grad clipping) as 32-bit and 8-bit block-wise optimizer
+ - Added AdamW (copy of Adam with weight decay init 1e-2)
+
+Bug fixes:
+ - Fixed a bug where weight decay was incorrectly applied to 32-bit Adam
