@@ -13,7 +13,7 @@ def read(fname):
 
 setup(
     name = f"bitsandbytes-cuda{os.environ['CUDA_VERSION']}",
-    version = "0.25.0",
+    version = "0.26.0",
     author = "Tim Dettmers",
     author_email = "dettmers@cs.washington.edu",
     description = ("8-bit optimizers and quantization routines."),
