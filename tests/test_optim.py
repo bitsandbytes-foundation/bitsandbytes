@@ -392,3 +392,18 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     #assert s < 3.9
 
 
+
+def test_str_betas():
+    betas = (0.80, 0.95)
+    strbetas = '(0.80, 0.95)'
+
+    layer = torch.nn.Linear(10, 10)
+
+    base = bnb.optim.Adam(layer.parameters(), betas=betas)
+    strbase = bnb.optim.Adam(layer.parameters(), betas=strbetas)
+    assert base.defaults['betas'][0] == 0.8
+    assert base.defaults['betas'][1] == 0.95
+    assert strbase.defaults['betas'][0] == 0.8
+    assert strbase.defaults['betas'][1] == 0.95
+
+

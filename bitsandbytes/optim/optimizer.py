@@ -242,8 +242,9 @@ class Optimizer2State(Optimizer8bit):
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {}".format(eps))
         if isinstance(betas, str):
-            betas = eval(betas)
-            print(betas, 'parsed')
+            # format: '(beta1, beta2)'
+            betas = betas.replace('(', '').replace(')', '').strip().split(',')
+            betas = [float(b) for b in betas]
         for i in range(len(betas)):
             if not 0.0 <= betas[i] < 1.0:
                 raise ValueError(f"Invalid beta parameter at index {i}: {betas[i]}")
