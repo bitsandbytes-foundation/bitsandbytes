@@ -83,6 +83,7 @@ For upcoming features and changes and full history see [Patch Notes](CHANGELOG.m
 ## Errors
 
 1. RuntimeError: CUDA error: no kernel image is available for execution on the device. [Solution](errors_and_solutions.md#No-kernel-image-available)
+2. __fatbinwrap_.. [Solution](errors_and_solutions.md#fatbinwrap_)
 
 ## Compile from source
 

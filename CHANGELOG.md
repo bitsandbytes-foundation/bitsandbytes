@@ -43,7 +43,13 @@ Docs:
 Features:
  - Added Adagrad (without grad clipping) as 32-bit and 8-bit block-wise optimizer.
  - Added AdamW (copy of Adam with weight decay init 1e-2). #10
+ - Introduced ModuleConfig overrides which can be seamlessly be used at initialization time of a module.
+ - Added `bnb.nn.Embedding` layer which runs at 32-bit but without the layernorm. This works well if you need to fine-tune pretrained models that do not have a embedding layer norm. #19
 
 Bug fixes:
  - Fixed a bug where weight decay was incorrectly applied to 32-bit Adam. #13
  - Fixed an unsafe use of eval. #8
+ - Fixed a bug where the StableEmbedding layer 32-bit optimizer override would not work without registering the whole model first (`bnb.optim.GlobalOptimManager.get_instance().register_parameters(model.parameters())`).  #13 #15 
+
+Docs:
+ - Added instructions how to solve "\_\_fatbinwrap_" errors.
