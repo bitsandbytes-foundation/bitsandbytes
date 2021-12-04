@@ -81,6 +81,8 @@ void gemmex(Context * context, bool transposeA, bool transposeB, int m, int n, i
 void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc, 
                     long long int strideA, long long int strideB, long long int strideC, int batchCount);
 
+void cutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
+
 #endif
 
 

@@ -306,10 +306,10 @@ def test_igemm_bench():
     C = torch.zeros(dim1, dim3, device=A.device, dtype=B.dtype)
 
 
-
     for i in range(128):
         #F.mmi(A, B, out=C)
-        torch.mm(A, B, out=C)
+        #torch.mm(A, B, out=C)
+        F.cutlass_igemm(A, B, out=C)
 
 def test_stable_embedding():
     layer = bnb.nn.StableEmbedding(1024, 1024)
@@ -514,3 +514,20 @@ def test_vector_quant(dim1, dim2, dim3):
         torch.testing.assert_allclose(A1, A, atol=0.01, rtol=0.1)
 
 
+
+dim1 = torch.randint(32,1024*4, size=(4,)).tolist()
+dim2 = torch.randint(32,1024*4, size=(4,)).tolist()
+values = list(product(dim1,dim2))
+names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2", values, ids=names)
+def test_cutlass_igemm(dim1, dim2):
+    dim1 = dim1 - (dim1 % 32)
+    dim2 = dim2 - (dim2 % 32)
+    for i in range(100):
+        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+        B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
+        #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
+        #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
+        out = F.cutlass_igemm(A.half(), B.half())
+        out2 = torch.mm(A.half(), B.half())
+        torch.testing.assert_allclose(out, out2)
