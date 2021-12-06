@@ -762,8 +762,8 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
 
 
 def cutlass_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transposed_B=False):
-    sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.float16)
-    if out is None: out = torch.zeros(size=sout, dtype=torch.float16, device=A.device)
+    sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8)
+    if out is None: out = torch.zeros(size=sout, dtype=torch.int32, device=A.device)
     if len(A.shape) == 3 and len(B.shape) == 3:
         if A.shape[0] == B.shape[0] and A.shape[2] == B.shape[1]:
             return batched_igemm(A, B, out)
