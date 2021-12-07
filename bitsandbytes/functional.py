@@ -11,6 +11,29 @@ lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libbitsandbytes.so')
 lib.get_context.restype = ct.c_void_p
 name2qmap = {}
 
+def get_transform_func(dtype, orderA, orderOut, transpose=False):
+    name = f'ctransform_{(8 if dtype == torch.int8 else 32)}_{orderA}_to_{orderOut}_{"t" if transpose else "n"}'
+    if not hasattr(lib, name):
+        print(name)
+        raise ValueError(f'Transform function not supported: {orderA} to {orderOut} for data type {dtype} and transpose={transpose}')
+    else:
+        return getattr(lib, name)
+
+def transform(A, to_order, from_order='row', out=None, transpose=False):
+    if out is None: out = torch.zeros_like(A)
+    func = get_transform_func(A.dtype, from_order, to_order, transpose)
+
+    ptr = CUBLAS_Context.get_instance().context
+    dim1 = ct.c_int32(A.shape[0])
+    dim2 = ct.c_int32(A.shape[1])
+    ld = ct.c_int32(A.shape[1])
+
+    ptrA = get_ptr(A)
+    ptrOut = get_ptr(out)
+    func(ptr, get_ptr(A), get_ptr(out), dim1, dim2, ld)
+
+    return out
+
 
 class Timer(object):
     def __init__(self):

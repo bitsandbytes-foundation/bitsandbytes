@@ -304,6 +304,94 @@ void igemmLt(Context *context, bool transposeA, bool transposeB, int m, int n, i
  
 }
 
+typedef enum Transform_t
+{
+	ROW = 0,
+	COL = 1,
+  COL32 = 2,
+  COL_TURING = 3,
+  COL_AMPERE = 4,
+} Transform_t;
+
+template<int ORDER> cublasLtOrder_t get_order()
+{
+	switch(ORDER)
+	{
+		case ROW:
+      return CUBLASLT_ORDER_ROW;
+			break;
+    case COL:
+      return CUBLASLT_ORDER_COL;
+      break;
+    case COL32:
+      return CUBLASLT_ORDER_COL32;
+      break;
+    case COL_TURING:
+      return CUBLASLT_ORDER_COL4_4R2_8C;
+      break;
+    case COL_AMPERE:
+      return CUBLASLT_ORDER_COL32_2R_4R4;
+      break;
+  }
+}
+
+template cublasLtOrder_t get_order<ROW>();
+template cublasLtOrder_t get_order<COL>();
+template cublasLtOrder_t get_order<COL32>();
+template cublasLtOrder_t get_order<COL_TURING>();
+template cublasLtOrder_t get_order<COL_AMPERE>();
+
+
+template<int ORDER> int get_leading_dim(int dim1, int dim2)
+{
+	switch(ORDER)
+	{
+		case ROW:
+      return dim2;
+			break;
+    case COL:
+      return dim1;
+      break;
+  }
+}
+
+template int get_leading_dim<ROW>(int dim1, int dim2);
+template int get_leading_dim<COL>(int dim1, int dim2);
+
+template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2, int ld)
+{
+
+  cublasLtOrder_t orderA = get_order<SRC>();
+  cublasLtOrder_t orderOut = get_order<TARGET>();
+  int ldA = get_leading_dim<SRC>(dim1, dim2);
+  int ldOut = get_leading_dim<TARGET>(dim1, dim2);
+  
+  cublasLtMatrixLayout_t A_desc = NULL, out_desc = NULL;
+  cublasLtMatrixTransformDesc_t A2Out_desc = NULL;
+  cublasOperation_t opTranspose = CUBLAS_OP_T;
+  float transformAlpha = 1.0f, transformBeta = 0.0f;
+
+
+  checkCublasStatus(cublasLtMatrixLayoutCreate(&A_desc, CUDA_R_8I, dim1, dim2, ldA));
+  checkCublasStatus(cublasLtMatrixLayoutSetAttribute(A_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
+
+  checkCublasStatus(cublasLtMatrixLayoutCreate(&out_desc, CUDA_R_8I, dim1, dim2, ldOut));
+  checkCublasStatus(cublasLtMatrixLayoutSetAttribute(out_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderOut, sizeof(orderOut)));
+
+  checkCublasStatus(cublasLtMatrixTransformDescCreate(&A2Out_desc, CUDA_R_32F));
+
+  if(transpose){ checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(A2Out_desc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose))); }
+
+  checkCublasStatus(cublasLtMatrixTransform(ltHandle, A2Out_desc, &transformAlpha, A, A_desc, &transformBeta, NULL, NULL, out, out_desc, 0));
+
+  if (A_desc) checkCublasStatus(cublasLtMatrixLayoutDestroy(A_desc));
+  if (out_desc) checkCublasStatus(cublasLtMatrixLayoutDestroy(out_desc));
+  if (A2Out_desc) checkCublasStatus(cublasLtMatrixTransformDescDestroy(A2Out_desc));
+}
+
+template void transform<int8_t, ROW, COL, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2, int ld);
+template void transform<int8_t, ROW, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2, int ld);
+
 void LtIgemmTensor(cublasLtHandle_t ltHandle,
                    int m,
                    int n,
@@ -369,10 +457,10 @@ void LtIgemmTensor(cublasLtHandle_t ltHandle,
 
     checkCublasStatus(cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, A, Adesc, &transformBeta, NULL, NULL, Atransform, AtransformDesc, 0));
 
-    // B matrix is non-transposed, but transposed matrix is needed - add transpose operation in matrix transform.
-    checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(transformDesc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose)));
+    //// B matrix is non-transposed, but transposed matrix is needed - add transpose operation in matrix transform.
+    //checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(transformDesc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose)));
 
-    checkCublasStatus(cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, B, Bdesc, &transformBeta, NULL, NULL, Btransform, BtransformDesc, 0));
+    //checkCublasStatus(cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, B, Bdesc, &transformBeta, NULL, NULL, Btransform, BtransformDesc, 0));
 
     // no need to transform C matrix as beta is assumed to be 0
     checkCublasStatus(cublasLtMatmul(ltHandle,
@@ -396,7 +484,7 @@ void LtIgemmTensor(cublasLtHandle_t ltHandle,
     checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(transformDesc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose)));
 
     // transform outputs to COL order
-    checkCublasStatus(cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, Ctransform, CtransformDesc, &transformBeta, NULL, NULL, C, Cdesc, 0));
+    //checkCublasStatus(cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, Ctransform, CtransformDesc, &transformBeta, NULL, NULL, C, Cdesc, 0));
 
     // descriptors are no longer needed as all GPU work was already enqueued
     if (CtransformDesc) checkCublasStatus(cublasLtMatrixLayoutDestroy(CtransformDesc));

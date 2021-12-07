@@ -5,6 +5,13 @@
 #define MOMENTUM 1
 #define RMSPROP 2
 
+#define ROW 0
+#define COL 1
+#define COL32 2
+#define COL_TURING 3
+#define COL_AMPERE 4
+
+
 // We cannot call templated code from C, so we wrap the template in a C compatible call here if necessary.
 // We use macro functions to expand all the different optimizers. Looks ugly, and is ugly, but its better than to 
 // maintain all that boilerplate
@@ -14,6 +21,16 @@
 
 void estimateQuantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles<float>(A, code, offset, n); }
 void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles<half>(A, code, offset, n); }
+
+
+#define MAKE_FUNC_TRANSFORM(fbits, fsrc, ftrgt, ftranspose, dtype, src, target, transpose, bits) \
+void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(cublasLtHandle_t ltHandle, dtype *A, dtype *out, int dim1, int dim2, int ld) \
+{ \
+	transform<dtype, src, target, transpose, bits>(ltHandle, A, out, dim1, dim2, ld); \
+} \
+
+MAKE_FUNC_TRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8);
+MAKE_FUNC_TRANSFORM(8, row, row, n, int8_t, ROW, ROW, false, 8);
 
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
@@ -186,6 +203,15 @@ LtIgemmTensor((cublasLtHandle_t) context->m_handle,
 				});
 		}
 
+  #define MAKE_FUNC_CTRANSFORM(fbits, fsrc, ftrgt, ftranspose, dtype, src, target, transpose, bits) \
+	void ctransform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(Context *context, dtype *A, dtype *out, int dim1, int dim2, int ld) \
+	{ \
+		transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose((cublasLtHandle_t) context->m_handle, A, out, dim1, dim2, ld); \
+	} \
+
+
+	MAKE_FUNC_CTRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8)
+	MAKE_FUNC_CTRANSFORM(8, row, row, n, int8_t, ROW, ROW, false, 8)
 
 }
 

@@ -517,17 +517,13 @@ def test_vector_quant(dim1, dim2, dim3):
 
 def test_igemm_bench():
     batch = 4
-    seq = 2048
-    model = 4*1024
+    seq = 512
+    model = 2*1024
     factor = 8
     hidden = factor*model
-    dim1 = batch*seq
-    dim2 = hidden
+    dim1 = hidden
+    dim2 = batch*seq
     dim3 = model
-    A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-    B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
-    C = torch.zeros(dim1, dim3, device=A.device, dtype=torch.int32)
-
     A = torch.randn(dim1, dim2, device='cuda')
     B = torch.randn(dim2, dim3, device='cuda')
     A = A.half()
@@ -555,3 +551,31 @@ def test_igemm_bench():
     #t.tick()
     for i in range(1280):
         F.igemmLt(A, B, out=C)
+
+
+n = 1
+dim1 = torch.randint(1,16, size=(n,)).tolist()
+dim2 = torch.randint(1,16, size=(n,)).tolist()
+dtype = [torch.int8]
+a_order = ['row']
+out_order = ['col', 'row']
+transpose = [False]
+values = list(product(dim1,dim2,dtype, a_order, out_order, transpose))
+names = ['dim1_{0}_dim2_{1}_dtype_{2}_orderA_{3}_orderOut_{4}_{5}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, dtype, orderA, orderOut, transpose", values, ids=names)
+def test_transform(dim1, dim2, dtype, orderA, orderOut, transpose):
+    func = F.get_transform_func(dtype, orderA, orderOut, transpose)
+
+    A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+    out = F.transform(A, to_order=orderOut)
+
+    if orderOut == 'row':
+        torch.testing.assert_allclose(A.flatten(), out.flatten())
+    elif orderOut == 'col':
+        torch.testing.assert_allclose(A.t().flatten(), out.flatten())
+
+    if not transpose:
+        for s1, s2 in zip(A.shape, out.shape):
+            assert s1 == s2
+
+

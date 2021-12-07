@@ -200,6 +200,8 @@ void LtIgemmTensor(cublasLtHandle_t ltHandle,
                    int32_t *C,
                    int ldc);
 
+template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2, int ld);
+
 #endif
 
 
