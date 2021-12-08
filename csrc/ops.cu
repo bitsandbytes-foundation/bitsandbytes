@@ -352,11 +352,15 @@ template<int ORDER> int get_leading_dim(int dim1, int dim2)
     case COL:
       return dim1;
       break;
+    case COL32:
+      return dim1*32;
+      break;
   }
 }
 
 template int get_leading_dim<ROW>(int dim1, int dim2);
 template int get_leading_dim<COL>(int dim1, int dim2);
+template int get_leading_dim<COL32>(int dim1, int dim2);
 
 template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2, int ld)
 {
@@ -370,6 +374,8 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   cublasLtMatrixTransformDesc_t A2Out_desc = NULL;
   cublasOperation_t opTranspose = CUBLAS_OP_T;
   float transformAlpha = 1.0f, transformBeta = 0.0f;
+
+  cout << SRC << TARGET <<  " " << ldOut << " " << orderOut << endl;
 
 
   checkCublasStatus(cublasLtMatrixLayoutCreate(&A_desc, CUDA_R_8I, dim1, dim2, ldA));
@@ -391,6 +397,8 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
 
 template void transform<int8_t, ROW, COL, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2, int ld);
 template void transform<int8_t, ROW, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2, int ld);
+template void transform<int8_t, ROW, COL32, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2, int ld);
+template void transform<int8_t, ROW, COL_TURING, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2, int ld);
 
 void LtIgemmTensor(cublasLtHandle_t ltHandle,
                    int m,

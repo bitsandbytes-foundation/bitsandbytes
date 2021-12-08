@@ -19,8 +19,18 @@ def get_transform_func(dtype, orderA, orderOut, transpose=False):
     else:
         return getattr(lib, name)
 
+def get_transform_buffer(A, order='row'):
+    if order == 'row' or order == 'col':
+        return torch.zeros_like(A)
+    elif order == 'col32':
+        # blocks of 32 columns (padded)
+        cols = A.shape[1] + (32 - (A.shape[1] % 32))
+        return torch.zeros((A.shape[0], cols), dtype=A.dtype, device=A.device)
+
+
+
 def transform(A, to_order, from_order='row', out=None, transpose=False):
-    if out is None: out = torch.zeros_like(A)
+    if out is None: out = get_transform_buffer(A, to_order)
     func = get_transform_func(A.dtype, from_order, to_order, transpose)
 
     ptr = CUBLAS_Context.get_instance().context

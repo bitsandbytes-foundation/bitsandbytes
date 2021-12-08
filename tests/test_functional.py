@@ -554,11 +554,12 @@ def test_igemm_bench():
 
 
 n = 1
-dim1 = torch.randint(1,16, size=(n,)).tolist()
-dim2 = torch.randint(1,16, size=(n,)).tolist()
+#dim1 = torch.randint(2,4, size=(n,)).tolist()
+#dim2 = torch.randint(2,4, size=(n,)).tolist()
+dim1, dim2 = (2,), (33,)
 dtype = [torch.int8]
 a_order = ['row']
-out_order = ['col', 'row']
+out_order = ['col', 'row', 'col_turing', 'col32']
 transpose = [False]
 values = list(product(dim1,dim2,dtype, a_order, out_order, transpose))
 names = ['dim1_{0}_dim2_{1}_dtype_{2}_orderA_{3}_orderOut_{4}_{5}'.format(*vals) for vals in values]
@@ -573,9 +574,23 @@ def test_transform(dim1, dim2, dtype, orderA, orderOut, transpose):
         torch.testing.assert_allclose(A.flatten(), out.flatten())
     elif orderOut == 'col':
         torch.testing.assert_allclose(A.t().flatten(), out.flatten())
+    elif orderOut == 'col32':
+        n = A.shape[0]*(A.shape[1] + (32 - (A.shape[1]%32)))
+        assert out.numel() == n
+        offset = 32*A.shape[0]
+        for row in range(A.shape[0]):
+            for col in range(A.shape[1]):
+                i = row*A.shape[1]
+                j = col
 
-    if not transpose:
-        for s1, s2 in zip(A.shape, out.shape):
-            assert s1 == s2
+                # offset the block
+                block = col // 32
+                block_offset = offset*block
+                col2 = col % 32
+
+                row2 = row*32
+
+                torch.testing.assert_allclose(A.flatten()[i+j], A[row, col])
+                torch.testing.assert_allclose(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
 
 
