@@ -19,30 +19,50 @@ def get_transform_func(dtype, orderA, orderOut, transpose=False):
     else:
         return getattr(lib, name)
 
-def get_transform_buffer(A, order='row'):
+def get_transform_buffer(A, order='row', state=None):
     if order == 'row' or order == 'col':
-        return torch.zeros_like(A)
+        if state[1] != 'row' and state[1] != 'col':
+            shape = state[0]
+            return torch.zeros(shape, dtype=A.dtype, device=A.device)
+        else:
+            return torch.zeros_like(A)
     elif order == 'col32':
         # blocks of 32 columns (padded)
         cols = A.shape[1] + (32 - (A.shape[1] % 32))
         return torch.zeros((A.shape[0], cols), dtype=A.dtype, device=A.device)
+    elif order == 'col_turing':
+        # blocks of 32 columns and 8 rows
+        cols = A.shape[1] + (32 - (A.shape[1] % 32))
+        rows = A.shape[0] + (8 - (A.shape[0] % 8))
+        return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
+    elif order == 'col_ampere':
+        # blocks of 32 columns and 32 rows
+        cols = A.shape[1] + (32 - (A.shape[1] % 32))
+        rows = A.shape[0] + (32 - (A.shape[0] % 32))
+        return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
 
 
 
-def transform(A, to_order, from_order='row', out=None, transpose=False):
-    if out is None: out = get_transform_buffer(A, to_order)
+
+
+def transform(A, to_order, from_order='row', out=None, transpose=False, state=None):
+    if state is None: state = (A.shape, from_order)
+    if out is None: out = get_transform_buffer(A, to_order, state)
     func = get_transform_func(A.dtype, from_order, to_order, transpose)
 
+    shape = state[0]
     ptr = CUBLAS_Context.get_instance().context
-    dim1 = ct.c_int32(A.shape[0])
-    dim2 = ct.c_int32(A.shape[1])
-    ld = ct.c_int32(A.shape[1])
+    dim1 = ct.c_int32(shape[0])
+    dim2 = ct.c_int32(shape[1])
+    ld = ct.c_int32(shape[1])
 
     ptrA = get_ptr(A)
     ptrOut = get_ptr(out)
     func(ptr, get_ptr(A), get_ptr(out), dim1, dim2, ld)
 
-    return out
+    state = (A.shape, to_order)
+
+    return out, state
 
 
 class Timer(object):

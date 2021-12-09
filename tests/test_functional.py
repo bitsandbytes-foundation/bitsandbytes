@@ -554,12 +554,12 @@ def test_igemm_bench():
 
 
 n = 1
-#dim1 = torch.randint(2,4, size=(n,)).tolist()
-#dim2 = torch.randint(2,4, size=(n,)).tolist()
-dim1, dim2 = (2,), (33,)
+dim1 = torch.randint(2,4, size=(n,)).tolist()
+dim2 = torch.randint(2,4, size=(n,)).tolist()
+#dim1, dim2 = (2,), (33,)
 dtype = [torch.int8]
 a_order = ['row']
-out_order = ['col', 'row', 'col_turing', 'col32']
+out_order = ['col', 'row', 'col32']
 transpose = [False]
 values = list(product(dim1,dim2,dtype, a_order, out_order, transpose))
 names = ['dim1_{0}_dim2_{1}_dtype_{2}_orderA_{3}_orderOut_{4}_{5}'.format(*vals) for vals in values]
@@ -568,7 +568,7 @@ def test_transform(dim1, dim2, dtype, orderA, orderOut, transpose):
     func = F.get_transform_func(dtype, orderA, orderOut, transpose)
 
     A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-    out = F.transform(A, to_order=orderOut)
+    out, S = F.transform(A, to_order=orderOut)
 
     if orderOut == 'row':
         torch.testing.assert_allclose(A.flatten(), out.flatten())
@@ -592,5 +592,9 @@ def test_transform(dim1, dim2, dtype, orderA, orderOut, transpose):
 
                 torch.testing.assert_allclose(A.flatten()[i+j], A[row, col])
                 torch.testing.assert_allclose(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
+
+    if orderOut == 'col32':
+        out2, S = F.transform(out, from_order=orderOut, to_order='row', state=S)
+        torch.testing.assert_allclose(A, out2)
 
 
