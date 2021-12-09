@@ -189,18 +189,18 @@ void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, i
                     long long int strideA, long long int strideB, long long int strideC, int batchCount);
 
 
-void LtIgemmTensor(cublasLtHandle_t ltHandle,
+void LtIgemm(cublasLtHandle_t ltHandle,
                    int m,
                    int n,
                    int k,
                    const int8_t *A,
-                   int lda,
                    const int8_t *B,
-                   int ldb,
                    int32_t *C,
+                   int lda,
+                   int ldb,
                    int ldc);
 
-template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2, int ld);
+template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2);
 
 #endif
 

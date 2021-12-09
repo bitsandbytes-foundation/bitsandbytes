@@ -24,17 +24,19 @@ void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimate
 
 
 #define MAKE_FUNC_TRANSFORM(fbits, fsrc, ftrgt, ftranspose, dtype, src, target, transpose, bits) \
-void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(cublasLtHandle_t ltHandle, dtype *A, dtype *out, int dim1, int dim2, int ld) \
+void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(cublasLtHandle_t ltHandle, dtype *A, dtype *out, int dim1, int dim2) \
 { \
-	transform<dtype, src, target, transpose, bits>(ltHandle, A, out, dim1, dim2, ld); \
+	transform<dtype, src, target, transpose, bits>(ltHandle, A, out, dim1, dim2); \
 } \
 
 MAKE_FUNC_TRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8);
 MAKE_FUNC_TRANSFORM(8, row, row, n, int8_t, ROW, ROW, false, 8);
 MAKE_FUNC_TRANSFORM(8, row, col32, n, int8_t, ROW, COL32, false, 8);
+MAKE_FUNC_TRANSFORM(32, row, col32, n, int32_t, ROW, COL32, false, 32);
 MAKE_FUNC_TRANSFORM(8, row, col_turing, n, int8_t, ROW, COL_TURING, false, 8);
 MAKE_FUNC_TRANSFORM(8, row, col_ampere, n, int8_t, ROW, COL_AMPERE, false, 8);
 MAKE_FUNC_TRANSFORM(8, col32, row, n, int8_t, COL32, ROW, false, 8);
+MAKE_FUNC_TRANSFORM(32, col32, row, n, int32_t, COL32, ROW, false, 32);
 
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
@@ -166,60 +168,26 @@ extern "C"
 			               long strideA, long strideB, long strideC, int batchCount)
 	{ strided_gemmex(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc, strideA, strideB, strideC, batchCount); }
 
-	void cigemmLt(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
-	{ igemmLt(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc); }
-
 	Context *get_context(){ return new Context(); }
 
-	void cgemmtest(Context *context, int m, int n, int k,
-                   const int8_t *A,
-                   int lda,
-                   const int8_t *B,
-                   int ldb,
-                   int32_t *C,
-                   int ldc){
-LtIgemmTensor((cublasLtHandle_t) context->m_handle,
-                   m,
-                   n,
-                   k,
-                   A,
-                   lda,
-                   B,
-                   ldb,
-                   C,
-                   ldc); }
-
-
-		void ctest()
-		{
-    TestBench<int8_t, int32_t> props(4096*1, 4096*1, 4096*1);
-    props.run([&props] {
-        LtIgemmTensor(props.ltHandle,
-                    props.m,
-                    props.n,
-                    props.k,
-                    props.Adev,
-                    props.m,
-                    props.Bdev,
-                    props.k,
-                    props.Cdev,
-                    props.m);
-				});
-		}
+	void cigemmlt(Context *context, int m, int n, int k, const int8_t *A, const int8_t *B, int32_t *C, int lda, int ldb, int ldc)
+	{ LtIgemm((cublasLtHandle_t) context->m_handle, m, n, k, A, B, C, lda, ldb, ldc); }
 
   #define MAKE_FUNC_CTRANSFORM(fbits, fsrc, ftrgt, ftranspose, dtype, src, target, transpose, bits) \
-	void ctransform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(Context *context, dtype *A, dtype *out, int dim1, int dim2, int ld) \
+	void ctransform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(Context *context, dtype *A, dtype *out, int dim1, int dim2) \
 	{ \
-		transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose((cublasLtHandle_t) context->m_handle, A, out, dim1, dim2, ld); \
+		transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose((cublasLtHandle_t) context->m_handle, A, out, dim1, dim2); \
 	} \
 
 
 	MAKE_FUNC_CTRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, row, row, n, int8_t, ROW, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, row, col32, n, int8_t, ROW, COL32, false, 8)
+	MAKE_FUNC_CTRANSFORM(32, row, col32, n, int32_t, ROW, COL32, false, 32)
 	MAKE_FUNC_CTRANSFORM(8, row, col_turing, n, int8_t, ROW, COL_TURING, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, row, col_ampere, n, int8_t, ROW, COL_AMPERE, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, col32, row, n, int8_t, COL32, ROW, false, 8)
+	MAKE_FUNC_CTRANSFORM(32, col32, row, n, int32_t, COL32, ROW, false, 32)
 
 }
 

@@ -47,6 +47,7 @@ def get_transform_buffer(A, order='row', state=None):
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None):
     if state is None: state = (A.shape, from_order)
+    else: from_order = state[1]
     if out is None: out = get_transform_buffer(A, to_order, state)
     func = get_transform_func(A.dtype, from_order, to_order, transpose)
 
@@ -814,7 +815,7 @@ def igemmLt(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transpos
     ptrA = get_ptr(A)
     ptrB = get_ptr(B)
     ptrC = get_ptr(out)
-    lib.cgemmtest(ptr, m, n, k, ptrB, lda, ptrA, ldb, ptrC, ldc)
+    #lib.cgemmtest(ptr, m, n, k, ptrB, lda, ptrA, ldb, ptrC, ldc)
     return out
 
 
@@ -948,20 +949,31 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     else: return None
 
 
-def igemm_test(A, B, C):
+def igemm_test(A, B, C, SA, SB, SC):
+    # assert B transposed
+    # assert dimensions fit
+    # assert format
+    assert A.dtype == torch.int8
+    assert B.dtype == torch.int8
+    assert C.dtype == torch.int32
+    assert SA[1] == 'col32'
+    assert SB[1] == 'col_turing'
+    assert SC[1] == 'col32'
+    shapeA = SA[0]
+    shapeB = SB[0]
+
     ptr = CUBLAS_Context.get_instance().context
     ptrA = get_ptr(A)
     ptrB = get_ptr(B)
     ptrC = get_ptr(C)
-    m = A.shape[0]
-    n = B.shape[1]
-    k = A.shape[1]
+    m = shapeA[0]
+    n = shapeB[0]
+    k = shapeA[1]
+    lda = ct.c_int32(m*32)
+    ldb = ct.c_int32(k + (8 - (k % 8)))
+    ldc = ct.c_int32(m*32)
     m = ct.c_int32(m)
     n = ct.c_int32(n)
     k = ct.c_int32(k)
-    lda = m
-    ldb = k
-    ldc = m
 
-    lib.cigemmLt(ptr, ct.c_bool(False), ct.c_bool(False), m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
-    #lib.cgemmtest(ptr, m, n, k, ptrA, lda, ptrB, ldb, ptrC, ldc)
+    lib.cigemmlt(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
