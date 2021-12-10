@@ -952,7 +952,7 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     else: return None
 
 
-def igemmlt(A, B, C, SA, SB, SC, lda=0, ldb=0, ldc=0):
+def igemmlt(A, B, C, SA, SB, SC):
     # TODO: assert dimensions fit
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
@@ -964,8 +964,6 @@ def igemmlt(A, B, C, SA, SB, SC, lda=0, ldb=0, ldc=0):
     shapeB = SB[0]
     dims = len(shapeA)
 
-    print(B.shape, shapeB)
-
     ptr = CUBLAS_Context.get_instance().context
     ptrA = get_ptr(A)
     ptrB = get_ptr(B)
@@ -976,19 +974,15 @@ def igemmlt(A, B, C, SA, SB, SC, lda=0, ldb=0, ldc=0):
     elif dims == 3:
         m = shapeA[0]*shapeA[1]
 
-    n = shapeB[0]
-    k = shapeA[1]
+    rows = n = shapeB[0]
+    k = shapeA[-1]
     lda = ct.c_int32(m*32)
-    #lda = ct.c_int32(lda)
-    blockoff = 32*(((n+7)//8)*8)
     # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
-    blocks = k//32 + (1 if (k % 32 != 0) else 0)
-    ldb = ct.c_int32(32*(n + (8 - (n % 8))))
-    #ldb2 = ct.c_int32(32*(n + (8 - (n % 8))))
-    #print(ldb, ldb2)
-    #ldb = ct.c_int32(ldb)
+    # n = rows
+    tiles = rows
+    if rows % 8 != 0: tiles += (8-(rows %8))
+    ldb = ct.c_int32(tiles*32)
     ldc = ct.c_int32(m*32)
-    #ldc = ct.c_int32(ldc)
     m = ct.c_int32(m)
     n = ct.c_int32(n)
     k = ct.c_int32(k)

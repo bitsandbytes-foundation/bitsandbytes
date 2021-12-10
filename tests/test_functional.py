@@ -567,6 +567,8 @@ values = list(product(dim1,dim2,dim3, dims,dtype, a_order, out_order, transpose)
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_{7}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose", values, ids=names)
 def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
+    if dims == 3 and out_order != 'col32': return
+    if dtype == torch.int32 and out_order != 'col32': return
     func = F.get_transform_func(dtype, orderA, orderOut, transpose)
 
     if dims == 2:
@@ -614,24 +616,13 @@ def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
 
 
 
-n = 4
-dim1 = torch.randint(1,64, size=(n,)).tolist()
-dim2 = torch.randint(32,128, size=(n,)).tolist()
-dim3 = torch.randint(32,256, size=(n,)).tolist()
-dim4 = torch.randint(32,256, size=(n,)).tolist()
+n = 2
+dim1 = torch.randint(1,256, size=(n,)).tolist()
+dim2 = torch.randint(32,512, size=(n,)).tolist()
+dim3 = torch.randint(32,1024, size=(n,)).tolist()
+dim4 = torch.randint(32,1024, size=(n,)).tolist()
 
-#dim1 = torch.randint(2,128, size=(n,)).tolist()
-#dim2 = torch.randint(2,128, size=(n,)).tolist()
-#dim3 = torch.randint(2,128, size=(n,)).tolist()
-#dim4 = torch.randint(2,128, size=(n,)).tolist()
-#dim1 = dim2 = dim3 = dim4 = [2]
-#dim1 = [10]
-#dim2 = [10]
-#dim3 = [65]
-#dim4 = [10]
 dims = (2, 3)
-#ldb = list(range(256, 1280*1, 32))
-#ldb = list(range(256, 1280*4, 32))
 ldb = [0]
 values = list(product(dim1,dim2,dim3,dim4,dims, ldb))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}'.format(*vals) for vals in values]
@@ -651,7 +642,7 @@ def test_igemmlt(dim1, dim2, dim3, dim4, dims, ldb):
             C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
         else:
             C2, SC = F.transform(torch.zeros(A.shape[0], A.shape[1], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
-        F.igemmlt(A2, B2, C2, SA, SB, SC, ldb=ldb)
+        F.igemmlt(A2, B2, C2, SA, SB, SC)
         C3, S = F.transform(C2, 'row', state=SC)
         torch.testing.assert_allclose(C1, C3.float())
 
