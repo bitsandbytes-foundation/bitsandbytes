@@ -556,19 +556,24 @@ def test_igemm_bench():
 n = 2
 dim1 = torch.randint(2,256, size=(n,)).tolist()
 dim2 = torch.randint(2,256, size=(n,)).tolist()
+dim3 = torch.randint(2,256, size=(n,)).tolist()
 #dim1, dim2 = (256,), (256,)
 dtype = [torch.int8, torch.int32]
 a_order = ['row']
-out_order = ['col', 'row', 'col32', 'col_turing']
+out_order = ['col', 'row', 'col32']
 transpose = [False]
-values = list(product(dim1,dim2,dtype, a_order, out_order, transpose))
-names = ['dim1_{0}_dim2_{1}_dtype_{2}_orderA_{3}_orderOut_{4}_{5}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2, dtype, orderA, orderOut, transpose", values, ids=names)
-def test_transform(dim1, dim2, dtype, orderA, orderOut, transpose):
-    if orderOut == 'col_turing' and dtype == torch.int32: return
+dims = [2, 3]
+values = list(product(dim1,dim2,dim3, dims,dtype, a_order, out_order, transpose))
+names = ['dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_{7}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose", values, ids=names)
+def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     func = F.get_transform_func(dtype, orderA, orderOut, transpose)
 
-    A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(dtype)
+    if dims == 2:
+        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(dtype)
+    elif dims == 3:
+        A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device='cuda').to(dtype)
+
     out, S = F.transform(A, to_order=orderOut)
 
     if orderOut == 'row':
@@ -576,23 +581,11 @@ def test_transform(dim1, dim2, dtype, orderA, orderOut, transpose):
     elif orderOut == 'col':
         torch.testing.assert_allclose(A.t().flatten(), out.flatten())
     elif orderOut == 'col32':
-        n = A.shape[0]*(A.shape[1] + (32 - (A.shape[1]%32)))
+        if dims == 2:
+            n = A.shape[0]*(A.shape[1] + (32 - (A.shape[1]%32)))
+        elif dims == 3:
+            n = A.shape[0]*A.shape[1]*(A.shape[2] + (32 - (A.shape[2]%32)))
         assert out.numel() == n
-        #offset = 32*A.shape[0]
-        #for row in range(A.shape[0]):
-        #    for col in range(A.shape[1]):
-        #        i = row*A.shape[1]
-        #        j = col
-
-        #        # offset the block
-        #        block = col // 32
-        #        block_offset = offset*block
-        #        col2 = col % 32
-
-        #        row2 = row*32
-
-        #        torch.testing.assert_allclose(A.flatten()[i+j], A[row, col])
-        #        torch.testing.assert_allclose(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
     elif orderOut == 'col_turing':
         # 32 col 8 row tiles
         n = (A.shape[0]+(8- A.shape[0]%8))*(A.shape[1] + (32 - (A.shape[1]%32)))
