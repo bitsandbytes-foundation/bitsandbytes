@@ -28,8 +28,12 @@ def get_transform_buffer(A, order='row', state=None):
             return torch.zeros_like(A)
     elif order == 'col32':
         # blocks of 32 columns (padded)
-        cols = A.shape[1] + (32 - (A.shape[1] % 32))
-        return torch.zeros((A.shape[0], cols), dtype=A.dtype, device=A.device)
+        cols = A.shape[-1]
+        if len(A.shape) == 3: rows = A.shape[0]*A.shape[1]
+        else: rows = A.shape[0]
+
+        cols = cols + (32 - (cols % 32))
+        return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
     elif order == 'col_turing':
         # blocks of 32 columns and 8 rows
         cols = A.shape[1] + (32 - (A.shape[1] % 32))
@@ -41,10 +45,6 @@ def get_transform_buffer(A, order='row', state=None):
         rows = A.shape[0] + (32 - (A.shape[0] % 32))
         return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
 
-
-
-
-
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None):
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
@@ -52,14 +52,17 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
     func = get_transform_func(A.dtype, from_order, to_order, transpose)
 
     shape = state[0]
-    ptr = CUBLAS_Context.get_instance().context
-    dim1 = ct.c_int32(shape[0])
-    dim2 = ct.c_int32(shape[1])
-    ld = ct.c_int32(shape[1])
+    if len(shape) == 2:
+        dim1 = ct.c_int32(shape[0])
+        dim2 = ct.c_int32(shape[1])
+    else:
+        dim1 = ct.c_int32(shape[0]*shape[1])
+        dim2 = ct.c_int32(shape[2])
 
+    ptr = CUBLAS_Context.get_instance().context
     ptrA = get_ptr(A)
     ptrOut = get_ptr(out)
-    func(ptr, get_ptr(A), get_ptr(out), dim1, dim2, ld)
+    func(ptr, get_ptr(A), get_ptr(out), dim1, dim2)
 
     state = (A.shape, to_order)
 
@@ -949,10 +952,8 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     else: return None
 
 
-def igemm_test(A, B, C, SA, SB, SC):
-    # assert B transposed
-    # assert dimensions fit
-    # assert format
+def igemmlt(A, B, C, SA, SB, SC, lda=0, ldb=0, ldc=0):
+    # TODO: assert dimensions fit
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
     assert C.dtype == torch.int32
@@ -961,17 +962,33 @@ def igemm_test(A, B, C, SA, SB, SC):
     assert SC[1] == 'col32'
     shapeA = SA[0]
     shapeB = SB[0]
+    dims = len(shapeA)
+
+    print(B.shape, shapeB)
 
     ptr = CUBLAS_Context.get_instance().context
     ptrA = get_ptr(A)
     ptrB = get_ptr(B)
     ptrC = get_ptr(C)
-    m = shapeA[0]
+
+    if dims == 2:
+        m = shapeA[0]
+    elif dims == 3:
+        m = shapeA[0]*shapeA[1]
+
     n = shapeB[0]
     k = shapeA[1]
     lda = ct.c_int32(m*32)
-    ldb = ct.c_int32(k + (8 - (k % 8)))
+    #lda = ct.c_int32(lda)
+    blockoff = 32*(((n+7)//8)*8)
+    # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
+    blocks = k//32 + (1 if (k % 32 != 0) else 0)
+    ldb = ct.c_int32(32*(n + (8 - (n % 8))))
+    #ldb2 = ct.c_int32(32*(n + (8 - (n % 8))))
+    #print(ldb, ldb2)
+    #ldb = ct.c_int32(ldb)
     ldc = ct.c_int32(m*32)
+    #ldc = ct.c_int32(ldc)
     m = ct.c_int32(m)
     n = ct.c_int32(n)
     k = ct.c_int32(k)

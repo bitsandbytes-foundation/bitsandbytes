@@ -556,7 +556,7 @@ def test_igemm_bench():
 n = 2
 dim1 = torch.randint(2,256, size=(n,)).tolist()
 dim2 = torch.randint(2,256, size=(n,)).tolist()
-dim1, dim2 = (256,), (256,)
+#dim1, dim2 = (256,), (256,)
 dtype = [torch.int8, torch.int32]
 a_order = ['row']
 out_order = ['col', 'row', 'col32', 'col_turing']
@@ -578,21 +578,21 @@ def test_transform(dim1, dim2, dtype, orderA, orderOut, transpose):
     elif orderOut == 'col32':
         n = A.shape[0]*(A.shape[1] + (32 - (A.shape[1]%32)))
         assert out.numel() == n
-        offset = 32*A.shape[0]
-        for row in range(A.shape[0]):
-            for col in range(A.shape[1]):
-                i = row*A.shape[1]
-                j = col
+        #offset = 32*A.shape[0]
+        #for row in range(A.shape[0]):
+        #    for col in range(A.shape[1]):
+        #        i = row*A.shape[1]
+        #        j = col
 
-                # offset the block
-                block = col // 32
-                block_offset = offset*block
-                col2 = col % 32
+        #        # offset the block
+        #        block = col // 32
+        #        block_offset = offset*block
+        #        col2 = col % 32
 
-                row2 = row*32
+        #        row2 = row*32
 
-                torch.testing.assert_allclose(A.flatten()[i+j], A[row, col])
-                torch.testing.assert_allclose(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
+        #        torch.testing.assert_allclose(A.flatten()[i+j], A[row, col])
+        #        torch.testing.assert_allclose(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
     elif orderOut == 'col_turing':
         # 32 col 8 row tiles
         n = (A.shape[0]+(8- A.shape[0]%8))*(A.shape[1] + (32 - (A.shape[1]%32)))
@@ -621,21 +621,29 @@ def test_transform(dim1, dim2, dtype, orderA, orderOut, transpose):
 
 
 
-n = 2
-#dim1 = torch.randint(1,64, size=(n,)).tolist()
-#dim2 = torch.randint(32,128, size=(n,)).tolist()
-#dim3 = torch.randint(32,256, size=(n,)).tolist()
-#dim4 = torch.randint(32,256, size=(n,)).tolist()
+n = 4
+dim1 = torch.randint(1,64, size=(n,)).tolist()
+dim2 = torch.randint(32,128, size=(n,)).tolist()
+dim3 = torch.randint(32,256, size=(n,)).tolist()
+dim4 = torch.randint(32,256, size=(n,)).tolist()
 
-dim1 = torch.randint(2,64, size=(n,)).tolist()
-dim2 = torch.randint(2,128, size=(n,)).tolist()
-dim3 = torch.randint(2,256, size=(n,)).tolist()
-dim4 = torch.randint(2,256, size=(n,)).tolist()
-dims = [2, 3]
-values = list(product(dim1,dim2,dim3,dim4,dims))
-names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims", values, ids=names)
-def test_igemmlt(dim1, dim2, dim3, dim4, dims):
+#dim1 = torch.randint(2,128, size=(n,)).tolist()
+#dim2 = torch.randint(2,128, size=(n,)).tolist()
+#dim3 = torch.randint(2,128, size=(n,)).tolist()
+#dim4 = torch.randint(2,128, size=(n,)).tolist()
+#dim1 = dim2 = dim3 = dim4 = [2]
+#dim1 = [10]
+#dim2 = [10]
+#dim3 = [65]
+#dim4 = [10]
+dims = (2, 3)
+#ldb = list(range(256, 1280*1, 32))
+#ldb = list(range(256, 1280*4, 32))
+ldb = [0]
+values = list(product(dim1,dim2,dim3,dim4,dims, ldb))
+names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
+def test_igemmlt(dim1, dim2, dim3, dim4, dims, ldb):
     for i in range(k):
         if dims == 2:
             A = torch.randint(-128, 127, size=(dim1, dim3), device='cuda').to(torch.int8)
@@ -646,8 +654,11 @@ def test_igemmlt(dim1, dim2, dim3, dim4, dims):
 
         A2, SA = F.transform(A, 'col32')
         B2, SB = F.transform(B, 'col_turing')
-        C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
-        F.igemm_test(A2, B2, C2, SA, SB, SC)
+        if dims == 2:
+            C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
+        else:
+            C2, SC = F.transform(torch.zeros(A.shape[0], A.shape[1], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
+        F.igemmlt(A2, B2, C2, SA, SB, SC, ldb=ldb)
         C3, S = F.transform(C2, 'row', state=SC)
         torch.testing.assert_allclose(C1, C3.float())
 

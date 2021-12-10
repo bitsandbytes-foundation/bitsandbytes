@@ -365,6 +365,8 @@ template<int ORDER> int get_leading_dim(int dim1, int dim2)
       //return 256;
       return 32*roundoff(dim1, 8);
       //return 32*roundoff(dim2, 8);
+      //return 8*roundoff(dim2, 32);
+      //return 8*roundoff(dim1, 32);
       break;
     case COL_AMPERE:
       // 32*32 tiles
@@ -449,7 +451,8 @@ void LtIgemm(cublasLtHandle_t ltHandle,
     cublasLtOrder_t row = CUBLASLT_ORDER_ROW;
     cublasLtOrder_t col_turing = CUBLASLT_ORDER_COL4_4R2_8C;
 
-    ldb = 32*roundoff(n, 8);
+    //ldb = 32*roundoff(n, 8);
+    //cout << n << " " << ldb << " " << endl;
 
 
     checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32I));
