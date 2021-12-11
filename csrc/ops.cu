@@ -451,9 +451,9 @@ void LtIgemm(cublasLtHandle_t ltHandle,
     cublasLtOrder_t row = CUBLASLT_ORDER_ROW;
     cublasLtOrder_t col_turing = CUBLASLT_ORDER_COL4_4R2_8C;
 
-    //ldb = 32*roundoff(n, 8);
-    //cout << n << " " << ldb << " " << endl;
-
+    //cublasLtMatmulPreference_t pref = NULL;
+    //checkCublasStatus(cublasLtMatmulPreferenceCreate(&pref)
+    //checkCublasStatus(cublasLtMatmulPreferenceInit(pref)
 
     checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32I));
     checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));

@@ -648,3 +648,71 @@ def test_igemmlt(dim1, dim2, dim3, dim4, dims, ldb):
 
 
 
+batch = [2]
+seq = [2048]
+model = [4*1024]
+hidden = [16*1024]
+#values = [(4, 512, 1*1024, 4*1024),(4, 512, 1*1024, 8*1024),(4, 1024, 2*1024, 8*1024),(4, 1024, 2*1024, 16*1024),(4, 2048, 4*1024, 16*1024),(4, 2048, 4*1024, 32*1024)]
+values = [(4, 2048, 4*1024, 32*1024)]
+
+#values = list(product(batch, seq, model, hidden))
+names = ['batch_{0}_seq_{1}_model_{2}_hidden_{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
+def test_bench_8bit_training(batch, seq, model, hidden):
+    print(batch, seq, model, hidden)
+    A = torch.randint(-128, 127, size=(batch, seq, model), device='cuda').half()
+    A2 = torch.zeros((batch, seq, hidden), device='cuda').half()
+    A3 = torch.zeros((batch, seq, model), device='cuda').half()
+    w1 = torch.randint(-128, 127, size=(hidden, model), device='cuda').half()
+    w2 = torch.randint(-128, 127, size=(model, hidden), device='cuda').half()
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        torch.matmul(A, w1.t(), out=A2)
+        torch.matmul(A2, w2.t(), out=A3)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        torch.matmul(A, w1.t(), out=A2)
+        torch.matmul(A2, w2.t(), out=A3)
+
+    torch.cuda.synchronize()
+    t32 = time.time() - t0
+    A = torch.randint(-128, 127, size=(batch, seq, model), device='cuda').to(torch.int8)
+    A2a = torch.zeros((batch, seq, hidden), device='cuda').to(torch.int32)
+    A2b = torch.zeros((batch, seq, hidden), device='cuda').to(torch.int8)
+    A3a = torch.zeros((batch, seq, model), device='cuda').to(torch.int32)
+    A3b = torch.zeros((batch, seq, model), device='cuda').to(torch.int8)
+    w1 = torch.randint(-128, 127, size=(hidden, model), device='cuda').to(torch.int8)
+    w2 = torch.randint(-128, 127, size=(model, hidden), device='cuda').to(torch.int8)
+
+    A, SA = F.transform(A, 'col32')
+    A2a, SA2a = F.transform(A2a, 'col32')
+    A2b, SA2b = F.transform(A2b, 'col32')
+    A3a, SA3a = F.transform(A3a, 'col32')
+    A3b, SA3b = F.transform(A3b, 'col32')
+    w1, Sw1 = F.transform(w1, 'col_turing')
+    w2, Sw2 = F.transform(w2, 'col_turing')
+
+    for i in range(100):
+        A1, SA = F.transform(A, 'col32')
+        F.igemmlt(A1, w1, A2a, SA, Sw1, SA2a)
+        A2b.copy_(A2a)
+        F.igemmlt(A2b, w2, A3a, SA2b, Sw2, SA3a)
+        A3b.copy_(A3a)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        A1, SA = F.transform(A, 'col32')
+        F.igemmlt(A1, w1, A2a, SA, Sw1, SA2a)
+        A2b.copy_(A2a)
+        F.igemmlt(A2b, w2, A3a, SA2b, Sw2, SA3a)
+        A3b.copy_(A3a)
+
+
+    torch.cuda.synchronize()
+    t8 = time.time() - t0
+    print(t32/t8)
