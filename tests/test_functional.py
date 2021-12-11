@@ -524,15 +524,16 @@ def test_cutlass_igemm(dim1, dim2):
     dim1 = dim1 - (dim1 % 32)
     dim2 = dim2 - (dim2 % 32)
     for i in range(100):
-        #A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-        #B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
-        A = torch.randn(dim1, dim2, device='cuda').to(torch.float16)
-        B = torch.randn(dim2, dim1, device='cuda').to(torch.float16)
+        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+        B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
+        #A = torch.randn(dim1, dim2, device='cuda').to(torch.float16)
+        #B = torch.randn(dim2, dim1, device='cuda').to(torch.float16)
         #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
         #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
-        out = F.cutlass_igemm(A.half(), B.half())
-        out2 = torch.mm(A.half(), B.half())
-        torch.testing.assert_allclose(out, out2)
+        #out = F.cutlass_igemm(A.half(), B.half())
+        out = F.cutlass_igemm(A, B)
+        out2 = torch.mm(A.float(), B.float())
+        torch.testing.assert_allclose(out.float(), out2)
 
 
 
