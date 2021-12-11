@@ -780,6 +780,36 @@ def test_bench_8bit_training(batch, seq, model, hidden):
     t8 = time.time() - t0
     print(t32/t8)
 
+    ## weight update
+
+    #grad1 = torch.randint(-128, 127, size=(hidden, batch, seq), device='cuda').to(torch.int8)
+    #grad2 = torch.randint(-128, 127, size=(model, batch, seq), device='cuda').to(torch.int8)
+    #A2 = torch.zeros((hidden, model), device='cuda').to(torch.int32)
+    #A3 = torch.zeros((model, hidden), device='cuda').to(torch.int8)
+    #w1 = torch.randint(-128, 127, size=(model, batch, seq), device='cuda').to(torch.int8)
+    #w2 = torch.randint(-128, 127, size=(hidden, batch, seq), device='cuda').to(torch.int8)
+
+    #A2, SA2 = F.transform(A2, 'col32')
+    #A3, SA3 = F.transform(A3, 'col32')
+    #grad1, Sgrad1 = F.transform(grad1, 'col32', ld=[0])
+    #grad2, Sgrad2 = F.transform(grad2, 'col32', ld=[0])
+    #w1, Sw1 = F.transform(w1, 'col_turing', ld=[0])
+    #w2, Sw2 = F.transform(w2, 'col_turing', ld=[0])
+
+    #for i in range(100):
+    #    F.igemmlt(grad1, w1, A2, Sgrad1, Sw1, SA2)
+    #    F.igemmlt(grad2, w2, A3, Sgrad2, Sw2, SA3)
+
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(100):
+    #    pass
+
+
+    #torch.cuda.synchronize()
+    #t8 = time.time() - t0
+    #print(t32/t8)
+
     #A = torch.randint(-128, 127, size=(batch, seq, model), device='cuda').to(torch.int8)
     #A2a = torch.zeros((batch, seq, hidden), device='cuda').to(torch.int32)
     #A3 = torch.zeros((batch, seq, model), device='cuda').to(torch.int32)
