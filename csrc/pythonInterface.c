@@ -189,6 +189,8 @@ extern "C"
 	MAKE_FUNC_CTRANSFORM(8, col32, row, n, int8_t, COL32, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(32, col32, row, n, int32_t, COL32, ROW, false, 32)
 
+	void ccutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
+	{ cutlass_igemm(transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc); }
 }
 
 

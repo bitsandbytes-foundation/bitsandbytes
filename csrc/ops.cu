@@ -2,6 +2,8 @@
 #include <kernels.cuh>
 #include <cub/device/device_scan.cuh>
 #include <limits>
+#include <cutlass/numeric_types.h>
+#include <cutlass/gemm/device/gemm.h>
 
 using std::cout;
 using std::endl;
@@ -488,6 +490,73 @@ void LtIgemm(cublasLtHandle_t ltHandle,
     if (Adesc) checkCublasStatus(cublasLtMatrixLayoutDestroy(Adesc));
     if (matmulDesc) checkCublasStatus(cublasLtMatmulDescDestroy(matmulDesc));
 }
+
+void cutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
+{
+
+  // Define the GEMM operation
+  //using Gemm = cutlass::gemm::device::Gemm<
+  //  int8_t,
+  //  cutlass::layout::ColumnMajor,              // LayoutA
+  //  int8_t,
+  //  cutlass::layout::ColumnMajor,              // LayoutB
+  //  int32_t,
+  //  cutlass::layout::ColumnMajor,              // LayoutOutput
+  //  int32_t,                                     // ElementAccumulator
+  //  cutlass::arch::OpClassWmmaTensorOp,            // tag indicating Tensor Cores
+  //  cutlass::arch::Sm75,                        // tag indicating target GPU compute architecture
+  //  cutlass::gemm::GemmShape<64, 128, 64>,
+  //  cutlass::gemm::GemmShape<32, 32, 64>,
+  //  cutlass::gemm::GemmShape<16, 16, 16>
+  //  //cutlass::gemm::GemmShape<32, 32, 16>
+  //>;
+
+  using Gemm = cutlass::gemm::device::Gemm<
+    int8_t,
+    cutlass::layout::RowMajor,              // LayoutA
+    int8_t,
+    cutlass::layout::ColumnMajor,              // LayoutB
+    int32_t,
+    cutlass::layout::ColumnMajor,              // LayoutOutput
+    int32_t,                                     // ElementAccumulator
+    cutlass::arch::OpClassTensorOp,            // tag indicating Tensor Cores
+    cutlass::arch::Sm75                        // tag indicating target GPU compute architecture
+    //cutlass::gemm::GemmShape<64, 128, 64>,
+    //cutlass::gemm::GemmShape<32, 32, 64>,
+    //cutlass::gemm::GemmShape<16, 16, 16>
+    //cutlass::gemm::GemmShape<32, 32, 16>
+  >;
+
+  Gemm gemm_op;
+  cutlass::Status status;
+
+  float alpha = 1.0f;
+  float beta = 0.0f;
+
+  int8_t const *ptrA = (int8_t*)A;
+  int8_t const *ptrB = (int8_t*)B;
+  int32_t const *ptrC = (int32_t*)C;
+
+  int32_t       *ptrD = (int32_t*)C;
+	int ldd = ldc;
+
+  //
+  // Launch GEMM on the device
+  //
+  status = gemm_op({
+    {m, n, k},
+    {ptrA, lda},            // TensorRef to A device tensor
+    {ptrB, ldb},            // TensorRef to B device tensor
+    {ptrC, ldc},            // TensorRef to C device tensor
+    {ptrD, ldd},            // TensorRef to D device tensor - may be the same as C
+    {alpha, beta}           // epilogue operation arguments
+    });
+
+  if (status != cutlass::Status::kSuccess)
+	{
+		printf("ERROR\n");
+  }
+} 
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

@@ -716,3 +716,51 @@ def test_bench_8bit_training(batch, seq, model, hidden):
     torch.cuda.synchronize()
     t8 = time.time() - t0
     print(t32/t8)
+
+
+
+dim1 = torch.randint(32,1024*4, size=(4,)).tolist()
+dim2 = torch.randint(32,1024*4, size=(4,)).tolist()
+values = list(product(dim1,dim2))
+names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2", values, ids=names)
+def test_cutlass_igemm(dim1, dim2):
+    dim1 = dim1 - (dim1 % 32)
+    dim2 = dim2 - (dim2 % 32)
+    for i in range(100):
+        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+        B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
+        #A = torch.randn(dim1, dim2, device='cuda').to(torch.float16)
+        #B = torch.randn(dim2, dim1, device='cuda').to(torch.float16)
+        #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
+        #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
+        out = F.cutlass_igemm(A, B)
+        out2 = torch.mm(A.float(), B.float())
+        torch.testing.assert_allclose(out.float(), out2)
+
+
+
+def test_cutlass_bench():
+    batch = 4
+    seq = 512
+    model = 1024
+    hidden = 8*model
+    t = Timer()
+    A = torch.randn(batch*seq, model, device='cuda')
+    B = torch.randn(model, hidden, device='cuda')
+    A = A.half()
+    B = B.half()
+    C = torch.zeros(batch*seq, hidden, device=A.device, dtype=B.dtype)
+    A2 = torch.randint(-128, 127, size=(model, batch*seq), device='cuda').to(torch.int8)
+    B2 = torch.randint(-128, 127, size=(model, hidden), device='cuda').to(torch.int8)
+    C2 = torch.zeros(batch*seq, hidden, device=A.device, dtype=torch.int32)
+
+    for i in range(1000):
+        F.cutlass_igemm(A2.t(), B2, out=C2)
+    torch.cuda.synchronize()
+
+    for i in range(1000):
+        torch.mm(A, B, out=C)
+    torch.cuda.synchronize()
+
+
