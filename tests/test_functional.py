@@ -616,14 +616,20 @@ def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
 
 
 
-n = 2
-dim1 = torch.randint(1,256, size=(n,)).tolist()
-dim2 = torch.randint(32,512, size=(n,)).tolist()
-dim3 = torch.randint(32,1024, size=(n,)).tolist()
-dim4 = torch.randint(32,1024, size=(n,)).tolist()
+n = 1
+#dim1 = torch.randint(1,256, size=(n,)).tolist()
+#dim2 = torch.randint(32,512, size=(n,)).tolist()
+#dim3 = torch.randint(32,1024, size=(n,)).tolist()
+#dim4 = torch.randint(32,1024, size=(n,)).tolist()
+
+dim1 = [2]
+dim2 = [2]
+dim3 = [2]
+dim4 = [2]
 
 dims = (2, 3)
 ldb = [0]
+ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1,dim2,dim3,dim4,dims, ldb))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
@@ -646,14 +652,36 @@ def test_igemmlt(dim1, dim2, dim3, dim4, dims, ldb):
         C3, S = F.transform(C2, 'row', state=SC)
         torch.testing.assert_allclose(C1, C3.float())
 
+        # transposed
+        A = torch.randint(-128, 127, size=(dim4, dim3), device='cuda').to(torch.int8)
+        if dims == 2:
+            B = torch.randint(-128, 127, size=(dim1, dim3), device='cuda').to(torch.int8)
+            C1 = torch.matmul(A.float(), B.float().t())
+        elif dims == 3:
+            B = torch.randint(-128, 127, size=(dim1, dim2, dim3), device='cuda').to(torch.int8)
+            C1 = torch.matmul(B.float(), A.t().float())
+            C1 = C1.permute([2, 0, 1])
+
+        A2, SA = F.transform(A, 'col32')
+        B2, SB = F.transform(B, 'col_turing')
+        if dims == 2:
+            C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
+        else:
+            C2 = torch.zeros(A.shape[0], B.shape[0], B.shape[1], dtype=torch.int32, device='cuda')
+            state = (C2.shape, 'row', A.shape[0])
+            C2, SC = F.transform(C2, 'col32', state=state)
+        F.igemmlt(A2, B2, C2, SA, SB, SC, ldb=ldb)
+        C3, S = F.transform(C2, 'row', state=SC, ld=[0])
+        torch.testing.assert_allclose(C1, C3.float())
+
 
 
 batch = [2]
 seq = [2048]
 model = [4*1024]
 hidden = [16*1024]
-#values = [(4, 512, 1*1024, 4*1024),(4, 512, 1*1024, 8*1024),(4, 1024, 2*1024, 8*1024),(4, 1024, 2*1024, 16*1024),(4, 2048, 4*1024, 16*1024),(4, 2048, 4*1024, 32*1024)]
-values = [(4, 2048, 4*1024, 32*1024)]
+values = [(4, 512, 1*1024, 4*1024),(4, 512, 1*1024, 8*1024),(4, 1024, 2*1024, 8*1024),(4, 1024, 2*1024, 16*1024),(4, 2048, 4*1024, 16*1024),(4, 2048, 4*1024, 32*1024)]
+#values = [(4, 2048, 4*1024, 32*1024)]
 
 #values = list(product(batch, seq, model, hidden))
 names = ['batch_{0}_seq_{1}_model_{2}_hidden_{3}'.format(*vals) for vals in values]
@@ -696,26 +724,84 @@ def test_bench_8bit_training(batch, seq, model, hidden):
     w1, Sw1 = F.transform(w1, 'col_turing')
     w2, Sw2 = F.transform(w2, 'col_turing')
 
+    A1, SA = F.transform(A, 'col32')
     for i in range(100):
-        A1, SA = F.transform(A, 'col32')
+        A1, SA = F.transform(A, 'col32', out=A1)
         F.igemmlt(A1, w1, A2a, SA, Sw1, SA2a)
         A2b.copy_(A2a)
         F.igemmlt(A2b, w2, A3a, SA2b, Sw2, SA3a)
-        A3b.copy_(A3a)
 
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(100):
-        A1, SA = F.transform(A, 'col32')
+        A1, SA = F.transform(A, 'col32', out=A1)
         F.igemmlt(A1, w1, A2a, SA, Sw1, SA2a)
         A2b.copy_(A2a)
         F.igemmlt(A2b, w2, A3a, SA2b, Sw2, SA3a)
-        A3b.copy_(A3a)
 
 
     torch.cuda.synchronize()
     t8 = time.time() - t0
     print(t32/t8)
+
+    # transposed compute
+
+    A = torch.randint(-128, 127, size=(batch, seq, model), device='cuda').to(torch.int8)
+    A2a = torch.zeros((hidden, batch, seq), device='cuda').to(torch.int32)
+    A2bb = torch.zeros((batch, seq, hidden), device='cuda').to(torch.int8)
+    A3a = torch.zeros((model, batch, seq), device='cuda').to(torch.int32)
+    A3b = torch.zeros((batch, seq, model), device='cuda').to(torch.int8)
+    w1 = torch.randint(-128, 127, size=(hidden, model), device='cuda').to(torch.int8)
+    w2 = torch.randint(-128, 127, size=(model, hidden), device='cuda').to(torch.int8)
+
+    A1, SA = F.transform(A, 'col_turing')
+    A2a, SA2a = F.transform(A2a, 'col32')
+    A2b, SA2b = F.transform(A2bb, 'col_turing')
+    A3a, SA3a = F.transform(A3a, 'col32')
+    w1, Sw1 = F.transform(w1, 'col32')
+    w2, Sw2 = F.transform(w2, 'col32')
+
+    for i in range(100):
+        A1, SA = F.transform(A, 'col_turing', out=A1)
+        F.igemmlt(w1, A1, A2a, Sw1, SA, SA2a)
+        A2b, SA2b = F.transform(A2bb, 'col_turing', out=A2b)
+        F.igemmlt(w2, A2b, A3a, Sw2, SA2b, SA3a)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        A1, SA = F.transform(A, 'col_turing', out=A1)
+        F.igemmlt(w1, A1, A2a, Sw1, SA, SA2a)
+        A2b, SA2b = F.transform(A2bb, 'col_turing', out=A2b)
+        F.igemmlt(w2, A2b, A3a, Sw2, SA2b, SA3a)
+
+
+    torch.cuda.synchronize()
+    t8 = time.time() - t0
+    print(t32/t8)
+
+    #A = torch.randint(-128, 127, size=(batch, seq, model), device='cuda').to(torch.int8)
+    #A2a = torch.zeros((batch, seq, hidden), device='cuda').to(torch.int32)
+    #A3 = torch.zeros((batch, seq, model), device='cuda').to(torch.int32)
+    #A2b = torch.zeros((batch, seq, hidden), device='cuda').to(torch.int8)
+    #w1 = torch.randint(-128, 127, size=(model, hidden), device='cuda').to(torch.int8)
+    #w2 = torch.randint(-128, 127, size=(hidden, model), device='cuda').to(torch.int8)
+
+    #for i in range(100):
+    #    #F.cutlass_igemm(A, w1, out=A2a)
+    #    F.cutlass_igemm(A2b, w2, out=A3)
+
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(100):
+    #    #F.cutlass_igemm(A, w1, out=A2a)
+    #    #A2b.copy_(A2a)
+    #    F.cutlass_igemm(A2b, w2, out=A3)
+
+
+    #torch.cuda.synchronize()
+    #cutlass_t8 = time.time() - t0
+    #print(t32/cutlass_t8)
 
 
 
@@ -728,14 +814,14 @@ def test_cutlass_igemm(dim1, dim2):
     dim1 = dim1 - (dim1 % 32)
     dim2 = dim2 - (dim2 % 32)
     for i in range(100):
-        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
+        A = torch.randint(-128, 127, size=(4, dim1, dim2), device='cuda').to(torch.int8)
         B = torch.randint(-128, 127, size=(dim2, dim1), device='cuda').to(torch.int8)
         #A = torch.randn(dim1, dim2, device='cuda').to(torch.float16)
         #B = torch.randn(dim2, dim1, device='cuda').to(torch.float16)
         #A = torch.arange(16*16, device='cuda').view(32, 8).to(torch.int8).contiguous()
         #B = torch.arange(16*16, device='cuda').view(8, 32).to(torch.int8).contiguous()
         out = F.cutlass_igemm(A, B)
-        out2 = torch.mm(A.float(), B.float())
+        out2 = torch.matmul(A.float(), B.float())
         torch.testing.assert_allclose(out.float(), out2)
 
 

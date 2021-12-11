@@ -36,8 +36,10 @@ def get_transform_buffer(A, order='row', state=None):
         return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
     elif order == 'col_turing':
         # blocks of 32 columns and 8 rows
-        cols = A.shape[1] + (32 - (A.shape[1] % 32))
-        rows = A.shape[0] + (8 - (A.shape[0] % 8))
+        if len(A.shape) == 3: rows = A.shape[0]*A.shape[1]
+        else: rows = A.shape[0]
+        cols = A.shape[-1] + (32 - (A.shape[-1] % 32))
+        rows = rows + (8 - (rows % 8))
         return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
     elif order == 'col_ampere':
         # blocks of 32 columns and 32 rows
@@ -45,7 +47,7 @@ def get_transform_buffer(A, order='row', state=None):
         rows = A.shape[0] + (32 - (A.shape[0] % 32))
         return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
 
-def transform(A, to_order, from_order='row', out=None, transpose=False, state=None):
+def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
     if out is None: out = get_transform_buffer(A, to_order, state)
@@ -55,6 +57,11 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
     if len(shape) == 2:
         dim1 = ct.c_int32(shape[0])
         dim2 = ct.c_int32(shape[1])
+    elif ld is not None:
+        n = math.prod(shape)
+        dim1 = math.prod([shape[i] for i in ld])
+        dim2 = ct.c_int32(n//dim1)
+        dim1 = ct.c_int32(dim1)
     else:
         dim1 = ct.c_int32(shape[0]*shape[1])
         dim2 = ct.c_int32(shape[2])
@@ -952,7 +959,7 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     else: return None
 
 
-def igemmlt(A, B, C, SA, SB, SC):
+def igemmlt(A, B, C, SA, SB, SC, ldb=None):
     # TODO: assert dimensions fit
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
@@ -962,26 +969,34 @@ def igemmlt(A, B, C, SA, SB, SC):
     assert SC[1] == 'col32'
     shapeA = SA[0]
     shapeB = SB[0]
-    dims = len(shapeA)
+    dimsA = len(shapeA)
+    dimsB = len(shapeB)
 
     ptr = CUBLAS_Context.get_instance().context
     ptrA = get_ptr(A)
     ptrB = get_ptr(B)
     ptrC = get_ptr(C)
 
-    if dims == 2:
+    if dimsA == 2:
         m = shapeA[0]
-    elif dims == 3:
+    elif dimsA == 3:
         m = shapeA[0]*shapeA[1]
 
-    rows = n = shapeB[0]
+    if dimsB == 2:
+        rows = n = shapeB[0]
+    elif dimsB == 3:
+        rows = n = shapeB[0]*shapeB[1]
+
     k = shapeA[-1]
     lda = ct.c_int32(m*32)
     # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
     # n = rows
     tiles = rows
     if rows % 8 != 0: tiles += (8-(rows %8))
-    ldb = ct.c_int32(tiles*32)
+    if ldb is None:
+        ldb = ct.c_int32(tiles*32)
+    else:
+        ldb = ct.c_int32(ldb)
     ldc = ct.c_int32(m*32)
     m = ct.c_int32(m)
     n = ct.c_int32(n)

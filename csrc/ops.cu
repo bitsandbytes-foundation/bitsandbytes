@@ -495,37 +495,37 @@ void cutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *
 {
 
   // Define the GEMM operation
-  //using Gemm = cutlass::gemm::device::Gemm<
-  //  int8_t,
-  //  cutlass::layout::ColumnMajor,              // LayoutA
-  //  int8_t,
-  //  cutlass::layout::ColumnMajor,              // LayoutB
-  //  int32_t,
-  //  cutlass::layout::ColumnMajor,              // LayoutOutput
-  //  int32_t,                                     // ElementAccumulator
-  //  cutlass::arch::OpClassWmmaTensorOp,            // tag indicating Tensor Cores
-  //  cutlass::arch::Sm75,                        // tag indicating target GPU compute architecture
-  //  cutlass::gemm::GemmShape<64, 128, 64>,
-  //  cutlass::gemm::GemmShape<32, 32, 64>,
-  //  cutlass::gemm::GemmShape<16, 16, 16>
-  //  //cutlass::gemm::GemmShape<32, 32, 16>
-  //>;
-
   using Gemm = cutlass::gemm::device::Gemm<
     int8_t,
-    cutlass::layout::RowMajor,              // LayoutA
+    cutlass::layout::ColumnMajor,              // LayoutA
     int8_t,
     cutlass::layout::ColumnMajor,              // LayoutB
     int32_t,
     cutlass::layout::ColumnMajor,              // LayoutOutput
     int32_t,                                     // ElementAccumulator
-    cutlass::arch::OpClassTensorOp,            // tag indicating Tensor Cores
-    cutlass::arch::Sm75                        // tag indicating target GPU compute architecture
-    //cutlass::gemm::GemmShape<64, 128, 64>,
-    //cutlass::gemm::GemmShape<32, 32, 64>,
-    //cutlass::gemm::GemmShape<16, 16, 16>
+    cutlass::arch::OpClassWmmaTensorOp,            // tag indicating Tensor Cores
+    cutlass::arch::Sm75,                        // tag indicating target GPU compute architecture
+    cutlass::gemm::GemmShape<64, 128, 64>,
+    cutlass::gemm::GemmShape<32, 32, 64>,
+    cutlass::gemm::GemmShape<16, 16, 16>
     //cutlass::gemm::GemmShape<32, 32, 16>
   >;
+
+  //using Gemm = cutlass::gemm::device::Gemm<
+  //  int8_t,
+  //  cutlass::layout::RowMajor,              // LayoutA
+  //  int8_t,
+  //  cutlass::layout::ColumnMajor,              // LayoutB
+  //  int32_t,
+  //  cutlass::layout::ColumnMajor,              // LayoutOutput
+  //  int32_t,                                     // ElementAccumulator
+  //  cutlass::arch::OpClassTensorOp,            // tag indicating Tensor Cores
+  //  cutlass::arch::Sm75                        // tag indicating target GPU compute architecture
+  //  //cutlass::gemm::GemmShape<64, 128, 64>,
+  //  //cutlass::gemm::GemmShape<32, 32, 64>,
+  //  //cutlass::gemm::GemmShape<16, 16, 16>
+  //  //cutlass::gemm::GemmShape<32, 32, 16>
+  //>;
 
   Gemm gemm_op;
   cutlass::Status status;
