@@ -10,6 +10,21 @@ from bitsandbytes import functional as F
 
 torch.set_printoptions(precision=4, sci_mode=False)
 
+class FFN(torch.nn.Module):
+    def __init__(self, input_features, hidden_size, bias=True):
+        super(FFN, self).__init__()
+        self.fc1 = torch.nn.Linear(input_features, hidden_size, bias=bias)
+        self.fc2 = torch.nn.Linear(hidden_size, input_features, bias=bias)
+
+        with torch.no_grad():
+            torch.nn.init.xavier_uniform_(self.fc1.weight)
+            torch.nn.init.xavier_uniform_(self.fc2.weight)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
 class Timer(object):
     def __init__(self):
         self.starts = {}
@@ -893,5 +908,50 @@ def test_cutlass_bench():
     for i in range(1000):
         torch.mm(A, B, out=C)
     torch.cuda.synchronize()
+
+
+tols = {}
+tols['forward'] = {'atol': 5e-2, 'rtol': 0.1}
+tols['backward'] = {'atol': 5e-2, 'rtol': 0.1}
+
+tols_strict = {}
+tols_strict['forward'] = {'atol': 1e-5, 'rtol': 0.1}
+tols_strict['backward'] = {'atol': 1e-5, 'rtol': 0.1}
+values = ['forward']
+@pytest.mark.parametrize("action", values, ids=values)
+def test_MLP(action):
+    batch = 2
+    seq = 4
+    model = 8
+    hidden = 16
+
+    ffn1 = FFN(model, hidden, False)
+    ffn2 = bnb.nn.FFN(model, hidden, False)
+    ffn1 = ffn1.cuda().half()
+    ffn2 = ffn2.cuda().half()
+
+    with torch.no_grad():
+        ffn1.fc1.weight.copy_(ffn2.w1)
+        ffn1.fc2.weight.copy_(ffn2.w2)
+        # same data but different tensors
+        assert ffn1.fc1.weight.sum() == ffn2.w1.sum()
+        assert ffn1.fc2.weight.sum() == ffn2.w2.sum()
+        assert ffn1.fc1.weight.data.storage().data_ptr != ffn2.w1.data.storage().data_ptr
+
+
+
+    num_batches = 50
+    batches = torch.randn(num_batches, seq, batch, model).cuda()
+    total_not_close = 0
+    for i in range(num_batches):
+        batch = batches[i].half()
+        out1 = ffn1(batch)
+        out2 = ffn2(batch)
+        torch.testing.assert_allclose(out1, out2, **tols[action])
+
+        total_not_close += (torch.isclose(out1, out2, **tols_strict[action])==0).sum().item()
+
+    print(total_not_close, ' out of ', out2.numel()*num_batches, ' elements')
+    assert total_not_close <= (num_batches*out2.numel()*0.1)
 
 

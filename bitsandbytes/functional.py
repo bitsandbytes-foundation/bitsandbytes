@@ -19,38 +19,36 @@ def get_transform_func(dtype, orderA, orderOut, transpose=False):
     else:
         return getattr(lib, name)
 
-def get_transform_buffer(A, order='row', state=None):
-    if order == 'row' or order == 'col':
-        if state[1] != 'row' and state[1] != 'col':
-            shape = state[0]
-            return torch.zeros(shape, dtype=A.dtype, device=A.device)
-        else:
-            return torch.zeros_like(A)
-    elif order == 'col32':
+def get_transform_buffer(shape, dtype, device, to_order, from_order='row'):
+    state = (shape, to_order)
+    if to_order == 'row' or to_order == 'col':
+        return torch.zeros(shape, dtype=dtype, device=device), state
+    elif to_order == 'col32':
         # blocks of 32 columns (padded)
-        cols = A.shape[-1]
-        if len(A.shape) == 3: rows = A.shape[0]*A.shape[1]
-        else: rows = A.shape[0]
+        cols = shape[-1]
+        if len(shape) == 3: rows = shape[0]*shape[1]
+        else: rows = shape[0]
 
         cols = cols + (32 - (cols % 32))
-        return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
-    elif order == 'col_turing':
+        return torch.zeros((rows, cols), dtype=dtype, device=device), state
+    elif to_order == 'col_turing':
         # blocks of 32 columns and 8 rows
-        if len(A.shape) == 3: rows = A.shape[0]*A.shape[1]
-        else: rows = A.shape[0]
-        cols = A.shape[-1] + (32 - (A.shape[-1] % 32))
+        if len(shape) == 3: rows = shape[0]*shape[1]
+        else: rows = shape[0]
+        cols = shape[-1] + (32 - (shape[-1] % 32))
         rows = rows + (8 - (rows % 8))
-        return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
-    elif order == 'col_ampere':
+        return torch.zeros((rows, cols), dtype=dtype, device=device), state
+    elif to_order == 'col_ampere':
         # blocks of 32 columns and 32 rows
-        cols = A.shape[1] + (32 - (A.shape[1] % 32))
-        rows = A.shape[0] + (32 - (A.shape[0] % 32))
-        return torch.zeros((rows, cols), dtype=A.dtype, device=A.device)
+        cols = shape[1] + (32 - (shape[1] % 32))
+        rows = shape[0] + (32 - (shape[0] % 32))
+        return torch.zeros((rows, cols), dtype=dtype, device=device), state
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
-    if out is None: out = get_transform_buffer(A, to_order, state)
+    if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1])
+    else: new_state = (state[0], to_order)
     func = get_transform_func(A.dtype, from_order, to_order, transpose)
 
     shape = state[0]
@@ -71,9 +69,8 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
     ptrOut = get_ptr(out)
     func(ptr, get_ptr(A), get_ptr(out), dim1, dim2)
 
-    state = (A.shape, to_order)
 
-    return out, state
+    return out, new_state
 
 
 class Timer(object):
