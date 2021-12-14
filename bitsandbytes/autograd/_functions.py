@@ -119,10 +119,61 @@ class MLP(torch.autograd.Function):
         out232, Sout232 = F.transform(out2, state=Sout2, to_order='row')
         out2 = F.vectorwise_mm_dequant(out232, scale_out18, scale_w2.t())
 
+        ctx.grad_input1 = x
+        ctx.grad_input2 = out1h
+        ctx.w1 = w1
+        ctx.w2 = w2
+
         return out2
 
 
     def backward(ctx, grad_output):
-        A, B = ctx.saved_tensors
+        #return x_grad, w1_grad, w2_grad
+        seq, bsz = grad_output.shape[0], grad_output.shape[1]
+        grad_input1 = ctx.grad_input1
+        grad_input2 = ctx.grad_input2
+        w1 = ctx.w1
+        w2 = ctx.w2
 
-        return x_grad, w1_grad, w2_grad
+        # weight grad = grad_out^t @ grad_in^t(^t)
+        # [oh] = [obs, hbs^t]
+        grad_out8, scale_grad_out = F.vectorwise_quant(grad_output.view(seq*bsz, -1).t().contiguous(), dim=[-1])
+        grad_in8, scale_grad_in = F.vectorwise_quant(grad_input2.view(seq*bsz, -1).t().contiguous(), dim=[-1])
+        grad_out8, Sgrad_out = F.transform(grad_out8, 'col32')
+        grad_in8, Sgrad_in = F.transform(grad_in8, 'col_turing')
+        w2grad, Sw2grad = F.get_transform_buffer(w2.shape, torch.int32, grad_output.device, 'col32')
+
+        F.igemmlt(grad_out8, grad_in8, w2grad, Sgrad_out, Sgrad_in, Sw2grad)
+
+        w2grad, Sw2grad = F.transform(w2grad, state=Sw2grad, to_order='row')
+        w2grad = F.vectorwise_mm_dequant(w2grad, scale_grad_out, scale_grad_in.t())
+
+        # generating output_grad2
+        # grad_output2 = (grad_output @ w^t(^t))*relu_mask
+        # [bsh] = [bso, ho^t]*[bsh]
+        grad_out8, scale_grad_out = F.vectorwise_quant(grad_output, dim=[-1])
+        w28, scale_w2 = F.vectorwise_quant(w2.t().contiguous(), dim=[-1])
+        grad_out8, Sgrad_out = F.transform(grad_out8, 'col32')
+        w28, Sw2 = F.transform(w28, 'col_turing')
+        grad_out2, Sgrad_out2 = F.get_transform_buffer((seq, bsz, w1.shape[0]), torch.int32, grad_output.device, 'col32')
+
+        F.igemmlt(grad_out8, w28, grad_out2, Sgrad_out, Sw2, Sgrad_out2)
+
+        grad_out2, Sgrad_out2 = F.transform(grad_out2, state=Sgrad_out2, to_order='row')
+        grad_output2 = F.vectorwise_mm_dequant(grad_out2, scale_grad_out, scale_w2.t())
+        grad_output2.mul_((grad_input2>0).to(grad_out2.dtype))
+
+        # weight grad = grad_out^t @ grad_in^t(^t)
+        # [oh] = [obs, hbs^t]
+        grad_out8, scale_grad_out = F.vectorwise_quant(grad_output2.view(-1, grad_output2.shape[2]).t().contiguous(), dim=[-1])
+        grad_in8, scale_grad_in = F.vectorwise_quant(grad_input1.view(-1, grad_input1.shape[2]).t().contiguous(), dim=[-1])
+        grad_out8, Sgrad_out = F.transform(grad_out8, 'col32')
+        grad_in8, Sgrad_in = F.transform(grad_in8, 'col_turing')
+        w1grad, Sw1grad = F.get_transform_buffer(w1.shape, torch.int32, grad_output.device, 'col32')
+
+        F.igemmlt(grad_out8, grad_in8, w1grad, Sgrad_out, Sgrad_in, Sw1grad)
+
+        w1grad, Sw1grad = F.transform(w1grad, state=Sw1grad, to_order='row')
+        w1grad = F.vectorwise_mm_dequant(w1grad, scale_grad_out, scale_grad_in.t())
+
+        return None, w1grad, w2grad
