@@ -709,7 +709,7 @@ batch = [2]
 seq = [2048]
 model = [4*1024]
 hidden = [16*1024]
-values = [(4, 512, 1*1024, 4*1024),(4, 512, 1*1024, 8*1024),(4, 1024, 2*1024, 8*1024),(4, 1024, 2*1024, 16*1024),(4, 2048, 4*1024, 16*1024),(4, 2048, 4*1024, 32*1024)]
+values = [(4, 512, 1*1024, 4*1024)]#,(4, 512, 1*1024, 8*1024),(4, 1024, 2*1024, 8*1024),(4, 1024, 2*1024, 16*1024),(4, 2048, 4*1024, 16*1024),(4, 2048, 4*1024, 32*1024)]
 #values = [(4, 2048, 4*1024, 32*1024)]
 
 #values = list(product(batch, seq, model, hidden))
@@ -972,3 +972,34 @@ def test_MLP(action):
     assert total_not_close <= (num_batches*out2.numel()*0.1)
 
 
+
+backends = ['torch', 'cublaslt']
+dims = [(4, 512, 1*1024, 4*1024)]#,(4, 512, 1*1024, 8*1024)]#,(4, 1024, 2*1024, 8*1024),(4, 1024, 2*1024, 16*1024),(4, 2048, 4*1024, 16*1024),(4, 2048, 4*1024, 32*1024)]
+#dims = [(4, 2048, 4*1024, 32*1024)]
+values = list(product(dims, backends))
+names = ['dims_{0}_backend_{1}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dims, backend", values, ids=names)
+def test_benchmlp(dims, backend):
+    batch, seq, model, hidden = dims
+    num_batches = 100
+
+    if backend == 'torch':
+        ffn1 = FFN(model, hidden, False)
+    else:
+        ffn1 = bnb.nn.FFN(model, hidden, False)
+    ffn1 = ffn1.cuda().half()
+    batches = torch.randn(num_batches, seq, batch, model, device='cuda')
+
+    for i in range(num_batches):
+        batch = batches[i].half()
+        out1 = ffn1(batch)
+        out1.mean().backward()
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(num_batches):
+        batch = batches[i].half()
+        out1 = ffn1(batch)
+        out1.mean().backward()
+    torch.cuda.synchronize()
+    print(time.time()-t0)

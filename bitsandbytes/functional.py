@@ -22,7 +22,7 @@ def get_transform_func(dtype, orderA, orderOut, transpose=False):
 def get_transform_buffer(shape, dtype, device, to_order, from_order='row'):
     state = (shape, to_order)
     if to_order == 'row' or to_order == 'col':
-        return torch.zeros(shape, dtype=dtype, device=device), state
+        return torch.empty(shape, dtype=dtype, device=device), state
     elif to_order == 'col32':
         # blocks of 32 columns (padded)
         cols = shape[-1]
@@ -30,19 +30,19 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order='row'):
         else: rows = shape[0]
 
         cols = cols + (32 - (cols % 32))
-        return torch.zeros((rows, cols), dtype=dtype, device=device), state
+        return torch.empty((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_turing':
         # blocks of 32 columns and 8 rows
         if len(shape) == 3: rows = shape[0]*shape[1]
         else: rows = shape[0]
         cols = shape[-1] + (32 - (shape[-1] % 32))
         rows = rows + (8 - (rows % 8))
-        return torch.zeros((rows, cols), dtype=dtype, device=device), state
+        return torch.empty((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_ampere':
         # blocks of 32 columns and 32 rows
         cols = shape[1] + (32 - (shape[1] % 32))
         rows = shape[0] + (32 - (shape[0] % 32))
-        return torch.zeros((rows, cols), dtype=dtype, device=device), state
+        return torch.empty((rows, cols), dtype=dtype, device=device), state
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     if state is None: state = (A.shape, from_order)

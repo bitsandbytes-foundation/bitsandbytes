@@ -96,22 +96,29 @@ class MLP(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, w1, w2):
         assert len(x.shape)==3
-        x8, scale_x = F.vectorwise_quant(x, dim=[-1])
-        w18, scale_w1 = F.vectorwise_quant(w1, dim=[-1])
-        w28, scale_w2 = F.vectorwise_quant(w2, dim=[-1])
-        x8, Sx = F.transform(x8, 'col32')
-        w18, Sw1 = F.transform(w18, 'col_turing')
-        w28, Sw2 = F.transform(w28, 'col_turing')
-        out1, Sout32 = F.get_transform_buffer((x.shape[0], x.shape[1], w1.shape[0]), torch.int32, x8.device, 'col32')
+
+        #outa = torch.matmul(x, w1.t())
+        # 16-bit: 0.136 / 0.25 -> for all -> 0.023 / 0.042 for one layer
+        # raw: 0.0175
+        x8, scale_x = F.vectorwise_quant(x, dim=[-1]) # +0.01
+        w18, scale_w1 = F.vectorwise_quant(w1, dim=[-1]) # +0.01
+
+        # -0.02 / -0.02 -> use empty instead of zero -> total: 0.02 / 0.03 (zeros) and  0.01 / 0.015 (empty)
+        x8, Sx = F.transform(x8, 'col32') # +0.003 / +0.004
+        w18, Sw1 = F.transform(w18, 'col_turing') # +0.005 / +0.008
+        out1, Sout32 = F.get_transform_buffer((x.shape[0], x.shape[1], w1.shape[0]), torch.int32, x8.device, 'col32') # 0.002 / 0.007
 
 
-        F.igemmlt(x8, w18, out1, Sx, Sw1, Sout32)
+        F.igemmlt(x8, w18, out1, Sx, Sw1, Sout32) # 0.012 / 0.023
 
-        out132, Sout132 = F.transform(out1, state=Sout32, to_order='row')
-        out1h = F.vectorwise_mm_dequant(out132, scale_x, scale_w1.t())
+        out132, Sout132 = F.transform(out1, state=Sout32, to_order='row') # 0.015 / 0.038
+        out1h = F.vectorwise_mm_dequant(out132, scale_x, scale_w1.t()) # 0.051 / 0.033
         torch.relu_(out1h)
+
+        w28, scale_w2 = F.vectorwise_quant(w2, dim=[-1]) # +0.02 / +0.04
         out18, scale_out18 = F.vectorwise_quant(out1h, dim=[-1])
         out18col, Sout18 = F.transform(out18, 'col32')
+        w28, Sw2 = F.transform(w28, 'col_turing') # +0.01 / +0.013
         out2, Sout2 = F.get_transform_buffer((x.shape[0], x.shape[1], w2.shape[0]), torch.int32, x8.device, 'col32')
 
         F.igemmlt(out18col, w28, out2, Sout18, Sw2, Sout2)
@@ -119,12 +126,13 @@ class MLP(torch.autograd.Function):
         out232, Sout232 = F.transform(out2, state=Sout2, to_order='row')
         out2 = F.vectorwise_mm_dequant(out232, scale_out18, scale_w2.t())
 
+
         ctx.grad_input1 = x
         ctx.grad_input2 = out1h
         ctx.w1 = w1
         ctx.w2 = w2
 
-        return out2
+        return x
 
 
     def backward(ctx, grad_output):
@@ -163,8 +171,9 @@ class MLP(torch.autograd.Function):
         grad_output2 = F.vectorwise_mm_dequant(grad_out2, scale_grad_out, scale_w2.t())
         grad_output2.mul_((grad_input2>0).to(grad_out2.dtype))
 
+
         # weight grad = grad_out^t @ grad_in^t(^t)
-        # [oh] = [obs, hbs^t]
+        # [oh] = [obs, hbs^t] 
         grad_out8, scale_grad_out = F.vectorwise_quant(grad_output2.view(-1, grad_output2.shape[2]).t().contiguous(), dim=[-1])
         grad_in8, scale_grad_in = F.vectorwise_quant(grad_input1.view(-1, grad_input1.shape[2]).t().contiguous(), dim=[-1])
         grad_out8, Sgrad_out = F.transform(grad_out8, 'col32')
@@ -175,5 +184,6 @@ class MLP(torch.autograd.Function):
 
         w1grad, Sw1grad = F.transform(w1grad, state=Sw1grad, to_order='row')
         w1grad = F.vectorwise_mm_dequant(w1grad, scale_grad_out, scale_grad_in.t())
+
 
         return None, w1grad, w2grad
