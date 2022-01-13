@@ -1686,6 +1686,107 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     }
 }
 
+#define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
+
+template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void dequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols)
+{
+
+  // Strategy: To dequantize we need to load col/row statistics. This can be very expensive
+  // since different row/col stats need to be loaded with each thread. 
+  // (1, bad algorithm) Loading 32 items per thread would only occur 1 row load, but this increases register pressure
+  // and would lead to low global load utilization. 
+  // (2, bad algorithm) If each thread loads some columns and multiple rows one needs to do lot of row loads
+  // for each thread and this is duplicated by a factor of 32/num-cols-per-thread.
+  // (3, good algorithm) Combining (1) and (2) we use sub-tiles of size 32xk in shared memory per threadblock.
+  // This allows for efficient row/col loading from shared memory within the tile.
+  // We can run for example 32x128 sub-tiles and warp-strided loads of 4 elements so that each thread has
+  // the same col statistic but needs to load 4 row stats from shared memory. To prevent bank conflicts
+  // we use a block-striped shared memory config [1, 31, 63, 95] so no bank conflicts happen during the
+  // shared memory loads. 
+
+  // data is in 32 column-tile major with tile width 32 columns and numRows rows
+  // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
+  // L2. Load data in warp-striped arangement (t0 holds idx [0, 31, 63, 95])
+  // C1. Compute val(row_stat*col_stat)/(127*127) (load 1/(127*127 into register))
+  // C2. Compute normalization values and store col values in register
+  // S1. Store C1 into 16-bit output
+  // S2. Store col/row statistics of new buffer in shared memory
+
+  // We allow for sub-tiles to span multiple col32 tiles. This is okay
+  // since the items per thread only rely on a single column statistic.
+
+
+  const int tilesize = numRows*32; 
+  const int n = numRows*numCols;
+
+  int i = (blockIdx.x*blockDim.x)+threadIdx.x;
+  // col32 tile indices
+  int tile_idx = i / tilesize;
+  int col = (tile_idx*32)+((i-(tile_idx*tilesize)) % 32);
+  int base_row = ((blockIdx.x*blockDim.x) - (tile_idx*tilesize))/32;
+  float absmax_col = -FLT_MAX;
+
+  // SUBTILE_ROWS is independent from ITEMS_PER_THREAD is independent from THREADS
+  // subtiles have 32*SUBTILE_ROWS elements <= THREADS*ITEMS_PER_THREAD
+  // Total subtiles should be n/(32*SUBTILE_ROWS) where each subtile has SUBTILE_ROW*32/4 threads.
+  // For example for a 1024x1024 matrix with 128 SUBTILE_ROWS and 4 ITEMS_PER_THREAD we have
+  // 1024*1024/(128*32) = 256 tiles
+  // 256 tiles are 256*128*32/4 = 256*1024 threads
+
+  // 1. Figure out how index relates to the start of the sub-tile
+  // 2. Each thread < SUBTILE_ROWS calculates row index
+  // 3. Load striped and store in shared memory
+
+  int local_values[ITEMS_PER_THREAD];
+  half local_output[ITEMS_PER_THREAD];
+  float local_rowStats[ITEMS_PER_THREAD];
+  __shared__ float smem_rowStats[ITEMS_PER_THREAD*32];
+
+  typedef cub::BlockLoad<int, THREADS , ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+  __shared__ typename LoadT::TempStorage loadt;
+
+  // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
+  float colStat = colStats[col];
+  // no block loads for rows for now -- keep it simple
+  for(int j = threadIdx.x; j < SUBTILE_ROWS; blockDim.x)
+  {
+    int row = base_row+j < numRows ? base_row+j : base_row+j - numRows; // wrap around
+    int offset = row / ITEMS_PER_THREAD; // striped arangement [0, 4, 8, .. , 1, 5, 9]
+    smem_rowStats[row+(j*ITEMS_PER_THREAD)] = rowStats[j];
+  }
+  __syncthreads();
+
+  // L2. Load data in warp-striped arangement (t0 holds colidx [0, 31, 63, 95], rowidx [0, 1, 2, 3])
+  LoadT(loadt).Load(&(A[blockIdx.x*blockDim.x]), local_values, ITEMS_PER_THREAD, 0);
+
+  int warp_idx = threadIdx.x / 32;
+
+  for(int row = base_row+warp_idx; SUBTILE_ROWS; row+=blockDim.x/32)
+  {
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      local_rowStats[j] = smem_rowStats[row+(j*ITEMS_PER_THREAD)];
+
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    {
+      local_output[j] = __float2half(local_values[j]*MM_DEQUANT_CONST*local_rowStats[j]*colStat);
+      absmax_col = fmax(fabsf(local_output[j]), absmax_col);
+    }
+
+    // we store data in row major
+    // to store data efficiently, we want to use block exchange: [0, 32, 64, 92] -> [0, 1, 2, 3]
+    // so that each thread holds ITEMS_PER_THREAD consecutive items for each row
+    // this way throughput into storage is increased by a factor of ~2x
+    // for now we use a simple store
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    {
+      int outIdx = col + ((row+j)*numCols);
+      out[outIdx] = local_output[j];
+    }
+  }
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
