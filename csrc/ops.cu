@@ -4,6 +4,7 @@
 #include <limits>
 #include <cutlass/numeric_types.h>
 #include <cutlass/gemm/device/gemm.h>
+#include <cassert>
 
 using std::cout;
 using std::endl;
@@ -557,6 +558,19 @@ void cutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *
 		printf("ERROR\n");
   }
 } 
+
+void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols)
+{
+  int threads = 512;
+  int tileCols = (32*(numCols / 32)) + (32 - (numCols % 32));
+  int n = numRows*tileCols;
+  int items_per_thread = 4;
+  int num_blocks = n/items_per_thread;
+  assert(n % items_per_thread == 0);
+
+  kdequant_mm_int32_fp16<4, 128, 512><<<num_blocks, threads>>>(A, rowStats, colStats, out, newRowStats, newcolStats, numRows, numCols);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

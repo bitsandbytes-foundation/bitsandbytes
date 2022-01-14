@@ -1068,3 +1068,29 @@ def cutlass_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
     lib.ccutlass_igemm(ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
     return out
+
+
+def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None):
+    assert A.dtype == torch.int32
+    out_shape = quant_state[0]
+    if len(out_shape) == 3: out_shape = (out_shape[0]*out_shape[1], out_shape[2])
+
+    if out is None: out = torch.empty(out_shape, dtype=torch.float16, device=A.device)
+    if new_row_stats is None: new_row_stats = torch.zeros(out_shape[0], dtype=torch.float32, device=A.device)
+    if new_col_stats is None: new_col_stats = torch.zeros(out_shape[1], dtype=torch.float32, device=A.device)
+    print(new_col_stats.shape, col_stats.shape)
+    assert new_row_stats.shape[0] == row_stats.shape[0]
+    assert new_col_stats.shape[0] == col_stats.shape[0]
+
+    ptrA = get_ptr(A)
+    ptrOut = get_ptr(out)
+    ptrRowStats = get_ptr(row_stats)
+    ptrColStats = get_ptr(col_stats)
+    ptrNewRowStats = get_ptr(new_row_stats)
+    ptrNewColStats = get_ptr(new_col_stats)
+    numRows = ct.c_int32(out_shape[0])
+    numCols = ct.c_int32(out_shape[1])
+
+    lib.cdequant_mm_int32_fp16(ptrA, ptrRowStats, ptrColStats, ptrOut, ptrNewRowStats, ptrNewColStats, numRows, numCols)
+
+    return out

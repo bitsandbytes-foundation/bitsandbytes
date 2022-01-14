@@ -1688,7 +1688,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
-template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void dequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols)
+template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols)
 {
 
   // Strategy: To dequantize we need to load col/row statistics. This can be very expensive
@@ -1717,7 +1717,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void de
 
 
   const int tilesize = numRows*32; 
-  const int n = numRows*numCols;
+  //const int n = numRows*numCols;
 
   int i = (blockIdx.x*blockDim.x)+threadIdx.x;
   // col32 tile indices
@@ -1748,10 +1748,10 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void de
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
   float colStat = colStats[col];
   // no block loads for rows for now -- keep it simple
-  for(int j = threadIdx.x; j < SUBTILE_ROWS; blockDim.x)
+  for(int j = threadIdx.x; j < SUBTILE_ROWS; j+=blockDim.x)
   {
     int row = base_row+j < numRows ? base_row+j : base_row+j - numRows; // wrap around
-    int offset = row / ITEMS_PER_THREAD; // striped arangement [0, 4, 8, .. , 1, 5, 9]
+    //int offset = row / ITEMS_PER_THREAD; // striped arangement [0, 4, 8, .. , 1, 5, 9]
     smem_rowStats[row+(j*ITEMS_PER_THREAD)] = rowStats[j];
   }
   __syncthreads();
@@ -1786,6 +1786,8 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void de
     }
   }
 }
+
+template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols);
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

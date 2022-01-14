@@ -99,6 +99,10 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> __global__ voi
 
 template<typename T, int BLOCK_SIZE, int NUM_VALS> __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n);
 
+template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kdequant_mm_int32_fp16(
+  int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats,
+  half *out, float* newRowStats, float* newcolStats, int numRows, int numCols);
+
 #endif
 
 

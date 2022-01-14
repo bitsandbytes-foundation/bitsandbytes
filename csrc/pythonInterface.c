@@ -191,6 +191,9 @@ extern "C"
 
 	void ccutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
 	{ cutlass_igemm(transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc); }
+
+	void cdequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols)
+	{ dequant_mm_int32_fp16(A, rowStats, colStats, out, newRowStats, newcolStats, numRows, numCols); }
 }
 
 
