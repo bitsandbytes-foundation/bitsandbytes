@@ -101,7 +101,7 @@ template<typename T, int BLOCK_SIZE, int NUM_VALS> __global__ void kPercentileCl
 
 template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kdequant_mm_int32_fp16(
   int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats,
-  half *out, float* newRowStats, float* newcolStats, int numRows, int numCols);
+  half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int n);
 
 #endif
 

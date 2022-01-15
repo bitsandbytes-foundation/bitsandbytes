@@ -1688,7 +1688,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
-template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols)
+template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int n)
 {
 
   // Strategy: To dequantize we need to load col/row statistics. This can be very expensive
@@ -1706,7 +1706,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
   // data is in 32 column-tile major with tile width 32 columns and numRows rows
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
-  // L2. Load data in warp-striped arangement (t0 holds idx [0, 31, 63, 95])
+  // L2. Load data in warp-striped arangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
   // C1. Compute val(row_stat*col_stat)/(127*127) (load 1/(127*127 into register))
   // C2. Compute normalization values and store col values in register
   // S1. Store C1 into 16-bit output
@@ -1717,14 +1717,28 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
 
   const int tilesize = numRows*32; 
-  //const int n = numRows*numCols;
+  const int n_out = numRows*numCols;
 
   int i = (blockIdx.x*blockDim.x)+threadIdx.x;
+  // a block loads a sub-tile which is SUBTILE_ROWS*32 elements
+  int base_idx = blockIdx.x*SUBTILE_ROWS*32;
+  // each warp loads ITEMS_PER_THREAD rows
+  // the base row is the warp row + the offset of the subtile
+  // the offset calculated as: 32 elements per row, the row wraps around at numRows so
+  // (base_idx/32) % numRows
+  int base_row = (threadIdx.x/32*ITEMS_PER_THREAD) + ((base_idx/32) % numRows);
+  // thread 0, 1, 2 in wrap k indexes column 0, 1, 2
+  // the column is offset by 32 every (32*numRow) elements: 32*base_idx/(32*numRow) = base_idx/numRows
+  int col = (threadIdx.x % 32) + (base_idx/numRows)
+
+  //if(i >= n) return; // we cannot skip empty warps due to blockloads
+
   // col32 tile indices
-  int tile_idx = i / tilesize;
-  int col = (tile_idx*32)+((i-(tile_idx*tilesize)) % 32);
-  int base_row = ((blockIdx.x*blockDim.x) - (tile_idx*tilesize))/32;
-  float absmax_col = -FLT_MAX;
+  //int tile_idx = i / tilesize;
+  //int col = (tile_idx*32)+((i-(tile_idx*tilesize)) % 32);
+  //int base_row = ((blockIdx.x*blockDim.x) - (tile_idx*tilesize))/32;
+  //float absmax_col = -FLT_MAX;
+  //printf("%i %i %i\n", threadIdx.x, n, base_row);
 
   // SUBTILE_ROWS is independent from ITEMS_PER_THREAD is independent from THREADS
   // subtiles have 32*SUBTILE_ROWS elements <= THREADS*ITEMS_PER_THREAD
@@ -1746,32 +1760,45 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
   __shared__ typename LoadT::TempStorage loadt;
 
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
-  float colStat = colStats[col];
+  float colStat = col >= numCols ? 0.0f : colStats[col];
   // no block loads for rows for now -- keep it simple
   for(int j = threadIdx.x; j < SUBTILE_ROWS; j+=blockDim.x)
   {
-    int row = base_row+j < numRows ? base_row+j : base_row+j - numRows; // wrap around
-    //int offset = row / ITEMS_PER_THREAD; // striped arangement [0, 4, 8, .. , 1, 5, 9]
-    smem_rowStats[row+(j*ITEMS_PER_THREAD)] = rowStats[j];
+    // todo: is this global mem access slow due to overlaps or does the L1 cache work well here?
+    int row = base_row+j % numRows; // wrap around
+    // each warp accesses the same element, for four consequitive elements
+    // todo: update description about striped shared memory, it is not needed
+    // rowidx: [0, 1, 2, 3...] and each warp reads ITEMS_PER_THREAD consequitive elements
+    smem_rowStats[j] = rowStats[row];
   }
   __syncthreads();
 
-  // L2. Load data in warp-striped arangement (t0 holds colidx [0, 31, 63, 95], rowidx [0, 1, 2, 3])
-  LoadT(loadt).Load(&(A[blockIdx.x*blockDim.x]), local_values, ITEMS_PER_THREAD, 0);
 
   int warp_idx = threadIdx.x / 32;
+  // each block processes SUBTILE_ROWS*32 elements
+  const int items_per_load = THREADS*ITEMS_PER_THREAD;
+  const int rows_per_load = items_per_load/32;
 
-  for(int row = base_row+warp_idx; SUBTILE_ROWS; row+=blockDim.x/32)
+  int subtile_base_row = threadIdx.x / 32; // row within the tile
+  for(int subtile_idx = blockIdx.x*SUBTILE_ROWS*32; subtile_idx < (blockIdx.x+1)*SUBTILE_ROWS*32; subtile_idx+=items_per_load)
   {
+    int valid_items = n - subtile_idx > items_per_load ? items_per_load : n - subtile_idx;
+    if(valid_items <= 0) // the sub-tile might have more elements than the tile itself
+      break;
+
+    // L2. Load data in warp-striped arangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
+    LoadT(loadt).Load(&(A[subtile_idx]), local_values, valid_items, 0);
+
+    //printf("%i %i\n", threadIdx.x, subtile_base_row);
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
-      local_rowStats[j] = smem_rowStats[row+(j*ITEMS_PER_THREAD)];
+      local_rowStats[j] = smem_rowStats[subtile_base_row+j];
 
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
     {
       local_output[j] = __float2half(local_values[j]*MM_DEQUANT_CONST*local_rowStats[j]*colStat);
-      absmax_col = fmax(fabsf(local_output[j]), absmax_col);
+      //absmax_col = fmax(fabsf(local_output[j]), absmax_col);
     }
 
     // we store data in row major
@@ -1779,15 +1806,51 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     // so that each thread holds ITEMS_PER_THREAD consecutive items for each row
     // this way throughput into storage is increased by a factor of ~2x
     // for now we use a simple store
+    #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
     {
-      int outIdx = col + ((row+j)*numCols);
-      out[outIdx] = local_output[j];
+      int outIdx = col + ((base_row+j)*numCols);
+      if(outIdx< n_out)
+      {
+        //printf("%i %i %i %i\n", threadIdx.x, n, base_row, outIdx);
+        out[outIdx] = local_output[j];
+      }
     }
+
+    subtile_base_row += rows_per_load;
   }
+
+  // each warp processes one row (32 elements)
+  // in total each warp processes ITEMS_PER_THREAD rows per iteration
+  // each loop the index needs to be increased by total_warps*num_items (since each warp processes num_items rows)
+  //for(int k = warp_idx*ITEMS_PER_THREAD; k < SUBTILE_ROWS; k+=ITEMS_PER_THREAD*THREADS/32) // THREADS/32 = num_warps
+  //{
+
+    //#pragma unroll ITEMS_PER_THREAD
+    //for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    //  local_rowStats[j] = smem_rowStats[row+(j*ITEMS_PER_THREAD)];
+
+    //#pragma unroll ITEMS_PER_THREAD
+    //for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    //{
+    //  local_output[j] = __float2half(local_values[j]*MM_DEQUANT_CONST*local_rowStats[j]*colStat);
+    //  absmax_col = fmax(fabsf(local_output[j]), absmax_col);
+    //}
+
+    // we store data in row major
+    // to store data efficiently, we want to use block exchange: [0, 32, 64, 92] -> [0, 1, 2, 3]
+    // so that each thread holds ITEMS_PER_THREAD consecutive items for each row
+    // this way throughput into storage is increased by a factor of ~2x
+    // for now we use a simple store
+    //for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    //{
+    //  int outIdx = col + ((row+j)*numCols);
+    //  out[outIdx] = local_output[j];
+    //}
+  //}
 }
 
-template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols);
+template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int n);
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
