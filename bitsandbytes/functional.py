@@ -1078,7 +1078,6 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
     if out is None: out = torch.zeros(out_shape, dtype=torch.float16, device=A.device)
     if new_row_stats is None: new_row_stats = torch.zeros(out_shape[0], dtype=torch.float32, device=A.device)
     if new_col_stats is None: new_col_stats = torch.zeros(out_shape[1], dtype=torch.float32, device=A.device)
-    print(new_col_stats.shape, col_stats.shape)
     assert new_row_stats.shape[0] == row_stats.shape[0]
     assert new_col_stats.shape[0] == col_stats.shape[0]
 

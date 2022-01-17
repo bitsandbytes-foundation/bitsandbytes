@@ -1044,6 +1044,9 @@ def test_dequant_mm(dim1, dim2, dim3, dim4, dims, ldb):
         #torch.testing.assert_allclose(C1, C4, atol=0.01, rtol=0.1)
 
         C5 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten())
-        print(C4)
-        print(C5)
+        torch.testing.assert_allclose(C5, C4)
+        #print(maxA.flatten(), maxB.flatten())
+        #print(C2)
+        #print(C4)
+        #print(C5)
 
