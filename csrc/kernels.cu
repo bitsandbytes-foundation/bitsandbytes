@@ -1754,7 +1754,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
   int local_values[ITEMS_PER_THREAD];
   half local_output[ITEMS_PER_THREAD];
   float local_rowStats[ITEMS_PER_THREAD];
-  __shared__ float smem_rowStats[ITEMS_PER_THREAD*32];
+  __shared__ float smem_rowStats[SUBTILE_ROWS];
 
   typedef cub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadInt32;
   typedef cub::BlockExchange<int, THREADS, ITEMS_PER_THREAD> ExchangeInt32;
@@ -1768,7 +1768,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
   for(int j = threadIdx.x; j < SUBTILE_ROWS; j+=blockDim.x)
   {
     // todo: is this global mem access slow due to overlaps or does the L1 cache work well here?
-    int row = base_row+j % numRows; // wrap around
+    int row = ((base_idx/32)+j) % numRows; // wrap around
     // each warp accesses the same element, for four consequitive elements
     // todo: update description about striped shared memory, it is not needed
     // rowidx: [0, 1, 2, 3...] and each warp reads ITEMS_PER_THREAD consequitive elements
@@ -1782,7 +1782,8 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
   const int items_per_load = THREADS*ITEMS_PER_THREAD;
   const int rows_per_load = items_per_load/32;
 
-  int subtile_base_row = threadIdx.x / 32; // row within the tile
+  int subtile_base_row = (threadIdx.x / 32)*4; // row within the tile
+  int row_offset = 0;
   for(int subtile_idx = blockIdx.x*SUBTILE_ROWS*32; subtile_idx < (blockIdx.x+1)*SUBTILE_ROWS*32; subtile_idx+=items_per_load)
   {
     int valid_items = n - subtile_idx > items_per_load ? items_per_load : n - subtile_idx;
@@ -1793,17 +1794,16 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     LoadInt32(loadint32).Load(&(A[subtile_idx]), local_values, valid_items, 0);
     ExchangeInt32(exchangeint32).BlockedToWarpStriped(local_values, local_values);
 
-    //printf("%i %i\n", threadIdx.x, subtile_base_row);
-    #pragma unroll ITEMS_PER_THREAD
-    for(int j = 0; j < ITEMS_PER_THREAD; j++)
-      local_rowStats[j] = smem_rowStats[subtile_base_row+j];
-
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
     {
+      local_rowStats[j] = smem_rowStats[subtile_base_row+row_offset+j];
+    }
+
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
       local_output[j] = __float2half(local_values[j]*MM_DEQUANT_CONST*local_rowStats[j]*colStat);
       //absmax_col = fmax(fabsf(local_output[j]), absmax_col);
-    }
 
     // we store data in row major
     // to store data efficiently, we want to use block exchange: [0, 32, 64, 92] -> [0, 1, 2, 3]
@@ -1813,15 +1813,15 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
     {
-      int outIdx = col + ((base_row+j)*numCols);
+      int outIdx = col + ((base_row+row_offset+j)*numCols);
       if(outIdx< n_out && col < numCols)
       {
-        //printf("%i %i %i %i %i\n", threadIdx.x, n, base_row, outIdx, col);
+        //printf("%i %i %i %i %i\n", threadIdx.x, n_out, base_row, outIdx, col);
         out[outIdx] = local_output[j];
       }
     }
 
-    subtile_base_row += rows_per_load;
+    row_offset += rows_per_load;
   }
 }
 

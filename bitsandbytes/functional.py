@@ -1089,6 +1089,7 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
     ptrNewColStats = get_ptr(new_col_stats)
     numRows = ct.c_int32(out_shape[0])
     numCols = ct.c_int32(out_shape[1])
+    print(out.shape, out.dtype)
 
     lib.cdequant_mm_int32_fp16(ptrA, ptrRowStats, ptrColStats, ptrOut, ptrNewRowStats, ptrNewColStats, numRows, numCols)
 

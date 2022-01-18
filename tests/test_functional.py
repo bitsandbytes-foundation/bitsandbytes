@@ -1012,17 +1012,17 @@ n = 2
 #dim3 = torch.randint(32,1024, size=(n,)).tolist()
 #dim4 = torch.randint(32,1024, size=(n,)).tolist()
 
-dim1 = [2]
-dim2 = [2]
-dim3 = [2]
-dim4 = [2]
+dim1 = [128]
+dim2 = [32]
+dim3 = [32]
+dim4 = [32]
 
 dims = (2,)
 ldb = [0]
 #ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1,dim2,dim3,dim4,dims, ldb))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}'.format(*vals) for vals in values]
-k = 100
+k = 10
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
 def test_dequant_mm(dim1, dim2, dim3, dim4, dims, ldb):
     for i in range(k):
@@ -1044,9 +1044,10 @@ def test_dequant_mm(dim1, dim2, dim3, dim4, dims, ldb):
         #torch.testing.assert_allclose(C1, C4, atol=0.01, rtol=0.1)
 
         C5 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten())
+        print('')
+        print(C4[31:33])
+        print(C5[31:33])
+        print(maxA.flatten()[31:33], maxB.flatten()[31:33])
         torch.testing.assert_allclose(C5, C4)
-        #print(maxA.flatten(), maxB.flatten())
         #print(C2)
-        #print(C4)
-        #print(C5)
 
