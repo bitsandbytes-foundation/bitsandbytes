@@ -1008,30 +1008,27 @@ def test_benchmlp(dims, backend):
 
 n = 2
 #dim1 = torch.randint(1,256, size=(n,)).tolist()
-#dim2 = torch.randint(32,512, size=(n,)).tolist()
-#dim3 = torch.randint(32,1024, size=(n,)).tolist()
 #dim4 = torch.randint(32,1024, size=(n,)).tolist()
 
 dim1 = [128]
-dim2 = [32]
-dim3 = [32]
-dim4 = [32]
+dim4 = [64]
 
 dims = (2,)
 ldb = [0]
 #ldb = list(range(256, 1*1024, 256))
-values = list(product(dim1,dim2,dim3,dim4,dims, ldb))
-names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}'.format(*vals) for vals in values]
+values = list(product(dim1,dim4,dims, ldb))
+names = ['dim1_{0}_dim4_{1}_dims_{2}_ldb_{3}'.format(*vals) for vals in values]
 k = 10
-@pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
-def test_dequant_mm(dim1, dim2, dim3, dim4, dims, ldb):
+@pytest.mark.parametrize("dim1, dim4, dims, ldb", values, ids=names)
+def test_dequant_mm(dim1, dim4, dims, ldb):
+    inner = torch.randint(1, 128, size=(1,)).item()
     for i in range(k):
-        A = torch.randn(dim1, dim3, device='cuda')
-        B = torch.randn(dim4, dim3, device='cuda')
+        A = torch.randn(dim1, inner, device='cuda')
+        B = torch.randn(dim4, inner, device='cuda')
         C1 = torch.matmul(A.half(), B.t().half())
 
         A1, maxA = F.vectorwise_quant(A, dim=1)
-        B1, maxB = F.vectorwise_quant(B.t(), dim=0)
+        B1, maxB = F.vectorwise_quant(B, dim=1)
 
         A2, SA = F.transform(A1, 'col32')
         B2, SB = F.transform(B1, 'col_turing')
@@ -1039,15 +1036,12 @@ def test_dequant_mm(dim1, dim2, dim3, dim4, dims, ldb):
         F.igemmlt(A2, B2, C2, SA, SB, SC)
 
         C3, S = F.transform(C2, 'row', state=SC)
-        C4 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB)
+        C4 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
 
         #torch.testing.assert_allclose(C1, C4, atol=0.01, rtol=0.1)
 
         C5 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten())
-        print('')
-        print(C4[31:33])
-        print(C5[31:33])
-        print(maxA.flatten()[31:33], maxB.flatten()[31:33])
+        #print('')
         torch.testing.assert_allclose(C5, C4)
         #print(C2)
 

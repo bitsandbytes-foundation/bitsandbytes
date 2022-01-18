@@ -571,11 +571,12 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   int n = numRows*tileCols;
   int subtile_rows = 128;
   int tilesize = 32*subtile_rows;
-  int num_blocks = n/tilesize;
-  num_blocks += n % tilesize != 0 ? 1 : 0;
+  int num_blocks = numRows/subtile_rows;
+  num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
+  num_blocks = num_blocks*(tileCols/32);
   assert(threads <= tilesize);
 
-  kdequant_mm_int32_fp16<4, 128, 512><<<num_blocks, threads>>>(A, rowStats, colStats, out, newRowStats, newcolStats, numRows, numCols, n);
+  kdequant_mm_int32_fp16<4, 128, 512><<<num_blocks, threads>>>(A, rowStats, colStats, out, newRowStats, newcolStats, numRows, numCols, tileCols, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
