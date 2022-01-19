@@ -1718,14 +1718,13 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
   const int n_out = numRows*numCols;
 
-  // column is offset by 32 for each tile; the tile index is equivalent to the blockIdx.x
-  int col = (threadIdx.x % 32) + (blockIdx.x*32);
-  // every warp (threadIdx.x/32) processes 4 consequitive rows
-  // every block processes 32 columns
-  // rows increase by SUBTILE_ROWS after each tileCols columns are processes
-  // (columns processes = blockIdx.x*32; columns_processes/tileCols*SUBTILE_ROWS = row offset)
-  int base_row = (((blockIdx.x*32)/tileCols)*SUBTILE_ROWS);
-  //int local_row = base_row + ((threadIdx.x/32)*ITEMS_PER_THREAD);
+  int num_row_tiles = (numRows/SUBTILE_ROWS) + (numRows % SUBTILE_ROWS == 0 ? 0 : 1);
+  // we have tiles of size numRows*32, thus col only increases every numRows
+  // num_row_tiles is the tiles after which the column increases by 32
+  // blockIdx.x is the index of the current tile
+  int col = ((threadIdx.x % 32) + ((blockIdx.x/num_row_tiles)*32));
+  // base_row increases by SUBTILE_ROWS every block. It wraps back to zero once num_row_tiles is reached
+  int base_row = (blockIdx.x*SUBTILE_ROWS) % (num_row_tiles*SUBTILE_ROWS);
 
   // SUBTILE_ROWS is independent from ITEMS_PER_THREAD is independent from THREADS
   // subtiles have 32*SUBTILE_ROWS elements <= THREADS*ITEMS_PER_THREAD
@@ -1770,9 +1769,12 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
   int subtile_base_row = (threadIdx.x / 32)*ITEMS_PER_THREAD; // row within the tile
   int row_offset = 0;
-  for(int subtile_idx = blockIdx.x*SUBTILE_ROWS*32; subtile_idx < (blockIdx.x+1)*SUBTILE_ROWS*32; subtile_idx+=items_per_load)
+  // subtile_idx starts at the base_row*32 + the total offset for a full numRow*32 tile is passed
+  int subtile_start = (blockIdx.x/num_row_tiles)*(numRows*32) + (base_row*32);
+  for(int subtile_idx = subtile_start; subtile_idx < subtile_start + (SUBTILE_ROWS*32); subtile_idx+=items_per_load)
   {
-    int valid_items = n - subtile_idx > items_per_load ? items_per_load : n - subtile_idx;
+    int valid_rows = numRows - (base_row+row_offset) > rows_per_load ? rows_per_load : numRows - (base_row+row_offset);
+    int valid_items = valid_rows*32;
     if(valid_items <= 0) // the sub-tile might have more elements than the tile itself
       break;
 
@@ -1782,9 +1784,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
-    {
       local_rowStats[j] = smem_rowStats[subtile_base_row+row_offset+j];
-    }
 
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
@@ -1801,10 +1801,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     {
       int outIdx = col + ((base_row+subtile_base_row+row_offset+j)*numCols);
       if(outIdx< n_out && col < numCols)
-      {
-        //printf("%i %i %i %i %i\n", threadIdx.x, n_out, base_row, outIdx, col);
         out[outIdx] = local_output[j];
-      }
     }
 
     row_offset += rows_per_load;

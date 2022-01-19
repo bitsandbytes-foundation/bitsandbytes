@@ -1006,12 +1006,12 @@ def test_benchmlp(dims, backend):
 
 
 
-n = 2
-#dim1 = torch.randint(1,256, size=(n,)).tolist()
-#dim4 = torch.randint(32,1024, size=(n,)).tolist()
+n = 10
+dim1 = torch.randint(1,256, size=(n,)).tolist()
+dim4 = torch.randint(32,1024, size=(n,)).tolist()
 
-dim1 = [128]
-dim4 = [64]
+#dim1 = [129]
+#dim4 = [33]
 
 dims = (2,)
 ldb = [0]
@@ -1041,7 +1041,6 @@ def test_dequant_mm(dim1, dim4, dims, ldb):
         #torch.testing.assert_allclose(C1, C4, atol=0.01, rtol=0.1)
 
         C5 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten())
-        #print('')
         torch.testing.assert_allclose(C5, C4)
         #print(C2)
 

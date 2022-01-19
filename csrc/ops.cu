@@ -576,6 +576,8 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   num_blocks = num_blocks*(tileCols/32);
   assert(threads <= tilesize);
 
+  //cout << num_blocks << " blocks" << endl;
+
   kdequant_mm_int32_fp16<4, 128, 512><<<num_blocks, threads>>>(A, rowStats, colStats, out, newRowStats, newcolStats, numRows, numCols, tileCols, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
