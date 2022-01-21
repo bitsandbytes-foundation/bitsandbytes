@@ -1706,22 +1706,28 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global_
   __shared__ typename LoadT::TempStorage loadt;
   typedef cub::BlockReduce<half, ITEMS_PER_THREAD*THREADS> BlockRowReduce;
   __shared__ typename BlockRowReduce::TempStorage rowreduce;
+  typedef cub::BlockExchange<half, THREADS, ITEMS_PER_THREAD> BlockExchange;
+  __shared__ typename BlockExchange::TempStorage exchange;
+
   __shared__ float smem_row_absmax_values[ITEMS_PER_THREAD*THREADS];
   __shared__ float smem_col_absmax_values[ITEMS_PER_THREAD*THREADS];
 
   half local_data[ITEMS_PER_THREAD];
-  float local_col_absmax[ITEMS_PER_THREAD];
   float row_absmax = -FLT_MAX;
 
   // 0. reset stats to -FLT_MAX
-  #pragma unroll ITEMS_PER_THREAD
-  for(int j = 0; j < ITEMS_PER_THREAD; j++)
-    local_col_absmax[j] = -FLT_MAX;
 
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
   {
     rowStats[base_row+threadIdx.x+(j*THREADS)] = -FLT_MAX;
     colStats[base_col+threadIdx.x+(j*THREADS)] = -FLT_MAX;
+  }
+
+
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+  {
+    smem_col_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
+    smem_row_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
   }
 
   // we load row after row from the base_position
@@ -1743,24 +1749,39 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global_
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
       // take the col max for this row
       // we use shared memory because register pressure is too high if we do this locally
-      smem_col_absmax_values[threadIdx.x + (j*THREADS)] = fmaxf(smem_col_absmax_values[threadIdx.x + (j*THREADS)], local_data[j]);
+      smem_col_absmax_values[threadIdx.x + (j*THREADS)] = fmaxf(smem_col_absmax_values[threadIdx.x + (j*THREADS)], __half2float(local_data[j]));
 
     // 3. compute row max (per block); store in smem to accumulate full global mem transation
     row_absmax = BlockRowReduce(rowreduce).Reduce(local_data, cub::Max());
     // we store the data temporarily in shared memory so we
     // can execute a full atomic block transaction into global memory later
+    // we use a striped arrangement [0, 8, 16, 24, ..] for t0 for faster stores
     if(threadIdx.x == 0)
-      smem_row_absmax_values[row - base_row] = row_absmax;
+      smem_row_absmax_values[(row % ITEMS_PER_THREAD) + ((row/ITEMS_PER_THREAD)*ITEMS_PER_THREAD)] = row_absmax;
     __syncthreads();
 
   }
-    
+
   // 4. store data via atomicMax
-  // sequential access ensures no bank conflicts
+  // to store col data efficienctly we need to rewrite the smem blocked data [0, 1, 2, 3...] for t0
+  // into a striped arangement: [0, 8, 16, 24, ..] for t0
+  // We reuse the local_data array to do this.
+  #pragma unroll ITEMS_PER_THREAD
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      local_data[j] = __float2half(smem_col_absmax_values[threadIdx.x+(j*THREADS)]);
+
+  BlockExchange(exchange).BlockedToStriped(local_data);
+  __syncthreads();
+
+  #pragma unroll ITEMS_PER_THREAD
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    if(base_col+threadIdx.x+(j*THREADS) < rows)
+      atomicMax(&colStats[base_col+(threadIdx.x+(j*THREADS))], __half2float(local_data[j]));
+
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
   {
-    atomicMax(&rowStats[base_row+(threadIdx.x+(j*THREADS))], smem_row_absmax_values[threadIdx.x+(j*THREADS)]);
-    atomicMax(&colStats[base_col+(threadIdx.x+(j*THREADS))], smem_col_absmax_values[threadIdx.x+(j*THREADS)]);
+    if(base_row+threadIdx.x+(j*THREADS) < cols)
+      atomicMax(&rowStats[base_row+(threadIdx.x+(j*THREADS))], smem_row_absmax_values[threadIdx.x+(j*THREADS)]);
   }
 }
 
