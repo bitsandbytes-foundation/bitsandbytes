@@ -1006,12 +1006,12 @@ def test_benchmlp(dims, backend):
 
 
 
-n = 10
-dim1 = torch.randint(1,256, size=(n,)).tolist()
-dim4 = torch.randint(32,1024, size=(n,)).tolist()
+n = 2
+#dim1 = torch.randint(1,256, size=(n,)).tolist()
+#dim4 = torch.randint(32,1024, size=(n,)).tolist()
 
-#dim1 = [129]
-#dim4 = [33]
+dim1 = [4*1024]
+dim4 = [2*1024]
 
 dims = (2,)
 ldb = [0]
@@ -1044,3 +1044,28 @@ def test_dequant_mm(dim1, dim4, dims, ldb):
         torch.testing.assert_allclose(C5, C4)
         #print(C2)
 
+
+
+n = 2
+dim1 = [2]
+dim2 = [2]
+
+dims = (2,)
+#ldb = list(range(256, 1*1024, 256))
+values = list(product(dim1,dim4,dims))
+names = ['dim1_{0}_dim2_{1}_dims_{2}'.format(*vals) for vals in values]
+k = 1
+@pytest.mark.parametrize("dim1, dim2, dims", values, ids=names)
+def test_colrow_absmax(dim1, dim2, dims):
+    for i in range(k):
+        A = torch.randn(dim1, dim2, device='cuda').half()
+        if dims == 2:
+            row_stats1 = torch.abs(A).max(1).values
+            col_stats1 = torch.abs(A).max(0).values
+        else:
+            assert False
+
+        row_stats2, col_stats2 = F.get_colrow_absmax(A)
+
+        torch.testing.assert_allclose(row_stats1.float(), row_stats2)
+        torch.testing.assert_allclose(col_stats1.float(), col_stats2)

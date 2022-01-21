@@ -582,6 +582,18 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int cols)
+{
+  int threads = 64;
+  int items_per_thread = 8;
+  int tiledCols = fill_up_to_nearest_multiple(cols, 64*8);
+  int tiledRows = fill_up_to_nearest_multiple(rows, 64*8);
+  int num_blocks = (tiledCols/(64*8)) + (tiledRows/(64*8));
+  kgetColRowStats<half, 64, 8, 64*8><<<threads, num_blocks>>>(A, rowStats, colStats, rows, cols, tiledRows, tiledCols);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================

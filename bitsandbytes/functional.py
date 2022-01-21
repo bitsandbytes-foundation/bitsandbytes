@@ -1093,3 +1093,27 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
     lib.cdequant_mm_int32_fp16(ptrA, ptrRowStats, ptrColStats, ptrOut, ptrNewRowStats, ptrNewColStats, numRows, numCols)
 
     return out
+
+def get_colrow_absmax(A, row_stats=None, col_stats=None):
+    assert A.dtype == torch.float16
+
+    cols = A.shape[-1]
+    if len(A.shape) == 3:
+        rows = A.shape[0]*A.shape[1]
+    else:
+        rows = A.shape[0]
+
+    if row_stats is None: row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device)
+    if col_stats is None: col_stats = torch.empty((cols,), dtype=torch.float32, device=A.device)
+
+    ptrA = get_ptr(A)
+    ptrRowStats = get_ptr(row_stats)
+    ptrColStats = get_ptr(col_stats)
+    rows = ct.c_int32(rows)
+    cols = ct.c_int32(cols)
+
+    lib.cget_col_row_stats(ptrA, ptrRowStats, ptrColStats, rows, cols)
+
+    return row_stats, col_stats
+
+

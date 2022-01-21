@@ -1686,6 +1686,86 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     }
 }
 
+template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global__ void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols)
+{
+  // 0. reset stats to -FLT_MAX
+  // 1. load row-by-row ITEMS_PER_THREAD (TILE_SIZE==THREADS*ITEMS_PER_THREAD)
+  // 2. compute col max (per thread); store in smem due to register pressure
+  // 3. compute row max (per block); store in smem to accumulate full global mem transation
+  // 4. store data via atomicMax
+
+  // each block loads TILE_SIZE columns and TILE_SIZE rows
+  // after reading tiledCols columns the row counter increase by TILE_SIZE
+  const int base_row = ((blockIdx.x*TILE_SIZE)/tiledCols)*TILE_SIZE;
+  // col increases by TILE_SIZE for each block and wraps back to 0 after tiledCols is reached
+  const int base_col = (blockIdx.x*TILE_SIZE) % tiledCols;
+  const int base_idx = (base_row*cols) + base_col;
+  const int items_per_load = ITEMS_PER_THREAD*THREADS;
+
+  typedef cub::BlockLoad<T, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadT;
+  __shared__ typename LoadT::TempStorage loadt;
+  typedef cub::BlockReduce<half, ITEMS_PER_THREAD*THREADS> BlockRowReduce;
+  __shared__ typename BlockRowReduce::TempStorage rowreduce;
+  __shared__ float smem_row_absmax_values[ITEMS_PER_THREAD*THREADS];
+  __shared__ float smem_col_absmax_values[ITEMS_PER_THREAD*THREADS];
+
+  half local_data[ITEMS_PER_THREAD];
+  float local_col_absmax[ITEMS_PER_THREAD];
+  float row_absmax = -FLT_MAX;
+
+  // 0. reset stats to -FLT_MAX
+  #pragma unroll ITEMS_PER_THREAD
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    local_col_absmax[j] = -FLT_MAX;
+
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+  {
+    rowStats[base_row+threadIdx.x+(j*THREADS)] = -FLT_MAX;
+    colStats[base_col+threadIdx.x+(j*THREADS)] = -FLT_MAX;
+  }
+
+  // we load row after row from the base_position
+  // 1. load row-by-row ITEMS_PER_THREAD (TILE_SIZE==THREADS*ITEMS_PER_THREAD)
+  for(int row = base_row; row < row+TILE_SIZE; row++)
+  {
+    if(row >= rows){ break; }
+    int i = base_idx + (row*cols);
+    int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
+    // each thread gets data from the same column
+    LoadT(loadt).Load(&A[i], local_data, valid_items, (T)0.0f);
+
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      local_data[j] = fabsf(local_data[j]);
+
+    // 2. compute col max (per thread); store in smem due to register pressure
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      // take the col max for this row
+      // we use shared memory because register pressure is too high if we do this locally
+      smem_col_absmax_values[threadIdx.x + (j*THREADS)] = fmaxf(smem_col_absmax_values[threadIdx.x + (j*THREADS)], local_data[j]);
+
+    // 3. compute row max (per block); store in smem to accumulate full global mem transation
+    row_absmax = BlockRowReduce(rowreduce).Reduce(local_data, cub::Max());
+    // we store the data temporarily in shared memory so we
+    // can execute a full atomic block transaction into global memory later
+    if(threadIdx.x == 0)
+      smem_row_absmax_values[row - base_row] = row_absmax;
+    __syncthreads();
+
+  }
+    
+  // 4. store data via atomicMax
+  // sequential access ensures no bank conflicts
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+  {
+    atomicMax(&rowStats[base_row+(threadIdx.x+(j*THREADS))], smem_row_absmax_values[threadIdx.x+(j*THREADS)]);
+    atomicMax(&colStats[base_col+(threadIdx.x+(j*THREADS))], smem_col_absmax_values[threadIdx.x+(j*THREADS)]);
+  }
+}
+
+template __global__ void kgetColRowStats<half, 64, 8, 512>(half * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols);
+
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
 template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n)

@@ -103,6 +103,9 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
   int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats,
   half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 
+template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global__ void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols);
+
+
 #endif
 
 
