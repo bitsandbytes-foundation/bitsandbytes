@@ -590,7 +590,7 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int co
   int tiledRows = fill_up_to_nearest_multiple(rows, 64*8);
   int num_blocks = (tiledCols/(64*8)) * (tiledRows/(64*8));
   //cout << cols << " " << tiledCols << " " << tiledRows << endl;
-  cout << "num blocks " << num_blocks << endl;
+  //cout << "num blocks " << num_blocks << endl;
   kgetColRowStats<half, 64, 8, 64*8><<<num_blocks, threads>>>(A, rowStats, colStats, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 

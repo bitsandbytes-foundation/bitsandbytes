@@ -1103,8 +1103,8 @@ def get_colrow_absmax(A, row_stats=None, col_stats=None):
     else:
         rows = A.shape[0]
 
-    if row_stats is None: row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device)
-    if col_stats is None: col_stats = torch.empty((cols,), dtype=torch.float32, device=A.device)
+    if row_stats is None: row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device).fill_(-50000.0)
+    if col_stats is None: col_stats = torch.empty((cols,), dtype=torch.float32, device=A.device).fill_(-50000.0)
 
     ptrA = get_ptr(A)
     ptrRowStats = get_ptr(row_stats)

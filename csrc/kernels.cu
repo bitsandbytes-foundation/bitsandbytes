@@ -1702,9 +1702,9 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global_
   const int base_idx = (base_row*cols) + base_col;
   const int items_per_load = ITEMS_PER_THREAD*THREADS;
 
-  typedef cub::BlockLoad<T, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadT;
+  typedef cub::BlockLoad<T, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
   __shared__ typename LoadT::TempStorage loadt;
-  typedef cub::BlockReduce<half, ITEMS_PER_THREAD*THREADS> BlockRowReduce;
+  typedef cub::BlockReduce<half, THREADS> BlockRowReduce;
   __shared__ typename BlockRowReduce::TempStorage rowreduce;
   typedef cub::BlockExchange<half, THREADS, ITEMS_PER_THREAD> BlockExchange;
   __shared__ typename BlockExchange::TempStorage exchange;
@@ -1716,29 +1716,23 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global_
   float row_absmax = -FLT_MAX;
 
   // 0. reset stats to -FLT_MAX
-
-  for(int j = 0; j < ITEMS_PER_THREAD; j++)
-  {
-    rowStats[base_row+threadIdx.x+(j*THREADS)] = -FLT_MAX;
-    colStats[base_col+threadIdx.x+(j*THREADS)] = -FLT_MAX;
-  }
-
-
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
   {
     smem_col_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
     smem_row_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
   }
 
+  __syncthreads();
+
   // we load row after row from the base_position
   // 1. load row-by-row ITEMS_PER_THREAD (TILE_SIZE==THREADS*ITEMS_PER_THREAD)
-  for(int row = base_row; row < row+TILE_SIZE; row++)
+  for(int row = 0; row < TILE_SIZE; row++)
   {
-    if(row >= rows){ break; }
     int i = base_idx + (row*cols);
+    if(base_row+row >= rows){ break; }
     int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
     // each thread gets data from the same column
-    LoadT(loadt).Load(&A[i], local_data, valid_items, (T)0.0f);
+    LoadT(loadt).Load(&(A[i]), local_data, valid_items, __float2half(0.0f));
 
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
@@ -1751,6 +1745,8 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global_
       // we use shared memory because register pressure is too high if we do this locally
       smem_col_absmax_values[threadIdx.x + (j*THREADS)] = fmaxf(smem_col_absmax_values[threadIdx.x + (j*THREADS)], __half2float(local_data[j]));
 
+    __syncthreads();
+
     // 3. compute row max (per block); store in smem to accumulate full global mem transation
     row_absmax = BlockRowReduce(rowreduce).Reduce(local_data, cub::Max());
     // we store the data temporarily in shared memory so we
@@ -1758,6 +1754,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global_
     // we use a striped arrangement [0, 8, 16, 24, ..] for t0 for faster stores
     if(threadIdx.x == 0)
       smem_row_absmax_values[(row % ITEMS_PER_THREAD) + ((row/ITEMS_PER_THREAD)*ITEMS_PER_THREAD)] = row_absmax;
+
     __syncthreads();
 
   }
@@ -1773,16 +1770,15 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global_
   BlockExchange(exchange).BlockedToStriped(local_data);
   __syncthreads();
 
+
   #pragma unroll ITEMS_PER_THREAD
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
-    if(base_col+threadIdx.x+(j*THREADS) < rows)
+    if(base_col+threadIdx.x+(j*THREADS) < cols)
       atomicMax(&colStats[base_col+(threadIdx.x+(j*THREADS))], __half2float(local_data[j]));
 
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
-  {
-    if(base_row+threadIdx.x+(j*THREADS) < cols)
+    if(base_row+threadIdx.x+(j*THREADS) < rows)
       atomicMax(&rowStats[base_row+(threadIdx.x+(j*THREADS))], smem_row_absmax_values[threadIdx.x+(j*THREADS)]);
-  }
 }
 
 template __global__ void kgetColRowStats<half, 64, 8, 512>(half * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols);
