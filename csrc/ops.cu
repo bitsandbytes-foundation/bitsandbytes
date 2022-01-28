@@ -596,6 +596,15 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int co
 
 }
 
+void doubleRowColQuant(half * A, float *rowStats, float *colStats, int8_t *out_col_normed, int8_t *out_row_normed, int n)
+{
+  int threads = 256;
+  int items_per_block = threads*4;
+  int num_blocks = (n+items_per_block-1)/items_per_block;
+  kelementwiseDoubleRowColQuant<256, 4><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================

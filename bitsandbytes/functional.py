@@ -1116,4 +1116,24 @@ def get_colrow_absmax(A, row_stats=None, col_stats=None):
 
     return row_stats, col_stats
 
+def double_quant(A, row_stats=None, col_stats=None, out_col=None, out_row=None):
+    assert A.dtype == torch.half
+    assert A.device.type == 'cuda'
+
+    if row_stats is None or col_stats is None:
+        row_stats, col_stats = get_colrow_absmax(A)
+
+    if out_col is None: out_col = torch.empty_like(A, dtype=torch.int8)
+    if out_row is None: out_row = torch.empty_like(A, dtype=torch.int8)
+
+    ptrA = get_ptr(A)
+    ptrColStats = get_ptr(col_stats)
+    ptrRowStats = get_ptr(row_stats)
+    ptrOutCol = get_ptr(out_col)
+    ptrOutRow = get_ptr(out_row)
+
+    lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, ct.c_int32(A.numel()))
+
+    return out_col, out_row
+
 

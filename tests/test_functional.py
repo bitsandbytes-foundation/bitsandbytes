@@ -1068,8 +1068,6 @@ def test_colrow_absmax(dim1, dim2, dims):
             assert False
 
         row_stats2, col_stats2 = F.get_colrow_absmax(A)
-
-        row_stats2, col_stats2 = F.get_colrow_absmax(A)
         #print(A)
         #print(row_stats1)
         #print(row_stats2)
@@ -1078,3 +1076,33 @@ def test_colrow_absmax(dim1, dim2, dims):
 
         torch.testing.assert_allclose(col_stats1, col_stats2)
         torch.testing.assert_allclose(row_stats1, row_stats2)
+
+
+
+n = 2
+dim1 = [2]
+dim2 = [2]
+#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+
+dims = (2,)
+values = list(product(dim1,dim2,dims))
+names = ['dim1_{0}_dim2_{1}_dims_{2}'.format(*vals) for vals in values]
+k = 1
+@pytest.mark.parametrize("dim1, dim2, dims", values, ids=names)
+def test_double_quant(dim1, dim2, dims):
+    for i in range(k):
+        A = torch.randn(dim1, dim2, device='cuda').half()
+        if dims == 2:
+            out_row1, Srow = F.vectorwise_quant(A, dim=0)
+            out_col1, Scol = F.vectorwise_quant(A, dim=1)
+        else:
+            assert False
+
+        out_col2, out_row2 = F.double_quant(A)
+
+        print(out_row1, out_col1)
+        print(out_row2, out_col2)
+
+        torch.testing.assert_allclose(out_row2, out_row1)
+        torch.testing.assert_allclose(out_col2, out_row2)

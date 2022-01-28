@@ -1907,6 +1907,31 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
 template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 
+template <int THREADS, int ITEMS_PER_THREAD> __global__ void kelementwiseDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, int8_t *out_col_normed, int8_t *out_row_normed, int n)
+{
+  const int base_idx = (blockIdx.x * blockDim.x * ITEMS_PER_THREAD);
+  half local_data[ITEMS_PER_THREAD];
+  int8_t local_quantized_data[ITEMS_PER_THREAD];
+
+
+  typedef cub::BlockLoad<half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadHalf;
+  typedef cub::BlockStore<int8_t, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreInt8;
+
+  __shared__ union {
+      typename LoadHalf::TempStorage load;
+      typename StoreInt8::TempStorage store;
+  } temp_storage;
+
+  int valid_items = n - base_idx >= (THREADS*ITEMS_PER_THREAD) ? (THREADS*ITEMS_PER_THREAD) : n - base_idx;
+
+  LoadHalf(temp_storage.load).Load(&(A[base_idx]), local_data, valid_items);
+
+  __syncthreads();
+  StoreInt8(temp_storage.store).Store(&(out_row_normed[base_idx]), local_quantized_data, valid_items);
+}
+
+template __global__ void kelementwiseDoubleRowColQuant<256, 4>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, int8_t *out_col_normed, int8_t *out_row_normed, int n);
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
