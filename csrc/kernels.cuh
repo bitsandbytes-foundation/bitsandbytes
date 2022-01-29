@@ -104,7 +104,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
   half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 
 template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global__ void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols);
-template <int THREADS, int ITEMS_PER_THREAD>__global__ void kelementwiseDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, int8_t *out_col_normed, int8_t *out_row_normed, int n);
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global__ void kDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, int8_t *out_col_normed, int8_t *out_row_normed, int rows, int cols, int tiledCols);
 
 
 #endif

@@ -1080,8 +1080,8 @@ def test_colrow_absmax(dim1, dim2, dims):
 
 
 n = 2
-dim1 = [2]
-dim2 = [2]
+dim1 = [4]
+dim2 = [4]
 #dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 
@@ -1094,15 +1094,24 @@ def test_double_quant(dim1, dim2, dims):
     for i in range(k):
         A = torch.randn(dim1, dim2, device='cuda').half()
         if dims == 2:
-            out_row1, Srow = F.vectorwise_quant(A, dim=0)
-            out_col1, Scol = F.vectorwise_quant(A, dim=1)
+            out_col1, Scol = F.vectorwise_quant(A, dim=0)
+            out_row1, Srow = F.vectorwise_quant(A, dim=1)
         else:
             assert False
 
         out_col2, out_row2 = F.double_quant(A)
 
-        print(out_row1, out_col1)
-        print(out_row2, out_col2)
+        #print('')
+        #print(A)
+        #print(Scol)
+        #print(out_col1)
+        #print(out_col2)
+        #print('='*80)
 
+
+        num_not_close_rows = (torch.isclose(out_row2, out_row1)==0).sum().item()
+        num_not_close_cols = (torch.isclose(out_col2, out_col1)==0).sum().item()
+        print(num_not_close_cols)
+        print(num_not_close_rows)
+        torch.testing.assert_allclose(out_col2, out_col1)
         torch.testing.assert_allclose(out_row2, out_row1)
-        torch.testing.assert_allclose(out_col2, out_row2)

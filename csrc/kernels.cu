@@ -1907,30 +1907,88 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
 template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 
-template <int THREADS, int ITEMS_PER_THREAD> __global__ void kelementwiseDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, int8_t *out_col_normed, int8_t *out_row_normed, int n)
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global__ void kDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, int8_t *out_col_normed, int8_t *out_row_normed, int rows, int cols, int tiledCols)
 {
-  const int base_idx = (blockIdx.x * blockDim.x * ITEMS_PER_THREAD);
+  // assumes TILE_SIZE == THREADS*ITEMS_PER_THREAD
+  // Each thread reads the same column but multiple rows
+  // Rows are loaded in shared memory and access is shared across the threadblock (broadcast)
+
+  // 0. Load row stats data into shared memory; load col stat (1 fixed per thread)
+  // 1. Load data row by row (should be at least with TILE_SIZE = 512)
+  // 2. quantize data with row/col stats
+  // 3. Store data (TILE_SIZE = 512 is a bit slow, but should still be close enough to good performance)
+
+  // each block loads TILE_SIZE columns and TILE_SIZE rows
+  // after reading tiledCols columns the row counter increase by TILE_SIZE
+  const int base_row = ((blockIdx.x*TILE_SIZE)/tiledCols)*TILE_SIZE;
+  // col increases by TILE_SIZE for each block and wraps back to 0 after tiledCols is reached
+  const int base_col = (blockIdx.x*TILE_SIZE) % tiledCols;
+  const int base_idx = (base_row*cols) + base_col;
+  const int items_per_load = ITEMS_PER_THREAD*THREADS;
+
+  typedef cub::BlockLoad<half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadHalf;
+  __shared__ typename LoadHalf::TempStorage loadhalf;
+  __shared__ float smem_row_stats[TILE_SIZE];
+  typedef cub::BlockStore<int8_t, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_DIRECT> StoreInt8;
+  __shared__ typename StoreInt8::TempStorage storeint8;
+
   half local_data[ITEMS_PER_THREAD];
+  float local_col_stats[ITEMS_PER_THREAD];
   int8_t local_quantized_data[ITEMS_PER_THREAD];
 
+  // 0. Load row stats data into shared memory; load col stat (1 fixed per thread)
+  #pragma unroll ITEMS_PER_THREAD
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    if(base_col+threadIdx.x < cols)
+      local_col_stats[j] = __fdividef(127.0f, colStats[base_col+threadIdx.x+j]);
 
-  typedef cub::BlockLoad<half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadHalf;
-  typedef cub::BlockStore<int8_t, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreInt8;
-
-  __shared__ union {
-      typename LoadHalf::TempStorage load;
-      typename StoreInt8::TempStorage store;
-  } temp_storage;
-
-  int valid_items = n - base_idx >= (THREADS*ITEMS_PER_THREAD) ? (THREADS*ITEMS_PER_THREAD) : n - base_idx;
-
-  LoadHalf(temp_storage.load).Load(&(A[base_idx]), local_data, valid_items);
-
+  for(int i = threadIdx.x; i < TILE_SIZE; i+=blockDim.x)
+  {
+    if(base_row + i < rows)
+      smem_row_stats[i] = rowStats[base_row+i];
+  }
   __syncthreads();
-  StoreInt8(temp_storage.store).Store(&(out_row_normed[base_idx]), local_quantized_data, valid_items);
+
+  // we load row after row from the base_position
+  // 1. Load data row by row (should be at least with TILE_SIZE = 512)
+  for(int row = 0; row < TILE_SIZE; row++)
+  {
+    int i = base_idx + (row*cols);
+    if(base_row+row >= rows){ break; }
+    int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
+    // each thread gets data from the same column
+    LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, __float2half(0.0f));
+    float row_stat = __fdividef(127.0f, smem_row_stats[row]);
+
+    
+    // 2. quantize data with row/col stats
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    {
+      // we already pre-normalized the col/row stat:
+      // what this does is float/absmax*127 = int8
+      local_quantized_data[j] = (int8_t)(rintf(__half2float(local_data[j])*row_stat));
+    }
+
+    StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
+
+    // 2. quantize data with row/col stats
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    {
+      // we already pre-normalized the col/row stat:
+      // what this does is float/absmax*127 = int8
+      local_quantized_data[j] = (int8_t)(rintf(__half2float(local_data[j])*local_col_stats[j]));
+    }
+
+    __syncthreads();
+    StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
+
+  }
+
 }
 
-template __global__ void kelementwiseDoubleRowColQuant<256, 4>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, int8_t *out_col_normed, int8_t *out_row_normed, int n);
+template __global__ void kDoubleRowColQuant<64, 8, 512>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, int8_t *out_col_normed, int8_t *out_row_normed, int rows, int cols, int tiledCols);
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

@@ -911,8 +911,9 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
         xq = torch.round(x/max1*127).to(torch.int8)
         return xq, max1
     elif quant_type == 'vector':
-        max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
-        xq = torch.round(x/max1*C).to(torch.int8)
+        max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True).float()
+        norm = C/max1
+        xq = torch.round(x*norm).to(torch.int8)
         return xq, max1
     elif quant_type == 'truncated-vector':
         with torch.no_grad():
@@ -1120,11 +1121,19 @@ def double_quant(A, row_stats=None, col_stats=None, out_col=None, out_row=None):
     assert A.dtype == torch.half
     assert A.device.type == 'cuda'
 
+    cols = A.shape[-1]
+    if len(A.shape) == 3:
+        rows = A.shape[0]*A.shape[1]
+    else:
+        rows = A.shape[0]
+
     if row_stats is None or col_stats is None:
         row_stats, col_stats = get_colrow_absmax(A)
 
-    if out_col is None: out_col = torch.empty_like(A, dtype=torch.int8)
-    if out_row is None: out_row = torch.empty_like(A, dtype=torch.int8)
+    #if out_col is None: out_col = torch.empty_like(A, dtype=torch.int8)
+    #if out_row is None: out_row = torch.empty_like(A, dtype=torch.int8)
+    if out_col is None: out_col = torch.zeros_like(A, dtype=torch.int8)
+    if out_row is None: out_row = torch.zeros_like(A, dtype=torch.int8)
 
     ptrA = get_ptr(A)
     ptrColStats = get_ptr(col_stats)
@@ -1132,7 +1141,7 @@ def double_quant(A, row_stats=None, col_stats=None, out_col=None, out_row=None):
     ptrOutCol = get_ptr(out_col)
     ptrOutRow = get_ptr(out_row)
 
-    lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, ct.c_int32(A.numel()))
+    lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, ct.c_int32(rows), ct.c_int32(cols))
 
     return out_col, out_row
 
