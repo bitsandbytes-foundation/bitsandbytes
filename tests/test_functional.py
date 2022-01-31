@@ -1080,15 +1080,15 @@ def test_colrow_absmax(dim1, dim2, dims):
 
 
 n = 2
-dim1 = [4]
-dim2 = [4]
-#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
-#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+#dim1 = [2992]
+#dim2 = [64]
+dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 
 dims = (2,)
 values = list(product(dim1,dim2,dims))
 names = ['dim1_{0}_dim2_{1}_dims_{2}'.format(*vals) for vals in values]
-k = 1
+k = 10
 @pytest.mark.parametrize("dim1, dim2, dims", values, ids=names)
 def test_double_quant(dim1, dim2, dims):
     for i in range(k):
@@ -1108,10 +1108,20 @@ def test_double_quant(dim1, dim2, dims):
         #print(out_col2)
         #print('='*80)
 
+        # max difference is 1 due to rounding differences
+        torch.testing.assert_allclose(out_col2, out_col1, atol=1, rtol=0)
+        torch.testing.assert_allclose(out_row2, out_row1, atol=1, rtol=0)
 
+        n = out_row2.numel()
         num_not_close_rows = (torch.isclose(out_row2, out_row1)==0).sum().item()
         num_not_close_cols = (torch.isclose(out_col2, out_col1)==0).sum().item()
-        print(num_not_close_cols)
-        print(num_not_close_rows)
-        torch.testing.assert_allclose(out_col2, out_col1)
-        torch.testing.assert_allclose(out_row2, out_row1)
+
+        # allow for 1:1000 error due to rounding differences
+        min_error = 1/1000
+        if num_not_close_cols > (min_error*n):
+            print(f'Min error exceeded {num_not_close_cols} elements are different')
+            assert False
+        if num_not_close_rows > (min_error*n):
+            print(f'Min error exceeded {num_not_close_rows} elements are different')
+            assert False
+

@@ -1939,8 +1939,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global__ void kDou
   // 0. Load row stats data into shared memory; load col stat (1 fixed per thread)
   #pragma unroll ITEMS_PER_THREAD
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
-    if(base_col+threadIdx.x < cols)
-      local_col_stats[j] = __fdividef(127.0f, colStats[base_col+threadIdx.x+j]);
+    if(base_col+(threadIdx.x*ITEMS_PER_THREAD) + j < cols)
+      local_col_stats[j] = __fdividef(127.0f, colStats[base_col+(threadIdx.x*ITEMS_PER_THREAD)+j]);
 
   for(int i = threadIdx.x; i < TILE_SIZE; i+=blockDim.x)
   {
@@ -1959,6 +1959,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global__ void kDou
     // each thread gets data from the same column
     LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, __float2half(0.0f));
     float row_stat = __fdividef(127.0f, smem_row_stats[row]);
+    //if(threadIdx.x == 0)
+      //printf("%i %i %i\n", base_row, row, valid_items);
 
     
     // 2. quantize data with row/col stats
@@ -1978,6 +1980,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_SIZE> __global__ void kDou
     {
       // we already pre-normalized the col/row stat:
       // what this does is float/absmax*127 = int8
+      //if(__half2float(local_data[j]) != 0.0f)
+        //printf("%i %i %f %f\n", threadIdx.x, j, 1.0f/(local_col_stats[j]/127.0f), __half2float(local_data[j]));
       local_quantized_data[j] = (int8_t)(rintf(__half2float(local_data[j])*local_col_stats[j]));
     }
 
