@@ -594,18 +594,21 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int co
 
 }
 
-void doubleRowColQuant(half * A, float *rowStats, float *colStats, int8_t *out_col_normed, int8_t *out_row_normed, int rows, int cols)
+void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int rows, int cols)
 {
   int threads = 64;
-  int items_per_thread = 8;
-  int tiledCols = fill_up_to_nearest_multiple(cols, threads*items_per_thread);
-  int tiledRows = fill_up_to_nearest_multiple(rows, 64*8);
-  int num_blocks = (tiledCols/(64*8)) * (tiledRows/(64*8));
+  int items_per_thread = 4;
+  int tile_cols = threads*items_per_thread;
+  int tile_rows = 64;
+  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
+  int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
+  int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
 
   //cout << cols << " " << tiledCols << " " << tiledRows << endl;
   //cout << "num blocks " << num_blocks << endl;
 
-  kDoubleRowColQuant<64, 8, 64*8><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rows, cols, tiledCols);
+  //cout << A << " " << out_col_normed << endl;
+  kDoubleRowColQuant<64, 4, 64, 64*4><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rows, cols, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
