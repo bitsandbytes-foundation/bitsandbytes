@@ -1127,8 +1127,11 @@ def double_quant(A, row_stats=None, col_stats=None, out_col=None, out_row=None):
     else:
         rows = A.shape[0]
 
-    if row_stats is None or col_stats is None:
-        row_stats, col_stats = get_colrow_absmax(A)
+    #if row_stats is None or col_stats is None:
+        #row_stats, col_stats = get_colrow_absmax(A)
+
+    row_stats = torch.abs(A.float()).max(1).values
+    col_stats = torch.abs(A.float()).max(0).values
 
     #if out_col is None: out_col = torch.empty_like(A, dtype=torch.int8)
     #if out_row is None: out_row = torch.empty_like(A, dtype=torch.int8)

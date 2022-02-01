@@ -1927,9 +1927,9 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __glo
   const int base_idx = (base_row*cols) + base_col;
   const int items_per_load = ITEMS_PER_THREAD*THREADS;
 
-  typedef cub::BlockLoad<half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadHalf;
+  typedef cub::BlockLoad<half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadHalf;
   __shared__ typename LoadHalf::TempStorage loadhalf;
-  typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_DIRECT> StoreInt8;
+  typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
   __shared__ typename StoreInt8::TempStorage storeint8;
 
   __shared__ float smem_row_stats[TILE_ROWS];
@@ -1954,16 +1954,13 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __glo
   // 1. Load data row by row (should be at least with TILE_SIZE = 512)
   for(int row = 0; row < TILE_ROWS; row++)
   {
-    if(base_row + row > rows){ break; }
+    if(base_row + row >= rows){ break; }
     int i = base_idx + (row*cols);
     int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
-    if(i == 0 && threadIdx.x < 4)
-    printf("%i %i %i %i\n", cols, base_col, row, valid_items);
     //if(threadIdx.x == 0)
     // each thread gets data from the same column
     //if(blockIdx.x == 0 && row == 0)
       //printf("%i %i\n", threadIdx.x, i);
-    __syncthreads();
     LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
     float row_stat = __fdividef(127.0f, smem_row_stats[row]);
 
@@ -1976,10 +1973,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __glo
       local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*row_stat));
     }
 
-    if(i == 0)
-      for(int j = 0; j < ITEMS_PER_THREAD; j++)
-        printf("%i %i %i %i %i %f %i\n", i, row, threadIdx.x, j, local_quantized_data[j], __half2float(local_data[j]), valid_items);
-    __syncthreads();
     StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
 
     // 2. quantize data with row/col stats
@@ -1988,15 +1981,10 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __glo
     {
       // we already pre-normalized the col/row stat:
       // what this does is float/absmax*127 = int8
-      //if(threadIdx.x == 0)
-      //if(__half2float(local_data[j]) != 0.0f)
-        //printf("%i %i %f %f\n", threadIdx.x, j, 1.0f/(local_col_stats[j]/127.0f), __half2float(local_data[j]));
-      //local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*local_col_stats[j]));
+      local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*local_col_stats[j]));
     }
 
     __syncthreads();
-    if(threadIdx.x == 0)
-    printf("%i %i\n", blockIdx.x, valid_items);
     StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
 
   }
