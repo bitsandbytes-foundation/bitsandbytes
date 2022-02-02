@@ -582,14 +582,17 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+#define STATS_THREADS 64
+#define STATS_ITEMS 4
+#define STATS_ROWS 32
 void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int cols)
 {
-  int threads = 64;
-  int items_per_thread = 8;
-  int tiledCols = fill_up_to_nearest_multiple(cols, threads*items_per_thread);
-  int tiledRows = fill_up_to_nearest_multiple(rows, 64*8);
-  int num_blocks = (tiledCols/(64*8)) * (tiledRows/(64*8));
-  kgetColRowStats<half, 64, 8, 64*8><<<num_blocks, threads>>>(A, rowStats, colStats, rows, cols, tiledRows, tiledCols);
+  int tile_cols = STATS_THREADS*STATS_ITEMS;
+  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
+  int tiledRows = fill_up_to_nearest_multiple(rows, STATS_ROWS);
+  int num_blocks = (tiledCols/tile_cols) * (tiledRows/STATS_ROWS);
+
+  kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 
 }
@@ -599,7 +602,7 @@ void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col
   int threads = 64;
   int items_per_thread = 4;
   int tile_cols = threads*items_per_thread;
-  int tile_rows = 64;
+  int tile_rows = 16;
   int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
   int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
@@ -608,7 +611,7 @@ void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col
   //cout << "num blocks " << num_blocks << endl;
 
   //cout << A << " " << out_col_normed << endl;
-  kDoubleRowColQuant<64, 4, 64, 64*4><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rows, cols, tiledCols);
+  kDoubleRowColQuant<64, 4, 16, 64*4><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rows, cols, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

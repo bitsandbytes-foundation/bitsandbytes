@@ -1047,10 +1047,10 @@ def test_dequant_mm(dim1, dim4, dims, ldb):
 
 
 n = 2
-dim1 = [43]
-dim2 = [118]
-#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
-#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+#dim1 = [4*1024]
+#dim2 = [2*1024]
+dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 
 dims = (2,)
 #ldb = list(range(256, 1*1024, 256))
@@ -1080,10 +1080,10 @@ def test_colrow_absmax(dim1, dim2, dims):
 
 
 n = 2
-#dim1 = [43]
-#dim2 = [118]
-dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
-dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim1 = [1*1024]
+dim2 = [1*1024]
+#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 
 dims = (2,)
 values = list(product(dim1,dim2,dims))
