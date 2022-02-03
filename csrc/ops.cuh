@@ -39,8 +39,15 @@ typedef enum Optimizer_t
   ADAGRAD = 4,
 } Optimizer_t;
 
+typedef enum Funcs_t
+{
+	FILL = 0,
+	ARANGE = 1,
+} Funcs_t;
+
 
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
+template <typename T, int FUNC> void func(T *A, T value, int n);
 
 void quantize(float *code, float *A, unsigned char *out, int n);
 void dequantize(float *code, unsigned char *A, float *out, int n);

@@ -79,6 +79,14 @@ void quantizeBlockwise_stochastic_fp32(float * code, float *A, float *absmax, un
 void dequantizeBlockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n){ dequantizeBlockwise<half>(code, A, absmax, out, blocksize, n); } \
 void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float>(code, A, absmax, out, blocksize, n); }
 
+#define MAKE_ELEMENTWISE_FUNC(fname, type_name, ctype, FUNC) \
+void fname##_##type_name(ctype *ptr, ctype value, int n){ func<ctype, FUNC>(ptr, value, n); } \
+
+MAKE_ELEMENTWISE_FUNC(fill, fp32, float, FILL)
+MAKE_ELEMENTWISE_FUNC(fill, uint8, unsigned char, FILL)
+MAKE_ELEMENTWISE_FUNC(arange, fp32, float, ARANGE)
+
+
 extern "C"
 {
 	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
@@ -152,6 +160,26 @@ extern "C"
 	void cdequantize_blockwise_cpu_fp32(float *code, unsigned char *A, float *absmax, float *out, const int n){ dequantize_cpu(code, A, absmax, out, n); }
 
 	void chistogram_scatter_add_2d(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n){ histogramScatterAdd2D(histogram, index1, index2, src, maxidx1, n); }
+
+	void *cget_managed_ptr_fp32(int rows, int cols, int dtype_size)
+	{
+		int n = rows*cols;
+		void *ptr;
+		CUDA_CHECK_RETURN(cudaMallocManaged(&ptr, n*dtype_size, cudaMemAttachHost));
+		CUDA_CHECK_RETURN(cudaPeekAtLastError());
+
+		return ptr;
+	}
+
+	void cprefetch(void *ptr, int n, int size_dtype, int device)
+	{
+		CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, n*size_dtype, device, NULL));
+		CUDA_CHECK_RETURN(cudaPeekAtLastError());
+	}
+
+	void cfill_fp32(float *ptr, float fill_value, int n){ fill_fp32(ptr, fill_value, n); }
+	void cfill_uint8(unsigned char *ptr, unsigned char fill_value, int n){ fill_uint8(ptr, fill_value, n); }
+	void carange_fp32(float *ptr, float value, int n){ arange_fp32(ptr, value, n); }
 }
 
 

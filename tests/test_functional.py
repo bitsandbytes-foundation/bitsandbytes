@@ -5,6 +5,8 @@
 import pytest
 import torch
 import bitsandbytes as bnb
+import numpy as np
+import ctypes
 
 from itertools import product
 
@@ -211,3 +213,53 @@ def test_histogram():
 
     torch.testing.assert_allclose(histogram1, histogram2)
     torch.testing.assert_allclose(histogram1.sum(), source.sum())
+
+
+k = 1
+def test_managed():
+    n = 1024*10
+    A = F.get_managed(n, n, dtype=torch.float32)
+    B = F.get_managed(n, n, dtype=torch.uint8)
+    assert A.is_managed
+    assert B.is_managed
+    F.fill(A, 17.0)
+    F.fill(B, 17)
+    F.prefetch_cpu(A)
+    F.prefetch_cpu(B)
+    torch.cuda.synchronize()
+    C = A*B.float()
+
+    assert (A==17).sum().item() == n*n
+    assert (B==17).sum().item() == n*n
+    assert (C==289).sum().item() == n*n
+
+
+
+k = 1
+def test_stream_quant():
+    diffs = []
+    reldiffs = []
+    n = 1024
+    for i in range(k):
+        A1 = F.get_managed(n, n, dtype=torch.float32)
+        out = F.get_managed(n, n, dtype=torch.uint8)
+        F.prefetch(A1)
+        F.arange(A1)
+        A2 = A1.cuda()
+        F.prefetch(out)
+        C1, S1 = F.quantize_blockwise(A1, out=out, is_managed=True)
+        torch.cuda.synchronize()
+
+        A21 = torch.arange(n*n).view(n, n).float().cuda()
+        C2, S2 = F.quantize_blockwise(A1)
+
+        torch.testing.assert_allclose(C1, C2.cpu(), atol=1, rtol=0)
+
+        #A2 = F.dequantize_blockwise(C, S)
+        #diff = torch.abs(A1-A2)
+        #reldiff = diff/torch.abs(A1+1e-8)
+        #diffs.append(diff.mean().item())
+        #reldiffs.append(reldiff.mean().item())
+        #assert diffs[-1] < 0.011
+    #print(sum(diffs)/len(diffs))
+    #print(sum(reldiffs)/len(reldiffs))

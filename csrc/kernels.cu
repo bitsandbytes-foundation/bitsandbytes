@@ -43,6 +43,7 @@ __device__ float atomicMin(float* address, float val) {
   return __int_as_float(old);
 }
 
+
 template <int STOCHASTIC>
 __device__ unsigned char dQuantize(float* smem_code, const float rand, float x)
 {
@@ -216,6 +217,22 @@ __device__ __forceinline__ unsigned char quantize_quadrant(int QUADRANT, float *
         return pivot;
     }
 }
+
+template <typename T, int FUNC> __global__ void kfunc(T *A, T value, int n)
+{
+  for(int i = (blockDim.x*blockIdx.x) + threadIdx.x; i < n; i+=(blockDim.x*gridDim.x))
+  {
+    switch(FUNC)
+    {
+      case FILL: 
+        A[i] = value;
+        break;
+      case ARANGE:
+        A[i] = (T)i;
+    }
+  }
+}
+
 
 __global__ void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n)
 {
@@ -1740,6 +1757,10 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
+
+template __global__ void kfunc<float, FILL>(float *A, float value, int n);
+template __global__ void kfunc<unsigned char, FILL>(unsigned char *A, unsigned char value, int n);
+template __global__ void kfunc<float, ARANGE>(float *A, float value, int n);
 
 template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template __device__ unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
