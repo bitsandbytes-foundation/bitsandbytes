@@ -584,7 +584,7 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
 
 #define STATS_THREADS 64
 #define STATS_ITEMS 4
-#define STATS_ROWS 32
+#define STATS_ROWS 16
 void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int cols)
 {
   int tile_cols = STATS_THREADS*STATS_ITEMS;

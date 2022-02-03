@@ -1010,7 +1010,7 @@ n = 2
 #dim1 = torch.randint(1,256, size=(n,)).tolist()
 #dim4 = torch.randint(32,1024, size=(n,)).tolist()
 
-dim1 = [4*1024]
+dim1 = [2*1024]
 dim4 = [2*1024]
 
 dims = (2,)
@@ -1047,16 +1047,16 @@ def test_dequant_mm(dim1, dim4, dims, ldb):
 
 
 n = 2
-#dim1 = [4*1024]
-#dim2 = [2*1024]
-dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
-dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim1 = [1*1024]
+dim2 = [1*1024]
+#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 
 dims = (2,)
 #ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1,dim2,dims))
 names = ['dim1_{0}_dim2_{1}_dims_{2}'.format(*vals) for vals in values]
-k = 10
+k = 1
 @pytest.mark.parametrize("dim1, dim2, dims", values, ids=names)
 def test_colrow_absmax(dim1, dim2, dims):
     for i in range(k):

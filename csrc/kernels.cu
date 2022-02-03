@@ -1786,17 +1786,6 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
         atomicMax(&colStats[base_col+(threadIdx.x+(j*THREADS))], local_col_absmax_values[j]);
     }
 
-  //#pragma unroll ITEMS_PER_THREAD
-  //for(int j = 0; j < ITEMS_PER_THREAD; j++)
-  //{
-  //  if(base_col+(threadIdx.x*ITEMS_PER_THREAD)+j < cols)
-  //  {
-  //    float val = colStats[base_col+(threadIdx.x*ITEMS_PER_THREAD) + j];
-  //    if(val < local_col_absmax_values[j])
-  //      atomicMax(&colStats[base_col+(threadIdx.x*ITEMS_PER_THREAD) + j], local_col_absmax_values[j]);
-  //  }
-  //}
-
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
     if(base_row+threadIdx.x+(j*THREADS) < rows)
     {
@@ -1806,7 +1795,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     }
 }
 
-template __global__ void kgetColRowStats<half, 64, 4, 32, 64*4>(half * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols);
+template __global__ void kgetColRowStats<half, 64, 4, 16, 64*4>(half * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols);
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
