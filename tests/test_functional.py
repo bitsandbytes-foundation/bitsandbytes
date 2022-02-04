@@ -265,6 +265,40 @@ def test_stream_quant():
     #print(sum(diffs)/len(diffs))
     #print(sum(reldiffs)/len(reldiffs))
 
+def get_binary_code():
+    values = list(product([0, 1], repeat=8))
+    values.sort()
+    print(values[:5])
+
+    data = []
+    for j, v in enumerate(values):
+        exp = 1
+        for bit in v[1:]:
+            if bit == 1: break
+            exp += 1
+
+
+        base = 8-1-1-exp
+        value = 0
+        for i, bit in enumerate(v[1+exp:]):
+            if bit: value += 2**(base-i)
+        base = 2**(base+1)-1
+        if exp == 0 or base == 0:
+            print(exp, base, value, v, 'pass')
+            data.append((j, 'pass'))
+        else:
+            linear_quant = (value+1)/(base+2)
+            #if v[0] == 1: continue
+            val = (-1 if v[0] == 1 else 1)*linear_quant*(10**(-exp+1))
+            data.append((j, val))
+
+    #data.sort()
+    #x = torch.Tensor(data)
+    #print(x[:-1] - x[1:])
+    print(data)
+
+
+
 
 k = 1
 def test_binary_encoding():
@@ -272,6 +306,8 @@ def test_binary_encoding():
     reldiffs = []
     n = 4
     print('')
+    print(get_binary_code())
     for i in range(k):
         A1 = torch.normal(0, 3.0, size=(n, n)).cuda()
         C1, S1 = F.quantize_blockwise(A1)
+
