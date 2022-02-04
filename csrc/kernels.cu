@@ -43,6 +43,8 @@ __device__ float atomicMin(float* address, float val) {
   return __int_as_float(old);
 }
 
+#define MAGIC 0.30103f
+#define power 1e8
 
 template <int STOCHASTIC>
 __device__ unsigned char dQuantize(float* smem_code, const float rand, float x)
@@ -53,6 +55,30 @@ __device__ unsigned char dQuantize(float* smem_code, const float rand, float x)
 
     float lower = -1.0f;
     float upper = 1.0f;
+
+    
+    unsigned char out = 0;
+    float absx = fabsf(x);
+
+    float expval = logbf(absx);
+    float exp10 = fabsf((float)((int)(MAGIC*expval)));
+    float frac = absx*powf(10.0f, fabsf(exp10));
+    // 6 bits for the fraction - exponent bits
+    float frac_scaled = scalbnf(frac, 6-(int)fabsf(exp10));
+    int frac_int = lrintf(frac_scaled);
+
+    unsigned char ret = 0;
+    out |= (signbit(x) ^ 1) << 7;
+    out |= (1 << (6-(int)exp10));
+    //out |= frac_int << ((int)exp10);
+
+
+    out |= frac_int << ((int)exp10);
+
+    //if((x!=0.0f) && (x*powf(10.0f, fabsf(exp10)) > 1.0f))
+    //  printf("%f %f %f\n", x, expval, exp10);
+    //if((x!=0.0f) && (x*powf(10.0f, fabsf(exp10)) < 0.1f))
+    //  printf("%f %f %f\n", x, expval, exp10);
 
     float val = smem_code[pivot];
     // i>>=1 = {32, 16, 8, 4, 2, 1}
@@ -78,44 +104,29 @@ __device__ unsigned char dQuantize(float* smem_code, const float rand, float x)
     if(lower_pivot == 0)
         lower = smem_code[lower_pivot];
 
-    if(!STOCHASTIC)
+    if(x > val)
     {
-      if(x > val)
+      float midpoint = (upper+val)*0.5f;
+      if(x > midpoint)
       {
-        float midpoint = (upper+val)*0.5f;
-        if(x > midpoint)
-        {
-          return upper_pivot;
-        }
-        else
-          return pivot;
+        ret = upper_pivot;
       }
       else
-      {
-        float midpoint = (lower+val)*0.5f;
-        if(x < midpoint)
-          return lower_pivot;
-        else
-          return pivot;
-      }
+        ret = pivot;
     }
     else
     {
-      if(x > val)
-      {
-        float dist_to_upper = fabsf(upper-x);
-        float dist_full = upper-val;
-        if(rand >= dist_to_upper/dist_full) return upper_pivot;
-        else return pivot;
-      }
+      float midpoint = (lower+val)*0.5f;
+      if(x < midpoint)
+        ret = lower_pivot;
       else
-      {
-        float dist_to_lower = fabsf(lower-x);
-        float dist_full = val-lower;
-        if(rand >= dist_to_lower/dist_full) return lower_pivot;
-        else return pivot;
-      }
+        ret = pivot;
     }
+
+    if(x != 0.0f)
+      printf("%f %f %f %f %f %i %i %i %i\n", x, expval, exp10, frac, frac_scaled, frac_int, (int)out, out | (frac_int << ((int)exp10)), ret );
+
+    return ret;
 }
 
 template <int SIGNED>
@@ -218,14 +229,16 @@ __device__ __forceinline__ unsigned char quantize_quadrant(int QUADRANT, float *
     }
 }
 
-template <typename T, int FUNC> __global__ void kfunc(T *A, T value, int n)
+template <typename T, int FUNC> __global__ void kfunc(T *A, T value, long n)
 {
-  for(int i = (blockDim.x*blockIdx.x) + threadIdx.x; i < n; i+=(blockDim.x*gridDim.x))
+  for(long i = (blockDim.x*blockIdx.x) + threadIdx.x; i < n; i+=(blockDim.x*gridDim.x))
   {
+    if(i < 0)
+      printf("%ld\n", i);
     switch(FUNC)
     {
       case FILL: 
-        A[i] = value;
+        A[i] = (T)value;
         break;
       case ARANGE:
         A[i] = (T)i;
@@ -1758,9 +1771,9 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kfunc<float, FILL>(float *A, float value, int n);
-template __global__ void kfunc<unsigned char, FILL>(unsigned char *A, unsigned char value, int n);
-template __global__ void kfunc<float, ARANGE>(float *A, float value, int n);
+template __global__ void kfunc<float, FILL>(float *A, float value, long n);
+template __global__ void kfunc<unsigned char, FILL>(unsigned char *A, unsigned char value, long n);
+template __global__ void kfunc<float, ARANGE>(float *A, float value, long n);
 
 template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template __device__ unsigned char dQuantize<1>(float* smem_code, const float rand, float x);

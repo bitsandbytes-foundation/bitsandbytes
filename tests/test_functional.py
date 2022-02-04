@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the 
 # LICENSE file in the root directory of this source tree.
 import pytest
+import math
 import torch
 import bitsandbytes as bnb
 import numpy as np
@@ -239,21 +240,21 @@ k = 1
 def test_stream_quant():
     diffs = []
     reldiffs = []
-    n = 1024
+    n = 1024*80
+    print(n*n/2147483647)
     for i in range(k):
         A1 = F.get_managed(n, n, dtype=torch.float32)
         out = F.get_managed(n, n, dtype=torch.uint8)
-        F.prefetch(A1)
-        F.arange(A1)
-        A2 = A1.cuda()
-        F.prefetch(out)
-        C1, S1 = F.quantize_blockwise(A1, out=out, is_managed=True)
+        F.fill(A1, 1.0)
+        b = torch.zeros(1024*1024*1024*5, device='cuda')
         torch.cuda.synchronize()
+        #C1, S1 = F.quantize_blockwise(A1, out=out, is_managed=True)
+        #print(S1[0].numel())
 
-        A21 = torch.arange(n*n).view(n, n).float().cuda()
-        C2, S2 = F.quantize_blockwise(A1)
+        #A2 = torch.arange(n*n).view(n, n).float().cuda()
+        #C2, S2 = F.quantize_blockwise(A2)
 
-        torch.testing.assert_allclose(C1, C2.cpu(), atol=1, rtol=0)
+        #torch.testing.assert_allclose(C1, C2.cpu(), atol=1, rtol=0)
 
         #A2 = F.dequantize_blockwise(C, S)
         #diff = torch.abs(A1-A2)
@@ -263,3 +264,14 @@ def test_stream_quant():
         #assert diffs[-1] < 0.011
     #print(sum(diffs)/len(diffs))
     #print(sum(reldiffs)/len(reldiffs))
+
+
+k = 1
+def test_binary_encoding():
+    diffs = []
+    reldiffs = []
+    n = 4
+    print('')
+    for i in range(k):
+        A1 = torch.normal(0, 3.0, size=(n, n)).cuda()
+        C1, S1 = F.quantize_blockwise(A1)

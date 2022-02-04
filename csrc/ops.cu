@@ -125,11 +125,13 @@ void dequantize_cpu(float *code, unsigned char *A, float *absmax, float *out, in
   }
 }
 
-template <typename T, int FUNC> void func(T *A, T value, int n)
+template <typename T, int FUNC> void func(T *A, T value, long n)
 {
   int threads = 512;
   int blocks = n/threads;
   blocks = n % threads == 0 ? blocks : blocks + 1;
+  blocks = blocks > 65535 ? 65535 : blocks;
+  cout << blocks << " blocks " << endl;
   kfunc<T, FUNC><<<blocks, 512>>>(A, value, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -313,9 +315,9 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template void func<float, FILL>(float *A, float value, int n);
-template void func<unsigned char, FILL>(unsigned char *A, unsigned char value, int n);
-template void func<float, ARANGE>(float *A, float value, int n);
+template void func<float, FILL>(float *A, float value, long n);
+template void func<unsigned char, FILL>(unsigned char *A, unsigned char value, long n);
+template void func<float, ARANGE>(float *A, float value, long n);
 
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);

@@ -54,7 +54,7 @@ def get_managed(rows, cols, dtype=torch.float32):
         nptype = np.uint8
     assert size > 0
 
-    ptr = lib.cget_managed_ptr_fp32(ct.c_int32(rows), ct.c_int32(cols), ct.c_int32(size))
+    ptr = lib.cget_managed_ptr_fp32(ct.c_int64(rows), ct.c_int64(cols), ct.c_int64(size))
     cptr = ct.cast(ptr, ct.POINTER(ct.c_int))
     new_array = np.ctypeslib.as_array(cptr, shape=(rows,cols))
     new_a = np.frombuffer(new_array, dtype=nptype, count=rows*cols)
@@ -577,7 +577,7 @@ type2size[torch.uint8] = 1
 def prefetch(A, deviceid=0):
     assert A.is_managed
     size = type2size[A.dtype]
-    lib.cprefetch(get_ptr(A), ct.c_int32(A.numel()), ct.c_int32(size), ct.c_int32(deviceid))
+    lib.cprefetch(get_ptr(A), ct.c_int64(A.numel()), ct.c_int64(size), ct.c_int32(deviceid))
 
 def prefetch_cpu(A):
     prefetch(A, -1)
@@ -599,7 +599,7 @@ def elementwise_func(func_name, A, value, device=None):
     is_managed = getattr(A, 'is_managed', False)
     if is_managed: prefetch(A, device_idx)
 
-    func(get_ptr(A), cvalue, ct.c_int32(A.numel()))
+    func(get_ptr(A), cvalue, ct.c_int64(A.numel()))
 
 def fill(A, value, device=None): elementwise_func('fill', A, value, device)
 def arange(A, device=None): elementwise_func('arange', A, 0, device)

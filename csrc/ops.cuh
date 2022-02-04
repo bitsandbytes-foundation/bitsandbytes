@@ -47,7 +47,7 @@ typedef enum Funcs_t
 
 
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
-template <typename T, int FUNC> void func(T *A, T value, int n);
+template <typename T, int FUNC> void func(T *A, T value, long n);
 
 void quantize(float *code, float *A, unsigned char *out, int n);
 void dequantize(float *code, unsigned char *A, float *out, int n);
