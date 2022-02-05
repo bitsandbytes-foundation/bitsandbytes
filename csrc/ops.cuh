@@ -54,6 +54,8 @@ void dequantize(float *code, unsigned char *A, float *out, int n);
 template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
 template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n);
 
+template <typename T, int BLOCK_SIZE> void quantizeBlockwiseDynamic(T *A, float *absmax, unsigned char *out, int n);
+
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2, float eps, float weight_decay,

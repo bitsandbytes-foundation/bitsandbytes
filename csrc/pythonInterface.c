@@ -87,6 +87,13 @@ MAKE_ELEMENTWISE_FUNC(fill, uint8, unsigned char, FILL)
 MAKE_ELEMENTWISE_FUNC(arange, fp32, float, ARANGE)
 
 
+#define MAKE_BLOCKWISE_DYNAMIC(type_name, BLOCK_SIZE, dtype) \
+void quantizeBlockwiseDynamic_##type_name##_##BLOCK_SIZE##b(dtype *A, float *absmax, unsigned char *out, int n) \
+{ quantizeBlockwiseDynamic<dtype, BLOCK_SIZE>(A, absmax, out, n); } \
+
+MAKE_BLOCKWISE_DYNAMIC(fp32, 2048, float)
+
+
 extern "C"
 {
 	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
@@ -180,6 +187,9 @@ extern "C"
 	void cfill_fp32(float *ptr, float fill_value, long n){ fill_fp32(ptr, fill_value, n); }
 	void cfill_uint8(unsigned char *ptr, unsigned char fill_value, long n){ fill_uint8(ptr, fill_value, n); }
 	void carange_fp32(float *ptr, float value, long n){ arange_fp32(ptr, value, n); }
+
+	void cquantize_blockwise_dynamic_fp32_2048b(float *A, float *absmax, unsigned char *out, int n) 
+	{ quantizeBlockwiseDynamic_fp32_2048b(A, absmax, out, n); }
 }
 
 

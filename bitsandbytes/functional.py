@@ -603,3 +603,49 @@ def elementwise_func(func_name, A, value, device=None):
 
 def fill(A, value, device=None): elementwise_func('fill', A, value, device)
 def arange(A, device=None): elementwise_func('arange', A, 0, device)
+
+
+def quantize_blockwise_dynamic(A: Tensor, absmax: Tensor=None, out: Tensor=None) -> Tensor:
+    '''
+    Quantize tensor A in blocks of size 4096 values.
+
+    Quantizes tensor A by dividing it into blocks of 4096 values.
+    Then the absolute maximum value within these blocks is calculated
+    for the non-linear quantization.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        The input tensor.
+    absmax : torch.Tensor
+        The absmax values.
+    out : torch.Tensor
+        The output tensor (8-bit).
+
+    Returns
+    -------
+    torch.Tensor:
+        The 8-bit tensor.
+    tuple(torch.Tensor, torch.Tensor):
+        The quantization state to undo the quantization.
+    '''
+
+    assert A.device.type == 'cuda'
+    is_managed = getattr(A, 'is_managed', False)
+    device = (A.device if not is_managed else torch.device('cuda'))
+
+    if absmax is None:
+        n = A.numel()
+        block_size = 2048
+        blocks = n//block_size
+        blocks += 1 if n % block_size > 0 else 0
+        absmax = torch.zeros((blocks,), device=device)
+
+    if out is None: out = torch.zeros_like(A, dtype=torch.uint8, device=device)
+
+    if A.dtype == torch.float32:
+        lib.cquantize_blockwise_dynamic_fp32_2048b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+    else:
+        raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
+
+    return out, absmax

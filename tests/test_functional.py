@@ -7,7 +7,7 @@ import math
 import torch
 import bitsandbytes as bnb
 import numpy as np
-import ctypes
+import time
 
 from itertools import product
 
@@ -268,7 +268,6 @@ def test_stream_quant():
 def get_binary_code():
     values = list(product([0, 1], repeat=8))
     values.sort()
-    print(values[:5])
 
     data = []
     for j, v in enumerate(values):
@@ -283,9 +282,10 @@ def get_binary_code():
         for i, bit in enumerate(v[1+exp:]):
             if bit: value += 2**(base-i)
         base = 2**(base+1)-1
-        if exp == 0 or base == 0:
-            print(exp, base, value, v, 'pass')
-            data.append((j, 'pass'))
+        if exp == 8:
+            data.append((j, 0))
+        elif exp == 0 or base == 0:
+            data.append((j, (-1 if v[0] == 1 else 1)*1.0))
         else:
             linear_quant = (value+1)/(base+2)
             #if v[0] == 1: continue
@@ -295,7 +295,8 @@ def get_binary_code():
     #data.sort()
     #x = torch.Tensor(data)
     #print(x[:-1] - x[1:])
-    print(data)
+    data = [v[1] for v in data]
+    return torch.Tensor(data).float()
 
 
 
@@ -305,9 +306,9 @@ def test_binary_encoding():
     diffs = []
     reldiffs = []
     n = 4
-    print('')
-    print(get_binary_code())
-    for i in range(k):
-        A1 = torch.normal(0, 3.0, size=(n, n)).cuda()
-        C1, S1 = F.quantize_blockwise(A1)
+    code = get_binary_code()
+    A1 = torch.randn(n, n).cuda()
+    C1, S1 = F.quantize_blockwise_dynamic(A1)
+    print(C1)
+
 

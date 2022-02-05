@@ -14,7 +14,7 @@ using namespace BinSearch;
 using std::cout;
 using std::endl;
 
-#define BLOCK_SIZE 4096
+#define CPU_BLOCK_SIZE 4096
 
 struct quantize_block_args
 {
@@ -43,7 +43,7 @@ void *quantize_block(void *arguments)
   for (int i = args->block_idx; i < args->block_end; i++)
     absmax_block = fmax(absmax_block, fabs(args->A[i]));
 
-  args->absmax[args->block_idx/BLOCK_SIZE] = absmax_block;
+  args->absmax[args->block_idx/CPU_BLOCK_SIZE] = absmax_block;
 
   for (int i = args->block_idx; i < args->block_end; i++)
   {
@@ -74,8 +74,8 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, int 
   // the default code is has range [-0.993, 1.0] which can cause an error in the binary search algorithm used below
   code[0] = -1.0f; 
 
-  int num_blocks = n/BLOCK_SIZE;
-  num_blocks += n % BLOCK_SIZE == 0 ? 0 : 1;
+  int num_blocks = n/CPU_BLOCK_SIZE;
+  num_blocks += n % CPU_BLOCK_SIZE == 0 ? 0 : 1;
 
   pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t)*num_blocks);
   struct quantize_block_args **args = (quantize_block_args**)malloc(num_blocks*sizeof(quantize_block_args*));
@@ -86,12 +86,12 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, int 
   const uint32 elements_code = 256;
   BinAlgo<Scalar, float, Direct2> bin_searcher(code, elements_code);
 
-  for(int block_idx = 0; block_idx < n; block_idx+=BLOCK_SIZE)
+  for(int block_idx = 0; block_idx < n; block_idx+=CPU_BLOCK_SIZE)
   {
-    int valid_items = n-block_idx >= BLOCK_SIZE ? BLOCK_SIZE : n - block_idx;
+    int valid_items = n-block_idx >= CPU_BLOCK_SIZE ? CPU_BLOCK_SIZE : n - block_idx;
     int block_end = block_idx + valid_items;
 
-    struct quantize_block_args *arg = args[block_idx/BLOCK_SIZE];
+    struct quantize_block_args *arg = args[block_idx/CPU_BLOCK_SIZE];
     arg->bin_searcher = &bin_searcher;
     arg->code = code;
     arg->A = A;
@@ -99,9 +99,9 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, int 
     arg->out = out;
     arg->block_end = block_end;
     arg->block_idx = block_idx;
-    arg->threadidx = block_idx/BLOCK_SIZE;
+    arg->threadidx = block_idx/CPU_BLOCK_SIZE;
  
-    pthread_create(&threads[block_idx/BLOCK_SIZE], NULL, &quantize_block, (void *)arg);
+    pthread_create(&threads[block_idx/CPU_BLOCK_SIZE], NULL, &quantize_block, (void *)arg);
   }
 
   for(int i = 0; i < num_blocks; i++)
@@ -116,12 +116,12 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, int 
 
 void dequantize_cpu(float *code, unsigned char *A, float *absmax, float *out, int n)
 {
-  for(int block_idx = 0; block_idx < n; block_idx+=BLOCK_SIZE)
+  for(int block_idx = 0; block_idx < n; block_idx+=CPU_BLOCK_SIZE)
   {
-    int valid_items = n-block_idx >= BLOCK_SIZE ? BLOCK_SIZE : n - block_idx;
+    int valid_items = n-block_idx >= CPU_BLOCK_SIZE ? CPU_BLOCK_SIZE : n - block_idx;
     int block_end = block_idx + valid_items;
     for (int i = block_idx; i < block_end; i++)
-      out[i] = code[A[i]]*absmax[block_idx/BLOCK_SIZE];
+      out[i] = code[A[i]]*absmax[block_idx/CPU_BLOCK_SIZE];
   }
 }
 
@@ -171,11 +171,20 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+#define ITEMS 4
 template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float *rand, int rand_offset, const int n)
 {
   int blocks = n/4096;
   blocks = n % 4096 == 0 ? blocks : blocks + 1;
-  kQuantizeBlockwise<T, 4096, 4, STOCHASTIC><<<blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
+  kQuantizeBlockwise<T, 4096, ITEMS, STOCHASTIC><<<blocks, 4096/ITEMS>>>(code, A, absmax, out, rand, rand_offset, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template<typename T, int BLOCK_SIZE> void quantizeBlockwiseDynamic(T *A, float *absmax, unsigned char *out, int n)
+{
+  int blocks = n/BLOCK_SIZE;
+  blocks = n % BLOCK_SIZE == 0 ? blocks : blocks + 1;
+  kQuantizeBlockwiseDynamic<T, BLOCK_SIZE, ITEMS><<<blocks, BLOCK_SIZE/ITEMS>>>(A, absmax, out, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -328,6 +337,8 @@ template void quantizeBlockwise<half, 1>(float * code, half *A, float *absmax, u
 template void quantizeBlockwise<float, 1>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
 template void dequantizeBlockwise<half>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
 template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
+
+template void quantizeBlockwiseDynamic<float, 2048>(float *A, float *absmax, unsigned char *out, const int n);
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
