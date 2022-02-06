@@ -92,6 +92,7 @@ void quantizeBlockwiseDynamic_##type_name##_##BLOCK_SIZE##b(dtype *A, float *abs
 { quantizeBlockwiseDynamic<dtype, BLOCK_SIZE>(A, absmax, out, n); } \
 
 MAKE_BLOCKWISE_DYNAMIC(fp32, 2048, float)
+MAKE_BLOCKWISE_DYNAMIC(fp32, 4096, float)
 
 
 extern "C"
@@ -190,6 +191,9 @@ extern "C"
 
 	void cquantize_blockwise_dynamic_fp32_2048b(float *A, float *absmax, unsigned char *out, int n) 
 	{ quantizeBlockwiseDynamic_fp32_2048b(A, absmax, out, n); }
+
+	void cquantize_blockwise_dynamic_fp32_4096b(float *A, float *absmax, unsigned char *out, int n) 
+	{ quantizeBlockwiseDynamic_fp32_4096b(A, absmax, out, n); }
 }
 
 

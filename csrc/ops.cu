@@ -339,6 +339,7 @@ template void dequantizeBlockwise<half>(float *code, unsigned char *A, float *ab
 template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
 
 template void quantizeBlockwiseDynamic<float, 2048>(float *A, float *absmax, unsigned char *out, const int n);
+template void quantizeBlockwiseDynamic<float, 4096>(float *A, float *absmax, unsigned char *out, const int n);
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \

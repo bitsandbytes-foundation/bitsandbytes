@@ -67,10 +67,10 @@ __device__ __forceinline__ unsigned char dQuantizeDynamic(float x)
     // inc = 0.9/(base+1)
     // val2 = (0.1+(inc*value)) + (inc/2.0)
     //float frac3 = ((frac-0.1f) + (inc/2.0f))/inc;
-    float frac3 = ((frac-0.1f) )/inc;
+    float frac3 = ((frac-0.1f))/inc;
     //float frac3 = (1.111111f*base*frac) - (0.111111f*base) -0.5f;
     float frac_scaled = frac3;
-    int frac_int = round(frac_scaled-0.5f);
+    int frac_int = round(frac_scaled-0.50f);
 
     out |= signbit(x) << 7;
     out |= 1 << (7-exp10);
@@ -643,7 +643,7 @@ __global__ void kQuantizeBlockwiseDynamic(T * __restrict__ const A, float *absma
       // qvals[j] = dQuantize<1>(smem_code, rand_vals[j], ((float)vals[j])*local_abs_max);
     }
 
-    //__syncthreads();
+    __syncthreads();
     StoreChar(storec).Store(&(out[i]), qvals, valid_items);
   }
 }
@@ -2009,6 +2009,7 @@ template __global__ void kDequantizeBlockwise<half, 2048, 512, 4>(float *code, u
 template __global__ void kDequantizeBlockwise<float, 2048, 512, 4>(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, float *out, const int n);
 
 template __global__ void kQuantizeBlockwiseDynamic<float, 2048, 4>(float * __restrict__ const A, float *absmax, unsigned char *out, const int n);
+template __global__ void kQuantizeBlockwiseDynamic<float, 4096, 4>(float * __restrict__ const A, float *absmax, unsigned char *out, const int n);
 
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \

@@ -636,7 +636,8 @@ def quantize_blockwise_dynamic(A: Tensor, absmax: Tensor=None, out: Tensor=None)
 
     if absmax is None:
         n = A.numel()
-        block_size = 2048
+        #block_size = 2048
+        block_size = 4096
         blocks = n//block_size
         blocks += 1 if n % block_size > 0 else 0
         absmax = torch.zeros((blocks,), device=device)
@@ -644,7 +645,8 @@ def quantize_blockwise_dynamic(A: Tensor, absmax: Tensor=None, out: Tensor=None)
     if out is None: out = torch.zeros_like(A, dtype=torch.uint8, device=device)
 
     if A.dtype == torch.float32:
-        lib.cquantize_blockwise_dynamic_fp32_2048b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+        #lib.cquantize_blockwise_dynamic_fp32_2048b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+        lib.cquantize_blockwise_dynamic_fp32_4096b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
     else:
         raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
 
