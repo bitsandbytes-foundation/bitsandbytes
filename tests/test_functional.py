@@ -287,7 +287,13 @@ def get_binary_code():
         elif exp == 0 or base == 0:
             data.append((j, (-1 if v[0] == 1 else 1)*1.0))
         else:
-            linear_quant = (value+1)/(base+2)
+            #print(value, base)
+            increment = (1-(1/base))/(base)
+            inc = 0.9/(base+1)
+            val2 = (0.1+(inc*value)) + (inc/2.0)
+
+            linear_quant = (increment*value) + (increment)
+            linear_quant = val2
             #if v[0] == 1: continue
             val = (-1 if v[0] == 1 else 1)*linear_quant*(10**(-exp+1))
             data.append((j, val))
@@ -305,10 +311,30 @@ k = 1
 def test_binary_encoding():
     diffs = []
     reldiffs = []
-    n = 4
-    code = get_binary_code()
+    n = 1024
+    code = get_binary_code().cuda()
+    #print(code)
+    values, idx = torch.sort(code)
+    #print(values)
     A1 = torch.randn(n, n).cuda()
-    C1, S1 = F.quantize_blockwise_dynamic(A1)
-    print(C1)
+    #A1 = torch.arange(n*n).float().view(n, n).cuda()
+    #A1 = torch.pow(A1, 5.0)
+    #A1 /= A1.max()
+    C1, S1 = F.quantize_blockwise(A1, code=values)
+    C2, S2 = F.quantize_blockwise_dynamic(A1)
+    A2 = values[C1.flatten().long()].view(C2.shape)
+    C1 = idx[C1.flatten().long()].view(C2.shape)
+    A3 = A2*S2[0]
+    B2 = code[C2.flatten().long()].view(C2.shape)
+    A2 = values[C1.flatten().long()].view(C2.shape)
+    #print(A1)
+    #print(B2*S2[0])
+
+    torch.testing.assert_allclose(C1, C2)
+    err2 = torch.abs(A1-(B2*S2[0])).mean()
+    C2, S2 = F.quantize_blockwise(A1)
+    B1 = F.dequantize_blockwise(C2, S2)
+    err1 = torch.abs(A1-B1).mean()
+    print(err1, err2)
 
 

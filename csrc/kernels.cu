@@ -55,19 +55,31 @@ __device__ __forceinline__ unsigned char dQuantizeDynamic(float x)
 
     unsigned char out = 0;
     float absx = fabsf(x);
-    float expval = logbf(absx);
-    int exp10 = abs((int)(MAGIC*expval));
-    float frac = absx*powerTable8[exp10];
+    int exp10 = abs(floor(log10f(absx)));
+    float frac = absx*powf(10.0f, exp10-1);
+
+    // if exp = 1 then there are 6 bits for the linear quantization -> normalized by 2^6-1 (7-exp10)
+    // if exp = 2 then there are 5 bits for the linear quantization -> normalized by 2^5-1
 
     // 6 bits for the fraction - exponent bits
-    float frac_scaled = scalbnf(frac, 6-exp10);
-    int frac_int = lrintf(frac_scaled);
+    float base = powf(2.0f, 7-exp10);
+    float inc = 0.9f/(base);
+    // inc = 0.9/(base+1)
+    // val2 = (0.1+(inc*value)) + (inc/2.0)
+    //float frac3 = ((frac-0.1f) + (inc/2.0f))/inc;
+    float frac3 = ((frac-0.1f) )/inc;
+    //float frac3 = (1.111111f*base*frac) - (0.111111f*base) -0.5f;
+    float frac_scaled = frac3;
+    int frac_int = round(frac_scaled-0.5f);
 
-    out |= (signbit(x) ^ 1) << 7;
-    out |= 1 << (6-exp10);
-    out |= frac_int << exp10;
+    out |= signbit(x) << 7;
+    out |= 1 << (7-exp10);
+    out += frac_int;
 
-    return out;
+    if(out == 1) 
+      return 0;
+    else 
+      return out;
 }
 
 template <int STOCHASTIC>
