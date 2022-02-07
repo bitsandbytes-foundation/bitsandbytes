@@ -43,10 +43,9 @@ __device__ float atomicMin(float* address, float val) {
   return __int_as_float(old);
 }
 
-#define MAGIC 0.30103f
-#define power 1e8
-
-__device__ static const float powerTable8[8] = {0.0f, 1e2f, 1e3f, 1e4f, 1e5f, 1e6f, 1e7f, 1e8f};
+// see below for scaleTable
+__device__ __constant__ static const float powerTable8[8] = {0.0f, 1.0f, 1e1f, 1e2f, 1e3f, 1e4f, 1e5f, 1e6f};
+__device__ __constant__ static const float scaleTable[8] = {142.2222f, 71.11111f, 35.55556f, 17.77778f, 8.888889f, 4.444444f, 2.222222f, 1.111111f};
 __device__ __forceinline__ unsigned char dQuantizeDynamic(float x)
 {
     if(x == 0.0f){ return 0; }
@@ -56,21 +55,22 @@ __device__ __forceinline__ unsigned char dQuantizeDynamic(float x)
     unsigned char out = 0;
     float absx = fabsf(x);
     int exp10 = abs(floor(log10f(absx)));
-    float frac = absx*powf(10.0f, exp10-1);
+    float frac = absx*powerTable8[exp10];
 
     // if exp = 1 then there are 6 bits for the linear quantization -> normalized by 2^6-1 (7-exp10)
     // if exp = 2 then there are 5 bits for the linear quantization -> normalized by 2^5-1
-
-    // 6 bits for the fraction - exponent bits
-    float base = powf(2.0f, 7-exp10);
-    float inc = 0.9f/(base);
-    // inc = 0.9/(base+1)
-    // val2 = (0.1+(inc*value)) + (inc/2.0)
-    //float frac3 = ((frac-0.1f) + (inc/2.0f))/inc;
-    float frac3 = ((frac-0.1f))/inc;
-    //float frac3 = (1.111111f*base*frac) - (0.111111f*base) -0.5f;
-    float frac_scaled = frac3;
-    int frac_int = round(frac_scaled-0.50f);
+    // Reasoning: We get a number between [0.1, 1.0]
+    // We first shift it so zero (frac-0.1) to put it in [0, 0.9]
+    // Now we divide the interval in 2^bits sections by dividing through 0.9/2^bits
+    // However, we end up directly on the quantization bins, e.g. for 2^1 we have:
+    // [0..0.45...0.9]/(0.9/2) = [0..1..2]
+    // so if we want to round to [0..1] we need to subtract 0.5 to center
+    // the values in the middle between quantization bins
+    //float base = powf(2.0f, 7-exp10);
+    //float inc = 0.9f/(base);
+    // 1/inc =  base/0.9f = 2.0^(7-exp10)/0.9
+    // for exp10 0..7: scaleTable = [142.2222, 71.11111, 35.55556, 17.77778, 8.888889, 4.444444, 2.222222, 1.111111]
+    int frac_int = round(((frac-0.1f))*scaleTable[exp10]-0.5f);
 
     out |= signbit(x) << 7;
     out |= 1 << (7-exp10);
@@ -80,6 +80,48 @@ __device__ __forceinline__ unsigned char dQuantizeDynamic(float x)
       return 0;
     else 
       return out;
+}
+
+
+__device__ __constant__ static const unsigned char maskTable[6] = {0b00111111, 0b00011111, 0b00001111, 0b00000111, 0b00000011, 0b00000001};
+__device__ __constant__ static const float incTable[7] = {0.9f, 0.45f, 0.225f, 0.1125f, 0.05625f, 0.028125f, 0.0140625f};
+__device__ __forceinline__ float dDequantizeDynamic(unsigned char x)
+{
+    if(x == 0){ return 0.0f; }
+    if(x == 1){ return 1.0f; }
+    if(x == 129){ return -1.0f; }
+
+    //float sign = (x >>> 7) == 1 ? -1.0f : 1.0f;
+    float sign = x > 128 ? -1.0f : 1.0f;
+    // clz finds the first bit set to 1 from the right
+    // its for a 32-bit integer
+    // the 8-bit value will occupy the lower bits so
+    // the top 24 will be empty, 1 bit for the sign so
+    // 25-clz = exp10
+
+    x &= 0b01111111; // remove sign bit
+    int exp10 = abs(25-__clz(x));
+    x &= maskTable[exp10]; // remove exponent bits
+    //int frac_int = x;
+
+    // we can get the fraction with:
+    // base = 2^(7-abs(exp10)) (fraction bits = 8 - signbit - indicator-bits = 6-0
+    //inc = inc = 0.9/(base+1)
+    // 0.1f+(inc*frac_int)+(inc/2.0);
+    // expanded code:
+    // float base = powf(2.0f, 7-exp10);
+    // float inc = 0.9f/base;
+    // float frac = 0.1f+(inc/2.0f)+(inc*frac_int);
+    // this code can be simplified with a lookup table
+    // frac = (0.1f + (inc/2.0f)) + (inc*frac_int) = C1 + C2*frac_int
+    // C2 = {0.9f, 0.45f, 0.225f, 0.1125f, 0.05625f, 0.028125f, 0.0140625f}
+    // C1 = {0.55f, 0.325f, 0.2125f, 0.15625f, 0.128125f, 0.1140625f, 0.10703125f} 
+    float inc = incTable[6-exp10];
+    float frac = 0.1f + (0.5f*inc) + ((float)x*inc);
+
+    //printf("%i %i %i %i %i %f\n", val, pre, x, exp10, frac_int, frac);
+
+    return sign*powf(10.0f, -(exp10))*frac;
 }
 
 template <int STOCHASTIC>
@@ -583,16 +625,13 @@ __global__ void kQuantizeBlockwiseDynamic(T * __restrict__ const A, float *absma
   float local_abs_max = 0.0f;
   int local_rand_idx = 0;
 
-  typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_VECTORIZE> LoadT;
+  typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
   typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
   typedef cub::BlockReduce<float, BLOCK_SIZE/NUM_PER_TH> BlockReduce;
-  //typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_VECTORIZE> LoadFloat;
 
   __shared__ typename LoadT::TempStorage loadt;
-  //__shared__ typename LoadFloat::TempStorage loadf;
   __shared__ typename StoreChar::TempStorage storec;
   __shared__ typename BlockReduce::TempStorage reduce;
-  __shared__ float smem_code[256];
   __shared__ float smem_absmax_value[1];
 
   for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
@@ -600,7 +639,6 @@ __global__ void kQuantizeBlockwiseDynamic(T * __restrict__ const A, float *absma
     valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
     local_abs_max = -FLT_MAX;
 
-    __syncthreads();
     LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
 
     // 1. compute local max
@@ -626,24 +664,11 @@ __global__ void kQuantizeBlockwiseDynamic(T * __restrict__ const A, float *absma
     __syncwarp();
 
     local_abs_max = 1.0f/local_abs_max;
-    //local_abs_max = __frcp_rn(local_abs_max);
-
-    //if(STOCHASTIC)
-    //{
-    //  local_rand_idx = ((blockIdx.x*NUM_BLOCK) + (threadIdx.x*NUM_PER_TH) + rand_offset) % (1024-4);
-    //  LoadFloat(loadf).Load(&rand[local_rand_idx], rand_vals, BLOCK_SIZE, 0);
-    //}
 
     #pragma unroll NUM_PER_TH
     for(int j = 0; j < NUM_PER_TH; j++)
-    {
-      //if(!STOCHASTIC)
        qvals[j] = dQuantizeDynamic(((float)vals[j])*local_abs_max);
-      //else
-      // qvals[j] = dQuantize<1>(smem_code, rand_vals[j], ((float)vals[j])*local_abs_max);
-    }
 
-    __syncthreads();
     StoreChar(storec).Store(&(out[i]), qvals, valid_items);
   }
 }
@@ -681,6 +706,42 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * __restrict__ c
       #pragma unroll NUM_PER_TH
       for(int j = 0; j < NUM_PER_TH; j++)
         vals[j] = smem_code[qvals[j]]*local_abs_max;
+
+      __syncthreads();
+      StoreT(storet).Store(&(out[i]), vals, valid_items);
+  }
+}
+
+
+template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH>
+__global__ void kDequantizeBlockwiseDynamic(unsigned char * __restrict__ const A, float * __restrict__ const absmax, T *out, const int n)
+{
+
+  const int n_full = gridDim.x * BLOCK_SIZE;
+  int valid_items = 0;
+  const int base_idx = (blockIdx.x * BLOCK_SIZE);
+
+  T vals[NUM];
+  unsigned char qvals[NUM];
+  float local_abs_max = -FLT_MAX;
+
+  typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+  typedef cub::BlockStore<T, THREADS, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+
+  __shared__ typename LoadChar::TempStorage loadchar;
+  __shared__ typename StoreT::TempStorage storet;
+
+  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
+  {
+      valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
+      local_abs_max = absmax[i/BLOCK_SIZE];
+
+      __syncthreads();
+      LoadChar(loadchar).Load(&(A[i]), qvals, valid_items, 0);
+
+      #pragma unroll NUM_PER_TH
+      for(int j = 0; j < NUM_PER_TH; j++)
+        vals[j] = dDequantizeDynamic(qvals[j])*local_abs_max;
 
       __syncthreads();
       StoreT(storet).Store(&(out[i]), vals, valid_items);
@@ -2010,6 +2071,7 @@ template __global__ void kDequantizeBlockwise<float, 2048, 512, 4>(float *code, 
 
 template __global__ void kQuantizeBlockwiseDynamic<float, 2048, 4>(float * __restrict__ const A, float *absmax, unsigned char *out, const int n);
 template __global__ void kQuantizeBlockwiseDynamic<float, 4096, 4>(float * __restrict__ const A, float *absmax, unsigned char *out, const int n);
+template __global__ void kDequantizeBlockwiseDynamic<float, 2048, 512, 4>(unsigned char * __restrict__ const A, float * __restrict__ const absmax, float *out, const int n);
 
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \

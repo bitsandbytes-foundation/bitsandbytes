@@ -188,6 +188,14 @@ template<typename T, int BLOCK_SIZE> void quantizeBlockwiseDynamic(T *A, float *
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+template<typename T, int BLOCK_SIZE> void dequantizeBlockwiseDynamic(unsigned char *A, float *absmax, T *out, int n)
+{
+  int blocks = n/BLOCK_SIZE;
+  blocks = n % BLOCK_SIZE == 0 ? blocks : blocks + 1;
+  kDequantizeBlockwiseDynamic<T, BLOCK_SIZE, 512, ITEMS><<<blocks, BLOCK_SIZE/ITEMS>>>(A, absmax, out, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int blocksize, const int n)
 {
   int blocks = n/blocksize;
@@ -340,6 +348,7 @@ template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *a
 
 template void quantizeBlockwiseDynamic<float, 2048>(float *A, float *absmax, unsigned char *out, const int n);
 template void quantizeBlockwiseDynamic<float, 4096>(float *A, float *absmax, unsigned char *out, const int n);
+template void dequantizeBlockwiseDynamic<float, 2048>(unsigned char *A, float *absmax, float *out, int n);
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \

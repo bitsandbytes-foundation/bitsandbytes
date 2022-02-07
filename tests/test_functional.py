@@ -308,7 +308,7 @@ k = 1
 def test_binary_encoding():
     diffs = []
     reldiffs = []
-    n = 32
+    n = 8
     code = get_binary_code().cuda()
     #print(code)
     values, idx = torch.sort(code)
@@ -376,3 +376,49 @@ def test_binary_encoding():
     print(err1, err2, err3)
 
 
+
+
+k = 1000
+def test_bench_bits():
+    diffs = []
+    reldiffs = []
+    n = 1024
+    A1 = torch.randn(n, n).cuda()
+    for i in range(k):
+        C2, S2 = F.quantize_blockwise_dynamic(A1)
+        A2 = F.dequantize_blockwise_dynamic(C2, S2)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        C2, S2 = F.quantize_blockwise_dynamic(A1, S2)
+        F.dequantize_blockwise_dynamic(C2, S2, A2)
+    torch.cuda.synchronize()
+    print(time.time() - t0)
+
+    C2, S2 = F.quantize_blockwise(A1)
+    A2 = F.dequantize_blockwise(A1, S2[1], S2[0])
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        C2, S2 = F.quantize_blockwise(A1, S2[1], S2[0])
+        F.dequantize_blockwise(A1, S2[1], S2[0], out=A2)
+    torch.cuda.synchronize()
+    print(time.time() - t0)
+
+def test_blockwise_dynamic_bits():
+    n = 1024
+    diffs = []
+    reldiffs = []
+    for i in range(k):
+        A1 = torch.randn(n, n, device='cuda')
+        C2, S2 = F.quantize_blockwise_dynamic(A1)
+        A2 = F.dequantize_blockwise_dynamic(C2, S2)
+
+        diff = torch.abs(A1-A2)
+        reldiff = diff/torch.abs(A1+1e-8)
+        diffs.append(diff.mean().item())
+        reldiffs.append(reldiff.mean().item())
+        assert diffs[-1] < 0.011
+    print(sum(diffs)/len(diffs))
+    print(sum(reldiffs)/len(reldiffs))

@@ -636,8 +636,8 @@ def quantize_blockwise_dynamic(A: Tensor, absmax: Tensor=None, out: Tensor=None)
 
     if absmax is None:
         n = A.numel()
-        #block_size = 2048
-        block_size = 4096
+        block_size = 2048
+        #block_size = 4096
         blocks = n//block_size
         blocks += 1 if n % block_size > 0 else 0
         absmax = torch.zeros((blocks,), device=device)
@@ -645,9 +645,44 @@ def quantize_blockwise_dynamic(A: Tensor, absmax: Tensor=None, out: Tensor=None)
     if out is None: out = torch.zeros_like(A, dtype=torch.uint8, device=device)
 
     if A.dtype == torch.float32:
-        #lib.cquantize_blockwise_dynamic_fp32_2048b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
-        lib.cquantize_blockwise_dynamic_fp32_4096b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+        lib.cquantize_blockwise_dynamic_fp32_2048b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+        #lib.cquantize_blockwise_dynamic_fp32_4096b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
     else:
         raise ValueError(f'Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}')
 
     return out, absmax
+
+
+def dequantize_blockwise_dynamic(A: Tensor, absmax: Tensor=None, out: Tensor=None,
+                         blocksize: int=2048) -> Tensor:
+    '''
+    Dequantizes blockwise quantized values.
+
+    Dequantizes the tensor A with maximum absolute values absmax in
+    blocks of size 4096.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        The input 8-bit tensor.
+    absmax : torch.Tensor
+        The absmax values.
+    out : torch.Tensor
+        Dequantized output tensor (default: float32)
+
+
+    Returns
+    -------
+    torch.Tensor:
+        Dequantized tensor (default: float32)
+    '''
+    if out is None: out = torch.zeros_like(A, dtype=torch.float32)
+
+    if blocksize not in [2048, 4096]:
+        raise ValueError(f'The blockwise of {blocksize} is not supported. Supported values: [2048 4096]')
+
+    if out.dtype == torch.float32:
+        lib.cdequantize_blockwise_dynamic_fp32_2048b(get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(A.numel()))
+
+
+    return out
