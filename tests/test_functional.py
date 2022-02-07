@@ -213,27 +213,6 @@ def test_igemm(dim1, dim2):
         out2 = torch.mm(A.float(), B.float())
         torch.testing.assert_allclose(out.float(), out2)
 
-#dim1 = torch.randint(32,1024*4, size=(4,)).tolist()
-#dim2 = torch.randint(32,1024*4, size=(4,)).tolist()
-#values = list(product(dim1,dim2))
-#names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
-#@pytest.mark.parametrize("dim1, dim2", values, ids=names)
-#def test_igemmLt(dim1, dim2):
-#    dim1 = dim1 - (dim1 % 32)
-#    dim2 = dim2 - (dim2 % 32)
-#    dim3 = (dim1+dim2)//2
-#    dim3 = dim3 - (dim3 % 32)
-#    for i in range(1):
-#        #A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-#        #B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
-#        A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-#        B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
-#        #out = torch.zeros((dim1, dim3), dtype=torch.int32, device='cuda')
-#        out = F.igemmLt(A, B)
-#        out2 = torch.mm(A.float(), B.float())
-#        torch.testing.assert_allclose(out.float(), out2)
-
-
 def quant(x):
     max1 = torch.abs(x).max()
     x = torch.round(x/max1*127)
@@ -528,44 +507,6 @@ def test_vector_quant(dim1, dim2, dim3):
         A1 = F.vectorwise_dequant(qA, SA)
         torch.testing.assert_allclose(A1, A, atol=0.01, rtol=0.1)
 
-
-
-def test_igemm_bench():
-    batch = 4
-    seq = 512
-    model = 2*1024
-    factor = 8
-    hidden = factor*model
-    dim1 = hidden
-    dim2 = batch*seq
-    dim3 = model
-    A = torch.randn(dim1, dim2, device='cuda')
-    B = torch.randn(dim2, dim3, device='cuda')
-    A = A.half()
-    B = B.half()
-    C = torch.zeros(dim1, dim3, device=A.device, dtype=B.dtype)
-
-
-    for i in range(128):
-        torch.mm(A, B, out=C)
-
-    torch.cuda.synchronize()
-
-    for i in range(1280):
-        torch.mm(A, B, out=C)
-
-    A = torch.randint(-128, 127, size=(dim1, dim2), device='cuda').to(torch.int8)
-    B = torch.randint(-128, 127, size=(dim2, dim3), device='cuda').to(torch.int8)
-    C = torch.zeros(dim1, dim3, device=A.device, dtype=torch.int32)
-
-    for i in range(128):
-        F.igemmLt(A, B, out=C)
-
-    torch.cuda.synchronize()
-
-    #t.tick()
-    for i in range(1280):
-        F.igemmLt(A, B, out=C)
 
 
 n = 2
@@ -1047,7 +988,7 @@ def test_dequant_mm(dim1, dim4, dims, ldb):
 
 
 n = 2
-dim1 = [1*1024]
+dim1 = [2*1024]
 dim2 = [1*1024]
 #dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
@@ -1129,3 +1070,40 @@ def test_double_quant(dim1, dim2, dims):
             print(f'Min error exceeded {num_not_close_rows} elements are different')
             assert False
 
+
+#dim1 = [128]
+#dim4 = [128]
+n = 10
+dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+
+dims = (2,)
+#ldb = list(range(256, 1*1024, 256))
+values = list(product(dim1,dim4,dims))
+names = ['dim1_{0}_dim4_{1}_dims_{2}'.format(*vals) for vals in values]
+k = 10
+@pytest.mark.parametrize("dim1, dim4, dims", values, ids=names)
+def test_integrated_igemmlt(dim1, dim4, dims):
+    inner = torch.randint(1, 128, size=(1,)).item()
+    for i in range(k):
+        A = torch.randn(dim1, inner, device='cuda')*0.1
+        B = torch.randn(dim4, inner, device='cuda')*0.1
+        C1 = torch.matmul(A.half(), B.t().half())
+
+        C1a, C1b, stats1a, stats1b = F.double_quant(A.half())
+        C2a, C2b, stats2a, stats2b = F.double_quant(B.half())
+
+        A2, SA = F.transform(C1a, 'col32')
+        B2, SB = F.transform(C2b, 'col_turing')
+        C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
+
+        F.igemmlt(A2, B2, C2, SA, SB, SC)
+        C5 = F.mm_dequant(C2, SC, stats1b, stats2b)
+
+        n = C1.numel()
+        idx = torch.isclose(C1, C5, atol=0.001, rtol=0.1) == 0
+        num_not_close = idx.sum().item()
+        p_not_close = num_not_close/n
+        #assert p_not_close < 0.02
+        #torch.testing.assert_allclose(C1, C5)
+        #print(C2)
