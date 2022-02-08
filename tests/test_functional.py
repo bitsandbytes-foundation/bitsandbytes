@@ -1071,39 +1071,84 @@ def test_double_quant(dim1, dim2, dims):
             assert False
 
 
-#dim1 = [128]
-#dim4 = [128]
-n = 10
-dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
-dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+# fw
+batch = 2
+seq = 2048
+model = 1024
+hidden = 4*model
 
-dims = (2,)
+# bw
+#batch = 4
+#seq = 1024
+#hidden = 1024
+#model = 4*hidden
+batch_seq = batch*seq
+
+# fw
+dim1 = [batch_seq, batch_seq, batch_seq]
+inner = [4*model, 5*model, 12*model]
+dim4 = [4*hidden, 5*hidden, 12*hidden]
+
+# fw2
+#dim1 = [batch_seq, batch_seq, batch_seq]
+#dim4 = [4*model, 5*model, 12*model]
+#inner = [4*hidden, 5*hidden, 12*hidden]
+
+# grad
+#inner = [batch_seq, batch_seq, batch_seq]
+#dim1 = [4*model, 5*model, 12*model]
+#dim4 = [4*hidden, 5*hidden, 12*hidden]
+
+n = 10
+#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+
+dims = (2,2, 2)
 #ldb = list(range(256, 1*1024, 256))
-values = list(product(dim1,dim4,dims))
-names = ['dim1_{0}_dim4_{1}_dims_{2}'.format(*vals) for vals in values]
-k = 10
-@pytest.mark.parametrize("dim1, dim4, dims", values, ids=names)
-def test_integrated_igemmlt(dim1, dim4, dims):
-    inner = torch.randint(1, 128, size=(1,)).item()
+#values = list(product(dim1,dim4,dims, inner))
+values = list(zip(dim1, dim4, dims, inner))
+names = ['dim1_{0}_dim4_{1}_dims_{2}_inner_{3}'.format(*vals) for vals in values]
+k = 100
+@pytest.mark.parametrize("dim1, dim4, dims, inner", values, ids=names)
+def test_integrated_igemmlt(dim1, dim4, dims, inner):
+    A = torch.randn(dim1, inner, device='cuda')*0.1
+    B = torch.randn(dim4, inner, device='cuda')*0.1
+    A = A.half()
+    B = B.half()
     for i in range(k):
-        A = torch.randn(dim1, inner, device='cuda')*0.1
-        B = torch.randn(dim4, inner, device='cuda')*0.1
         C1 = torch.matmul(A.half(), B.t().half())
 
-        C1a, C1b, stats1a, stats1b = F.double_quant(A.half())
-        C2a, C2b, stats2a, stats2b = F.double_quant(B.half())
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        C1 = torch.matmul(A, B.t())
+    torch.cuda.synchronize()
+    t_fp16 = time.time() - t0
 
-        A2, SA = F.transform(C1a, 'col32')
-        B2, SB = F.transform(C2b, 'col_turing')
-        C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
+
+    C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
+    torch.cuda.synchronize()
+    C1a, C1b, stats1a, stats1b = F.double_quant(A)
+    C2a, C2b, stats2a, stats2b = F.double_quant(B)
+    A2, SA = F.transform(C1a, 'col32')
+    B2, SB = F.transform(C2b, 'col_turing')
+    F.igemmlt(A2, B2, C2, SA, SB, SC)
+    C5 = F.mm_dequant(C2, SC, stats1b, stats2b)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    #print(C1a.numel()/1e6, C1b.numel()/1e6)
+    for i in range(k):
+        S = F.double_quant(A)
+        C1a *= 0
+        C1b *= 0
+        #A2, SA = F.transform(C1a, 'col32')
+        #B2, SB = F.transform(C2b, 'col_turing')
 
         F.igemmlt(A2, B2, C2, SA, SB, SC)
-        C5 = F.mm_dequant(C2, SC, stats1b, stats2b)
+        C5 = F.mm_dequant(C2, SC, stats1b, stats2b, C5)
+    torch.cuda.synchronize()
+    t_i8 = time.time() - t0
 
-        n = C1.numel()
-        idx = torch.isclose(C1, C5, atol=0.001, rtol=0.1) == 0
-        num_not_close = idx.sum().item()
-        p_not_close = num_not_close/n
-        #assert p_not_close < 0.02
-        #torch.testing.assert_allclose(C1, C5)
-        #print(C2)
+    print(t_i8, t_fp16, t_fp16/t_i8, dim1, inner, dim4)
+    #if t_i8 < t_fp16:
+        #print(t_i8, t_fp16, t_fp16/t_i8, dim1, inner, dim4)

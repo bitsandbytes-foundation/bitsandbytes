@@ -994,9 +994,9 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
     out_shape = quant_state[0]
     if len(out_shape) == 3: out_shape = (out_shape[0]*out_shape[1], out_shape[2])
 
-    if out is None: out = torch.zeros(out_shape, dtype=torch.float16, device=A.device)
-    if new_row_stats is None: new_row_stats = torch.zeros(out_shape[0], dtype=torch.float32, device=A.device)
-    if new_col_stats is None: new_col_stats = torch.zeros(out_shape[1], dtype=torch.float32, device=A.device)
+    if out is None: out = torch.empty(out_shape, dtype=torch.float16, device=A.device)
+    if new_row_stats is None: new_row_stats = torch.empty(out_shape[0], dtype=torch.float32, device=A.device)
+    if new_col_stats is None: new_col_stats = torch.empty(out_shape[1], dtype=torch.float32, device=A.device)
     assert new_row_stats.shape[0] == row_stats.shape[0], f"{new_row_stats.shape} vs {row_stats.shape}"
     assert new_col_stats.shape[0] == col_stats.shape[0], f"{new_col_stats.shape} vs {col_stats.shape}"
 
@@ -1035,7 +1035,7 @@ def get_colrow_absmax(A, row_stats=None, col_stats=None):
 
     return row_stats, col_stats
 
-def double_quant(A, row_stats=None, col_stats=None, out_col=None, out_row=None):
+def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None):
     assert A.dtype == torch.half
     assert A.device.type == 'cuda'
 
@@ -1045,14 +1045,9 @@ def double_quant(A, row_stats=None, col_stats=None, out_col=None, out_row=None):
     else:
         rows = A.shape[0]
 
-    #if row_stats is None or col_stats is None:
-        #row_stats, col_stats = get_colrow_absmax(A)
+    if row_stats is None or col_stats is None:
+        row_stats, col_stats = get_colrow_absmax(A)
 
-    row_stats = torch.abs(A.float()).max(1).values
-    col_stats = torch.abs(A.float()).max(0).values
-
-    #if out_col is None: out_col = torch.empty_like(A, dtype=torch.int8)
-    #if out_row is None: out_row = torch.empty_like(A, dtype=torch.int8)
     if out_col is None: out_col = torch.zeros_like(A, dtype=torch.int8)
     if out_row is None: out_row = torch.zeros_like(A, dtype=torch.int8)
 
