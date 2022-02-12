@@ -20,9 +20,12 @@ def get_transform_func(dtype, orderA, orderOut, transpose=False):
         return getattr(lib, name)
 
 def get_transform_buffer(shape, dtype, device, to_order, from_order='row'):
+    #init_func = torch.empty
+    init_func = torch.zeros
+
     state = (shape, to_order)
     if to_order == 'row' or to_order == 'col':
-        return torch.empty(shape, dtype=dtype, device=device), state
+        return init_func(shape, dtype=dtype, device=device), state
     elif to_order == 'col32':
         # blocks of 32 columns (padded)
         cols = shape[-1]
@@ -30,19 +33,19 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order='row'):
         else: rows = shape[0]
 
         cols = cols + (32 - (cols % 32))
-        return torch.empty((rows, cols), dtype=dtype, device=device), state
+        return init_func((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_turing':
         # blocks of 32 columns and 8 rows
         if len(shape) == 3: rows = shape[0]*shape[1]
         else: rows = shape[0]
         cols = shape[-1] + (32 - (shape[-1] % 32))
         rows = rows + (8 - (rows % 8))
-        return torch.empty((rows, cols), dtype=dtype, device=device), state
+        return init_func((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_ampere':
         # blocks of 32 columns and 32 rows
         cols = shape[1] + (32 - (shape[1] % 32))
         rows = shape[0] + (32 - (shape[0] % 32))
-        return torch.empty((rows, cols), dtype=dtype, device=device), state
+        return init_func((rows, cols), dtype=dtype, device=device), state
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     if state is None: state = (A.shape, from_order)
@@ -1062,3 +1065,25 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None):
     return out_col, out_row, col_stats, row_stats
 
 
+
+def transform2(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+    if state is None: state = (A.shape, from_order)
+    else: from_order = state[1]
+    if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1])
+    else: new_state = (state[0], to_order)
+    assert from_order == 'row'
+    assert to_order == 'col32'
+
+    shape = state[0]
+    if len(shape) == 2:
+        dim1 = ct.c_int32(shape[0])
+        dim2 = ct.c_int32(shape[1])
+    else:
+        dim1 = ct.c_int32(shape[0]*shape[1])
+        dim2 = ct.c_int32(shape[2])
+
+    ptrA = get_ptr(A)
+    ptrOut = get_ptr(out)
+    lib.ctransform_row2col32(get_ptr(A), get_ptr(out), dim1, dim2)
+
+    return out, new_state

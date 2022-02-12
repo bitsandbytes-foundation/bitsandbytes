@@ -199,6 +199,9 @@ extern "C"
 
   void cdouble_rowcol_quant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int rows, int cols)
 	{ doubleRowColQuant(A, rowStats, colStats, out_col_normed, out_row_normed, rows, cols); }
+
+	void ctransform_row2col32(char * A, char *out, int rows, int cols)
+	{ transformRowToCol32(A, out, rows, cols); }
 }
 
 

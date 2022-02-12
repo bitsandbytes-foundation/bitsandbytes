@@ -1919,7 +1919,6 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
   }
 }
 
-template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __global__ void kDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int rows, int cols, int tiledCols)
 {
@@ -1971,10 +1970,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __glo
     if(base_row + row >= rows){ break; }
     int i = base_idx + (row*cols);
     int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
-    //if(threadIdx.x == 0)
-    // each thread gets data from the same column
-    //if(blockIdx.x == 0 && row == 0)
-      //printf("%i %i\n", threadIdx.x, i);
     LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
     float row_stat = __fdividef(127.0f, smem_row_stats[row]);
 
@@ -2002,14 +1997,109 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __glo
     StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
 
   }
-
 }
 
-template __global__ void kDoubleRowColQuant<64, 4, 16, 64*4>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int rows, int cols, int tiledCols);
+
+
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE> __global__ void kTransformRowToCol32(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols)
+{
+
+  // 0. Load data into 32*32 shared memory tiles
+  // 1. transpose / reorder in shared memory
+  // 2. store
+
+  // TURING FORMAT:
+  // 8*32 tiles with 4*4 subtiles
+  // the 8*32 subtile has first all 4*4 subtiles of even rows (max 4*4*4 = 64 elements)
+  // the subsequent 4*4 subtiles are for all odd rows if some rows columns are empty the values are zero
+  // the tile repeats again after the 8*32 tile in a major column order, meaning: (next 8 rows are A[8:16, 0:32])
+  // the next tile is the next 8 rows for the same 32 columns. Once all rows are finished, the column
+  // index increases by 32
+
+  // AMPERE FORMAT:
+  // 32*32 tiles with 8*32 subtiles. The rows are interleaved in pairs of two rows with offset of 8 between pairs of two rows:
+  // row idx (each number stands for 32 values): [1 2 9 10 17 18 25 26] [3 4 11 12 19 20 27 28]...
+  // the tiles are column-major ordered, so after 1024*1024 values we process: A[32:64, 0:32]
+
+
+  // To have efficient loads and stores if we transpose we need 128 consequitive bytes which at 1 byte are 128 values
+  // As such we need: 
+  // at least 32*4 shared memory tiles for col32; preferably 32*32
+  // at least 32*6 shared memory tiles for col32_ampere: preferably 32*32
+  // at least 32*8 shared memory tiles for col4_turing: preferably 32*32
+  // for efficient loading of row major we need to load 128 elements and repeat this 32 items
+  // this would imply a 32x128 shared memory tile -> 4kb
+  // It is more efficient to have more than 1 warp, so with 64 threads we need 32x128 -> 8 kb
+  // we have 64k sharded mem per SM in Turing which is 8 blocks per SM which is 2*8 = 32 warps = 100% occupancy
+  // for turing and 50% for A100 and 75% for RTX 30s / A40 which is probably good enough
+  // register pressure should be low with: 8 registers from local memoryh per block and 64 registers per SM
+  // 
+  // to make the shared memory work with that occupancy we might need to union the block loads/stores
+
+  // each block loads TILE_COLs columns and TILE_ROW rows
+  // after reading a tile the row counter increase by TILE_ROWS
+  // the col counter reset after reading TILE_COL elements
+  const int base_row = ((blockIdx.x*TILE_COLS)/tiledCols)*TILE_ROWS;
+  // col increases by TILE_SIZE for each block and wraps back to 0 after tiledCols is reached
+  const int base_col = (blockIdx.x*TILE_COLS) % tiledCols;
+  const int base_idx = (base_row*cols) + base_col;
+  const int items_per_load = ITEMS_PER_THREAD*THREADS;
+
+  typedef cub::BlockLoad<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadInt8;
+  __shared__ typename LoadInt8::TempStorage loadint8;
+  typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
+  __shared__ typename StoreInt8::TempStorage storeint8;
+
+  char local_data[ITEMS_PER_THREAD];
+  __shared__ smem_data[32*32];
+
+  // we load row after row from the base_position
+  // Load data row by row
+  int smem_row = 0;
+  for(int row = 0; row < TILE_ROWS; row++)
+  {
+    int i = base_idx + (row*cols);
+    int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
+
+    // 0. Load data into 32*32 shared memory tiles
+    if(base_row + row < rows)
+    {
+      LoadInt8(loadint8).Load(&(A[i]), local_data, valid_items, 0);
+
+      #pragma unroll ITEMS_PER_THREAD
+      for(int j = 0; j < ITEMS_PER_THREAD; j++)
+        smem_data[(smem_row*items_per_load) + (threadIdx.x*blockDim.x*j) + j] = local_data[j];
+    }
+    else
+    {
+      #pragma unroll ITEMS_PER_THREAD
+      for(int j = 0; j < ITEMS_PER_THREAD; j++)
+        smem_data[(smem_row*items_per_load) + (threadIdx.x*blockDim.x*j) + j] = 0;
+    }
+
+    smem_row += 1;
+
+    // 1. transpose / reorder in shared memory
+    if(smem_row == 32)
+    {
+      // 2. store
+      StoreInt8(storeint8).Store(&(out[i]), local_data, valid_items);
+    }
+
+
+  }
+}
+
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
+
+template __global__ void kTransformRowToCol32<64, 4, 8, 64*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols);
+
+template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
+
+template __global__ void kDoubleRowColQuant<64, 4, 16, 64*4>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int rows, int cols, int tiledCols);
 
 template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template __device__ unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
