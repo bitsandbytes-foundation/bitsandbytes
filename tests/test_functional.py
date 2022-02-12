@@ -235,36 +235,6 @@ def test_managed():
     assert (C==289).sum().item() == n*n
 
 
-
-k = 1
-def test_stream_quant():
-    diffs = []
-    reldiffs = []
-    n = 1024*80
-    print(n*n/2147483647)
-    for i in range(k):
-        A1 = F.get_managed(n, n, dtype=torch.float32)
-        out = F.get_managed(n, n, dtype=torch.uint8)
-        F.fill(A1, 1.0)
-        b = torch.zeros(1024*1024*1024*5, device='cuda')
-        torch.cuda.synchronize()
-        #C1, S1 = F.quantize_blockwise(A1, out=out, is_managed=True)
-        #print(S1[0].numel())
-
-        #A2 = torch.arange(n*n).view(n, n).float().cuda()
-        #C2, S2 = F.quantize_blockwise(A2)
-
-        #torch.testing.assert_allclose(C1, C2.cpu(), atol=1, rtol=0)
-
-        #A2 = F.dequantize_blockwise(C, S)
-        #diff = torch.abs(A1-A2)
-        #reldiff = diff/torch.abs(A1+1e-8)
-        #diffs.append(diff.mean().item())
-        #reldiffs.append(reldiff.mean().item())
-        #assert diffs[-1] < 0.011
-    #print(sum(diffs)/len(diffs))
-    #print(sum(reldiffs)/len(reldiffs))
-
 def get_binary_code():
     values = list(product([0, 1], repeat=8))
     values.sort()
@@ -300,81 +270,6 @@ def get_binary_code():
     #print(x[:-1] - x[1:])
     data = [v[1] for v in data]
     return torch.Tensor(data).float()
-
-
-
-
-k = 1
-def test_binary_encoding():
-    diffs = []
-    reldiffs = []
-    n = 8
-    code = get_binary_code().cuda()
-    #print(code)
-    values, idx = torch.sort(code)
-    #print(values)
-    A1 = torch.randn(n, n).cuda()
-    #A1 = torch.arange(n*n).float().view(n, n).cuda()
-    #A1 = torch.pow(A1, 5.0)
-    #A1 /= A1.max()
-    C1, S1 = F.quantize_blockwise(A1, code=values)
-    C2, S2 = F.quantize_blockwise_dynamic(A1)
-    B3 = F.dequantize_blockwise(C1, S1)
-    A2 = values[C1.flatten().long()].view(C2.shape)
-    C1 = idx[C1.flatten().long()].view(C2.shape)
-    B2 = code[C2.flatten().long()].view(C2.shape)
-    A2 = code[C1.flatten().long()].view(C2.shape)
-    start = 0
-    B2 = B2.flatten()
-    block_size = 4096
-    for i, end in enumerate(range(block_size, A1.numel()+block_size-1, block_size)):
-        print(start, end)
-        B2[start:end] *= S2[i]
-        start = end
-
-    B2 = B2.view(A1.shape)
-
-    #B5 = F.dequantize_blockwise(C2, (S2, values))
-
-    #torch.testing.assert_allclose(C1, C2)
-    #print(B3)
-    #print(B2)
-    #print(B5)
-
-    #print(A1)
-    #print(B2)
-    #print(C1.dtype, C2.dtype)
-    C1 = C1.byte()
-    idx = torch.isclose(C1.flatten(), C2.flatten()) == 0
-    idx2 = torch.where(C1.flatten()==idx)[0]
-    val1 = B3.flatten()[idx]
-    val2 = B2.flatten()[idx]
-    val3 = A1.flatten()[idx]
-    for i, (n1, n2, n3) in enumerate(zip(val1, val2, val3)):
-        print(torch.abs(n3-n1), torch.abs(n3-n2), n1, n2, n3)
-        if i == 100: break
-
-    val, idx = torch.sort(torch.abs(val3-val2), descending=True)
-    C3, S3 = F.quantize_blockwise(A1)
-    B1 = F.dequantize_blockwise(C3, S3)
-    print(val[:5])
-    print(C1.flatten()[idx[:5]])
-    print(C2.flatten()[idx[:5]])
-    print(A2.flatten()[idx[:5]])
-    print(A1.flatten()[idx[:5]])
-    #print(A1.flatten()[idx[:5]])
-    print(val1[idx[:5]])
-    print(val2[idx[:5]]*S2[0])
-    print(val3[idx[:5]])
-    print(S2[:10])
-    print(S1[0][:10])
-    #print(S2.shape, S3[0].shape)
-
-    err1 = torch.abs(A1-B1).mean()
-    err2 = torch.abs(A1-(B2)).mean()
-    err3 = torch.abs(A1-B3).mean()
-    print(err1, err2, err3)
-
 
 
 
