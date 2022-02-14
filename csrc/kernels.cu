@@ -2008,6 +2008,9 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   // 1. transpose / reorder in shared memory
   // 2. store
 
+  // COL32 FORMAT:
+  // rows*32 tiles
+
   // TURING FORMAT:
   // 8*32 tiles with 4*4 subtiles
   // the 8*32 subtile has first all 4*4 subtiles of even rows (max 4*4*4 = 64 elements)
@@ -2051,7 +2054,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   __shared__ typename StoreInt8::TempStorage storeint8;
 
   char local_data[ITEMS_PER_THREAD];
-  __shared__ smem_data[32*32];
+  __shared__ char smem_data[32*items_per_load];
 
   // we load row after row from the base_position
   // Load data row by row
@@ -2068,22 +2071,39 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 
       #pragma unroll ITEMS_PER_THREAD
       for(int j = 0; j < ITEMS_PER_THREAD; j++)
-        smem_data[(smem_row*items_per_load) + (threadIdx.x*blockDim.x*j) + j] = local_data[j];
+        smem_data[(smem_row*items_per_load) + (ITEMS_PER_THREAD*threadIdx.x) + j] = local_data[j];
     }
     else
     {
       #pragma unroll ITEMS_PER_THREAD
       for(int j = 0; j < ITEMS_PER_THREAD; j++)
-        smem_data[(smem_row*items_per_load) + (threadIdx.x*blockDim.x*j) + j] = 0;
+        smem_data[(smem_row*items_per_load) + (ITEMS_PER_THREAD*threadIdx.x) + j] = 0;
     }
+
 
     smem_row += 1;
 
     // 1. transpose / reorder in shared memory
-    if(smem_row == 32)
+    if(smem_row % 32 == 0)
     {
+      smem_row = 0;
+      __syncthreads();
       // 2. store
-      StoreInt8(storeint8).Store(&(out[i]), local_data, valid_items);
+      int warps = blockDim.x/32;
+      int warpid = threadIdx.x/32;
+      int warplane = threadIdx.x % 32;
+      for(int subrow = warpid; subrow < 32; subrow+=warps)
+      {
+        for(int col = base_col; col < ITEMS_PER_THREAD; col+=32)
+        {
+          if(((base_row+subrow) < rows) && (col+warplane < tiledCols))
+          {
+            // 2. store
+            char data = smem_data[(subrow*items_per_load) + col + warplane];
+            out[(base_row+subrow)*32 + (col*rows)+warplane] = data;
+          }
+        }
+      }
     }
 
 
@@ -2095,7 +2115,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kTransformRowToCol32<64, 4, 8, 64*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols);
+template __global__ void kTransformRowToCol32<64, 4, 32, 64*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols);
 
 template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 

@@ -1156,10 +1156,10 @@ def test_integrated_igemmlt(dim1, dim4, dims, inner):
 
 
 n = 2
-#dim1 = torch.randint(2,256, size=(n,)).tolist()
-#dim2 = torch.randint(2,256, size=(n,)).tolist()
-#dim3 = torch.randint(2,256, size=(n,)).tolist()
-dim1, dim2, dim3 = (63,), (33,), (4,)
+dim1 = torch.randint(2,1024, size=(n,)).tolist()
+dim2 = torch.randint(2,1024, size=(n,)).tolist()
+dim3 = torch.randint(2,1024, size=(n,)).tolist()
+#dim1, dim2, dim3 = (1,), (129,), (8,)
 dtype = [torch.int8]
 a_order = ['row']
 out_order = ['col32']
@@ -1178,14 +1178,14 @@ def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
 
     #A[8] *= -1
     #out1, S1 = F.transform(A, to_order=orderOut)
-    out1, S1 = F.transform(A, to_order='col_ampere')
+    out1, S1 = F.transform(A, to_order='col32')
     out2, S2 = F.transform2(A, to_order=orderOut)
-    print('')
+    assert (out1!=0).sum().item() == A.numel()
+    #print('')
     #print(A)
-    print(A[:, 32:])
-    print(out1.flatten()[32*32:])
-    print(out1.shape)
-    #print(out2.flatten())
+    #print(out1)
+    #print(out2)
+    #print(out1.shape)
 
     #torch.testing.assert_allclose(out1, out2)
 

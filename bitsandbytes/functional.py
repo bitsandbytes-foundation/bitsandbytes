@@ -32,7 +32,7 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order='row'):
         if len(shape) == 3: rows = shape[0]*shape[1]
         else: rows = shape[0]
 
-        cols = cols + (32 - (cols % 32))
+        cols = 32*((cols+31)//32)
         return init_func((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_turing':
         # blocks of 32 columns and 8 rows
