@@ -617,20 +617,21 @@ void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col
 
 void transformRowToCol32(char * A, char *out, int rows, int cols)
 {
-  int threads = 64;
-  int items_per_thread = 4;
-  int tile_cols = threads*items_per_thread;
+  int threads = 256;
+  int items_per_thread = 8;
+  // we load 128 column values per warp
+  int tile_cols = 32*items_per_thread;
   int tile_rows = 32;
   int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
   int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
   int outCols = fill_up_to_nearest_multiple(cols, 32);
 
-  //cout << cols << " " << tiledCols << " " << tiledRows << endl;
+  //cout << cols << " " << tiledCols << " " << tiledRows <<  " " << outCols << endl;
   //cout << "num blocks " << num_blocks << endl;
 
   //cout << A << " " << out_col_normed << endl;
-  kTransformRowToCol32<64, 4, 32, 64*4, 0><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outCols);
+  kTransformRowToCol32<256, 8, 32, 32*8, 0><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

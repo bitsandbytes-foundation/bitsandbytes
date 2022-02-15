@@ -1156,10 +1156,12 @@ def test_integrated_igemmlt(dim1, dim4, dims, inner):
 
 
 n = 10
-dim1 = torch.randint(2,1024, size=(n,)).tolist()
-dim2 = torch.randint(2,1024, size=(n,)).tolist()
-#dim1 = [1015]
-#dim2 = [649]
+#dim1 = torch.randint(2,1024, size=(n,)).tolist()
+#dim2 = torch.randint(2,1024, size=(n,)).tolist()
+dim1 = [8*1024]
+dim2 = [4*1024]
+#dim1 = [1]
+#dim2 = [129]
 
 dim3 = [0]
 dtype = [torch.int8]

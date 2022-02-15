@@ -2046,63 +2046,72 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   // col increases by TILE_SIZE for each block and wraps back to 0 after tiledCols is reached
   const int base_col = (blockIdx.x*TILE_COLS) % tiledCols;
   const int base_idx = (base_row*cols) + base_col;
-  const int items_per_load = ITEMS_PER_THREAD*THREADS;
 
-  typedef cub::BlockLoad<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadInt8;
-  __shared__ typename LoadInt8::TempStorage loadint8;
-  typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
-  __shared__ typename StoreInt8::TempStorage storeint8;
-
+  // we load 128 bytes per warp with
+  // 32 rows for transposes that fill col32 types
+  // so that we can have contiguous stores
+  __shared__ char smem_data[32*32*ITEMS_PER_THREAD];
+  //char4 local_data[ITEMS_PER_THREAD];
   char local_data[ITEMS_PER_THREAD];
-  __shared__ char smem_data[32*items_per_load];
 
   // we load row after row from the base_position
   // Load data row by row
   int smem_row = 0;
-  for(int row = 0; row < TILE_ROWS; row++)
+  int warps = blockDim.x/32;
+  int warp_id = threadIdx.x/32;
+  int warp_lane = threadIdx.x % 32;
+  int col32offset = (base_col/32)*(32*rows);
+  // each warp loads one row of 128 bytes
+  char4 *data32 = reinterpret_cast<char4*>(A);
+  for(int row = warp_id; row < TILE_ROWS; row+=warps)
   {
     int i = base_idx + (row*cols);
-    int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
+    // we load up to 128 bytes/items per load
+    int valid_items = cols - base_col > 32*ITEMS_PER_THREAD ? 32*ITEMS_PER_THREAD : cols - base_col;
 
     // 0. Load data into 32*32 shared memory tiles
     if(base_row + row < rows)
     {
-      LoadInt8(loadint8).Load(&(A[i]), local_data, valid_items, 0);
+      #pragma unroll ITEMS_PER_THREAD
+      for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      {
+        int col_idx = warp_lane+(j*32);
+        if(col_idx < valid_items)
+          local_data[j] = A[i+col_idx];
+        else
+          local_data[j] = 0;
+      }
 
       #pragma unroll ITEMS_PER_THREAD
       for(int j = 0; j < ITEMS_PER_THREAD; j++)
-        smem_data[(smem_row*items_per_load) + (ITEMS_PER_THREAD*threadIdx.x) + j] = local_data[j];
+        smem_data[row*32*ITEMS_PER_THREAD + (warp_lane) + (j*32)] = local_data[j];
     }
     else
     {
       #pragma unroll ITEMS_PER_THREAD
       for(int j = 0; j < ITEMS_PER_THREAD; j++)
-        smem_data[(smem_row*items_per_load) + (ITEMS_PER_THREAD*threadIdx.x) + j] = 0;
+        smem_data[row*32*ITEMS_PER_THREAD + (warp_lane) + (j*32)] = 0;
     }
+    //else{}
 
 
-    smem_row += 1;
+    smem_row += warps;
 
     // 1. transpose / reorder in shared memory
     if(smem_row % 32 == 0)
     {
       smem_row = 0;
       __syncthreads();
-      int warps = blockDim.x/32;
-      int warpid = threadIdx.x/32;
-      int warplane = threadIdx.x % 32;
-      int col32offset = (base_col/32)*(32*rows);
-      for(int subrow = warpid; subrow < 32; subrow+=warps)
+      for(int subrow = warp_id; subrow < 32; subrow+=warps)
       {
-        for(int col = 0; col < ITEMS_PER_THREAD*warps; col++)
+        for(int col = 0; col < ITEMS_PER_THREAD; col++)
         {
 
           // 2. store
-          if(((base_row+subrow) < rows) && (base_col+(col*32)+warplane < outCols))
+          if(((base_row+subrow) < rows) && (base_col+(col*32)+warp_lane < outCols))
           {
-            // 2. store
-            char data = smem_data[(subrow*items_per_load) + (col*32) + warplane];
-            out[col32offset+(base_row+subrow)*32 + ((col)*rows*32)+warplane] = data;
+            char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (col*32) + warp_lane];
+            out[col32offset+(base_row+subrow)*32 + ((col)*rows*32)+warp_lane] = data;
           }
         }
       }
@@ -2117,7 +2126,21 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kTransformRowToCol32<64, 4, 32, 64*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<64, 16, 32, 32*16, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<64, 8, 32, 32*8, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<64, 4, 32, 32*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+
+template __global__ void kTransformRowToCol32<128, 16, 32, 32*16, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<128, 8, 32, 32*8, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<128, 4, 32, 32*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+
+template __global__ void kTransformRowToCol32<256, 16, 32, 32*16, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<256, 8, 32, 32*8, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<256, 4, 32, 32*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+
+template __global__ void kTransformRowToCol32<512, 16, 32, 32*16, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<512, 8, 32, 32*8, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToCol32<512, 4, 32, 32*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
 
 template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 
