@@ -2051,18 +2051,17 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   // 32 rows for transposes that fill col32 types
   // so that we can have contiguous stores
   __shared__ char smem_data[32*32*ITEMS_PER_THREAD];
-  //char4 local_data[ITEMS_PER_THREAD];
   char local_data[ITEMS_PER_THREAD];
 
   // we load row after row from the base_position
   // Load data row by row
-  int smem_row = 0;
   int warps = blockDim.x/32;
   int warp_id = threadIdx.x/32;
   int warp_lane = threadIdx.x % 32;
   int col32offset = (base_col/32)*(32*rows);
+
+  int smem_row = 0;
   // each warp loads one row of 128 bytes
-  char4 *data32 = reinterpret_cast<char4*>(A);
   for(int row = warp_id; row < TILE_ROWS; row+=warps)
   {
     int i = base_idx + (row*cols);
@@ -2086,14 +2085,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
       for(int j = 0; j < ITEMS_PER_THREAD; j++)
         smem_data[row*32*ITEMS_PER_THREAD + (warp_lane) + (j*32)] = local_data[j];
     }
-    else
-    {
-      #pragma unroll ITEMS_PER_THREAD
-      for(int j = 0; j < ITEMS_PER_THREAD; j++)
-        smem_data[row*32*ITEMS_PER_THREAD + (warp_lane) + (j*32)] = 0;
-    }
-    //else{}
-
 
     smem_row += warps;
 
@@ -2116,8 +2107,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
         }
       }
     }
-
-
   }
 }
 
