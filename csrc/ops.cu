@@ -626,7 +626,7 @@ void transformRowToCol32(char * A, char *out, int rows, int cols)
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
 
   //cout << cols << " " << tiledCols << " " << tiledRows << endl;
-  //cout << "num blocks " << num_blocks << endl;
+  cout << "num blocks " << num_blocks << endl;
 
   //cout << A << " " << out_col_normed << endl;
   kTransformRowToCol32<64, 4, 32, 64*4, 0><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols);

@@ -2088,19 +2088,25 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
     {
       smem_row = 0;
       __syncthreads();
-      // 2. store
       int warps = blockDim.x/32;
       int warpid = threadIdx.x/32;
       int warplane = threadIdx.x % 32;
+      int col32offset = (base_col/32)*(32*rows);
       for(int subrow = warpid; subrow < 32; subrow+=warps)
       {
-        for(int col = base_col; col < ITEMS_PER_THREAD; col+=32)
+        for(int col = 0; col < ITEMS_PER_THREAD*warps; col++)
         {
-          if(((base_row+subrow) < rows) && (col+warplane < tiledCols))
+
+          // 2. store
+          if(((base_row+subrow) < rows) && (base_col+(col*32)+warplane < tiledCols))
           {
             // 2. store
-            char data = smem_data[(subrow*items_per_load) + col + warplane];
-            out[(base_row+subrow)*32 + (col*rows)+warplane] = data;
+
+            char data = smem_data[(subrow*items_per_load) + (col*32) + warplane];
+            //if(warpid.x == 0)
+              //if(data != 0)
+                //printf("%i %d\n", threadIdx.x, data);
+            out[col32offset+(base_row+subrow)*32 + ((col)*rows*32)+warplane] = data;
           }
         }
       }

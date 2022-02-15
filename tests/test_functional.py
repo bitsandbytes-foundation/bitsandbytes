@@ -1155,11 +1155,14 @@ def test_integrated_igemmlt(dim1, dim4, dims, inner):
 
 
 
-n = 2
-dim1 = torch.randint(2,1024, size=(n,)).tolist()
-dim2 = torch.randint(2,1024, size=(n,)).tolist()
-dim3 = torch.randint(2,1024, size=(n,)).tolist()
-#dim1, dim2, dim3 = (1,), (129,), (8,)
+n = 10
+#dim1 = torch.randint(2,1024, size=(n,)).tolist()
+#dim2 = torch.randint(2,1024, size=(n,)).tolist()
+#dim3 = torch.randint(2,1024, size=(n,)).tolist()
+dim1 = [1015]
+dim2 = [649]
+
+dim3 = [0]
 dtype = [torch.int8]
 a_order = ['row']
 out_order = ['col32']
@@ -1167,27 +1170,27 @@ transpose = [False]
 dims = [2]
 values = list(product(dim1,dim2,dim3, dims,dtype, a_order, out_order, transpose))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_{7}'.format(*vals) for vals in values]
+k = 100
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose", values, ids=names)
 def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
-    func = F.get_transform_func(dtype, orderA, orderOut, transpose)
+    for i in range(k):
+        if dims == 2:
+            A = torch.randint(10, 99, size=(dim1, dim2), device='cuda').to(dtype)
+        elif dims == 3:
+            A = torch.randint(10, 99, size=(dim1, dim2, dim3), device='cuda').to(dtype)
 
-    if dims == 2:
-        A = torch.randint(10, 99, size=(dim1, dim2), device='cuda').to(dtype)
-    elif dims == 3:
-        A = torch.randint(10, 99, size=(dim1, dim2, dim3), device='cuda').to(dtype)
+        #A[8] *= -1
+        #out1, S1 = F.transform(A, to_order=orderOut)
+        out1, S1 = F.transform(A, to_order='col32')
+        out2, S2 = F.transform2(A, to_order=orderOut)
+        assert (out1!=0).sum().item() == A.numel()
+        #print('')
+        #print(A)
+        #print(out1)
+        #print(out2)
+        #print(out1.shape)
 
-    #A[8] *= -1
-    #out1, S1 = F.transform(A, to_order=orderOut)
-    out1, S1 = F.transform(A, to_order='col32')
-    out2, S2 = F.transform2(A, to_order=orderOut)
-    assert (out1!=0).sum().item() == A.numel()
-    #print('')
-    #print(A)
-    #print(out1)
-    #print(out2)
-    #print(out1.shape)
-
-    #torch.testing.assert_allclose(out1, out2)
+        torch.testing.assert_allclose(out1, out2)
 
 
 
