@@ -624,12 +624,13 @@ void transformRowToCol32(char * A, char *out, int rows, int cols)
   int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
   int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
+  int outCols = fill_up_to_nearest_multiple(cols, 32);
 
   //cout << cols << " " << tiledCols << " " << tiledRows << endl;
-  cout << "num blocks " << num_blocks << endl;
+  //cout << "num blocks " << num_blocks << endl;
 
   //cout << A << " " << out_col_normed << endl;
-  kTransformRowToCol32<64, 4, 32, 64*4, 0><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols);
+  kTransformRowToCol32<64, 4, 32, 64*4, 0><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

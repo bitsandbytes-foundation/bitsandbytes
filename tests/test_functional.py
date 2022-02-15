@@ -1156,11 +1156,10 @@ def test_integrated_igemmlt(dim1, dim4, dims, inner):
 
 
 n = 10
-#dim1 = torch.randint(2,1024, size=(n,)).tolist()
-#dim2 = torch.randint(2,1024, size=(n,)).tolist()
-#dim3 = torch.randint(2,1024, size=(n,)).tolist()
-dim1 = [1015]
-dim2 = [649]
+dim1 = torch.randint(2,1024, size=(n,)).tolist()
+dim2 = torch.randint(2,1024, size=(n,)).tolist()
+#dim1 = [1015]
+#dim2 = [649]
 
 dim3 = [0]
 dtype = [torch.int8]
@@ -1170,7 +1169,7 @@ transpose = [False]
 dims = [2]
 values = list(product(dim1,dim2,dim3, dims,dtype, a_order, out_order, transpose))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_{7}'.format(*vals) for vals in values]
-k = 100
+k = 1
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose", values, ids=names)
 def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     for i in range(k):
@@ -1189,6 +1188,7 @@ def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
         #print(out1)
         #print(out2)
         #print(out1.shape)
+        #print(out2.shape)
 
         torch.testing.assert_allclose(out1, out2)
 
