@@ -202,6 +202,9 @@ extern "C"
 
 	void ctransform_row2col32(char * A, char *out, int rows, int cols)
 	{ transformRowToCol32(A, out, rows, cols); }
+
+	void ccopy(char *A, char *out, int n)
+	{ char_copy(A, out, n); }
 }
 
 

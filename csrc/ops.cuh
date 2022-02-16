@@ -207,6 +207,7 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int co
 void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int rows, int cols);
 
 void transformRowToCol32(char * A, char *out, int rows, int cols);
+void char_copy(char *A, char *out, int n);
 
 #endif
 

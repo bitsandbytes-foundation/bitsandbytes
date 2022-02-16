@@ -1196,3 +1196,15 @@ def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
 
 
 
+
+def test_copy():
+    dim1 = 4*1024
+    dim2 = 8*1024
+    A = torch.randint(10, 99, size=(dim1, dim2), device='cuda').to(torch.int8)
+
+    for i in range(1):
+        out = F.char_copy(A)
+
+    torch.testing.assert_allclose(A, out)
+
+

@@ -1087,3 +1087,9 @@ def transform2(A, to_order, from_order='row', out=None, transpose=False, state=N
     lib.ctransform_row2col32(get_ptr(A), get_ptr(out), dim1, dim2)
 
     return out, new_state
+
+def char_copy(A, out=None):
+    if out is None: out = torch.zeros_like(A)
+    lib.ccopy(get_ptr(A), get_ptr(out), ct.c_int32(A.numel()))
+    return out
+

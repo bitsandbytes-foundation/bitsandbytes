@@ -635,6 +635,15 @@ void transformRowToCol32(char * A, char *out, int rows, int cols)
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+void char_copy(char *A, char *out, int n)
+{
+  int threads = 1024;
+  int num_per_load = 4*2;
+  int blocks = (n+threads-1)/threads;
+  kCopyInt8<<<blocks/num_per_load, threads>>>(A, out, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================

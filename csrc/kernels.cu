@@ -2110,6 +2110,27 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   }
 }
 
+#define ITEMS 2
+__global__ void kCopyInt8(char *A, char *out, int n)
+{
+  //typedef cub::BlockLoad<char4, 512, ITEMS, cub::BLOCK_LOAD_VECTORIZE> Load;
+  //typedef cub::BlockStore<char4, 512, ITEMS, cub::BLOCK_STORE_VECTORIZE> Store;
+  //__shared__ typename Load::TempStorage load;
+  //__shared__ typename Store::TempStorage store;
+  //char4 data[ITEMS];
+  //const int tid = (blockIdx.x*blockDim.x);
+  //for(int i = tid; i < n/4; i+= (blockDim.x*gridDim.x))
+  //{
+  //  Load(load).Load(&(reinterpret_cast<char4*>(A)[i]), data);
+  //  Store(store).Store(&(reinterpret_cast<char4*>(out)[i]), data);
+  //}
+
+  const int tid = (blockIdx.x*blockDim.x) + threadIdx.x;
+  for(int i = tid; i < n/8; i+= (blockDim.x*gridDim.x))
+    reinterpret_cast<int2*>(out)[tid] = reinterpret_cast<int2*>(A)[tid];
+
+}
+
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
