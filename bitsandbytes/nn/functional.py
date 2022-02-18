@@ -24,14 +24,15 @@ import einops
 Tensor = torch.Tensor
 
 
-def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, num_splits=1) -> Tensor:
+def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, num_splits=1, quant_type='vector', index=None) -> Tensor:
     if num_splits == 2:
         split_size = input.shape[-1]//2
         split_inp = torch.split(input, split_size, dim=2)
         split_weight = torch.split(weight, split_size, dim=1)
         out = bnb.matmul(split_inp[0], split_weight[0].t()) + bnb.matmul(split_inp[1], split_weight[1].t())
     else:
-        out = bnb.matmul(input, weight.t())
+        out, test = bnb.matmul(input, weight.t(), None, quant_type, [8, 8, 8], index)
+        print(test)
     if bias is not None:
         out += bias.unsqueeze(0).expand_as(out)
     return out
@@ -252,6 +253,7 @@ def multi_head_attention_forward8bit(
     if args is not None:
         perc = getattr(args, 'sparse_perc', 6)
 
+    #print('aaaa', perc, sparse_decomp)
     # top magnitude of the distribution in steps of 1/256, so 2.56 steps per percent
     perc = int(2.56*perc)
 
@@ -361,9 +363,20 @@ def multi_head_attention_forward8bit(
                 #q = linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
                 #k = linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
                 #v = linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
+                snorm = getattr(args, 'snorm', 'none')
+                if 'q' in snorm: query = query-torch.mean(query, [0, 1]).unsqueeze(0).unsqueeze(0)
+                if 'k' in snorm: key = key-torch.mean(key, [0, 1]).unsqueeze(0).unsqueeze(0)
+                if 'v' in snorm: value = value-torch.mean(value, [1, 2]).unsqueeze(1).unsqueeze(2)
                 q = sparse_decomposed_linear8bit(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim],sparse_decomp=sparse_decomp, percentage=perc)
                 k = sparse_decomposed_linear8bit(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)],sparse_decomp=sparse_decomp, percentage=perc)
                 v = sparse_decomposed_linear8bit(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :],sparse_decomp=sparse_decomp, percentage=perc)
+                #if iters % 500 == 0:
+                #    mq = torch.mean(q, [0, 1])
+                #    mk = torch.mean(k, [0, 1])
+                #    stdq = torch.std(q, [0, 1])
+                #    stdk = torch.std(k, [0, 1])
+                #    for i, (qval, kval, qval2, kval2) in enumerate(zip(mq, mk, stdq, stdk)):
+                #        print(iters, i, (qval.item(), qval2.item()), (kval.item(), kval2.item()))
             else:
                 if 'q' in attention_type:
                     query = apply_squash_func(query, args.attention_func)

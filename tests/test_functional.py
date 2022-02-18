@@ -561,3 +561,44 @@ def test_cutlass_bench():
     torch.cuda.synchronize()
 
 
+
+def test_row_matmul():
+    A = torch.rand(32, 32).half().cuda()
+    B = torch.rand(32, 32).half().cuda()
+
+    C1 = torch.matmul(A, B)
+    C2 = bnb.matmul(A, B, None, 'vector')
+    C3 = bnb.matmul(A, B, None, 'row')
+    C4 = bnb.matmul(A, B, None, 'linear')
+
+    print(C1)
+    print(C2)
+    print(C3)
+    print(C4)
+
+    print(torch.abs((C1-C2)).mean())
+    print(torch.abs((C1-C3)).mean())
+    print(torch.abs((C1-C4)).mean())
+
+
+
+def test_overflow():
+    batch = 4
+    seq = 512
+    model = 1024
+    hidden = 8*model
+    A = torch.randn(batch*seq, model, device='cuda')
+    B = torch.randn(model, hidden, device='cuda')
+    A = torch.round(A/torch.abs(A).max()*127).to(torch.int8)
+    B = torch.round(B/torch.abs(A).max()*127).to(torch.int8)
+    for i in range(127):
+        A = torch.clip(A, -128+i, 127-i)
+        B = torch.clip(B, -128+i, 127-i)
+        C = F.igemm(A, B)/127
+        n = C.numel()
+        overflows = (C>127).sum().item()
+        underflows = (C<-128).sum().item()
+
+        print(overflows/n, underflows/n, i, A.min(), A.max())
+
+

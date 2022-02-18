@@ -837,7 +837,7 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
         max1 = torch.abs(x).max().float()
         xq = torch.round(x/max1*127).to(torch.int8)
         return xq, max1
-    elif quant_type == 'vector':
+    elif quant_type in ['vector', 'row']:
         max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
         xq = torch.round(x/max1*C).to(torch.int8)
         return xq, max1
@@ -870,6 +870,15 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
         norm = S1*S2/(C*C)
         # double cast needed to prevent overflows
         return (xq.float()*norm).to(dtype)
+    elif quant_type == 'row':
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= S1*S2/(C*C)
+        else:
+            x *= S1*S2/(C*C)
+        return x.to(dtype)
     elif quant_type in ['truncated-vector', 'vector']:
         x = xq.float()
         if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)

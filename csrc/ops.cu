@@ -225,57 +225,6 @@ void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, i
 
 }
 
-void cutlass_hgemm(bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
-{
-
-  // Define the GEMM operation
-  using Gemm = cutlass::gemm::device::Gemm<
-    cutlass::half_t,                           // ElementA
-    cutlass::layout::ColumnMajor,              // LayoutA
-    cutlass::half_t,                           // ElementB
-    cutlass::layout::ColumnMajor,              // LayoutB
-    cutlass::half_t,                           // ElementOutput
-    cutlass::layout::ColumnMajor,              // LayoutOutput
-    float,                                     // ElementAccumulator
-    cutlass::arch::OpClassWmmaTensorOp,            // tag indicating Tensor Cores
-    cutlass::arch::Sm75,                        // tag indicating target GPU compute architecture
-    cutlass::gemm::GemmShape<128, 128, 32>,
-    cutlass::gemm::GemmShape<64, 64, 32>,
-    //cutlass::gemm::GemmShape<16, 16, 16>
-    cutlass::gemm::GemmShape<8, 32, 16>
-  >;
-
-  Gemm gemm_op;
-  cutlass::Status status;
-
-  float alpha = 1.0f;
-  float beta = 0.0f;
-
-  cutlass::half_t const *ptrA = (cutlass::half_t*)A;
-  cutlass::half_t const *ptrB = (cutlass::half_t*)B;
-  cutlass::half_t const *ptrC = (cutlass::half_t*)C;
-
-  cutlass::half_t       *ptrD = (cutlass::half_t*)C;
-	int ldd = ldc;
-
-  //
-  // Launch GEMM on the device
-  //
-  status = gemm_op({
-    {m, n, k},
-    {ptrA, lda},            // TensorRef to A device tensor
-    {ptrB, ldb},            // TensorRef to B device tensor
-    {ptrC, ldc},            // TensorRef to C device tensor
-    {ptrD, ldd},            // TensorRef to D device tensor - may be the same as C
-    {alpha, beta}           // epilogue operation arguments
-    });
-
-  if (status != cutlass::Status::kSuccess)
-	{
-		printf("ERROR\n");
-  }
-} 
-
 
 void cutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
 {
@@ -338,10 +287,32 @@ void cutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *
     {alpha, beta}           // epilogue operation arguments
     });
 
-  if (status != cutlass::Status::kSuccess)
-	{
-		printf("ERROR\n");
-  }
+  //float alpha = 1.0f;
+  //float beta = 0.0f;
+
+  //int8_t const *ptrA = (int8_t*)A;
+  //int8_t const *ptrB = (int8_t*)B;
+  //int32_t const *ptrC = (int32_t*)C;
+
+  //int32_t       *ptrD = (int32_t*)C;
+	//int ldd = ldc;
+
+  ////
+  //// Launch GEMM on the device
+  ////
+  //status = gemm_op({
+  //  {m, n, k},
+  //  {ptrA, lda},            // TensorRef to A device tensor
+  //  {ptrB, ldb},            // TensorRef to B device tensor
+  //  {ptrC, ldc},            // TensorRef to C device tensor
+  //  {ptrD, ldd},            // TensorRef to D device tensor - may be the same as C
+  //  {alpha, beta}           // epilogue operation arguments
+  //});
+
+  //if (status != cutlass::Status::kSuccess)
+	//{
+	//	printf("ERROR\n");
+  //}
 } 
 
 //==============================================================
