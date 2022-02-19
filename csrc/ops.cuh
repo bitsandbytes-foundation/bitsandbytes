@@ -214,7 +214,7 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
 void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int cols);
 void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int rows, int cols);
 
-template <int FORMAT> void transformRowToFormat(char * A, char *out, int rows, int cols);
+template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *out, int rows, int cols);
 
 #endif
 

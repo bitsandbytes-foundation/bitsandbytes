@@ -98,8 +98,10 @@ void quantizeBlockwise_stochastic_fp32(float * code, float *A, float *absmax, un
 void dequantizeBlockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n){ dequantizeBlockwise<half>(code, A, absmax, out, blocksize, n); } \
 void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float>(code, A, absmax, out, blocksize, n); }
 
-void transform_row2col32(char * A, char *out, int rows, int cols){ transformRowToFormat<COL32>(A, out, rows, cols); }
-void transform_row2turing(char * A, char *out, int rows, int cols){ transformRowToFormat<COL_TURING>(A, out, rows, cols); }
+void transform_row2col32(char * A, char *out, int rows, int cols){ transformRowToFormat<COL32, 0>(A, out, rows, cols); }
+void transform_row2col32T(char * A, char *out, int rows, int cols){ transformRowToFormat<COL32, 1>(A, out, rows, cols); }
+void transform_row2turing(char * A, char *out, int rows, int cols){ transformRowToFormat<COL_TURING, 0>(A, out, rows, cols); }
+void transform_row2turingT(char * A, char *out, int rows, int cols){ transformRowToFormat<COL_TURING, 1>(A, out, rows, cols); }
 
 extern "C"
 {
@@ -206,8 +208,14 @@ extern "C"
 	void ctransform_row2col32(char * A, char *out, int rows, int cols)
 	{ transform_row2col32(A, out, rows, cols); }
 
+	void ctransform_row2col32T(char * A, char *out, int rows, int cols)
+	{ transform_row2col32T(A, out, rows, cols); }
+
 	void ctransform_row2turing(char * A, char *out, int rows, int cols)
 	{ transform_row2turing(A, out, rows, cols); }
+
+	void ctransform_row2turingT(char * A, char *out, int rows, int cols)
+	{ transform_row2turingT(A, out, rows, cols); }
 }
 
 

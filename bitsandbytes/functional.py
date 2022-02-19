@@ -19,26 +19,33 @@ def get_transform_func(dtype, orderA, orderOut, transpose=False):
     else:
         return getattr(lib, name)
 
-def get_transform_buffer(shape, dtype, device, to_order, from_order='row'):
+def get_transform_buffer(shape, dtype, device, to_order, from_order='row', transpose=False):
     #init_func = torch.empty
     init_func = torch.zeros
+    dims = len(shape)
+
+    if dims == 2:
+        rows = shape[0]
+    elif dims == 3:
+        rows = shape[0]*shape[1]
+    cols = shape[-1]
+
+    if transpose:
+        # swap dims
+        tmp = rows
+        rows = cols
+        cols = tmp
 
     state = (shape, to_order)
     if to_order == 'row' or to_order == 'col':
         return init_func(shape, dtype=dtype, device=device), state
     elif to_order == 'col32':
         # blocks of 32 columns (padded)
-        cols = shape[-1]
-        if len(shape) == 3: rows = shape[0]*shape[1]
-        else: rows = shape[0]
-
         cols = 32*((cols+31)//32)
         return init_func((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_turing':
         # blocks of 32 columns and 8 rows
-        if len(shape) == 3: rows = shape[0]*shape[1]
-        else: rows = shape[0]
-        cols = 32*((shape[-1]+31)//32)
+        cols = 32*((cols+31)//32)
         rows = 8*((rows+7)//8)
         return init_func((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_ampere':
@@ -1069,7 +1076,7 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None):
 def transform2(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
-    if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1])
+    if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1], transpose)
     else: new_state = (state[0], to_order)
     assert from_order == 'row'
     assert to_order in ['col32', 'col_turing']
@@ -1085,8 +1092,14 @@ def transform2(A, to_order, from_order='row', out=None, transpose=False, state=N
     ptrA = get_ptr(A)
     ptrOut = get_ptr(out)
     if to_order == 'col32':
-        lib.ctransform_row2col32(get_ptr(A), get_ptr(out), dim1, dim2)
+        if transpose:
+            lib.ctransform_row2col32T(get_ptr(A), get_ptr(out), dim1, dim2)
+        else:
+            lib.ctransform_row2col32(get_ptr(A), get_ptr(out), dim1, dim2)
     elif to_order == 'col_turing':
-        lib.ctransform_row2turing(get_ptr(A), get_ptr(out), dim1, dim2)
+        if transpose:
+            lib.ctransform_row2turingT(get_ptr(A), get_ptr(out), dim1, dim2)
+        else:
+            lib.ctransform_row2turing(get_ptr(A), get_ptr(out), dim1, dim2)
 
     return out, new_state

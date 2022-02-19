@@ -607,7 +607,7 @@ void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template <int FORMAT> void transformRowToFormat(char * A, char *out, int rows, int cols)
+template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *out, int rows, int cols)
 {
   int threads = 256;
   int items_per_thread = 8;
@@ -621,20 +621,27 @@ template <int FORMAT> void transformRowToFormat(char * A, char *out, int rows, i
   int outRows = fill_up_to_nearest_multiple(rows, 32);
   if(FORMAT == COL_TURING)
     outRows = fill_up_to_nearest_multiple(rows, 8);
+  if(TRANSPOSE)
+  {
+    outCols = fill_up_to_nearest_multiple(rows, 32);
+    outRows = cols;
+  }
 
   //cout << cols << " " << tiledCols << " " << tiledRows <<  " " << outCols << endl;
   //cout << "num blocks " << num_blocks << endl;
 
   //cout << A << " " << out_col_normed << endl;
-  kTransformRowToFormat<256, 8, 32, 32*8, 0, FORMAT><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outRows, outCols);
+  kTransformRowToFormat<256, 8, 32, 32*8, TRANSPOSE, FORMAT><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outRows, outCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
-template void transformRowToFormat<COL32>(char * A, char *out, int rows, int cols);
-template void transformRowToFormat<COL_TURING>(char * A, char *out, int rows, int cols);
+template void transformRowToFormat<COL32, 0>(char * A, char *out, int rows, int cols);
+template void transformRowToFormat<COL32, 1>(char * A, char *out, int rows, int cols);
+template void transformRowToFormat<COL_TURING, 0>(char * A, char *out, int rows, int cols);
+template void transformRowToFormat<COL_TURING, 1>(char * A, char *out, int rows, int cols);
 
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);
