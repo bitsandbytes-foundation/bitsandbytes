@@ -38,8 +38,8 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order='row'):
         # blocks of 32 columns and 8 rows
         if len(shape) == 3: rows = shape[0]*shape[1]
         else: rows = shape[0]
-        cols = shape[-1] + (32 - (shape[-1] % 32))
-        rows = rows + (8 - (rows % 8))
+        cols = 32*((shape[-1]+31)//32)
+        rows = 8*((rows+7)//8)
         return init_func((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_ampere':
         # blocks of 32 columns and 32 rows

@@ -1156,12 +1156,12 @@ def test_integrated_igemmlt(dim1, dim4, dims, inner):
 
 
 n = 10
-#dim1 = torch.randint(2,1024, size=(n,)).tolist()
-#dim2 = torch.randint(2,1024, size=(n,)).tolist()
+dim1 = torch.randint(2,1024, size=(n,)).tolist()
+dim2 = torch.randint(2,1024, size=(n,)).tolist()
 #dim1 = [8*1024]
 #dim2 = [4*1024]
-dim1 = [4]
-dim2 = [4]
+#dim1 = [33]
+#dim2 = [257]
 
 dim3 = [0]
 dtype = [torch.int8]
@@ -1187,12 +1187,13 @@ def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
         assert (out1!=0).sum().item() == A.numel()
         #print('')
         #print(A)
-        print(out1)
-        print(out2)
+        #print(out1)
+        #print(out2)
+        #print(out1.shape)
         #print(out1.shape)
         #print(out2.shape)
 
-        #torch.testing.assert_allclose(out1, out2)
+        torch.testing.assert_allclose(out1, out2)
 
 
 

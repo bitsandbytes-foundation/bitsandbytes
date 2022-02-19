@@ -618,12 +618,15 @@ template <int FORMAT> void transformRowToFormat(char * A, char *out, int rows, i
   int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
   int outCols = fill_up_to_nearest_multiple(cols, 32);
+  int outRows = fill_up_to_nearest_multiple(rows, 32);
+  if(FORMAT == COL_TURING)
+    outRows = fill_up_to_nearest_multiple(rows, 8);
 
   //cout << cols << " " << tiledCols << " " << tiledRows <<  " " << outCols << endl;
   //cout << "num blocks " << num_blocks << endl;
 
   //cout << A << " " << out_col_normed << endl;
-  kTransformRowToFormat<256, 8, 32, 32*8, 0, FORMAT><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outCols);
+  kTransformRowToFormat<256, 8, 32, 32*8, 0, FORMAT><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outRows, outCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

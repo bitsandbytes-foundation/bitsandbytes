@@ -2001,7 +2001,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __glo
 
 
 
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> __global__ void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols)
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> __global__ void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols)
 {
 
   // 0. Load data into 32*32 shared memory tiles
@@ -2121,25 +2121,37 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                 if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
                 {
                   char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
+                  // set offset designates the tile offset among the 8*32 tiles
+                  // we first increase rows and then columns. Since we load 128 columns at once
+                  // we increase the offset by outRows*32 every 32 columns
+                  // additionally, we increase the offset by 8*32=256 every 8 rows
+                  offset = ((base_col+(j*32))/32)*outRows*32 + (((base_row+subrow)/8)*256);
+                  //if(data != 0)
+                    //printf("pre %i %i %i %i %d\n", offset, base_col, (base_col+j*32), ((base_row+subrow)/8)*256, data);
                   // first 4 rows are reserved for even rows, [0, 2, 4, 6], the next 4 for odd
                   // each of these has 32 values in total for 32*4 = 128 as offset if odd
                   // every set of 4 columns increases the total offset by 16
-                  // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc
+                  // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc so: subrow/2*4 = subrow*2
+                  // this happends every 8 rows anew (subrow % 8)
                   // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
-                  int turing_offset = 0;
-                  int subcol = (j*32) + warp_lane;
+                  int subcol = warp_lane;
                   
                   if(subrow % 2 == 1)
                     // odd
-                    turing_offset = 128 + (subcol/4)*16 + (subcol%4) + ((subrow-1)*2);
+                    offset += 128 + (subcol/4)*16 + (subcol%4) + (((subrow%8)-1)*2);
                   else
                     // even
-                    turing_offset = 0   + (subcol/4)*16 + (subcol%4) + (subrow*2);
-                  out[turing_offset] = data;
+                    offset += 0   + (subcol/4)*16 + (subcol%4) + ((subrow%8)*2);
+
+                  //if(data != 0)
+                    //printf("post %i %i %i %i %d\n", offset, base_col, (base_col+j*32), ((base_row+subrow)/8)*256, data);
+
+                  //if(data != 0)
+                    //printf("(%i %i) (%i %i) %i %i %d\n", base_row, subrow, j*32, subcol, base_row+subrow, offset, data);
+                  out[offset] = data;
                 }
                 break;
           }
-          // 2. store
         }
       }
     }
@@ -2151,8 +2163,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
+template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
 
 template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 
