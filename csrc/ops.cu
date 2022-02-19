@@ -307,14 +307,6 @@ int roundoff(int v, int d) {
 // 
 //}
 
-typedef enum Transform_t
-{
-	ROW = 0,
-	COL = 1,
-  COL32 = 2,
-  COL_TURING = 3,
-  COL_AMPERE = 4,
-} Transform_t;
 
 template<int ORDER> cublasLtOrder_t get_order()
 {
@@ -615,7 +607,7 @@ void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-void transformRowToCol32(char * A, char *out, int rows, int cols)
+template <int FORMAT> void transformRowToFormat(char * A, char *out, int rows, int cols)
 {
   int threads = 256;
   int items_per_thread = 8;
@@ -631,13 +623,15 @@ void transformRowToCol32(char * A, char *out, int rows, int cols)
   //cout << "num blocks " << num_blocks << endl;
 
   //cout << A << " " << out_col_normed << endl;
-  kTransformRowToCol32<256, 8, 32, 32*8, 0><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outCols);
+  kTransformRowToFormat<256, 8, 32, 32*8, 0, FORMAT><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
+template void transformRowToFormat<COL32>(char * A, char *out, int rows, int cols);
+template void transformRowToFormat<COL_TURING>(char * A, char *out, int rows, int cols);
 
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);
@@ -648,6 +642,7 @@ template void quantizeBlockwise<half, 1>(float * code, half *A, float *absmax, u
 template void quantizeBlockwise<float, 1>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
 template void dequantizeBlockwise<half>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
 template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
+
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \

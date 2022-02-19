@@ -126,6 +126,14 @@ typedef enum Optimizer_t
   LARS = 3,
 } Optimizer_t;
 
+typedef enum Transform_t
+{
+	ROW = 0,
+	COL = 1,
+  COL32 = 2,
+  COL_TURING = 3,
+  COL_AMPERE = 4,
+} Transform_t;
 
 class Context
 {
@@ -206,7 +214,7 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
 void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int cols);
 void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int rows, int cols);
 
-void transformRowToCol32(char * A, char *out, int rows, int cols);
+template <int FORMAT> void transformRowToFormat(char * A, char *out, int rows, int cols);
 
 #endif
 

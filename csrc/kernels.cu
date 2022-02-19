@@ -2001,7 +2001,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __glo
 
 
 
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE> __global__ void kTransformRowToCol32(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols)
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> __global__ void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols)
 {
 
   // 0. Load data into 32*32 shared memory tiles
@@ -2058,7 +2058,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   int warps = blockDim.x/32;
   int warp_id = threadIdx.x/32;
   int warp_lane = threadIdx.x % 32;
-  int col32offset = (base_col/32)*(32*rows);
+  int offset = 0;
 
   int smem_row = 0;
   // each warp loads one row of 128 bytes
@@ -2095,15 +2095,51 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
       __syncthreads();
       for(int subrow = warp_id; subrow < 32; subrow+=warps)
       {
-        for(int col = 0; col < ITEMS_PER_THREAD; col++)
+        for(int j = 0; j < ITEMS_PER_THREAD; j++)
         {
 
-          // 2. store
-          if(((base_row+subrow) < rows) && (base_col+(col*32)+warp_lane < outCols))
+          switch(FORMAT)
           {
-            char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (col*32) + warp_lane];
-            out[col32offset+(base_row+subrow)*32 + ((col)*rows*32)+warp_lane] = data;
+              case COL32: 
+                offset = (base_col/32)*(32*rows);
+                if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
+                {
+                  char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
+                  out[offset+(base_row+subrow)*32 + ((j)*rows*32)+warp_lane] = data;
+                }
+                break;
+              case COL_TURING:
+                // TURING FORMAT:
+                // 8*32 tiles with 4*4 subtiles
+                // the 8*32 subtile has first all 4*4 subtiles of even rows (max 4*4*4 = 64 elements)
+                // the subsequent 4*4 subtiles are for all odd rows if some rows columns are empty the values are zero
+                // the tile repeats again after the 8*32 tile in a major column order, meaning: (next 8 rows are A[8:16, 0:32])
+                // the next tile is the next 8 rows for the same 32 columns. Once all rows are finished, the column
+                // index increases by 32
+                //
+                // [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
+                if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
+                {
+                  char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
+                  // first 4 rows are reserved for even rows, [0, 2, 4, 6], the next 4 for odd
+                  // each of these has 32 values in total for 32*4 = 128 as offset if odd
+                  // every set of 4 columns increases the total offset by 16
+                  // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc
+                  // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
+                  int turing_offset = 0;
+                  int subcol = (j*32) + warp_lane;
+                  
+                  if(subrow % 2 == 1)
+                    // odd
+                    turing_offset = 128 + (subcol/4)*16 + (subcol%4) + ((subrow-1)*2);
+                  else
+                    // even
+                    turing_offset = 0   + (subcol/4)*16 + (subcol%4) + (subrow*2);
+                  out[turing_offset] = data;
+                }
+                break;
           }
+          // 2. store
         }
       }
     }
@@ -2115,21 +2151,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kTransformRowToCol32<64, 16, 32, 32*16, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToCol32<64, 8, 32, 32*8, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToCol32<64, 4, 32, 32*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-
-template __global__ void kTransformRowToCol32<128, 16, 32, 32*16, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToCol32<128, 8, 32, 32*8, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToCol32<128, 4, 32, 32*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-
-template __global__ void kTransformRowToCol32<256, 16, 32, 32*16, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToCol32<256, 8, 32, 32*8, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToCol32<256, 4, 32, 32*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-
-template __global__ void kTransformRowToCol32<512, 16, 32, 32*16, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToCol32<512, 8, 32, 32*8, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
-template __global__ void kTransformRowToCol32<512, 4, 32, 32*4, 0>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
+template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outCols);
 
 template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 

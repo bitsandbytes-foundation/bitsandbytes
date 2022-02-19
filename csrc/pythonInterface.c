@@ -98,6 +98,9 @@ void quantizeBlockwise_stochastic_fp32(float * code, float *A, float *absmax, un
 void dequantizeBlockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n){ dequantizeBlockwise<half>(code, A, absmax, out, blocksize, n); } \
 void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float>(code, A, absmax, out, blocksize, n); }
 
+void transform_row2col32(char * A, char *out, int rows, int cols){ transformRowToFormat<COL32>(A, out, rows, cols); }
+void transform_row2turing(char * A, char *out, int rows, int cols){ transformRowToFormat<COL_TURING>(A, out, rows, cols); }
+
 extern "C"
 {
 	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
@@ -201,7 +204,10 @@ extern "C"
 	{ doubleRowColQuant(A, rowStats, colStats, out_col_normed, out_row_normed, rows, cols); }
 
 	void ctransform_row2col32(char * A, char *out, int rows, int cols)
-	{ transformRowToCol32(A, out, rows, cols); }
+	{ transform_row2col32(A, out, rows, cols); }
+
+	void ctransform_row2turing(char * A, char *out, int rows, int cols)
+	{ transform_row2turing(A, out, rows, cols); }
 }
 
 
