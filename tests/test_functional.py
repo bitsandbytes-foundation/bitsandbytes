@@ -1155,13 +1155,13 @@ def test_integrated_igemmlt(dim1, dim4, dims, inner):
 
 
 
-n = 2
+n = 10
 #dim1 = torch.randint(2,1024, size=(n,)).tolist()
 #dim2 = torch.randint(2,1024, size=(n,)).tolist()
 #dim1 = [8*1024]
 #dim2 = [4*1024]
-dim1 = [4]
-dim2 = [4]
+dim1 = [768+2]
+dim2 = [256*2+1]
 
 dim3 = [0]
 dtype = [torch.int8]
@@ -1171,7 +1171,7 @@ transpose = [False, True]
 dims = [2]
 values = list(product(dim1,dim2,dim3, dims,dtype, a_order, out_order, transpose))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_{7}'.format(*vals) for vals in values]
-k = 1
+k = 1000
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose", values, ids=names)
 def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     for i in range(k):
@@ -1180,26 +1180,30 @@ def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
         elif dims == 3:
             A = torch.randint(10, 99, size=(dim1, dim2, dim3), device='cuda').to(dtype)
 
-        #A[8] *= -1
+        #print('')
+        #A[-1, -1] = -1
+        #A[:, -1] *= -1
+        #A[-1, :] *= -1
+        #print(A)
         #out1, S1 = F.transform(A, to_order=orderOut)
         if transpose:
             At = A.t().contiguous()
             out1, S1 = F.transform(At, to_order=orderOut)
         else:
             out1, S1 = F.transform(A, to_order=orderOut)
-        out2, S2 = F.transform2(A, to_order=orderOut, transpose=True)
-        assert (out1!=0).sum().item() == A.numel()
-        print(out1)
-        print(out2)
+        out2, S2 = F.transform2(A, to_order=orderOut, transpose=transpose)
+        #assert (out1!=0).sum().item() == A.numel()
+        #print(out1)
+        #print(out2)
+        #print(out1.shape)
         #print('')
         #print(A)
         #print(out1)
         #print(out2)
         #print(out1.shape)
-        #print(out1.shape)
         #print(out2.shape)
 
-        #torch.testing.assert_allclose(out1, out2)
+        torch.testing.assert_allclose(out1, out2)
 
 
 

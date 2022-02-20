@@ -2052,6 +2052,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   // so that we can have contiguous stores
   __shared__ char smem_data[32*32*ITEMS_PER_THREAD];
   char local_data[ITEMS_PER_THREAD];
+  typedef cub::BlockExchange<char, THREADS, ITEMS_PER_THREAD> BlockExchange;
+  __shared__ typename BlockExchange::TempStorage temp_storage;
 
   // we load row after row from the base_position
   // Load data row by row
@@ -2080,11 +2082,69 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
         else
           local_data[j] = 0;
       }
+    }
+    else
+    {
+      #pragma unroll ITEMS_PER_THREAD
+      for(int j = 0; j < ITEMS_PER_THREAD; j++)
+        local_data[j] = 0;
+    }
 
+    if(TRANSPOSE)
+    {
+
+      BlockExchange(temp_storage).BlockedToStriped(local_data);
+      // this tranposes columns and rows
+      // we load 256 columns per warp and we have 8 warps that load a total of 8 rows: 8x256 = 8 warps x 32 threads * 8 column values
+      // Now we transpose that so we have: 256x8 = 256 threads x 8 row values
+      // Since we want to store transposed values, these now have a different meaning:
+      // we want to store colunmns as rows and rows as columns
+      // So each thread holds a row with 8 column values
+      //
+      // For this we have an interleaved pattern: 
+      // threads 0, 8, 16 hold store rows 0, 1, 2
+      // threads 1, 9, 17 hold store rows 32, 33, 34
+      // as the row-offset increase, we store the columns 8-15, 16-23, 24-31
+      int myrow = (threadIdx.x % 8)*32 + (threadIdx.x/8);
+      //if(threadIdx.x == 0)
+        //for(int j = 0; j < blockDim.x; j++)
+          //printf("row (%i %i) ", j, (j/8) + (j%8)*8);
+
+      // storeage in shared memory
+      // we want linear memory so a warp and store a full row of 32 elements
+      // we achieve this by have thread thread write its memory linearly with a column and row offset 
+      // the column offset increase by 8 every 8 rows
+      // the row offset is 32 elements
+      #pragma unroll ITEMS_PER_THREAD
+      for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      {
+        //if(local_data[j] == -1)
+          //printf("idx %i\n", (myrow*32) + (row/8)*8 + j);
+        //if( (myrow*32) + (row/8)*8 + j == 256)
+          //printf("idx2 %i %i\n", threadIdx.x, row);
+        smem_data[(myrow*32) + (row/8)*8 + j] = local_data[j];
+      }
+    }
+    else
+    {
+      // treat smem as 32x256, that is 32 rows and 256 columns
       #pragma unroll ITEMS_PER_THREAD
       for(int j = 0; j < ITEMS_PER_THREAD; j++)
         smem_data[row*32*ITEMS_PER_THREAD + (warp_lane) + (j*32)] = local_data[j];
     }
+
+
+
+      //#pragma unroll ITEMS_PER_THREAD
+      //for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      //  if(local_data[j] != 0)
+      //    printf("pre %i %i %d\n", threadIdx.x, j, local_data[j]);
+
+
+      //#pragma unroll ITEMS_PER_THREAD
+      //for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      //  if(local_data[j] != 0)
+      //    printf("post %i %i %d\n", threadIdx.x, j, local_data[j]);
 
     smem_row += warps;
 
@@ -2093,6 +2153,13 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
     {
       smem_row = 0;
       __syncthreads();
+        //if(threadIdx.x == 0)
+        //{
+        //  for(int i = 0; i < 32*32*ITEMS_PER_THREAD; i++)
+        //    if(smem_data[i] != 0)
+        //    printf("%d ", smem_data[i]);
+        //}
+
       for(int subrow = warp_id; subrow < 32; subrow+=warps)
       {
         for(int j = 0; j < ITEMS_PER_THREAD; j++)
@@ -2103,24 +2170,39 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
               case COL32: 
                 if(TRANSPOSE)
                 {
-                  offset = (base_row/32)*(32*rows);
-                  if(((base_col+(j*32)) < rows) && (base_row+subrow+warp_lane < outCols))
+                  // data lies in shared memory in the following way:
+                  // row0 [col0 col1 ... col31]
+                  // row1 [col0 col1 ... col31]
+                  // ...
+                  //
+                  // As such we read consequtive entries with 256 threads (8rows x 32 columns)
+                  // as j increase, the row increase by a factor of 8
+                  // We load 8 rows per subrow loop, and subrow increase by 8 per loop
+                  // so we have an offset of 8 rows every loop or (subrow/warps)*8 = (subrow/8)*8
+                  if((base_col+(((j*8)+(subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD)) + warp_id < outRows) && (base_row+warp_lane < rows))
                   {
-                    char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
-                    if(data != 0)
-                    {
-                      printf("%i %i %i %i %i %d\n", offset, base_col, base_row+subrow, offset+(base_col+(j*32) + warp_lane)*32 + (((base_row+subrow)/32)*rows*32)+subrow, threadIdx.x, data);
-                      //if(threadIdx.x < outCols*outRows)
-                        //out[threadIdx.x] = data;
-                    out[offset+(base_col+(j*32) + warp_lane)*32 + (((base_row+subrow)/32)*rows*32)+subrow] = data;
-                    }
+                    char data = smem_data[(subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x];
+
+                    // a new tile in the output begins every 32 columns which is equvalent to every 32 rows in the input
+                    // each tile loads 32 rows and 256 columns -> 256 rows and 32 columns
+                    offset = (base_row/32)*32*outRows + (base_col/256)*32*256;
+                    int idx = offset +  (subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x;
+                    //if(data < 0)
+                      //printf("%i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, data);
+                    //if(idx == 288)
+                      //printf("idx %i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, data);
+
+                    if(idx >= outRows*outCols)
+                      printf("ooi %i %i %i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, base_col+(((j*8)+(subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD))+warp_id, outRows, data);
+
+                    out[offset + (subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x] = data;
                   }
                 }
                 else
                 {
-                  offset = (base_col/32)*(32*rows);
                   if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
                   {
+                    offset = (base_col/32)*(32*rows);
                     char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
                     out[offset+(base_row+subrow)*32 + ((j)*rows*32)+warp_lane] = data;
                   }
