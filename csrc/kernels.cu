@@ -2093,6 +2093,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
     if(TRANSPOSE)
     {
 
+      __syncthreads();
       BlockExchange(temp_storage).BlockedToStriped(local_data);
       // this tranposes columns and rows
       // we load 256 columns per warp and we have 8 warps that load a total of 8 rows: 8x256 = 8 warps x 32 threads * 8 column values
@@ -2186,14 +2187,14 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // a new tile in the output begins every 32 columns which is equvalent to every 32 rows in the input
                     // each tile loads 32 rows and 256 columns -> 256 rows and 32 columns
                     offset = (base_row/32)*32*outRows + (base_col/256)*32*256;
-                    int idx = offset +  (subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x;
+                    //int idx = offset +  (subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x;
                     //if(data < 0)
                       //printf("%i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, data);
                     //if(idx == 288)
                       //printf("idx %i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, data);
 
-                    if(idx >= outRows*outCols)
-                      printf("ooi %i %i %i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, base_col+(((j*8)+(subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD))+warp_id, outRows, data);
+                    //if(idx >= outRows*outCols)
+                      //printf("ooi %i %i %i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, base_col+(((j*8)+(subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD))+warp_id, outRows, data);
 
                     out[offset + (subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x] = data;
                   }
