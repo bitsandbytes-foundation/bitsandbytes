@@ -620,11 +620,19 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
   int outCols = fill_up_to_nearest_multiple(cols, 32);
   int outRows = fill_up_to_nearest_multiple(rows, 32);
   if(FORMAT == COL_TURING)
-    outRows = fill_up_to_nearest_multiple(rows, 8);
-  if(TRANSPOSE)
   {
-    outCols = fill_up_to_nearest_multiple(rows, 32);
-    outRows = cols;
+    if(TRANSPOSE)
+      outRows = fill_up_to_nearest_multiple(cols, 8);
+    else
+      outRows = fill_up_to_nearest_multiple(rows, 8);
+  }
+  else
+  {
+    if(TRANSPOSE)
+    {
+      outCols = fill_up_to_nearest_multiple(rows, 32);
+      outRows = cols;
+    }
   }
 
   //cout << cols << " " << tiledCols << " " << tiledRows <<  " " << outCols << endl;

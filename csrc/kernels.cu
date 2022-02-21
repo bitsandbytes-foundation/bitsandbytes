@@ -2100,9 +2100,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
         // store as 256x32
         smem_data[(local_col*33) + row] = local_data[j];
       }
-      //#pragma unroll ITEMS_PER_THREAD
-      //for(int j = 0; j < ITEMS_PER_THREAD; j++)
-      //  smem_data[row*32*ITEMS_PER_THREAD + (warp_lane) + (j*32)] = local_data[j];
     }
     else
     {
@@ -2114,17 +2111,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 
 
 
-      //#pragma unroll ITEMS_PER_THREAD
-      //for(int j = 0; j < ITEMS_PER_THREAD; j++)
-      //  if(local_data[j] != 0)
-      //    printf("pre %i %i %d\n", threadIdx.x, j, local_data[j]);
-
-
-      //#pragma unroll ITEMS_PER_THREAD
-      //for(int j = 0; j < ITEMS_PER_THREAD; j++)
-      //  if(local_data[j] != 0)
-      //    printf("post %i %i %d\n", threadIdx.x, j, local_data[j]);
-
     smem_row += warps;
 
     // 1. transpose / reorder in shared memory
@@ -2132,12 +2118,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
     {
       smem_row = 0;
       __syncthreads();
-        //if(threadIdx.x == 0)
-        //{
-        //  for(int i = 0; i < 32*32*ITEMS_PER_THREAD; i++)
-        //    if(smem_data[i] != 0)
-        //    printf("%d ", smem_data[i]);
-        //}
 
       for(int subrow = warp_id; subrow < 32; subrow+=warps)
       {
@@ -2197,6 +2177,45 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                 // [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
                 if(TRANSPOSE)
                 {
+                  const int jrow = j*ITEMS_PER_THREAD; // 8 rows per j
+                  const int subrow_loop_row = (subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD; // 8 rows per j; 8j per subrow loop (subrow/warps)
+                  //const int local_row =  warp_id; // each warp_id is one row
+                  //const int block_row = base_col; // block offset for row
+                  //const int local_col = warp_lane
+                  //const int global_col = base_row; // block offset for col
+                  if((base_col + subrow_loop_row + jrow + warp_id < outRows) && (base_row+warp_lane < rows))
+                  {
+                    // each row hae 32 columns and is offset by 1 to prevent bank conflict during storage into smem
+                    char data = smem_data[(subrow_loop_row + jrow + warp_id)*33 + warp_lane];
+
+                    // each 32 columns we have new tile
+                    // each tile has size 8*32 = 256 elements offset
+                    // for each row offset of 8 we increaes the tile first
+                    // after all rows are exhausted, we increase the col
+                    int row_offset = ((base_col+jrow+subrow_loop_row+warp_id)/8)*256; // global_row+jrow+subrow_loop_row+local_row, increase tile(=256) every 8 rows
+
+                    // we increase by row_tile_column every 32 columns
+                    // base_row increase in increments of 32
+                    //int row_tile_column = 256*outRows/8; // there are outRows/8 row tiles, and each tile is 256 elements
+                    //int col_offset = (base_row/32)*row_tile_column; 
+                    // -> we can remove the divisions to speed up compute since outRows is always a multiple of 8
+                    // 256*outRows/8*base_row/32 = outRows*base_row
+                    int col_offset = outRows*base_row;
+
+                    offset = row_offset+col_offset;
+
+                    // since we process even number of rows with each j (8) and with each subrow (8j) we can determine
+                    // odd or even rows with the warp_id (each warp processes one row)
+                    // the col is warp_lane (max 32 columns per row) and the row warp_id
+                    if(warp_id % 2 == 1)
+                      // odd
+                      offset += 128 + (warp_lane/4)*16 + (warp_lane%4) + (((warp_id%8)-1)*2);
+                    else
+                      // even
+                      offset += 0   + (warp_lane/4)*16 + (warp_lane%4) + ((warp_id%8)*2);
+
+                    out[offset] = data;
+                  }
                 }
                 else
                 {

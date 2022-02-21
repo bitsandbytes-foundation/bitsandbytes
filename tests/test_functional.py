@@ -1160,8 +1160,8 @@ dim1 = torch.randint(2,1024, size=(n,)).tolist()
 dim2 = torch.randint(2,1024, size=(n,)).tolist()
 #dim1 = [8*1024]
 #dim2 = [4*1024]
-#dim1 = [2]
-#dim2 = [2]
+#dim1 = [257]
+#dim2 = [257]
 
 dim3 = [0]
 dtype = [torch.int8]
