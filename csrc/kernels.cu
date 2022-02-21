@@ -2161,20 +2161,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   if((base_col+(((j*8)+(subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD)) + warp_id < outRows) && (base_row+warp_lane < rows))
                   {
                     char data = smem_data[(subrow/warps)*(ITEMS_PER_THREAD*33)*ITEMS_PER_THREAD + (j*ITEMS_PER_THREAD*33) + (warp_id*33)+warp_lane];
-                    //char data = -1;
-
-                    // a new tile in the output begins every 32 columns which is equvalent to every 32 rows in the input
-                    // each tile loads 32 rows and 256 columns -> 256 rows and 32 columns
-                    offset = (base_row/32)*32*outRows + (base_col/256)*32*256;
-                    //int idx = offset +  (subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x;
-                    //if(data < 0)
-                      //printf("%i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, data);
-                    //if(idx == 288)
-                      //printf("idx %i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, data);
-
-                    //if(idx >= outRows*outCols)
-                      //printf("ooi %i %i %i %i %i %i %i %i %i %d\n", threadIdx.x, subrow, j, base_row, base_col, offset, idx, base_col+(((j*8)+(subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD))+warp_id, outRows, data);
-
+                    offset = base_row*outRows + base_col*32;
                     out[offset + (subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x] = data;
                   }
                 }
