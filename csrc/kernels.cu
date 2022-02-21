@@ -2158,11 +2158,21 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   // as j increase, the row increase by a factor of 8
                   // We load 8 rows per subrow loop, and subrow increase by 8 per loop
                   // so we have an offset of 8 rows every loop or (subrow/warps)*8 = (subrow/8)*8
-                  if((base_col+(((j*8)+(subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD)) + warp_id < outRows) && (base_row+warp_lane < rows))
+                  const int jrow = j*ITEMS_PER_THREAD; // 8 rows per j
+                  const int subrow_loop_row = (subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD; // 8 rows per j; 8j per subrow loop (subrow/warps)
+                  //const int local_row =  warp_id; // each warp_id is one row
+                  //const int block_row = base_col; // block offset for row
+                  //const int local_col = warp_lane
+                  //const int global_col = base_row; // block offset for col
+                  if((base_col + subrow_loop_row + jrow + warp_id < outRows) && (base_row+warp_lane < rows))
                   {
-                    char data = smem_data[(subrow/warps)*(ITEMS_PER_THREAD*33)*ITEMS_PER_THREAD + (j*ITEMS_PER_THREAD*33) + (warp_id*33)+warp_lane];
-                    offset = base_row*outRows + base_col*32;
-                    out[offset + (subrow/warps)*blockDim.x*ITEMS_PER_THREAD + (j*blockDim.x) + threadIdx.x] = data;
+                    // each row hae 32 columns and is offset by 1 to prevent bank conflict during storage into smem
+                    char data = smem_data[(subrow_loop_row + jrow + warp_id)*33 + warp_lane];
+
+                    // each 32 columns we have new tile
+                    // each tile has size outRows*32 and base_row is done in increments of 32
+                    offset = base_row*outRows; 
+                    out[offset + (base_col + jrow + subrow_loop_row)*32 + threadIdx.x] = data;
                   }
                 }
                 else
@@ -2185,31 +2195,37 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                 // index increases by 32
                 //
                 // [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
-                if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
+                if(TRANSPOSE)
                 {
-                  char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
-                  // set offset designates the tile offset among the 8*32 tiles
-                  // we first increase rows and then columns. Since we load 128 columns at once
-                  // we increase the offset by outRows*32 every 32 columns
-                  // additionally, we increase the offset by 8*32=256 every 8 rows
-                  offset = ((base_col+(j*32))/32)*outRows*32 + (((base_row+subrow)/8)*256); // global offset (8x32 tile)
-                  // first 4 rows are reserved for even rows, [0, 2, 4, 6], the next 4 for odd
-                  // each of these has 32 values in total for 32*4 = 128 as offset if odd
-                  // every set of 4 columns increases the total offset by 16
-                  // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc so: subrow/2*4 = subrow*2
-                  // this happends every 8 rows anew (subrow % 8)
-                  // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
-                  int subcol = warp_lane;
-                  
-                  // add local offset (4x4 sub-tile)
-                  if(subrow % 2 == 1)
-                    // odd
-                    offset += 128 + (subcol/4)*16 + (subcol%4) + (((subrow%8)-1)*2);
-                  else
-                    // even
-                    offset += 0   + (subcol/4)*16 + (subcol%4) + ((subrow%8)*2);
+                }
+                else
+                {
+                  if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
+                  {
+                    char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
+                    // set offset designates the tile offset among the 8*32 tiles
+                    // we first increase rows and then columns. Since we load 128 columns at once
+                    // we increase the offset by outRows*32 every 32 columns
+                    // additionally, we increase the offset by 8*32=256 every 8 rows
+                    offset = ((base_col+(j*32))/32)*outRows*32 + (((base_row+subrow)/8)*256); // global offset (8x32 tile)
+                    // first 4 rows are reserved for even rows, [0, 2, 4, 6], the next 4 for odd
+                    // each of these has 32 values in total for 32*4 = 128 as offset if odd
+                    // every set of 4 columns increases the total offset by 16
+                    // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc so: subrow/2*4 = subrow*2
+                    // this happends every 8 rows anew (subrow % 8)
+                    // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
+                    int subcol = warp_lane;
+                    
+                    // add local offset (4x4 sub-tile)
+                    if(subrow % 2 == 1)
+                      // odd
+                      offset += 128 + (subcol/4)*16 + (subcol%4) + (((subrow%8)-1)*2);
+                    else
+                      // even
+                      offset += 0   + (subcol/4)*16 + (subcol%4) + ((subrow%8)*2);
 
-                  out[offset] = data;
+                    out[offset] = data;
+                  }
                 }
                 break;
           }

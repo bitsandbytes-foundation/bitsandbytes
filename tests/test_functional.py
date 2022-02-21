@@ -1155,18 +1155,18 @@ def test_integrated_igemmlt(dim1, dim4, dims, inner):
 
 
 
-n = 10
+n = 2
 dim1 = torch.randint(2,1024, size=(n,)).tolist()
 dim2 = torch.randint(2,1024, size=(n,)).tolist()
 #dim1 = [8*1024]
 #dim2 = [4*1024]
-#dim1 = [768+2]
-#dim2 = [256*2+1]
+#dim1 = [2]
+#dim2 = [2]
 
 dim3 = [0]
 dtype = [torch.int8]
 a_order = ['row']
-out_order = ['col32']#, 'col_turing']
+out_order = ['col32', 'col_turing']
 transpose = [False, True]
 dims = [2]
 values = list(product(dim1,dim2,dim3, dims,dtype, a_order, out_order, transpose))
