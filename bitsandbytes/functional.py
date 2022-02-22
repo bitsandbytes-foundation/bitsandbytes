@@ -30,13 +30,14 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order='row', trans
         rows = shape[0]*shape[1]
     cols = shape[-1]
 
+    state = (shape, to_order)
     if transpose:
         # swap dims
         tmp = rows
         rows = cols
         cols = tmp
+        state = (shape[::-1], to_order)
 
-    state = (shape, to_order)
     if to_order == 'row' or to_order == 'col':
         return init_func(shape, dtype=dtype, device=device), state
     elif to_order == 'col32':
@@ -53,6 +54,8 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order='row', trans
         cols = shape[1] + (32 - (shape[1] % 32))
         rows = shape[0] + (32 - (shape[0] % 32))
         return init_func((rows, cols), dtype=dtype, device=device), state
+    else:
+        raise NotImplementedError(f'To_order not supported: {to_order}')
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     if state is None: state = (A.shape, from_order)
@@ -258,7 +261,7 @@ def estimate_quantiles(A: Tensor, out: Tensor=None, offset: float=1/512) -> Tens
     elif A.dtype == torch.float16:
         lib.cestimate_quantiles_fp16(get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel()))
     else:
-        raise NotImplementError(f'Not supported data type {A.dtype}')
+        raise NotImplementedError(f'Not supported data type {A.dtype}')
     return out
 
 def quantize_blockwise(A: Tensor, code: Tensor=None, absmax: Tensor=None, rand=None, out: Tensor=None) -> Tensor:
@@ -885,24 +888,12 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     else: return None
 
 
-def igemmlt(A, B, C, SA, SB, SC, ldb=None):
+def igemmlt(A, B, SA, SB, out=None, Sout=None, ldb=None):
     # TODO: assert dimensions fit
-    assert A.dtype == torch.int8
-    assert B.dtype == torch.int8
-    assert C.dtype == torch.int32
-    assert SA[1] == 'col32'
-    assert SB[1] == 'col_turing'
-    assert SC[1] == 'col32'
     shapeA = SA[0]
     shapeB = SB[0]
     dimsA = len(shapeA)
     dimsB = len(shapeB)
-
-    ptr = CUBLAS_Context.get_instance().context
-    ptrA = get_ptr(A)
-    ptrB = get_ptr(B)
-    ptrC = get_ptr(C)
-
     if dimsA == 2:
         m = shapeA[0]
     elif dimsA == 3:
@@ -912,6 +903,25 @@ def igemmlt(A, B, C, SA, SB, SC, ldb=None):
         rows = n = shapeB[0]
     elif dimsB == 3:
         rows = n = shapeB[0]*shapeB[1]
+
+    if dimsA == 2 and out is None:
+        out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), torch.int32, A.device, 'col32', 'row')
+    elif dimsA == 3 and out is None:
+        out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), torch.int32, A.device, 'col32', 'row')
+
+    assert dimsB != 3, 'len(B.shape)==3 not supported'
+    assert A.dtype == torch.int8
+    assert B.dtype == torch.int8
+    assert out.dtype == torch.int32
+    assert SA[1] == 'col32'
+    assert SB[1] == 'col_turing'
+    assert Sout[1] == 'col32'
+    assert shapeA[-1] == shapeB[-1]
+
+    ptr = CUBLAS_Context.get_instance().context
+    ptrA = get_ptr(A)
+    ptrB = get_ptr(B)
+    ptrC = get_ptr(out)
 
     k = shapeA[-1]
     lda = ct.c_int32(m*32)
@@ -929,6 +939,8 @@ def igemmlt(A, B, C, SA, SB, SC, ldb=None):
     k = ct.c_int32(k)
 
     lib.cigemmlt(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+
+    return out, Sout
 
 
 def cutlass_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, transposed_B=False):
