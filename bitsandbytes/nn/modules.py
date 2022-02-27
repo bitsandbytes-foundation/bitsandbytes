@@ -42,20 +42,28 @@ class StableEmbedding(torch.nn.Embedding):
         return self.norm(emb)
 
 class Linear8bit(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, quant_type='vector', index=None):
+    def __init__(self, input_features, output_features, bias=True, quant_type='vector', index=None, scale_mode='last', scale_p=0.01):
         super(Linear8bit, self).__init__(input_features, output_features, bias)
         self.quant_type = quant_type
         self.index = index
+        self.s = torch.ones((3,))*127*16
+        self.scale_p = scale_p
+        self.scale_mode = scale_mode
+        GlobalOptimManager.get_instance().override_config(self.s, 'lr', 1.0)
+        GlobalOptimManager.get_instance().register_parameters(self.s)
 
     def forward(self, x):
-        #with torch.no_grad():
-            #Cw, Sw = bnb.functional.quantize_blockwise(self.weight)
-            #w = bnb.functional.dequantize_blockwise(Cw, Sw)
-            #Cw, Sw = bnb.functional.vectorwise_quant(self.weight)
-            #w = bnb.functional.vectorwise_dequant(Cw, Sw)
-            #self.weight.copy_(w)
-            #torch.cuda.synchronize()
-        out = bnb.matmul(x, self.weight.t(), self.bias, self.quant_type, [8, 8, 8], self.index)
+        if self.s is not None:
+            if self.s.device != x.device:
+                self.s = self.s.to(x.device)
+        #if self.s is None:
+        #    print('init s')
+        #    self.s = torch.ones((x.shape[0]*x.shape[1],), device=x.device)*127*127
+        #elif self.s.numel() != x.shape[0]*x.shape[1]:
+        #    print('reinit s')
+        #    self.s = torch.ones((x.shape[0]*x.shape[1],), device=x.device)*self.s.mean()
+
+        out = bnb.matmul(x, self.weight.t(), self.bias, self.quant_type, [8, 8, 8], self.index, self.s, self.scale_mode, self.scale_p)
         if self.bias is not None:
             out += self.bias.unsqueeze(0).expand_as(out)
         return out

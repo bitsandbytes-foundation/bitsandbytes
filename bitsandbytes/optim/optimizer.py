@@ -320,6 +320,8 @@ class Optimizer2State(Optimizer8bit):
 
         state['step'] += 1
         step = state['step']
+        #if len(p.shape) == 1 and p.shape[0] == 1:
+            #print(p, p.grad, config['lr'])
 
         if config['percentile_clipping'] < 100:
             current_gnorm, clip_value, gnorm_scale = F.percentile_clipping(grad, state['gnorm_vec'], step, config['percentile_clipping'])
