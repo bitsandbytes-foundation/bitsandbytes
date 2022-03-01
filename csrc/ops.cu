@@ -651,6 +651,8 @@ template void transformRowToFormat<COL32, 0>(char * A, char *out, int rows, int 
 template void transformRowToFormat<COL32, 1>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL_TURING, 0>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL_TURING, 1>(char * A, char *out, int rows, int cols);
+template void transformRowToFormat<COL_AMPERE, 0>(char * A, char *out, int rows, int cols);
+template void transformRowToFormat<COL_AMPERE, 1>(char * A, char *out, int rows, int cols);
 
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);

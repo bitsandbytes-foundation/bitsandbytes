@@ -2021,7 +2021,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 
   // AMPERE FORMAT:
   // 32*32 tiles with 8*32 subtiles. The rows are interleaved in pairs of two rows with offset of 8 between pairs of two rows:
-  // row idx (each number stands for 32 values): [1 2 9 10 17 18 25 26] [3 4 11 12 19 20 27 28]...
+	// row idx (each number stands for 32 values): [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
   // the tiles are column-major ordered, so after 1024*1024 values we process: A[32:64, 0:32]
 
 
@@ -2247,6 +2247,32 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   }
                 }
                 break;
+								case COL_AMPERE:
+									// AMPERE FORMAT:
+									// 32*32 tiles with 8*32 subtiles. The rows are interleaved in pairs of two rows with offset of 8 between pairs of two rows:
+									// row idx (each number stands for 32 values): [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
+									// the tiles are column-major ordered, so after 1024*1024 values we process: A[32:64, 0:32]
+                  if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
+                  {
+                    char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
+
+                    // set offset designates the tile offset among the 32*32 tiles
+                    // we first increase rows and then columns. Since we load 128 columns at once
+                    // we increase the offset by outRows*32 every 32 columns
+                    // additionally, we increase the offset by 32*32=1024 every 32 rows
+                    offset = ((base_col+(j*32))/32)*outRows*32 + (((base_row+subrow)/32)*1024); // global offset (32x32 tile)
+
+										// [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
+										// subrow % 8 -> [0,1] in tile0, [2, 3] in tile 1 etc
+										// subrow % 2 -> 0 for 1st row in the pair, 1 for the 2nd row
+										// every 2 rows, the offset increases by two [0, 1, 8, 9...]
+										// every 2 rows, the row index increase by 8 [0, 1, 8, 9...]
+										int local_row = ((subrow % 8)/2)*8 + (subrow/8)*2 + (subrow % 2);
+
+										// global offset + row with 32 cols each + 32 cols per j + col_idx
+                    out[offset + (local_row*32) + warp_lane] = data;
+                  }
+								break;
           }
         }
       }
@@ -2263,6 +2289,8 @@ template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char 
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
+template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
+template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
 
 template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 

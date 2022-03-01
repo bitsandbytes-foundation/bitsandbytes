@@ -1097,7 +1097,7 @@ def transform2(A, to_order, from_order='row', out=None, transpose=False, state=N
     if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1], transpose)
     else: new_state = (state[0], to_order)
     assert from_order == 'row'
-    assert to_order in ['col32', 'col_turing']
+    assert to_order in ['col32', 'col_turing', 'col_ampere']
 
     shape = state[0]
     if len(shape) == 2:
@@ -1119,5 +1119,10 @@ def transform2(A, to_order, from_order='row', out=None, transpose=False, state=N
             lib.ctransform_row2turingT(get_ptr(A), get_ptr(out), dim1, dim2)
         else:
             lib.ctransform_row2turing(get_ptr(A), get_ptr(out), dim1, dim2)
+    elif to_order == 'col_ampere':
+        if transpose:
+            lib.ctransform_row2ampereT(get_ptr(A), get_ptr(out), dim1, dim2)
+        else:
+            lib.ctransform_row2ampere(get_ptr(A), get_ptr(out), dim1, dim2)
 
     return out, new_state
