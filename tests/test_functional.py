@@ -960,20 +960,23 @@ def test_benchmlp(dims, backend):
 
 
 n = 2
-#dim1 = torch.randint(1,256, size=(n,)).tolist()
-#dim4 = torch.randint(32,1024, size=(n,)).tolist()
+dim1 = torch.randint(64,256, size=(n,)).tolist()
+dim4 = torch.randint(64,1024, size=(n,)).tolist()
 
-dim1 = [2*1024]
-dim4 = [2*1024]
+#dim1 = [2*1024]
+#dim4 = [2*1024]
+
+#dim1 = [4]
+#dim4 = [4]
 
 dims = (2,)
-ldb = [0]
 #ldb = list(range(256, 1*1024, 256))
-values = list(product(dim1,dim4,dims, ldb))
-names = ['dim1_{0}_dim4_{1}_dims_{2}_ldb_{3}'.format(*vals) for vals in values]
+formatB = ['col_turing', 'col_ampere']
+values = list(product(dim1,dim4,dims, formatB))
+names = ['dim1_{0}_dim4_{1}_dims_{2}_formatB_{3}'.format(*vals) for vals in values]
 k = 10
-@pytest.mark.parametrize("dim1, dim4, dims, ldb", values, ids=names)
-def test_dequant_mm(dim1, dim4, dims, ldb):
+@pytest.mark.parametrize("dim1, dim4, dims, formatB", values, ids=names)
+def test_dequant_mm(dim1, dim4, dims, formatB):
     inner = torch.randint(1, 128, size=(1,)).item()
     for i in range(k):
         A = torch.randn(dim1, inner, device='cuda')
@@ -984,14 +987,16 @@ def test_dequant_mm(dim1, dim4, dims, ldb):
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
         A2, SA = F.transform(A1, 'col32')
-        B2, SB = F.transform(B1, 'col_turing')
-        C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
-        F.igemmlt(A2, B2, C2, SA, SB, SC)
+        B2, SB = F.transform(B1, formatB)
+        C2, SC = F.igemmlt(A2, B2, SA, SB)
 
         C3, S = F.transform(C2, 'row', state=SC)
         C4 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
 
-        #torch.testing.assert_allclose(C1, C4, atol=0.01, rtol=0.1)
+        count = (torch.isclose(C1, C4, atol=0.01, rtol=0.1) == 0).sum().item()
+        n = C1.numel()
+        p = 0.06
+        assert count/n < p, f'error in more than {p} of elements: {count}/{n}={count/n}'
 
         C5 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten())
         torch.testing.assert_allclose(C5, C4)

@@ -888,7 +888,7 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     else: return None
 
 
-def igemmlt(A, B, SA, SB, out=None, Sout=None, ldb=None):
+def igemmlt(A, B, SA, SB, out=None, Sout=None):
     # TODO: assert dimensions fit
     shapeA = SA[0]
     shapeB = SB[0]
@@ -914,9 +914,10 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, ldb=None):
     assert B.dtype == torch.int8
     assert out.dtype == torch.int32
     assert SA[1] == 'col32'
-    assert SB[1] == 'col_turing'
+    assert SB[1] in ['col_turing', 'col_ampere']
     assert Sout[1] == 'col32'
     assert shapeA[-1] == shapeB[-1]
+    formatB = SB[1]
 
     ptr = CUBLAS_Context.get_instance().context
     ptrA = get_ptr(A)
@@ -925,20 +926,25 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, ldb=None):
 
     k = shapeA[-1]
     lda = ct.c_int32(m*32)
-    # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
-    # n = rows
-    tiles = rows
-    if rows % 8 != 0: tiles += (8-(rows %8))
-    if ldb is None:
-        ldb = ct.c_int32(tiles*32)
+    if formatB == 'col_turing':
+        # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
+        # n = rows
+        ldb = ct.c_int32(((rows+7)//8)*8*32)
     else:
-        ldb = ct.c_int32(ldb)
+        # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
+        # n = rows
+        ldb = ct.c_int32(((rows+31)//32)*32*32)
+
     ldc = ct.c_int32(m*32)
     m = ct.c_int32(m)
     n = ct.c_int32(n)
     k = ct.c_int32(k)
 
-    lib.cigemmlt(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+    if formatB == 'col_turing':
+        lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+    else:
+        lib.cigemmlt_ampere_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+
 
     return out, Sout
 
