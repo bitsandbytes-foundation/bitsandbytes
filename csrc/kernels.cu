@@ -2252,26 +2252,75 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 									// 32*32 tiles with 8*32 subtiles. The rows are interleaved in pairs of two rows with offset of 8 between pairs of two rows:
 									// row idx (each number stands for 32 values): [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
 									// the tiles are column-major ordered, so after 1024*1024 values we process: A[32:64, 0:32]
-                  if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
-                  {
-                    char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
+									if(TRANSPOSE)
+									{
+										const int jrow = j*ITEMS_PER_THREAD; // 8 rows per j
+										const int subrow_loop_row = (subrow/warps)*ITEMS_PER_THREAD*ITEMS_PER_THREAD; // 8 rows per j; 8j per subrow loop (subrow/warps)
+										//const int local_row =  warp_id; // each warp_id is one row
+										//const int block_row = base_col; // block offset for row
+										//const int local_col = warp_lane
+										//const int global_col = base_row; // block offset for col
+										if((base_col + subrow_loop_row + jrow + warp_id < outRows) && (base_row+warp_lane < rows))
+										{
+											// each row hae 32 columns and is offset by 1 to prevent bank conflict during storage into smem
+											char data = smem_data[(subrow_loop_row + jrow + warp_id)*33 + warp_lane];
 
-                    // set offset designates the tile offset among the 32*32 tiles
-                    // we first increase rows and then columns. Since we load 128 columns at once
-                    // we increase the offset by outRows*32 every 32 columns
-                    // additionally, we increase the offset by 32*32=1024 every 32 rows
-                    offset = ((base_col+(j*32))/32)*outRows*32 + (((base_row+subrow)/32)*1024); // global offset (32x32 tile)
+											// each 32 columns we have new tile
+											// each tile has size 32*32 = 1024 elements offset
+											// for each row offset of 32 we increaes the tile first
+											// after all rows are exhausted, we increase the col
+											int row_offset = ((base_col+jrow+subrow_loop_row+warp_id)/32)*1024; // global_row+jrow+subrow_loop_row+local_row, increase tile(=256) every 8 rows
 
-										// [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
-										// subrow % 8 -> [0,1] in tile0, [2, 3] in tile 1 etc
-										// subrow % 2 -> 0 for 1st row in the pair, 1 for the 2nd row
-										// every 2 rows, the offset increases by two [0, 1, 8, 9...]
-										// every 2 rows, the row index increase by 8 [0, 1, 8, 9...]
-										int local_row = ((subrow % 8)/2)*8 + (subrow/8)*2 + (subrow % 2);
+											// we increase by row_tile_column every 32 columns
+											// base_row increase in increments of 32
+											//int row_tile_column = 1024*outRows/32; // there are outRows/32 row tiles, and each tile is 1024 elements
+											//int col_offset = (base_row/32)*row_tile_column; 
+											// -> we can remove the divisions to speed up compute since outRows is always a multiple of 8
+											// 1024*outRows/32*base_row/32 = outRows*base_row
+											int col_offset = outRows*base_row;
 
-										// global offset + row with 32 cols each + 32 cols per j + col_idx
-                    out[offset + (local_row*32) + warp_lane] = data;
-                  }
+											offset = row_offset+col_offset;
+
+
+											// same as in the non-transpose case (see below)
+											// the difference is that now rows = cols
+											// in this case warp_id = subrow
+
+											// [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
+											// subrow % 8 -> [0,1] in tile0, [2, 3] in tile 1 etc
+											// subrow % 2 -> 0 for 1st row in the pair, 1 for the 2nd row
+											// every 2 rows, the offset increases by two [0, 1, 8, 9...]
+											// every 2 rows, the row index increase by 8 [0, 1, 8, 9...]
+											int local_row = (jrow + warp_id) % 32; // offset for row > 32 is already calculated into row_offset
+											int ampere_row = ((local_row % 8)/2)*8 + (local_row/8)*2 + (local_row % 2);
+
+											// global offset + row with 32 cols each + 32 cols per j + col_idx=warp_lane
+											out[offset + (ampere_row*32) + warp_lane] = data;
+										}
+									}
+									else
+									{
+										if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < outCols))
+										{
+											char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
+
+											// set offset designates the tile offset among the 32*32 tiles
+											// we first increase rows and then columns. Since we load 128 columns at once
+											// we increase the offset by outRows*32 every 32 columns
+											// additionally, we increase the offset by 32*32=1024 every 32 rows
+											offset = ((base_col+(j*32))/32)*outRows*32 + (((base_row+subrow)/32)*1024); // global offset (32x32 tile)
+
+											// [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
+											// subrow % 8 -> [0,1] in tile0, [2, 3] in tile 1 etc
+											// subrow % 2 -> 0 for 1st row in the pair, 1 for the 2nd row
+											// every 2 rows, the offset increases by two [0, 1, 8, 9...]
+											// every 2 rows, the row index increase by 8 [0, 1, 8, 9...]
+											int local_row = ((subrow % 8)/2)*8 + (subrow/8)*2 + (subrow % 2);
+
+											// global offset + row with 32 cols each + 32 cols per j + col_idx
+											out[offset + (local_row*32) + warp_lane] = data;
+										}
+									}
 								break;
           }
         }

@@ -621,6 +621,13 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
     else
       outRows = fill_up_to_nearest_multiple(rows, 8);
   }
+  else if(FORMAT == COL_AMPERE)
+  {
+    if(TRANSPOSE)
+      outRows = fill_up_to_nearest_multiple(cols, 32);
+    else
+      outRows = fill_up_to_nearest_multiple(rows, 32);
+  }
   else
   {
     if(TRANSPOSE)

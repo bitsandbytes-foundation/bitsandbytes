@@ -51,8 +51,8 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order='row', trans
         return init_func((rows, cols), dtype=dtype, device=device), state
     elif to_order == 'col_ampere':
         # blocks of 32 columns and 32 rows
-        cols = shape[1] + (32 - (shape[1] % 32))
-        rows = shape[0] + (32 - (shape[0] % 32))
+        cols = 32*((cols+31)//32)
+        rows = 32*((rows+31)//32)
         return init_func((rows, cols), dtype=dtype, device=device), state
     else:
         raise NotImplementedError(f'To_order not supported: {to_order}')

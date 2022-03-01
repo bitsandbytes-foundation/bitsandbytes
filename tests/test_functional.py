@@ -1197,6 +1197,7 @@ def test_transform2(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
         elif dims == 3:
             A = torch.randint(10, 99, size=(dim1, dim2, dim3), device='cuda').to(dtype)
 
+        A.view(-1)[-1] = -1
         if transpose:
             At = A.t().contiguous()
             out1, S1 = F.transform(At, to_order=orderOut)
