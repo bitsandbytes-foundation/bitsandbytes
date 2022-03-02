@@ -228,85 +228,6 @@ int roundoff(int v, int d) {
     return (v + d - 1) / d * d;
 }
 
-//void igemmLt(Context *context, bool transposeA, bool transposeB, int m, int n, int k, const void *A, const void *B, void *C, int lda, int ldb, int ldc)
-//{
-//
-//	cublasLtHandle_t ltHandle = (cublasLtHandle_t)context->m_handle;
-//
-//	cublasLtMatmulDesc_t matmulDesc = NULL;
-//	cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
-//	cublasOperation_t opTranspose = CUBLAS_OP_T;
-//	const void *D = C;
-//
-//  const int falpha = 1;
-//  const int fbeta = 0;
-//  const void * alpha = &falpha;
-//  const void * beta = &fbeta;
-//
-//	cublasLtMatrixTransformDesc_t transformDesc = NULL;
-//	int8_t *Atransform = NULL, *Btransform = NULL;
-//	int32_t *Ctransform                   = NULL;
-//	cublasLtMatrixLayout_t AtransformDesc = NULL, BtransformDesc = NULL, CtransformDesc = NULL;
-//	float transformAlpha = 1.0f, transformBeta = 0.0f;
-//	cublasLtOrder_t order_COL = CUBLASLT_ORDER_COL;
-//	cublasLtOrder_t order_COL32       = CUBLASLT_ORDER_COL32;
-//	cublasLtOrder_t order_COL4_4R2_8C = CUBLASLT_ORDER_COL4_4R2_8C;
-//
-//	//int ldatransform = 32 * m;
-//	//int ldbtransform = 32 * roundoff(n, 8);
-//	//int ldctransform = 32 * m;
-//
-//	//checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Atransform), sizeof(int8_t) * roundoff(k, 32) / 32 * ldatransform));
-//	//checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Btransform), sizeof(int8_t) * roundoff(k, 32) / 32 * ldbtransform));
-//	//checkCudaStatus(cudaMalloc(reinterpret_cast<void**>(&Ctransform), sizeof(int32_t) * roundoff(n, 32) / 32 * ldctransform));
-//
-//	//checkCublasStatus(cublasLtMatrixTransformDescCreate(&transformDesc, CUDA_R_32F));
-//
-//	checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32I));
-//	if(transposeA)
-//		checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opTranspose, sizeof(opTranspose)));
-//	if(transposeB)
-//		checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opTranspose, sizeof(opTranspose)));
-//
-//	// ---------------------------------------------------------------------------------------------
-//	// create descriptors for original matrices
-//
-//	checkCublasStatus(cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_8I, m, k, lda));
-//	checkCublasStatus(cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_8I, k, n, ldb));
-//	checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32I, m, n, ldc));
-//
-//	// ---------------------------------------------------------------------------------------------
-//	// create descriptors for transformed matrices
-//
-//	cout << m << " " << n << " " << k << endl;
-//	checkCublasStatus(cublasLtMatrixLayoutCreate(&AtransformDesc, CUDA_R_8I, m, k, lda));
-//	checkCublasStatus(cublasLtMatrixLayoutCreate(&BtransformDesc, CUDA_R_8I, n, k, ldb));
-//	checkCublasStatus(cublasLtMatrixLayoutCreate(&CtransformDesc, CUDA_R_32I, m, n, ldc));
-//
-//	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(AtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL, sizeof(order_COL)));
-//	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(BtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL, sizeof(order_COL)));
-//	checkCublasStatus(cublasLtMatrixLayoutSetAttribute(CtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL, sizeof(order_COL)));
-//
-//	// no need to transform C matrix as beta is assumed to be 0
-// checkCublasStatus(cublasLtMatmul(ltHandle,
-//  															 matmulDesc,
-//  															 alpha,
-//  															 A,
-//  															 AtransformDesc,
-//  															 B,
-//  															 BtransformDesc,
-//  															 beta,
-//  															 D,
-//  															 CtransformDesc,
-//  															 C,
-//  															 CtransformDesc,
-//  															 NULL,
-//  															 NULL,
-//  															 0,
-//  															 0));
-// 
-//}
-
 
 template<int ORDER> cublasLtOrder_t get_order()
 {
@@ -352,16 +273,7 @@ template<int ORDER> int get_leading_dim(int dim1, int dim2)
       return dim1*32;
       break;
     case COL_TURING:
-      // 32*8 tiles
-      //int num_blocks = (dim1 + (8 - (dim1 % 8)))/8;
-      //return 32*(dim1 + (8 - (dim1 % 8)));
-      //return 8*(dim1  + (32 - (dim1 % 32)));
-      //return 8*(dim2 + (32 - (dim2 % 32)));
-      //return 256;
       return 32*roundoff(dim1, 8);
-      //return 32*roundoff(dim2, 8);
-      //return 8*roundoff(dim2, 32);
-      //return 8*roundoff(dim1, 32);
       break;
     case COL_AMPERE:
       // 32*32 tiles
@@ -426,11 +338,10 @@ template void transform<int8_t, ROW, COL_AMPERE, false, 8>(cublasLtHandle_t ltHa
 template void transform<int8_t, COL32, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int32_t, COL32, ROW, false, 32>(cublasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
 
-template <int FORMATB, int DTYPE_OUT> void igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, int32_t *C, int lda, int ldb, int ldc) 
+template <int FORMATB, int DTYPE_OUT> void igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc) 
 {
     cublasLtMatmulDesc_t matmulDesc = NULL;
     cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
-    int32_t alpha = 1, beta = 0;
     cublasOperation_t opT = CUBLAS_OP_T;
     //cublasOperation_t opN = CUBLAS_OP_N;
     cublasLtOrder_t col32 = CUBLASLT_ORDER_COL32;
@@ -442,36 +353,35 @@ template <int FORMATB, int DTYPE_OUT> void igemmlt(cublasLtHandle_t ltHandle, in
     //checkCublasStatus(cublasLtMatmulPreferenceCreate(&pref)
     //checkCublasStatus(cublasLtMatmulPreferenceInit(pref)
 
-    checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32I));
-    checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
 
     checkCublasStatus(cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_8I, m, k, lda));
     checkCublasStatus(cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_8I, n, k, ldb));
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32I, m, n, ldc));
 
     checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
     if(FORMATB == COL_TURING)
       checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_turing, sizeof(col_turing)));
     else
       checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_ampere, sizeof(col_ampere)));
-    checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
 
-    checkCublasStatus(cublasLtMatmul(ltHandle,
-                                     matmulDesc,
-                                     &alpha,
-                                     A,
-                                     Adesc,
-                                     B,
-                                     Bdesc,
-                                     &beta,
-                                     C,
-                                     Cdesc,
-                                     C,
-                                     Cdesc,
-                                     NULL,
-                                     NULL,
-                                     0,
-                                     0));
+    if(DTYPE_OUT == 32)
+    {
+      checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32I));
+      checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
+      checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32I, m, n, ldc));
+      checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
+      int alpha = 1, beta = 0;
+      checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int32_t*)C, Cdesc, (int32_t*)C, Cdesc, NULL, NULL, 0, 0));
+    }
+    else
+    {
+      checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32F));
+      checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
+      checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_8I, m, n, ldc));
+      checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
+      float alpha = 1.0f, beta = 0.0f;
+      checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, 0));
+    }
+
 
     if (Cdesc) checkCublasStatus(cublasLtMatrixLayoutDestroy(Cdesc));
     if (Bdesc) checkCublasStatus(cublasLtMatrixLayoutDestroy(Bdesc));
@@ -649,10 +559,10 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template void igemmlt<COL_TURING, 32>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, int32_t *C, int lda, int ldb, int ldc);
-template void igemmlt<COL_TURING, 8>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, int32_t *C, int lda, int ldb, int ldc);
-template void igemmlt<COL_AMPERE, 32>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, int32_t *C, int lda, int ldb, int ldc);
-template void igemmlt<COL_AMPERE, 8>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, int32_t *C, int lda, int ldb, int ldc);
+template void igemmlt<COL_TURING, 32>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc);
+template void igemmlt<COL_TURING, 8>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc);
+template void igemmlt<COL_AMPERE, 32>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc);
+template void igemmlt<COL_AMPERE, 8>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc);
 
 template void transformRowToFormat<COL32, 0>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL32, 1>(char * A, char *out, int rows, int cols);
