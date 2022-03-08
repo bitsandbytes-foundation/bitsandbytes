@@ -20,8 +20,8 @@ def get_transform_func(dtype, orderA, orderOut, transpose=False):
         return getattr(lib, name)
 
 def get_transform_buffer(shape, dtype, device, to_order, from_order='row', transpose=False):
-    init_func = torch.empty
-    #init_func = torch.zeros
+    #init_func = torch.empty
+    init_func = torch.zeros
     dims = len(shape)
 
     if dims == 2:
@@ -888,7 +888,7 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     else: return None
 
 
-def igemmlt(A, B, SA, SB, out=None, Sout=None, out_dtype=torch.int32):
+def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     # TODO: assert dimensions fit
     shapeA = SA[0]
     shapeB = SB[0]
@@ -905,18 +905,18 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, out_dtype=torch.int32):
         rows = n = shapeB[0]*shapeB[1]
 
     if dimsA == 2 and out is None:
-        out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), out_dtype, A.device, 'col32', 'row')
+        out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, 'col32', 'row')
     elif dimsA == 3 and out is None:
-        out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), out_dtype, A.device, 'col32', 'row')
+        out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, 'col32', 'row')
 
     assert dimsB != 3, 'len(B.shape)==3 not supported'
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
-    assert out.dtype == out_dtype
+    assert out.dtype == dtype
     assert SA[1] == 'col32'
     assert SB[1] in ['col_turing', 'col_ampere']
     assert Sout[1] == 'col32'
-    assert shapeA[-1] == shapeB[-1]
+    assert shapeA[-1] == shapeB[-1], f'Inner matrix dimensions do not match: A @ B = {shapeA} @ {shapeB}'
     formatB = SB[1]
 
     ptr = CUBLAS_Context.get_instance().context
@@ -942,7 +942,7 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, out_dtype=torch.int32):
 
     if formatB == 'col_turing':
         lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
-    elif formatB == 'col_ampere' and out_dtype == torch.int32:
+    elif formatB == 'col_ampere' and dtype == torch.int32:
         lib.cigemmlt_ampere_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
     else:
         lib.cigemmlt_ampere_8(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
@@ -1090,6 +1090,14 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None):
     lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, ct.c_int32(rows), ct.c_int32(cols))
 
     return out_col, out_row, col_stats, row_stats
+
+
+def get_special_format_str():
+    major, minor = torch.cuda.get_device_capability()
+    if major == 7: return 'col_turing'
+    elif major == 8: return 'col_ampere'
+    else: return 'col_turing'
+
 
 
 

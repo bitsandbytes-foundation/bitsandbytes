@@ -572,7 +572,7 @@ def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
 
 
 
-n = 2
+n = 1
 dim1 = torch.randint(1,256, size=(n,)).tolist()
 dim2 = torch.randint(32,512, size=(n,)).tolist()
 dim3 = torch.randint(32,1024, size=(n,)).tolist()
@@ -589,7 +589,7 @@ ldb = [0]
 values = list(product(dim1,dim2,dim3,dim4,dims, ldb))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
-def test_igemmlt(dim1, dim2, dim3, dim4, dims, ldb):
+def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
     print(k)
     for i in range(k):
         if dims == 2:
@@ -605,6 +605,64 @@ def test_igemmlt(dim1, dim2, dim3, dim4, dims, ldb):
         C3, S = F.transform(C2, 'row', state=SC)
         torch.testing.assert_allclose(C1, C3.float())
 
+        # transpose
+        B = torch.randint(-128, 127, size=(dim3, dim4), device='cuda').to(torch.int8)
+        C1 = torch.matmul(A.float(), B.float())
+
+        B2t, SBt = F.transform2(B, 'col_turing', transpose=True)
+        C2, SC = F.igemmlt(A2, B2t, SA, SBt)
+        C3, S = F.transform(C2, 'row', state=SC)
+        torch.testing.assert_allclose(C1, C3.float())
+
+dim1 = [32]
+dim2 = [32]
+dim3 = [32]
+dim4 = [32]
+
+dims = (2,)
+#ldb = list(range(256, 1*1024, 256))
+values = list(product(dim1,dim2,dim3,dim4,dims))
+names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}'.format(*vals) for vals in values]
+k = 1
+@pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims", values, ids=names)
+def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
+    formatB = F.get_special_format_str()
+    k = 1
+    for i in range(k):
+        if dims == 2:
+            A = torch.normal(0, 0.5, size=(dim1, dim3), device='cuda').half()
+        elif dims == 3:
+            A = torch.normal(0, 0.5, size=(dim1, dim2, dim3), device='cuda').half()
+        B = torch.randn((dim4, dim3), device='cuda').half()
+        torch.nn.init.xavier_uniform_(B)
+        C1 = torch.matmul(A, B.t())
+        C2 = bnb.matmul(A, B.t())
+
+        A = A.view(-1, A.shape[-1])
+
+        CA, CAt, statsA, statsAt = F.double_quant(A)
+        CB, CBt, statsB, statsBt = F.double_quant(B)
+        C32A, SA = F.transform2(CA, 'col32')
+        CxB, SB = F.transform2(CB, to_order=formatB)
+        out1_32, Sout1_32 = F.igemmlt(C32A, CxB, SA, SB)
+        output = F.mm_dequant(out1_32, Sout1_32, statsAt, statsBt)
+
+        print('')
+        print(output.flatten()[:10])
+        print(C1.flatten()[:10])
+        print(C2.flatten()[:10])
+
+
+        #torch.testing.assert_allclose(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
+
+        # transpose
+        #B = torch.randint(-128, 127, size=(dim3, dim4), device='cuda').to(torch.int8)
+        #C1 = torch.matmul(A.float(), B.float())
+
+        #B2t, SBt = F.transform2(B, 'col_turing', transpose=True)
+        #C2, SC = F.igemmlt(A2, B2t, SA, SBt)
+        #C3, S = F.transform(C2, 'row', state=SC)
+        #torch.testing.assert_allclose(C1, C3.float())
 
 seq = [2048]
 model = [4*1024]
@@ -913,6 +971,7 @@ k = 10
 @pytest.mark.parametrize("dim1, dim4, dims, formatB", values, ids=names)
 def test_dequant_mm(dim1, dim4, dims, formatB):
     inner = torch.randint(1, 128, size=(1,)).item()
+    formatB = F.get_special_format_str()
     for i in range(k):
         A = torch.randn(dim1, inner, device='cuda')
         B = torch.randn(dim4, inner, device='cuda')
@@ -992,26 +1051,16 @@ def test_double_quant(dim1, dim2, dims):
         else:
             assert False
 
-        out_col2, out_row2 = F.double_quant(A)
-
-        #print('')
-        #print(A)
-        #print(Scol)
-        #print(A[0])
-        #print(out_row1[0])
-        #print(out_row2[0])
-        #out_row1, Srow = F.vectorwise_quant(A, dim=1)
-        #print(out_row1[0])
-        #print('='*80)
-        #print(out_col2)
+        CA, CAt, statsA, statsAt = F.double_quant(A)
 
         # max difference is 1 due to rounding differences
-        torch.testing.assert_allclose(out_col2, out_col1, atol=1, rtol=0)
-        torch.testing.assert_allclose(out_row2, out_row1, atol=1, rtol=0)
+        torch.testing.assert_allclose(CA, out_col1, atol=1, rtol=0)
+        torch.testing.assert_allclose(CAt, out_row1, atol=1, rtol=0)
 
-        n = out_row2.numel()
-        num_not_close_rows = (torch.isclose(out_row2, out_row1)==0).sum().item()
-        num_not_close_cols = (torch.isclose(out_col2, out_col1)==0).sum().item()
+
+        n = CAt.numel()
+        num_not_close_rows = (torch.isclose(CAt, out_row1)==0).sum().item()
+        num_not_close_cols = (torch.isclose(CA, out_col1)==0).sum().item()
 
         # allow for 1:500 error due to rounding differences
         min_error = 1/500
@@ -1022,10 +1071,13 @@ def test_double_quant(dim1, dim2, dims):
             print(f'Min error exceeded {num_not_close_rows} elements are different')
             assert False
 
+        torch.testing.assert_allclose(Scol.flatten(), statsA)
+        torch.testing.assert_allclose(Srow.flatten(), statsAt)
+
 
 # fw
 batch = 2
-seq = 2048
+seq = 512
 model = 1024
 hidden = 4*model
 
@@ -1060,7 +1112,7 @@ dims = (2,2, 2)
 #values = list(product(dim1,dim4,dims, inner))
 values = list(zip(dim1, dim4, dims, inner))
 names = ['dim1_{0}_dim4_{1}_dims_{2}_inner_{3}'.format(*vals) for vals in values]
-k = 100
+k = 1
 @pytest.mark.parametrize("dim1, dim4, dims, inner", values, ids=names)
 def test_integrated_igemmlt(dim1, dim4, dims, inner):
     A = torch.randn(dim1, inner, device='cuda')*0.1
