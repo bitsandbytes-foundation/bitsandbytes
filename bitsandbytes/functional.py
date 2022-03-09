@@ -1043,7 +1043,7 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
 
     return out
 
-def get_colrow_absmax(A, row_stats=None, col_stats=None):
+def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_rows=None, threshold=6.0):
     assert A.dtype == torch.float16
 
     cols = A.shape[-1]
@@ -1053,17 +1053,19 @@ def get_colrow_absmax(A, row_stats=None, col_stats=None):
         rows = A.shape[0]
 
     if row_stats is None: row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device).fill_(-50000.0)
+    if nnz_rows is None: nnz_rows = torch.zeros((rows,), dtype=torch.int32, device=A.device)
     if col_stats is None: col_stats = torch.empty((cols,), dtype=torch.float32, device=A.device).fill_(-50000.0)
 
     ptrA = get_ptr(A)
     ptrRowStats = get_ptr(row_stats)
     ptrColStats = get_ptr(col_stats)
+    ptrNnzrows = get_ptr(nnz_rows)
     rows = ct.c_int32(rows)
     cols = ct.c_int32(cols)
 
-    lib.cget_col_row_stats(ptrA, ptrRowStats, ptrColStats, rows, cols)
+    lib.cget_col_row_stats(ptrA, ptrRowStats, ptrColStats, ptrNnzrows, ct.c_float(threshold), rows, cols)
 
-    return row_stats, col_stats
+    return row_stats, col_stats, nnz_rows
 
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None):
     assert A.dtype == torch.half
@@ -1076,7 +1078,7 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None):
         rows = A.shape[0]
 
     if row_stats is None or col_stats is None:
-        row_stats, col_stats = get_colrow_absmax(A)
+        row_stats, col_stats, nnz_rows = get_colrow_absmax(A)
 
     if out_col is None: out_col = torch.zeros_like(A, dtype=torch.int8)
     if out_row is None: out_row = torch.zeros_like(A, dtype=torch.int8)

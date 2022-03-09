@@ -482,14 +482,14 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
 #define STATS_THREADS 64
 #define STATS_ITEMS 4
 #define STATS_ROWS 16
-void getColRowStats(half * A, float *rowStats, float *colStats, int rows, int cols)
+void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)
 {
   int tile_cols = STATS_THREADS*STATS_ITEMS;
   int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
   int tiledRows = fill_up_to_nearest_multiple(rows, STATS_ROWS);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/STATS_ROWS);
 
-  kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, rows, cols, tiledRows, tiledCols);
+  kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 
 }

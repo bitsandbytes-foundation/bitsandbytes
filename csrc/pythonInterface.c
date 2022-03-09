@@ -216,8 +216,8 @@ extern "C"
 
 	void cdequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols)
 	{ dequant_mm_int32_fp16(A, rowStats, colStats, out, newRowStats, newcolStats, numRows, numCols); }
-	void cget_col_row_stats(half * A, float *rowStats, float *colStats, int rows, int cols)
-	{ getColRowStats(A, rowStats, colStats, rows, cols); }
+	void cget_col_row_stats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)
+	{ getColRowStats(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols); }
 
   void cdouble_rowcol_quant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int rows, int cols)
 	{ doubleRowColQuant(A, rowStats, colStats, out_col_normed, out_row_normed, rows, cols); }

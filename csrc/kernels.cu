@@ -1686,7 +1686,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     }
 }
 
-template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __global__ void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols)
+template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __global__ void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols)
 {
   // 0. reset stats to -FLT_MAX
   // 1. load row-by-row ITEMS_PER_THREAD (TILE_SIZE==THREADS*ITEMS_PER_THREAD)
@@ -1705,19 +1705,23 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
 
   typedef cub::BlockLoad<T, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadT;
   typedef cub::BlockReduce<half, THREADS> BlockRowReduce;
+  typedef cub::BlockReduce<int, THREADS> BlockRowSum;
   typedef cub::BlockExchange<float, THREADS, ITEMS_PER_THREAD> BlockExchange;
 
   __shared__ union {
     typename BlockExchange::TempStorage exchange;
     typename BlockRowReduce::TempStorage rowreduce;
+    typename BlockRowSum::TempStorage rowsum;
     typename LoadT::TempStorage loadt;
   } temp_storage;
 
   __shared__ float smem_row_absmax_values[ITEMS_PER_THREAD*THREADS];
+  __shared__ int smem_row_nnz_values[ITEMS_PER_THREAD*THREADS];
   //__shared__ float smem_col_absmax_values[ITEMS_PER_THREAD*THREADS];
 
   half local_data[ITEMS_PER_THREAD];
   float local_col_absmax_values[ITEMS_PER_THREAD];
+  int local_row_nnz_count = 0;
   float row_absmax = -FLT_MAX;
 
   // 0. reset stats to -FLT_MAX
@@ -1725,6 +1729,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   {
     //smem_col_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
     smem_row_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
+    smem_row_nnz_values[threadIdx.x + (j*THREADS)] = 0;
   }
 
   #pragma unroll ITEMS_PER_THREAD
@@ -1740,6 +1745,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   for(int row = 0; row < TILE_ROWS; row++)
   {
     if(base_row+row >= rows){ break; }
+    local_row_nnz_count = 0;
     i = base_idx + ((row)*cols);
     // each thread gets data from the same column
     __syncthreads();
@@ -1748,6 +1754,11 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
       local_data[j] = fabsf(local_data[j]);
+
+
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      local_row_nnz_count += (float)local_data[j] >= nnz_threshold ? 1 : 0;
 
     // 2. compute col max (per thread); store in smem due to register pressure
     #pragma unroll ITEMS_PER_THREAD
@@ -1760,14 +1771,18 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     // 3. compute row max (per block); store in smem to accumulate full global mem transation
     __syncthreads();
     row_absmax = BlockRowReduce(temp_storage.rowreduce).Reduce(local_data, cub::Max());
+    __syncthreads();
+    local_row_nnz_count = BlockRowSum(temp_storage.rowsum).Sum(local_row_nnz_count);
     // we store the data temporarily in shared memory so we
     // can execute a full atomic block transaction into global memory later
     // we use a striped arrangement [0, 8, 16, 24, ..] for t0 for faster stores
     if(threadIdx.x == 0)
+    {
       smem_row_absmax_values[(row % ITEMS_PER_THREAD) + ((row/ITEMS_PER_THREAD)*ITEMS_PER_THREAD)] = row_absmax;
+      smem_row_nnz_values[(row % ITEMS_PER_THREAD) + ((row/ITEMS_PER_THREAD)*ITEMS_PER_THREAD)] = local_row_nnz_count;
+    }
 
     __syncthreads();
-
 
   }
 
@@ -1793,9 +1808,13 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
       if(val < smem_row_absmax_values[threadIdx.x+(j*THREADS)])
         atomicMax(&rowStats[base_row+(threadIdx.x+(j*THREADS))], smem_row_absmax_values[threadIdx.x+(j*THREADS)]);
     }
+
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    if(base_row+threadIdx.x+(j*THREADS) < rows)
+        atomicAdd(&nnz_count_row[base_row+(threadIdx.x+(j*THREADS))], smem_row_nnz_values[threadIdx.x+(j*THREADS)]);
 }
 
-template __global__ void kgetColRowStats<half, 64, 4, 16, 64*4>(half * __restrict__ A, float *rowStats, float *colStats, int rows, int cols, int tiledRows, int tiledCols);
+template __global__ void kgetColRowStats<half, 64, 4, 16, 64*4>(half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols);
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
