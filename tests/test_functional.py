@@ -3,6 +3,7 @@ import random
 import time
 import torch
 import bitsandbytes as bnb
+import einops
 
 from itertools import product
 
@@ -999,8 +1000,8 @@ def test_dequant_mm(dim1, dim4, dims, formatB):
 
 
 n = 2
-dim1 = [1*1024]
-dim2 = [2*1024]
+dim1 = [4*1024]
+dim2 = [8*1024]
 #dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 
@@ -1020,8 +1021,10 @@ def test_colrow_absmax(dim1, dim2, dims):
             assert False
 
         threshold = 3.0
-        nnz_rows1 = (torch.abs(A)>=threshold).sum(1)
         row_stats2, col_stats2, nnz_rows2 = F.get_colrow_absmax(A, threshold=threshold)
+
+        A_blocked = einops.rearrange(torch.abs(A), '(rows row_tiles) (cols block_size)-> rows cols row_tiles block_size', row_tiles=16, block_size=64*4)
+        nnz_rows1 = (torch.abs(A_blocked)>=threshold).sum(3).flatten()
 
         torch.testing.assert_allclose(col_stats1, col_stats2)
         torch.testing.assert_allclose(row_stats1, row_stats2)

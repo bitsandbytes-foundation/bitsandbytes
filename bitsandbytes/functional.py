@@ -1052,8 +1052,10 @@ def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_rows=None, threshol
     else:
         rows = A.shape[0]
 
+    col_tiles = (cols+255)//256
+    tiled_rows = ((rows+15)//16)*16
     if row_stats is None: row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device).fill_(-50000.0)
-    if nnz_rows is None: nnz_rows = torch.zeros((rows,), dtype=torch.int32, device=A.device)
+    if nnz_rows is None: nnz_rows = torch.zeros((tiled_rows*col_tiles,), dtype=torch.int32, device=A.device)
     if col_stats is None: col_stats = torch.empty((cols,), dtype=torch.float32, device=A.device).fill_(-50000.0)
 
     ptrA = get_ptr(A)

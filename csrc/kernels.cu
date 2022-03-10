@@ -1716,7 +1716,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   } temp_storage;
 
   __shared__ float smem_row_absmax_values[ITEMS_PER_THREAD*THREADS];
-  __shared__ int smem_row_nnz_values[ITEMS_PER_THREAD*THREADS];
+  __shared__ int smem_row_nnz_values[TILE_ROWS];
   //__shared__ float smem_col_absmax_values[ITEMS_PER_THREAD*THREADS];
 
   half local_data[ITEMS_PER_THREAD];
@@ -1779,7 +1779,8 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     if(threadIdx.x == 0)
     {
       smem_row_absmax_values[(row % ITEMS_PER_THREAD) + ((row/ITEMS_PER_THREAD)*ITEMS_PER_THREAD)] = row_absmax;
-      smem_row_nnz_values[(row % ITEMS_PER_THREAD) + ((row/ITEMS_PER_THREAD)*ITEMS_PER_THREAD)] = local_row_nnz_count;
+      // each blockIdx.x process 16 rows and 64*4=256 columns -> we sum nnz over 256 columns and have 16 values per block
+      smem_row_nnz_values[row] = local_row_nnz_count;
     }
 
     __syncthreads();
@@ -1809,9 +1810,8 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
         atomicMax(&rowStats[base_row+(threadIdx.x+(j*THREADS))], smem_row_absmax_values[threadIdx.x+(j*THREADS)]);
     }
 
-  for(int j = 0; j < ITEMS_PER_THREAD; j++)
-    if(base_row+threadIdx.x+(j*THREADS) < rows)
-        atomicAdd(&nnz_count_row[base_row+(threadIdx.x+(j*THREADS))], smem_row_nnz_values[threadIdx.x+(j*THREADS)]);
+    if(threadIdx.x < TILE_ROWS)
+      nnz_count_row[blockIdx.x*TILE_ROWS+threadIdx.x] = smem_row_nnz_values[threadIdx.x];
 }
 
 template __global__ void kgetColRowStats<half, 64, 4, 16, 64*4>(half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols);
