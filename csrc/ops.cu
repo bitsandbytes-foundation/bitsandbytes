@@ -489,7 +489,10 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_r
   int tiledRows = fill_up_to_nearest_multiple(rows, STATS_ROWS);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/STATS_ROWS);
 
-  kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
+  if(nnz_threshold == 0.0)
+    kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
+  else if(nnz_threshold != 0.0)
+    kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 1><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 
 }

@@ -1686,7 +1686,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     }
 }
 
-template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __global__ void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols)
+template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> __global__ void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols)
 {
   // 0. reset stats to -FLT_MAX
   // 1. load row-by-row ITEMS_PER_THREAD (TILE_SIZE==THREADS*ITEMS_PER_THREAD)
@@ -1756,9 +1756,16 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
       local_data[j] = fabsf(local_data[j]);
 
 
-    #pragma unroll ITEMS_PER_THREAD
-    for(int j = 0; j < ITEMS_PER_THREAD; j++)
-      local_row_nnz_count += (float)local_data[j] >= nnz_threshold ? 1 : 0;
+    if(SPARSE_DECOMP)
+      #pragma unroll ITEMS_PER_THREAD
+      for(int j = 0; j < ITEMS_PER_THREAD; j++)
+      {
+        if((float)local_data[j] >= nnz_threshold)
+        {
+          local_row_nnz_count += 1;
+          local_data[j] = 0.0f;
+        }
+      }
 
     // 2. compute col max (per thread); store in smem due to register pressure
     #pragma unroll ITEMS_PER_THREAD
@@ -1771,8 +1778,11 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     // 3. compute row max (per block); store in smem to accumulate full global mem transation
     __syncthreads();
     row_absmax = BlockRowReduce(temp_storage.rowreduce).Reduce(local_data, cub::Max());
-    __syncthreads();
-    local_row_nnz_count = BlockRowSum(temp_storage.rowsum).Sum(local_row_nnz_count);
+    if(SPARSE_DECOMP)
+    {
+      __syncthreads();
+      local_row_nnz_count = BlockRowSum(temp_storage.rowsum).Sum(local_row_nnz_count);
+    }
     // we store the data temporarily in shared memory so we
     // can execute a full atomic block transaction into global memory later
     // we use a striped arrangement [0, 8, 16, 24, ..] for t0 for faster stores
@@ -1810,11 +1820,13 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
         atomicMax(&rowStats[base_row+(threadIdx.x+(j*THREADS))], smem_row_absmax_values[threadIdx.x+(j*THREADS)]);
     }
 
-    if(threadIdx.x < TILE_ROWS)
-      nnz_count_row[blockIdx.x*TILE_ROWS+threadIdx.x] = smem_row_nnz_values[threadIdx.x];
+    if(SPARSE_DECOMP)
+      if(threadIdx.x < TILE_ROWS)
+        nnz_count_row[blockIdx.x*TILE_ROWS+threadIdx.x] = smem_row_nnz_values[threadIdx.x];
 }
 
-template __global__ void kgetColRowStats<half, 64, 4, 16, 64*4>(half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols);
+template __global__ void kgetColRowStats<half, 64, 4, 16, 64*4, 0>(half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols);
+template __global__ void kgetColRowStats<half, 64, 4, 16, 64*4, 1>(half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols);
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
@@ -1940,6 +1952,85 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
 
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __global__ void kDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int rows, int cols, int tiledCols)
+{
+  // assumes TILE_SIZE == THREADS*ITEMS_PER_THREAD
+  // Each thread reads the same column but multiple rows
+  // Rows are loaded in shared memory and access is shared across the threadblock (broadcast)
+
+  // 0. Load row stats data into shared memory; load col stat (1 fixed per thread)
+  // 1. Load data row by row (should be at least with TILE_SIZE = 512)
+  // 2. quantize data with row/col stats
+  // 3. Store data (TILE_SIZE = 512 is a bit slow, but should still be close enough to good performance)
+
+  // each block loads TILE_COLs columns and TILE_ROW rows
+  // after reading a tile the row counter increase by TILE_ROWS
+  // the col counter reset after reading TILE_COL elements
+  const int base_row = ((blockIdx.x*TILE_COLS)/tiledCols)*TILE_ROWS;
+  // col increases by TILE_SIZE for each block and wraps back to 0 after tiledCols is reached
+  const int base_col = (blockIdx.x*TILE_COLS) % tiledCols;
+  const int base_idx = (base_row*cols) + base_col;
+  const int items_per_load = ITEMS_PER_THREAD*THREADS;
+
+  typedef cub::BlockLoad<half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadHalf;
+  __shared__ typename LoadHalf::TempStorage loadhalf;
+  typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
+  __shared__ typename StoreInt8::TempStorage storeint8;
+
+  __shared__ float smem_row_stats[TILE_ROWS];
+  half local_data[ITEMS_PER_THREAD];
+  float local_col_stats[ITEMS_PER_THREAD];
+  char local_quantized_data[ITEMS_PER_THREAD];
+
+  // 0. Load row stats data into shared memory; load col stat (1 fixed per thread)
+  #pragma unroll ITEMS_PER_THREAD
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    if(base_col+(threadIdx.x*ITEMS_PER_THREAD) + j < cols)
+      local_col_stats[j] = __fdividef(127.0f, colStats[base_col+(threadIdx.x*ITEMS_PER_THREAD)+j]);
+
+  for(int i = threadIdx.x; i < TILE_ROWS; i+=blockDim.x)
+  {
+    if(base_row + i < rows)
+      smem_row_stats[i] = rowStats[base_row+i];
+  }
+  __syncthreads();
+
+  // we load row after row from the base_position
+  // 1. Load data row by row (should be at least with TILE_SIZE = 512)
+  for(int row = 0; row < TILE_ROWS; row++)
+  {
+    if(base_row + row >= rows){ break; }
+    int i = base_idx + (row*cols);
+    int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
+    LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
+    float row_stat = __fdividef(127.0f, smem_row_stats[row]);
+
+    // 2. quantize data with row/col stats
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    {
+      // we already pre-normalized the col/row stat:
+      // what this does is float/absmax*127 = int8
+      local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*row_stat));
+    }
+
+    StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
+
+    // 2. quantize data with row/col stats
+    #pragma unroll ITEMS_PER_THREAD
+    for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    {
+      // we already pre-normalized the col/row stat:
+      // what this does is float/absmax*127 = int8
+      local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*local_col_stats[j]));
+    }
+
+    __syncthreads();
+    StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
+
+  }
+}
+
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS> __global__ void kDoubleRowColQuantWithDecomp(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int rows, int cols, int tiledCols)
 {
   // assumes TILE_SIZE == THREADS*ITEMS_PER_THREAD
   // Each thread reads the same column but multiple rows

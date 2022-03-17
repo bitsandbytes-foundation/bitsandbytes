@@ -1043,7 +1043,7 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
 
     return out
 
-def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_rows=None, threshold=6.0):
+def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_rows=None, threshold=0.0):
     assert A.dtype == torch.float16
 
     cols = A.shape[-1]
