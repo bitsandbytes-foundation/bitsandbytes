@@ -497,7 +497,7 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_r
 
 }
 
-void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int rows, int cols)
+void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, float threshold, int rows, int cols)
 {
   int threads = 64;
   int items_per_thread = 4;
@@ -511,7 +511,11 @@ void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col
   //cout << "num blocks " << num_blocks << endl;
 
   //cout << A << " " << out_col_normed << endl;
-  kDoubleRowColQuant<64, 4, 16, 64*4><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rows, cols, tiledCols);
+  if(threshold > 0.0f)
+    kDoubleRowColQuant<64, 4, 16, 64*4, 1><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, threshold, rows, cols, tiledCols);
+  else
+    kDoubleRowColQuant<64, 4, 16, 64*4, 0><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, threshold, rows, cols, tiledCols);
+
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

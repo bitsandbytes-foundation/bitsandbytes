@@ -1025,26 +1025,28 @@ def test_colrow_absmax(dim1, dim2, dims):
         else:
             assert False
 
-        row_stats2, col_stats2, nnz_rows2 = F.get_colrow_absmax(A, threshold=threshold)
+        row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=threshold)
 
         A_blocked = einops.rearrange(torch.abs(A), '(rows row_tiles) (cols block_size)-> rows cols row_tiles block_size', row_tiles=16, block_size=64*4)
-        nnz_rows1 = (torch.abs(A_blocked)>=threshold).sum(3).flatten()
+        nnz_rows1_counts = (torch.abs(A_blocked)>=threshold).sum(3).flatten()
+        nnz_block_ptr1 = torch.zeros(nnz_rows1_counts.shape[0]+1, dtype=nnz_rows1_counts.dtype, device=nnz_rows1_counts.device)
+        nnz_block_ptr1[1:] = nnz_rows1_counts.cumsum(0)
 
         torch.testing.assert_allclose(col_stats1_trunc, col_stats2)
         torch.testing.assert_allclose(row_stats1_trunc, row_stats2)
-        torch.testing.assert_allclose(nnz_rows1, nnz_rows2)
+        torch.testing.assert_allclose(nnz_block_ptr1, nnz_block_ptr2)
 
-        row_stats2, col_stats2, nnz_rows2 = F.get_colrow_absmax(A, threshold=0.0)
+        row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=0.0)
 
         torch.testing.assert_allclose(col_stats1, col_stats2)
         torch.testing.assert_allclose(row_stats1, row_stats2)
-        torch.testing.assert_allclose(torch.zeros_like(nnz_rows2), nnz_rows2)
+        assert nnz_block_ptr2 is None
 
 
 
 n = 2
-dim1 = [1*1024]
-dim2 = [1*1024]
+dim1 = [8*1024]
+dim2 = [4*1024]
 #dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 

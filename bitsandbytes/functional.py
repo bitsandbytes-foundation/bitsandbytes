@@ -1043,7 +1043,7 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
 
     return out
 
-def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_rows=None, threshold=0.0):
+def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0):
     assert A.dtype == torch.float16
 
     cols = A.shape[-1]
@@ -1055,21 +1055,26 @@ def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_rows=None, threshol
     col_tiles = (cols+255)//256
     tiled_rows = ((rows+15)//16)*16
     if row_stats is None: row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device).fill_(-50000.0)
-    if nnz_rows is None: nnz_rows = torch.zeros((tiled_rows*col_tiles,), dtype=torch.int32, device=A.device)
     if col_stats is None: col_stats = torch.empty((cols,), dtype=torch.float32, device=A.device).fill_(-50000.0)
+
+    if nnz_block_ptr is None and threshold > 0.0: nnz_block_ptr = torch.zeros(((tiled_rows*col_tiles)+1,), dtype=torch.int32, device=A.device)
 
     ptrA = get_ptr(A)
     ptrRowStats = get_ptr(row_stats)
     ptrColStats = get_ptr(col_stats)
-    ptrNnzrows = get_ptr(nnz_rows)
+    ptrNnzrows = get_ptr(nnz_block_ptr)
     rows = ct.c_int32(rows)
     cols = ct.c_int32(cols)
 
     lib.cget_col_row_stats(ptrA, ptrRowStats, ptrColStats, ptrNnzrows, ct.c_float(threshold), rows, cols)
 
-    return row_stats, col_stats, nnz_rows
+    if threshold > 0.0:
+        nnz_block_ptr.cumsum_(0)
 
-def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None):
+
+    return row_stats, col_stats, nnz_block_ptr
+
+def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
     assert A.dtype == torch.half
     assert A.device.type == 'cuda'
 
@@ -1091,7 +1096,7 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None):
     ptrOutCol = get_ptr(out_col)
     ptrOutRow = get_ptr(out_row)
 
-    lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, ct.c_int32(rows), ct.c_int32(cols))
+    lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, ct.c_float(threshold), ct.c_int32(rows), ct.c_int32(cols))
 
     return out_col, out_row, col_stats, row_stats
 
