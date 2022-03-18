@@ -185,6 +185,7 @@ extern "C"
 	{ strided_gemmex(context, transposeA, transposeB, m, n, k, A, B, C, lda, ldb, ldc, strideA, strideB, strideC, batchCount); }
 
 	Context *get_context(){ return new Context(); }
+	ContextCusparse *get_cusparse(){ return new ContextCusparse(); }
 
 	void cigemmlt_turing_32(Context *context, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc)
 	{ igemmlt_turing_32((cublasLtHandle_t) context->m_handle, m, n, k, A, B, C, lda, ldb, ldc); }
@@ -219,8 +220,8 @@ extern "C"
 	void cget_col_row_stats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)
 	{ getColRowStats(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols); }
 
-  void cdouble_rowcol_quant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, float threshold, int rows, int cols)
-	{ doubleRowColQuant(A, rowStats, colStats, out_col_normed, out_row_normed, threshold, rows, cols); }
+  void cdouble_rowcol_quant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int *nnz_row_ptr, float threshold, int rows, int cols)
+	{ doubleRowColQuant(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_row_ptr, threshold, rows, cols); }
 
 	void ctransform_row2col32(char * A, char *out, int rows, int cols)
 	{ transform_row2col32(A, out, rows, cols); }
@@ -239,6 +240,10 @@ extern "C"
 
 	void ctransform_row2ampereT(char * A, char *out, int rows, int cols)
 	{ transform_row2ampereT(A, out, rows, cols); }
+
+	void cspmm_coo(ContextCusparse *context, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C)
+  { spmm_coo((cusparseHandle_t) context->m_handle, A_rowidx, A_colidx, A_vals, A_nnz, A_rows, A_cols, B_cols, ldb, B, ldc, C); }
+
 }
 
 

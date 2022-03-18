@@ -497,7 +497,7 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_r
 
 }
 
-void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, float threshold, int rows, int cols)
+void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int *nnz_block_ptr, float threshold, int rows, int cols)
 {
   int threads = 64;
   int items_per_thread = 4;
@@ -512,9 +512,9 @@ void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col
 
   //cout << A << " " << out_col_normed << endl;
   if(threshold > 0.0f)
-    kDoubleRowColQuant<64, 4, 16, 64*4, 1><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, threshold, rows, cols, tiledCols);
+    kDoubleRowColQuant<64, 4, 16, 64*4, 1><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols);
   else
-    kDoubleRowColQuant<64, 4, 16, 64*4, 0><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, threshold, rows, cols, tiledCols);
+    kDoubleRowColQuant<64, 4, 16, 64*4, 0><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols);
 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -560,6 +560,54 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
   //cout << A << " " << out_col_normed << endl;
   kTransformRowToFormat<256, 8, 32, 32*8, TRANSPOSE, FORMAT><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outRows, outCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C)
+{
+
+    cusparseSpMatDescr_t descA;
+    cusparseDnMatDescr_t descB, descC;
+
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    void *dBuffer = NULL;
+    size_t bufferSize = 0;
+
+    CHECK_CUSPARSE( cusparseCreateCoo(&descA, A_rows, A_cols, A_nnz,
+                                      A_rowidx, A_colidx, A_vals,
+                                      CUSPARSE_INDEX_32I,
+                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_16F) );
+    // Create dense matrix B
+    CHECK_CUSPARSE( cusparseCreateDnMat(&descB, A_cols, B_cols, ldb, B,
+                                        CUDA_R_16F, CUSPARSE_ORDER_ROW) );
+    // Create dense matrix C
+    CHECK_CUSPARSE( cusparseCreateDnMat(&descC, A_rows, B_cols, ldc, C,
+                                        CUDA_R_16F, CUSPARSE_ORDER_ROW) );
+    // allocate an external buffer if needed
+    CHECK_CUSPARSE( cusparseSpMM_bufferSize(
+                                 handle,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 &alpha, descA, descB, &beta, descC, CUDA_R_32F,
+                                 CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize) );
+    CUDA_CHECK_RETURN( cudaMalloc(&dBuffer, bufferSize) );
+
+    // execute SpMM
+    cusparseStatus_t test = cusparseSpMM(handle,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 &alpha, descA, descB, &beta, descC, CUDA_R_32F,
+                                 CUSPARSE_SPMM_ALG_DEFAULT, dBuffer);
+
+    CHECK_CUSPARSE(test);
+
+    cudaDeviceSynchronize();
+
+    // destroy matrix/vector descriptors
+    CHECK_CUSPARSE( cusparseDestroySpMat(descA) );
+    CHECK_CUSPARSE( cusparseDestroyDnMat(descB) );
+    CHECK_CUSPARSE( cusparseDestroyDnMat(descC) );
+    CUDA_CHECK_RETURN( cudaFree(dBuffer) );
 }
 
 //==============================================================

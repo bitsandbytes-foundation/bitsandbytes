@@ -11,6 +11,7 @@
 #include <cuda_fp16.h>
 #include <cublas_v2.h>
 #include <cublasLt.h>
+#include <cusparse.h>
 #include <vector>
 #include <functional>
 
@@ -24,6 +25,15 @@ using std::endl;
         cudaGetErrorString(_m_cudaStat), __LINE__, __FILE__);   \
     exit(1);                              \
   } }
+
+#define CHECK_CUSPARSE(value) {                      \
+  cusparseStatus_t _m_cudaStat = value;                    \
+  if (_m_cudaStat != CUSPARSE_STATUS_SUCCESS) {                   \
+    fprintf(stderr, "Error %s at line %d in file %s\n",         \
+        cusparseGetErrorString(_m_cudaStat), __LINE__, __FILE__);   \
+    exit(1);                              \
+  } }
+
 
 #define THREADS_PER_BLOCKS (512)
 
@@ -163,6 +173,20 @@ class ContextLt
 
 };
 
+class ContextCusparse
+{
+    public:
+				cusparseHandle_t m_handle;
+
+				ContextCusparse()
+				{
+					cusparseHandle_t handle;
+					cusparseCreate(&handle);
+					m_handle = handle;
+				}
+
+};
+
 
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
 
@@ -203,9 +227,12 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
 void cutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
 void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols);
 void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols);
-void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, float threshold, int rows, int cols);
+void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed,
+                       int *rowidx, int *colidx, half *val, int *nnz_block_ptr, float threshold, int rows, int cols);
 
 template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *out, int rows, int cols);
+
+void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C);
 
 #endif
 

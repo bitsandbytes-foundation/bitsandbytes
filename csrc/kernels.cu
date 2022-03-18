@@ -1952,7 +1952,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 }
 
 
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> __global__ void kDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, float threshold, int rows, int cols, int tiledCols)
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> __global__ void kDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols)
 {
   // assumes TILE_SIZE == THREADS*ITEMS_PER_THREAD
   // Each thread reads the same column but multiple rows
@@ -1978,6 +1978,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
   __shared__ typename StoreInt8::TempStorage storeint8;
 
   __shared__ float smem_row_stats[TILE_ROWS];
+  __shared__ unsigned int smem_nnz_row_idx[TILE_ROWS];
+
   half local_data[ITEMS_PER_THREAD];
   float local_col_stats[ITEMS_PER_THREAD];
   char local_quantized_data[ITEMS_PER_THREAD];
@@ -1992,6 +1994,9 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
   {
     if(base_row + i < rows)
       smem_row_stats[i] = rowStats[base_row+i];
+
+    if(SPARSE_DECOMP)
+      smem_nnz_row_idx[i] = nnz_block_ptr[(TILE_ROWS*blockIdx.x) + i];
   }
   __syncthreads();
 
@@ -2002,6 +2007,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     if(base_row + row >= rows){ break; }
     int i = base_idx + (row*cols);
     int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
+
+
     LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
     float row_stat = __fdividef(127.0f, smem_row_stats[row]);
 
@@ -2011,7 +2018,28 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     {
       // we already pre-normalized the col/row stat:
       // what this does is float/absmax*127 = int8
-      local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*row_stat));
+      if(SPARSE_DECOMP)
+      {
+        if(fabsf((float)local_data[j]) >= threshold)
+        {
+          local_quantized_data[j] = 0;
+
+          int old_idx = smem_nnz_row_idx[row];
+          int next_idx = old_idx;
+          while(old_idx == next_idx)
+          {
+            next_idx = old_idx + 1;
+            old_idx = atomicCAS(&smem_nnz_row_idx[row], old_idx, next_idx);
+          }
+          printf("%i %i (%i %i) %i %f\n", blockIdx.x, base_row+row, old_idx, next_idx, base_col+(threadIdx.x*ITEMS_PER_THREAD)+j, (float)local_data[j]);
+
+          rowidx[old_idx] = base_row+row;
+          colidx[old_idx] = base_col+(threadIdx.x*ITEMS_PER_THREAD)+j;
+          val[old_idx] = local_data[j];
+        }
+      }
+      else
+        local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*row_stat));
     }
 
     StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
@@ -2022,7 +2050,11 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     {
       // we already pre-normalized the col/row stat:
       // what this does is float/absmax*127 = int8
-      local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*local_col_stats[j]));
+      if(SPARSE_DECOMP)
+      {
+      }
+      else
+        local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*local_col_stats[j]));
     }
 
     __syncthreads();
@@ -2454,8 +2486,8 @@ template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_AMPERE>(
 
 template __global__ void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, half *out, float* newRowStats, float* newcolStats, const int numRows, const int numCols, const int tileCols, const int n);
 
-template __global__ void kDoubleRowColQuant<64, 4, 16, 64*4, 0>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, float threshold, int rows, int cols, int tiledCols);
-template __global__ void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, float threshold, int rows, int cols, int tiledCols);
+template __global__ void kDoubleRowColQuant<64, 4, 16, 64*4, 0>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols);
+template __global__ void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols);
 
 template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template __device__ unsigned char dQuantize<1>(float* smem_code, const float rand, float x);

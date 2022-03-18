@@ -9,6 +9,7 @@ from typing import Tuple
 
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libbitsandbytes.so')
 lib.get_context.restype = ct.c_void_p
+lib.get_cusparse.restype = ct.c_void_p
 name2qmap = {}
 
 def get_transform_func(dtype, orderA, orderOut, transpose=False):
@@ -136,6 +137,22 @@ class CUBLAS_Context(object):
 
     def initialize(self):
         self.context = ct.c_void_p(lib.get_context())
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls.__new__(cls)
+            cls._instance.initialize()
+        return cls._instance
+
+class Cusparse_Context(object):
+    _instance = None
+
+    def __init__(self):
+        raise RuntimeError('Call get_instance() instead')
+
+    def initialize(self):
+        self.context = ct.c_void_p(lib.get_cusparse())
 
     @classmethod
     def get_instance(cls):
@@ -1074,6 +1091,29 @@ def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_block_ptr=None, thr
 
     return row_stats, col_stats, nnz_block_ptr
 
+class COOSparseTensor(object):
+    def __init__(self, rows, cols, nnz, rowidx, colidx, values):
+        assert rowidx.dtype == torch.int32
+        assert colidx.dtype == torch.int32
+        assert values.dtype == torch.float16
+        assert values.numel() == nnz
+        assert rowidx.numel() == nnz
+        assert colidx.numel() == nnz
+
+        self.rows = rows
+        self.cols = cols
+        self.nnz = nnz
+        self.rowidx = rowidx
+        self.colidx = colidx
+        self.values = values
+
+def coo_zeros(self, rows, cols, nnz, device, dtype=torch.half):
+    rowidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
+    colidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
+    values = torch.zeros((nnz,), dtype=dtype, device=device)
+    return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
+
+
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
     assert A.dtype == torch.half
     assert A.device.type == 'cuda'
@@ -1085,7 +1125,7 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, 
         rows = A.shape[0]
 
     if row_stats is None or col_stats is None:
-        row_stats, col_stats, nnz_rows = get_colrow_absmax(A)
+        row_stats, col_stats, nnz_row_ptr = get_colrow_absmax(A, threshold=threshold)
 
     if out_col is None: out_col = torch.zeros_like(A, dtype=torch.int8)
     if out_row is None: out_row = torch.zeros_like(A, dtype=torch.int8)
@@ -1095,10 +1135,28 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, 
     ptrRowStats = get_ptr(row_stats)
     ptrOutCol = get_ptr(out_col)
     ptrOutRow = get_ptr(out_row)
+    coo_tensor = None
 
-    lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, ct.c_float(threshold), ct.c_int32(rows), ct.c_int32(cols))
+    if threshold > 0.0:
+        nnz = nnz_row_ptr[-1].item()
+        if nnz > 0:
+            coo_tensor = COOSparseTensor(A.shape[0], A.shape[1], nnz_row_ptr[-1].item(), A.device)
+            ptrRowIdx = get_ptr(coo_tensor.rowidx)
+            ptrColIdx = get_ptr(coo_tensor.colidx)
+            ptrVal = get_ptr(coo_tensor.values)
+            ptrRowPtr = get_ptr(nnz_row_ptr)
 
-    return out_col, out_row, col_stats, row_stats
+            lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, ptrRowIdx, ptrColIdx, ptrVal, ptrRowPtr, ct.c_float(threshold), ct.c_int32(rows), ct.c_int32(cols))
+            val, idx = torch.sort(coo_tensor.rowidx)
+            coo_tensor.rowidx = val
+            coo_tensor.colidx = coo_tensor.colidx[idx]
+            coo_tensor.values = coo_tensor.values[idx]
+        else:
+            lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, None, None, None, None, ct.c_float(0.0), ct.c_int32(rows), ct.c_int32(cols))
+    else:
+        lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, None, None, None, None, ct.c_float(threshold), ct.c_int32(rows), ct.c_int32(cols))
+
+    return out_col, out_row, col_stats, row_stats, coo_tensor
 
 
 def get_special_format_str():
@@ -1145,3 +1203,34 @@ def transform2(A, to_order, from_order='row', out=None, transpose=False, state=N
             lib.ctransform_row2ampere(get_ptr(A), get_ptr(out), dim1, dim2)
 
     return out, new_state
+
+def spmm_coo(cooA, B, out=None):
+    if out is None: out = torch.zeros((cooA.rows, B.shape[1]), device=B.device, dtype=B.dtype)
+    nnz = cooA.nnz
+    assert cooA.rowidx.numel() == nnz
+    assert cooA.colidx.numel() == nnz
+    assert cooA.values.numel() == nnz
+    assert cooA.cols == B.shape[0]
+
+    ldb = B.shape[1]
+    ldc = cooA.rows
+
+    ptr = Cusparse_Context.get_instance().context
+
+    ptrRowidx = get_ptr(cooA.rowidx)
+    ptrColidx = get_ptr(cooA.colidx)
+    ptrValues = get_ptr(cooA.values)
+    ptrB = get_ptr(B)
+    ptrC = get_ptr(out)
+    cnnz = ct.c_int32(cooA.nnz)
+    crowsA = ct.c_int32(cooA.rows)
+    ccolsA = ct.c_int32(cooA.cols)
+    ccolsB = ct.c_int32(B.shape[1])
+    cldb = ct.c_int32(ldb)
+    cldc = ct.c_int32(ldc)
+
+    lib.cspmm_coo(ptr, ptrRowidx, ptrColidx, ptrValues, cnnz, crowsA, ccolsA, ccolsB, cldb, ptrB, cldc, ptrC)
+
+    return out
+
+
