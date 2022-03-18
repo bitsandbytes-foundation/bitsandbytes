@@ -202,10 +202,10 @@ class MatMul8bitLt(torch.autograd.Function):
             output_shape = (A.shape[0], A.shape[1], B.shape[-1])
             A = A.view(-1, A.shape[-1]).contiguous()
 
-        CA, CAt, statsA, statsAt = F.double_quant(A)
-        CB, CBt, statsB, statsBt = F.double_quant(B.t().contiguous())
+        CA, CAt, statsA, statsAt, nnz_block_ptr = F.double_quant(A)
+        CB, CBt, statsB, statsBt, nnz_block_ptr = F.double_quant(B.t().contiguous())
         C32A, SA = F.transform2(CA, 'col32')
-        print(formatB)
+        #print(formatB)
         CxB, SB = F.transform2(CB, to_order=formatB)
         out1_32, Sout1_32 = F.igemmlt(C32A, CxB, SA, SB)
         output = F.mm_dequant(out1_32, Sout1_32, statsA, statsB)
@@ -214,8 +214,8 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.save_for_backward(A, B)
 
         output2 = torch.matmul(A, B)
-        print(output2.flatten()[:10])
-        print(output.flatten()[:10])
+        #print(output2.flatten()[:10])
+        #print(output.flatten()[:10])
 
         return output.view(output_shape)
 

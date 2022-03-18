@@ -1295,16 +1295,12 @@ def test_coo_double_quant(dim1, dim2, dims):
         #torch.testing.assert_allclose(Scol.flatten(), statsA)
         #torch.testing.assert_allclose(Srow.flatten(), statsAt)
 
-dim1 = [1]
-dim2 = [4*1024]
-#dim1 = [32]
-#dim2 = [32]
-#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
-#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
-
+n = 2
+dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
+dim2 = torch.randint(1,1*1024, size=(n,)).tolist()
 values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
-k = 1000
+k = 10
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_spmm_coo(dim1, dim2):
     threshold = 3.01
@@ -1321,6 +1317,41 @@ def test_spmm_coo(dim1, dim2):
 
         A2 = A*idx
         out1 = torch.matmul(A2, B)
-        torch.testing.assert_allclose(out1, out2)
+        torch.testing.assert_allclose(out1, out2, rtol=0.01, atol=1.2e-2)
 
+
+
+def test_spmm_bench():
+    dim1 = 1024*8
+    dim2 = 1024*8
+    threshold = 6
+    A = torch.randn(dim1, dim2).cuda().half()
+    B = torch.randn(dim2, dim1).cuda().half()
+    for i in range(100):
+        C1 = bnb.matmullt(A, B)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        C1 = bnb.matmullt(A, B)
+    torch.cuda.synchronize()
+    t8 = time.time()-t0
+
+    idx = torch.abs(A) >= threshold
+    nnz = (idx == 1).sum().item()
+    rows, cols = torch.where(idx)
+    values = A[idx]
+    cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
+
+    for i in range(100):
+        out2 = F.spmm_coo(cooA, B)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        out2 = F.spmm_coo(cooA, B)
+    torch.cuda.synchronize()
+    tsp = time.time()-t0
+    print(tsp, t8)
+    print(tsp/t8)
 
