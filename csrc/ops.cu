@@ -562,7 +562,7 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C)
+void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C, bool transposed_B)
 {
 
     cusparseSpMatDescr_t descA;
@@ -577,29 +577,34 @@ void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_val
                                       A_rowidx, A_colidx, A_vals,
                                       CUSPARSE_INDEX_32I,
                                       CUSPARSE_INDEX_BASE_ZERO, CUDA_R_16F) );
-    // Create dense matrix B
-    CHECK_CUSPARSE( cusparseCreateDnMat(&descB, A_cols, B_cols, ldb, B,
-                                        CUDA_R_16F, CUSPARSE_ORDER_ROW) );
     // Create dense matrix C
     CHECK_CUSPARSE( cusparseCreateDnMat(&descC, A_rows, B_cols, ldc, C,
+                                        CUDA_R_16F, CUSPARSE_ORDER_ROW) );
+    // Create dense matrix B
+    if(transposed_B)
+    {
+      int tmp = A_cols;
+      A_cols = B_cols;
+      B_cols = tmp;
+    }
+
+    CHECK_CUSPARSE( cusparseCreateDnMat(&descB, A_cols, B_cols, ldb, B,
                                         CUDA_R_16F, CUSPARSE_ORDER_ROW) );
     // allocate an external buffer if needed
     CHECK_CUSPARSE( cusparseSpMM_bufferSize(
                                  handle,
                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 transposed_B ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE,
                                  &alpha, descA, descB, &beta, descC, CUDA_R_32F,
                                  CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize) );
     CUDA_CHECK_RETURN( cudaMalloc(&dBuffer, bufferSize) );
 
     // execute SpMM
-    cusparseStatus_t test = cusparseSpMM(handle,
+    CHECK_CUSPARSE( cusparseSpMM(handle,
                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 transposed_B ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE,
                                  &alpha, descA, descB, &beta, descC, CUDA_R_32F,
-                                 CUSPARSE_SPMM_ALG_DEFAULT, dBuffer);
-
-    CHECK_CUSPARSE(test);
+                                 CUSPARSE_SPMM_ALG_DEFAULT, dBuffer));
 
     cudaDeviceSynchronize();
 

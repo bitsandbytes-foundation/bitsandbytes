@@ -1211,7 +1211,9 @@ def spmm_coo(cooA, B, out=None):
     assert cooA.values.numel() == nnz
     assert cooA.cols == B.shape[0]
 
-    ldb = B.shape[1]
+    transposed_B = (False if B.is_contiguous() else True)
+
+    ldb = B.stride()[(1 if transposed_B else 0)]
     ldc = B.shape[1]
 
     ptr = Cusparse_Context.get_instance().context
@@ -1228,7 +1230,7 @@ def spmm_coo(cooA, B, out=None):
     cldb = ct.c_int32(ldb)
     cldc = ct.c_int32(ldc)
 
-    lib.cspmm_coo(ptr, ptrRowidx, ptrColidx, ptrValues, cnnz, crowsA, ccolsA, ccolsB, cldb, ptrB, cldc, ptrC)
+    lib.cspmm_coo(ptr, ptrRowidx, ptrColidx, ptrValues, cnnz, crowsA, ccolsA, ccolsB, cldb, ptrB, cldc, ptrC, ct.c_bool(transposed_B))
 
     return out
 

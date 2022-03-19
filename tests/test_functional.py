@@ -1226,26 +1226,35 @@ def test_coo_double_quant(dim1, dim2):
 n = 2
 dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
 dim2 = torch.randint(1,1*1024, size=(n,)).tolist()
-values = list(product(dim1,dim2))
-names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
+transposed_B = [False, True]
+values = list(product(dim1,dim2, transposed_B))
+names = ['dim1_{0}_dim2_{1}_transposed_B_{2}'.format(*vals) for vals in values]
 k = 1
-@pytest.mark.parametrize("dim1, dim2", values, ids=names)
-def test_spmm_coo(dim1, dim2):
+@pytest.mark.parametrize("dim1, dim2, transposed_B", values, ids=names)
+def test_spmm_coo(dim1, dim2, transposed_B):
     threshold = 1.5
     dim3 = torch.randint(32, 128, size=(1,)).item()
     for i in range(k):
         A = torch.randn(dim1, dim2).cuda().half()
-        B = torch.randn(dim2, dim3).cuda().half()
+        if transposed_B:
+            B = torch.randn(dim3, dim2).cuda().half()
+        else:
+            B = torch.randn(dim2, dim3).cuda().half()
 
         idx = torch.abs(A) >= threshold
         nnz = (idx == 1).sum().item()
         rows, cols = torch.where(idx)
         values = A[idx]
         cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
-        out2 = F.spmm_coo(cooA, B)
-
         A2 = A*idx
-        out1 = torch.matmul(A2, B)
+
+        if transposed_B:
+            out2 = F.spmm_coo(cooA, B.t())
+            out1 = torch.matmul(A2, B.t())
+        else:
+            out2 = F.spmm_coo(cooA, B)
+            out1 = torch.matmul(A2, B)
+
         torch.testing.assert_allclose(out1, out2, rtol=0.01, atol=3.0e-2)
 
 
