@@ -343,16 +343,9 @@ template <int FORMATB, int DTYPE_OUT> void igemmlt(cublasLtHandle_t ltHandle, in
     cublasLtMatmulDesc_t matmulDesc = NULL;
     cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
     cublasOperation_t opT = CUBLAS_OP_T;
-    //cublasOperation_t opN = CUBLAS_OP_N;
     cublasLtOrder_t col32 = CUBLASLT_ORDER_COL32;
-    //cublasLtOrder_t row = CUBLASLT_ORDER_ROW;
     cublasLtOrder_t col_turing = CUBLASLT_ORDER_COL4_4R2_8C;
     cublasLtOrder_t col_ampere = CUBLASLT_ORDER_COL32_2R_4R4;
-
-    //cublasLtMatmulPreference_t pref = NULL;
-    //checkCublasStatus(cublasLtMatmulPreferenceCreate(&pref)
-    //checkCublasStatus(cublasLtMatmulPreferenceInit(pref)
-
 
     checkCublasStatus(cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_8I, m, k, lda));
     checkCublasStatus(cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_8I, n, k, ldb));

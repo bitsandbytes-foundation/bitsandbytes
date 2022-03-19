@@ -665,11 +665,8 @@ def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
         #C3, S = F.transform(C2, 'row', state=SC)
         #torch.testing.assert_allclose(C1, C3.float())
 
-seq = [2048]
-model = [4*1024]
-hidden = [16*1024]
 batch_size = 2
-seqdim = 2048
+seqdim = 512
 values = [(batch_size, seqdim, 4*1024, 16*1024),(batch_size, seqdim, 5120, 4*5120),(batch_size, seqdim, 12*1024, 4*12*1024)]
 
 
@@ -677,7 +674,7 @@ values = [(batch_size, seqdim, 4*1024, 16*1024),(batch_size, seqdim, 5120, 4*512
 names = ['batch_{0}_seq_{1}_model_{2}_hidden_{3}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_8bit_training(batch, seq, model, hidden):
-    formatB = 'col_ampere'
+    formatB = F.get_special_format_str()
     A = torch.randn(batch, seq, model, device='cuda').half()
     grad = torch.randn(batch, seq, model, device='cuda').half()
     w1 = torch.randint(-128, 127, size=(hidden, model), device='cuda').half()
@@ -723,37 +720,37 @@ def test_bench_8bit_training(batch, seq, model, hidden):
     CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
     C32A, SA = F.transform2(CA, 'col32')
     # fc1
-    out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1, out_dtype=dtype)
+    out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1, dtype=dtype)
     #out1 = F.mm_dequant(out1_32, Sout1_32, statsAt, statsw1t)
 
     # fc2
     Cout1, Cout1t, statsout1, statsout1t, coo_tensor = F.double_quant(out1)
     C32out1, Sout1 = F.transform2(Cout1, 'col32')
-    out2_32, Sout2_32 = F.igemmlt(C32out1, CTw2, Sout1, Sw2, out_dtype=dtype)
+    out2_32, Sout2_32 = F.igemmlt(C32out1, CTw2, Sout1, Sw2, dtype=dtype)
     #out2 = F.mm_dequant(out2_32, Sout2_32, statsout1t, statsw2t)
 
     # delta1
     Cgrad, Cgradt, statsgrad, statsgradt, coo_tensor = F.double_quant(grad)
     C32grad, Sgrad = F.transform2(Cgrad, 'col32')
-    d1_32, Sd1_32 = F.igemmlt(C32grad, CTw2t, Sgrad, Sw2t, out_dtype=dtype)
+    #d1_32, Sd1_32 = F.igemmlt(C32grad, CTw2t, Sgrad, Sw2t, dtype=dtype)
     #d1 = F.mm_dequant(d1_32, Sd1_32, statsgradt, statsw2)
 
     # delta2
     Cd1, Cd1t, statsd1, statsd1t, coo_tensor = F.double_quant(d1)
     C32d1, Sd1 = F.transform2(Cd1, 'col32')
-    d2_32, Sd2_32 = F.igemmlt(C32d1, CTw1t, Sd1, Sw1t, out_dtype=dtype)
+    #d2_32, Sd2_32 = F.igemmlt(C32d1, CTw1t, Sd1, Sw1t, dtype=dtype)
     #d2 = F.mm_dequant(d2_32, Sd2_32, statsd1t, statsw1)
 
     # grad1
     C32out1t, Sout1t = F.transform2(Cout1t, 'col32', transpose=True)
     CTgradt, Sgradt = F.transform2(Cgradt, formatB, transpose=True)
-    grad1_32, Sgrad1_32 = F.igemmlt(C32out1t, CTgradt, Sout1t, Sgradt, out_dtype=dtype)
+    #grad1_32, Sgrad1_32 = F.igemmlt(C32out1t, CTgradt, Sout1t, Sgradt, dtype=dtype)
     #grad1 = F.mm_dequant(grad1_32, Sgrad1_32, statsout1, statsgrad)
 
     # grad2
     C32At, SAt = F.transform2(CAt, 'col32', transpose=True)
     CTd1t, Sd1t = F.transform2(Cd1t, formatB, transpose=True)
-    grad2_32, Sgrad2_32 = F.igemmlt(C32At, CTd1t, SAt, Sd1t, out_dtype=dtype)
+    #grad2_32, Sgrad2_32 = F.igemmlt(C32At, CTd1t, SAt, Sd1t, dtype=dtype)
     #grad2 = F.mm_dequant(grad2_32, Sgrad2_32, statsA, statsd1)
 
     torch.cuda.synchronize()
@@ -772,38 +769,38 @@ def test_bench_8bit_training(batch, seq, model, hidden):
         C32A, SA = F.transform2(CA, 'col32')
 
         # fc1
-        #out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1, out_dtype=dtype)
-        out1 = F.mm_dequant(out1_32, Sout1_32, statsAt, statsw1t)
+        #out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1, dtype=dtype)
+        #out1 = F.mm_dequant(out1_32, Sout1_32, statsAt, statsw1t)
 
         # fc2
         Cout1, Cout1t, statsout1, statsout1t, coo_tensor = F.double_quant(out1)
         C32out1, Sout1 = F.transform2(Cout1, 'col32')
-        #out2_32, Sout2_32 = F.igemmlt(C32out1, CTw2, Sout1, Sw2, out_dtype=dtype)
-        out2 = F.mm_dequant(out2_32, Sout2_32, statsout1t, statsw2t)
+        #out2_32, Sout2_32 = F.igemmlt(C32out1, CTw2, Sout1, Sw2, dtype=dtype)
+        #out2 = F.mm_dequant(out2_32, Sout2_32, statsout1t, statsw2t)
 
         # delta1
         Cgrad, Cgradt, statsgrad, statsgradt, coo_tensor = F.double_quant(grad)
         C32grad, Sgrad = F.transform2(Cgrad, 'col32')
-        #d1_32, Sd1_32 = F.igemmlt(C32grad, CTw2t, Sgrad, Sw2t, out_dtype=dtype)
-        d1 = F.mm_dequant(d1_32, Sd1_32, statsgradt, statsw2)
+        #d1_32, Sd1_32 = F.igemmlt(C32grad, CTw2t, Sgrad, Sw2t, dtype=dtype)
+        #d1 = F.mm_dequant(d1_32, Sd1_32, statsgradt, statsw2)
 
         # delta2
         Cd1, Cd1t, statsd1, statsd1t, coo_tensor = F.double_quant(d1)
         C32d1, Sd1 = F.transform2(Cd1, 'col32')
-        #d2_32, Sd2_32 = F.igemmlt(C32d1, CTw1t, Sd1, Sw1t, out_dtype=dtype)
-        d2 = F.mm_dequant(d2_32, Sd2_32, statsd1t, statsw1)
+        #d2_32, Sd2_32 = F.igemmlt(C32d1, CTw1t, Sd1, Sw1t, dtype=dtype)
+        #d2 = F.mm_dequant(d2_32, Sd2_32, statsd1t, statsw1)
 
         # grad1
         C32out1t, Sout1t = F.transform2(Cout1t, 'col32', transpose=True)
         CTgradt, Sgradt = F.transform2(Cgradt, formatB, transpose=True)
-        #grad1_32, Sgrad1_32 = F.igemmlt(C32out1t, CTgradt, Sout1t, Sgradt, out_dtype=dtype)
-        grad1 = F.mm_dequant(grad1_32, Sgrad1_32, statsout1, statsgrad)
+        #grad1_32, Sgrad1_32 = F.igemmlt(C32out1t, CTgradt, Sout1t, Sgradt, dtype=dtype)
+        #grad1 = F.mm_dequant(grad1_32, Sgrad1_32, statsout1, statsgrad)
 
         # grad2
         C32At, SAt = F.transform2(CAt, 'col32', transpose=True)
         CTd1t, Sd1t = F.transform2(Cd1t, formatB, transpose=True)
-        #grad2_32, Sgrad2_32 = F.igemmlt(C32At, CTd1t, SAt, Sd1t, out_dtype=dtype)
-        grad2 = F.mm_dequant(grad2_32, Sgrad2_32, statsA, statsd1)
+        #grad2_32, Sgrad2_32 = F.igemmlt(C32At, CTd1t, SAt, Sd1t, dtype=dtype)
+        #grad2 = F.mm_dequant(grad2_32, Sgrad2_32, statsA, statsd1)
 
     torch.cuda.synchronize()
     t8 = time.time() - t0
@@ -1088,48 +1085,47 @@ def test_double_quant(dim1, dim2, dims):
         torch.testing.assert_allclose(Scol.flatten(), statsAt)
 
 
-n = 10
-
-dim1 = [4]
-dim4 = [4]
-inner = [4]
+n = 4
+dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim4 = torch.randint(1,4*1024, size=(n,)).tolist()
+inner = torch.randint(1,4*1024, size=(n,)).tolist()
 
 values = list(zip(dim1, dim4, inner))
 names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
-k = 1
+k = 10
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
 def test_integrated_igemmlt(dim1, dim4, inner):
-    A = torch.randn(dim1, inner, device='cuda').half()
-    B = torch.randn(dim4, inner, device='cuda').half()
+    for i in range(k):
+        A = torch.randn(dim1, inner, device='cuda').half()
+        B = torch.randn(dim4, inner, device='cuda').half()
 
-    out1 = torch.matmul(A.half(), B.t().half())
+        out1 = torch.matmul(A.half(), B.t().half())
 
-    C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
-    C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
-    A1, maxA = F.vectorwise_quant(A, dim=1)
-    B1, maxB = F.vectorwise_quant(B, dim=1)
+        C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
+        C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
+        A1, maxA = F.vectorwise_quant(A, dim=1)
+        B1, maxB = F.vectorwise_quant(B, dim=1)
 
-    torch.testing.assert_allclose(maxA.flatten(), stats1a)
-    torch.testing.assert_allclose(maxB.flatten(), stats2a)
-    torch.testing.assert_allclose(C1a, A1)
-    torch.testing.assert_allclose(C2a, B1)
+        torch.testing.assert_allclose(maxA.flatten(), stats1a)
+        torch.testing.assert_allclose(maxB.flatten(), stats2a)
+        torch.testing.assert_allclose(C1a, A1, rtol=0, atol=1)
+        torch.testing.assert_allclose(C2a, B1, rtol=0, atol=1)
 
-    A2, SA = F.transform(C1a, 'col32')
-    B2, SB = F.transform(C2a, 'col_turing')
-    outC32, SC = F.igemmlt(A2, B2, SA, SB)
-    out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
+        A2, SA = F.transform(C1a, 'col32')
+        B2, SB = F.transform(C2a, 'col_turing')
+        outC32, SC = F.igemmlt(A2, B2, SA, SB)
+        out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
 
-    A2, SA = F.transform(A1, 'col32')
-    B2, SB = F.transform(B1, 'col_turing')
-    C2, SC = F.igemmlt(A2, B2, SA, SB)
+        A2, SA = F.transform(A1, 'col32')
+        B2, SB = F.transform(B1, 'col_turing')
+        C2, SC = F.igemmlt(A2, B2, SA, SB)
 
-    C3, S = F.transform(C2, 'row', state=SC)
-    out3 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
+        C3, S = F.transform(C2, 'row', state=SC)
+        out3 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
 
-    print('')
-    print(out1)
-    print(out2)
-    print(out3)
+        err1 = torch.abs(out1-out2).mean().item()
+        err2 = torch.abs(out1-out3).mean().item()
+        assert err2 <= err1*1.01
 
 
 
@@ -1187,7 +1183,7 @@ def test_overflow():
         Ca, Sa = F.transform(a, 'col32')
         Cb, Sb = F.transform(b, 'col_ampere')
 
-        c = F.igemmlt(Ca, Cb, Sa, Sb, out_dtype=torch.int8)
+        c = F.igemmlt(Ca, Cb, Sa, Sb, dtype=torch.int8)
         c2 = torch.matmul(a.float(), b.float().t())
     print(c)
     print(c2)
@@ -1205,7 +1201,7 @@ names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 k = 1
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_coo_double_quant(dim1, dim2):
-    threshold = 1.00
+    threshold = 3.00
     for i in range(k):
         A = torch.randn(dim1, dim2, device='cuda').half()
 
@@ -1221,7 +1217,7 @@ def test_coo_double_quant(dim1, dim2):
 
             A1 = A*(idx==0)
             A2 = (CA.float()*statsA.unsqueeze(1)/127).half()
-            torch.testing.assert_allclose(A*(idx==0), A2, rtol=0.05, atol=1e-2)
+            torch.testing.assert_allclose(A*(idx==0), A2, rtol=0.05, atol=1.5e-2)
 
 n = 2
 dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
@@ -1306,7 +1302,7 @@ dim1 = torch.randint(256,4*1024, size=(n,)).tolist()
 dim2 = torch.randint(256,4*1024, size=(n,)).tolist()
 values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
-k = 1
+k = 10
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_integrated_sparse_decomp(dim1, dim2):
     threshold = 3.0
@@ -1339,14 +1335,5 @@ def test_integrated_sparse_decomp(dim1, dim2):
         err1 = torch.abs(out1-out2).mean().item()
         err2 = torch.abs(out1-out5).mean().item()
         assert err2 < err1
-
-
-
-
-
-
-
-
-
 
 
