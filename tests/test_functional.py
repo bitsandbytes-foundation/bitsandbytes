@@ -1230,49 +1230,27 @@ def test_overflow():
 
 
 
-dim1 = [1]
-dim2 = [4*1024]
-#dim1 = [32]
-#dim2 = [32]
-#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
-#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+n = 2
+dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 
-dims = (2,)
-values = list(product(dim1,dim2,dims))
-names = ['dim1_{0}_dim2_{1}_dims_{2}'.format(*vals) for vals in values]
-k = 1000
-@pytest.mark.parametrize("dim1, dim2, dims", values, ids=names)
-def test_coo_double_quant(dim1, dim2, dims):
-    threshold = 3.0
+values = list(product(dim1,dim2))
+names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
+k = 10
+@pytest.mark.parametrize("dim1, dim2", values, ids=names)
+def test_coo_double_quant(dim1, dim2):
+    threshold = 3.00
     for i in range(k):
         A = torch.randn(dim1, dim2, device='cuda').half()
-        vals1 = A[(torch.abs(A) >= 3.0)]
+
+        idx = (torch.abs(A) >= threshold)
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
 
-
-        #print(coo_tensor.rowidx.numel())
-        #print(coo_tensor.rowidx)
-        #print(coo_tensor.colidx)
-
         if coo_tensor is not None:
-            val, counts = torch.unique(coo_tensor.rowidx, return_counts=True)
-            start = 0
-            for c in counts:
-                col = coo_tensor.colidx[start:start+c]
-                val2 = coo_tensor.values[start:start+c]
-                if c > 1:
-                    colval, idx = torch.sort(col)
-                    val2 = val2[idx]
-                #print(vals1[start:start+c])
-                #print(val2)
-                print(vals1)
-                print(coo_tensor.values)
-                print((coo_tensor.values == 0).sum().item())
-                #print(coo_tensor.rowidx)
-                #print(coo_tensor.colidx)
-                torch.testing.assert_allclose(vals1[start:start+c], val2)
-
-                start += c
+            A1 = A*idx
+            A2 = torch.zeros_like(A)
+            A2[coo_tensor.rowidx.long(), coo_tensor.colidx.long()] = coo_tensor.values
+            torch.testing.assert_allclose(A1, A2)
 
         # max difference is 1 due to rounding differences
         #torch.testing.assert_allclose(CA, out_col1, atol=1, rtol=0)
@@ -1303,10 +1281,12 @@ names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 k = 10
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_spmm_coo(dim1, dim2):
-    threshold = 3.01
+    threshold = 3.0
+    dim3 = torch.randint(1, 128, size=(1,)).item()
+    dim3 = 4
     for i in range(k):
         A = torch.randn(dim1, dim2).cuda().half()
-        B = torch.randn(dim2, dim1).cuda().half()
+        B = torch.randn(dim2, dim3).cuda().half()
 
         idx = torch.abs(A) >= threshold
         nnz = (idx == 1).sum().item()
@@ -1322,12 +1302,18 @@ def test_spmm_coo(dim1, dim2):
 
 
 def test_spmm_bench():
-    dim1 = 1024*8
-    dim2 = 1024*8
-    threshold = 6
-    A = torch.randn(dim1, dim2).cuda().half()
-    B = torch.randn(dim2, dim1).cuda().half()
-    for i in range(100):
+    batch = 2
+    model = 1024*1
+    hidden = model*4
+    seq = 1024
+    dim1 = batch*seq
+    dim2 = model
+    dim3 = hidden
+    threshold = 4
+    A = torch.randn(dim1, dim2, device='cuda').half()
+    B = torch.randn(dim2, dim3, device='cuda').half()
+    k = 100
+    for i in range(10):
         C1 = bnb.matmullt(A, B)
 
     torch.cuda.synchronize()
@@ -1339,11 +1325,12 @@ def test_spmm_bench():
 
     idx = torch.abs(A) >= threshold
     nnz = (idx == 1).sum().item()
+    print(nnz/idx.numel())
     rows, cols = torch.where(idx)
     values = A[idx]
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
 
-    for i in range(100):
+    for i in range(10):
         out2 = F.spmm_coo(cooA, B)
 
     torch.cuda.synchronize()

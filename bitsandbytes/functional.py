@@ -1107,7 +1107,7 @@ class COOSparseTensor(object):
         self.colidx = colidx
         self.values = values
 
-def coo_zeros(self, rows, cols, nnz, device, dtype=torch.half):
+def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     rowidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
     colidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
     values = torch.zeros((nnz,), dtype=dtype, device=device)
@@ -1140,7 +1140,7 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, 
     if threshold > 0.0:
         nnz = nnz_row_ptr[-1].item()
         if nnz > 0:
-            coo_tensor = COOSparseTensor(A.shape[0], A.shape[1], nnz_row_ptr[-1].item(), A.device)
+            coo_tensor = coo_zeros(A.shape[0], A.shape[1], nnz_row_ptr[-1].item(), A.device)
             ptrRowIdx = get_ptr(coo_tensor.rowidx)
             ptrColIdx = get_ptr(coo_tensor.colidx)
             ptrVal = get_ptr(coo_tensor.values)
@@ -1213,7 +1213,7 @@ def spmm_coo(cooA, B, out=None):
     assert cooA.cols == B.shape[0]
 
     ldb = B.shape[1]
-    ldc = cooA.rows
+    ldc = B.shape[1]
 
     ptr = Cusparse_Context.get_instance().context
 

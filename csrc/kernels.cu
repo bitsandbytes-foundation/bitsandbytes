@@ -2024,14 +2024,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
         {
           local_quantized_data[j] = 0;
 
-          int old_idx = smem_nnz_row_idx[row];
-          int next_idx = old_idx;
-          while(old_idx == next_idx)
-          {
-            next_idx = old_idx + 1;
-            old_idx = atomicCAS(&smem_nnz_row_idx[row], old_idx, next_idx);
-          }
-          printf("%i %i (%i %i) %i %f\n", blockIdx.x, base_row+row, old_idx, next_idx, base_col+(threadIdx.x*ITEMS_PER_THREAD)+j, (float)local_data[j]);
+					int old_idx = atomicInc(&smem_nnz_row_idx[row], UINT_MAX);
 
           rowidx[old_idx] = base_row+row;
           colidx[old_idx] = base_col+(threadIdx.x*ITEMS_PER_THREAD)+j;

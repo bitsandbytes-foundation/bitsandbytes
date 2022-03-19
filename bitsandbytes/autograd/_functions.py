@@ -208,7 +208,7 @@ class MatMul8bitLt(torch.autograd.Function):
         #print(formatB)
         CxB, SB = F.transform2(CB, to_order=formatB)
         out1_32, Sout1_32 = F.igemmlt(C32A, CxB, SA, SB)
-        output = F.mm_dequant(out1_32, Sout1_32, statsA, statsB)
+        output = F.mm_dequant(out1_32, Sout1_32, statsAt, statsBt)
 
         if A.requires_grad or B.requires_grad:
             ctx.save_for_backward(A, B)
