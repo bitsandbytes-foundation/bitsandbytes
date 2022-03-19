@@ -1067,13 +1067,13 @@ def test_double_quant(dim1, dim2, dims):
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
 
         # max difference is 1 due to rounding differences
-        torch.testing.assert_allclose(CA, out_col1, atol=1, rtol=0)
-        torch.testing.assert_allclose(CAt, out_row1, atol=1, rtol=0)
+        torch.testing.assert_allclose(CA, out_row1, atol=1, rtol=0)
+        torch.testing.assert_allclose(CAt, out_col1, atol=1, rtol=0)
 
 
         n = CAt.numel()
-        num_not_close_rows = (torch.isclose(CAt, out_row1)==0).sum().item()
-        num_not_close_cols = (torch.isclose(CA, out_col1)==0).sum().item()
+        num_not_close_rows = (torch.isclose(CA, out_row1)==0).sum().item()
+        num_not_close_cols = (torch.isclose(CAt, out_col1)==0).sum().item()
 
         # allow for 1:500 error due to rounding differences
         min_error = 1/500
@@ -1084,91 +1084,55 @@ def test_double_quant(dim1, dim2, dims):
             print(f'Min error exceeded {num_not_close_rows} elements are different')
             assert False
 
-        torch.testing.assert_allclose(Scol.flatten(), statsA)
-        torch.testing.assert_allclose(Srow.flatten(), statsAt)
+        torch.testing.assert_allclose(Srow.flatten(), statsA)
+        torch.testing.assert_allclose(Scol.flatten(), statsAt)
 
-
-# fw
-batch = 2
-seq = 512
-model = 1024
-hidden = 4*model
-
-# bw
-#batch = 4
-#seq = 1024
-#hidden = 1024
-#model = 4*hidden
-batch_seq = batch*seq
-
-# fw
-dim1 = [batch_seq, batch_seq, batch_seq]
-inner = [4*model, 5*model, 12*model]
-dim4 = [4*hidden, 5*hidden, 12*hidden]
-
-# fw2
-#dim1 = [batch_seq, batch_seq, batch_seq]
-#dim4 = [4*model, 5*model, 12*model]
-#inner = [4*hidden, 5*hidden, 12*hidden]
-
-# grad
-#inner = [batch_seq, batch_seq, batch_seq]
-#dim1 = [4*model, 5*model, 12*model]
-#dim4 = [4*hidden, 5*hidden, 12*hidden]
 
 n = 10
-#dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
-#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 
-dims = (2,2, 2)
-#ldb = list(range(256, 1*1024, 256))
-#values = list(product(dim1,dim4,dims, inner))
-values = list(zip(dim1, dim4, dims, inner))
-names = ['dim1_{0}_dim4_{1}_dims_{2}_inner_{3}'.format(*vals) for vals in values]
+dim1 = [4]
+dim4 = [4]
+inner = [4]
+
+values = list(zip(dim1, dim4, inner))
+names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
 k = 1
-@pytest.mark.parametrize("dim1, dim4, dims, inner", values, ids=names)
-def test_integrated_igemmlt(dim1, dim4, dims, inner):
-    A = torch.randn(dim1, inner, device='cuda')*0.1
-    B = torch.randn(dim4, inner, device='cuda')*0.1
-    A = A.half()
-    B = B.half()
-    for i in range(k):
-        C1 = torch.matmul(A.half(), B.t().half())
+@pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
+def test_integrated_igemmlt(dim1, dim4, inner):
+    A = torch.randn(dim1, inner, device='cuda').half()
+    B = torch.randn(dim4, inner, device='cuda').half()
 
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(k):
-        C1 = torch.matmul(A, B.t())
-    torch.cuda.synchronize()
-    t_fp16 = time.time() - t0
+    out1 = torch.matmul(A.half(), B.t().half())
 
-
-    C2, SC = F.transform(torch.zeros(A.shape[0], B.shape[0], dtype=torch.int32, device='cuda'), 'col32')
-    torch.cuda.synchronize()
     C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
     C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
+    A1, maxA = F.vectorwise_quant(A, dim=1)
+    B1, maxB = F.vectorwise_quant(B, dim=1)
+
+    torch.testing.assert_allclose(maxA.flatten(), stats1a)
+    torch.testing.assert_allclose(maxB.flatten(), stats2a)
+    torch.testing.assert_allclose(C1a, A1)
+    torch.testing.assert_allclose(C2a, B1)
+
     A2, SA = F.transform(C1a, 'col32')
-    B2, SB = F.transform(C2b, 'col_turing')
-    F.igemmlt(A2, B2, C2, SA, SB, SC)
-    C5 = F.mm_dequant(C2, SC, stats1b, stats2b)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    #print(C1a.numel()/1e6, C1b.numel()/1e6)
-    for i in range(k):
-        S = F.double_quant(A)
-        C1a *= 0
-        C1b *= 0
-        #A2, SA = F.transform(C1a, 'col32')
-        #B2, SB = F.transform(C2b, 'col_turing')
+    B2, SB = F.transform(C2a, 'col_turing')
+    outC32, SC = F.igemmlt(A2, B2, SA, SB)
+    out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
 
-        F.igemmlt(A2, B2, C2, SA, SB, SC)
-        C5 = F.mm_dequant(C2, SC, stats1b, stats2b, C5)
-    torch.cuda.synchronize()
-    t_i8 = time.time() - t0
+    A2, SA = F.transform(A1, 'col32')
+    B2, SB = F.transform(B1, 'col_turing')
+    C2, SC = F.igemmlt(A2, B2, SA, SB)
 
-    print(t_i8, t_fp16, t_fp16/t_i8, dim1, inner, dim4)
-    #if t_i8 < t_fp16:
-        #print(t_i8, t_fp16, t_fp16/t_i8, dim1, inner, dim4)
+    C3, S = F.transform(C2, 'row', state=SC)
+    out3 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
+
+    print('')
+    print(out1)
+    print(out2)
+    print(out3)
+
+
+
 
 
 
@@ -1233,17 +1197,20 @@ def test_overflow():
 n = 2
 dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
 dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+#dim1 = [4]
+#dim2 = [5]
 
 values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
-k = 10
+k = 1
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_coo_double_quant(dim1, dim2):
-    threshold = 3.00
+    threshold = 1.00
     for i in range(k):
         A = torch.randn(dim1, dim2, device='cuda').half()
 
         idx = (torch.abs(A) >= threshold)
+        CA2, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
 
         if coo_tensor is not None:
@@ -1252,26 +1219,9 @@ def test_coo_double_quant(dim1, dim2):
             A2[coo_tensor.rowidx.long(), coo_tensor.colidx.long()] = coo_tensor.values
             torch.testing.assert_allclose(A1, A2)
 
-        # max difference is 1 due to rounding differences
-        #torch.testing.assert_allclose(CA, out_col1, atol=1, rtol=0)
-        #torch.testing.assert_allclose(CAt, out_row1, atol=1, rtol=0)
-
-
-        #n = CAt.numel()
-        #num_not_close_rows = (torch.isclose(CAt, out_row1)==0).sum().item()
-        #num_not_close_cols = (torch.isclose(CA, out_col1)==0).sum().item()
-
-        ## allow for 1:500 error due to rounding differences
-        #min_error = 1/500
-        #if num_not_close_cols > (min_error*n):
-        #    print(f'Min error exceeded {num_not_close_cols} elements are different')
-        #    assert False
-        #if num_not_close_rows > (min_error*n):
-        #    print(f'Min error exceeded {num_not_close_rows} elements are different')
-        #    assert False
-
-        #torch.testing.assert_allclose(Scol.flatten(), statsA)
-        #torch.testing.assert_allclose(Srow.flatten(), statsAt)
+            A1 = A*(idx==0)
+            A2 = (CA.float()*statsA.unsqueeze(1)/127).half()
+            torch.testing.assert_allclose(A*(idx==0), A2, rtol=0.05, atol=1e-2)
 
 n = 2
 dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
@@ -1341,4 +1291,57 @@ def test_spmm_bench():
     tsp = time.time()-t0
     print(tsp, t8)
     print(tsp/t8)
+
+
+n = 10
+dim1 = torch.randint(256,4*1024, size=(n,)).tolist()
+dim2 = torch.randint(256,4*1024, size=(n,)).tolist()
+#dim1 = [8]
+#dim2 = [1024]
+values = list(product(dim1,dim2))
+names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
+k = 1
+@pytest.mark.parametrize("dim1, dim2", values, ids=names)
+def test_integrated_sparse_decomp(dim1, dim2):
+    threshold = 3.0
+    formatB = 'col_turing'
+    for i in range(k):
+        A = torch.randn(dim1, dim2).cuda().half()
+        w1 = torch.randn(dim1, dim2).cuda().half()
+        out1 = torch.matmul(A, w1.t())
+
+        Cw1, Cw1t, statsw1, statsw1t, coo_tensor = F.double_quant(w1)
+        CTw1, Sw1 = F.transform2(Cw1, formatB)
+
+        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)#, threshold=threshold)
+        C32A, SA = F.transform2(CA, 'col32')
+
+        out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1)
+        out2 = F.mm_dequant(out1_32, Sout1_32, statsAt, statsw1t)
+
+        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
+        C32A, SA = F.transform2(CA, 'col32')
+
+        out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1)
+        out3 = F.mm_dequant(out1_32, Sout1_32, statsAt, statsw1t)
+
+        assert coo_tensor is not None
+
+        out4 = F.spmm_coo(coo_tensor, w1.t())
+        out3 = out3 + out4
+
+
+        err1 = torch.abs(out1-out2).mean().item()
+        err2 = torch.abs(out1-out3).mean().item()
+        print(err1, err2)
+
+
+
+
+
+
+
+
+
+
 

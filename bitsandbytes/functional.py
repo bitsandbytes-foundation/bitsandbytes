@@ -906,7 +906,6 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
 
 
 def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
-    # TODO: assert dimensions fit
     shapeA = SA[0]
     shapeB = SB[0]
     dimsA = len(shapeA)
@@ -1156,7 +1155,7 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, 
     else:
         lib.cdouble_rowcol_quant(ptrA, ptrRowStats, ptrColStats, ptrOutCol, ptrOutRow, None, None, None, None, ct.c_float(threshold), ct.c_int32(rows), ct.c_int32(cols))
 
-    return out_col, out_row, col_stats, row_stats, coo_tensor
+    return out_row, out_col, row_stats, col_stats, coo_tensor
 
 
 def get_special_format_str():

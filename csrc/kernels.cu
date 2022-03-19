@@ -2030,6 +2030,10 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
           colidx[old_idx] = base_col+(threadIdx.x*ITEMS_PER_THREAD)+j;
           val[old_idx] = local_data[j];
         }
+				else
+				{
+					local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*row_stat));
+				}
       }
       else
         local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*row_stat));
@@ -2043,11 +2047,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     {
       // we already pre-normalized the col/row stat:
       // what this does is float/absmax*127 = int8
-      if(SPARSE_DECOMP)
-      {
-      }
-      else
-        local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*local_col_stats[j]));
+			local_quantized_data[j] = (char)(rintf(__half2float(local_data[j])*local_col_stats[j]));
     }
 
     __syncthreads();
