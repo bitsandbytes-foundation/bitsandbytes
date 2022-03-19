@@ -957,11 +957,15 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     k = ct.c_int32(k)
 
     if formatB == 'col_turing':
-        lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
-    elif formatB == 'col_ampere' and dtype == torch.int32:
-        lib.cigemmlt_ampere_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
-    else:
-        lib.cigemmlt_ampere_8(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+        if dtype == torch.int32:
+            lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+        else:
+            lib.cigemmlt_turing_8(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+    elif formatB == 'col_ampere':
+        if dtype == torch.int32:
+            lib.cigemmlt_ampere_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+        else:
+            lib.cigemmlt_ampere_8(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
 
 
     return out, Sout

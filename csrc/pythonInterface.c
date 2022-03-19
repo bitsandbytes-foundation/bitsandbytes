@@ -108,6 +108,9 @@ void transform_row2ampereT(char * A, char *out, int rows, int cols){ transformRo
  void igemmlt_turing_32(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc)
 	{ igemmlt<COL_TURING, 32>(ltHandle, m, n, k, A, B, C, lda, ldb, ldc); }
 
+ void igemmlt_turing_8(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc)
+	{ igemmlt<COL_TURING, 8>(ltHandle, m, n, k, A, B, C, lda, ldb, ldc); }
+
  void igemmlt_ampere_32(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc)
 	{ igemmlt<COL_AMPERE, 32>(ltHandle, m, n, k, A, B, C, lda, ldb, ldc); }
 
@@ -189,6 +192,9 @@ extern "C"
 
 	void cigemmlt_turing_32(Context *context, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc)
 	{ igemmlt_turing_32((cublasLtHandle_t) context->m_handle, m, n, k, A, B, C, lda, ldb, ldc); }
+
+	void cigemmlt_turing_8(Context *context, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc)
+	{ igemmlt_turing_8((cublasLtHandle_t) context->m_handle, m, n, k, A, B, C, lda, ldb, ldc); }
 
 	void cigemmlt_ampere_32(Context *context, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc)
 	{ igemmlt_ampere_32((cublasLtHandle_t) context->m_handle, m, n, k, A, B, C, lda, ldb, ldc); }
