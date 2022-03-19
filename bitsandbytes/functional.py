@@ -1061,6 +1061,7 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
 
 def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0):
     assert A.dtype == torch.float16
+    device = A.device
 
     cols = A.shape[-1]
     if len(A.shape) == 3:
@@ -1070,10 +1071,10 @@ def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_block_ptr=None, thr
 
     col_tiles = (cols+255)//256
     tiled_rows = ((rows+15)//16)*16
-    if row_stats is None: row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device).fill_(-50000.0)
-    if col_stats is None: col_stats = torch.empty((cols,), dtype=torch.float32, device=A.device).fill_(-50000.0)
+    if row_stats is None: row_stats = torch.empty((rows,), dtype=torch.float32, device=device).fill_(-50000.0)
+    if col_stats is None: col_stats = torch.empty((cols,), dtype=torch.float32, device=device).fill_(-50000.0)
 
-    if nnz_block_ptr is None and threshold > 0.0: nnz_block_ptr = torch.zeros(((tiled_rows*col_tiles)+1,), dtype=torch.int32, device=A.device)
+    if nnz_block_ptr is None and threshold > 0.0: nnz_block_ptr = torch.zeros(((tiled_rows*col_tiles)+1,), dtype=torch.int32, device=device)
 
     ptrA = get_ptr(A)
     ptrRowStats = get_ptr(row_stats)
@@ -1114,8 +1115,9 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
 
 
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
+    device = A.device
     assert A.dtype == torch.half
-    assert A.device.type == 'cuda'
+    assert device.type == 'cuda'
 
     cols = A.shape[-1]
     if len(A.shape) == 3:
@@ -1126,20 +1128,20 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, 
     if row_stats is None or col_stats is None:
         row_stats, col_stats, nnz_row_ptr = get_colrow_absmax(A, threshold=threshold)
 
-    if out_col is None: out_col = torch.zeros_like(A, dtype=torch.int8)
-    if out_row is None: out_row = torch.zeros_like(A, dtype=torch.int8)
+    if out_col is None: out_col = torch.zeros(A.shape, device=device, dtype=torch.int8)
+    if out_row is None: out_row = torch.zeros(A.shape, device=device, dtype=torch.int8)
 
+    coo_tensor = None
     ptrA = get_ptr(A)
     ptrColStats = get_ptr(col_stats)
     ptrRowStats = get_ptr(row_stats)
     ptrOutCol = get_ptr(out_col)
     ptrOutRow = get_ptr(out_row)
-    coo_tensor = None
 
     if threshold > 0.0:
         nnz = nnz_row_ptr[-1].item()
         if nnz > 0:
-            coo_tensor = coo_zeros(A.shape[0], A.shape[1], nnz_row_ptr[-1].item(), A.device)
+            coo_tensor = coo_zeros(A.shape[0], A.shape[1], nnz_row_ptr[-1].item(), device)
             ptrRowIdx = get_ptr(coo_tensor.rowidx)
             ptrColIdx = get_ptr(coo_tensor.colidx)
             ptrVal = get_ptr(coo_tensor.values)
@@ -1204,7 +1206,7 @@ def transform2(A, to_order, from_order='row', out=None, transpose=False, state=N
     return out, new_state
 
 def spmm_coo(cooA, B, out=None):
-    if out is None: out = torch.zeros((cooA.rows, B.shape[1]), device=B.device, dtype=B.dtype)
+    if out is None: out = torch.empty((cooA.rows, B.shape[1]), device=B.device, dtype=B.dtype)
     nnz = cooA.nnz
     assert cooA.rowidx.numel() == nnz
     assert cooA.colidx.numel() == nnz
