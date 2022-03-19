@@ -1301,17 +1301,15 @@ def test_spmm_bench():
     print(tsp/t8)
 
 
-n = 10
-#dim1 = torch.randint(256,4*1024, size=(n,)).tolist()
-#dim2 = torch.randint(256,4*1024, size=(n,)).tolist()
-dim1 = [4]
-dim2 = [4]
+n = 2
+dim1 = torch.randint(256,4*1024, size=(n,)).tolist()
+dim2 = torch.randint(256,4*1024, size=(n,)).tolist()
 values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 k = 1
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_integrated_sparse_decomp(dim1, dim2):
-    threshold = 2.0
+    threshold = 3.0
     formatB = 'col_turing'
     for i in range(k):
         A = torch.randn(dim1, dim2).cuda().half()
@@ -1335,28 +1333,12 @@ def test_integrated_sparse_decomp(dim1, dim2):
 
         assert coo_tensor is not None
 
-        out4 = F.spmm_coo(coo_tensor, w1.t().contiguous())
+        out4 = F.spmm_coo(coo_tensor, w1.t())
         out5 = out3 + out4
 
-        idx = torch.abs(A) >= threshold
-        A1 = idx*A
-        A2 = (idx==0)*A
-        out6 = torch.matmul(A1, w1.t()) + torch.matmul(A2, w1.t())
-
-        print('')
-        print(out1)
-        print(out2)
-        print(out3)
-        print(out4)
-        print(out5)
-        print(out6)
-
         err1 = torch.abs(out1-out2).mean().item()
-        err2 = torch.abs(out1-out3).mean().item()
-        err3 = torch.abs(out1-out4).mean().item()
-        err4 = torch.abs(out1-out5).mean().item()
-        err5 = torch.abs(out1-out6).mean().item()
-        print(err1, err2, err3, err4, err5)
+        err2 = torch.abs(out1-out5).mean().item()
+        assert err2 < err1
 
 
 
