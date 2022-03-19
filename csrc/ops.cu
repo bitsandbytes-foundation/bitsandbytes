@@ -571,6 +571,7 @@ void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_val
     float alpha = 1.0f;
     float beta = 0.0f;
     void *dBuffer = NULL;
+    size_t bufferSize = 0;
 
     CHECK_CUSPARSE( cusparseCreateCoo(&descA, A_rows, A_cols, A_nnz,
                                       A_rowidx, A_colidx, A_vals,
@@ -583,13 +584,13 @@ void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_val
     CHECK_CUSPARSE( cusparseCreateDnMat(&descC, A_rows, B_cols, ldc, C,
                                         CUDA_R_16F, CUSPARSE_ORDER_ROW) );
     // allocate an external buffer if needed
-    //CHECK_CUSPARSE( cusparseSpMM_bufferSize(
-    //                             handle,
-    //                             CUSPARSE_OPERATION_NON_TRANSPOSE,
-    //                             CUSPARSE_OPERATION_NON_TRANSPOSE,
-    //                             &alpha, descA, descB, &beta, descC, CUDA_R_32F,
-    //                             CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize) );
-    //CUDA_CHECK_RETURN( cudaMalloc(&dBuffer, bufferSize) );
+    CHECK_CUSPARSE( cusparseSpMM_bufferSize(
+                                 handle,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 &alpha, descA, descB, &beta, descC, CUDA_R_32F,
+                                 CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize) );
+    CUDA_CHECK_RETURN( cudaMalloc(&dBuffer, bufferSize) );
 
     // execute SpMM
     cusparseStatus_t test = cusparseSpMM(handle,
