@@ -23,18 +23,14 @@ import torch.distributed as dist
 Tensor = torch.Tensor
 
 
-def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, num_splits=1) -> Tensor:
-    if num_splits == 2:
-        split_size = input.shape[-1]//2
-        split_inp = torch.split(input, split_size, dim=2)
-        split_weight = torch.split(weight, split_size, dim=1)
-        out = bnb.matmul(split_inp[0], split_weight[0].t()) + bnb.matmul(split_inp[1], split_weight[1].t())
+def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, matmul_func=None) -> Tensor:
+    if matmul_func:
+        out = matmul_func(input, weight.t())
     else:
         out = bnb.matmul(input, weight.t())
     if bias is not None:
         out += bias.unsqueeze(0).expand_as(out)
     return out
-
 
 def truncate_tensor(x, low, high, mode='zero'):
     with torch.no_grad():

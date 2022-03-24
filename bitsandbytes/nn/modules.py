@@ -48,6 +48,13 @@ class Linear8bit(nn.Linear):
     def forward(self, x):
         return bnb.nn.functional.linear8bit(x, self.weight, self.bias)
 
+class Linear8bitLt(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True):
+        super(Linear8bitLt, self).__init__(input_features, output_features, bias)
+
+    def forward(self, x):
+        return bnb.nn.functional.linear8bit(x, self.weight, self.bias, matmul_func=bnb.matmullt)
+
 
 class FFN(nn.Module):
     def __init__(self, input_features, hidden_size, bias=True):

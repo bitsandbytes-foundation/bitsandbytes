@@ -16,6 +16,13 @@ def get_args():
     args.use_8bit_training = 'full'
     return args
 
+def assert_all_approx_close(a, b, atol, rtol, count):
+    idx = torch.isclose(a, b, rtol, atol)
+    sumval = (idx==0).sum().item()
+    if sumval > count:
+        print(f'Too many values not close: assert {sumval} < {count}')
+        torch.testing.assert_allclose(a, b, rtol, atol)
+
 class LinearFunction(torch.autograd.Function):
 
     @staticmethod
@@ -256,32 +263,67 @@ class Linear8bit(nn.Module):
 
 
 def test_linear8bit():
-    l1 = bnb.nn.Linear8bit(32,64).cuda()
-    l2 = Linear8bit(32, 64, args=get_args()).cuda()
+    l0 = torch.nn.Linear(32, 64).cuda().half()
+    l1 = bnb.nn.Linear8bit(32,64).cuda().half()
+    l2 = Linear8bit(32, 64, args=get_args()).cuda().half()
+    l3 = bnb.nn.Linear8bitLt(32,64).cuda().half()
+
+    l0.weight.data = l2.weight.data.clone()
+    l0.bias.data = l2.bias.data.clone()
 
     l1.weight.data = l2.weight.data.clone()
     l1.bias.data = l2.bias.data.clone()
 
-    for i in range(100):
-        b1 = torch.randn(16, 8, 32, device='cuda')
-        t = torch.randn(16, 8, 64, device='cuda')
-        b2 = b1.clone()
+    l3.weight.data = l2.weight.data.clone()
+    l3.bias.data = l2.bias.data.clone()
 
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        t = torch.randn(16, 8, 64, device='cuda').half()
+        b2 = b1.clone()
+        b3 = b1.clone()
+        b0 = b1.clone()
+
+        o0 = l0(b0)
         o1 = l1(b1)
         o2 = l2(b2)
+        o3 = l3(b3)
 
-        torch.testing.assert_allclose(o1, o2)
+        #assert_all_approx_close(o1, o2, atol=0.013, rtol=0.05, count=1)
+        #assert_all_approx_close(o3, o2, atol=0.013, rtol=0.05, count=1)
 
+        loss0 = torch.nn.functional.mse_loss(o0, t)
         loss1 = torch.nn.functional.mse_loss(o1, t)
         loss2 = torch.nn.functional.mse_loss(o2, t)
+        loss3 = torch.nn.functional.mse_loss(o3, t)
 
+        loss0.backward()
         loss1.backward()
         loss2.backward()
+        loss3.backward()
 
-        torch.testing.assert_allclose(l1.bias.grad, l2.bias.grad, atol=0.001, rtol=0)
-        torch.testing.assert_allclose(l1.weight.grad, l2.weight.grad, atol=0.001, rtol=0)
+        #assert_all_approx_close(l1.bias.grad, l2.bias.grad, atol=0.01, rtol=0, count=2)
+        #assert_all_approx_close(l3.bias.grad, l2.bias.grad, atol=0.01, rtol=0, count=2)
+        #assert_all_approx_close(l1.weight.grad, l2.weight.grad, atol=0.013, rtol=0.05, count=2)
+        #assert_all_approx_close(l3.weight.grad, l2.weight.grad, atol=0.013, rtol=0.05, count=2)
+
+        err1 = torch.abs(l0.weight.grad-l1.weight.grad).mean().item()
+        err2 = torch.abs(l0.weight.grad-l2.weight.grad).mean().item()
+        err3 = torch.abs(l0.weight.grad-l3.weight.grad).mean().item()
+        #print(i, err1, err2, err3)
+
+        assert err1*0.9 < err2
+        assert err2*0.8 < err3
+        assert err3*0.8 < err1
+
+
+        l0.weight.grad = None
         l1.weight.grad = None
         l2.weight.grad = None
+        l3.weight.grad = None
+        l0.bias.grad = None
         l1.bias.grad = None
         l2.bias.grad = None
+        l3.bias.grad = None
+
 
