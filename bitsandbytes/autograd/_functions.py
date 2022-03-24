@@ -207,8 +207,8 @@ class MatMul8bitLt(torch.autograd.Function):
         CB, CBt, SCB, SCBt, coo_tensor = F.double_quant(B.t())
         C32A, SA = F.transform2(CA, 'col32')
         CxB, SB = F.transform2(CB, to_order=formatB)
-        out1_32, Sout1_32 = F.igemmlt(C32A, CxB, SA, SB)
-        output = F.mm_dequant(out1_32, Sout1_32, SCA, SCB)
+        out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
+        output = F.mm_dequant(out32, Sout32, SCA, SCB)
 
         if A.requires_grad or B.requires_grad:
             ctx.tensors = (A, B, CAt, CBt)
@@ -232,12 +232,10 @@ class MatMul8bitLt(torch.autograd.Function):
         grad_A = grad_B = None
 
         Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output)
-        C32grad, Sgrad = F.transform2(Cgrad, 'col32')
-        Cxgradt, Sgradt = F.transform2(Cgradt, formatB, transpose=True)
 
 
         if B.requires_grad:
-            #CxBt, SBt = F.transform2(CBt, to_order=formatB)
+            Cxgradt, Sgradt = F.transform2(Cgradt, formatB, transpose=True)
             #out1_32, Sout1_32 = F.igemmlt(C32grad, CxB, SA, SB)
             #output = F.mm_dequant(out1_32, Sout1_32, SCA, SCB)
 
@@ -249,11 +247,10 @@ class MatMul8bitLt(torch.autograd.Function):
             grad_B = torch.matmul(A.t(), grad_output)
 
         if A.requires_grad:
-            grad_A = torch.matmul(grad_output, B.t()).view(ctx.grad_shape)
-            #qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
-            #qB, S3 = F.vectorwise_quant(B, dim=dim_B, quant_type=quant_type)
-            #igrad_A = F.igemm(qgrad_output, qB.permute(permute_dim))
-            #grad_A = F.vectorwise_mm_dequant(igrad_A, S1, S3.permute(permute_dim), grad_output.dtype, quant_type)
+            C32grad, Sgrad = F.transform2(Cgrad, 'col32')
+            CxBt, SBt = F.transform2(CBt, to_order=formatB, transpose=True)
+            gradA32, SgradA32 = F.igemmlt(C32grad, CxBt, Sgrad, SBt)
+            grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, SCBt).view(ctx.grad_shape)
 
         return grad_A, grad_B, None
 
