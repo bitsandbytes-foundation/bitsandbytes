@@ -51,9 +51,28 @@ class Linear8bit(nn.Linear):
 class Linear8bitLt(nn.Linear):
     def __init__(self, input_features, output_features, bias=True):
         super(Linear8bitLt, self).__init__(input_features, output_features, bias)
+        self.CxB = None
+        self.SB = None
+        self.SCB = None
 
     def forward(self, x):
-        return bnb.nn.functional.linear8bit(x, self.weight, self.bias, matmul_func=bnb.matmullt)
+        if self.training:
+            self.CxB, self.SB, self.SCB = None, None, None
+            out = bnb.matmullt(x, self.weight.t())
+            if self.bias is not None:
+                out += self.bias.unsqueeze(0).expand_as(out)
+            return out
+        else:
+            if self.CxB is None:
+                (out, self.CxB, self.SCB) = bnb.matmullt(x, self.weight.t(), None, None, True)
+                self.SB = (self.weight.shape, bnb.functional.get_special_format_str())
+            else:
+                out = bnb.matmullt(x, self.weight.t(), None, (self.CxB, self.SB, self.SCB))
+
+            if self.bias is not None:
+                out += self.bias.unsqueeze(0).expand_as(out)
+            return out
+
 
 
 class FFN(nn.Module):

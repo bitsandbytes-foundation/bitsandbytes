@@ -192,7 +192,7 @@ class MLP(torch.autograd.Function):
 class MatMul8bitLt(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, A, B, out=None):
+    def forward(ctx, A, B, out=None, CB=None, return_CB=False):
         formatB = F.get_special_format_str()
         input_shape = A.shape
 
@@ -204,9 +204,15 @@ class MatMul8bitLt(torch.autograd.Function):
 
 
         CA, CAt, SCA, SCAt, coo_tensor = F.double_quant(A)
-        CB, CBt, SCB, SCBt, coo_tensor = F.double_quant(B.t())
         C32A, SA = F.transform2(CA, 'col32')
-        CxB, SB = F.transform2(CB, to_order=formatB)
+
+        if CB is not None:
+            CxB, SB, SCB = CB
+            CBt = SCBt = None
+        else:
+            CB, CBt, SCB, SCBt, coo_tensor = F.double_quant(B.t())
+            CxB, SB = F.transform2(CB, to_order=formatB)
+
         out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
         output = F.mm_dequant(out32, Sout32, SCA, SCB)
 
@@ -218,7 +224,10 @@ class MatMul8bitLt(torch.autograd.Function):
         else:
             ctx.save_for_backward(None, None)
 
-        return output.view(output_shape).clone()
+        if return_CB:
+            return (output.view(output_shape).clone(), CxB, SCB)
+        else:
+            return output.view(output_shape).clone()
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -233,7 +242,6 @@ class MatMul8bitLt(torch.autograd.Function):
 
         Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output)
 
-
         if B.requires_grad:
             CxAt, SAt = F.transform2(CAt, formatB, transpose=True)
             C32grad, Sgrad = F.transform2(Cgradt, 'col32', transpose=True)
@@ -246,7 +254,7 @@ class MatMul8bitLt(torch.autograd.Function):
             gradA32, SgradA32 = F.igemmlt(C32grad, CxBt, Sgrad, SBt)
             grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, SCBt).view(ctx.grad_shape)
 
-        return grad_A, grad_B, None
+        return grad_A, grad_B, None, None, None
 
 
 mmlt = MatMul8bitLt.apply

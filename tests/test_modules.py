@@ -289,8 +289,8 @@ def test_linear8bit():
         o2 = l2(b2)
         o3 = l3(b3)
 
-        #assert_all_approx_close(o1, o2, atol=0.013, rtol=0.05, count=1)
-        #assert_all_approx_close(o3, o2, atol=0.013, rtol=0.05, count=1)
+        assert_all_approx_close(o1, o2, atol=0.013, rtol=0.05, count=1)
+        assert_all_approx_close(o3, o2, atol=0.013, rtol=0.05, count=1)
 
         loss0 = torch.nn.functional.mse_loss(o0, t)
         loss1 = torch.nn.functional.mse_loss(o1, t)
@@ -302,20 +302,18 @@ def test_linear8bit():
         loss2.backward()
         loss3.backward()
 
-        #assert_all_approx_close(l1.bias.grad, l2.bias.grad, atol=0.01, rtol=0, count=2)
-        #assert_all_approx_close(l3.bias.grad, l2.bias.grad, atol=0.01, rtol=0, count=2)
-        #assert_all_approx_close(l1.weight.grad, l2.weight.grad, atol=0.013, rtol=0.05, count=2)
-        #assert_all_approx_close(l3.weight.grad, l2.weight.grad, atol=0.013, rtol=0.05, count=2)
+        assert_all_approx_close(l1.bias.grad, l2.bias.grad, atol=0.01, rtol=0, count=2)
+        assert_all_approx_close(l3.bias.grad, l2.bias.grad, atol=0.01, rtol=0, count=2)
+        assert_all_approx_close(l1.weight.grad, l2.weight.grad, atol=0.013, rtol=0.05, count=2)
+        assert_all_approx_close(l3.weight.grad, l2.weight.grad, atol=0.013, rtol=0.05, count=2)
 
         err1 = torch.abs(l0.weight.grad-l1.weight.grad).mean().item()
         err2 = torch.abs(l0.weight.grad-l2.weight.grad).mean().item()
         err3 = torch.abs(l0.weight.grad-l3.weight.grad).mean().item()
-        #print(i, err1, err2, err3)
 
-        assert err1*0.9 < err2
+        assert err1*0.8 < err2
         assert err2*0.8 < err3
         assert err3*0.8 < err1
-
 
         l0.weight.grad = None
         l1.weight.grad = None
@@ -327,3 +325,12 @@ def test_linear8bit():
         l3.bias.grad = None
 
 
+def test_linear8bitlt_inference():
+    l1 = bnb.nn.Linear8bitLt(32,64).cuda().half()
+
+    l1.eval()
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        o1 = l1(b1)
+        if i == 1:
+            assert l1.CxB is not None
