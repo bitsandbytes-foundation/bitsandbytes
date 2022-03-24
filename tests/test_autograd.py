@@ -180,7 +180,7 @@ k = 1
 #dim4 = torch.randint(32,96, size=(n,)).tolist()
 
 dim1 = [32]
-dim2 = [32]
+dim2 = [16]
 dim3 = [64]
 dim4 = [32]
 funcs = [(torch.matmul, bnb.matmullt)]

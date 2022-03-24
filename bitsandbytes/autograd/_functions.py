@@ -211,7 +211,7 @@ class MatMul8bitLt(torch.autograd.Function):
         output = F.mm_dequant(out32, Sout32, SCA, SCB)
 
         if A.requires_grad or B.requires_grad:
-            ctx.tensors = (A, B, CAt, CBt)
+            ctx.tensors = (A, B, CA, CBt)
             ctx.tensor_states = (SCAt, SCBt)
             ctx.formatB = formatB
             ctx.grad_shape = input_shape
@@ -222,7 +222,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        A, B, CAt, CBt = ctx.tensors
+        A, B, CA, CBt = ctx.tensors
         SCAt, SCBt = ctx.tensor_states
         formatB = ctx.formatB
 
@@ -235,16 +235,10 @@ class MatMul8bitLt(torch.autograd.Function):
 
 
         if B.requires_grad:
-            Cxgradt, Sgradt = F.transform2(Cgradt, formatB, transpose=True)
-            #out1_32, Sout1_32 = F.igemmlt(C32grad, CxB, SA, SB)
-            #output = F.mm_dequant(out1_32, Sout1_32, SCA, SCB)
-
-            #qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
-            #qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
-            #igrad_B = F.igemm(qA.permute(permute_dim), qgrad_output)
-            #grad_B = F.vectorwise_mm_dequant(igrad_B, S2.permute(permute_dim), S1, grad_output.dtype, quant_type)
-
-            grad_B = torch.matmul(A.t(), grad_output)
+            CxAt, SAt = F.transform2(CA, formatB, transpose=True)
+            C32grad, Sgrad = F.transform2(Cgrad, 'col32', transpose=True)
+            gradB32, SgradB32 = F.igemmlt(C32grad, CxAt, Sgrad, SAt)
+            grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt).t()
 
         if A.requires_grad:
             C32grad, Sgrad = F.transform2(Cgrad, 'col32')
