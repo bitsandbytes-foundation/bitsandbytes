@@ -933,7 +933,6 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     assert SB[1] in ['col_turing', 'col_ampere']
     assert Sout[1] == 'col32'
     assert shapeA[-1] == shapeB[-1], f'Matmullt only supports A @ B^T. Inner matrix dimensions do not match: A @ B = {shapeA} @ {shapeB}'
-    print(shapeA, shapeB)
     formatB = SB[1]
 
     ptr = CUBLAS_Context.get_instance().context
