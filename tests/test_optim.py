@@ -13,6 +13,8 @@ from itertools import product
 
 import apex
 
+k = 20
+
 def get_temp_dir():
     path = '/tmp/autoswap/{0}'.format(str(uuid.uuid4()))
     os.makedirs(path, exist_ok=True)
@@ -83,7 +85,7 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
         atol, rtol = 1e-4, 1e-3
 
 
-    for i in range(50):
+    for i in range(k):
         g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01
         p1.grad = g.clone().float()
         p2.grad = g.clone()
@@ -96,7 +98,7 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
 
         torch.testing.assert_allclose(p1, p2.float(), atol=atol, rtol=rtol)
 
-        if i % 10 == 0 and i > 0:
+        if i % (k//5) == 0 and i > 0:
             path = get_temp_dir()
             torch.save(bnb_optimizer.state_dict(),join(path, 'opt.pt'))
             del bnb_optimizer
@@ -339,8 +341,8 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
 
     g = torch.randn(dim1,dim2, device='cuda', dtype=gtype)*0.01
     p1.grad = g
-    for i in range(5000):
-        if i == 500:
+    for i in range(k):
+        if i == k//5:
             # 100 iterations for burn-in
             torch.cuda.synchronize()
             t0 = time.time()
@@ -350,7 +352,7 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     torch.cuda.synchronize()
     s = time.time()-t0
     print('')
-    params = 4500*4096*4096
+    params = (k-k//5)*dim1*dim2
     print(optim_name, gtype, s/params)
     #assert s < 3.9
 

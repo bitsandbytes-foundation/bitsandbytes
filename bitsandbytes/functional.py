@@ -58,7 +58,7 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order='row', trans
     else:
         raise NotImplementedError(f'To_order not supported: {to_order}')
 
-def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+def nvidia_transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
     if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1])
@@ -1173,7 +1173,7 @@ def get_special_format_str():
 
 
 
-def transform2(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
     if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1], transpose)

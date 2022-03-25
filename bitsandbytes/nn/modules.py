@@ -76,19 +76,3 @@ class Linear8bitLt(nn.Linear):
             if self.bias is not None:
                 out += self.bias.unsqueeze(0).expand_as(out)
             return out
-
-
-
-class FFN(nn.Module):
-    def __init__(self, input_features, hidden_size, bias=True):
-        super(FFN, self).__init__()
-        self.w1 = nn.Parameter(torch.zeros((hidden_size, input_features)))
-        self.w2 = nn.Parameter(torch.zeros((input_features,hidden_size)))
-
-        with torch.no_grad():
-            nn.init.xavier_uniform_(self.w1)
-            nn.init.xavier_uniform_(self.w2)
-
-    def forward(self, x):
-        return bnb.autograd._functions.MLP.apply(x, self.w1, self.w2)
-
