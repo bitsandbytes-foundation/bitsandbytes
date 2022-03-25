@@ -54,9 +54,13 @@ class Linear8bitLt(nn.Linear):
         self.CxB = None
         self.SB = None
         self.SCB = None
+        self.has_accumulated_gradients = False
 
     def forward(self, x):
-        if self.training:
+        has_grad = (True if (getattr(self.weight, 'grad', None) is not None) else False)
+        if has_grad: self.has_accumulated_gradients = True
+
+        if self.training and not self.has_accumulated_gradients:
             self.CxB, self.SB, self.SCB = None, None, None
             out = bnb.matmullt(x, self.weight.t())
             if self.bias is not None:

@@ -334,3 +334,24 @@ def test_linear8bitlt_inference():
         o1 = l1(b1)
         if i == 1:
             assert l1.CxB is not None
+
+
+def test_linear8bitlt_accumulated_gradient():
+    l1 = bnb.nn.Linear8bitLt(32,64).cuda().half()
+    opt = bnb.optim.Adam8bit(l1.parameters())
+
+    acc_steps = 10
+
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        o1 = l1(b1)
+        loss = o1.mean()
+        loss.backward()
+        if i == 2:
+            assert l1.CxB is not None
+
+        if i > 0 and i % acc_steps == 0:
+            opt.step()
+            opt.zero_grad()
+
+
