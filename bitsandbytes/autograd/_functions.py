@@ -2,6 +2,7 @@ import torch
 import math
 import bitsandbytes.functional as F
 from scipy.stats import norm
+import torch.distributed as dist
 
 def print_overflow(flowed, gap, s, name):
     if flowed > 0.5:
@@ -17,7 +18,17 @@ def print_overflow(flowed, gap, s, name):
         if torch.rand(1) < 0.0001:
             print(flowed.item(), gap, s, name)
 
-def post_scale(iout, s, idx, p, scale_mode, name):
+def post_scale(A, B, iout, s, idx, args, absmax, name):
+    p = args.scale_p
+    scale_mode = getattr(args, 'scale_mode', 'none')
+    offset = args.scale_offset
+    beta1 = args.scale_beta1
+    beta2 = args.scale_beta2
+    thresh = args.scale_threshold
+    absmax1 = absmax[0]
+    absmax2 = absmax[1]
+    iter_val = 0
+
     if scale_mode == 'none':
         pass
     elif scale_mode == 'last':
@@ -26,37 +37,94 @@ def post_scale(iout, s, idx, p, scale_mode, name):
         n = iout.numel()
         count = ((iout2 == -127) +  (iout2 == 127)).float().sum()
         flowed = count/n
-        count2 = ((iout2 < -100) + (iout2 > 100)).float().sum()
+        count2 = ((iout2 < -127+offset) + (iout2 > 127-offset)).float().sum()
         gap = count2/n
 
-        if s is not None and flowed < 0.0005:
+        if s is not None and flowed < args.scale_flow_thresh:
             iout = (iout2.float()*s[idx]).int()
-            #if torch.rand(1) < 0.001:
-            #    print('s', name)
+            if torch.rand(1) < 0.00001:
+                print('s', name)
         else:
-            pass
-            #if torch.rand(1) < 0.001:
-            #    print('b', name)
+            if torch.rand(1) < 0.00001:
+                print('b', name)
 
         print_overflow(flowed, gap.item(),  s[idx].item(), name)
 
         p_flowed = 0.0
         loss = 0.0
         if flowed > 0:
-            loss += -10
-        if gap < p and loss < 1e-7:
+            loss += -0.5*(flowed-p_flowed)*beta1
+        if gap < p and loss < thresh:
             if loss == 0 and gap == 0:
-                loss += -0.5*(gap-p)*10000
+                loss += -0.5*(gap-p)*beta1
             else:
-                loss += -0.5*(gap-p)*1000
+                loss += -0.5*(gap-p)*beta2
         s.data[idx] -= loss
+    elif scale_mode == 'absmax':
+        #assert args.scale_layers == 'grad'
+        #absmax_scale = s.max(1).values*127
+        #iout2 = ((iout.float()/absmax_scale).clamp(-127, 127)).int()
+
+        #n = iout.numel()
+        #count = ((iout2 == -127) +  (iout2 == 127)).float().sum()
+        #flowed = count/n
+
+        #if s is not None and flowed < args.scale_flow_thresh:
+        #    iout = (iout2.float()*absmax_scale).int()
+        #    if torch.rand(1) < 0.01:
+        #        print('s', name)
+        #else:
+        #    if torch.rand(1) < 0.01:
+        #        print('b', name)
+
+        #print_overflow(flowed, 0,  absmax_scale.max().item(), name)
+
+        #absmax = torch.abs(iout).max(0).values
+        #s[:, iter_val] = absmax
+        #print(absmax[:3], absmax_scale[:3]/127, flowed)
+
+
+        if s[0, 0].item() == 4:
+            if not dist.is_initialized() or dist.get_rank() == 0:
+                #print(torch.abs(iout.float()).view(-1, iout.shape[-1]).max(0).values[:5], name, s[0, 0].item(), 'n', iout.shape)
+                #print(torch.abs(iout.float()).view(-1, iout.shape[-1]).max(1).values[:5], name, s[0, 0].item(), 't')
+                #print(iout.float().view(-1, iout.shape[-1]).std(0)[:5], name, s[0, 0].item())
+                #print(torch.abs(iout).float().view(-1, iout.shape[-1]).mean(0)[:5], name, s[0, 0].item())
+                dim = (0 if name == 'wgrad' else 1)
+                maxval = torch.abs(iout.float()).view(-1, iout.shape[-1]).max(dim).values[:5]
+                maxtotal = torch.abs(iout.float()).view(-1, iout.shape[-1]).max().item()
+                stdval1 = A.view(-1, A.shape[-1]).float().std(1)[:5]
+                stdval2 = B.float().std(0).mean()
+                idx = 0
+                quant = F.estimate_quantiles(torch.abs(iout.view(-1, iout.shape[-1]))[idx, :].float(), offset=0)
+                val1 = 8e5
+                val2 = 8.2e5
+                #if maxval[idx] < val2 and maxval[idx] > val1:
+                #if stdval1[idx].int() == 20:
+                if maxval[idx].int() > 1e6:
+                    print(absmax1.view(-1)[idx].item(), maxval[idx].int().item(), stdval1[idx].int().item(), (stdval1[idx]*stdval2).int().item(), quant[-2].int().item(), maxtotal)
+                idx = 1
+                val1 = 6e5
+                val2 = 6.5e5
+                quant = F.estimate_quantiles(torch.abs(iout.view(-1, iout.shape[-1]))[idx, :].float(), offset=0)
+                if maxval[idx].int() < 6e5 and maxval[idx].int() > 4e5:
+                #if maxval[idx] < val2 and maxval[idx] > val1:
+                    print(absmax1.view(-1)[idx].item(), maxval[idx].int().item(), stdval1[idx].int().item(), (stdval1[idx]*stdval2).int().item(), quant[-2].int().item())
+                #print(absmax1.view(-1)[:5], absmax2.view(-1)[:5], absmax1.max(), absmax2.max(), 'max')
+                #stdval = iout.float().view(-1, iout.shape[-1]).std(0)[:5]
+                #meanval = torch.abs(iout).float().view(-1, iout.shape[-1]).mean(0)[:5]
+                #for m, s in zip(maxval, stdval1):
+                    #print(m.int().item(), s.int().item(), (s*stdval2).int().item(), name)
+                #print(absmax1.view(-1)[:5], name, s[0].item())
+                #print(absmax1.view(-1)[:5]*absmax2.mean(), name, s[0].item())
 
     return iout
 
 class MatMul8bit(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, A, B, out=None, quant_type='vector', precision=[8, 8, 8], index=None, s=None, scale_mode='last', p=0.01):
+    def forward(ctx, A, B, out=None, quant_type='vector', precision=[8, 8, 8], index=None, s=None, args=None):
+        gemm_func = torch.matmul if quant_type == 'zeropoint' else F.igemm
 
         if precision[0] != 8:
             with torch.no_grad():
@@ -64,11 +132,12 @@ class MatMul8bit(torch.autograd.Function):
         else:
             if len(B.shape) == 2: dim = 0
             else: dim = 1
-            qA, SA = F.vectorwise_quant(A, dim=-1, quant_type=quant_type)
+            if quant_type == 'row':
+                qA, SA = F.vectorwise_quant(A, dim=-1, quant_type='linear')
+            else:
+                qA, SA = F.vectorwise_quant(A, dim=-1, quant_type=quant_type)
             qB, SB = F.vectorwise_quant(B, dim=dim, quant_type=quant_type)
-            iout = F.igemm(qA, qB)
-
-            iout = post_scale(iout, s, 0, p, scale_mode, 'fw')
+            iout = gemm_func(qA, qB)
 
             output = F.vectorwise_mm_dequant(iout, SA, SB, A.dtype, quant_type)
 
@@ -78,20 +147,19 @@ class MatMul8bit(torch.autograd.Function):
         ctx.quant_type = quant_type
         ctx.precision = precision
         ctx.s = s
-        ctx.p = p
-        ctx.scale_mode = scale_mode
+        ctx.args = args
 
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         A, B = ctx.saved_tensors
-        s, p, scale_mode = ctx.s, ctx.p, ctx.scale_mode
+        s, args = ctx.s, ctx.args
         quant_type = ctx.quant_type
         precision = ctx.precision
         grad_A = grad_B = None
         grad_s = getattr(ctx, 'grad_s', None)
-        #print(grad_s, 'backprop')
+        gemm_func = torch.matmul if quant_type == 'zeropoint' else F.igemm
 
         if B.requires_grad:
             if len(A.shape) == 3:
@@ -116,9 +184,7 @@ class MatMul8bit(torch.autograd.Function):
                         qgrad_output, S1 = F.vectorwise_quant(grad_output.view(-1, grad_output.shape[2]), dim=0, quant_type=quant_type)
                     if not A.is_contiguous(): A = A.contiguous()
                     qA, S2 = F.vectorwise_quant(A.view(-1, A.shape[2]), dim=0, quant_type=quant_type)
-                    igrad_B = F.igemm(qA.t(), qgrad_output)
-                    #print(igrad_B.shape, 'b')
-                    igrad_B = post_scale(igrad_B, s, 1, p, scale_mode, 'wgrad')
+                    igrad_B = gemm_func(qA.t(), qgrad_output)
                     grad_B = F.vectorwise_mm_dequant(igrad_B, S2.t(), S1, grad_output.dtype, quant_type)
                 else:
                     if quant_type == 'row':
@@ -126,7 +192,7 @@ class MatMul8bit(torch.autograd.Function):
                     else:
                         qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
                     qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
-                    igrad_B = F.igemm(qA.permute(permute_dim), qgrad_output)
+                    igrad_B = gemm_func(qA.permute(permute_dim), qgrad_output)
                     grad_B = F.vectorwise_mm_dequant(igrad_B, S2.permute(permute_dim), S1, grad_output.dtype, quant_type)
 
         if A.requires_grad:
@@ -149,24 +215,17 @@ class MatMul8bit(torch.autograd.Function):
                 qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
                 if quant_type == 'row':
                     qB, S3 = F.vectorwise_quant(B, dim=dim_B, quant_type='linear')
-                    igrad_A = F.igemm(qgrad_output, qB.permute(permute_dim))
+                    igrad_A = gemm_func(qgrad_output, qB.permute(permute_dim))
                     grad_A = F.vectorwise_mm_dequant(igrad_A, S1, S3, grad_output.dtype, quant_type)
                 else:
                     qB, S3 = F.vectorwise_quant(B, dim=dim_B, quant_type=quant_type)
-                    igrad_A = F.igemm(qgrad_output, qB.permute(permute_dim))
-                    #print(igrad_A.shape, 'a')
-                    #igrad_A = post_scale(igrad_A, s, 2, p, scale_mode, 'bw')
-                    grad_A = F.vectorwise_mm_dequant(igrad_A, S1, S3.permute(permute_dim), grad_output.dtype, quant_type)
-                    #if torch.rand(1) < 0.001:
-                    #    overflows_grad_B = (igrad_A.float()/(127))*S1
-                    #    print(F.estimate_quantiles(overflows_grad_B))
-                    #    #print(overflows_grad_B.flatten()[:10])
-                    #    n = overflows_grad_B.numel()
-                    #    print(overflows_grad_B.min(), overflows_grad_B.max(), overflows_grad_B.mean(), overflows_grad_B.median())
-                    #    overflows = (overflows_grad_B > 127).sum().item() + (overflows_grad_B < -127).sum().item()
-                    #    print(overflows/n)
+                    igrad_A = gemm_func(qgrad_output, qB.permute(permute_dim))
+                    if quant_type in ['linear', 'zeropoint']:
+                        grad_A = F.vectorwise_mm_dequant(igrad_A, S1, S3, grad_output.dtype, quant_type)
+                    else:
+                        grad_A = F.vectorwise_mm_dequant(igrad_A, S1, S3.permute(permute_dim), grad_output.dtype, quant_type)
 
-        return grad_A, grad_B, None, None, None, None, None, None, None
+        return grad_A, grad_B, None, None, None, None, None, None
 
 
 mm = MatMul8bit.apply

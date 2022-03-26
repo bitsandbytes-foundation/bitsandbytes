@@ -42,20 +42,21 @@ class StableEmbedding(torch.nn.Embedding):
         return self.norm(emb)
 
 class Linear8bit(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, quant_type='vector', index=None, scale_mode='last', scale_p=0.01):
+    def __init__(self, input_features, output_features, bias=True, quant_type='vector', index=None, args=None, sparse_decomp=False):
         super(Linear8bit, self).__init__(input_features, output_features, bias)
         self.quant_type = quant_type
         self.index = index
-        self.s = torch.ones((3,))*127*16
-        self.scale_p = scale_p
-        self.scale_mode = scale_mode
-        GlobalOptimManager.get_instance().override_config(self.s, 'lr', 1.0)
-        GlobalOptimManager.get_instance().register_parameters(self.s)
+        self.args = args
+        #if args.scale_mode == 'last':
+        #    self.s = torch.ones((3,))*127*16
+        #else:
+        #    self.s = torch.ones((output_features, 10))*127*16
+        #self.s[0] = index or 0
+        #GlobalOptimManager.get_instance().override_config(self.s, 'lr', 1.0)
+        #GlobalOptimManager.get_instance().register_parameters(self.s)
+        self.iter = 0
 
     def forward(self, x):
-        if self.s is not None:
-            if self.s.device != x.device:
-                self.s = self.s.to(x.device)
         #if self.s is None:
         #    print('init s')
         #    self.s = torch.ones((x.shape[0]*x.shape[1],), device=x.device)*127*127
@@ -63,9 +64,11 @@ class Linear8bit(nn.Linear):
         #    print('reinit s')
         #    self.s = torch.ones((x.shape[0]*x.shape[1],), device=x.device)*self.s.mean()
 
-        out = bnb.matmul(x, self.weight.t(), self.bias, self.quant_type, [8, 8, 8], self.index, self.s, self.scale_mode, self.scale_p)
-        if self.bias is not None:
-            out += self.bias.unsqueeze(0).expand_as(out)
+        if self.args is not None:
+            out = bnb.nn.functional.sparse_decomposed_linear8bit(x, self.weight, self.bias, qval=self.args.sparse_decomp_val, quant_type=self.args.quant_type)
+        else:
+            out = bnb.nn.functional.linear8bit(x, self.weight, self.bias, quant_type=self.args.quant_type)
+
         return out
 
 

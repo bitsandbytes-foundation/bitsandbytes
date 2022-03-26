@@ -602,3 +602,23 @@ def test_overflow():
         print(overflows/n, underflows/n, i, A.min(), A.max())
 
 
+
+def test_zeropoint():
+    batch = 4
+    seq = 32
+    model = 16
+    hidden = 8*model
+    A = torch.rand(batch*seq, model, device='cuda').half()
+    B = torch.rand(model, hidden, device='cuda').half()
+
+
+    C1 = torch.matmul(A, B)
+    C2 = bnb.matmul(A, B, None, 'linear')
+    C3 = bnb.matmul(A, B, None, 'zeropoint')
+
+    err1 = torch.abs(C1-C2).mean().item()
+    err2 = torch.abs(C1-C3).mean().item()
+    assert err1 > err2
+
+
+

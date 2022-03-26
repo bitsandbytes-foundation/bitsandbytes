@@ -841,6 +841,14 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
         max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
         xq = torch.round(x/max1*C).to(torch.int8)
         return xq, max1
+    elif quant_type == 'zeropoint':
+        dtype = x.dtype
+        x = x.float()
+        qx = 255./(x.max() - x.min())
+        minx = x.min()
+        zpx = torch.round(minx* qx)
+        x = torch.round(qx*x - zpx) + zpx
+        return x, qx
     elif quant_type == 'truncated-vector':
         with torch.no_grad():
             absx = torch.abs(x)
@@ -851,12 +859,6 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
             x[idx] = max1.expand_as(absx)[idx]*sign
             xq = torch.round(x/max1*C).to(torch.int8)
         return xq, max1
-    elif quant_type == 'min-max':
-        maxA = torch.amax(x, dim=dim, keepdim=True).float()
-        minA = torch.amin(x, dim=dim, keepdim=True).float()
-        scale = (maxA-minA)/2.0
-        xq = torch.round(127*(x-minA-scale)/scale).to(torch.int8)
-        return xq, (minA.float(), scale.float())
     else: return None
 
 def vectorwise_dequant(xq, max1, quant_type='vector'):
@@ -869,6 +871,9 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     if quant_type == 'linear':
         norm = S1*S2/(C*C)
         # double cast needed to prevent overflows
+        return (xq.float()*norm).to(dtype)
+    elif quant_type == 'zeropoint':
+        norm = 1.0/(S1*S2)
         return (xq.float()*norm).to(dtype)
     elif quant_type == 'row':
         x = xq.float()
@@ -890,3 +895,16 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
         x *= S2/C
         return x.to(dtype)
     else: return None
+
+
+def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
+    offset = B.float().t().sum(0)*(SA[0]+SA[1])
+    x = xq.float()
+    if len(xq.shape) == 2 and len(SB.shape) == 3: SB = SB.squeeze(0)
+    if len(SB.shape) == 2:
+        x *= SB.t()/127
+    else:
+        x *= SB/127
+    x *= SA[1]/127
+    x +=offset
+    return x.to(dtype)
