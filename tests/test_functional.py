@@ -1244,3 +1244,14 @@ def test_integrated_sparse_decomp(dim1, dim2):
         assert err2 < err1
 
 
+def test_matmuls():
+    a = torch.randn(256, 256).half().cuda()
+    b = torch.randn(256, 256).half().cuda()
+    c1 = torch.matmul(a, b)
+    c2 = bnb.matmul(a, b)
+    c3 = bnb.matmullt(a, b)
+
+    err1 = torch.abs(c1-c2).mean().item()
+    err2 = torch.abs(c1-c3).mean().item()
+    assert err1 < 0.2
+    assert err2 < 0.2

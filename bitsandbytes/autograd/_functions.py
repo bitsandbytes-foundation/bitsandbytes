@@ -106,6 +106,9 @@ class MatMul8bitLt(torch.autograd.Function):
         CA, CAt, SCA, SCAt, coo_tensor = F.double_quant(A)
         C32A, SA = F.transform(CA, 'col32')
 
+        is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
+        if not is_transposed: B = B.t().contiguous().t() # this is inefficient, but the simplest solution for now
+
         if CB is not None:
             CxB, SB, SCB = CB
             CBt = SCBt = None
