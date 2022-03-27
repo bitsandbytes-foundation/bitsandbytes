@@ -849,6 +849,14 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
         zpx = torch.round(minx* qx)
         x = torch.round(qx*x - zpx) + zpx
         return x, qx
+    elif quant_type == 'row-zeropoint':
+        dtype = x.dtype
+        x = x.float()
+        qx = 255./(torch.amax(x, dim=dim, keepdim=True) - torch.amin(x, dim=dim, keepdim=True))
+        minx = torch.amin(x, dim=dim, keepdim=True)
+        zpx = torch.round(minx* qx)
+        x = torch.round(qx*x - zpx) + zpx
+        return x, qx
     elif quant_type == 'truncated-vector':
         with torch.no_grad():
             absx = torch.abs(x)
@@ -875,6 +883,16 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     elif quant_type == 'zeropoint':
         norm = 1.0/(S1*S2)
         return (xq.float()*norm).to(dtype)
+    elif quant_type == 'row-zeropoint':
+        norm = 1.0/(S1*S2)
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= norm
+        else:
+            x *= norm
+        return x.to(dtype)
     elif quant_type == 'row':
         x = xq.float()
         if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)

@@ -620,5 +620,12 @@ def test_zeropoint():
     err2 = torch.abs(C1-C3).mean().item()
     assert err1 > err2
 
+    C2 = bnb.matmul(A, B, None, 'row')
+    C3 = bnb.matmul(A, B, None, 'row-zeropoint')
+
+    err1 = torch.abs(C1-C2).mean().item()
+    err2 = torch.abs(C1-C3).mean().item()
+    assert err1 > err2
+
 
 

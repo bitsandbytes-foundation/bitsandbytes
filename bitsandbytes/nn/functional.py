@@ -31,7 +31,7 @@ def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, num
         split_weight = torch.split(weight, split_size, dim=1)
         out = bnb.matmul(split_inp[0], split_weight[0].t()) + bnb.matmul(split_inp[1], split_weight[1].t())
     else:
-        out = bnb.matmul(input, weight.t(), None, quant_type, [8, 8, 8], index)
+        out = bnb.matmul(input, weight.t(), None, quant_type)
     if bias is not None:
         out += bias.unsqueeze(0).expand_as(out)
     return out

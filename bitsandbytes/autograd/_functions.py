@@ -124,7 +124,7 @@ class MatMul8bit(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, A, B, out=None, quant_type='vector', precision=[8, 8, 8], index=None, s=None, args=None):
-        gemm_func = torch.matmul if quant_type == 'zeropoint' else F.igemm
+        gemm_func = torch.matmul if quant_type in ['row-zeropoint', 'zeropoint'] else F.igemm
 
         if precision[0] != 8:
             with torch.no_grad():
@@ -159,7 +159,7 @@ class MatMul8bit(torch.autograd.Function):
         precision = ctx.precision
         grad_A = grad_B = None
         grad_s = getattr(ctx, 'grad_s', None)
-        gemm_func = torch.matmul if quant_type == 'zeropoint' else F.igemm
+        gemm_func = torch.matmul if quant_type in ['row-zeropoint', 'zeropoint'] else F.igemm
 
         if B.requires_grad:
             if len(A.shape) == 3:
@@ -180,6 +180,8 @@ class MatMul8bit(torch.autograd.Function):
                     if not grad_output.is_contiguous(): grad_output.contiguous()
                     if quant_type == 'row':
                         qgrad_output, S1 = F.vectorwise_quant(grad_output.view(-1, grad_output.shape[2]), dim=0, quant_type='linear')
+                    elif quant_type == 'row-zeropoint':
+                        qgrad_output, S1 = F.vectorwise_quant(grad_output.view(-1, grad_output.shape[2]), dim=0, quant_type='zeropoint')
                     else:
                         qgrad_output, S1 = F.vectorwise_quant(grad_output.view(-1, grad_output.shape[2]), dim=0, quant_type=quant_type)
                     if not A.is_contiguous(): A = A.contiguous()
@@ -189,6 +191,8 @@ class MatMul8bit(torch.autograd.Function):
                 else:
                     if quant_type == 'row':
                         qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type='linear')
+                    elif quant_type == 'row-zeropoint':
+                        qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type='zeropoint')
                     else:
                         qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
                     qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
@@ -215,6 +219,10 @@ class MatMul8bit(torch.autograd.Function):
                 qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
                 if quant_type == 'row':
                     qB, S3 = F.vectorwise_quant(B, dim=dim_B, quant_type='linear')
+                    igrad_A = gemm_func(qgrad_output, qB.permute(permute_dim))
+                    grad_A = F.vectorwise_mm_dequant(igrad_A, S1, S3, grad_output.dtype, quant_type)
+                elif quant_type == 'row-zeropoint':
+                    qB, S3 = F.vectorwise_quant(B, dim=dim_B, quant_type='zeropoint')
                     igrad_A = gemm_func(qgrad_output, qB.permute(permute_dim))
                     grad_A = F.vectorwise_mm_dequant(igrad_A, S1, S3, grad_output.dtype, quant_type)
                 else:
