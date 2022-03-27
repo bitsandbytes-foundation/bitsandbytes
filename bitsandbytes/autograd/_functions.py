@@ -124,7 +124,7 @@ class MatMul8bit(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, A, B, out=None, quant_type='vector', precision=[8, 8, 8], index=None, s=None, args=None):
-        gemm_func = torch.matmul if quant_type in ['row-zeropoint', 'zeropoint'] else F.igemm
+        gemm_func = torch.matmul if 'zeropoint' in quant_type else F.igemm
 
         if precision[0] != 8:
             with torch.no_grad():
@@ -132,13 +132,16 @@ class MatMul8bit(torch.autograd.Function):
         else:
             if len(B.shape) == 2: dim = 0
             else: dim = 1
-            if quant_type == 'row':
-                qA, SA = F.vectorwise_quant(A, dim=-1, quant_type='linear')
-            else:
-                qA, SA = F.vectorwise_quant(A, dim=-1, quant_type=quant_type)
-            qB, SB = F.vectorwise_quant(B, dim=dim, quant_type=quant_type)
-            iout = gemm_func(qA, qB)
+            qA, SA = F.vectorwise_quant(A, dim=-1, quant_type=quant_type)
 
+            if quant_type == 'row':
+                qB, SB = F.vectorwise_quant(B, dim=dim, quant_type='linear')
+            elif quant_type == 'row-zeropoint':
+                qB, SB = F.vectorwise_quant(B, dim=dim, quant_type='zeropoint')
+            else:
+                qB, SB = F.vectorwise_quant(B, dim=dim, quant_type=quant_type)
+
+            iout = gemm_func(qA, qB)
             output = F.vectorwise_mm_dequant(iout, SA, SB, A.dtype, quant_type)
 
         if A.requires_grad or B.requires_grad:
@@ -159,7 +162,7 @@ class MatMul8bit(torch.autograd.Function):
         precision = ctx.precision
         grad_A = grad_B = None
         grad_s = getattr(ctx, 'grad_s', None)
-        gemm_func = torch.matmul if quant_type in ['row-zeropoint', 'zeropoint'] else F.igemm
+        gemm_func = torch.matmul if 'zeropoint' in quant_type else F.igemm
 
         if B.requires_grad:
             if len(A.shape) == 3:
@@ -197,7 +200,10 @@ class MatMul8bit(torch.autograd.Function):
                         qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
                     qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
                     igrad_B = gemm_func(qA.permute(permute_dim), qgrad_output)
-                    grad_B = F.vectorwise_mm_dequant(igrad_B, S2.permute(permute_dim), S1, grad_output.dtype, quant_type)
+                    if quant_type in ['linear', 'zeropoint']:
+                        grad_B = F.vectorwise_mm_dequant(igrad_B, S2, S1, grad_output.dtype, quant_type)
+                    else:
+                        grad_B = F.vectorwise_mm_dequant(igrad_B, S2.permute(permute_dim), S1, grad_output.dtype, quant_type)
 
         if A.requires_grad:
             if len(grad_output.shape) == 3: dims = [2]

@@ -844,15 +844,19 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
     elif quant_type == 'zeropoint':
         dtype = x.dtype
         x = x.float()
-        qx = 255./(x.max() - x.min())
+        dyna = x.max() - x.min()
+        if dyna == 0: dyna = 1
+        qx = 255./dyna
         minx = x.min()
         zpx = torch.round(minx* qx)
         x = torch.round(qx*x - zpx) + zpx
         return x, qx
-    elif quant_type == 'row-zeropoint':
+    elif quant_type in ['vector-zeropoint', 'row-zeropoint']:
         dtype = x.dtype
         x = x.float()
-        qx = 255./(torch.amax(x, dim=dim, keepdim=True) - torch.amin(x, dim=dim, keepdim=True))
+        dyna = (torch.amax(x, dim=dim, keepdim=True) - torch.amin(x, dim=dim, keepdim=True))
+        dyna[dyna==0] = 1
+        qx = 255./dyna
         minx = torch.amin(x, dim=dim, keepdim=True)
         zpx = torch.round(minx* qx)
         x = torch.round(qx*x - zpx) + zpx
@@ -892,6 +896,16 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
             x *= norm
         else:
             x *= norm
+        return x.to(dtype)
+    elif quant_type == 'vector-zeropoint':
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= 1.0/S1
+        else:
+            x *= 1.0/S1
+        x *= 1.0/S2
         return x.to(dtype)
     elif quant_type == 'row':
         x = xq.float()

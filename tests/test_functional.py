@@ -455,10 +455,10 @@ def test_minmax_igemm(seq_dim, hidden_dim, batch_dim, transpose):
         relerrs.append(relerr.mean().item())
         errs2.append(err2.mean().item())
         relerrs2.append(relerr2.mean().item())
-    #print(mean(errs))
-    #print(mean(relerrs))
-    #print(mean(errs2))
-    #print(mean(relerrs2))
+    print(mean(errs))
+    print(mean(relerrs))
+    print(mean(errs2))
+    print(mean(relerrs2))
     assert mean(errs) < 0.015
     assert mean(relerrs) < 0.3
 
@@ -604,28 +604,81 @@ def test_overflow():
 
 
 def test_zeropoint():
-    batch = 4
-    seq = 32
-    model = 16
-    hidden = 8*model
-    A = torch.rand(batch*seq, model, device='cuda').half()
-    B = torch.rand(model, hidden, device='cuda').half()
+    def min_max(x):
+        maxA = torch.amax(x, dim=1, keepdim=True)
+        minA = torch.amin(x, dim=1, keepdim=True)
+        midpoint = (maxA-minA)/2.0
+        dyna = 252/(maxA-minA)
+        #dyna *= 0.98
+        x = dyna*x
+        x = x - torch.round((dyna*(minA+midpoint)))
+        return x.to(torch.int8), minA, midpoint, dyna
+    batch = 2
+    seq = 2
+    model = 4
+    hidden = 2*model
+    #batch = 4
+    #seq = 2048
+    #model = 1024
+    #hidden = 8*model
+    A = torch.randn(batch*seq, model, device='cuda').half()-0.4
+    B = torch.nn.Parameter(torch.randn(model, hidden, device='cuda').half())
+
+    #A[0] = 0
+    #B[:, 0] = 0
+    #A = A*(A>0)
+    #A[0, 0] = 0
+    #A[0, 0] = 6.0
+
+    Ac, minA, midpoint, dyna = min_max(A)
+    #print(Ac[0, 0], 'zero')
+    #print(Ac, Ac.min(), Ac.max())
+    Bc, maxB = F.vectorwise_quant(B, quant_type='linear')
+    out = F.igemm(Ac, Bc)
+    out2 = torch.matmul(A,B)
+    offset = B.sum(0)*torch.round(dyna*(minA+midpoint))/dyna
+    out = out.float()
+    #print(out.shape, maxB.shape, scale.shape, offset.shape)
+    norm1 = maxB/127
+    C4 = (out/dyna)*norm1+offset
 
 
-    C1 = torch.matmul(A, B)
-    C2 = bnb.matmul(A, B, None, 'linear')
-    C3 = bnb.matmul(A, B, None, 'zeropoint')
+    B1 = torch.nn.Parameter(B.clone())
+    B2 = torch.nn.Parameter(B.clone())
+    B3 = torch.nn.Parameter(B.clone())
+    B4 = torch.nn.Parameter(B.clone())
+
+
+    C1 = torch.matmul(A, B1)
+    C2 = bnb.matmul(A, B2, None, 'linear')
+    C3 = bnb.matmul(A, B3, None, 'zeropoint')
+    C4 = bnb.matmul(A, B4, None, 'vector-zeropoint')
 
     err1 = torch.abs(C1-C2).mean().item()
     err2 = torch.abs(C1-C3).mean().item()
-    assert err1 > err2
+    err3 = torch.abs(C1-C4).mean().item()
+    print(err1, err2, err3)
+    #assert err1 > err2
 
-    C2 = bnb.matmul(A, B, None, 'row')
-    C3 = bnb.matmul(A, B, None, 'row-zeropoint')
+    loss1 = C1.mean()
+    loss2 = C2.mean()
+    loss3 = C3.mean()
+    loss4 = C4.mean()
 
-    err1 = torch.abs(C1-C2).mean().item()
-    err2 = torch.abs(C1-C3).mean().item()
-    assert err1 > err2
+    loss1.backward()
+    loss2.backward()
+    loss3.backward()
+    loss4.backward()
+
+    print(B.grad)
+    print(B1.grad)
+    print(B2.grad)
+    print(B3.grad)
+    print(B4.grad)
+    err1 = torch.abs(B1.grad-B2.grad).mean().item()
+    err2 = torch.abs(B1.grad-B3.grad).mean().item()
+    err3 = torch.abs(B1.grad-B4.grad).mean().item()
+    print(err1, err2, err3)
 
 
 
