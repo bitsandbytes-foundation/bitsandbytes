@@ -7,6 +7,7 @@ from torch import Tensor
 from torch import nn
 from torch.nn.parameter import Parameter
 import torch.nn.functional as F
+import torch.distributed as dist
 
 from bitsandbytes.optim import GlobalOptimManager
 
@@ -47,22 +48,17 @@ class Linear8bit(nn.Linear):
         self.quant_type = quant_type
         self.index = index
         self.args = args
-        #if args.scale_mode == 'last':
-        #    self.s = torch.ones((3,))*127*16
-        #else:
-        #    self.s = torch.ones((output_features, 10))*127*16
-        #self.s[0] = index or 0
-        #GlobalOptimManager.get_instance().override_config(self.s, 'lr', 1.0)
-        #GlobalOptimManager.get_instance().register_parameters(self.s)
         self.iter = 0
 
     def forward(self, x):
-        #if self.s is None:
-        #    print('init s')
-        #    self.s = torch.ones((x.shape[0]*x.shape[1],), device=x.device)*127*127
-        #elif self.s.numel() != x.shape[0]*x.shape[1]:
-        #    print('reinit s')
-        #    self.s = torch.ones((x.shape[0]*x.shape[1],), device=x.device)*self.s.mean()
+        if self.iter % self.args.clip_freq == 0:
+            with torch.no_grad():
+                maxval, maxidx = torch.topk(torch.abs(self.weight.flatten()), k=self.args.clip_idx)
+                if not dist.is_initialized() or dist.get_rank() == 0:
+                    print('clip', maxval[-1].item())
+                self.weight.clip_(-maxval[-1], maxval[-1])
+        self.iter += 1
+
 
         if self.args is not None:
             out = bnb.nn.functional.sparse_decomposed_linear8bit(x, self.weight, self.bias, qval=self.args.sparse_decomp_val, quant_type=self.args.quant_type)
