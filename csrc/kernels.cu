@@ -2384,6 +2384,20 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   }
 }
 
+__global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, float *values, half *B, half *out, int nnz, int rowsB, int colsB)
+{
+
+  // 0. load balancing: We process rows with most columns first (count_vec)and we process one row per block
+  //    If a block finishes, the next one is scheduled. Since the last blocks like have fewer
+  //    elements they finish faster "fillin up" the gaps left by larger blocks
+
+  // 1. use rowidx_length to find what to load (as many blocks as there are rows)
+  // 2. Load A data and load into matrix tile; copy into each row of tile
+  // 3. Load B data and load into other matrix tile
+  // 4. Multiply the tile -> accumulate outputs in shared memory until 128 bytes it reached
+  // 5. Reduce output
+}
+
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

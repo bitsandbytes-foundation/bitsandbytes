@@ -1255,3 +1255,32 @@ def test_matmuls():
     err2 = torch.abs(c1-c3).mean().item()
     assert err1 < 0.2
     assert err2 < 0.2
+
+
+
+n = 2
+#dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
+#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim1 = [512*4]
+dim2 = [4096]
+values = list(product(dim1,dim2))
+names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2", values, ids=names)
+def test_spmm_coo_very_sparse(dim1, dim2):
+    threshold = 3.5
+    dim3 = torch.randint(32, 128, size=(1,)).item()
+    for i in range(1):
+        A = torch.randn(dim1, dim2).cuda().half()
+        B = torch.randn(dim2, dim3).cuda().half()
+
+        idx = torch.abs(A) >= threshold
+        nnz = (idx == 1).sum().item()
+        rows, cols = torch.where(idx)
+        values = A[idx]
+        cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
+        A2 = A*idx
+
+        out2 = F.spmm_coo_very_sparse(cooA, B)
+        out1 = torch.matmul(A2, B)
+
+        assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=30)

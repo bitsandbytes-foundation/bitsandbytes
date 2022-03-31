@@ -234,6 +234,8 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
 
 void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C, bool transposed_B);
 
+void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, float *values, half *B, half *out, int nnz, int rowsB, int colsB);
+
 #endif
 
 
