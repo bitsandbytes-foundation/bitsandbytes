@@ -2384,18 +2384,99 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   }
 }
 
-__global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, float *values, half *B, half *out, int nnz, int rowsB, int colsB)
+#define SPMM_ITEMS 2
+__global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
 {
 
   // 0. load balancing: We process rows with most columns first (count_vec)and we process one row per block
   //    If a block finishes, the next one is scheduled. Since the last blocks like have fewer
   //    elements they finish faster "fillin up" the gaps left by larger blocks
 
+  // with tensor cores
   // 1. use rowidx_length to find what to load (as many blocks as there are rows)
   // 2. Load A data and load into matrix tile; copy into each row of tile
   // 3. Load B data and load into other matrix tile
   // 4. Multiply the tile -> accumulate outputs in shared memory until 128 bytes it reached
   // 5. Reduce output
+
+  // without tensor cores
+  // 1. use rowidx_length to find what to load (as many blocks as there are rows)
+  // 2. Load A into registers
+  // 3. each warp loads all required rows of B but each warp is offset by k
+  // 4. Do mma operations that accumulate into registers
+  // 5. Each warp stores its output row into matrix C
+
+  const int count = max_count[blockIdx.x];
+  const int local_max_idx = max_idx[blockIdx.x];
+  const int offset = local_max_idx == 0 ? 0 : offset_rowidx[local_max_idx-1];
+
+  const int warp_id = threadIdx.x / 32;
+  const int warp_idx = threadIdx.x % 32;
+
+  __shared__ int smem_colidx[8];
+  int local_row_idx = rowidx[offset];
+
+  half local_valA[8];
+  half local_valC[SPMM_ITEMS];
+
+  if(threadIdx.x < count)
+    smem_colidx[threadIdx.x] = colidx[threadIdx.x];
+
+  if(threadIdx.x == 0)
+    printf("%i %i %i %i %i\n", blockIdx.x, count, local_max_idx, offset, local_row_idx);
+
+  // 2. Load A into registers
+  for(int j = 0; j < 8; j++)
+  {
+    local_valA[j] = j < count ? values[offset+j] : __float2half(0.0f);
+    //if(threadIdx.x == 0 && (float)local_valA[j] > 0.0f)
+    if(threadIdx.x == 0)
+      printf("%i %i %i %f\n", blockIdx.x, j, count, (float)local_valA[j]);
+  }
+
+  __syncthreads();
+
+  const int warp_offset = (warp_id*32)*SPMM_ITEMS;
+  int idx = warp_offset;
+  while(idx <  colsB)
+  {
+
+    #pragma unroll 2
+    for(int j = 0; j < SPMM_ITEMS; j++)
+      local_valC[j] = 0.0f;
+
+    #pragma unroll
+    for(int i = 0; i < count; i++)
+    {
+        // 3. each warp loads all required rows of B but each warp is offset by k
+        int row_offset = colsB*smem_colidx[i];
+        #pragma unroll 2
+        for(int j = 0; j < SPMM_ITEMS; j++)
+        {
+          half valB = B[row_offset+warp_offset + (32*j) + warp_idx];
+          // 4. Multiply the tile -> accumulate outputs in shared memory until 128 bytes it reached
+          local_valC[j] += valB*local_valA[i];
+        }
+    }
+
+    #pragma unroll 2
+    for(int j = 0; j < SPMM_ITEMS; j++)
+    {
+      int idx_val = rowsA*local_row_idx + warp_offset + (32*j) + warp_idx;
+      if(idx_val >= rowsA*colsB)
+        printf("ooi %i %i %i\n", blockIdx.x, j, idx_val);
+      //else
+      if(idx_val < rowsA*colsB)
+        out[rowsA*local_row_idx + warp_offset + (32*j) + warp_idx] = local_valC[j];
+    }
+
+    idx += blockDim.x*SPMM_ITEMS;
+
+    //int out_offset = 
+    //out[
+  } 
+
+
 }
 
 

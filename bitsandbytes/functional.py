@@ -1254,8 +1254,11 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     ldc = B.shape[1]
 
     values, counts = torch.unique(cooA.rowidx, return_counts=True)
-    offset = counts.cumsum(0)
+    offset = counts.cumsum(0).int()
     max_count, max_idx = torch.sort(counts, descending=True)
+    max_idx = max_idx.int()
+    max_count = max_count.int()
+    assert max_count[0] <= 8, f'Current max count per row is 8 but found {max_count[0]}.'
     ptrOffset = get_ptr(offset)
     ptrMaxCount = get_ptr(max_count)
     ptrMaxIdx = get_ptr(max_idx)
@@ -1265,6 +1268,7 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     ptrValues = get_ptr(cooA.values)
     ptrB = get_ptr(B)
     ptrC = get_ptr(out)
+    cnnz_rows = ct.c_int32(counts.numel())
     cnnz = ct.c_int32(cooA.nnz)
     crowsA = ct.c_int32(cooA.rows)
     ccolsA = ct.c_int32(cooA.cols)
@@ -1273,7 +1277,6 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     cldb = ct.c_int32(ldb)
     cldc = ct.c_int32(ldc)
 
-
-    lib.cspmm_coo_very_sparse_naive(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz, crowsB, ccolsB)
+    lib.cspmm_coo_very_sparse_naive(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
 
     return out
