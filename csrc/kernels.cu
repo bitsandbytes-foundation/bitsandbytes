@@ -2413,14 +2413,12 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   const int warp_id = threadIdx.x / 32;
   const int warp_idx = threadIdx.x % 32;
 
-  __shared__ int smem_colidx[8];
   int local_row_idx = rowidx[offset];
 
   half local_valA[8];
+  int local_colidxA[8];
   half local_valC[SPMM_ITEMS];
 
-  if(threadIdx.x < count)
-    smem_colidx[threadIdx.x] = colidx[threadIdx.x];
 
   if(threadIdx.x == 0)
     printf("%i %i %i %i %i\n", blockIdx.x, count, local_max_idx, offset, local_row_idx);
@@ -2429,15 +2427,13 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   for(int j = 0; j < 8; j++)
   {
     local_valA[j] = j < count ? values[offset+j] : __float2half(0.0f);
-    //if(threadIdx.x == 0 && (float)local_valA[j] > 0.0f)
-    if(threadIdx.x == 0)
-      printf("%i %i %i %f\n", blockIdx.x, j, count, (float)local_valA[j]);
+    local_colidxA[j] = j < count ? colidx[offset+j] : 0;
   }
 
   __syncthreads();
 
   const int warp_offset = (warp_id*32)*SPMM_ITEMS;
-  int idx = warp_offset;
+  int idx = warp_offset + warp_idx;
   while(idx <  colsB)
   {
 
@@ -2449,7 +2445,7 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
     for(int i = 0; i < count; i++)
     {
         // 3. each warp loads all required rows of B but each warp is offset by k
-        int row_offset = colsB*smem_colidx[i];
+        int row_offset = colsB*local_colidxA[i];
         #pragma unroll 2
         for(int j = 0; j < SPMM_ITEMS; j++)
         {
@@ -2459,15 +2455,15 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
         }
     }
 
+
     #pragma unroll 2
     for(int j = 0; j < SPMM_ITEMS; j++)
     {
       int idx_val = rowsA*local_row_idx + warp_offset + (32*j) + warp_idx;
-      if(idx_val >= rowsA*colsB)
-        printf("ooi %i %i %i\n", blockIdx.x, j, idx_val);
-      //else
+
+      printf("%i %i %i %f %i %i %i %i %i %i\n", blockIdx.x, threadIdx.x, j, (float)local_valC[j], local_row_idx, rowsA, warp_offset, warp_idx, idx_val, rowsA*colsB);
       if(idx_val < rowsA*colsB)
-        out[rowsA*local_row_idx + warp_offset + (32*j) + warp_idx] = local_valC[j];
+        out[idx] = local_valC[j];
     }
 
     idx += blockDim.x*SPMM_ITEMS;

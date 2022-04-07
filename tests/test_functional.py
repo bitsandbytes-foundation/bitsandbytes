@@ -1282,12 +1282,12 @@ def test_spmm_coo_very_sparse(dim1, dim2):
         out2 = F.spmm_coo_very_sparse(cooA, B)
         out1 = torch.matmul(A2, B)
         print('')
-        print(cooA.rowidx)
-        print(cooA.values)
-        print(A2)
-        print(B)
+        #print(cooA.rowidx)
+        #print(cooA.values)
+        #print(A2)
+        #print(B)
 
-        print(out2)
         print(out1)
+        print(out2)
 
         #assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=30)
