@@ -786,8 +786,6 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
     else:
         s = B.stride()
         if s[0] != B.shape[0]:
-            #print('ERROR')
-            #print(s, B.shape, 'B')
             B = B.contiguous()
             lda = B.stride()[1]
         elif s[2] == B.shape[1]:
@@ -801,8 +799,6 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
                 B = B.contiguous()
                 lda = B.stride()[1]
             else:
-                #print('copy b')
-                #print(s, B.shape)
                 B = B.contiguous()
                 lda = B.stride()[1]
 
@@ -819,7 +815,6 @@ def batched_igemm(A: Tensor, B: Tensor, out: Tensor=None, transposed_A=False, tr
             ldb = A.stride()[2]
             transposed_B = True
         else:
-            #print('copy a')
             A = A.contiguous()
             ldb = A.stride()[1]
             transposed_B = False
@@ -1258,7 +1253,8 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     max_count, max_idx = torch.sort(counts, descending=True)
     max_idx = max_idx.int()
     max_count = max_count.int()
-    assert max_count[0] <= 8, f'Current max count per row is 8 but found {max_count[0]}.'
+    assert max_count[0] <= 32, f'Current max count per row is 8 but found {max_count[0]}.'
+    #print(max_count[0])
     ptrOffset = get_ptr(offset)
     ptrMaxCount = get_ptr(max_count)
     ptrMaxIdx = get_ptr(max_idx)
@@ -1276,10 +1272,6 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     ccolsB = ct.c_int32(B.shape[1])
     cldb = ct.c_int32(ldb)
     cldc = ct.c_int32(ldc)
-
-    print(max_idx)
-    print(max_count)
-    print(offset)
 
     lib.cspmm_coo_very_sparse_naive(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
 

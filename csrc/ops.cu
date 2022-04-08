@@ -609,7 +609,7 @@ void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_val
 void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
 {
 
-   kspmm_coo_very_sparse_naive<<<nnz_rows, 512>>>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, nnz, rowsA, rowsB, colsB);
+   kspmm_coo_very_sparse_naive<32><<<nnz_rows, 64>>>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, nnz, rowsA, rowsB, colsB);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

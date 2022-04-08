@@ -1261,19 +1261,26 @@ def test_matmuls():
 n = 2
 #dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
-dim1 = [9]
-dim2 = [9]
+dim1 = [2*2048]
+dim2 = [12288]
+#dim1 = [512]
+#dim2 = [512]
 values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_spmm_coo_very_sparse(dim1, dim2):
-    threshold = 1.0
+    threshold = 3.6
+    #threshold = 2.8
     for i in range(k):
-        A = torch.randn(dim1, dim2).cuda().half()
-        B = torch.randn(dim2, dim1).cuda().half()
+        A = torch.randn(dim1, dim2, device='cuda').half()
+        B = torch.randn(dim2, dim2, device='cuda').half()
+
 
         idx = torch.abs(A) >= threshold
-        idx[:, -1] = 0
+        val_per_row = (idx==1).sum(1)
+        print(torch.median(val_per_row))
+        #for i, r in enumerate(val_per_row):
+            #print(i, r.item())
         nnz = (idx == 1).sum().item()
         rows, cols = torch.where(idx)
         values = A[idx]
@@ -1282,13 +1289,14 @@ def test_spmm_coo_very_sparse(dim1, dim2):
 
         out2 = F.spmm_coo_very_sparse(cooA, B)
         out1 = torch.matmul(A2, B)
-        print('')
+        print(nnz)
+        #print('')
         #print(cooA.rowidx)
         #print(cooA.values)
-        print(A2)
+        #print(A2)
         #print(B)
 
-        print(out1)
-        print(out2)
+        #print(out1)
+        #print(out2)
 
-        assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=2)
+        assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=20)
