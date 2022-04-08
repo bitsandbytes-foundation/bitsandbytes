@@ -2420,8 +2420,8 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   half local_valC[SPMM_ITEMS];
 
 
-  if(threadIdx.x == 0)
-    printf("%i %i %i %i %i\n", blockIdx.x, count, local_max_idx, offset, local_row_idx);
+  //if(threadIdx.x == 0)
+    //printf("%i %i %i %i %i\n", blockIdx.x, count, local_max_idx, offset, local_row_idx);
 
   // 2. Load A into registers
   for(int j = 0; j < 8; j++)
@@ -2433,8 +2433,8 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   __syncthreads();
 
   const int warp_offset = (warp_id*32)*SPMM_ITEMS;
-  int idx = warp_offset + warp_idx;
-  while(idx <  colsB)
+  int idx_col_B = warp_offset + warp_idx;
+  while(idx_col_B <  colsB)
   {
 
     #pragma unroll 2
@@ -2461,12 +2461,12 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
     {
       int idx_val = rowsA*local_row_idx + warp_offset + (32*j) + warp_idx;
 
-      printf("%i %i %i %f %i %i %i %i %i %i\n", blockIdx.x, threadIdx.x, j, (float)local_valC[j], local_row_idx, rowsA, warp_offset, warp_idx, idx_val, rowsA*colsB);
+      //printf("%i %i %i %f %i %i %i %i %i %i\n", blockIdx.x, threadIdx.x, j, (float)local_valC[j], local_row_idx, rowsA, warp_offset, warp_idx, idx_val, rowsA*colsB);
       if(idx_val < rowsA*colsB)
-        out[idx] = local_valC[j];
+        out[idx_val] = local_valC[j];
     }
 
-    idx += blockDim.x*SPMM_ITEMS;
+    idx_col_B += blockDim.x*SPMM_ITEMS;
 
     //int out_offset = 
     //out[

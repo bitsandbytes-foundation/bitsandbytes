@@ -1277,6 +1277,10 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     cldb = ct.c_int32(ldb)
     cldc = ct.c_int32(ldc)
 
+    print(max_idx)
+    print(max_count)
+    print(offset)
+
     lib.cspmm_coo_very_sparse_naive(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
 
     return out
