@@ -1106,6 +1106,30 @@ class COOSparseTensor(object):
         self.colidx = colidx
         self.values = values
 
+class CSRSparseTensor(object):
+    def __init__(self, rows, cols, nnz, rowptr, colidx, values):
+        assert rowptr.dtype == torch.int32
+        assert colidx.dtype == torch.int32
+        assert values.dtype == torch.float16
+        assert values.numel() == nnz
+        assert colidx.numel() == nnz
+        assert rowptr.numel() == rows+1
+
+        self.rows = rows
+        self.cols = cols
+        self.nnz = nnz
+        self.rowptr = rowptr
+        self.colidx = colidx
+        self.values = values
+
+def coo2csr(cooA):
+    values, counts = torch.unique(cooA.rowidx, return_counts=True)
+    values.add_(1)
+    rowptr = torch.zeros((cooA.rows+1, ), dtype=torch.int32, device=cooA.rowidx.device)
+    rowptr.scatter_(index=values.long(), src=counts.int(), dim=0)
+    rowptr.cumsum_(0)
+    return CSRSparseTensor(cooA.rows, cooA.cols, cooA.nnz, rowptr, cooA.colidx, cooA.values)
+
 def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     rowidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
     colidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
@@ -1272,6 +1296,53 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     ccolsB = ct.c_int32(B.shape[1])
     cldb = ct.c_int32(ldb)
     cldc = ct.c_int32(ldc)
+    #print(cooA.rowidx[:64])
+    #print(cooA.colidx[:64].sort()[0])
+
+    lib.cspmm_coo_very_sparse_naive(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
+
+    return out
+
+
+def spmm_csr_col32(csrA, B, out=None):
+    if out is None: out = torch.zeros((cooA.rows, B.shape[1]), device=B.device, dtype=B.dtype)
+    nnz = cooA.nnz
+    assert cooA.rowidx.numel() == nnz
+    assert cooA.colidx.numel() == nnz
+    assert cooA.values.numel() == nnz
+    assert cooA.cols == B.shape[0]
+
+    transposed_B = (False if B.is_contiguous() else True)
+
+    ldb = B.stride()[(1 if transposed_B else 0)]
+    ldc = B.shape[1]
+
+    values, counts = torch.unique(cooA.rowidx, return_counts=True)
+    offset = counts.cumsum(0).int()
+    max_count, max_idx = torch.sort(counts, descending=True)
+    max_idx = max_idx.int()
+    max_count = max_count.int()
+    assert max_count[0] <= 32, f'Current max count per row is 8 but found {max_count[0]}.'
+    #print(max_count[0])
+    ptrOffset = get_ptr(offset)
+    ptrMaxCount = get_ptr(max_count)
+    ptrMaxIdx = get_ptr(max_idx)
+
+    ptrRowidx = get_ptr(cooA.rowidx)
+    ptrColidx = get_ptr(cooA.colidx)
+    ptrValues = get_ptr(cooA.values)
+    ptrB = get_ptr(B)
+    ptrC = get_ptr(out)
+    cnnz_rows = ct.c_int32(counts.numel())
+    cnnz = ct.c_int32(cooA.nnz)
+    crowsA = ct.c_int32(cooA.rows)
+    ccolsA = ct.c_int32(cooA.cols)
+    crowsB = ct.c_int32(B.shape[1])
+    ccolsB = ct.c_int32(B.shape[1])
+    cldb = ct.c_int32(ldb)
+    cldc = ct.c_int32(ldc)
+    #print(cooA.rowidx[:64])
+    #print(cooA.colidx[:64].sort()[0])
 
     lib.cspmm_coo_very_sparse_naive(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
 

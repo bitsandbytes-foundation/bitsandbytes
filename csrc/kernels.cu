@@ -2475,10 +2475,17 @@ template <int SPMM_ITEMS> __global__ void kspmm_coo_very_sparse_naive(int *max_c
 
 }
 
+template <int TILE_ROWS, int TILE_COLS> __global__ void kspmm_csr_col32(int *rowptr, int *colidx, half *values, unsigned char *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
+{
+}
+
+
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
+
+template __global__ void kspmm_csr_col32<512, 64>(int *rowptr, int *colidx, half *values, unsigned char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
 
 template __global__ void kspmm_coo_very_sparse_naive<128>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
 template __global__ void kspmm_coo_very_sparse_naive<64>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);

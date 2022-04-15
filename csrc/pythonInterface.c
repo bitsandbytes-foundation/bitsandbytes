@@ -253,6 +253,9 @@ extern "C"
 	void cspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
 	{ spmm_coo_very_sparse_naive(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, nnz_rows, nnz, rowsA, rowsB, colsB); }
 
+	void cspmm_csr_col32(int *rowptr, int *colidx, half *values, unsigned char *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
+	{ spmm_csr_col32(rowptr, colidx, values, B, out, nnz, rowsA, rowsB, colsB); }
+
 }
 
 

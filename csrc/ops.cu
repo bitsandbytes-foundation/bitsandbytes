@@ -613,6 +613,16 @@ void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+#define TILE_ROWS 512
+#define TILE_COLS 64
+
+void spmm_csr_col32(int *rowptr, int *colidx, half *values, unsigned char *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
+{
+  int blocks = (rowsA/TILE_ROWS)*(rowsB/TILE_COLS);
+  kspmm_csr_col32<TILE_ROWS, TILE_COLS><<<blocks, 512>>>(rowptr, colidx, values, B, out, nnz, rowsA, rowsB, colsB);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
