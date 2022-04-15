@@ -62,7 +62,7 @@ def nvidia_transform(A, to_order, from_order='row', out=None, transpose=False, s
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
     if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1])
-    else: new_state = (state[0], to_order)
+    else: new_state = (state[1], to_order)
     func = get_transform_func(A.dtype, from_order, to_order, transpose)
 
     shape = state[0]
@@ -1196,7 +1196,7 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
     if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1], transpose)
-    else: new_state = (state[0], to_order)
+    else: new_state = (state[0], to_order) # (shape, order)
     assert from_order == 'row'
     assert to_order in ['col32', 'col_turing', 'col_ampere']
 
@@ -1304,46 +1304,26 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     return out
 
 
-def spmm_csr_col32(csrA, B, out=None):
-    if out is None: out = torch.zeros((cooA.rows, B.shape[1]), device=B.device, dtype=B.dtype)
-    nnz = cooA.nnz
-    assert cooA.rowidx.numel() == nnz
-    assert cooA.colidx.numel() == nnz
-    assert cooA.values.numel() == nnz
-    assert cooA.cols == B.shape[0]
+def spmm_csr_col32(csrA, B, SB, out=None):
+    if out is None: out = torch.zeros((csrA.rows, SB[0][0]), device=B.device, dtype=torch.float16)
+    nnz = csrA.nnz
+    assert csrA.rowptr.numel() == csrA.rows+1
+    assert csrA.colidx.numel() == nnz
+    assert csrA.values.numel() == nnz
+    assert csrA.cols == SB[0][1], 'B is assumed to be transposed!'
+    assert B.dtype == torch.int8
 
-    transposed_B = (False if B.is_contiguous() else True)
-
-    ldb = B.stride()[(1 if transposed_B else 0)]
-    ldc = B.shape[1]
-
-    values, counts = torch.unique(cooA.rowidx, return_counts=True)
-    offset = counts.cumsum(0).int()
-    max_count, max_idx = torch.sort(counts, descending=True)
-    max_idx = max_idx.int()
-    max_count = max_count.int()
-    assert max_count[0] <= 32, f'Current max count per row is 8 but found {max_count[0]}.'
-    #print(max_count[0])
-    ptrOffset = get_ptr(offset)
-    ptrMaxCount = get_ptr(max_count)
-    ptrMaxIdx = get_ptr(max_idx)
-
-    ptrRowidx = get_ptr(cooA.rowidx)
-    ptrColidx = get_ptr(cooA.colidx)
-    ptrValues = get_ptr(cooA.values)
+    ptrRowPtr = get_ptr(csrA.rowptr)
+    ptrColidx = get_ptr(csrA.colidx)
+    ptrValues = get_ptr(csrA.values)
     ptrB = get_ptr(B)
     ptrC = get_ptr(out)
-    cnnz_rows = ct.c_int32(counts.numel())
-    cnnz = ct.c_int32(cooA.nnz)
-    crowsA = ct.c_int32(cooA.rows)
-    ccolsA = ct.c_int32(cooA.cols)
-    crowsB = ct.c_int32(B.shape[1])
-    ccolsB = ct.c_int32(B.shape[1])
-    cldb = ct.c_int32(ldb)
-    cldc = ct.c_int32(ldc)
-    #print(cooA.rowidx[:64])
-    #print(cooA.colidx[:64].sort()[0])
+    cnnz = ct.c_int32(csrA.nnz)
+    crowsA = ct.c_int32(csrA.rows)
+    ccolsA = ct.c_int32(csrA.cols)
+    crowsB = ct.c_int32(SB[0][1])
+    ccolsB = ct.c_int32(SB[0][0])
 
-    lib.cspmm_coo_very_sparse_naive(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
+    lib.cspmm_csr_col32(ptrRowPtr, ptrColidx, ptrValues, ptrB, ptrC, cnnz, crowsA, crowsB, ccolsB)
 
     return out
