@@ -2475,8 +2475,22 @@ template <int SPMM_ITEMS> __global__ void kspmm_coo_very_sparse_naive(int *max_c
 
 }
 
-template <int TILE_ROWS, int TILE_COLS> __global__ void kspmm_csr_col32(int *rowptr, int *colidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
+template <int TILE_ROWS, int TILE_COLS, int WARPS> __global__ void kspmm_csr_col32(int *rowptr, int *colidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB)
 {
+  // each warp reads 128 bytes of B = 4 rows
+  const int warp_id = threadIdx.x / 32;
+
+  // because B is assumed to be transposed, we iterate across the first 8 rows of B; a sub-tile is of size 8x32=256 elements
+  // increment by 8 rows once all columns have been read
+  int offset_per_col_tile = tiledRows*32;
+  int my_warp_offset = ((warp_id/2)*offset_per_col_tile) + ((warp_id*4/8)*(tiledCols*8))
+
+  int my_row_offset = blockIdx.x/(tiledCols/32)*8;
+  int my_tile_B_offset =  blockIdx.x*(tiledRows)*32 + ((my_row_offset/8)*(tiledCols));
+
+  for(int row = my_row_offset; row < TILE_COLS; my_row_value+=8)
+  {
+  }
 }
 
 
@@ -2485,7 +2499,7 @@ template <int TILE_ROWS, int TILE_COLS> __global__ void kspmm_csr_col32(int *row
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kspmm_csr_col32<512, 64>(int *rowptr, int *colidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_csr_col32<512, 64, 16>(int *rowptr, int *colidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB);
 
 template __global__ void kspmm_coo_very_sparse_naive<128>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
 template __global__ void kspmm_coo_very_sparse_naive<64>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
