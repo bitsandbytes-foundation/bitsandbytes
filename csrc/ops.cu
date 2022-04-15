@@ -639,8 +639,10 @@ void char_copy(char *A, char *out, int n)
 {
   int threads = 1024;
   int num_per_load = 4*2;
-  int blocks = (n+threads-1)/threads;
-  kCopyInt8<<<blocks/num_per_load, threads>>>(A, out, n);
+  int num_per_block = threads*num_per_load;
+  int blocks = (n+num_per_block-1)/num_per_block;
+  //printf("%i %i %i\n", blocks, num_per_block, n);
+  kCopyInt8<<<blocks, threads>>>(A, out, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

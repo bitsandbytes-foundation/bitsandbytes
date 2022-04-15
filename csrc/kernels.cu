@@ -2113,6 +2113,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 #define ITEMS 2
 __global__ void kCopyInt8(char *A, char *out, int n)
 {
+  // 135 us
   //typedef cub::BlockLoad<char4, 512, ITEMS, cub::BLOCK_LOAD_VECTORIZE> Load;
   //typedef cub::BlockStore<char4, 512, ITEMS, cub::BLOCK_STORE_VECTORIZE> Store;
   //__shared__ typename Load::TempStorage load;
@@ -2125,9 +2126,66 @@ __global__ void kCopyInt8(char *A, char *out, int n)
   //  Store(store).Store(&(reinterpret_cast<char4*>(out)[i]), data);
   //}
 
-  const int tid = (blockIdx.x*blockDim.x) + threadIdx.x;
-  for(int i = tid; i < n/8; i+= (blockDim.x*gridDim.x))
-    reinterpret_cast<int2*>(out)[tid] = reinterpret_cast<int2*>(A)[tid];
+  // 157 us
+  //typedef cub::BlockLoad<char, 1024, ITEMS*4, cub::BLOCK_LOAD_VECTORIZE> Load;
+  //typedef cub::BlockStore<char, 1024, ITEMS*4, cub::BLOCK_STORE_VECTORIZE> Store;
+  //__shared__ typename Load::TempStorage load;
+  //__shared__ typename Store::TempStorage store;
+  //char data[ITEMS*4];
+  //const int tid = (blockIdx.x*blockDim.x)*ITEMS*2;
+  //for(int i = tid; i < n; i+= (blockDim.x*gridDim.x*ITEMS*2))
+  //{
+  //  Load(load).Load(&A[i], data);
+  //  Store(store).Store(&out[i], data);
+  //}
+
+  // 129 us
+  //const int tid = (blockIdx.x*blockDim.x) + threadIdx.x;
+  //for(int i = tid; i < n/8; i+= (blockDim.x*gridDim.x))
+  //  reinterpret_cast<int2*>(out)[tid] = reinterpret_cast<int2*>(A)[tid];
+
+  // 127 us
+  //char data[ITEMS*4];
+  //const int tid = (blockIdx.x*blockDim.x) + threadIdx.x;
+  //for(int i = tid; i < n/8; i+= (blockDim.x*gridDim.x))
+  //{
+  //  reinterpret_cast<int2(&)[1]>(data)[0] = reinterpret_cast<int2*>(A)[tid];
+  //  reinterpret_cast<int2*>(out)[tid] = reinterpret_cast<int2(&)[1]>(data)[0];
+  //}
+
+  // 222 us
+  //char data[ITEMS*4];
+  //const int tid = (blockIdx.x*blockDim.x*ITEMS*4) + (threadIdx.x*ITEMS*4);
+  //for(int i = tid; i < n; i+= (blockDim.x*gridDim.x)*ITEMS*4)
+  //{
+  //  #pragma unroll 8
+  //  for(int j = 0; j < ITEMS*4; j++)
+  //  {
+  //    if(tid+j < n)
+  //    {
+  //      data[j] = A[tid+j];
+  //      out[tid+j] = data[j];
+  //    }
+  //  }
+  //}
+
+  // 220 us
+  char data[ITEMS*4];
+  const int warp_idx = threadIdx.x % 32;
+  const int warp_id = threadIdx.x / 32;
+  const int tid = (blockIdx.x*blockDim.x*ITEMS*4) + (warp_id*32*8) + warp_idx;
+  for(int i = tid; i < n; i+= (blockDim.x*gridDim.x)*ITEMS*4)
+  {
+    #pragma unroll 8
+    for(int j = 0; j < ITEMS*4; j++)
+    {
+      if(tid+(j*32) < n)
+      {
+        data[j] = A[tid+(32*j)];
+        out[tid+(32*j)] = data[j];
+      }
+    }
+  }
 
 }
 
