@@ -2170,22 +2170,31 @@ __global__ void kCopyInt8(char *A, char *out, int n)
   //}
 
   // 220 us
-  char data[ITEMS*4];
-  const int warp_idx = threadIdx.x % 32;
-  const int warp_id = threadIdx.x / 32;
-  const int tid = (blockIdx.x*blockDim.x*ITEMS*4) + (warp_id*32*8) + warp_idx;
-  for(int i = tid; i < n; i+= (blockDim.x*gridDim.x)*ITEMS*4)
-  {
-    #pragma unroll 8
-    for(int j = 0; j < ITEMS*4; j++)
-    {
-      if(tid+(j*32) < n)
-      {
-        data[j] = A[tid+(32*j)];
-        out[tid+(32*j)] = data[j];
-      }
-    }
-  }
+  //char data[ITEMS*4];
+  //const int warp_idx = threadIdx.x % 32;
+  //const int warp_id = threadIdx.x / 32;
+  //const int tid = (blockIdx.x*blockDim.x*ITEMS*4) + (warp_id*32*8) + warp_idx;
+  //for(int i = tid; i < n; i+= (blockDim.x*gridDim.x)*ITEMS*4)
+  //{
+  //  #pragma unroll 8
+  //  for(int j = 0; j < ITEMS*4; j++)
+  //  {
+  //    if(tid+(j*32) < n)
+  //    {
+  //      data[j] = A[tid+(32*j)];
+  //      out[tid+(32*j)] = data[j];
+  //    }
+  //  }
+  //}
+
+  // 130 us (requires changes in number of blocks)
+  //char data[ITEMS*2];
+  //const int tid = (blockIdx.x*blockDim.x) + threadIdx.x;
+  //for(int i = tid; i < n/4; i+= (blockDim.x*gridDim.x))
+  //{
+  //  reinterpret_cast<int(&)[1]>(data)[0] = reinterpret_cast<int*>(A)[tid];
+  //  reinterpret_cast<int*>(out)[tid] = reinterpret_cast<int(&)[1]>(data)[0];
+  //}
 
 }
 
