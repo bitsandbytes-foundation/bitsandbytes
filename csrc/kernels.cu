@@ -2504,12 +2504,67 @@ template <int TILE_ROWS, int TILE_COLS, int WARPS> __global__ void kspmm_csr_col
   int offset = block_offset + col_tileB_offset + subtile_offset + (warp_idx*4);
   int end_offset = min(offset + elements_per_block, tiledRowsB*tiledColsB);
 
+  //=============== B FORMAT ===============
+  // AMPERE FORMAT:
+  // 32*32 tiles with 8*32 subtiles. The rows are interleaved in pairs of two rows with offset of 8 between pairs of two rows:
+	// row idx (each number stands for 32 values): [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
+  // the tiles are column-major ordered, so after 1024*1024 values we process: A[32:64, 0:32]
+
+  // each thread loads 4 consecutive values -> for ampere each thread holds 4 column values
+  // this changes only if the next row is loaded (after tiledColsB elements), after which new A need to be loaded
+
+  // TURING FORMAT:
+  // 8*32 tiles with 4*4 subtiles
+  // the 8*32 subtile has first all 4*4 subtiles of even rows (max 4*4*4 = 64 elements)
+  // the subsequent 4*4 subtiles are for all odd rows if some rows columns are empty the values are zero
+  // the tile repeats again after the 8*32 tile in a major column order, meaning: (next 8 rows are A[8:16, 0:32])
+  // the next tile is the next 8 rows for the same 32 columns. Once all rows are finished, the column
+  // index increases by 32
+  //
+  // row idx: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
+
+  // each thread loads 4 consecutive values -> for turing each thread holds 4 column values for either an even (first warp) or odd row (second warp)
+  // this changes only if the next row is loaded (after tiledColsB elements), after which new A need to be loaded
+
+
+  //=============== B FORMAT ===============
+
+  // =========== A statistics and loading ======================
+
+  // if we assume GPT-3, that is 12288 columns and 4 outliers per column, this means for a seq length of 2k on average we have:
+  // 4/12288 probability of a value per column
+  // we have that 2048 times, so 2048*4/12288 = 0.666 values per thread
+  // if we have TILE_ROWS=512, that is 0.16666 values per thread
+
+  // if we load 32 columns of A at once, that is on average (TILE_ROWS*32) elements with each element having probability 4/12288
+  // so (TILE_ROWS*32)*4/12288 = 5.33 elements tile
+  // this means its important to check if a tile has some non-zero value at all
+  // This means best is to store elements A in registers and have them spill if not used
+
+  // how to find these values? I guess one can do texture loads of A for the first TILE_ROW rows
+  // and then just iterate over it with all threads which is about 512*4 evaluations = 512*4*15 cycles =  31k cycles
+  // better would be to match and scatter: 
+  //  1. load data
+  //  2. match values in the k:k+32 column range
+  //  3. scatter into an array for each thread, repeat up to 32 times
+  //
+  // What would 3 look like? One reuses items across multiple warps (every 2nd warp processes the same columns)
+  // so multiple stores or bank conflicts is the same. So one can use a shared memory of 32 and theno
+  // better yet might be to restructure A
+  // if rows and beginnings of cols are known, then one can index directly
+  // if I have colptr representation; a thread could just load the data responsible for columns
+  // that is actually super easy and much better. I can just use texture memory for this
+
+  // =========== A statistics and loading ======================
+
+  
+
+  
+
   char local_dataB[4];
 
   for(int i = offset; i < end_offset; i+=elements_per_iter)
   {
-    //if(blockIdx.x == 0 && threadIdx.x == 0)
-      //printf("%i %i\n", i, threadIdx.x);
       reinterpret_cast<int(&)[1]>(local_dataB)[0] = reinterpret_cast<int*>(B)[i/4];
 
       #pragma unroll 4

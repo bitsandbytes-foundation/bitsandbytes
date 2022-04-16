@@ -1322,6 +1322,27 @@ def test_coo2csr():
     assert counts.numel() == A.shape[0]
 
     torch.testing.assert_allclose(counts, (A2!=0).sum(1))
+    idx = (A2!=0)
+    torch.testing.assert_allclose(A2[idx], csrA.values)
+
+
+def test_coo2csc():
+    threshold = 1
+    A = torch.randn(128, 128).half().cuda()
+    idx = torch.abs(A) >= threshold
+    nnz = (idx == 1).sum().item()
+    rows, cols = torch.where(idx)
+    values = A[idx]
+    cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
+    A2 = A*idx
+    cscA = F.coo2csc(cooA)
+    counts = cscA.colptr[1:] - cscA.colptr[:-1]
+    assert counts.numel() == A.shape[1]
+
+    torch.testing.assert_allclose(counts, (A2!=0).sum(0))
+    # torch uses row-major -> use transpose to transfer to col-major
+    idx = (A2.t()!=0)
+    torch.testing.assert_allclose(A2.t()[idx], cscA.values)
 
 
 n = 2

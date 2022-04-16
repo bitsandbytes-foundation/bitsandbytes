@@ -1122,6 +1122,22 @@ class CSRSparseTensor(object):
         self.colidx = colidx
         self.values = values
 
+class CSCSparseTensor(object):
+    def __init__(self, rows, cols, nnz, colptr, rowidx, values):
+        assert colptr.dtype == torch.int32
+        assert rowidx.dtype == torch.int32
+        assert values.dtype == torch.float16
+        assert values.numel() == nnz
+        assert rowidx.numel() == nnz
+        assert colptr.numel() == cols+1
+
+        self.rows = rows
+        self.cols = cols
+        self.nnz = nnz
+        self.colptr = colptr
+        self.rowidx = rowidx
+        self.values = values
+
 def coo2csr(cooA):
     values, counts = torch.unique(cooA.rowidx, return_counts=True)
     values.add_(1)
@@ -1129,6 +1145,17 @@ def coo2csr(cooA):
     rowptr.scatter_(index=values.long(), src=counts.int(), dim=0)
     rowptr.cumsum_(0)
     return CSRSparseTensor(cooA.rows, cooA.cols, cooA.nnz, rowptr, cooA.colidx, cooA.values)
+
+def coo2csc(cooA):
+    val, col2rowidx = torch.sort(cooA.colidx)
+    rowidx = cooA.rowidx[col2rowidx]
+    values = cooA.values[col2rowidx]
+    colvalues, counts = torch.unique(val, return_counts=True)
+    colvalues.add_(1)
+    colptr = torch.zeros((cooA.cols+1, ), dtype=torch.int32, device=cooA.colidx.device)
+    colptr.scatter_(index=colvalues.long(), src=counts.int(), dim=0)
+    colptr.cumsum_(0)
+    return CSCSparseTensor(cooA.rows, cooA.cols, cooA.nnz, colptr, rowidx, values)
 
 def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     rowidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
