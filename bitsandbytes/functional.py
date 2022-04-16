@@ -1312,6 +1312,7 @@ def spmm_csr_col32(csrA, B, SB, out=None):
     assert csrA.values.numel() == nnz
     assert csrA.cols == SB[0][1], 'B is assumed to be transposed!'
     assert B.dtype == torch.int8
+    print(B.shape)
 
     ptrRowPtr = get_ptr(csrA.rowptr)
     ptrColidx = get_ptr(csrA.colidx)

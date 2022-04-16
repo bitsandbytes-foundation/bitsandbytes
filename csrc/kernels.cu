@@ -2477,19 +2477,47 @@ template <int SPMM_ITEMS> __global__ void kspmm_coo_very_sparse_naive(int *max_c
 
 template <int TILE_ROWS, int TILE_COLS, int WARPS> __global__ void kspmm_csr_col32(int *rowptr, int *colidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB)
 {
-  // each warp reads 128 bytes of B = 4 rows
-  const int warp_id = threadIdx.x / 32;
+  // assumptions:
+  // 1. Each block is responsible for TILE_ROW*TILE_COLS output elements of C/out
+  // 2. Each block loads all values of A in TILE_ROWS and loads subtiles of B across TILE_COLS rows of B
+  // 3. we load TILE_ROWS per block, and store TILE_COLS per block
+  // 4. We separate tile_cols into loading 8 values at the time (rows)
+  // 5. Each warp loads half of a subtile
 
+  // each warp reads 128 bytes of B = 4 rows
+  const int warp_id = (threadIdx.x / 32);
+  const int offset_per_col_tile = tiledRowsB*32;
+  const int elements_per_block = TILE_COLS*tiledColsB;
+  // elements_per_iter = warps * 128 elements
+  const int elements_per_iter = (blockDim.x/32)*128;
+  const int warp_idx = threadIdx.x % 32;
+
+  // each block processes TILE_COLS rows and tiledColsB columns
+  int block_offset = blockIdx.x*TILE_COLS*tiledColsB;
   // because B is assumed to be transposed, we iterate across the first 8 rows of B; a sub-tile is of size 8x32=256 elements
   // increment by 8 rows once all columns have been read
-  int offset_per_col_tile = tiledRows*32;
-  int my_warp_offset = ((warp_id/2)*offset_per_col_tile) + ((warp_id*4/8)*(tiledCols*8))
+  // a subtile has two warps; each file has offset tiledRowsB*32 -> (warp_id/2)
+  int col_tileB_offset = (warp_id/2)*offset_per_col_tile;
+  // since we have 8*32 subtiles, the second warp will have an offset of 128 elements
+  int subtile_offset = (warp_id % 2)*(4*32);
+  // load 4 elements per thread
+  int offset = block_offset + col_tileB_offset + subtile_offset + (warp_idx*4);
+  int end_offset = min(offset + elements_per_block, tiledRowsB*tiledColsB);
 
-  int my_row_offset = blockIdx.x/(tiledCols/32)*8;
-  int my_tile_B_offset =  blockIdx.x*(tiledRows)*32 + ((my_row_offset/8)*(tiledCols));
+  char local_dataB[4];
 
-  for(int row = my_row_offset; row < TILE_COLS; my_row_value+=8)
+  for(int i = offset; i < end_offset; i+=elements_per_iter)
   {
+    //if(blockIdx.x == 0 && threadIdx.x == 0)
+      //printf("%i %i\n", i, threadIdx.x);
+      reinterpret_cast<int(&)[1]>(local_dataB)[0] = reinterpret_cast<int*>(B)[i/4];
+
+      #pragma unroll 4
+      for(int j = 0; j < 4; j++)
+      {
+        if(local_dataB[j] != 0)
+          printf("%i %i\n", threadIdx.x, (int)local_dataB[j]);
+      }
   }
 }
 

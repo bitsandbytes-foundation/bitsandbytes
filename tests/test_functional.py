@@ -1349,6 +1349,7 @@ def test_spmm_csr_col32(dim1, dim2):
     Bt32, SBt = F.transform(Bt, formatB)
     C2 = F.spmm_csr_col32(csrA, Bt32, SBt)
     print('')
+    print(Bt)
     print(C1)
     print(C2)
 
