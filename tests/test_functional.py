@@ -1353,7 +1353,7 @@ dim2 = [4]
 values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
-def test_spmm_csr_col32(dim1, dim2):
+def test_spmm_csc_col32(dim1, dim2):
     threshold = 1.0
     A = torch.randn(dim1, dim2, device='cuda').half()
     Bt = torch.randint(-128, 127, size=(2, dim2), device='cuda').to(torch.int8)
@@ -1364,12 +1364,14 @@ def test_spmm_csr_col32(dim1, dim2):
     rows, cols = torch.where(idx)
     values = A[idx]
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
-    csrA = F.coo2csr(cooA)
+    cscA = F.coo2csc(cooA)
     A2 = A*idx
     C1 = torch.matmul(A2, Bt.half().t())
     Bt32, SBt = F.transform(Bt, formatB)
-    C2 = F.spmm_csr_col32(csrA, Bt32, SBt)
+    C2 = F.spmm_csc_col32(cscA, Bt32, SBt)
     print('')
+    print(A2)
+    print(cscA.values)
     print(Bt)
     print(C1)
     print(C2)

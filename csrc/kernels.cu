@@ -2475,7 +2475,9 @@ template <int SPMM_ITEMS> __global__ void kspmm_coo_very_sparse_naive(int *max_c
 
 }
 
-template <int TILE_ROWS, int TILE_COLS, int WARPS> __global__ void kspmm_csr_col32(int *rowptr, int *colidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB)
+template <int TILE_ROWS, int TILE_COLS, int WARPS>
+__launch_bounds__(512, 2)
+__global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB)
 {
   // assumptions:
   // 1. Each block is responsible for TILE_ROW*TILE_COLS output elements of C/out
@@ -2535,6 +2537,7 @@ template <int TILE_ROWS, int TILE_COLS, int WARPS> __global__ void kspmm_csr_col
   // 4/12288 probability of a value per column
   // we have that 2048 times, so 2048*4/12288 = 0.666 values per thread
   // if we have TILE_ROWS=512, that is 0.16666 values per thread
+  // we have 4 columns per thread, so in total back to 0.6666 value per thread on average
 
   // if we load 32 columns of A at once, that is on average (TILE_ROWS*32) elements with each element having probability 4/12288
   // so (TILE_ROWS*32)*4/12288 = 5.33 elements tile
@@ -2555,24 +2558,78 @@ template <int TILE_ROWS, int TILE_COLS, int WARPS> __global__ void kspmm_csr_col
   // if I have colptr representation; a thread could just load the data responsible for columns
   // that is actually super easy and much better. I can just use texture memory for this
 
+  // now we have for each load 512x4 possible output values per warp, but only 0.6666 values per thread on average
+  // since the values of A stay the same and only B changes, and we have on average 0.6666 values per thread, we have
+  // on average one output row; as such, we can keep a dynamic array of k values with kx4 outputs and a k array for rowidx
+  // then these values are writting via atomic writes to shared memory (full tile of TILE_ROWS*64 half values)
+
   // =========== A statistics and loading ======================
-
   
-
-  
-
+  // the index of the TILE_ROWS*TILE_COLS tile
+  // the best loads would be if we process TILE_ROWS first then then TILE_COLS
+  // this helps to maximize L2 cache loads for B
+  // However, currently, we offset the loads of B via block. So every colsB we increase the TILE_ROWS by TILE_ROWS
+  // since a block process TILE_COLS we have colsB/TILE_COLS until we increase TILE_ROWS
+  const int rowsA_offset = (colsB/TILE_COLS)*TILE_ROWS;
   char local_dataB[4];
 
+  half my_cols_data[4*16];
+	// AMPERE: row idx (each number stands for 32 values): [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
+  // TURING: row idx: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...] (repeats 8 times)
+
+  // TURNING:
+  // thread 0-3 load idx 0-3
+  // thread 4-7 load idx 4-7
+  // -> col = warp_idx
+  // AMPERE:
+  // thread 0 loads idx 0-3
+  // thread 1 loads idx 4-7
+  // -> col = warp_idx*4
+
+  // every two warps we process a new subtile of 32 columns
+  int my_col_start = warp_idx + (warp_id/2)*32;
+
+  // each block loads ALL columns of A and B for TILE_COLS outputs columns (rows B)
   for(int i = offset; i < end_offset; i+=elements_per_iter)
   {
+      if(my_col_start > colsB){ continue; }
       reinterpret_cast<int(&)[1]>(local_dataB)[0] = reinterpret_cast<int*>(B)[i/4];
+      
+
+      # pragma unroll 4
+      for(int j = 0; j < 4; j++)
+      {
+        int offset_rowidx = colptr[my_col_start +j];
+        int num_loads_A = colptr[my_col_start +j+1] - offset_rowidx;
+        for(int k = 0; k < num_loads_A; k++)
+        {
+          int row_value = rowidx[offset_rowidx+k];
+          if((row_value >= rowsA_offset) && (row_value < (rowsA_offset+TILE_ROWS)))
+          {
+            my_cols_data[(j*16) + k] = values[offset_rowidx+k];
+          }
+        }
+        my_cols_data[(j*16)+num_loads_A] = -HLF_MAX;
+      }
+
 
       #pragma unroll 4
       for(int j = 0; j < 4; j++)
       {
         if(local_dataB[j] != 0)
           printf("%i %i\n", threadIdx.x, (int)local_dataB[j]);
+
+        for(int k = 0; k < 16*4; k++)
+        {
+          if((float)my_cols_data[k] == -HLF_MAX){ break; }
+          if((float)my_cols_data[k] != 0.0f)
+            printf("%i %i %f\n", threadIdx.x, k, (float)my_cols_data[k]);
+        }
+
       }
+
+      // every two warps for all warps_per_block increase the col index by 32
+      my_col_start += ((blockDim.x/32)/2)*32;
   }
 }
 
@@ -2582,7 +2639,7 @@ template <int TILE_ROWS, int TILE_COLS, int WARPS> __global__ void kspmm_csr_col
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kspmm_csr_col32<512, 64, 16>(int *rowptr, int *colidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB);
+template __global__ void kspmm_csc_col32<512, 64, 16>(int *colptr, int *rowidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB);
 
 template __global__ void kspmm_coo_very_sparse_naive<128>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
 template __global__ void kspmm_coo_very_sparse_naive<64>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);

@@ -1331,27 +1331,26 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     return out
 
 
-def spmm_csr_col32(csrA, B, SB, out=None):
-    if out is None: out = torch.zeros((csrA.rows, SB[0][0]), device=B.device, dtype=torch.float16)
-    nnz = csrA.nnz
-    assert csrA.rowptr.numel() == csrA.rows+1
-    assert csrA.colidx.numel() == nnz
-    assert csrA.values.numel() == nnz
-    assert csrA.cols == SB[0][1], 'B is assumed to be transposed!'
+def spmm_csc_col32(cscA, B, SB, out=None):
+    if out is None: out = torch.zeros((cscA.rows, SB[0][0]), device=B.device, dtype=torch.float16)
+    nnz = cscA.nnz
+    assert cscA.colptr.numel() == cscA.cols+1
+    assert cscA.rowidx.numel() == nnz
+    assert cscA.values.numel() == nnz
+    assert cscA.cols == SB[0][1], 'B is assumed to be transposed!'
     assert B.dtype == torch.int8
-    print(B.shape)
 
-    ptrRowPtr = get_ptr(csrA.rowptr)
-    ptrColidx = get_ptr(csrA.colidx)
-    ptrValues = get_ptr(csrA.values)
+    ptrColPtr = get_ptr(cscA.colptr)
+    ptrRowidx = get_ptr(cscA.rowidx)
+    ptrValues = get_ptr(cscA.values)
     ptrB = get_ptr(B)
     ptrC = get_ptr(out)
-    cnnz = ct.c_int32(csrA.nnz)
-    crowsA = ct.c_int32(csrA.rows)
-    ccolsA = ct.c_int32(csrA.cols)
+    cnnz = ct.c_int32(cscA.nnz)
+    crowsA = ct.c_int32(cscA.rows)
+    ccolsA = ct.c_int32(cscA.cols)
     crowsB = ct.c_int32(SB[0][1])
     ccolsB = ct.c_int32(SB[0][0])
 
-    lib.cspmm_csr_col32(ptrRowPtr, ptrColidx, ptrValues, ptrB, ptrC, cnnz, crowsA, crowsB, ccolsB)
+    lib.cspmm_csc_col32(ptrColPtr, ptrRowidx, ptrValues, ptrB, ptrC, cnnz, crowsA, crowsB, ccolsB)
 
     return out
