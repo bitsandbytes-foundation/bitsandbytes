@@ -613,7 +613,7 @@ void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-#define TILE_ROWS 512
+#define TILE_ROWS 256
 #define TILE_COLS 64
 #define TILE_WARPS 512/32
 

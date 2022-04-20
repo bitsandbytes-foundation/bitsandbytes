@@ -849,26 +849,33 @@ def test_cutlass_igemm(dim1, dim2):
 
 def test_cutlass_bench():
     batch = 4
-    seq = 512
-    model = 1024
-    hidden = 8*model
-    t = Timer()
+    seq = 2048
+    model = 4096
+    hidden = 4*model
     A = torch.randn(batch*seq, model, device='cuda')
     B = torch.randn(model, hidden, device='cuda')
     A = A.half()
     B = B.half()
     C = torch.zeros(batch*seq, hidden, device=A.device, dtype=B.dtype)
-    A2 = torch.randint(-128, 127, size=(model, batch*seq), device='cuda').to(torch.int8)
+    #A2 = torch.randint(-128, 127, size=(model, batch*seq), device='cuda').to(torch.int8)
+    A2 = torch.randint(-128, 127, size=(batch*seq, model), device='cuda').to(torch.int8)
     B2 = torch.randint(-128, 127, size=(model, hidden), device='cuda').to(torch.int8)
     C2 = torch.zeros(batch*seq, hidden, device=A.device, dtype=torch.int32)
 
-    for i in range(k):
-        F.cutlass_igemm(A2.t(), B2, out=C2)
-    torch.cuda.synchronize()
 
-    for i in range(k):
-        torch.mm(A, B, out=C)
     torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        C2 = F.cutlass_igemm(A2, B2)
+    torch.cuda.synchronize()
+    print('cutlass', time.time()-t0)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        C = torch.mm(A, B)
+    torch.cuda.synchronize()
+    print('fp16', time.time()-t0)
 
 
 n = 2
@@ -1356,7 +1363,13 @@ names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 def test_spmm_csc_col32(dim1, dim2):
     threshold = 1.0
     A = torch.randn(dim1, dim2, device='cuda').half()
-    Bt = torch.randint(-128, 127, size=(2, dim2), device='cuda').to(torch.int8)
+    A = torch.ones(dim1, dim2, device='cuda').half()
+    A = torch.arange(dim1* dim2, device='cuda').half().reshape(dim1, dim2).contiguous()
+    A.flatten()[2:6] = 0
+    A.flatten()[8:] = 0
+    Bt = torch.randint(-128, 127, size=(1, dim2), device='cuda').to(torch.int8)
+    #Bt[0] = 1
+    #Bt[1] = 2
     formatB = F.get_special_format_str()
 
     idx = torch.abs(A) >= threshold
@@ -1365,6 +1378,7 @@ def test_spmm_csc_col32(dim1, dim2):
     values = A[idx]
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
     cscA = F.coo2csc(cooA)
+    print(cscA.colptr)
     A2 = A*idx
     C1 = torch.matmul(A2, Bt.half().t())
     Bt32, SBt = F.transform(Bt, formatB)
@@ -1373,6 +1387,7 @@ def test_spmm_csc_col32(dim1, dim2):
     print(A2)
     print(cscA.values)
     print(Bt)
+    print(Bt32)
     print(C1)
     print(C2)
 
