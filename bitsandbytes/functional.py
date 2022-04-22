@@ -1332,7 +1332,8 @@ def spmm_coo_very_sparse(cooA, B, out=None):
 
 
 def spmm_csc_col32(cscA, B, SB, out=None):
-    if out is None: out = torch.zeros((cscA.rows, SB[0][0]), device=B.device, dtype=torch.float16)
+    #if out is None: out = torch.zeros((cscA.rows, SB[0][0]), device=B.device, dtype=torch.float16)
+    if out is None: out, Sout = get_transform_buffer((cscA.rows, SB[0][0]), torch.float16, B.device, 'col32')
     nnz = cscA.nnz
     assert cscA.colptr.numel() == cscA.cols+1
     assert cscA.rowidx.numel() == nnz
@@ -1353,4 +1354,4 @@ def spmm_csc_col32(cscA, B, SB, out=None):
 
     lib.cspmm_csc_col32(ptrColPtr, ptrRowidx, ptrValues, ptrB, ptrC, cnnz, crowsA, crowsB, ccolsB)
 
-    return out
+    return out, Sout

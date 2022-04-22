@@ -1355,8 +1355,8 @@ def test_coo2csc():
 n = 2
 #dim1 = [1*2048]
 #dim2 = [12288]
-dim1 = [4]
-dim2 = [4]
+dim1 = [5]
+dim2 = [5]
 values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
@@ -1378,17 +1378,14 @@ def test_spmm_csc_col32(dim1, dim2):
     values = A[idx]
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
     cscA = F.coo2csc(cooA)
-    print(cscA.colptr)
     A2 = A*idx
     C1 = torch.matmul(A2, Bt.half().t())
     Bt32, SBt = F.transform(Bt, formatB)
-    C2 = F.spmm_csc_col32(cscA, Bt32, SBt)
+    C2_32, SC2 = F.spmm_csc_col32(cscA, Bt32, SBt)
+    A3, S3 = F.nvidia_transform(C2_32.float(), 'row', state=SC2)
     print('')
-    print(A2)
-    print(cscA.values)
-    print(Bt)
-    print(Bt32)
     print(C1)
-    print(C2)
+    print(C2_32)
+    print(A3)
 
     #assert_all_approx_close(C1, C2.float(), rtol=0.01, atol=3.0e-2, count=20)

@@ -620,7 +620,7 @@ void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx
 void spmm_csc_col32(int *colptr, int *rowidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
 {
   int blocks = ((rowsA+TILE_ROWS-1)/TILE_ROWS)*((rowsB+TILE_COLS-1)/TILE_COLS);
-  printf("%i %i %i\n", rowsA, rowsB, blocks);
+  printf("%i %i blocks %i\n", rowsA, rowsB, blocks);
   int tiledRowsB = fill_up_to_nearest_multiple(rowsB, 8);
   int tiledColsB = fill_up_to_nearest_multiple(colsB, 32);
   kspmm_csc_col32<TILE_ROWS, TILE_COLS, TILE_WARPS><<<blocks, 512>>>(colptr, rowidx, values, B, out, nnz, rowsA, rowsB, colsB, tiledRowsB, tiledColsB);
