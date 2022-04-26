@@ -2571,7 +2571,6 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
 
   // every two warps we process a new subtile of 32 columns
   int my_col_start = warp_idx + (warp_id/2)*32;
-  int rowB = 0;
 
   const int offset_per_col_tile = tiledRowsB*32;
   const int elements_per_block = TILE_COLS*tiledColsB;
@@ -2600,9 +2599,30 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
   // each block loads ALL columns of A and B for TILE_COLS outputs columns (rows B)
   for(int i = offset; i < end_offset; i+=elements_per_iter)
   {
-    rowB = i/tiledColsB; // row is the output column
     if(my_col_start > rowsB){ continue; } // since B is transposed this is rowsB instead of colsB
     reinterpret_cast<int(&)[1]>(local_dataB)[0] = reinterpret_cast<int*>(B)[i/4];
+
+    // currently specific for Turning
+    int outCol = 0;
+
+    // outCol = rowB
+    // turing has even then odd rows in 4x32 sub-tiles
+    // row idx: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
+    // col idx: [0 1 2 3, 0 1 2 3, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
+    // row idx+128: [1 1 1 1, 3 3 3 3...]
+    int base_rowB = i/tiledColsB;
+    int is_odd = warp_id % 2;
+    base_rowB -= is_odd ? 4 : 0;
+    // each thread loads 4 elements which comes from the same row
+    // row idx: [0 2 4 6, 0 2 4 6, ...]
+    // tid: [0 1 2 3, 4 5 6 7 ...]
+    int thread_row = (warp_idx % 4)*2;
+    thread_row += is_odd ? 1 : 0;
+    outCol = base_rowB + thread_row;
+
+
+
+
 
     # pragma unroll 4
     for(int j = 0; j < 4; j++)
@@ -2622,14 +2642,23 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
             //int rowidx_A = rowidx[offset_rowidx+k];
             //if(((float)local_dataB[my_col_start+j] != 0.0) && (value != 0.0))
               //printf("[%i %i] %i %i %i %f %f %f\n", rowA, rowB, my_col_start, rowidx_A, threadIdx.x, (float)local_dataB[my_col_start+j], value, (float)local_dataB[my_col_start+j]*value);
+
             // we store the data as two 2x32 subtiles:
             // [row0_0, row0_1, ... row0_31, row1_0, row1_1, ... row1_31]
             // [rowTILE_ROWS_0, ...
             // [row0_32
-            int offset_columns = (rowB/32)*(TILE_ROWS*TILE_COLS/2);
+            int offset_columns = (outCol/32)*(TILE_ROWS*TILE_COLS/2) + (outCol % 32);
             // every row has an offset of 32 elements
             int offset_rows = (rowA % TILE_ROWS)*32;
-            atomicAdd(&smem_output_tile[offset_rows+offset_columns], value*((float)local_dataB[my_col_start+j]));
+            // this calculates A[rowA, my_col_start+j]*B[rowB, my_col_start+j] = C[rowA, my_col_start+j]
+            float calc = value*((float)local_dataB[j]);
+            int idx = offset_rows+offset_columns+warp_idx;
+            if(calc != 0.0f)
+            {
+              printf("%f (%i %i+%i)=%i (%i, %i)\n", calc, offset_rows, offset_columns, warp_idx, idx, rowA, outCol);
+              //printf("A[%i, %i](%f) * B[%i, %i](%f) = C[%i, %i](%f)\n", rowA, my_col_start+j, value, outCol, my_col_start+j, (float)local_dataB[j], rowA, outCol, (float)calc);
+            }
+            atomicAdd(&smem_output_tile[idx], value*((float)local_dataB[j]));
           }
         }
       }
@@ -2662,10 +2691,10 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
 
     if(output_col+(2*warp_idx) < rowsB)
     {
-      if(((float)smem_output_tile[i+(2*warp_idx)] != 0.0f))
-        printf("%f %i %i %i (%i %i) %i %i\n", (float)smem_output_tile[i], i, idx, threadIdx.x, output_row, output_col, colsB/TILE_COLS, blockIdx.x % (colsB/TILE_COLS));
-      if((float)smem_output_tile[i+1+(2*warp_idx)] != 0.0f)
-        printf("%f %i %i %i (%i %i)\n", (float)smem_output_tile[i+1], i+1, idx, threadIdx.x, output_row, output_col);
+      //if(((float)smem_output_tile[i+(2*warp_idx)] != 0.0f))
+      //  printf("%f %i %i %i (%i %i) %i %i\n", (float)smem_output_tile[i], i, idx, threadIdx.x, output_row, output_col, colsB/TILE_COLS, blockIdx.x % (colsB/TILE_COLS));
+      //if((float)smem_output_tile[i+1+(2*warp_idx)] != 0.0f)
+      //  printf("%f %i %i %i (%i %i)\n", (float)smem_output_tile[i+1], i+1, idx, threadIdx.x, output_row, output_col);
       reinterpret_cast<float*>(out)[idx] = reinterpret_cast<float(&)[TILE_ROWS*TILE_COLS/2]>(smem_output_tile)[i+warp_idx];
     }
   }
