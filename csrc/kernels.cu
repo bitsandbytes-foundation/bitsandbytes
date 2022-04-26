@@ -2569,8 +2569,6 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
   // thread 1 loads idx 4-7
   // -> col = warp_idx*4
 
-  // every two warps we process a new subtile of 32 columns
-  int my_col_start = warp_idx + (warp_id/2)*32;
 
   const int offset_per_col_tile = tiledRowsB*32;
   const int elements_per_block = TILE_COLS*tiledColsB;
@@ -2596,6 +2594,14 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
 
   __syncthreads();
 
+  // every two warps we process a new subtile of 32 columns which match to the columns in A (transposed B)
+  // every thread loads 4 values
+  // in TURING format, all of these will have the same column
+  int is_odd = warp_id % 2;
+  int thread_row = (warp_idx % 4)*2;
+  thread_row += is_odd ? 1 : 0;
+  int my_col_start = (warp_id/2)*32 + (warp_idx/4)*4;
+
   // each block loads ALL columns of A and B for TILE_COLS outputs columns (rows B)
   for(int i = offset; i < end_offset; i+=elements_per_iter)
   {
@@ -2611,30 +2617,29 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
     // col idx: [0 1 2 3, 0 1 2 3, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
     // row idx+128: [1 1 1 1, 3 3 3 3...]
     int base_rowB = i/tiledColsB;
-    int is_odd = warp_id % 2;
     base_rowB -= is_odd ? 4 : 0;
     // each thread loads 4 elements which comes from the same row
     // row idx: [0 2 4 6, 0 2 4 6, ...]
     // tid: [0 1 2 3, 4 5 6 7 ...]
-    int thread_row = (warp_idx % 4)*2;
-    thread_row += is_odd ? 1 : 0;
     outCol = base_rowB + thread_row;
-
-
-
 
 
     # pragma unroll 4
     for(int j = 0; j < 4; j++)
     {
-      if(my_col_start+j < rowsB)
+      int offset_rowidx = colptr[my_col_start+j];
+      int num_loads_A = colptr[my_col_start+1+j] - offset_rowidx;
+      if(local_dataB[j] != 0)
+        printf("%f warpidx %i col %i j %i rowsb %i if %i loads %i\n", (float)local_dataB[j], warp_idx, my_col_start, j, rowsB, (int)(my_col_start < rowsB), num_loads_A);
+      if(my_col_start < rowsB)
       {
-        int offset_rowidx = colptr[my_col_start +j];
-        int num_loads_A = colptr[my_col_start +j+1] - offset_rowidx;
+
         //printf("num_loads %i %i %i\n", num_loads_A, threadIdx.x, my_col_start);
         for(int k = 0; k < num_loads_A; k++)
         {
           int rowA = rowidx[offset_rowidx+k];
+          //if(local_dataB[j] != 0)
+            //printf("%f %f rowa %i if %i col %i tid %i\n", 0.0f, (float)local_dataB[j], rowA, (int)(rowA >= base_rowsA) && (rowA < (base_rowsA+TILE_ROWS)), my_col_start, threadIdx.x);
           if((rowA >= base_rowsA) && (rowA < (base_rowsA+TILE_ROWS)))
           {
             //my_cols_data[(j*16) + k] = values[offset_rowidx+k];
@@ -2652,11 +2657,11 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
             int offset_rows = (rowA % TILE_ROWS)*32;
             // this calculates A[rowA, my_col_start+j]*B[rowB, my_col_start+j] = C[rowA, my_col_start+j]
             float calc = value*((float)local_dataB[j]);
-            int idx = offset_rows+offset_columns+warp_idx;
+            int idx = offset_rows+offset_columns;
             if(calc != 0.0f)
             {
-              printf("%f (%i %i+%i)=%i (%i, %i)\n", calc, offset_rows, offset_columns, warp_idx, idx, rowA, outCol);
-              //printf("A[%i, %i](%f) * B[%i, %i](%f) = C[%i, %i](%f)\n", rowA, my_col_start+j, value, outCol, my_col_start+j, (float)local_dataB[j], rowA, outCol, (float)calc);
+              //printf("%f (%i %i+%i)=%i (%i, %i)\n", calc, offset_rows, offset_columns, warp_idx, idx, rowA, outCol);
+              printf("A[%i, %i](%f) * B[%i, %i](%f) = C[%i, %i](%f) [%i+%i+%i]\n", rowA, my_col_start+j, value, outCol, my_col_start+j, (float)local_dataB[j], rowA, outCol, (float)calc, offset_rows, offset_columns, warp_idx);
             }
             atomicAdd(&smem_output_tile[idx], value*((float)local_dataB[j]));
           }

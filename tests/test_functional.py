@@ -1356,7 +1356,7 @@ n = 2
 #dim1 = [1*2048]
 #dim2 = [12288]
 dim1 = [4]
-dim2 = [4]
+dim2 = [5]
 values = list(product(dim1,dim2))
 names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
@@ -1365,9 +1365,9 @@ def test_spmm_csc_col32(dim1, dim2):
     A = torch.randn(dim1, dim2, device='cuda').half()
     A = torch.ones(dim1, dim2, device='cuda').half()
     A = torch.arange(dim1* dim2, device='cuda').half().reshape(dim1, dim2).contiguous()
-    A.flatten()[2:6] = 0
-    A.flatten()[8:] = 0
-    Bt = torch.randint(-128, 127, size=(2, dim2), device='cuda').to(torch.int8)
+    #A.flatten()[0:6] = 0
+    #A.flatten()[12:] = 0
+    Bt = torch.randint(-128, 127, size=(4, dim2), device='cuda').to(torch.int8)
     #Bt[0] = 1
     #Bt[1] = 2
     formatB = F.get_special_format_str()
