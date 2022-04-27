@@ -2570,22 +2570,23 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
   // -> col = warp_idx*4
 
 
-  const int offset_per_col_tile = tiledRowsB*32;
-  const int elements_per_block = TILE_COLS*tiledColsB;
-  // elements_per_iter = warps * 128 elements
-  const int elements_per_iter = (blockDim.x/32)*128;
+  // each block processes all columns in B for up to TILE_COLS output cols
+  const int elements_per_blockB = tiledColsB*TILE_COLS;
+  // max: elements_per_iter = warps * 128 elements
+  // min: the current iteration only processes only 8 rows at a time: 8*tiledColsB
+  const int elements_per_iter = min((blockDim.x/32)*128, 8*tiledColsB);
 
   // each block processes TILE_COLS rows and tiledColsB columns
   int block_offset = blockIdx.x*TILE_COLS*tiledColsB;
   // because B is assumed to be transposed, we iterate across the first 8 rows of B; a sub-tile is of size 8x32=256 elements
   // increment by 8 rows once all columns have been read
-  // a subtile has two warps; each file has offset tiledRowsB*32 -> (warp_id/2)
-  int col_tileB_offset = (warp_id/2)*offset_per_col_tile;
+  // a subtile has two warps; each tile has offset tiledRowsB*32 -> (warp_id/2)
+  int col_tileB_offset = (warp_id/2)*tiledRowsB*32;
   // since we have 8*32 subtiles, the second warp will have an offset of 128 elements
   int subtile_offset = (warp_id % 2)*(4*32);
   // load 4 elements per thread
   int offset = block_offset + col_tileB_offset + subtile_offset + (warp_idx*4);
-  int end_offset = min(offset + elements_per_block, tiledRowsB*tiledColsB);
+  int end_offset = min(offset + elements_per_blockB, tiledRowsB*tiledColsB);
 
   __shared__ half smem_output_tile[TILE_ROWS*TILE_COLS];
 
@@ -2601,13 +2602,30 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
   int thread_row = (warp_idx % 4)*2;
   thread_row += is_odd ? 1 : 0;
   int my_col_start = (warp_id/2)*32 + (warp_idx/4)*4;
+  // how many iters to process all tiles
+  // divide total number of columns by every two warps 32 columns
+  int iters_per_row_tiles = (tiledColsB+(blockDim.x/32/2*32)-1)/(blockDim.x/32/2*32);
 
+  int iters = 0;
   // each block loads ALL columns of A and B for TILE_COLS outputs columns (rows B)
   for(int i = offset; i < end_offset; i+=elements_per_iter)
   {
-    if(my_col_start > rowsB){ continue; } // since B is transposed this is rowsB instead of colsB
+    if(iters >= iters_per_row_tiles)
+    {
+      // start processing next set of tileds with the next 8 rows
+      my_col_start = (warp_id/2)*32 + (warp_idx/4)*4;
+      iters = 0;
+    }
+
+    if(my_col_start > rowsB){ continue; } // since B is transposed this is rowsB instead of cols
+    //if(threadIdx.x == 0)
+      //printf("warp %i offset %i block size %i ele iter %i end %i\n", warp_id, i, elements_per_blockB, elements_per_iter, end_offset);
     reinterpret_cast<int(&)[1]>(local_dataB)[0] = reinterpret_cast<int*>(B)[i/4];
 
+    //# pragma unroll 4
+    //for(int j = 0; j < 4; j++)
+    //  if(local_dataB[j] != 0)
+    //    printf("%f %i %i\n", (float)local_dataB[j], threadIdx.x, i);
     // currently specific for Turning
     int outCol = 0;
 
@@ -2616,8 +2634,8 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
     // row idx: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
     // col idx: [0 1 2 3, 0 1 2 3, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
     // row idx+128: [1 1 1 1, 3 3 3 3...]
-    int base_rowB = i/tiledColsB;
-    base_rowB -= is_odd ? 4 : 0;
+    // base_rowB is counted only in increments of 8 (a sub-tile)
+    int base_rowB = (i/tiledColsB)/8*8;
     // each thread loads 4 elements which comes from the same row
     // row idx: [0 2 4 6, 0 2 4 6, ...]
     // tid: [0 1 2 3, 4 5 6 7 ...]
@@ -2630,7 +2648,7 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
       int offset_rowidx = colptr[my_col_start+j];
       int num_loads_A = colptr[my_col_start+1+j] - offset_rowidx;
       if(local_dataB[j] != 0)
-        printf("%f warpidx %i col %i j %i rowsb %i if %i loads %i\n", (float)local_dataB[j], warp_idx, my_col_start, j, rowsB, (int)(my_col_start < rowsB), num_loads_A);
+        printf("%f warpidx %i col %i j %i rowsb %i if %i loads %i is_odd %i trow %i baserow %i \n", (float)local_dataB[j], warp_idx, my_col_start, j, rowsB, (int)(my_col_start < rowsB), num_loads_A, is_odd, thread_row, base_rowB);
       if(my_col_start < rowsB)
       {
 
@@ -2661,7 +2679,7 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
             if(calc != 0.0f)
             {
               //printf("%f (%i %i+%i)=%i (%i, %i)\n", calc, offset_rows, offset_columns, warp_idx, idx, rowA, outCol);
-              printf("A[%i, %i](%f) * B[%i, %i](%f) = C[%i, %i](%f) [%i+%i+%i]\n", rowA, my_col_start+j, value, outCol, my_col_start+j, (float)local_dataB[j], rowA, outCol, (float)calc, offset_rows, offset_columns, warp_idx);
+              printf("A[%i, %i](%f) * B[%i, %i](%f) = C[%i, %i](%f) [%i+%i]\n", rowA, my_col_start+j, value, outCol, my_col_start+j, (float)local_dataB[j], rowA, outCol, (float)calc, offset_rows, offset_columns);
             }
             atomicAdd(&smem_output_tile[idx], value*((float)local_dataB[j]));
           }
@@ -2671,6 +2689,7 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
 
     // every two warps for all warps_per_block increase the col index by 32
     my_col_start += ((blockDim.x/32)/2)*32;
+    iters += 1;
   }
 
   // store output tile into output matrix

@@ -1349,8 +1349,8 @@ def spmm_csc_col32(cscA, B, SB, out=None):
     cnnz = ct.c_int32(cscA.nnz)
     crowsA = ct.c_int32(cscA.rows)
     ccolsA = ct.c_int32(cscA.cols)
-    crowsB = ct.c_int32(SB[0][1])
-    ccolsB = ct.c_int32(SB[0][0])
+    crowsB = ct.c_int32(SB[0][0])
+    ccolsB = ct.c_int32(SB[0][1])
 
     lib.cspmm_csc_col32(ptrColPtr, ptrRowidx, ptrValues, ptrB, ptrC, cnnz, crowsA, crowsB, ccolsB)
 

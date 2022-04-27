@@ -1355,19 +1355,20 @@ def test_coo2csc():
 n = 2
 #dim1 = [1*2048]
 #dim2 = [12288]
-dim1 = [4]
-dim2 = [5]
-values = list(product(dim1,dim2))
-names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2", values, ids=names)
-def test_spmm_csc_col32(dim1, dim2):
+dim1 = [9]
+dim2 = [9]
+dim3 = [9]
+values = list(product(dim1,dim2, dim3))
+names = ['dim1_{0}_dim2_{1}_dim3_{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, dim3", values, ids=names)
+def test_spmm_csc_col32(dim1, dim2, dim3):
     threshold = 1.0
-    A = torch.randn(dim1, dim2, device='cuda').half()
-    A = torch.ones(dim1, dim2, device='cuda').half()
+    #A = torch.randn(dim1, dim2, device='cuda').half()
+    #A = torch.ones(dim1, dim2, device='cuda').half()
     A = torch.arange(dim1* dim2, device='cuda').half().reshape(dim1, dim2).contiguous()
     #A.flatten()[0:6] = 0
     #A.flatten()[12:] = 0
-    Bt = torch.randint(-128, 127, size=(4, dim2), device='cuda').to(torch.int8)
+    Bt = torch.randint(-128, 127, size=(dim3, dim2), device='cuda').to(torch.int8)
     #Bt[0] = 1
     #Bt[1] = 2
     formatB = F.get_special_format_str()
@@ -1379,11 +1380,12 @@ def test_spmm_csc_col32(dim1, dim2):
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
     cscA = F.coo2csc(cooA)
     A2 = A*idx
-    C1 = torch.matmul(A2, Bt.half().t())
+    C1 = torch.matmul(A2.float(), Bt.float().t())
     Bt32, SBt = F.transform(Bt, formatB)
     C2_32, SC2 = F.spmm_csc_col32(cscA, Bt32, SBt)
     A3, S3 = F.nvidia_transform(C2_32.float(), 'row', state=SC2)
     print('')
+    print(A2.shape, Bt.t().shape, Bt32.shape, Bt.shape)
     print(A2)
     print(Bt.t())
     print(Bt32)
@@ -1391,4 +1393,6 @@ def test_spmm_csc_col32(dim1, dim2):
     print(C2_32, C2_32.shape)
     print(A3)
 
-    #assert_all_approx_close(C1, C2.float(), rtol=0.01, atol=3.0e-2, count=20)
+
+    torch.testing.assert_allclose(C1.float(), A3.float(), rtol=0.01, atol=3.0e-2)
+    #assert_all_approx_close(A2.float(), A3.float(), rtol=0.01, atol=3.0e-2, count=20)
