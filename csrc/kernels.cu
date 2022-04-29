@@ -2709,21 +2709,23 @@ __global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B,
     // each warp loads two rows = each half-warp 1 row
     // base_rowsA is the offset due to previous blocks
     // each row has 32 columns
-    int output_row = (base_rowsA+(i*2 + (warp_idx/16)))*32;
+    // restart the output row count from 0 after TILE_ROWS
+    int output_row = 32*(base_rowsA+(((i*2)%TILE_ROWS) + (warp_idx/16)));
     // output col is 2 columns per thread for each half-warp and an additional 32 after TILE_ROWS/2 rows
     int output_col = (warp_idx % 16)*2 + (i >= TILE_ROWS/2 ? 32 : 0); // TODO: offset this for blockIdx.x tiles
     // output_col is offset by outputRows=rowsA*32 for each tile
     int tile_offset = rowsA*32*(output_col/32);
+    output_col = output_col % 32;
     // each output row has 32 elements (col32 outputs) 
     int idx = (tile_offset + output_col + output_row);
 
 
     int tiledColsOut = 32*((tiledRowsB+31)/32);
     if(((float)smem_output_tile[2*(32*i+warp_idx)] != 0.0f))
-      printf("%i %i idx (%i %i %i %i) %f if %i\n", i, idx, tile_offset, output_col, output_row, warp_idx, (float)smem_output_tile[2*(32*i+warp_idx)], (int)(idx < rowsA*tiledColsOut));
+      printf("%f %i %i %i idx (%i %i %i %i) if %i\n", (float)smem_output_tile[2*(32*i+warp_idx)], i, (i*2) % TILE_ROWS, idx, tile_offset, output_col, output_row, warp_idx, (int)(idx < rowsA*tiledColsOut));
 
     if((float)smem_output_tile[1+2*(32*i+warp_idx)] != 0.0f)
-      printf("%i %i idx (%i %i %i %i) %f if %i\n", i, idx, tile_offset, output_col, output_row, warp_idx, (float)smem_output_tile[1+2*(32*i+warp_idx)], (int)(idx < rowsA*tiledColsOut));
+      printf("%f %i %i %i idx (%i %i %i %i) if %i\n", (float)smem_output_tile[1+2*(32*i+warp_idx)], i, (i*2) % TILE_ROWS, idx, tile_offset, output_col, output_row, warp_idx, (int)(idx < rowsA*tiledColsOut));
 
 
     //if(((float)smem_output_tile[2*(32*i+warp_idx)] != 0.0f))
