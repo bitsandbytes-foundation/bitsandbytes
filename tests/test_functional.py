@@ -1355,9 +1355,9 @@ def test_coo2csc():
 n = 2
 #dim1 = [1*2048]
 #dim2 = [12288]
-dim1 = [9]
-dim2 = [9]
-dim3 = [9]
+dim1 = [2]
+dim2 = [1]
+dim3 = [33]
 values = list(product(dim1,dim2, dim3))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3", values, ids=names)
@@ -1368,7 +1368,7 @@ def test_spmm_csc_col32(dim1, dim2, dim3):
     A = torch.arange(dim1* dim2, device='cuda').half().reshape(dim1, dim2).contiguous()
     #A.flatten()[0:6] = 0
     #A.flatten()[12:] = 0
-    Bt = torch.randint(-128, 127, size=(dim3, dim2), device='cuda').to(torch.int8)
+    Bt = torch.randint(-4, 4, size=(dim3, dim2), device='cuda').to(torch.int8)
     #Bt[0] = 1
     #Bt[1] = 2
     formatB = F.get_special_format_str()
@@ -1385,12 +1385,12 @@ def test_spmm_csc_col32(dim1, dim2, dim3):
     C2_32, SC2 = F.spmm_csc_col32(cscA, Bt32, SBt)
     A3, S3 = F.nvidia_transform(C2_32.float(), 'row', state=SC2)
     print('')
-    print(A2.shape, Bt.t().shape, Bt32.shape, Bt.shape)
-    print(A2)
-    print(Bt.t())
-    print(Bt32)
+    #print(A2.shape, Bt.t().shape, Bt32.shape, Bt.shape)
+    #print(A2)
+    #print(Bt.t())
+    #print(Bt32)
     print(C1)
-    print(C2_32, C2_32.shape)
+    #print(C2_32, C2_32.shape)
     print(A3)
 
 
