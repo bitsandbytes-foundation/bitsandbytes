@@ -1270,17 +1270,22 @@ n = 2
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 dim1 = [1*2048]
 dim2 = [12288]
-#dim1 = [512]
-#dim2 = [512]
-values = list(product(dim1,dim2))
-names = ['dim1_{0}_dim2_{1}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2", values, ids=names)
-def test_spmm_coo_very_sparse(dim1, dim2):
+#dim1 = [2]
+#dim2 = [2]
+dtype = [torch.float16, torch.int8]
+values = list(product(dim1,dim2, dtype))
+names = ['dim1_{0}_dim2_{1}_dtype_{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
+def test_spmm_coo_very_sparse(dim1, dim2, dtype):
     threshold = 3.3
     #threshold = 2.8
+    #threshold = 0.0
     A = torch.randn(dim1, dim2, device='cuda').half()
-    B = torch.randn(dim2, dim2*4, device='cuda').half()
-    Bt = torch.randn(dim2*4, dim2, device='cuda').half()
+
+    if dtype == torch.float16:
+        B = torch.randn(dim2, dim2*4, device='cuda').half()
+    else:
+        B = torch.randint(-127, 127, size=(dim2, dim2*4), device='cuda').to(torch.int8)
 
 
     idx = torch.abs(A) >= threshold
@@ -1289,19 +1294,31 @@ def test_spmm_coo_very_sparse(dim1, dim2):
     values = A[idx]
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
     A2 = A*idx
-    out1 = torch.matmul(A2, Bt.t())
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(k):
+    out2 = F.spmm_coo_very_sparse(cooA, B)
+    out1 = torch.matmul(A2, B.half())
+    #print('')
+    #print(B)
+    #print(out1)
+    #print(out2)
+    p = 200/(2048*12288*4)
+    n = out1.numel()
+    count = int(p*n)
+    assert_all_approx_close(out1, out2.half(), rtol=0.01, atol=3.0e-2, count=count)
 
-        #out3 = F.spmm_coo(cooA, Bt.t())
-        #out2 = F.spmm_coo(cooA, B)
-        #out2 = F.spmm_coo_very_sparse(cooA, B)
-        torch.matmul(A, B)
+    #torch.testing.assert_allclose(out1, out2.half(), rtol=0.05, atol=0.001)
 
-        #assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=20)
-    torch.cuda.synchronize()
-    print(time.time() - t0)
+    #Bt = torch.randn(dim2*4, dim2, device='cuda').half()
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(k):
+
+    #   #out3 = F.spmm_coo(cooA, Bt.t())
+    #   #out2 = F.spmm_coo(cooA, B)
+    #   out2 = F.spmm_coo_very_sparse(cooA, B)
+    #   #out1 = torch.matmul(A2, B)
+
+    #torch.cuda.synchronize()
+    #print(time.time() - t0)
 
 
 def test_layout():
@@ -1357,24 +1374,28 @@ n = 2
 #dim2 = [12288]
 dim1 = [1]
 dim2 = [33]
-dim3 = [1]
+dim3 = [9]
 values = list(product(dim1,dim2, dim3))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3", values, ids=names)
 def test_spmm_csc_col32(dim1, dim2, dim3):
     threshold = 0.0
-    #A = torch.randn(dim1, dim2, device='cuda').half()
+    A = torch.randn(dim1, dim2, device='cuda').half()
     #A = torch.ones(dim1, dim2, device='cuda').half()
-    A = torch.arange(dim1* dim2, device='cuda').half().reshape(dim1, dim2).contiguous()
+    #A = torch.arange(dim1* dim2, device='cuda').half().reshape(dim1, dim2).contiguous()
     #A.flatten()[0:6] = 0
     #A.flatten()[12:] = 0
-    A.flatten()[:-1] = 0
-    A.flatten()[-1] = 1
+    A.flatten()[:-2] = 0
+    A.flatten()[-1:] = 0
+    A.flatten()[-2] = 1
     irange = 32
     Bt = torch.randint(-irange, irange, size=(dim3, dim2), device='cuda').to(torch.int8)
+    Bt[:-1] = 0
+    Bt[:, :-2] = 0
     #Bt[0] = 1
     #Bt[1] = 2
     formatB = F.get_special_format_str()
+    print(Bt[:, 31:], Bt.shape)
 
     idx = torch.abs(A) >= threshold
     nnz = (idx == 1).sum().item()
@@ -1383,19 +1404,22 @@ def test_spmm_csc_col32(dim1, dim2, dim3):
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
     cscA = F.coo2csc(cooA)
     A2 = A*idx
-    C1 = torch.matmul(A2.float(), Bt.float().t())
+    C1 = torch.matmul(A2.half(), Bt.half().t())
     Bt32, SBt = F.transform(Bt, formatB)
     C2_32, SC2 = F.spmm_csc_col32(cscA, Bt32, SBt)
     A3, S3 = F.nvidia_transform(C2_32.float(), 'row', state=SC2)
     print('')
     #print(A2.shape, Bt.t().shape, Bt32.shape, Bt.shape)
-    print(A2)
-    print(Bt.t())
-    #print(Bt32)
+    #print(A2)
+    #print(Bt.t())
+    print(Bt32, Bt32.shape)
+    print(Bt32.flatten()[256:384])
     print(C1)
     #print(C2_32, C2_32.shape)
     print(A3)
+    #print(C2_32.shape)
 
 
     torch.testing.assert_allclose(C1.float(), A3.float(), rtol=0.01, atol=3.0e-2)
+    #torch.testing.assert_allclose(C1.float(), A3.float(), rtol=0.00, atol=0)
     #assert_all_approx_close(A2.float(), A3.float(), rtol=0.01, atol=3.0e-2, count=20)
