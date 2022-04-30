@@ -900,7 +900,7 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
     else: return None
 
 
-def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
+def igemmlt(A, B, SA, SB, out=None, Sout=None, row_scale=None, dtype=torch.int32):
     shapeA = SA[0]
     shapeB = SB[0]
     dimsA = len(shapeA)
@@ -920,6 +920,7 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     elif dimsA == 3 and out is None:
         out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, 'col32', 'row')
 
+    if row_scale is not None: assert row_scale.numel() == out.shape[0]
     assert dimsB != 3, 'len(B.shape)==3 not supported'
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
@@ -934,6 +935,7 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     ptrA = get_ptr(A)
     ptrB = get_ptr(B)
     ptrC = get_ptr(out)
+    ptrRowScale = get_ptr(row_scale)
 
     k = shapeA[-1]
     lda = ct.c_int32(m*32)
@@ -953,14 +955,18 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
 
     if formatB == 'col_turing':
         if dtype == torch.int32:
-            lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+            lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+        elif row_scale is None:
+            lib.cigemmlt_turing_8(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
         else:
-            lib.cigemmlt_turing_8(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+            lib.cigemmlt_turing_8_rowscale(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
     elif formatB == 'col_ampere':
         if dtype == torch.int32:
-            lib.cigemmlt_ampere_32(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+            lib.cigemmlt_ampere_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+        elif row_scale is None:
+            lib.cigemmlt_ampere_8(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
         else:
-            lib.cigemmlt_ampere_8(ptr, m, n, k, ptrA, ptrB, ptrC, lda, ldb, ldc)
+            lib.cigemmlt_ampere_8_rowscale(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
 
 
     return out, Sout

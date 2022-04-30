@@ -338,11 +338,12 @@ template void transform<int8_t, ROW, COL_AMPERE, false, 8>(cublasLtHandle_t ltHa
 template void transform<int8_t, COL32, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int32_t, COL32, ROW, false, 32>(cublasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
 
-template <int FORMATB, int DTYPE_OUT> void igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc) 
+template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> void igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc) 
 {
     cublasLtMatmulDesc_t matmulDesc = NULL;
     cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
     cublasOperation_t opT = CUBLAS_OP_T;
+    cublasLtPointerMode_t alphaVec = CUBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_ZERO;
     cublasLtOrder_t col32 = CUBLASLT_ORDER_COL32;
     cublasLtOrder_t col_turing = CUBLASLT_ORDER_COL4_4R2_8C;
     cublasLtOrder_t col_ampere = CUBLASLT_ORDER_COL32_2R_4R4;
@@ -371,8 +372,17 @@ template <int FORMATB, int DTYPE_OUT> void igemmlt(cublasLtHandle_t ltHandle, in
       checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
       checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_8I, m, n, ldc));
       checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      float alpha = 1.0f, beta = 0.0f;
-      checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, 0));
+      if(!SCALE_ROWS)
+      {
+        float alpha = 1.0f, beta = 0.0f;
+        checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, 0));
+      }
+      else
+      {
+        checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_POINTER_MODE, &alphaVec, sizeof(alphaVec)));
+        float beta = 0.0f;
+        checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc, row_scale, A, Adesc, B, Bdesc, NULL, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, 0));
+      }
     }
 
 
@@ -608,8 +618,7 @@ void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_val
 
 template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
 {
-  //kspmm_coo_very_sparse_naive<T, 32, BITS><<<nnz_rows, 64>>>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, nnz, rowsA, rowsB, colsB);
-  kspmm_coo_very_sparse_naive<T, 16, BITS><<<nnz_rows, 128>>>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, nnz, rowsA, rowsB, colsB);
+  kspmm_coo_very_sparse_naive<T, 32, BITS><<<nnz_rows, 128>>>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, nnz, rowsA, rowsB, colsB);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -620,10 +629,12 @@ template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, 
 template void spmm_coo_very_sparse_naive<half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
-template void igemmlt<COL_TURING, 32>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc);
-template void igemmlt<COL_TURING, 8>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc);
-template void igemmlt<COL_AMPERE, 32>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc);
-template void igemmlt<COL_AMPERE, 8>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, int lda, int ldb, int ldc);
+template void igemmlt<COL_TURING, 32, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template void igemmlt<COL_TURING, 8, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template void igemmlt<COL_TURING, 8, 1>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template void igemmlt<COL_AMPERE, 32, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template void igemmlt<COL_AMPERE, 8, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template void igemmlt<COL_AMPERE, 8, 1>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
 
 template void transformRowToFormat<COL32, 0>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL32, 1>(char * A, char *out, int rows, int cols);

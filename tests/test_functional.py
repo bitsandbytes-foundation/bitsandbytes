@@ -594,7 +594,6 @@ values = list(product(dim1,dim2,dim3,dim4,dims, ldb))
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
 def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
-    print(k)
     for i in range(k):
         if dims == 2:
             A = torch.randint(-128, 127, size=(dim1, dim3), device='cuda').to(torch.int8)
@@ -1048,6 +1047,36 @@ def test_integrated_igemmlt(dim1, dim4, inner):
         assert err2 <= err1*1.01
 
 
+values = list(zip(dim1, dim4, inner))
+names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
+def test_igemmlt_row_scale(dim1, dim4, inner):
+    for i in range(k):
+        A = torch.randn(dim1, inner, device='cuda').half()
+        B = torch.randn(dim4, inner, device='cuda').half()
+
+        out1 = torch.matmul(A.half(), B.t().half())
+
+        C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
+        C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
+        A1, maxA = F.vectorwise_quant(A, dim=1)
+        B1, maxB = F.vectorwise_quant(B, dim=1)
+
+        torch.testing.assert_allclose(maxA.flatten(), stats1a)
+        torch.testing.assert_allclose(maxB.flatten(), stats2a)
+        torch.testing.assert_allclose(C1a, A1, rtol=0, atol=1)
+        torch.testing.assert_allclose(C2a, B1, rtol=0, atol=1)
+
+        A2, SA = F.nvidia_transform(C1a, 'col32')
+        B2, SB = F.nvidia_transform(C2a, 'col_turing')
+        outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=maxA/(127*127))
+        C3, S = F.nvidia_transform(outC32, 'row', state=SC)
+
+        C4 = torch.matmul(C1a.float(), C2a.float().t())
+
+        assert_all_approx_close(C3.float(), torch.round(C4*maxA/(127*127)), rtol=0, atol=0, count=10)
+
+
 
 
 
@@ -1304,13 +1333,14 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype):
     n = out1.numel()
     count = int(p*n)
     assert_all_approx_close(out1, out2.half(), rtol=0.01, atol=3.0e-2, count=count)
+    #assert_all_approx_close(out1, out2.half(), rtol=0.05, atol=0.01, count=count)
 
     #torch.testing.assert_allclose(out1, out2.half(), rtol=0.05, atol=0.001)
 
     Bt = torch.randn(dim2*4, dim2, device='cuda').half()
     torch.cuda.synchronize()
     t0 = time.time()
-    for i in range(k):
+    for i in range(1000):
 
        #out3 = F.spmm_coo(cooA, Bt.t())
        #out2 = F.spmm_coo(cooA, B)
