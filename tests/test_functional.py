@@ -1010,6 +1010,10 @@ dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
 dim4 = torch.randint(1,4*1024, size=(n,)).tolist()
 inner = torch.randint(1,4*1024, size=(n,)).tolist()
 
+dim1 = [4]
+dim4 = [4]
+inner = [4]
+
 values = list(zip(dim1, dim4, inner))
 names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
@@ -1044,39 +1048,133 @@ def test_integrated_igemmlt(dim1, dim4, inner):
 
         err1 = torch.abs(out1-out2).mean().item()
         err2 = torch.abs(out1-out3).mean().item()
+        print(out1)
+        print(out2)
         assert err2 <= err1*1.01
 
+
+n = 6
+dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
+dim4 = torch.randint(1,4*1024, size=(n,)).tolist()
+inner = torch.randint(1,4*1024, size=(n,)).tolist()
 
 values = list(zip(dim1, dim4, inner))
 names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
 def test_igemmlt_row_scale(dim1, dim4, inner):
+    err1, err2, err3 = [], [], []
+    relerr1, relerr2 = [], []
+    scale = 1
     for i in range(k):
         A = torch.randn(dim1, inner, device='cuda').half()
         B = torch.randn(dim4, inner, device='cuda').half()
+        torch.nn.init.xavier_uniform_(B)
+        C1 = torch.matmul(A, B.t())
 
         out1 = torch.matmul(A.half(), B.t().half())
 
+
         C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
-        C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
-        A1, maxA = F.vectorwise_quant(A, dim=1)
-        B1, maxB = F.vectorwise_quant(B, dim=1)
-
-        torch.testing.assert_allclose(maxA.flatten(), stats1a)
-        torch.testing.assert_allclose(maxB.flatten(), stats2a)
-        torch.testing.assert_allclose(C1a, A1, rtol=0, atol=1)
-        torch.testing.assert_allclose(C2a, B1, rtol=0, atol=1)
-
+        CB, absmaxB = F.vectorwise_quant(B, quant_type='linear')
         A2, SA = F.nvidia_transform(C1a, 'col32')
-        B2, SB = F.nvidia_transform(C2a, 'col_turing')
-        outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=maxA/(127*127))
+        B2, SB = F.nvidia_transform(CB, 'col_turing')
+        A1, maxA = F.vectorwise_quant(A, dim=1)
+
+        c = 10.0*inner*scale
+        row_scale = maxA/c
+        outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=row_scale)
         C3, S = F.nvidia_transform(outC32, 'row', state=SC)
+        maxval = torch.abs(C3).max()
+        #if maxval == 127:
+        #    scale = 1.5
+        #else:
+        #    scale = maxval/120
+        #print(maxval, scale)
+        out3 = C3*absmaxB*c/(127*127)
 
-        C4 = torch.matmul(C1a.float(), C2a.float().t())
-
-        assert_all_approx_close(C3.float(), torch.round(C4*maxA/(127*127)), rtol=0, atol=0, count=10)
+        C4 = torch.matmul(C1a.float(), CB.float().t())
 
 
+        C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
+        B2, SB = F.nvidia_transform(C2a, 'col_turing')
+        outC32, SC = F.igemmlt(A2, B2, SA, SB)
+        out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
+
+        CA, SA = F.vectorwise_quant(A, dim=1, quant_type='vector')
+        CB, SB = F.vectorwise_quant(B, dim=1, quant_type='linear')
+
+        C = torch.matmul(CA.float(), CB.t().float())
+        out4 = C*SA*SB/(127*127)
+        #out4 = torch.clip(torch.round(C*SA/c), -127, 127)*c*SB/(127*127)
+
+        #print('='*80)
+        #print(out1)
+        #print(out2)
+        #print(out3)
+
+        #print(out1)
+        #print(out2)
+        #print(out3)
+        err1.append(torch.abs(out1-out2).mean().item())
+        err2.append(torch.abs(out1-out3).mean().item())
+        err3.append(torch.abs(out1-out4).mean().item())
+
+        #assert_all_approx_close(C3.float(), torch.round(C4*row_scale), rtol=0, atol=0, count=10)
+    print('')
+    print(sum(err1)/len(err1))
+    print(sum(err2)/len(err2))
+    print(sum(err3)/len(err3))
+
+
+dim1 = [1024, 2048]
+inner = [12288*4, 4096*4]
+dim4 = [12288, 4096]
+
+values = list(zip(dim1, dim4, inner))
+names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
+def test_row_scale_bench(dim1, dim4, inner):
+    err1, err2, err3 = [], [], []
+    relerr1, relerr2 = [], []
+    scale = 1
+    A = torch.randn(dim1, inner, device='cuda').half()
+    B = torch.randn(dim4, inner, device='cuda').half()
+    torch.nn.init.xavier_uniform_(B)
+    # warmpup
+    for i in range(k):
+        C1 = torch.matmul(A, B.t())
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        C1 = torch.matmul(A, B.t())
+    torch.cuda.synchronize()
+    print('16', time.time()-t0)
+
+    C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
+    CB, absmaxB = F.vectorwise_quant(B, quant_type='linear')
+    A2, SA = F.nvidia_transform(C1a, 'col32')
+    B2, SB = F.nvidia_transform(CB, 'col_turing')
+    A1, maxA = F.vectorwise_quant(A, dim=1)
+
+    c = 10.0*inner*scale
+    row_scale = maxA/c
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=row_scale)
+    torch.cuda.synchronize()
+    print('row-wise', time.time()-t0)
+
+
+    C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
+    B2, SB = F.nvidia_transform(C2a, 'col_turing')
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
+        outC32, SC = F.igemmlt(A2, B2, SA, SB)
+    torch.cuda.synchronize()
+    print('vector-wise', time.time()-t0)
 
 
 
