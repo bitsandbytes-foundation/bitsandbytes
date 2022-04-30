@@ -236,8 +236,6 @@ void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_val
 
 template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
-void spmm_csc_col32(int *colptr, int *rowidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
-
 #endif
 
 

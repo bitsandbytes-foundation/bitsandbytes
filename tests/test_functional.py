@@ -1307,18 +1307,18 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype):
 
     #torch.testing.assert_allclose(out1, out2.half(), rtol=0.05, atol=0.001)
 
-    #Bt = torch.randn(dim2*4, dim2, device='cuda').half()
-    #torch.cuda.synchronize()
-    #t0 = time.time()
-    #for i in range(k):
+    Bt = torch.randn(dim2*4, dim2, device='cuda').half()
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(k):
 
-    #   #out3 = F.spmm_coo(cooA, Bt.t())
-    #   #out2 = F.spmm_coo(cooA, B)
-    #   out2 = F.spmm_coo_very_sparse(cooA, B)
-    #   #out1 = torch.matmul(A2, B)
+       #out3 = F.spmm_coo(cooA, Bt.t())
+       #out2 = F.spmm_coo(cooA, B)
+       out2 = F.spmm_coo_very_sparse(cooA, B)
+       #out1 = torch.matmul(A2, B)
 
-    #torch.cuda.synchronize()
-    #print(time.time() - t0)
+    torch.cuda.synchronize()
+    print(time.time() - t0)
 
 
 def test_layout():

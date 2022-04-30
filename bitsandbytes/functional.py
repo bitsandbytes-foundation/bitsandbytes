@@ -1334,29 +1334,3 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     #else: assertion error
 
     return out
-
-
-def spmm_csc_col32(cscA, B, SB, out=None):
-    #if out is None: out = torch.zeros((cscA.rows, SB[0][0]), device=B.device, dtype=torch.float16)
-    if out is None: out, Sout = get_transform_buffer((cscA.rows, SB[0][0]), torch.float16, B.device, 'col32')
-    nnz = cscA.nnz
-    assert cscA.colptr.numel() == cscA.cols+1
-    assert cscA.rowidx.numel() == nnz
-    assert cscA.values.numel() == nnz
-    assert cscA.cols == SB[0][1], 'B is assumed to be transposed!'
-    assert B.dtype == torch.int8
-
-    ptrColPtr = get_ptr(cscA.colptr)
-    ptrRowidx = get_ptr(cscA.rowidx)
-    ptrValues = get_ptr(cscA.values)
-    ptrB = get_ptr(B)
-    ptrC = get_ptr(out)
-    cnnz = ct.c_int32(cscA.nnz)
-    crowsA = ct.c_int32(cscA.rows)
-    ccolsA = ct.c_int32(cscA.cols)
-    crowsB = ct.c_int32(SB[0][0])
-    ccolsB = ct.c_int32(SB[0][1])
-
-    lib.cspmm_csc_col32(ptrColPtr, ptrRowidx, ptrValues, ptrB, ptrC, cnnz, crowsA, crowsB, ccolsB)
-
-    return out, Sout

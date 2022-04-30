@@ -2385,7 +2385,8 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 }
 
 #define MAX_SPARSE_COUNT 32
-template <typename T, int SPMM_ITEMS, int BITS> __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
+template <typename T, int SPMM_ITEMS, int BITS> 
+__global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
 {
 
   // 0. load balancing: We process rows with most columns first (count_vec)and we process one row per block
@@ -2406,7 +2407,7 @@ template <typename T, int SPMM_ITEMS, int BITS> __global__ void kspmm_coo_very_s
   const int warp_id = threadIdx.x / 32;
   const int warp_idx = threadIdx.x % 32;
   const int warp_offset = (warp_id*32)*SPMM_ITEMS;
-  const int num_items = BITS == 8 ? 4 : 2;
+  const int num_items = BITS == 8 ? 16 : 8;
 
   int local_row_idx = rowidx[offset];
 
@@ -2414,7 +2415,7 @@ template <typename T, int SPMM_ITEMS, int BITS> __global__ void kspmm_coo_very_s
   int local_colidxA[MAX_SPARSE_COUNT];
   float local_valC[SPMM_ITEMS];
   // 128 byte loads per warp == 4 bytes per thread
-  T local_valsB[BITS == 8 ? 4 : 2];
+  T local_valsB[num_items];
 
   // 2. Load A into registers
   for(int j = 0; j < MAX_SPARSE_COUNT; j++)
@@ -2439,28 +2440,24 @@ template <typename T, int SPMM_ITEMS, int BITS> __global__ void kspmm_coo_very_s
         // 3. each warp loads all required rows of B but each warp is offset by k
         int row_offset = colsB*local_colidxA[i];
 
-        //for(int j = 0; j < SPMM_ITEMS; j+=num_items)
-        //{
-        //  reinterpret_cast<float(&)[num_items]>(local_valsB)[0] = reinterpret_cast<float*>(B)[(row_offset+ idx_col_B + (j*32))/num_items+warp_idx];
-        //  #pragma unroll num_items
-        //  for(int k = 0; k < num_items; k++)
-        //  {
-        //    T valB = B[row_offset+ idx_col_B + (32*j) + (warp_idx*num_items) + k];
-        //    printf("%f %f\n", (float)valB, float(local_valsB[k]));
-        //  }
-
-        //  #pragma unroll num_items
-        //  for(int k = 0; k < num_items; k++)
-        //    local_valC[j+k] += (float)local_valsB[k]*(float)local_valA[i];
-        //}
-
         #pragma unroll SPMM_ITEMS
         for(int j = 0; j < SPMM_ITEMS; j++)
         {
           // 4. Multiply the tile -> accumulate outputs in shared memory until 128 bytes it reached
           T valB = B[row_offset+ idx_col_B + (32*j) + warp_idx];
+          //local_valC[j] += (half)valB*local_valA[i];
           local_valC[j] += (float)valB*(float)local_valA[i];
         }
+
+        //#pragma unroll SPMM_ITEMS
+        //for(int j = 0; j < SPMM_ITEMS; j+=num_items)
+        //{
+        //  // 4. Multiply the tile -> accumulate outputs in shared memory until 128 bytes it reached
+        //  reinterpret_cast<float4(&)[num_items]>(local_valsB)[0] = reinterpret_cast<float4*>(B)[(row_offset+ idx_col_B + warp_idx*SPMM_ITEMS + j)/num_items];
+        //  #pragma unroll num_items
+        //  for(int k = 0; k < num_items; k++)
+        //    local_valC[j+k] += (half)local_valsB[k]*local_valA[i];
+        //}
     }
 
     int idx_row_C = (colsB*local_row_idx);
@@ -2473,310 +2470,41 @@ template <typename T, int SPMM_ITEMS, int BITS> __global__ void kspmm_coo_very_s
       int idx_val = idx_col_C + idx_row_C;
 
       if(idx_col_C < colsB)
-        out[idx_val] = __float2half(local_valC[j]);
+        out[idx_val] = local_valC[j];
     }
+
+    //#pragma unroll SPMM_ITEMS
+    //for(int j = 0; j < SPMM_ITEMS; j+=num_items)
+    //{
+    //  //int idx_col_C =  idx_col_B + (32*j) + warp_idx;
+    //  int idx_col_C =  idx_col_B + warp_idx*SPMM_ITEMS + j;
+    //  int idx_val = idx_col_C + idx_row_C;
+
+    //  if(idx_col_C +num_items < colsB)
+    //    reinterpret_cast<float4*>(out)[idx_val/num_items] = reinterpret_cast<float4(&)[num_items]>(local_valC)[j/num_items];
+    //  else
+    //  {
+    //    #pragma unroll num_items
+    //    for(int k = 0; k < num_items; k++)
+    //     if(idx_col_C + k < colsB)
+    //       out[idx_val+k] = local_valC[j+k];
+    //  }
+    //}
 
     idx_col_B += blockDim.x*SPMM_ITEMS;
   } 
-
-
 }
-
-template <int TILE_ROWS, int TILE_COLS, int WARPS>
-__launch_bounds__(512, 2)
-__global__ void kspmm_csc_col32(int *colptr, int *rowidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB)
-{
-  // assumptions:
-  // 1. Each block is responsible for TILE_ROW*TILE_COLS output elements of C/out
-  // 2. Each block loads all values of A in TILE_ROWS and loads subtiles of B across TILE_COLS rows of B
-  // 3. we load TILE_ROWS per block, and store TILE_COLS per block
-  // 4. We separate tile_cols into loading 8 values at the time (rows)
-  // 5. Each warp loads half of a subtile
-
-  //=============== B FORMAT ===============
-  // AMPERE FORMAT:
-  // 32*32 tiles with 8*32 subtiles. The rows are interleaved in pairs of two rows with offset of 8 between pairs of two rows:
-	// row idx (each number stands for 32 values): [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
-  // the tiles are column-major ordered, so after 1024*1024 values we process: A[32:64, 0:32]
-
-  // each thread loads 4 consecutive values -> for ampere each thread holds 4 column values
-  // this changes only if the next row is loaded (after tiledColsB elements), after which new A need to be loaded
-
-  // TURING FORMAT:
-  // 8*32 tiles with 4*4 subtiles
-  // the 8*32 subtile has first all 4*4 subtiles of even rows (max 4*4*4 = 64 elements)
-  // the subsequent 4*4 subtiles are for all odd rows if some rows columns are empty the values are zero
-  // the tile repeats again after the 8*32 tile in a major column order, meaning: (next 8 rows are A[8:16, 0:32])
-  // the next tile is the next 8 rows for the same 32 columns. Once all rows are finished, the column
-  // index increases by 32
-  //
-  // row idx: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
-
-  // each thread loads 4 consecutive values -> for turing each thread holds 4 column values for either an even (first warp) or odd row (second warp)
-  // this changes only if the next row is loaded (after tiledColsB elements), after which new A need to be loaded
-
-
-  //=============== B FORMAT ===============
-
-  // =========== A statistics and loading ======================
-
-  // if we assume GPT-3, that is 12288 columns and 4 outliers per column, this means for a seq length of 2k on average we have:
-  // 4/12288 probability of a value per column
-  // we have that 2048 times, so 2048*4/12288 = 0.666 values per thread
-  // if we have TILE_ROWS=512, that is 0.16666 values per thread
-  // we have 4 columns per thread, so in total back to 0.6666 value per thread on average
-
-  // if we load 32 columns of A at once, that is on average (TILE_ROWS*32) elements with each element having probability 4/12288
-  // so (TILE_ROWS*32)*4/12288 = 5.33 elements tile
-  // this means its important to check if a tile has some non-zero value at all
-  // This means best is to store elements A in registers and have them spill if not used
-
-  // how to find these values? I guess one can do texture loads of A for the first TILE_ROW rows
-  // and then just iterate over it with all threads which is about 512*4 evaluations = 512*4*15 cycles =  31k cycles
-  // better would be to match and scatter: 
-  //  1. load data
-  //  2. match values in the k:k+32 column range
-  //  3. scatter into an array for each thread, repeat up to 32 times
-  //
-  // What would 3 look like? One reuses items across multiple warps (every 2nd warp processes the same columns)
-  // so multiple stores or bank conflicts is the same. So one can use a shared memory of 32 and theno
-  // better yet might be to restructure A
-  // if rows and beginnings of cols are known, then one can index directly
-  // if I have colptr representation; a thread could just load the data responsible for columns
-  // that is actually super easy and much better. I can just use texture memory for this
-
-  // now we have for each load 512x4 possible output values per warp, but only 0.6666 values per thread on average
-  // since the values of A stay the same and only B changes, and we have on average 0.6666 values per thread, we have
-  // on average one output row; as such, we can keep a dynamic array of k values with kx4 outputs and a k array for rowidx
-  // then these values are writting via atomic writes to shared memory (full tile of TILE_ROWS*64 half values)
-
-  // =========== A statistics and loading ======================
-
-  const int warp_id = (threadIdx.x / 32);
-  const int warp_idx = threadIdx.x % 32;
-  
-  // the index of the TILE_ROWS*TILE_COLS tile
-  // the best loads would be if we process TILE_ROWS first then then TILE_COLS
-  // this helps to maximize L2 cache loads for B
-  // However, currently, we offset the loads of B via block. So every colsB we increase the TILE_ROWS by TILE_ROWS
-  // since a block process TILE_COLS we have colsB/TILE_COLS until we increase TILE_ROWS
-  const int base_rowsA = (colsB/TILE_COLS)*TILE_ROWS;
-  char local_dataB[4];
-
-  //int my_cols_data[4*4];
-	// AMPERE: row idx (each number stands for 32 values): [0 1 8 9 16 17 24 25] [2 3 10 11 18 19 26 27]...
-  // TURING: row idx: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...] (repeats 8 times)
-
-  // TURNING:
-  // thread 0-3 load idx 0-3
-  // thread 4-7 load idx 4-7
-  // -> col = warp_idx
-  // AMPERE:
-  // thread 0 loads idx 0-3
-  // thread 1 loads idx 4-7
-  // -> col = warp_idx*4
-
-
-  // each block processes all columns in B for up to TILE_COLS output cols
-  const int elements_per_blockB = tiledColsB*TILE_COLS;
-  // max: elements_per_iter = warps * 128 elements
-  // min: the current iteration only processes only 8 rows at a time: 8*tiledColsB
-  const int elements_per_iter = min((blockDim.x/32)*128, 8*tiledColsB);
-
-  // each block processes TILE_COLS rows and tiledColsB columns
-  int block_offset = blockIdx.x*TILE_COLS*tiledColsB;
-  // because B is assumed to be transposed, we iterate across the first 8 rows of B; a sub-tile is of size 8x32=256 elements
-  // increment by 8 rows once all columns have been read
-  // a subtile has two warps; each tile has offset tiledRowsB*32 -> (warp_id/2)
-  int col_tileB_offset = (warp_id/2)*8*32;
-  // since we have 8*32 subtiles, the second warp will have an offset of 128 elements
-  int subtile_offset = (warp_id % 2)*(4*32);
-  // load 4 elements per thread
-  int offset = block_offset + col_tileB_offset + subtile_offset + (warp_idx*4);
-  int end_offset = min(offset + elements_per_blockB, tiledRowsB*tiledColsB);
-
-  __shared__ half smem_output_tile[TILE_ROWS*TILE_COLS];
-
-  for(int i = threadIdx.x; i < TILE_ROWS*TILE_COLS; i+=blockDim.x)
-      smem_output_tile[i] = 0.0;
-
-  __syncthreads();
-
-  // every two warps we process a new subtile of 32 columns which match to the columns in A (transposed B)
-  // every thread loads 4 values
-  // in TURING format, all of these will have the same column
-  // turing has even then odd rows in 4x32 sub-tiles
-  // row idx: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
-  // col idx: [0 1 2 3, 0 1 2 3, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
-  // row idx+128: [1 1 1 1, 3 3 3 3...]
-
-  int is_odd = warp_id % 2;
-  int thread_row = (warp_idx % 4)*2;
-  thread_row += is_odd ? 1 : 0;
-  int my_col_start = (warp_id/2)*32 + (warp_idx/4)*4;
-  //my_col_start -= warp_id % 2 == 1 ? 32 : 0;
-  // how many iters to process all tiles
-  // divide total number of columns by every two warps 32 columns
-  int iters_per_row_tiles = (tiledColsB+(blockDim.x/32/2*32)-1)/(blockDim.x/32/2*32);
-
-  int iters = 0;
-  // each block loads ALL columns of A and B for TILE_COLS outputs columns (rows B)
-  for(int i = offset; i < end_offset; i+=elements_per_iter)
-  {
-
-    if(iters >= iters_per_row_tiles)
-    {
-      // start processing next set of tileds with the next 8 rows
-      my_col_start = (warp_id/2)*32 + (warp_idx/4)*4;
-      iters = 0;
-    }
-
-    if(warp_idx == 0)
-      printf("%i %i %i %i\n", warp_id, iters, iters_per_row_tiles, my_col_start);
-
-    //if(my_col_start <= 32)
-    //  printf("%i %i %i %i %i (%i %i %i %i) %i if %i\n", i, my_col_start, colsB, tiledColsB, warp_id, block_offset, col_tileB_offset, subtile_offset, warp_idx*4, warp_idx, ((int)my_col_start > colsB));
-    if(my_col_start > tiledColsB){ continue; } // since B is transposed this is rowsB instead of cols
-
-    //if(threadIdx.x == 0)
-      //printf("warp %i offset %i block size %i ele iter %i end %i\n", warp_id, i, elements_per_blockB, elements_per_iter, end_offset);
-    reinterpret_cast<int(&)[1]>(local_dataB)[0] = reinterpret_cast<int*>(B)[i/4];
-
-    for(int j = 0; j < 4; j++)
-      if(local_dataB[j] != 0)
-        printf("%f %i %i (%i %i) %i %i %i\n", (float)local_dataB[j], threadIdx.x, i, warp_id, warp_idx, my_col_start, thread_row, iters);
-    // currently specific for Turning
-    int outCol = 0;
-
-
-    // outCol = rowB
-    // turing has even then odd rows in 4x32 sub-tiles
-    // row idx: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
-    // col idx: [0 1 2 3, 0 1 2 3, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
-    // row idx+128: [1 1 1 1, 3 3 3 3...]
-    // base_rowB is counted only in increments of 8 (a sub-tile)
-    int base_rowB = (i/tiledColsB)/8*8;
-    // each thread loads 4 elements which comes from the same row
-    // row idx: [0 2 4 6, 0 2 4 6, ...]
-    // tid: [0 1 2 3, 4 5 6 7 ...]
-    outCol = base_rowB + thread_row;
-
-
-    # pragma unroll 4
-    for(int j = 0; j < 4; j++)
-    {
-      if(my_col_start+j >= colsB){ continue; }
-      int offset_rowidx = colptr[my_col_start+j];
-      int num_loads_A = colptr[my_col_start+1+j] - offset_rowidx;
-      //if(local_dataB[j] != 0)
-        //printf("%f warpidx %i col %i j %i rowsb %i if %i loads %i is_odd %i trow %i baserow %i %f\n", (float)local_dataB[j], warp_idx, my_col_start, j, rowsB, (int)(my_col_start < rowsB), num_loads_A, is_odd, thread_row, base_rowB);
-
-      //printf("num_loads %i %i %i\n", num_loads_A, threadIdx.x, my_col_start);
-      for(int k = 0; k < num_loads_A; k++)
-      {
-        int rowA = rowidx[offset_rowidx+k];
-        //if(local_dataB[j] != 0)
-          //printf("%f %f rowa %i if %i col %i tid %i\n", 0.0f, (float)local_dataB[j], rowA, (int)(rowA >= base_rowsA) && (rowA < (base_rowsA+TILE_ROWS)), my_col_start, threadIdx.x);
-        if((rowA >= base_rowsA) && (rowA < (base_rowsA+TILE_ROWS)))
-        {
-          //my_cols_data[(j*16) + k] = values[offset_rowidx+k];
-          float value = __half2float(values[offset_rowidx+k]);
-          //int rowidx_A = rowidx[offset_rowidx+k];
-          //if(((float)local_dataB[my_col_start+j] != 0.0) && (value != 0.0))
-            //printf("[%i %i] %i %i %i %f %f %f\n", rowA, rowB, my_col_start, rowidx_A, threadIdx.x, (float)local_dataB[my_col_start+j], value, (float)local_dataB[my_col_start+j]*value);
-
-          // we store the data as two 2x32 subtiles:
-          // [row0_0, row0_1, ... row0_31, row1_0, row1_1, ... row1_31]
-          // [rowTILE_ROWS_0, ...
-          // [row0_32
-          int offset_columns = (outCol/32)*(TILE_ROWS*TILE_COLS/2) + (outCol % 32);
-          // every row has an offset of 32 elements
-          int offset_rows = (rowA % TILE_ROWS)*32;
-          // this calculates A[rowA, my_col_start+j]*B[rowB, my_col_start+j] = C[rowA, my_col_start+j]
-          float calc = value*((float)local_dataB[j]);
-          int idx = offset_rows+offset_columns;
-          if(calc != 0.0f)
-          {
-            //printf("%f (%i %i+%i)=%i (%i, %i)\n", calc, offset_rows, offset_columns, warp_idx, idx, rowA, outCol);
-            printf("A[%i, %i](%f) * B[%i, %i](%f) = C[%i, %i](%f) [%i+%i]\n", rowA, my_col_start+j, value, outCol, my_col_start+j, (float)local_dataB[j], rowA, outCol, (float)calc, offset_rows, offset_columns);
-          }
-          atomicAdd(&smem_output_tile[idx], value*((float)local_dataB[j]));
-        }
-      }
-    }
-
-    // every two warps for all warps_per_block increase the col index by 32
-    my_col_start += ((blockDim.x/32)/2)*32;
-    iters += 1;
-  }
-
-  // store output tile into output matrix
-  // output is in col32 format and has shape rowsA x tiledRowsB (RowsB=colsOut because B is tranposed)
-  // it has sub-tiles of shape rowsA*32
-  // Each warp should store two consequtive rows
-  // We need to do this as atomicAdds
-  __syncthreads();
-  for(int i = warp_id; i < TILE_ROWS; i+=blockDim.x/32)
-  {
-    // we load from the follwing layout: first all TILE_ROWS with elements 0 to 31
-    // after all TILE_ROWS*32 elements, we get all elements from 32 to 63
-    // [row0_0, row0_1, ... row0_31, row1_0, row1_1, ... row1_31]
-    // [rowTILE_ROWS_0, ...
-    // [row0_32
-
-    // each warp loads two rows = each half-warp 1 row
-    // base_rowsA is the offset due to previous blocks
-    // each row has 32 columns
-    // restart the output row count from 0 after TILE_ROWS
-    int output_row = 32*(base_rowsA+(((i*2)%TILE_ROWS) + (warp_idx/16)));
-    // output col is 2 columns per thread for each half-warp and an additional 32 after TILE_ROWS/2 rows
-    int output_col = (warp_idx % 16)*2 + (i >= TILE_ROWS/2 ? 32 : 0); // TODO: offset this for blockIdx.x tiles
-    // output_col is offset by outputRows=rowsA*32 for each tile
-    int tile_offset = rowsA*32*(output_col/32);
-    output_col = output_col % 32;
-    // each output row has 32 elements (col32 outputs) 
-    int idx = (tile_offset + output_col + output_row);
-
-
-    int tiledColsOut = 32*((tiledRowsB+31)/32);
-    //if(((float)smem_output_tile[2*(32*i+warp_idx)] != 0.0f))
-    //  printf("%f %i %i %i idx (%i %i %i %i) if %i\n", (float)smem_output_tile[2*(32*i+warp_idx)], i, (i*2) % TILE_ROWS, idx, tile_offset, output_col, output_row, warp_idx, (int)(idx < rowsA*tiledColsOut));
-
-    //if((float)smem_output_tile[1+2*(32*i+warp_idx)] != 0.0f)
-    //  printf("%f %i %i %i idx (%i %i %i %i) if %i\n", (float)smem_output_tile[1+2*(32*i+warp_idx)], i, (i*2) % TILE_ROWS, idx, tile_offset, output_col, output_row, warp_idx, (int)(idx < rowsA*tiledColsOut));
-
-
-    //if(((float)smem_output_tile[2*(32*i+warp_idx)] != 0.0f))
-    //  printf("%f %i %i (%i %i) if %i warp %i (%i %i)\n", (float)smem_output_tile[2*(32*i+warp_idx)], i, idx, output_row, output_col, (int)(idx < rowsA*tiledColsOut), warp_idx, tiledColsOut, rowsA);
-    //if((float)smem_output_tile[1+2*(32*i+warp_idx)] != 0.0f)
-    //  printf("%f %i %i (%i %i) if %i warp %i (%i %i)\n", (float)smem_output_tile[1+2*(32*i+warp_idx)], i+1, idx, output_row, output_col, (int)(idx < rowsA*tiledColsOut), warp_idx, tiledColsOut, rowsA);
-
-    //if(output_col+(2*(warp_idx/16)) < rowsB)
-    // col32 output format
-    if(idx < rowsA*tiledColsOut)
-    {
-      // 7 256
-      // 7 16 x2
-      //if(idx == 2*32*32)
-      //{
-      //printf("%i %i %i %f\n", i, warp_idx, idx, (float)smem_output_tile[2*(32*i+warp_idx)]);
-      //printf("%i %i %i %f\n", i, warp_idx, idx, (float)smem_output_tile[2*(32*i+warp_idx)+1]);
-      //}
-      reinterpret_cast<float*>(out)[idx/2] = reinterpret_cast<float(&)[TILE_ROWS*TILE_COLS/2]>(smem_output_tile)[(32*i+warp_idx)];
-    }
-  }
-}
-
-
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kspmm_csc_col32<256, 64, 16>(int *colptr, int *rowidx, half *values, char *B, half *out, int nnz, int rowsA, int rowsB, int colsB, int tiledRowsB, int tiledColsB);
-
+template __global__ void kspmm_coo_very_sparse_naive<half, 16, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
 template __global__ void kspmm_coo_very_sparse_naive<half, 32, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<half, 64, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<signed char, 16, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
 template __global__ void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<signed char, 64, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
 
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
