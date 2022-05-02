@@ -1,4 +1,5 @@
 import pytest
+import math
 import random
 import time
 import torch
@@ -1010,9 +1011,9 @@ dim1 = torch.randint(1,4*1024, size=(n,)).tolist()
 dim4 = torch.randint(1,4*1024, size=(n,)).tolist()
 inner = torch.randint(1,4*1024, size=(n,)).tolist()
 
-dim1 = [4]
+dim1 = [6]
 dim4 = [4]
-inner = [4]
+inner = [8]
 
 values = list(zip(dim1, dim4, inner))
 names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
@@ -1026,6 +1027,7 @@ def test_integrated_igemmlt(dim1, dim4, inner):
 
         C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
         C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
+        print(A.shape, C1a.shape, C1b.shape)
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
@@ -1048,8 +1050,6 @@ def test_integrated_igemmlt(dim1, dim4, inner):
 
         err1 = torch.abs(out1-out2).mean().item()
         err2 = torch.abs(out1-out3).mean().item()
-        print(out1)
-        print(out2)
         assert err2 <= err1*1.01
 
 
@@ -1062,6 +1062,7 @@ values = list(zip(dim1, dim4, inner))
 names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
 def test_igemmlt_row_scale(dim1, dim4, inner):
+    formatB = F.get_special_format_str()
     err1, err2, err3 = [], [], []
     relerr1, relerr2 = [], []
     scale = 1
@@ -1077,26 +1078,25 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
         C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
         CB, absmaxB = F.vectorwise_quant(B, quant_type='linear')
         A2, SA = F.nvidia_transform(C1a, 'col32')
-        B2, SB = F.nvidia_transform(CB, 'col_turing')
+        B2, SB = F.nvidia_transform(CB, formatB)
         A1, maxA = F.vectorwise_quant(A, dim=1)
 
         c = 10.0*inner*scale
-        row_scale = maxA/c
+        row_scale = torch.ones_like(maxA)/c
         outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=row_scale)
         C3, S = F.nvidia_transform(outC32, 'row', state=SC)
         maxval = torch.abs(C3).max()
-        #if maxval == 127:
-        #    scale = 1.5
-        #else:
-        #    scale = maxval/120
-        #print(maxval, scale)
-        out3 = C3*absmaxB*c/(127*127)
+        if maxval == 127:
+            scale = 1.5
+        else:
+            scale = maxval/120
+        out3 = C3*maxA*absmaxB*c/(127*127)
 
         C4 = torch.matmul(C1a.float(), CB.float().t())
 
 
         C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
-        B2, SB = F.nvidia_transform(C2a, 'col_turing')
+        B2, SB = F.nvidia_transform(C2a, formatB)
         outC32, SC = F.igemmlt(A2, B2, SA, SB)
         out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
 
@@ -1154,7 +1154,7 @@ def test_row_scale_bench(dim1, dim4, inner):
     C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
     CB, absmaxB = F.vectorwise_quant(B, quant_type='linear')
     A2, SA = F.nvidia_transform(C1a, 'col32')
-    B2, SB = F.nvidia_transform(CB, 'col_turing')
+    B2, SB = F.nvidia_transform(CB, formatB)
     A1, maxA = F.vectorwise_quant(A, dim=1)
 
     c = 10.0*inner*scale
@@ -1168,7 +1168,7 @@ def test_row_scale_bench(dim1, dim4, inner):
 
 
     C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
-    B2, SB = F.nvidia_transform(C2a, 'col_turing')
+    B2, SB = F.nvidia_transform(C2a, formatB)
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(k):
@@ -1497,57 +1497,38 @@ def test_coo2csc():
     torch.testing.assert_allclose(A2.t()[idx], cscA.values)
 
 
+
 n = 2
+#dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
+#dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 #dim1 = [1*2048]
 #dim2 = [12288]
-dim1 = [1]
-dim2 = [33]
-dim3 = [9]
-values = list(product(dim1,dim2, dim3))
-names = ['dim1_{0}_dim2_{1}_dim3_{2}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2, dim3", values, ids=names)
-def test_spmm_csc_col32(dim1, dim2, dim3):
+dim1 = [4]
+dim2 = [6]
+dtype = [torch.int8]
+values = list(product(dim1,dim2, dtype))
+names = ['dim1_{0}_dim2_{1}_dtype_{2}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
+def test_spmm_coo_dequant(dim1, dim2, dtype):
+    #threshold = 2.8
     threshold = 0.0
     A = torch.randn(dim1, dim2, device='cuda').half()
-    #A = torch.ones(dim1, dim2, device='cuda').half()
-    #A = torch.arange(dim1* dim2, device='cuda').half().reshape(dim1, dim2).contiguous()
-    #A.flatten()[0:6] = 0
-    #A.flatten()[12:] = 0
-    A.flatten()[:-2] = 0
-    A.flatten()[-1:] = 0
-    A.flatten()[-2] = 1
-    irange = 32
-    Bt = torch.randint(-irange, irange, size=(dim3, dim2), device='cuda').to(torch.int8)
-    Bt[:-1] = 0
-    Bt[:, :-2] = 0
-    #Bt[0] = 1
-    #Bt[1] = 2
-    formatB = F.get_special_format_str()
-    print(Bt[:, 31:], Bt.shape)
+    B = torch.randn(dim2, dim2*4, device='cuda').half()
+
+    CB, CBt, statsB, statsBt, coo_tensor = F.double_quant(B)
 
     idx = torch.abs(A) >= threshold
     nnz = (idx == 1).sum().item()
     rows, cols = torch.where(idx)
     values = A[idx]
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
-    cscA = F.coo2csc(cooA)
     A2 = A*idx
-    C1 = torch.matmul(A2.half(), Bt.half().t())
-    Bt32, SBt = F.transform(Bt, formatB)
-    C2_32, SC2 = F.spmm_csc_col32(cscA, Bt32, SBt)
-    A3, S3 = F.nvidia_transform(C2_32.float(), 'row', state=SC2)
-    print('')
-    #print(A2.shape, Bt.t().shape, Bt32.shape, Bt.shape)
-    #print(A2)
-    #print(Bt.t())
-    print(Bt32, Bt32.shape)
-    print(Bt32.flatten()[256:384])
-    print(C1)
-    #print(C2_32, C2_32.shape)
-    print(A3)
-    #print(C2_32.shape)
+    out2 = F.spmm_coo_very_sparse(cooA, CBt)
+    out1 = torch.matmul(A2, B.half())
+
+    p = 200/(2048*12288*4)
+    n = out1.numel()
+    count = math.ceil(p*n)
+    assert_all_approx_close(out1, out2*statsBt.half()/127, rtol=0.01, atol=3.0e-2, count=count)
 
 
-    torch.testing.assert_allclose(C1.float(), A3.float(), rtol=0.01, atol=3.0e-2)
-    #torch.testing.assert_allclose(C1.float(), A3.float(), rtol=0.00, atol=0)
-    #assert_all_approx_close(A2.float(), A3.float(), rtol=0.01, atol=3.0e-2, count=20)
