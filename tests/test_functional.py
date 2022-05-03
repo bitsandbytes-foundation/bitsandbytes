@@ -1397,8 +1397,10 @@ n = 2
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 dim1 = [1*2048]
 dim2 = [12288]
-#dim1 = [2]
-#dim2 = [2]
+#dim1 = [32]
+#dim2 = [32]
+dtype = [torch.float16]
+dtype = [torch.int8]
 dtype = [torch.float16, torch.int8]
 values = list(product(dim1,dim2, dtype))
 names = ['dim1_{0}_dim2_{1}_dtype_{2}'.format(*vals) for vals in values]
@@ -1411,10 +1413,14 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype):
 
     if dtype == torch.float16:
         B = torch.randn(dim2, dim2*4, device='cuda').half()
+        torch.nn.init.xavier_uniform_(B)
     else:
-        B = torch.randint(-127, 127, size=(dim2, dim2*4), device='cuda').to(torch.int8)
+        B = torch.randn(dim2, dim2*4, device='cuda').half()
+        torch.nn.init.xavier_uniform_(B)
+        B, SB = F.vectorwise_quant(B, quant_type='linear')
+        #B = torch.randint(-127, 127, size=(dim2, dim2*4), device='cuda').to(torch.int8)
 
-
+    print('')
     idx = torch.abs(A) >= threshold
     nnz = (idx == 1).sum().item()
     rows, cols = torch.where(idx)
@@ -1422,31 +1428,33 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype):
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
     A2 = A*idx
     out2 = F.spmm_coo_very_sparse(cooA, B)
-    out1 = torch.matmul(A2, B.half())
-    #print('')
+    out1 = torch.matmul(A2.half(), B.half())
     #print(B)
     #print(out1)
     #print(out2)
     p = 200/(2048*12288*4)
     n = out1.numel()
-    count = int(p*n)
+    count = math.ceil(p*n)
+    std = out1.std()
+    out1 /= std
+    out2 /= std
     assert_all_approx_close(out1, out2.half(), rtol=0.01, atol=3.0e-2, count=count)
     #assert_all_approx_close(out1, out2.half(), rtol=0.05, atol=0.01, count=count)
 
     #torch.testing.assert_allclose(out1, out2.half(), rtol=0.05, atol=0.001)
 
-    Bt = torch.randn(dim2*4, dim2, device='cuda').half()
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(1000):
+    #Bt = torch.randn(dim2*4, dim2, device='cuda').half()
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(1000):
 
-       #out3 = F.spmm_coo(cooA, Bt.t())
-       #out2 = F.spmm_coo(cooA, B)
-       out2 = F.spmm_coo_very_sparse(cooA, B)
-       #out1 = torch.matmul(A2, B)
+    #   #out3 = F.spmm_coo(cooA, Bt.t())
+    #   #out2 = F.spmm_coo(cooA, B)
+    #   out2 = F.spmm_coo_very_sparse(cooA, B)
+    #   #out1 = torch.matmul(A2, B)
 
-    torch.cuda.synchronize()
-    print(time.time() - t0)
+    #torch.cuda.synchronize()
+    #print(time.time() - t0)
 
 
 def test_layout():
@@ -1501,19 +1509,22 @@ def test_coo2csc():
 n = 2
 #dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
-#dim1 = [1*2048]
-#dim2 = [12288]
-dim1 = [4]
-dim2 = [6]
+dim1 = [1*2048]
+dim2 = [12288]
+#dim1 = [2]
+#dim2 = [2]
 dtype = [torch.int8]
 values = list(product(dim1,dim2, dtype))
 names = ['dim1_{0}_dim2_{1}_dtype_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
 def test_spmm_coo_dequant(dim1, dim2, dtype):
+    threshold = 3.55
     #threshold = 2.8
-    threshold = 0.0
+    #threshold = 0.0
     A = torch.randn(dim1, dim2, device='cuda').half()
-    B = torch.randn(dim2, dim2*4, device='cuda').half()
+    B = torch.empty(dim2, dim2*4, device='cuda', dtype=torch.float16)
+    torch.nn.init.xavier_uniform_(B)
+
 
     CB, CBt, statsB, statsBt, coo_tensor = F.double_quant(B)
 
@@ -1523,12 +1534,49 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     values = A[idx]
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
     A2 = A*idx
-    out2 = F.spmm_coo_very_sparse(cooA, CBt)
+    out2 = F.spmm_coo_very_sparse(cooA, CBt, dequant_stats=statsBt)
     out1 = torch.matmul(A2, B.half())
+    out3 = F.spmm_coo_very_sparse(cooA, CBt.half())
+    out3 = out3*statsBt.half()/127
+
+    torch.testing.assert_allclose(out2, out3, rtol=0.05, atol=0.001)
 
     p = 200/(2048*12288*4)
     n = out1.numel()
     count = math.ceil(p*n)
-    assert_all_approx_close(out1, out2*statsBt.half()/127, rtol=0.01, atol=3.0e-2, count=count)
+    assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=count)
 
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(100):
+    #   out2 = F.spmm_coo_very_sparse(cooA, B)
+    #torch.cuda.synchronize()
+    #print('fp16', time.time() - t0)
 
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+       out2 = F.spmm_coo(cooA, B)
+    torch.cuda.synchronize()
+    print('cusparse fp16', time.time() - t0)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+       out2 = F.spmm_coo_very_sparse(cooA, CBt)
+    torch.cuda.synchronize()
+    print('int8', time.time() - t0)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+       out2 = F.spmm_coo_very_sparse(cooA, CBt, dequant_stats=statsBt)
+    torch.cuda.synchronize()
+    print('int8+dequant', time.time() - t0)
+
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(100):
+    #   out2 = torch.matmul(A, B)
+    #torch.cuda.synchronize()
+    #print('matmul', time.time() - t0)

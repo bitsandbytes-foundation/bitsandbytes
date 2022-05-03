@@ -2384,9 +2384,11 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   }
 }
 
+#define C 1.0f/127.0f
 #define MAX_SPARSE_COUNT 32
+#define SMEM_SIZE 8*256
 template <typename T, int SPMM_ITEMS, int BITS> 
-__global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, int nnz, int rowsA, int rowsB, int colsB)
+__global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB)
 {
 
   // 0. load balancing: We process rows with most columns first (count_vec)and we process one row per block
@@ -2408,10 +2410,14 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   const int warp_id = threadIdx.x / 32;
   const int warp_idx = threadIdx.x % 32;
   const int warp_offset = (warp_id*32)*SPMM_ITEMS;
+  const int num_items = BITS == 8 ? 8 : 8;
+  int idx_col_B = warp_offset;
+  int local_idx_col_B_offset = 0;
 
   half local_valA[MAX_SPARSE_COUNT];
   int local_colidxA[MAX_SPARSE_COUNT];
-  float local_valC[SPMM_ITEMS];
+  half local_valC[SPMM_ITEMS];
+  T local_valsB[num_items];
   // 128 byte loads per warp == 4 bytes per thread
 
   // 2. Load A into registers
@@ -2421,9 +2427,24 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
     local_colidxA[j] = j < count ? colidx[offset+j] : 0;
   }
 
-  int idx_col_B = warp_offset;
+  // each thread processes SPMM_ITEMS=32 per iteration. We have 256 threads. 32*256=x192
+  // we expect each warp to be SPMM_ITEMS*32 apart
+  // we have a total of 128 bytes for the bank with a bank size of 4 bytes
+  // added 3 bytes = 6 values between warps should reduce bank conflicts
+  __shared__ half smem_dequant_stats[SMEM_SIZE];
+
+
   while(idx_col_B <  colsB)
   {
+
+    if(dequant_stats != NULL)
+    {
+      for(int i = threadIdx.x; i < SMEM_SIZE; i+=blockDim.x)
+        if((idx_col_B+i-local_idx_col_B_offset) < colsB)
+          smem_dequant_stats[i] = __ldg(&dequant_stats[idx_col_B+i-local_idx_col_B_offset]);
+
+      __syncthreads();
+    }
 
     #pragma unroll SPMM_ITEMS
     for(int j = 0; j < SPMM_ITEMS; j++)
@@ -2436,27 +2457,69 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
         int row_offset = colsB*local_colidxA[i];
 
         #pragma unroll SPMM_ITEMS
-        for(int j = 0; j < SPMM_ITEMS; j++)
+        for(int j = 0; j < SPMM_ITEMS; j+=num_items)
         {
           // 4. Multiply the tile -> accumulate outputs in shared memory until 128 bytes it reached
-          T valB = B[row_offset+ idx_col_B + (32*j) + warp_idx];
-          local_valC[j] += (float)valB*(float)local_valA[i];
+          int idx = idx_col_B + (warp_idx*SPMM_ITEMS) + j;
+          if(idx >= colsB){ break; }
+          //printf("%i %i\n", (row_offset+idx) % num_items, row_offset+idx);
+          if((idx+num_items < colsB))
+          {
+            if(BITS == 8)
+              reinterpret_cast<float2(&)[num_items]>(local_valsB)[0] = reinterpret_cast<float2*>(B)[(row_offset+ idx)/num_items];
+            else
+              reinterpret_cast<float4(&)[num_items]>(local_valsB)[0] = reinterpret_cast<float4*>(B)[(row_offset+ idx)/num_items];
+          }
+          else
+          {
+            #pragma unroll num_items
+            for(int k = 0; k < num_items; k++)
+              if(idx+k < colsB)
+                local_valsB[k] = B[row_offset+idx+k];
+              else
+                local_valsB[k] = 0.0f;
+          }
+          #pragma unroll num_items
+          for(int k = 0; k < num_items; k++)
+          {
+            //if((float)local_valsB[k] != 0.0)
+            //  printf("%f %i %i %i\n", (float)local_valsB[k], k, idx, colsB);
+            if(BITS == 8 && dequant_stats != NULL)
+              // we do texture cache reads (__ldg) on dequant_stats which should be super fast
+            {
+              float valB = local_valsB[k];
+              float valA = local_valA[i];
+              if(valB != 0.0 && valA != 0.0)
+                local_valC[j+k] += ((float)smem_dequant_stats[idx+k-local_idx_col_B_offset])*C*valB*valA;
+            }
+            else
+              local_valC[j+k] += (float)local_valsB[k]*(float)local_valA[i];
+          }
         }
     }
 
     int idx_row_C = (colsB*local_row_idx);
 
     #pragma unroll SPMM_ITEMS
-    for(int j = 0; j < SPMM_ITEMS; j++)
+    for(int j = 0; j < SPMM_ITEMS; j+=num_items)
     {
-      int idx_col_C =  idx_col_B + (32*j) + warp_idx;
+      //int idx_col_C =  idx_col_B + (32*j) + warp_idx;
+      int idx_col_C =  idx_col_B + warp_idx*SPMM_ITEMS + j;
       int idx_val = idx_col_C + idx_row_C;
 
-      if(idx_col_C < colsB)
-        out[idx_val] += __float2half(local_valC[j]);
+      if(idx_col_C +num_items < colsB)
+          reinterpret_cast<float4*>(out)[idx_val/num_items] = reinterpret_cast<float4(&)[num_items]>(local_valC)[j/num_items];
+      else
+      {
+        #pragma unroll num_items
+        for(int k = 0; k < num_items; k++)
+         if(idx_col_C + k < colsB)
+           out[idx_val+k] = local_valC[j+k];
+      }
     }
 
     idx_col_B += blockDim.x*SPMM_ITEMS;
+    local_idx_col_B_offset += blockDim.x*SPMM_ITEMS;
   } 
 }
 
@@ -2464,12 +2527,12 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kspmm_coo_very_sparse_naive<half, 16, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<half, 32, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<half, 128, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<signed char, 16, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<signed char, 128, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<half, 8, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<half, 16, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<half, 32, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<signed char, 8, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<signed char, 16, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
 
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);

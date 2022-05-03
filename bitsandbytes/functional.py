@@ -1292,7 +1292,7 @@ def spmm_coo(cooA, B, out=None):
 
     return out
 
-def spmm_coo_very_sparse(cooA, B, out=None):
+def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     if out is None: out = torch.zeros((cooA.rows, B.shape[1]), device=B.device, dtype=cooA.values.dtype)
     nnz = cooA.nnz
     assert cooA.rowidx.numel() == nnz
@@ -1312,7 +1312,6 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     max_count = max_count.int()
     assert max_count[0] <= 32, f'Current max count per row is 8 but found {max_count[0]}.'
     assert B.dtype in [torch.float16, torch.int8]
-    #print(max_count[0])
     ptrOffset = get_ptr(offset)
     ptrMaxCount = get_ptr(max_count)
     ptrMaxIdx = get_ptr(max_idx)
@@ -1322,6 +1321,7 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     ptrValues = get_ptr(cooA.values)
     ptrB = get_ptr(B)
     ptrC = get_ptr(out)
+    ptrDequantStats = get_ptr(dequant_stats)
     cnnz_rows = ct.c_int32(counts.numel())
     cnnz = ct.c_int32(cooA.nnz)
     crowsA = ct.c_int32(cooA.rows)
@@ -1334,9 +1334,9 @@ def spmm_coo_very_sparse(cooA, B, out=None):
     #print(cooA.colidx[:64].sort()[0])
 
     if B.dtype == torch.float16:
-        lib.cspmm_coo_very_sparse_naive_fp16(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
+        lib.cspmm_coo_very_sparse_naive_fp16(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, ptrDequantStats, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
     elif B.dtype == torch.int8:
-        lib.cspmm_coo_very_sparse_naive_int8(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
+        lib.cspmm_coo_very_sparse_naive_int8(ptrMaxCount, ptrMaxIdx, ptrOffset, ptrRowidx, ptrColidx, ptrValues, ptrB, ptrC, ptrDequantStats, cnnz_rows, cnnz, crowsA, crowsB, ccolsB)
     #else: assertion error
 
     return out
