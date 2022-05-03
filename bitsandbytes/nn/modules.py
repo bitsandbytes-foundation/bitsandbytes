@@ -62,16 +62,16 @@ class Linear8bitLt(nn.Linear):
 
         if self.training and not self.has_accumulated_gradients:
             self.CxB, self.SB, self.SCB = None, None, None
-            out = bnb.matmullt(x, self.weight.t())
+            out = bnb.matmullt(x, self.weight)
             if self.bias is not None:
                 out += self.bias.unsqueeze(0).expand_as(out)
             return out
         else:
             if self.CxB is None:
-                (out, self.CxB, self.SCB) = bnb.matmullt(x, self.weight.t(), None, None, True)
+                (out, self.CxB, self.SCB) = bnb.matmullt(x, self.weight, None, None, True)
                 self.SB = (self.weight.shape, bnb.functional.get_special_format_str())
             else:
-                out = bnb.matmullt(x, self.weight.t(), None, (self.CxB, self.SB, self.SCB))
+                out = bnb.matmullt(x, self.weight, None, (self.CxB, self.SB, self.SCB))
 
             if self.bias is not None:
                 out += self.bias.unsqueeze(0).expand_as(out)

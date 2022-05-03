@@ -1027,7 +1027,6 @@ def test_integrated_igemmlt(dim1, dim4, inner):
 
         C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
         C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
-        print(A.shape, C1a.shape, C1b.shape)
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
@@ -1582,3 +1581,53 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     #   out2 = torch.matmul(A, B)
     #torch.cuda.synchronize()
     #print('matmul', time.time() - t0)
+
+batch_size = 1
+seqdim = 2048
+values = [(batch_size, seqdim, 4*1024, 3*4*1024),(batch_size, seqdim, 5120, 3*5120),(batch_size, seqdim, 12*1024, 4*12*1024)]
+names = ['batch_{0}_seq_{1}_model_{2}_hidden_{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
+def test_bench_matmul(batch, seq, model, hidden):
+    formatB = F.get_special_format_str()
+
+    A = torch.randn(batch, seq, model, device='cuda').half()
+    B = torch.empty(hidden, model, dtype=torch.float16, device='cuda')
+    torch.nn.init.xavier_uniform_(B)
+
+    linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
+    linear8bit.eval()
+
+    # warmup
+    for i in range(100):
+        torch.matmul(A, B.t())
+    torch.cuda.synchronize()
+    print('')
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        torch.matmul(A, B.t())
+    torch.cuda.synchronize()
+    print(f'pytorch: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        bnb.matmul(A, B.t())
+    torch.cuda.synchronize()
+    print(f'bnb: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        bnb.matmullt(A, B)
+    torch.cuda.synchronize()
+    print(f'bnb lt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        linear8bit(A)
+    torch.cuda.synchronize()
+    print(f'bnb linear8bitlt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
+
+
