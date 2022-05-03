@@ -1399,18 +1399,18 @@ dim1 = [1*2048]
 dim2 = [12288]
 #dim1 = [32]
 #dim2 = [32]
-dtype = [torch.float16]
-dtype = [torch.int8]
 dtype = [torch.float16, torch.int8]
-values = list(product(dim1,dim2, dtype))
-names = ['dim1_{0}_dim2_{1}_dtype_{2}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
-def test_spmm_coo_very_sparse(dim1, dim2, dtype):
+out_function = ['zeros', 'ones']
+values = list(product(dim1,dim2, dtype, out_function))
+names = ['dim1_{0}_dim2_{1}_dtype_{2}_out_func_{3}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, dtype, out_func", values, ids=names)
+def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
+    out_func = getattr(torch, out_func)
+
     threshold = 3.3
     #threshold = 2.8
     #threshold = 0.0
     A = torch.randn(dim1, dim2, device='cuda').half()
-
     if dtype == torch.float16:
         B = torch.randn(dim2, dim2*4, device='cuda').half()
         torch.nn.init.xavier_uniform_(B)
@@ -1427,8 +1427,10 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype):
     values = A[idx]
     cooA = F.COOSparseTensor(A.shape[0], A.shape[1], nnz, rows.int(), cols.int(), values)
     A2 = A*idx
-    out2 = F.spmm_coo_very_sparse(cooA, B)
     out1 = torch.matmul(A2.half(), B.half())
+    out = out_func(out1.shape, dtype=torch.float16, device=out1.device)
+    out1 += out.clone()
+    out2 = F.spmm_coo_very_sparse(cooA, B, out=out)
     #print(B)
     #print(out1)
     #print(out2)

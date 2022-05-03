@@ -2418,6 +2418,7 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   int local_colidxA[MAX_SPARSE_COUNT];
   half local_valC[SPMM_ITEMS];
   T local_valsB[num_items];
+  half local_valOut[num_items];
   // 128 byte loads per warp == 4 bytes per thread
 
   // 2. Load A into registers
@@ -2508,13 +2509,23 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
       int idx_val = idx_col_C + idx_row_C;
 
       if(idx_col_C +num_items < colsB)
+      {
+
+          // load outputs to do inplace addition
+          reinterpret_cast<float4(&)[num_items/4]>(local_valOut)[0] = reinterpret_cast<float4*>(out)[idx_val/num_items];
+
+          #pragma unroll num_items
+          for(int k = 0; k < num_items; k++)
+            local_valC[(j/num_items) + k] += local_valOut[k];
+            
           reinterpret_cast<float4*>(out)[idx_val/num_items] = reinterpret_cast<float4(&)[num_items]>(local_valC)[j/num_items];
+      }
       else
       {
         #pragma unroll num_items
         for(int k = 0; k < num_items; k++)
          if(idx_col_C + k < colsB)
-           out[idx_val+k] = local_valC[j+k];
+           out[idx_val+k] += local_valC[j+k];
       }
     }
 
