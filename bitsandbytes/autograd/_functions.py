@@ -112,9 +112,9 @@ class MatMul8bitLt(torch.autograd.Function):
             idx = torch.unique(coo_tensorA.colidx).long()
             CA[:, idx] = 0
             CAt[:, idx] = 0
-            Asub = A[:, idx]
+            subA = A[:, idx]
         else:
-            Asub = None
+            subA = None
 
         C32A, SA = F.transform(CA, 'col32')
 
@@ -122,18 +122,18 @@ class MatMul8bitLt(torch.autograd.Function):
         if is_transposed: B = B.contiguous()
 
         if CB is not None:
-            CxB, SB, SCB, Bsub = CB
+            CxB, SB, SCB, subB = CB
             CBt = SCBt = None
         else:
             CB, CBt, SCB, SCBt, coo_tensorB = F.double_quant(B)
             CxB, SB = F.transform(CB, to_order=formatB)
-            Bsub = None
+            subB = None
 
         out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
         output = F.mm_dequant(out32, Sout32, SCA, SCB)
 
         if decomp_threshold > 0.0 and coo_tensorA is not None:
-            output += torch.matmul(Asub, B[:, idx].t())
+            output += torch.matmul(subA, B[:, idx].t())
 
         ctx.formatB = formatB
         ctx.grad_shape = input_shape
@@ -141,7 +141,7 @@ class MatMul8bitLt(torch.autograd.Function):
         ctx.decomp_threshold = decomp_threshold
 
         if requires_gradA or requires_gradB:
-            ctx.tensors = (CAt, CBt, Asub)
+            ctx.tensors = (CAt, CBt, subA)
             ctx.tensor_states = (SCAt, SCBt, idx)
         else:
             ctx.tensors = [None, None]
@@ -150,14 +150,14 @@ class MatMul8bitLt(torch.autograd.Function):
 
         clone_func = torch.clone if len(output_shape) == 3 else lambda x : x
         if return_CB:
-            return (clone_func(output.view(output_shape)), CxB, SCB)
+            return (clone_func(output.view(output_shape)), CxB, SCB, subB or torch.empty(1))
         else:
             return clone_func(output.view(output_shape))
 
     @staticmethod
-    def backward(ctx, grad_output, CxB=None, SCB=None):
+    def backward(ctx, grad_output, CxB=None, SCB=None, subB=None):
         req_gradA, req_gradB = ctx.req_grads
-        CAt, CBt, Asub = ctx.tensors
+        CAt, CBt, subA = ctx.tensors
         SCAt, SCBt, idx = ctx.tensor_states
         formatB = ctx.formatB
         decomp_threshold = ctx.decomp_threshold
@@ -173,8 +173,8 @@ class MatMul8bitLt(torch.autograd.Function):
             C32grad, Sgrad = F.transform(Cgradt, 'col32', transpose=True)
             gradB32, SgradB32 = F.igemmlt(C32grad, CxAt, Sgrad, SAt)
             grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
-            if decomp_threshold > 0.0 and Asub is not None:
-                grad_B[:, idx] += torch.matmul(grad_output.t(), Asub)
+            if decomp_threshold > 0.0 and subA is not None:
+                grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:
             C32grad, Sgrad = F.transform(Cgrad, 'col32')

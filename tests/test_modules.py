@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from itertools import product
 from torch import nn
 
 import bitsandbytes as bnb
@@ -325,8 +326,12 @@ def test_linear8bit():
         l3.bias.grad = None
 
 
-def test_linear8bitlt_inference():
-    l1 = bnb.nn.Linear8bitLt(32,64).cuda().half()
+threshold = [0.0, 3.0]
+values = list(product(threshold))
+names = ['threshold_{0}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("threshold", values, ids=names)
+def test_linear8bitlt_inference(threshold):
+    l1 = bnb.nn.Linear8bitLt(32,64, threshold=threshold).cuda().half()
 
     l1.eval()
     for i in range(100):

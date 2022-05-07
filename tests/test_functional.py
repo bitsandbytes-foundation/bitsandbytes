@@ -1635,6 +1635,9 @@ def test_bench_matmul(batch, seq, model, hidden):
     linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
     linear8bit.eval()
 
+    linearMixedBit = bnb.nn.Linear8bitLt(model, hidden, False, threshold=3.0).cuda().half()
+    linearMixedBit.eval()
+
     # warmup
     for i in range(100):
         torch.matmul(A, B.t())
@@ -1647,12 +1650,6 @@ def test_bench_matmul(batch, seq, model, hidden):
         torch.matmul(A, B.t())
     torch.cuda.synchronize()
     print(f'pytorch: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(100):
-        bnb.matmul(A, B.t())
-    torch.cuda.synchronize()
-    print(f'bnb: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
 
     torch.cuda.synchronize()
     t0 = time.time()
@@ -1667,4 +1664,11 @@ def test_bench_matmul(batch, seq, model, hidden):
         linear8bit(A)
     torch.cuda.synchronize()
     print(f'bnb linear8bitlt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        linearMixedBit(A)
+    torch.cuda.synchronize()
+    print(f'bnb linear8bitlt with threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
 
