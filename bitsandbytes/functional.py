@@ -1298,7 +1298,7 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     assert cooA.rowidx.numel() == nnz
     assert cooA.colidx.numel() == nnz
     assert cooA.values.numel() == nnz
-    assert cooA.cols == B.shape[0]
+    assert cooA.cols == B.shape[0], f'{cooA.cols} vs {B.shape}'
 
     transposed_B = (False if B.is_contiguous() else True)
 

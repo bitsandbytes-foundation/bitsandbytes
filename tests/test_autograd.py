@@ -11,7 +11,7 @@ dim1 = torch.randint(16,64, size=(n,)).tolist()
 dim2 = torch.randint(32,96, size=(n,)).tolist()
 dim3 = torch.randint(32,96, size=(n,)).tolist()
 dim4 = torch.randint(32,96, size=(n,)).tolist()
-funcs = [(torch.bmm, bnb.bmm), (torch.matmul, bnb.matmul)]
+funcs = [(torch.bmm, bnb.bmm_cublas), (torch.matmul, bnb.matmul_cublas)]
 str_funcs = ['bmm', 'matmul']
 req_grad = [(False, False), (True, False), (True, True), (False, True)]
 req_grad_str = ['FF', 'TF', 'TT', 'FT']
@@ -172,25 +172,26 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
                 assert (idx==0).sum().item() < n*0.02
 
 
-n = 2
+n = 1
 k = 10
 dim1 = torch.randint(16,64, size=(n,)).tolist()
 dim2 = torch.randint(32,96, size=(n,)).tolist()
 dim3 = torch.randint(32,96, size=(n,)).tolist()
 dim4 = torch.randint(32,96, size=(n,)).tolist()
 
-funcs = [(torch.matmul, bnb.matmullt)]
+decomp = [0.0, 3.0]
+funcs = [(torch.matmul, bnb.matmul)]
 str_funcs = ['matmul']
 req_grad = [(False, False), (True, False), (True, True), (False, True)]
 req_grad_str = ['FF', 'TF', 'TT', 'FT']
 transpose = [(False, True), (False, False)]
 str_transpose = ['NT', 'NN']
 dtype = [torch.float16]
-values = list(product(dim1,dim2,dim3,dim4,funcs, dtype, req_grad, transpose))
-str_values = list(product(dim1,dim2,dim3,dim4,str_funcs, dtype, req_grad_str, str_transpose))
-names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_func_{4}_dtype_{5}_requires_grad_{6}_transpose_{7}'.format(*vals) for vals in str_values]
-@pytest.mark.parametrize("dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose", values, ids=names)
-def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
+values = list(product(dim1,dim2,dim3,dim4,funcs, dtype, req_grad, transpose, decomp))
+str_values = list(product(dim1,dim2,dim3,dim4,str_funcs, dtype, req_grad_str, str_transpose, decomp))
+names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_func_{4}_dtype_{5}_requires_grad_{6}_transpose_{7}_decomp_{8}'.format(*vals) for vals in str_values]
+@pytest.mark.parametrize("dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp", values, ids=names)
+def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp):
     for i in range(k):
 
         # normal multiply
@@ -204,14 +205,11 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
 
             if not transpose[0] and transpose[1]:
                 out_torch = funcs[0](A, B.t())
-                out_bnb = funcs[1](A, B)
+                out_bnb = funcs[1](A, B, threshold=decomp)
             elif not transpose[0] and not transpose[1]:
                 out_torch = funcs[0](A, B)
-                out_bnb = funcs[1](A, B.t())
+                out_bnb = funcs[1](A, B.t(), threshold=decomp)
 
-            #print('')
-            #print(out_torch)
-            #print(out_bnb)
             n = out_bnb.numel()
             idx = torch.isclose(out_bnb, out_torch, atol=0.01, rtol=0.1)
             assert (idx==0).sum().item() < n*0.0175
@@ -239,6 +237,8 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
                 torch.testing.assert_allclose(gradA1, gradA2, atol=0.015, rtol=0.1)
             if req_grad[1]:
                 n = gradB1.numel()
+                assert torch.abs(gradB1).sum() > 0.0
+                assert torch.abs(gradB2).sum() > 0.0
                 idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
                 assert (idx==0).sum().item() < n*0.1
                 idx = torch.isclose(gradB1, gradB2, atol=0.10, rtol=0.3)

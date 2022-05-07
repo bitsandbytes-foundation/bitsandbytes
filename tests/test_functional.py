@@ -1309,12 +1309,12 @@ def test_spmm_bench():
     A = torch.randn(dim1, dim2, device='cuda').half()
     B = torch.randn(dim2, dim3, device='cuda').half()
     for i in range(10):
-        C1 = bnb.matmullt(A, B)
+        C1 = bnb.matmul(A, B)
 
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(k):
-        C1 = bnb.matmullt(A, B)
+        C1 = bnb.matmul(A, B)
     torch.cuda.synchronize()
     t8 = time.time()-t0
 
@@ -1382,7 +1382,7 @@ def test_matmuls():
     b = torch.randn(256, 256).half().cuda()
     c1 = torch.matmul(a, b)
     c2 = bnb.matmul(a, b)
-    c3 = bnb.matmullt(a, b)
+    c3 = bnb.matmul(a, b)
 
     err1 = torch.abs(c1-c2).mean().item()
     err2 = torch.abs(c1-c3).mean().item()
@@ -1398,7 +1398,8 @@ dim1 = [1*2048]
 dim2 = [12288]
 #dim1 = [32]
 #dim2 = [32]
-dtype = [torch.float16, torch.int8]
+#dtype = [torch.float16, torch.int8]
+dtype = [torch.float16]
 out_function = ['zeros', 'ones']
 values = list(product(dim1,dim2, dtype, out_function))
 names = ['dim1_{0}_dim2_{1}_dtype_{2}_out_func_{3}'.format(*vals) for vals in values]
@@ -1442,21 +1443,22 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
     assert_all_approx_close(out1, out2.half(), rtol=0.01, atol=3.0e-2, count=count)
     #assert_all_approx_close(out1, out2.half(), rtol=0.05, atol=0.01, count=count)
 
+    idx_col = torch.randint(0, A2.shape[-1], size=(15,))
+
     #torch.testing.assert_allclose(out1, out2.half(), rtol=0.05, atol=0.001)
 
     #Bt = torch.randn(dim2*4, dim2, device='cuda').half()
     #torch.cuda.synchronize()
     #t0 = time.time()
-    #for i in range(1000):
-
+    #print(A2.shape, B.shape)
+    #for i in range(100):
     #   #out3 = F.spmm_coo(cooA, Bt.t())
     #   #out2 = F.spmm_coo(cooA, B)
-    #   out2 = F.spmm_coo_very_sparse(cooA, B)
-    #   #out1 = torch.matmul(A2, B)
+    #   #out2 = F.spmm_coo_very_sparse(cooA, B)
+    #   #out1 = torch.matmul(A, Bt.t())
 
     #torch.cuda.synchronize()
     #print(time.time() - t0)
-
 
 def test_layout():
     a1 = torch.rand(16, 64, device='cuda', dtype=torch.float16)
@@ -1519,15 +1521,20 @@ values = list(product(dim1,dim2, dtype))
 names = ['dim1_{0}_dim2_{1}_dtype_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
 def test_spmm_coo_dequant(dim1, dim2, dtype):
-    threshold = 3.55
+    threshold = 6.0
     #threshold = 2.8
     #threshold = 0.0
     A = torch.randn(dim1, dim2, device='cuda').half()
     B = torch.empty(dim2, dim2*4, device='cuda', dtype=torch.float16)
     torch.nn.init.xavier_uniform_(B)
+    Bt = B.t().contiguous()
 
 
     CB, CBt, statsB, statsBt, coo_tensor = F.double_quant(B)
+
+    rowidx = torch.randint(0, A.shape[-1], size=(15,))
+
+    A[:, rowidx] = 8.0
 
     idx = torch.abs(A) >= threshold
     nnz = (idx == 1).sum().item()
@@ -1540,12 +1547,19 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     out3 = F.spmm_coo_very_sparse(cooA, CBt.half())
     out3 = out3*statsBt.half()/127
 
+    values, counts = torch.unique(cooA.rowidx, return_counts=True)
+    offset = counts.cumsum(0).int()
+    max_count, max_idx = torch.sort(counts, descending=True)
+    print(torch.median(max_count.float()))
+
     torch.testing.assert_allclose(out2, out3, rtol=0.05, atol=0.001)
 
     p = 200/(2048*12288*4)
     n = out1.numel()
     count = math.ceil(p*n)
     assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=count)
+
+
 
     #torch.cuda.synchronize()
     #t0 = time.time()
@@ -1575,12 +1589,36 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     torch.cuda.synchronize()
     print('int8+dequant', time.time() - t0)
 
-    #torch.cuda.synchronize()
-    #t0 = time.time()
-    #for i in range(100):
-    #   out2 = torch.matmul(A, B)
-    #torch.cuda.synchronize()
-    #print('matmul', time.time() - t0)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+       out2 = torch.matmul(A, B)
+    torch.cuda.synchronize()
+    print('matmul', time.time() - t0)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        out1 = bnb.matmul(A, Bt)
+        out2 = F.spmm_coo_very_sparse(cooA, CBt, dequant_stats=statsBt)
+        out = out1+out2
+    torch.cuda.synchronize()
+    print('sparse+ matmul', time.time() - t0)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        out1 = bnb.matmul(A, Bt)
+        torch.matmul(A[:, rowidx], Bt.t()[rowidx], out=out1)
+    torch.cuda.synchronize()
+    print('partial matmul', time.time() - t0)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        out1 = bnb.matmul(A, Bt)
+    torch.cuda.synchronize()
+    print('partial matmul', time.time() - t0)
 
 batch_size = 1
 seqdim = 2048
@@ -1619,7 +1657,7 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(100):
-        bnb.matmullt(A, B)
+        bnb.matmul(A, B)
     torch.cuda.synchronize()
     print(f'bnb lt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
 
@@ -1629,5 +1667,4 @@ def test_bench_matmul(batch, seq, model, hidden):
         linear8bit(A)
     torch.cuda.synchronize()
     print(f'bnb linear8bitlt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
-
 
