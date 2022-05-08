@@ -1635,7 +1635,7 @@ def test_bench_matmul(batch, seq, model, hidden):
     linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
     linear8bit.eval()
 
-    linearMixedBit = bnb.nn.Linear8bitLt(model, hidden, False, threshold=3.0).cuda().half()
+    linearMixedBit = bnb.nn.Linear8bitLt(model, hidden, False, threshold=4.5).cuda().half()
     linearMixedBit.eval()
 
     # warmup

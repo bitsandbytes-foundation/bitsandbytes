@@ -56,6 +56,7 @@ class Linear8bitLt(nn.Linear):
         self.SCB = None
         self.subB = None
         self.has_accumulated_gradients = False
+        self.threshold = threshold
 
     def forward(self, x):
         has_grad = (True if (getattr(self.weight, 'grad', None) is not None) else False)
@@ -63,16 +64,16 @@ class Linear8bitLt(nn.Linear):
 
         if self.training and not self.has_accumulated_gradients:
             self.CxB, self.SB, self.SCB = None, None, None
-            out = bnb.matmul(x, self.weight)
+            out = bnb.matmul(x, self.weight, threshold=self.threshold)
             if self.bias is not None:
                 out += self.bias.unsqueeze(0).expand_as(out)
             return out
         else:
             if self.CxB is None:
-                (out, self.CxB, self.SCB, self.subB) = bnb.matmul(x, self.weight, return_CB=True)
+                (out, self.CxB, self.SCB, self.subB) = bnb.matmul(x, self.weight, return_CB=True, threshold=self.threshold)
                 self.SB = (self.weight.shape, bnb.functional.get_special_format_str())
             else:
-                out = bnb.matmul(x, self.weight, CB=(self.CxB, self.SB, self.SCB, self.subB))
+                out = bnb.matmul(x, self.weight, CB=(self.CxB, self.SB, self.SCB, self.subB), threshold=self.threshold)
 
             if self.bias is not None:
                 out += self.bias.unsqueeze(0).expand_as(out)

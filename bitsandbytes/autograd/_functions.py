@@ -109,6 +109,7 @@ class MatMul8bitLt(torch.autograd.Function):
         CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=decomp_threshold)
         idx = None
         if decomp_threshold > 0.0 and coo_tensorA is not None:
+            pass
             idx = torch.unique(coo_tensorA.colidx).long()
             CA[:, idx] = 0
             CAt[:, idx] = 0
