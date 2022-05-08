@@ -106,6 +106,8 @@ class MatmulLtState:
     subB = None
     has_accumulated_gradients = False
     threshold = 0.0
+    is_training = True
+
 
     def reset_grads(self):
         self.CxB = None
@@ -153,7 +155,7 @@ class MatMul8bitLt(torch.autograd.Function):
         is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
         if is_transposed: B = B.contiguous()
 
-        if not has_grad or state.CxB is None:
+        if (state.is_training and not has_grad) or state.CxB is None:
             state.reset_grads()
             CB, state.CBt, state.SCB, state.SCBt, coo_tensorB = F.double_quant(B)
             state.CxB, state.SB = F.transform(CB, to_order=formatB)
@@ -179,7 +181,8 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.tensor_states = (None, None)
             ctx.save_for_backward(None, None)
 
-        clone_func = torch.clone if len(output_shape) == 3 else lambda x : x
+        #clone_func = torch.clone if len(output_shape) == 3 else lambda x : x
+        clone_func = torch.clone
         return clone_func(output.view(output_shape))
 
     @staticmethod

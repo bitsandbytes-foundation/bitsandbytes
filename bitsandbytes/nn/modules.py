@@ -56,6 +56,8 @@ class Linear8bitLt(nn.Linear):
         self.state = state
 
     def forward(self, x):
+        self.state.is_training = self.training
+        has_grad = (True if (getattr(self.weight, 'grad', None) is not None) else False)
         out = bnb.matmul(x, self.weight, state=self.state)
 
         if self.bias is not None:
