@@ -51,30 +51,13 @@ class Linear8bit(nn.Linear):
 class Linear8bitLt(nn.Linear):
     def __init__(self, input_features, output_features, bias=True, threshold=0.0):
         super(Linear8bitLt, self).__init__(input_features, output_features, bias)
-        self.CxB = None
-        self.SB = None
-        self.SCB = None
-        self.subB = None
-        self.has_accumulated_gradients = False
-        self.threshold = threshold
+        state = bnb.MatmulLtState()
+        state.threshold = threshold
+        self.state = state
 
     def forward(self, x):
-        has_grad = (True if (getattr(self.weight, 'grad', None) is not None) else False)
-        if has_grad: self.has_accumulated_gradients = True
+        out = bnb.matmul(x, self.weight, state=self.state)
 
-        if self.training and not self.has_accumulated_gradients:
-            self.CxB, self.SB, self.SCB = None, None, None
-            out = bnb.matmul(x, self.weight, threshold=self.threshold)
-            if self.bias is not None:
-                out += self.bias.unsqueeze(0).expand_as(out)
-            return out
-        else:
-            if self.CxB is None:
-                (out, self.CxB, self.SCB, self.subB) = bnb.matmul(x, self.weight, return_CB=True, threshold=self.threshold)
-                self.SB = (self.weight.shape, bnb.functional.get_special_format_str())
-            else:
-                out = bnb.matmul(x, self.weight, CB=(self.CxB, self.SB, self.SCB, self.subB), threshold=self.threshold)
-
-            if self.bias is not None:
-                out += self.bias.unsqueeze(0).expand_as(out)
-            return out
+        if self.bias is not None:
+            out += self.bias.unsqueeze(0).expand_as(out)
+        return out

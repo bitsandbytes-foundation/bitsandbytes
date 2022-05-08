@@ -173,7 +173,7 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
 
 
 n = 1
-k = 10
+k = 2
 dim1 = torch.randint(16,64, size=(n,)).tolist()
 dim2 = torch.randint(32,96, size=(n,)).tolist()
 dim3 = torch.randint(32,96, size=(n,)).tolist()

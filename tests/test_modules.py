@@ -17,7 +17,7 @@ def get_args():
     args.use_8bit_training = 'full'
     return args
 
-def assert_all_approx_close(a, b, atol, rtol, count):
+def assert_all_approx_close(a, b, atol=1e-8, rtol=1e-5, count=10):
     idx = torch.isclose(a, b, rtol, atol)
     sumval = (idx==0).sum().item()
     if sumval > count:
@@ -327,8 +327,9 @@ def test_linear8bit():
 
 
 threshold = [0.0, 3.0]
-values = list(product(threshold))
-names = ['threshold_{0}'.format(*vals) for vals in values]
+#values = list(product(threshold))
+values = threshold
+names = ['threshold_{0}'.format(vals) for vals in values]
 @pytest.mark.parametrize("threshold", values, ids=names)
 def test_linear8bitlt_inference(threshold):
     l1 = bnb.nn.Linear8bitLt(32,64, threshold=threshold).cuda().half()
@@ -338,25 +339,45 @@ def test_linear8bitlt_inference(threshold):
         b1 = torch.randn(16, 8, 32, device='cuda').half()
         o1 = l1(b1)
         if i == 1:
-            assert l1.CxB is not None
-
+            assert l1.state.CxB is not None
 
 def test_linear8bitlt_accumulated_gradient():
-    l1 = bnb.nn.Linear8bitLt(32,64).cuda().half()
-    opt = bnb.optim.Adam8bit(l1.parameters())
+    l1 = torch.nn.Sequential(*[bnb.nn.Linear8bitLt(32,32).cuda().half() for i in range(2)])
+    l2 = torch.nn.Sequential(*[torch.nn.Linear(32,32).cuda().half() for i in range(2)])
+    l2[0].weight = torch.nn.Parameter(l1[0].weight.clone())
+    l2[0].bias = torch.nn.Parameter(l1[0].bias.clone())
+    l2[1].weight = torch.nn.Parameter(l1[1].weight.clone())
+    l2[1].bias = torch.nn.Parameter(l1[1].bias.clone())
+    opt1 = bnb.optim.Adam8bit(l1.parameters(), lr=0.001)
+    opt2 = bnb.optim.Adam8bit(l2.parameters(), lr=0.001)
 
     acc_steps = 10
 
-    for i in range(100):
+
+    for i in range(1000):
         b1 = torch.randn(16, 8, 32, device='cuda').half()
         o1 = l1(b1)
-        loss = o1.mean()
-        loss.backward()
+        o2 = l2(b1)
+        loss1 = o1.mean()
+        loss2 = o2.mean()
+        loss1.backward()
+        loss2.backward()
         if i == 2:
-            assert l1.CxB is not None
+            assert l1[0].state.CxB is not None
+            assert l1[1].state.CxB is not None
 
         if i > 0 and i % acc_steps == 0:
-            opt.step()
-            opt.zero_grad()
+            opt1.step()
+            opt1.zero_grad(True)
+            opt2.step()
+            opt2.zero_grad(True)
+            assert_all_approx_close(l1[0].weight, l2[0].weight, rtol=1.05, atol=0.01, count=2)
+            assert_all_approx_close(l1[1].weight, l2[1].weight, rtol=1.05, atol=0.01, count=2)
+            # we do this copy because otherwise we have small divergences over time that add up
+            l1[0].weight.data.copy_(l2[0].weight.data)
+            l1[1].weight.data.copy_(l2[1].weight.data)
+        else:
+            torch.testing.assert_allclose(l1[0].weight.grad, l2[0].weight.grad)
+            torch.testing.assert_allclose(l1[1].weight.grad, l2[1].weight.grad)
 
 
