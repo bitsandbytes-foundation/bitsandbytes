@@ -23,6 +23,12 @@ import torch.distributed as dist
 Tensor = torch.Tensor
 
 
+def linear8bitlt(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, threshold=6.0) -> Tensor:
+    out = bnb.matmullt(input, weight)
+    if bias is not None:
+        out += bias.unsqueeze(0).expand_as(out)
+    return out
+
 def linear8bit(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None, matmul_func=None) -> Tensor:
     if matmul_func:
         out = matmul_func(input, weight.t())

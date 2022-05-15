@@ -12,13 +12,22 @@ lib.get_context.restype = ct.c_void_p
 lib.get_cusparse.restype = ct.c_void_p
 name2qmap = {}
 
-def get_transform_func(dtype, orderA, orderOut, transpose=False):
-    name = f'ctransform_{(8 if dtype == torch.int8 else 32)}_{orderA}_to_{orderOut}_{"t" if transpose else "n"}'
-    if not hasattr(lib, name):
-        print(name)
-        raise ValueError(f'Transform function not supported: {orderA} to {orderOut} for data type {dtype} and transpose={transpose}')
-    else:
-        return getattr(lib, name)
+class GlobalData(object):
+    _instance = None
+
+    def __init__(self):
+        raise RuntimeError('Call get_instance() instead')
+
+    def initialize(self):
+        self.data = {}
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls.__new__(cls)
+            cls._instance.initialize()
+        return cls._instance
+
 
 def get_transform_buffer(shape, dtype, device, to_order, from_order='row', transpose=False):
     #init_func = torch.empty
@@ -876,29 +885,6 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
         return xq, (minA.float(), scale.float())
     else: return None
 
-def vectorwise_dequant(xq, max1, quant_type='vector'):
-    if quant_type == 'vector':
-        x = (xq/C*max1).to(torch.float32)
-        return x
-    else: return None
-
-def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
-    if quant_type == 'linear':
-        norm = S1*S2/(C*C)
-        # double cast needed to prevent overflows
-        return (xq.float()*norm).to(dtype)
-    elif quant_type in ['truncated-vector', 'vector']:
-        x = xq.float()
-        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
-        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
-        if len(S1.shape) == 2:
-            x *= S1/C
-        else:
-            x *= S1/C
-        x *= S2/C
-        return x.to(dtype)
-    else: return None
-
 
 def igemmlt(A, B, SA, SB, out=None, Sout=None, row_scale=None, dtype=torch.int32):
     shapeA = SA[0]
@@ -1340,3 +1326,116 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     #else: assertion error
 
     return out
+
+
+
+C = 127.0
+
+def vectorwise_quant(x, dim=1, quant_type='vector'):
+    if quant_type == 'linear':
+        max1 = torch.abs(x).max().float()
+        xq = torch.round(x/max1*127).to(torch.int8)
+        return xq, max1
+    elif quant_type in ['vector', 'row']:
+        max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
+        xq = torch.round(x/max1*C).to(torch.int8)
+        return xq, max1
+    elif quant_type == 'zeropoint':
+        dtype = x.dtype
+        x = x.float()
+        dyna = x.max() - x.min()
+        if dyna == 0: dyna = 1
+        qx = 255./dyna
+        minx = x.min()
+        zpx = torch.round(minx* qx)
+        x = torch.round(qx*x - zpx) + zpx
+        return x, qx
+    elif quant_type in ['vector-zeropoint', 'row-zeropoint']:
+        dtype = x.dtype
+        x = x.float()
+        dyna = (torch.amax(x, dim=dim, keepdim=True) - torch.amin(x, dim=dim, keepdim=True))
+        dyna[dyna==0] = 1
+        qx = 255./dyna
+        minx = torch.amin(x, dim=dim, keepdim=True)
+        zpx = torch.round(minx* qx)
+        x = torch.round(qx*x - zpx) + zpx
+        return x, qx
+    elif quant_type == 'truncated-vector':
+        with torch.no_grad():
+            absx = torch.abs(x)
+            max1 = torch.amax(absx, dim=dim, keepdim=True)
+            max1 = max1*0.7
+            idx = (absx > max1.expand_as(absx))
+            sign = torch.sign(x[idx])
+            x[idx] = max1.expand_as(absx)[idx]*sign
+            xq = torch.round(x/max1*C).to(torch.int8)
+        return xq, max1
+    else: return None
+
+def vectorwise_dequant(xq, max1, quant_type='vector'):
+    if quant_type == 'vector':
+        x = (xq/C*max1).to(torch.float32)
+        return x
+    else: return None
+
+def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type='vector'):
+    if quant_type == 'linear':
+        norm = S1*S2/(C*C)
+        # double cast needed to prevent overflows
+        return (xq.float()*norm).to(dtype)
+    elif quant_type == 'zeropoint':
+        norm = 1.0/(S1*S2)
+        return (xq.float()*norm).to(dtype)
+    elif quant_type == 'row-zeropoint':
+        norm = 1.0/(S1*S2)
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= norm
+        else:
+            x *= norm
+        return x.to(dtype)
+    elif quant_type == 'vector-zeropoint':
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= 1.0/S1
+        else:
+            x *= 1.0/S1
+        x *= 1.0/S2.t()
+        return x.to(dtype)
+    elif quant_type == 'row':
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= S1*S2/(C*C)
+        else:
+            x *= S1*S2/(C*C)
+        return x.to(dtype)
+    elif quant_type in ['truncated-vector', 'vector']:
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2: S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2: S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= S1/C
+        else:
+            x *= S1/C
+        x *= S2/C
+        return x.to(dtype)
+    else: return None
+
+
+def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
+    offset = B.float().t().sum(0)*(SA[0]+SA[1])
+    x = xq.float()
+    if len(xq.shape) == 2 and len(SB.shape) == 3: SB = SB.squeeze(0)
+    if len(SB.shape) == 2:
+        x *= SB.t()/127
+    else:
+        x *= SB/127
+    x *= SA[1]/127
+    x +=offset
+    return x.to(dtype)
