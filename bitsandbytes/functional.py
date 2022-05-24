@@ -12,6 +12,14 @@ lib.get_context.restype = ct.c_void_p
 lib.get_cusparse.restype = ct.c_void_p
 name2qmap = {}
 
+def get_transform_func(dtype, orderA, orderOut, transpose=False):
+    name = f'ctransform_{(8 if dtype == torch.int8 else 32)}_{orderA}_to_{orderOut}_{"t" if transpose else "n"}'
+    if not hasattr(lib, name):
+        print(name)
+        raise ValueError(f'Transform function not supported: {orderA} to {orderOut} for data type {dtype} and transpose={transpose}')
+    else:
+        return getattr(lib, name)
+
 class GlobalData(object):
     _instance = None
 

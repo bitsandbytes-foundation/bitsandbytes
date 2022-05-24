@@ -1622,7 +1622,15 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
 
 batch_size = 1
 seqdim = 2048
-values = [(batch_size, seqdim, 4*1024, 3*4*1024),(batch_size, seqdim, 5120, 3*5120),(batch_size, seqdim, 12*1024, 4*12*1024)]
+values = []
+values.append((batch_size, seqdim, 768, 4*768))
+values.append((batch_size, seqdim, 1024, 4*1024))
+values.append((batch_size, seqdim, 1536, 4*1536))
+values.append((batch_size, seqdim, 2048, 4*2048))
+values.append((batch_size, seqdim, 2560, 4*2560))
+values.append((batch_size, seqdim, 4096, 4*4096))
+values.append((batch_size, seqdim, 5140, 4*5140))
+values.append((batch_size, seqdim, 12288, 4*12288))
 names = ['batch_{0}_seq_{1}_model_{2}_hidden_{3}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
@@ -1635,7 +1643,10 @@ def test_bench_matmul(batch, seq, model, hidden):
     linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
     linear8bit.eval()
 
-    linearMixedBit = bnb.nn.Linear8bitLt(model, hidden, False, threshold=4.5).cuda().half()
+    outliers = torch.randint(0, model, size=(5,)).cuda()
+    A[:, :, outliers] = 8.0
+
+    linearMixedBit = bnb.nn.Linear8bitLt(model, hidden, False, threshold=6.0).cuda().half()
     linearMixedBit.eval()
 
     # warmup
@@ -1658,6 +1669,46 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.cuda.synchronize()
     print(f'bnb lt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
 
+    CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=0.0)
+    C32A, SA = F.transform(CA, 'col32')
+    CB, CBt, SCB, SCBt, coo_tensorB = F.double_quant(B)
+    CxB, SB = F.transform(CB, to_order=formatB)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
+    torch.cuda.synchronize()
+    print(f'igemmlt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
+
+    BA, statsB = F.vectorwise_quant(B, dim=1)
+    CxB, SB = F.nvidia_transform(CB, to_order=formatB)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        A2 = A.view(-1, A.shape[-1]).contiguous()
+        CA, statsA = F.vectorwise_quant(A2, dim=1)
+        C32A, SA = F.nvidia_transform(CA, 'col32')
+        out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
+        Cout, Sout = F.nvidia_transform(out32, 'row', state=Sout32)
+        F.vectorwise_mm_dequant(Cout, statsA, statsB.t())
+    torch.cuda.synchronize()
+    print(f'vector pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
+
+    BA, statsB = F.vectorwise_quant(B, dim=1, quant_type='linear')
+    CxB, SB = F.nvidia_transform(CB, to_order=formatB)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        A2 = A.view(-1, A.shape[-1]).contiguous()
+        CA, statsA = F.vectorwise_quant(A2, dim=1, quant_type='linear')
+        C32A, SA = F.nvidia_transform(CA, 'col32')
+        out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
+        Cout, Sout = F.nvidia_transform(out32, 'row', state=Sout32)
+        out = Cout*statsB*statsA*(1.0/(127*127))
+    torch.cuda.synchronize()
+    print(f'linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
+
+    linear8bit(A)
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(100):
@@ -1665,6 +1716,8 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.cuda.synchronize()
     print(f'bnb linear8bitlt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s')
 
+
+    linearMixedBit(A)
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(100):
@@ -1762,7 +1815,8 @@ def test_zp():
         qx = 254./dyna
         minx = x.min()
         #zpx = torch.round(minx* qx)
-        zpx = 127 - torch.round(x.max()* qx)
+        #zpx = 127 - torch.round(x.max()* qx)
+        zpx = torch.round(x.min()* qx) - 127
         x = (qx*x) + zpx
         return x, qx, zpx
     batch = 2
@@ -1782,13 +1836,17 @@ def test_zp():
     B = B.float()
 
     C1 = torch.matmul(A, B)
-    C3 = bnb.matmul(A, B)
+    C3 = bnb.matmul(A.half(), B.t().contiguous().half())
 
     zp = 1
     #C2 = torch.matmul(A-zp, B)
     #C2 += B.sum(0).view(1, -1)*zp
-    C2 = torch.matmul(A, B+zp)
+    C2 = torch.matmul(A, B-zp)
     C2 -= A.sum(1).view(-1, 1)*zp
+
+    ca, cqa, cza = quant_zp(A)
+    print(ca.min(), ca.max())
+    print((ca-cza).min(), (ca-cza).max())
 
     zp = 1
     scale = 2.0

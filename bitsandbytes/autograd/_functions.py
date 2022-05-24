@@ -118,7 +118,6 @@ class MatmulLtState:
         self.SBt = None
         self.CBt = None
 
-        self.subB = None
 
 
 class MatMul8bitLt(torch.autograd.Function):
@@ -142,11 +141,11 @@ class MatMul8bitLt(torch.autograd.Function):
         idx = None
 
         if state.threshold > 0.0 and coo_tensorA is not None:
-            pass
             idx = torch.unique(coo_tensorA.colidx).long()
             CA[:, idx] = 0
             CAt[:, idx] = 0
             subA = A[:, idx]
+            state.subB = B[:, idx].t().contiguous()
         else:
             subA = None
 
@@ -165,7 +164,7 @@ class MatMul8bitLt(torch.autograd.Function):
         output = F.mm_dequant(out32, Sout32, SCA, state.SCB)
 
         if state.threshold > 0.0 and coo_tensorA is not None:
-            output += torch.matmul(subA, B[:, idx].t())
+            output += torch.matmul(subA, state.subB)
 
         ctx.state = state
 
