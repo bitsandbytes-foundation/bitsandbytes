@@ -1,8 +1,8 @@
 MKFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 ROOT_DIR := $(patsubst %/,%,$(dir $(MKFILE_PATH)))
 
-#CUDA_HOME :=/sw/cuda/11.5.1/
-CUDA_HOME :=/usr/local/cuda-11.5/
+CUDA_HOME :=/sw/cuda/11.5.1/
+#CUDA_HOME :=/usr/local/cuda-11.5/
 GPP:= /usr/bin/g++
 NVCC := $(CUDA_HOME)/bin/nvcc
 ###########################################
@@ -18,14 +18,14 @@ CUTLASS :=$(ROOT_DIR)/dependencies/cutlass
 
 INCLUDE :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/csrc -I $(CONDA_PREFIX)/include -I $(ROOT_DIR)/dependencies/cub -I $(CUTLASS)/include -I $(CUTLASS)/tools/util/include/ -I $(CUTLASS)/include/cutlass/gemm/kernel
 
-LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcuda -lcublas -lcublasLt -lcurand -lcusparse -L $(CONDA_PREFIX)/lib
+LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcublas -lcublasLt -lcurand -lcusparse -L $(CONDA_PREFIX)/lib
 
 # NVIDIA NVCC compilation flags
 #COMPUTE_CAPABILITY := -gencode arch=compute_50,code=sm_50 # Maxwell
 #COMPUTE_CAPABILITY += -gencode arch=compute_52,code=sm_52 # Maxwell
 #COMPUTE_CAPABILITY := -gencode arch=compute_70,code=sm_70 # Volta
 COMPUTE_CAPABILITY := -gencode arch=compute_75,code=sm_75 # Turing
-#COMPUTE_CAPABILITY := -gencode arch=compute_86,code=sm_86 # Turing
+COMPUTE_CAPABILITY := -gencode arch=compute_86,code=sm_86 # Turing
 
 all: $(ROOT_DIR)/dependencies/cub $(BUILD_DIR) $(CUTLASS)
 	echo $(CONDA_PREFIX)

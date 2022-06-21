@@ -187,11 +187,12 @@ req_grad_str = ['FF', 'TF', 'TT', 'FT']
 transpose = [(False, True), (False, False)]
 str_transpose = ['NT', 'NN']
 dtype = [torch.float16]
-values = list(product(dim1,dim2,dim3,dim4,funcs, dtype, req_grad, transpose, decomp))
-str_values = list(product(dim1,dim2,dim3,dim4,str_funcs, dtype, req_grad_str, str_transpose, decomp))
-names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_func_{4}_dtype_{5}_requires_grad_{6}_transpose_{7}_decomp_{8}'.format(*vals) for vals in str_values]
-@pytest.mark.parametrize("dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp", values, ids=names)
-def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp):
+has_fp16_weights = [True, False]
+values = list(product(dim1,dim2,dim3,dim4,funcs, dtype, req_grad, transpose, decomp, has_fp16_weights))
+str_values = list(product(dim1,dim2,dim3,dim4,str_funcs, dtype, req_grad_str, str_transpose, decomp, has_fp16_weights))
+names = ['dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_func_{4}_dtype_{5}_requires_grad_{6}_transpose_{7}_decomp_{8}_has_fp16_weights_{9}'.format(*vals) for vals in str_values]
+@pytest.mark.parametrize("dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights", values, ids=names)
+def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights):
     for i in range(k):
 
         # normal multiply
@@ -202,46 +203,59 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, dec
             B = torch.randn(size=dimB, device='cuda', requires_grad=req_grad[1], dtype=dtype)
             target = torch.randn(size=(dim2, dim4), device='cuda', requires_grad=req_grad[1], dtype=dtype)
             torch.nn.init.xavier_uniform_(B)
+            B2 = B.clone()
+
+            state = bnb.MatmulLtState()
+            state.threshold = decomp
+            state.has_fp16_weights = has_fp16_weights
+            if not has_fp16_weights:
+                if not transpose[0] and not transpose[1]: B2 = B2.t().contiguous()
+                CB, CBt, state.SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B2)
+                state.CxB, state.SB = bnb.functional.transform(CB, to_order=state.formatB)
+                B2 = state.CxB
 
             if not transpose[0] and transpose[1]:
                 out_torch = funcs[0](A, B.t())
-                out_bnb = funcs[1](A, B, threshold=decomp)
+                out_bnb = funcs[1](A, B2, state=state)
             elif not transpose[0] and not transpose[1]:
                 out_torch = funcs[0](A, B)
-                out_bnb = funcs[1](A, B.t(), threshold=decomp)
+                out_bnb = funcs[1](A, B2.t(), state=state)
 
             n = out_bnb.numel()
+            err = torch.abs(out_bnb-out_torch).mean().item()
+            print(f'abs error {err:.4f}')
             idx = torch.isclose(out_bnb, out_torch, atol=0.01, rtol=0.1)
             assert (idx==0).sum().item() < n*0.0175
             idx = torch.isclose(out_bnb, out_torch, atol=0.035, rtol=0.2)
             assert (idx==0).sum().item() < n*0.001
 
-            if any(req_grad):
-                out_bnb.data.copy_(out_torch)
-                torch.cuda.synchronize()
-                loss_bnb = torch.nn.functional.mse_loss(out_bnb, target).mean()
-                loss_bnb.backward()
-                gradA1 = A.grad
-                gradB1 = B.grad
-                A.grad = None
-                B.grad = None
+            if has_fp16_weights:
+                if any(req_grad):
+                    out_bnb.data.copy_(out_torch)
+                    torch.cuda.synchronize()
+                    loss_bnb = torch.nn.functional.mse_loss(out_bnb, target).mean()
+                    loss_bnb.backward()
+                    gradA1 = A.grad
+                    gradB1 = B.grad
+                    A.grad = None
+                    B.grad = None
 
-                loss_torch = torch.nn.functional.mse_loss(out_torch, target).mean()
-                loss_torch.backward()
-                gradA2 = A.grad
-                gradB2 = B.grad
-                A.grad = None
-                B.grad = None
+                    loss_torch = torch.nn.functional.mse_loss(out_torch, target).mean()
+                    loss_torch.backward()
+                    gradA2 = A.grad
+                    gradB2 = B.grad
+                    A.grad = None
+                    B.grad = None
 
-            if req_grad[0]:
-                torch.testing.assert_allclose(gradA1, gradA2, atol=0.015, rtol=0.1)
-            if req_grad[1]:
-                n = gradB1.numel()
-                assert torch.abs(gradB1).sum() > 0.0
-                assert torch.abs(gradB2).sum() > 0.0
-                idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
-                assert (idx==0).sum().item() < n*0.1
-                idx = torch.isclose(gradB1, gradB2, atol=0.10, rtol=0.3)
-                assert (idx==0).sum().item() < n*0.02
-                torch.testing.assert_allclose(gradB1, gradB2, atol=0.18, rtol=0.3)
+                if req_grad[0]:
+                    torch.testing.assert_allclose(gradA1, gradA2, atol=0.015, rtol=0.1)
+                if req_grad[1]:
+                    n = gradB1.numel()
+                    assert torch.abs(gradB1).sum() > 0.0
+                    assert torch.abs(gradB2).sum() > 0.0
+                    idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
+                    assert (idx==0).sum().item() < n*0.1
+                    idx = torch.isclose(gradB1, gradB2, atol=0.10, rtol=0.3)
+                    assert (idx==0).sum().item() < n*0.02
+                    torch.testing.assert_allclose(gradB1, gradB2, atol=0.18, rtol=0.3)
 

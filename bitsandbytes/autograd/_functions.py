@@ -1,4 +1,5 @@
 import torch
+import bitsandbytes as bnb
 import bitsandbytes.functional as F
 
 from dataclasses import dataclass
@@ -107,6 +108,8 @@ class MatmulLtState:
     has_accumulated_gradients = False
     threshold = 0.0
     is_training = True
+    has_fp16_weights = True
+    formatB = F.get_special_format_str()
 
 
     def reset_grads(self):
@@ -126,16 +129,30 @@ class MatMul8bitLt(torch.autograd.Function):
     def forward(ctx, A, B, out=None, state=MatmulLtState()):
         requires_gradA = A.requires_grad
         requires_gradB = B.requires_grad
-        formatB = F.get_special_format_str()
+        formatB = state.formatB
         input_shape = A.shape
 
-        has_grad = (True if (getattr(B, 'grad', None) is not None) else False)
+
+        if state.has_fp16_weights:
+            has_grad = (True if (getattr(B, 'grad', None) is not None) else False)
+            is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
+            if is_transposed: B = B.contiguous()
+
+            if (state.is_training and not has_grad) or state.CxB is None:
+                state.reset_grads()
+                CB, state.CBt, state.SCB, state.SCBt, coo_tensorB = F.double_quant(B)
+                state.CxB, state.SB = F.transform(CB, to_order=formatB)
+                subB = None
+        else:
+            has_grad = False
+
+        Bshape = state.SB[0]
 
         if len(A.shape) == 3:
-            output_shape = (A.shape[0], A.shape[1], B.shape[0])
+            output_shape = (A.shape[0], A.shape[1], Bshape[0])
             A = A.view(-1, A.shape[-1]).contiguous()
         else:
-            output_shape = (A.shape[0], B.shape[0])
+            output_shape = (A.shape[0], Bshape[0])
 
         CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=state.threshold)
         idx = None
@@ -145,20 +162,23 @@ class MatMul8bitLt(torch.autograd.Function):
             CA[:, idx] = 0
             CAt[:, idx] = 0
             subA = A[:, idx]
-            state.subB = B[:, idx].t().contiguous()
+            if state.has_fp16_weights:
+                state.subB = B[:, idx].t().contiguous()
+                print(state.subB)
+                sub2 = state.CxB
+                # 
+                rowmajor_B = bnb.functional.nvidia_transform(state.CxB, to_order='row', state=state.SB)
+                print('major')
+                sub2= rowmajor_B[:Bshape[0], idx].t().contiguous().half()*state.SCB.half()/127.0
+                print(sub2)
+                print('='*80)
+            else:
+                # B is transposed by default
+                state.subB = state.CxB[:Bshape[0], idx].t().contiguous().half()*state.SCB.half()/127.0
         else:
             subA = None
 
         C32A, SA = F.transform(CA, 'col32')
-
-        is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
-        if is_transposed: B = B.contiguous()
-
-        if (state.is_training and not has_grad) or state.CxB is None:
-            state.reset_grads()
-            CB, state.CBt, state.SCB, state.SCBt, coo_tensorB = F.double_quant(B)
-            state.CxB, state.SB = F.transform(CB, to_order=formatB)
-            subB = None
 
         out32, Sout32 = F.igemmlt(C32A, state.CxB, SA, state.SB)
         output = F.mm_dequant(out32, Sout32, SCA, state.SCB)
@@ -191,6 +211,7 @@ class MatMul8bitLt(torch.autograd.Function):
         SCAt, idx = ctx.tensor_states
         formatB = ctx.formatB
         state = ctx.state
+        assert state.has_fp16_weights, 'Backprop only supported for fp16 weights.'
 
         if len(grad_output.shape) == 3:
             grad_output = grad_output.view(-1, grad_output.shape[-1]).contiguous()

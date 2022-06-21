@@ -525,11 +525,10 @@ out_order = ['col', 'row', 'col32']
 transpose = [False]
 dims = [2, 3]
 values = list(product(dim1,dim2,dim3, dims,dtype, a_order, out_order, transpose))
-names = ['dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_{7}'.format(*vals) for vals in values]
+
+names = ['dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_transpose_{7}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose", values, ids=names)
 def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
-    if dims == 3 and out_order != 'col32': return
-    if dtype == torch.int32 and out_order != 'col32': return
     func = F.get_transform_func(dtype, orderA, orderOut, transpose)
 
     if dims == 2:
@@ -574,7 +573,6 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
     if orderOut == 'col32':
         out2, S = F.nvidia_transform(out, from_order=orderOut, to_order='row', state=S)
         torch.testing.assert_allclose(A, out2)
-
 
 
 n = 1

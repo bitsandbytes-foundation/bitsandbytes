@@ -327,7 +327,6 @@ def test_linear8bit():
 
 
 threshold = [0.0, 3.0]
-#values = list(product(threshold))
 values = threshold
 names = ['threshold_{0}'.format(vals) for vals in values]
 @pytest.mark.parametrize("threshold", values, ids=names)
@@ -381,3 +380,17 @@ def test_linear8bitlt_accumulated_gradient():
             torch.testing.assert_allclose(l1[1].weight.grad, l2[1].weight.grad)
 
 
+threshold = [0.0, 3.0]
+values = threshold
+names = ['threshold_{0}'.format(vals) for vals in values]
+@pytest.mark.parametrize("threshold", values, ids=names)
+def test_linear8bitlt_no_fp16_weights(threshold):
+    l1 = bnb.nn.Linear8bitLt(32,64, threshold=threshold, has_fp16_weights=False).cuda().half()
+
+    assert l1.weight.dtype == torch.int8
+
+    l1.eval()
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        o1 = l1(b1)
+        assert o1.dtype == torch.float16

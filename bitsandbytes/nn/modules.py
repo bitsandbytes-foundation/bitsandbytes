@@ -1,14 +1,16 @@
 import torch
 import bitsandbytes as bnb
 
-from typing import Optional
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict
 
-from torch import Tensor
+from torch import Tensor, device, dtype
 from torch import nn
 from torch.nn.parameter import Parameter
 import torch.nn.functional as F
 
 from bitsandbytes.optim import GlobalOptimManager
+
+T = TypeVar('T', bound='torch.nn.Module')
 
 class StableEmbedding(torch.nn.Embedding):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
@@ -48,22 +50,61 @@ class Linear8bit(nn.Linear):
     def forward(self, x):
         return bnb.nn.functional.linear8bit(x, self.weight, self.bias)
 
+
 class Linear8bitLt(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, threshold=0.0, index=None):
+    def __init__(self, input_features, output_features, bias=True, has_fp16_weights=True, threshold=0.0, index=None):
         super(Linear8bitLt, self).__init__(input_features, output_features, bias)
-        state = bnb.MatmulLtState()
-        state.threshold = threshold
-        self.state = state
+        self.state = bnb.MatmulLtState()
         self.index=index
+
+        self.state.threshold = threshold
+        self.state.has_fp16_weights = has_fp16_weights
 
     def forward(self, x):
         self.state.is_training = self.training
-        has_grad = (True if (getattr(self.weight, 'grad', None) is not None) else False)
         out = bnb.matmul(x, self.weight, state=self.state)
 
         if self.bias is not None:
             out += self.bias.unsqueeze(0).expand_as(out)
         return out
+
+    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
+        r"""Override to to function to force weights to stay on the CPU.
+        """
+        if device is None: device = 0
+        self.required_device = torch.device('cuda', device)
+        if self.state.has_fp16_weights: super().cuda()
+        else:
+            B = self.weight.half().cuda()
+            CB, CBt, self.state.SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
+            self.state.CxB, self.state.SB = bnb.functional.transform(CB, to_order=self.state.formatB)
+            del self.weight
+            del B
+            # we reassign the weight for torch.save/load to work
+            self.weight = self.state.CxB
+            self.bias.data = self.bias.data.cuda()
+        return self
+
+    @overload
+    def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
+           non_blocking: bool = ...) -> T:
+        ...
+
+    @overload
+    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T:
+        ...
+
+    @overload
+    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T:
+        ...
+
+    def to(self, *args, **kwargs):
+        r"""Override to to function to force weights to stay on the CPU.
+        """
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        #self.bias.data = self.bias.data.to(*args, **kwargs)
+        self.bias.data = self.bias.data.to(device, dtype, non_blocking)
+        return
 
 
 class Linear8bit(nn.Linear):
