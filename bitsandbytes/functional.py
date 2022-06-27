@@ -1212,6 +1212,10 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, 
 
 def get_special_format_str():
     major, minor = torch.cuda.get_device_capability()
+    if major < 7:
+        print(f'Device with CUDA capability of {major} not supported for 8-bit matmul. Device has no tensor cores!')
+        assert major >= 7
+
     if major == 7: return 'col_turing'
     elif major == 8: return 'col_ampere'
     else: return 'col_turing'
@@ -1346,7 +1350,7 @@ def vectorwise_quant(x, dim=1, quant_type='vector'):
         return xq, max1
     elif quant_type in ['vector', 'row']:
         max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
-        xq = torch.round(x/max1*C).to(torch.int8)
+        xq = torch.round(x*(C/max1)).to(torch.int8)
         return xq, max1
     elif quant_type == 'zeropoint':
         dtype = x.dtype

@@ -164,17 +164,17 @@ class MatMul8bitLt(torch.autograd.Function):
             subA = A[:, idx]
             if state.has_fp16_weights:
                 state.subB = B[:, idx].t().contiguous()
-                print(state.subB)
-                sub2 = state.CxB
-                # 
-                rowmajor_B = bnb.functional.nvidia_transform(state.CxB, to_order='row', state=state.SB)
-                print('major')
-                sub2= rowmajor_B[:Bshape[0], idx].t().contiguous().half()*state.SCB.half()/127.0
-                print(sub2)
-                print('='*80)
             else:
-                # B is transposed by default
-                state.subB = state.CxB[:Bshape[0], idx].t().contiguous().half()*state.SCB.half()/127.0
+                # B is iun col_turing or col_ampere order which cannot converted back to row
+                # so what we do is:
+                # 1. multiply by identity matrix -> col32 int32 output
+                # 2. apply mm_dequant ->  row fp16 output
+                # 3. copy the outlier columns to subB
+                identity = torch.eye(state.SB[0][1], device=A.device, dtype=CA.dtype)
+                identity32, SI = bnb.functional.transform(identity, to_order='col32')
+                out32, Sout32 = F.igemmlt(identity32, state.CxB, SI, state.SB)
+                B2 = F.mm_dequant(out32, Sout32, torch.ones((state.SB[0][1],), device=A.device)*127.0, state.SCB)
+                state.subB = B2[idx, :].contiguous()
         else:
             subA = None
 

@@ -529,6 +529,8 @@ values = list(product(dim1,dim2,dim3, dims,dtype, a_order, out_order, transpose)
 names = ['dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_transpose_{7}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose", values, ids=names)
 def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
+    if dims == 3 and out_order != 'col32': return
+    if dtype == torch.int32 and out_order != 'col32': return
     func = F.get_transform_func(dtype, orderA, orderOut, transpose)
 
     if dims == 2:
@@ -988,16 +990,16 @@ def test_double_quant(dim1, dim2):
 
 
         n = CAt.numel()
-        num_not_close_rows = (torch.isclose(CA, out_row1)==0).sum().item()
-        num_not_close_cols = (torch.isclose(CAt, out_col1)==0).sum().item()
+        num_not_close_rows = (torch.isclose(CA, out_row1, atol=1)==0).sum().item()
+        num_not_close_cols = (torch.isclose(CAt, out_col1, atol=1)==0).sum().item()
 
         # allow for 1:500 error due to rounding differences
         min_error = 1/500
         if num_not_close_cols > (min_error*n):
-            print(f'Min error exceeded {num_not_close_cols} elements are different')
+            print(f'Min error exceeded {num_not_close_cols} elements are different. Error: {num_not_close_cols/n:.4f}')
             assert False
         if num_not_close_rows > (min_error*n):
-            print(f'Min error exceeded {num_not_close_rows} elements are different')
+            print(f'Min error exceeded {num_not_close_rows} elements are different. Error: {num_not_close_rows/n:.4f}')
             assert False
 
         torch.testing.assert_allclose(Srow.flatten(), statsA)
@@ -1511,7 +1513,8 @@ n = 2
 #dim1 = torch.randint(1,1*1024, size=(n,)).tolist()
 #dim2 = torch.randint(1,4*1024, size=(n,)).tolist()
 dim1 = [1*2048]
-dim2 = [12288]
+#dim2 = [12288]
+dim2 = [2048]
 #dim1 = [2]
 #dim2 = [2]
 dtype = [torch.int8]
@@ -1622,13 +1625,13 @@ batch_size = 1
 seqdim = 2048
 values = []
 values.append((batch_size, seqdim, 768, 4*768))
-values.append((batch_size, seqdim, 1024, 4*1024))
-values.append((batch_size, seqdim, 1536, 4*1536))
-values.append((batch_size, seqdim, 2048, 4*2048))
-values.append((batch_size, seqdim, 2560, 4*2560))
-values.append((batch_size, seqdim, 4096, 4*4096))
-values.append((batch_size, seqdim, 5140, 4*5140))
-values.append((batch_size, seqdim, 12288, 4*12288))
+#values.append((batch_size, seqdim, 1024, 4*1024))
+#values.append((batch_size, seqdim, 1536, 4*1536))
+#values.append((batch_size, seqdim, 2048, 4*2048))
+#values.append((batch_size, seqdim, 2560, 4*2560))
+#values.append((batch_size, seqdim, 4096, 4*4096))
+#values.append((batch_size, seqdim, 5140, 4*5140))
+#values.append((batch_size, seqdim, 12288, 4*12288))
 names = ['batch_{0}_seq_{1}_model_{2}_hidden_{3}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
