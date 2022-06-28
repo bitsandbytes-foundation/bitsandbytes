@@ -1215,6 +1215,34 @@ def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
 
         torch.testing.assert_allclose(out1, out2)
 
+n = 2
+#dim1 = torch.randint(2,1024, size=(n,)).tolist()
+#dim2 = torch.randint(2,1024, size=(n,)).tolist()
+dim1 = [5]
+dim2 = [5]
+
+dtype = [torch.int8]
+#a_order = ['col_turing', 'col_ampere']
+a_order = ['col_turing']
+out_order = ['row']
+values = list(product(dim1,dim2,dtype, a_order, out_order))
+names = ['dim1_{0}_dim2_{1}_dtype_{2}_orderA_{3}_orderOut_{4}'.format(*vals) for vals in values]
+@pytest.mark.parametrize("dim1, dim2, dtype, orderA, orderOut", values, ids=names)
+def test_transform_to_row(dim1, dim2, dtype, orderA, orderOut):
+    for i in range(1):
+        A = torch.randint(-127, 127, size=(dim1, dim2), device='cuda').to(dtype)
+
+        out2, S2 = F.transform(A, to_order=orderA)
+        A2, S3 = F.transform(out2, from_order=orderA, to_order='row', state=S2)
+
+        print('')
+        print(A)
+        print(out2)
+        print(A2)
+
+
+        #torch.testing.assert_allclose(A, A2)
+
 
 
 

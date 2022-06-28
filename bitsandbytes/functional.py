@@ -1228,8 +1228,6 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
     else: from_order = state[1]
     if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1], transpose)
     else: new_state = (state[0], to_order) # (shape, order)
-    assert from_order == 'row'
-    assert to_order in ['col32', 'col_turing', 'col_ampere']
 
     shape = state[0]
     if len(shape) == 2:
@@ -1256,6 +1254,16 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
             lib.ctransform_row2ampereT(get_ptr(A), get_ptr(out), dim1, dim2)
         else:
             lib.ctransform_row2ampere(get_ptr(A), get_ptr(out), dim1, dim2)
+    elif to_order == 'row':
+        if from_order == 'col_turing':
+            lib.ctransform_turing2row(get_ptr(A), get_ptr(out), dim1, dim2)
+        elif from_order == 'col_ampere':
+            lib.ctransform_ampere2row(get_ptr(A), get_ptr(out), dim1, dim2)
+    else:
+        raise NotImplementedError(f'Transform function not implemented: From {from_order} to {to_order}')
+
+
+
 
     return out, new_state
 

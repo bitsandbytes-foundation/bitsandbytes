@@ -105,6 +105,9 @@ void transform_row2turingT(char * A, char *out, int rows, int cols){ transformRo
 void transform_row2ampere(char * A, char *out, int rows, int cols){ transformRowToFormat<COL_AMPERE, 0>(A, out, rows, cols); }
 void transform_row2ampereT(char * A, char *out, int rows, int cols){ transformRowToFormat<COL_AMPERE, 1>(A, out, rows, cols); }
 
+void transform_turing2row(char * A, char *out, int rows, int cols){ transformFormatToRow<COL_TURING, 0>(A, out, rows, cols); }
+void transform_ampere2row(char * A, char *out, int rows, int cols){ transformFormatToRow<COL_AMPERE, 0>(A, out, rows, cols); }
+
  void igemmlt_turing_32(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
 	{ igemmlt<COL_TURING, 32, 0>(ltHandle, m, n, k, A, B, C, row_scale, lda, ldb, ldc); }
 
@@ -264,6 +267,13 @@ extern "C"
 
 	void ctransform_row2ampereT(char * A, char *out, int rows, int cols)
 	{ transform_row2ampereT(A, out, rows, cols); }
+
+
+	void ctransform_ampere2row(char * A, char *out, int rows, int cols)
+	{ transform_ampere2row(A, out, rows, cols); }
+
+	void ctransform_turing2row(char * A, char *out, int rows, int cols)
+	{ transform_turing2row(A, out, rows, cols); }
 
 	void cspmm_coo(ContextCusparse *context, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C, bool transposed_B)
   { spmm_coo((cusparseHandle_t) context->m_handle, A_rowidx, A_colidx, A_vals, A_nnz, A_rows, A_cols, B_cols, ldb, B, ldc, C, transposed_B); }
