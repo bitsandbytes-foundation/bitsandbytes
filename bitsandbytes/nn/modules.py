@@ -7,7 +7,6 @@ import torch
 from typing import Optional
 
 from torch import Tensor
-from torch.nn.parameter import Parameter
 import torch.nn.functional as F
 
 from bitsandbytes.optim import GlobalOptimManager

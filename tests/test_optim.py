@@ -7,7 +7,6 @@ import time
 import shutil
 import uuid
 import pytest
-import ctypes
 import torch
 import bitsandbytes as bnb
 import bitsandbytes.functional as F

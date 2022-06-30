@@ -6,10 +6,6 @@ import pytest
 import torch
 import bitsandbytes as bnb
 
-from itertools import product
-
-from bitsandbytes import functional as F
-
 
 @pytest.mark.parametrize("embcls", [bnb.nn.Embedding, bnb.nn.StableEmbedding], ids=['Embedding', 'StableEmbedding'])
 def test_embeddings(embcls):
