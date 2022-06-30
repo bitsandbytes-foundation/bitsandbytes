@@ -2,13 +2,13 @@
 #   
 # This source code is licensed under the MIT license found in the 
 # LICENSE file in the root directory of this source tree.
+import ctypes as ct
 import os
 import random
-import math
-import ctypes as ct
+from typing import Tuple
+
 import torch
 from torch import Tensor
-from typing import Tuple
 
 lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + '/libbitsandbytes.so')
 name2qmap = {}

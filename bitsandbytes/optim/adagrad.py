@@ -2,10 +2,7 @@
 #   
 # This source code is licensed under the MIT license found in the 
 # LICENSE file in the root directory of this source tree.
-import torch
 from bitsandbytes.optim.optimizer import Optimizer1State
-
-torch.optim.Adagrad
 
 class Adagrad(Optimizer1State):
     def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0, eps=1e-10,
