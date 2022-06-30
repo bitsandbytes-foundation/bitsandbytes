@@ -1218,8 +1218,8 @@ def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
 n = 2
 #dim1 = torch.randint(2,1024, size=(n,)).tolist()
 #dim2 = torch.randint(2,1024, size=(n,)).tolist()
-dim1 = [5]
-dim2 = [5]
+dim1 = [1]
+dim2 = [33]
 
 dtype = [torch.int8]
 #a_order = ['col_turing', 'col_ampere']
@@ -1234,6 +1234,9 @@ def test_transform_to_row(dim1, dim2, dtype, orderA, orderOut):
 
         out2, S2 = F.transform(A, to_order=orderA)
         A2, S3 = F.transform(out2, from_order=orderA, to_order='row', state=S2)
+        assert A2.shape[0] == A.shape[0]
+        assert A2.shape[1] == A.shape[1]
+
 
         print('')
         print(A)

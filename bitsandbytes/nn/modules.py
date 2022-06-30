@@ -66,6 +66,13 @@ class Linear8bitLt(nn.Linear):
 
         if self.bias is not None:
             out += self.bias.unsqueeze(0).expand_as(out)
+
+        if not self.state.has_fp16_weights:
+            # we converted 8-bit row major to turing/ampere format in the first inference pass
+            # we no longer need the row-major weight
+            #del self.state.CB
+            self.weight = self.state.CxB
+
         return out
 
     def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
@@ -75,13 +82,14 @@ class Linear8bitLt(nn.Linear):
         self.required_device = torch.device('cuda', device)
         if self.state.has_fp16_weights: super().cuda()
         else:
+            # we store the 8-bit rows-major weight
+            # we convert this weight to the turning/ampere weight during the first inference pass
             B = self.weight.half().cuda()
-            CB, CBt, self.state.SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-            self.state.CxB, self.state.SB = bnb.functional.transform(CB, to_order=self.state.formatB)
+            self.state.CB, CBt, self.state.SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
             del self.weight
             del B
             # we reassign the weight for torch.save/load to work
-            self.weight = self.state.CxB
+            self.weight = self.state.CB
             self.bias.data = self.bias.data.cuda()
         return self
 

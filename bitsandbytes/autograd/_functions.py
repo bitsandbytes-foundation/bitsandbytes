@@ -96,6 +96,7 @@ matmul_cublas = MatMul8bit.apply
 
 @dataclass
 class MatmulLtState:
+    CB = None
     CxB = None
     SB = None
     SCB = None
@@ -107,12 +108,14 @@ class MatmulLtState:
     subB = None
     has_accumulated_gradients = False
     threshold = 0.0
+    idx = None
     is_training = True
     has_fp16_weights = True
     formatB = F.get_special_format_str()
 
 
     def reset_grads(self):
+        self.CB = None
         self.CxB = None
         self.SB = None
         self.SCB = None
@@ -127,12 +130,50 @@ class MatMul8bitLt(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, A, B, out=None, state=MatmulLtState()):
+        # 1. Quantize A
+        # 2. Quantize B
+        # 3. Matmul
+        # 4. Mixed-precision decomposition matmul
+        # 5. Save state
         requires_gradA = A.requires_grad
         requires_gradB = B.requires_grad
         formatB = state.formatB
         input_shape = A.shape
 
+        # 1. Quantize A
+        if len(A.shape) == 3: A = A.view(-1, A.shape[-1]).contiguous()
+        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=state.threshold)
 
+        if state.threshold > 0.0 and coo_tensorA is not None:
+            if state.has_fp16_weights:
+                idx = torch.unique(coo_tensorA.colidx).long()
+                CA[:, idx] = 0
+                CAt[:, idx] = 0
+                subA = A[:, idx]
+                state.subB = B[:, idx].t().contiguous()
+                state.idx = idx
+            else:
+                if state.CxB is None:
+                    # B in in 8-bit row-major, we can transform it back to 16-bit to extract outlier dimensions
+                    # we also need to convert it to the turing/ampere format
+                    state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
+                if state.threshold > 0.0 and coo_tensorA is not None and state.idx is None:
+                    # generate outlier index and subB
+                    state.idx = torch.unique(coo_tensorA.colidx).long()
+                    state.subB = (state.CB[:, state.idx].float().t().contiguous()*(state.SCB/127)).half()
+                if state.idx is not None:
+                    # extract outliers
+                    CA[:, state.idx] = 0
+                    CAt[:, state.idx] = 0
+                    subA = A[:, state.idx]
+        else:
+            if not state.has_fp16_weights and state.CxB is None:
+                state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
+            subA = None
+
+        C32A, SA = F.transform(CA, 'col32')
+
+        # 2. Quantize B
         if state.has_fp16_weights:
             has_grad = (True if (getattr(B, 'grad', None) is not None) else False)
             is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
@@ -142,50 +183,25 @@ class MatMul8bitLt(torch.autograd.Function):
                 state.reset_grads()
                 CB, state.CBt, state.SCB, state.SCBt, coo_tensorB = F.double_quant(B)
                 state.CxB, state.SB = F.transform(CB, to_order=formatB)
-                subB = None
         else:
             has_grad = False
 
-        Bshape = state.SB[0]
+        shapeB = state.SB[0]
 
-        if len(A.shape) == 3:
-            output_shape = (A.shape[0], A.shape[1], Bshape[0])
-            A = A.view(-1, A.shape[-1]).contiguous()
+        if len(input_shape) == 3:
+            output_shape = (input_shape[0], input_shape[1], shapeB[0])
         else:
-            output_shape = (A.shape[0], Bshape[0])
+            output_shape = (input_shape[0], shapeB[0])
 
-        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=state.threshold)
-        idx = None
-
-        if state.threshold > 0.0 and coo_tensorA is not None:
-            idx = torch.unique(coo_tensorA.colidx).long()
-            CA[:, idx] = 0
-            CAt[:, idx] = 0
-            subA = A[:, idx]
-            if state.has_fp16_weights:
-                state.subB = B[:, idx].t().contiguous()
-            else:
-                # B is iun col_turing or col_ampere order which cannot converted back to row
-                # so what we do is:
-                # 1. multiply by identity matrix -> col32 int32 output
-                # 2. apply mm_dequant ->  row fp16 output
-                # 3. copy the outlier columns to subB
-                identity = torch.eye(state.SB[0][1], device=A.device, dtype=CA.dtype)
-                identity32, SI = bnb.functional.transform(identity, to_order='col32')
-                out32, Sout32 = F.igemmlt(identity32, state.CxB, SI, state.SB)
-                B2 = F.mm_dequant(out32, Sout32, torch.ones((state.SB[0][1],), device=A.device)*127.0, state.SCB)
-                state.subB = B2[idx, :].contiguous()
-        else:
-            subA = None
-
-        C32A, SA = F.transform(CA, 'col32')
-
+        # 3. Matmul
         out32, Sout32 = F.igemmlt(C32A, state.CxB, SA, state.SB)
         output = F.mm_dequant(out32, Sout32, SCA, state.SCB)
 
+        # 4. Mixed-precision decomposition matmul
         if state.threshold > 0.0 and coo_tensorA is not None:
             output += torch.matmul(subA, state.subB)
 
+        # 5. Save state
         ctx.state = state
 
         ctx.formatB = formatB
@@ -194,7 +210,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         if requires_gradA or requires_gradB:
             ctx.tensors = (CAt, subA)
-            ctx.tensor_states = (SCAt, idx)
+            ctx.tensor_states = (SCAt, state.idx)
         else:
             ctx.tensors = [None, None]
             ctx.tensor_states = (None, None)

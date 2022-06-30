@@ -353,7 +353,7 @@ def test_linear8bitlt_accumulated_gradient():
     acc_steps = 10
 
 
-    for i in range(1000):
+    for i in range(10):
         b1 = torch.randn(16, 8, 32, device='cuda').half()
         o1 = l1(b1)
         o2 = l2(b1)

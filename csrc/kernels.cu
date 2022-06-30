@@ -2497,46 +2497,40 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
           {
               case COL_TURING:
                 // TURING FORMAT:
-                // 8*32 tiles with 4*4 subtiles
-                // the 8*32 subtile has first all 4*4 subtiles of even rows (max 4*4*4 = 64 elements)
-                // the subsequent 4*4 subtiles are for all odd rows if some rows columns are empty the values are zero
-                // the tile repeats again after the 8*32 tile in a major column order, meaning: (next 8 rows are A[8:16, 0:32])
-                // the next tile is the next 8 rows for the same 32 columns. Once all rows are finished, the column
-                // index increases by 32
-                //
-                // [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
+                // 8*32 tiles with 4*4*4 subtiles
+                // the 8*32 subtile has first all 4*4*4 subtiles of even rows 
+                // row idx:: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
+                // col idx:: [0 1 2 3, 0 1 2 3, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
+								// after 128 elements (4*4*4) the odd rows starts
+                // row idx:: [1 1 1 1, 3 3 3 3, 5 5 5 5, 7 7 7 7, 1 1 1 1 ...]
+                // col idx:: [0 1 2 3, 0 1 2 3, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
+								// after 256: elements, the column index is increased by 32
+								// after 256*tiledCols the row index is increased by 8
                 if(((base_row+subrow) < rows) && (base_col+(j*32)+warp_lane < cols))
                 {
                   int smem_idx = (subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane;
                   char data = smem_data[smem_idx];
-                  offset = 0;
-                  //offset = ((base_col+(j*32))/32)*outRows*32 + (((base_row+subrow)/8)*256); // global offset (8x32 tile)
-                  // first 4 rows are reserved for even rows, [0, 2, 4, 6], the next 4 for odd
-                  // each of these has 32 values in total for 32*4 = 128 as offset if odd
-                  // every set of 4 columns increases the total offset by 16
-                  // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc so: subrow/2*4 = subrow*2
-                  // this happends every 8 rows anew (subrow % 8)
-                  // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
-                  int subcol = warp_lane;
-                 // 
-                 // // add local offset (4x4 sub-tile)
-                 // if(subrow % 2 == 1)
-                 //   // odd
-                 //   offset += 128;// + (subcol/4)*16 + (subcol%4) + (((subrow%8)-1)*2);
-                 // else
-                 //   // even
-                 //   offset += 0;//   + (subcol/4)*16 + (subcol%4) + ((subrow%8)*2);
+									int subcol = warp_lane;
+									int tile_row_offset = (smem_idx/2048)*8;
+									offset = 0;
 
-                  int col_idx = (subcol/16)*4 + (subcol%4);
-                  int row_idx = 0;
-                  if(subcol >= 16)
-                    row_idx = (subrow >= 4) ? 1+(((subcol-16)/4)*2) : (((subcol-16)/4)*2);
-                  else
-                    row_idx = (subrow >= 4) ? 1+((subcol/4)*2) : ((subcol/4)*2);
+									// smem_idx is 256 columns and 32 rows
+									// odd rows start at index 1024
+
+									int row_idx = smem_idx;
+
+									if((smem_idx %2048) >= 1024)
+										row_idx = 1+(2*((smem_idx%16)/4));
+								  else
+										row_idx = (2*((smem_idx%16)/4));
+									row_idx += tile_row_offset;
+
+									int col_idx = (subcol % 4) + (subcol/16)*4 + ((smem_idx%1024)/256)*8 + (j*16);
                   offset += col_idx + (row_idx*outCols);
 
+
                   if( data != 0)
-                    printf("%i (%i %i %i) (%i %i): %i\n", offset, subrow, subcol, warp_lane, row_idx, col_idx, data);
+                    printf("%i %i (%i %i %i) (%i %i %i) (%i %i): %i\n", smem_idx, offset, subrow, subcol, j, row_idx, col_idx, outCols, base_row, base_col, data);
                   if( data != 0)
                     out[offset] = data;
                 }
