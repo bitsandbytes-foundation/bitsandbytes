@@ -86,7 +86,7 @@ void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, floa
 
 extern "C"
 {
-    if #BUILD_CUDA
+    #if BUILD_CUDA
 	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
 	void cestimate_quantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles_fp16(A, code, offset, n); }
 	void cquantize(float *code, float *A, unsigned char *out, int n){ quantize(code, A, out, n); }

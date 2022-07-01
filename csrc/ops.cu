@@ -15,35 +15,30 @@ using namespace BinSearch;
 using std::cout;
 using std::endl;
 
-void histogramScatterAdd2D(float *histogram, int *index1, int *index2, float *src, int maxidx1, int n) {
-    int threads = 512;
-    int blocks = n / threads;
-    blocks = n % threads == 0 ? blocks : blocks + 1;
-    kHistogramScatterAdd2D<<<blocks, 512>>>(histogram, index1, index2, src, maxidx1, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n)
+{
+  int threads = 512;
+  int blocks = n/threads;
+  blocks = n % threads == 0 ? blocks : blocks + 1;
+  kHistogramScatterAdd2D<<<blocks, 512>>>(histogram, index1, index2, src, maxidx1, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template<typename T>
-void estimateQuantiles(T *A, float *code, float offset, int n) {
-    int blocks = n / 4096;
-    blocks = n % 4096 == 0 ? blocks : blocks + 1;
-    CUDA_CHECK_RETURN(cudaMemset(code, 0, 256 * sizeof(float)));
-    kEstimateQuantiles < T ><<<blocks, 512>>>(A, code, offset, std::numeric_limits<T>::max(), n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
+{
+  int blocks = n/4096;
+  blocks = n % 4096 == 0 ? blocks : blocks + 1;
+	CUDA_CHECK_RETURN(cudaMemset(code, 0, 256*sizeof(float)));
+  kEstimateQuantiles<T><<<blocks, 512>>>(A, code, offset, std::numeric_limits<T>::max(), n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-void quantize(float *code, float *A, unsigned char *out, int n) {
-    int blocks = n / 1024;
-    blocks = n % 1024 == 0 ? blocks : blocks + 1;
-    kQuantize<<<blocks, 1024>>>(code, A, out, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-void dequantize(float *code, unsigned char *A, float *out, int n) {
-    int blocks = n / 1024;
-    blocks = n % 1024 == 0 ? blocks : blocks + 1;
-    kDequantize<<<blocks, 1024>>>(code, A, out, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+void quantize(float *code, float *A, unsigned char *out, int n)
+{
+  int blocks = n/1024;
+  blocks = n % 1024 == 0 ? blocks : blocks + 1;
+  kQuantize<<<blocks, 1024>>>(code, A, out, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float *rand, int rand_offset, const int n)
