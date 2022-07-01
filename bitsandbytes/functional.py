@@ -9,7 +9,7 @@ from typing import Tuple
 import torch
 from torch import Tensor
 
-from cextension import lib, COMPILED_WITH_CUDA
+from .cextension import lib, COMPILED_WITH_CUDA
 
 name2qmap = {}
 

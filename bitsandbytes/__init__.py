@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from .nn import modules
-from cextension import COMPILED_WITH_CUDA
+from .cextension import COMPILED_WITH_CUDA
 
 if COMPILED_WITH_CUDA:
     from .optim import adam
