@@ -455,3 +455,16 @@ def test_linear8bitlt_no_fp16_weights(threshold):
     assert mlp.fc2.weight.dtype == torch.int8
     assert mlp.fc1.weight.device.type == 'cuda'
     assert mlp.fc2.weight.device.type == 'cuda'
+
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).to(torch.float16).to('cuda')
+
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        o1 = mlp(b1)
+        assert o1.dtype == torch.float16
+        if threshold > 0: assert mlp.fc1.state.idx is not None
+        if threshold > 0: assert mlp.fc2.state.idx is not None
+    assert mlp.fc1.weight.dtype == torch.int8
+    assert mlp.fc2.weight.dtype == torch.int8
+    assert mlp.fc1.weight.device.type == 'cuda'
+    assert mlp.fc2.weight.device.type == 'cuda'

@@ -92,26 +92,8 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device.type == 'cuda' and self.data.device.type == 'cpu': return self.cuda(device)
-
-        if dtype is not None:
-            if not (dtype.is_floating_point or dtype.is_complex):
-                raise TypeError('nn.Module.to only accepts floating point or complex '
-                                'dtypes, but got desired dtype={}'.format(dtype))
-            if dtype.is_complex:
-                warnings.warn(
-                    "Complex modules are a new feature under active development whose design may change, "
-                    "and some modules might not work as expected when using complex tensors as parameters or buffers. "
-                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
-                    "if a complex module does not work as expected.")
-
-        def convert(t):
-            if convert_to_format is not None and t.dim() in (4, 5):
-                return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
-                            non_blocking, memory_format=convert_to_format)
-            return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
-
-        return self._apply(convert)
+        if device is not None and device.type == 'cuda' and self.data.device.type == 'cpu': return self.cuda(device)
+        else: return super().to(device=device, dtype=dtype, non_blocking=non_blocking)
 
 
 class Linear8bitLt(nn.Linear):
