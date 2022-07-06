@@ -157,15 +157,18 @@ class MatMul8bitLt(torch.autograd.Function):
                     # B in in 8-bit row-major, we can transform it back to 16-bit to extract outlier dimensions
                     # we also need to convert it to the turing/ampere format
                     state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
-                if state.threshold > 0.0 and coo_tensorA is not None and state.idx is None:
+                if state.threshold > 0.0 and coo_tensorA is not None and state.idx is None and state.CB is not None:
                     # generate outlier index and subB
                     state.idx = torch.unique(coo_tensorA.colidx).long()
                     state.subB = (state.CB[:, state.idx].float().t().contiguous()*(state.SCB/127)).half()
+
                 if state.idx is not None:
                     # extract outliers
                     CA[:, state.idx] = 0
                     CAt[:, state.idx] = 0
                     subA = A[:, state.idx]
+                else:
+                    subA = None
         else:
             if not state.has_fp16_weights and state.CxB is None:
                 state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
@@ -198,7 +201,7 @@ class MatMul8bitLt(torch.autograd.Function):
         output = F.mm_dequant(out32, Sout32, SCA, state.SCB)
 
         # 4. Mixed-precision decomposition matmul
-        if state.threshold > 0.0 and coo_tensorA is not None:
+        if state.threshold > 0.0 and coo_tensorA is not None and subA is not None:
             output += torch.matmul(subA, state.subB)
 
         # 5. Save state

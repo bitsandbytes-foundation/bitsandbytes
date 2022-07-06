@@ -51,46 +51,29 @@ class Linear8bit(nn.Linear):
         return bnb.nn.functional.linear8bit(x, self.weight, self.bias)
 
 
-class Linear8bitLt(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, has_fp16_weights=True, threshold=0.0, index=None):
-        super(Linear8bitLt, self).__init__(input_features, output_features, bias)
-        self.state = bnb.MatmulLtState()
-        self.index=index
+class Int8Params(torch.nn.Parameter):
+    def __new__(cls, data=None, requires_grad=True, has_fp16_weights=False):
+        cls.has_fp16_weights = has_fp16_weights
+        cls.CB = None
+        cls.SCB = None
+        if data is None:
+            data = torch.empty(0)
+        return torch.Tensor._make_subclass(cls, data, requires_grad)
 
-        self.state.threshold = threshold
-        self.state.has_fp16_weights = has_fp16_weights
-
-    def forward(self, x):
-        self.state.is_training = self.training
-        out = bnb.matmul(x, self.weight, state=self.state)
-
-        if self.bias is not None:
-            out += self.bias.unsqueeze(0).expand_as(out)
-
-        if not self.state.has_fp16_weights:
-            # we converted 8-bit row major to turing/ampere format in the first inference pass
-            # we no longer need the row-major weight
-            #del self.state.CB
-            self.weight = self.state.CxB
-
-        return out
-
-    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
-        r"""Override to to function to force weights to stay on the CPU.
-        """
-        if device is None: device = 0
-        self.required_device = torch.device('cuda', device)
-        if self.state.has_fp16_weights: super().cuda()
+    def cuda(self, device):
+        if self.has_fp16_weights:
+            return super().cuda(device)
         else:
             # we store the 8-bit rows-major weight
             # we convert this weight to the turning/ampere weight during the first inference pass
-            B = self.weight.half().cuda()
-            self.state.CB, CBt, self.state.SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-            del self.weight
-            del B
-            # we reassign the weight for torch.save/load to work
-            self.weight = self.state.CB
-            self.bias.data = self.bias.data.cuda()
+            B = self.data.half().cuda()
+            CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
+            del CBt
+            del SCBt
+            self.data = CB
+            setattr(self, 'CB', CB)
+            setattr(self, 'SCB', SCB)
+
         return self
 
     @overload
@@ -107,13 +90,63 @@ class Linear8bitLt(nn.Linear):
         ...
 
     def to(self, *args, **kwargs):
-        r"""Override to to function to force weights to stay on the CPU.
-        """
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
-        #self.bias.data = self.bias.data.to(*args, **kwargs)
-        self.bias.data = self.bias.data.to(device, dtype, non_blocking)
-        return
 
+        if device.type == 'cuda' and self.data.device.type == 'cpu': return self.cuda(device)
+
+        if dtype is not None:
+            if not (dtype.is_floating_point or dtype.is_complex):
+                raise TypeError('nn.Module.to only accepts floating point or complex '
+                                'dtypes, but got desired dtype={}'.format(dtype))
+            if dtype.is_complex:
+                warnings.warn(
+                    "Complex modules are a new feature under active development whose design may change, "
+                    "and some modules might not work as expected when using complex tensors as parameters or buffers. "
+                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+                    "if a complex module does not work as expected.")
+
+        def convert(t):
+            if convert_to_format is not None and t.dim() in (4, 5):
+                return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
+                            non_blocking, memory_format=convert_to_format)
+            return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
+
+        return self._apply(convert)
+
+
+class Linear8bitLt(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True, has_fp16_weights=True, threshold=0.0, index=None):
+        super(Linear8bitLt, self).__init__(input_features, output_features, bias)
+        self.state = bnb.MatmulLtState()
+        self.index=index
+
+        self.state.threshold = threshold
+        self.state.has_fp16_weights = has_fp16_weights
+        self.weight = Int8Params(self.weight.data, has_fp16_weights=has_fp16_weights)
+
+    def init_8bit_state(self):
+        self.state.CB = self.weight.CB
+        self.state.SCB = self.weight.SCB
+        self.weight.CB = None
+        self.weight.SCB = None
+
+    def forward(self, x):
+        self.state.is_training = self.training
+
+        if self.weight.CB is not None: self.init_8bit_state()
+
+        out = bnb.matmul(x, self.weight, state=self.state)
+
+        if self.bias is not None:
+            out += self.bias.unsqueeze(0).expand_as(out)
+
+        if not self.state.has_fp16_weights and self.state.CB is not None:
+            # we converted 8-bit row major to turing/ampere format in the first inference pass
+            # we no longer need the row-major weight
+            del self.state.CB
+            self.weight.data = self.state.CxB
+
+        return out
 
 class Linear8bit(nn.Linear):
     def __init__(self, input_features, output_features, bias=True, quant_type='vector', index=None, args=None, sparse_decomp=False):
@@ -124,13 +157,13 @@ class Linear8bit(nn.Linear):
         self.iter = 0
 
     def forward(self, x):
+        self.iter += 1
         if self.iter % self.args.clip_freq == 0:
             with torch.no_grad():
                 maxval, maxidx = torch.topk(torch.abs(self.weight.flatten()), k=self.args.clip_idx)
                 if not dist.is_initialized() or dist.get_rank() == 0:
                     print('clip', maxval[-1].item())
                 self.weight.clip_(-maxval[-1], maxval[-1])
-        self.iter += 1
 
 
         if self.args is not None:

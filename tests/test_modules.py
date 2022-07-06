@@ -11,10 +11,23 @@ class MockArgs(object):
         for key in initial_data:
             setattr(self, key, initial_data[key])
 
+class MLP8bit(torch.nn.Module):
+    def __init__(self, dim1, dim2, has_fp16_weights=True, threshold=0.0):
+        super(MLP8bit, self).__init__()
+        self.fc1 = bnb.nn.Linear8bitLt(dim1, dim2, has_fp16_weights=has_fp16_weights, threshold=threshold)
+        self.fc2 = bnb.nn.Linear8bitLt(dim2, dim1, has_fp16_weights=has_fp16_weights, threshold=threshold)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
+
+
 def get_args():
     args = MockArgs([])
     args.quant_type = 'vector'
     args.use_8bit_training = 'full'
+    args.clip_freq = 9999
     return args
 
 def assert_all_approx_close(a, b, atol=1e-8, rtol=1e-5, count=10):
@@ -265,7 +278,7 @@ class Linear8bit(nn.Module):
 
 def test_linear8bit():
     l0 = torch.nn.Linear(32, 64).cuda().half()
-    l1 = bnb.nn.Linear8bit(32,64).cuda().half()
+    l1 = bnb.nn.Linear8bit(32,64, args=get_args()).cuda().half()
     l2 = Linear8bit(32, 64, args=get_args()).cuda().half()
     l3 = bnb.nn.Linear8bitLt(32,64).cuda().half()
 
@@ -332,6 +345,8 @@ names = ['threshold_{0}'.format(vals) for vals in values]
 @pytest.mark.parametrize("threshold", values, ids=names)
 def test_linear8bitlt_inference(threshold):
     l1 = bnb.nn.Linear8bitLt(32,64, threshold=threshold).cuda().half()
+    assert l1.weight.device.type == 'cuda'
+    assert l1.weight.dtype == torch.float16
 
     l1.eval()
     for i in range(100):
@@ -380,13 +395,12 @@ def test_linear8bitlt_accumulated_gradient():
             torch.testing.assert_allclose(l1[1].weight.grad, l2[1].weight.grad)
 
 
-threshold = [0.0, 3.0]
+threshold = [0.0, 2.0]
 values = threshold
 names = ['threshold_{0}'.format(vals) for vals in values]
 @pytest.mark.parametrize("threshold", values, ids=names)
 def test_linear8bitlt_no_fp16_weights(threshold):
     l1 = bnb.nn.Linear8bitLt(32,64, threshold=threshold, has_fp16_weights=False).cuda().half()
-
     assert l1.weight.dtype == torch.int8
 
     l1.eval()
@@ -394,3 +408,50 @@ def test_linear8bitlt_no_fp16_weights(threshold):
         b1 = torch.randn(16, 8, 32, device='cuda').half()
         o1 = l1(b1)
         assert o1.dtype == torch.float16
+
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).cuda()
+    assert mlp.fc1.weight.dtype == torch.int8
+    assert mlp.fc2.weight.dtype == torch.int8
+
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        o1 = mlp(b1)
+        assert o1.dtype == torch.float16
+        if threshold > 0: assert mlp.fc1.state.idx is not None
+        if threshold > 0: assert mlp.fc2.state.idx is not None
+
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).cuda().half()
+    assert mlp.fc1.weight.dtype == torch.int8
+    assert mlp.fc2.weight.dtype == torch.int8
+
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        o1 = mlp(b1)
+        assert o1.dtype == torch.float16
+        if threshold > 0: assert mlp.fc1.state.idx is not None
+        if threshold > 0: assert mlp.fc2.state.idx is not None
+
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).half().cuda()
+
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        o1 = mlp(b1)
+        assert o1.dtype == torch.float16
+        if threshold > 0: assert mlp.fc1.state.idx is not None
+        if threshold > 0: assert mlp.fc2.state.idx is not None
+    assert mlp.fc1.weight.dtype == torch.int8
+    assert mlp.fc2.weight.dtype == torch.int8
+
+
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).half().to('cuda')
+
+    for i in range(100):
+        b1 = torch.randn(16, 8, 32, device='cuda').half()
+        o1 = mlp(b1)
+        assert o1.dtype == torch.float16
+        if threshold > 0: assert mlp.fc1.state.idx is not None
+        if threshold > 0: assert mlp.fc2.state.idx is not None
+    assert mlp.fc1.weight.dtype == torch.int8
+    assert mlp.fc2.weight.dtype == torch.int8
+    assert mlp.fc1.weight.device.type == 'cuda'
+    assert mlp.fc2.weight.device.type == 'cuda'
