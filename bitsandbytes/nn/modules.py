@@ -94,7 +94,13 @@ class Int8Params(torch.nn.Parameter):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if device is not None and device.type == 'cuda' and self.data.device.type == 'cpu': return self.cuda(device)
-        else: return super().to(device=device, dtype=dtype, non_blocking=non_blocking)
+        else:
+            new_param = Int8Params(super().to(device=device, dtype=dtype, non_blocking=non_blocking), requires_grad=self.requires_grad, has_fp16_weights=self.has_fp16_weights)
+            new_param.CB = self.CB
+            new_param.SCB = self.SCB
+
+            return new_param
+
 
 
 class Linear8bitLt(nn.Linear):
@@ -117,6 +123,8 @@ class Linear8bitLt(nn.Linear):
         self.state.is_training = self.training
 
         if self.weight.CB is not None: self.init_8bit_state()
+        #assert not self.state.has_fp16_weights
+        #if not self.state.has_fp16_weights: assert self.state.CB is not None or self.state.CxB is not None
 
         out = bnb.matmul(x, self.weight, state=self.state)
 
