@@ -564,48 +564,6 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template <int FORMAT, int TRANSPOSE> void transformFormatToRow(char * A, char *out, int rows, int cols)
-{
-  int threads = 256;
-  int items_per_thread = 8;
-  // we load 128 column values per warp
-  int tile_cols = 32*items_per_thread;
-  int tile_rows = 32;
-  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
-  int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
-  int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
-  int outCols = fill_up_to_nearest_multiple(cols, 32);
-  int outRows = fill_up_to_nearest_multiple(rows, 32);
-  if(FORMAT == COL_TURING)
-  {
-    if(TRANSPOSE)
-      outRows = fill_up_to_nearest_multiple(cols, 8);
-    else
-      outRows = fill_up_to_nearest_multiple(rows, 8);
-  }
-  else if(FORMAT == COL_AMPERE)
-  {
-    if(TRANSPOSE)
-      outRows = fill_up_to_nearest_multiple(cols, 32);
-    else
-      outRows = fill_up_to_nearest_multiple(rows, 32);
-  }
-  else
-  {
-    if(TRANSPOSE)
-    {
-      outCols = fill_up_to_nearest_multiple(rows, 32);
-      outRows = cols;
-    }
-  }
-
-  cout << rows << " " << cols << " " << tiledCols << " " << outRows <<  " " << outCols << endl;
-  cout << "num blocks " << num_blocks << endl;
-
-  kTransformFormatToRow<256, 8, 32, 32*8, TRANSPOSE, FORMAT><<<num_blocks, threads>>>(A, out, outRows, outCols, tiledCols, rows, cols);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
 void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C, bool transposed_B)
 {
 
@@ -684,9 +642,6 @@ template void transformRowToFormat<COL_TURING, 0>(char * A, char *out, int rows,
 template void transformRowToFormat<COL_TURING, 1>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL_AMPERE, 0>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL_AMPERE, 1>(char * A, char *out, int rows, int cols);
-
-template void transformFormatToRow<COL_TURING, 0>(char * A, char *out, int rows, int cols);
-template void transformFormatToRow<COL_AMPERE, 0>(char * A, char *out, int rows, int cols);
 
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);

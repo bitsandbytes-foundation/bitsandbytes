@@ -61,6 +61,7 @@ class Int8Params(torch.nn.Parameter):
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def cuda(self, device):
+        print('CUDA', self.has_fp16_weights, device)
         if self.has_fp16_weights:
             return super().cuda(device)
         else:
