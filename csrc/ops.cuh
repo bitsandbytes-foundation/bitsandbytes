@@ -68,16 +68,6 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);
 
-void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, int n);
-void dequantize_cpu(float *code, unsigned char *A, float *absmax, float *out, int n);
-
 void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n);
 
 #endif
-
-
-
-
-
-
-

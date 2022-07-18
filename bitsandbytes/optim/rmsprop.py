@@ -31,6 +31,6 @@ class RMSprop32bit(Optimizer1State):
         if alpha == 0:
             raise NotImplementedError(f'RMSprop with alpha==0.0 is not supported!')
         if centered:
-            raise NotImplementError(f'Centered RMSprop is not supported!')
+            raise NotImplementedError(f'Centered RMSprop is not supported!')
         super(RMSprop32bit, self).__init__('rmsprop', params, lr, (alpha, momentum), eps,
                 weight_decay, 32, args, min_8bit_size, percentile_clipping, block_wise)

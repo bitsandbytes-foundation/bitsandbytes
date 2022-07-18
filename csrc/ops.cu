@@ -8,122 +8,12 @@
 #include <cub/device/device_scan.cuh>
 #include <limits>
 #include <BinSearch.h>
+#include <common.h>
 
 
 using namespace BinSearch;
 using std::cout;
 using std::endl;
-
-#define BLOCK_SIZE 4096
-
-struct quantize_block_args
-{
-  BinAlgo<Scalar, float, Direct2> *bin_searcher;
-  float *code;
-  float *A;
-  float *absmax;
-  unsigned char *out;
-  int block_end;
-  int block_idx;
-  int threadidx;
-};
-
-void *quantize_block(void *arguments)
-{
-  // 1. find absmax in block
-  // 2. divide input value by absmax to normalize into [-1.0, 1.0]
-  // 3. do binary search to find the closest value
-  // 4. check minimal distance
-  // 5. store index
-
-  struct quantize_block_args *args = (quantize_block_args*)arguments;
-
-  // 1. find absmax in block
-  float absmax_block = -FLT_MAX;
-  for (int i = args->block_idx; i < args->block_end; i++)
-    absmax_block = fmax(absmax_block, fabs(args->A[i]));
-
-  args->absmax[args->block_idx/BLOCK_SIZE] = absmax_block;
-
-  for (int i = args->block_idx; i < args->block_end; i++)
-  {
-    // 2. divide input value by absmax to normalize into [-1.0, 1.0]
-    // 3. do binary search to find the closest value
-    float normed_value = args->A[i]/absmax_block;
-    int idx = args->bin_searcher->scalar(normed_value);
-
-    // 4. check minimal distance
-    // The binary search returns always the value to the left, which might not be the closest value
-    if(idx < 255)
-    {
-      float dist_left = fabs(normed_value-(args->code[idx]));
-      float dist_right = fabs(normed_value-(args->code[idx+1]));
-      if(dist_right < dist_left){ idx+=1; }
-    }
-
-    // 5. store index
-    args->out[i] = (unsigned char)idx;
-  }
-
-  return NULL;
-}
-
-void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, int n)
-{
-
-  // the default code is has range [-0.993, 1.0] which can cause an error in the binary search algorithm used below
-  code[0] = -1.0f; 
-
-  int num_blocks = n/BLOCK_SIZE;
-  num_blocks += n % BLOCK_SIZE == 0 ? 0 : 1;
-
-  pthread_t *threads = (pthread_t*)malloc(sizeof(pthread_t)*num_blocks);
-  struct quantize_block_args **args = (quantize_block_args**)malloc(num_blocks*sizeof(quantize_block_args*));
-
-  for(int i = 0; i < num_blocks; i++)
-    args[i] = (quantize_block_args*)malloc(sizeof(quantize_block_args));
-
-  const uint32 elements_code = 256;
-  BinAlgo<Scalar, float, Direct2> bin_searcher(code, elements_code);
-
-  for(int block_idx = 0; block_idx < n; block_idx+=BLOCK_SIZE)
-  {
-    int valid_items = n-block_idx >= BLOCK_SIZE ? BLOCK_SIZE : n - block_idx;
-    int block_end = block_idx + valid_items;
-
-    struct quantize_block_args *arg = args[block_idx/BLOCK_SIZE];
-    arg->bin_searcher = &bin_searcher;
-    arg->code = code;
-    arg->A = A;
-    arg->absmax = absmax;
-    arg->out = out;
-    arg->block_end = block_end;
-    arg->block_idx = block_idx;
-    arg->threadidx = block_idx/BLOCK_SIZE;
- 
-    pthread_create(&threads[block_idx/BLOCK_SIZE], NULL, &quantize_block, (void *)arg);
-  }
-
-  for(int i = 0; i < num_blocks; i++)
-    int err = pthread_join(threads[i], NULL);
-
-  free(threads);
-  for(int i = 0; i < num_blocks; i++)
-    free(args[i]);
-  free(args);
-}
-
-
-void dequantize_cpu(float *code, unsigned char *A, float *absmax, float *out, int n)
-{
-  for(int block_idx = 0; block_idx < n; block_idx+=BLOCK_SIZE)
-  {
-    int valid_items = n-block_idx >= BLOCK_SIZE ? BLOCK_SIZE : n - block_idx;
-    int block_end = block_idx + valid_items;
-    for (int i = block_idx; i < block_end; i++)
-      out[i] = code[A[i]]*absmax[block_idx/BLOCK_SIZE];
-  }
-}
 
 void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n)
 {
@@ -178,7 +68,7 @@ template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, flo
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
+template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, bool skip_zeros, const int n)
@@ -189,7 +79,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 	{
 		case ADAM:
       if(max_unorm > 0.0f)
-			{ 
+			{
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
         kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<blocks, 512>>>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
@@ -202,7 +92,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
     case ADAGRAD:
 
       if(max_unorm > 0.0f)
-			{ 
+			{
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
 				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<blocks, 512>>>(g, p, state1, unorm, beta1, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
@@ -218,7 +108,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
                 unsigned char* state1, unsigned char* state2,
                 float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2,
-                float eps, int step, float lr, 
+                float eps, int step, float lr,
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
@@ -261,7 +151,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 #define NUM_1STATE 8
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
-                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n)
 {
 
