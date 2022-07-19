@@ -61,13 +61,12 @@ class Int8Params(torch.nn.Parameter):
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def cuda(self, device):
-        print('CUDA', self.has_fp16_weights, device)
         if self.has_fp16_weights:
             return super().cuda(device)
         else:
             # we store the 8-bit rows-major weight
             # we convert this weight to the turning/ampere weight during the first inference pass
-            B = self.data.half().cuda()
+            B = self.data.contiguous().half().cuda()
             CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
             del CBt
             del SCBt
@@ -111,6 +110,9 @@ class Linear8bitLt(nn.Linear):
 
         self.state.threshold = threshold
         self.state.has_fp16_weights = has_fp16_weights
+        if threshold > 0.0 and not has_fp16_weights:
+            self.state.use_pool = True
+
         self.weight = Int8Params(self.weight.data, has_fp16_weights=has_fp16_weights)
 
     def init_8bit_state(self):

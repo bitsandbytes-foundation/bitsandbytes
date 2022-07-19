@@ -6,6 +6,37 @@ from dataclasses import dataclass
 
 tensor = torch.Tensor
 
+'''
+    This class pools outlier dimensions across layers.
+    This is particularly important for small models where outlier features 
+    are less systematic and occur with low frequency.
+'''
+class GlobalOutlierPooler(object):
+    _instance = None
+
+    def __init__(self):
+        raise RuntimeError('Call get_instance() instead')
+
+    def initialize(self):
+        self.outliers = set()
+        self.model_dim = None
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls.__new__(cls)
+            cls._instance.initialize()
+        return cls._instance
+
+    def add_outliers(self, outlier_idx, feature_dim):
+        if self.model_dim is None: self.model_dim = feature_dim
+        if feature_dim != self.model_dim: return # we do not encode outliers for the 2nd FFN layer
+
+        self.outliers.update(outlier_idx.tolist())
+
+    def get_current_outlier_idx(self):
+        return torch.Tensor(list(self.outliers)).to(torch.int64)
+
 class MatMul8bit(torch.autograd.Function):
 
     @staticmethod
@@ -106,13 +137,15 @@ class MatmulLtState:
     CBt = None
 
     subB = None
+
+    outlier_pool = None
     has_accumulated_gradients = False
     threshold = 0.0
     idx = None
     is_training = True
     has_fp16_weights = True
+    use_pool = False
     formatB = F.get_special_format_str()
-
 
     def reset_grads(self):
         self.CB = None
@@ -123,7 +156,6 @@ class MatmulLtState:
         self.CxBt = None
         self.SBt = None
         self.CBt = None
-
 
 
 class MatMul8bitLt(torch.autograd.Function):
@@ -139,6 +171,7 @@ class MatMul8bitLt(torch.autograd.Function):
         requires_gradB = B.requires_grad
         formatB = state.formatB
         input_shape = A.shape
+        if state.outlier_pool is None: state.outlier_pool = GlobalOutlierPooler.get_instance()
 
         # 1. Quantize A
         if len(A.shape) == 3: A = A.view(-1, A.shape[-1]).contiguous()
@@ -159,7 +192,13 @@ class MatMul8bitLt(torch.autograd.Function):
                     state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
                 if state.threshold > 0.0 and coo_tensorA is not None and state.idx is None and state.CB is not None:
                     # generate outlier index and subB
-                    state.idx = torch.unique(coo_tensorA.colidx).long()
+                    outlier_idx = torch.unique(coo_tensorA.colidx).long()
+                    state.outlier_pool.add_outliers(outlier_idx, A.shape[-1])
+                    if state.use_pool and state.outlier_pool.model_dim == A.shape[-1]:
+                        # do not use pool for 2nd FFN layer
+                        state.idx = state.outlier_pool.get_current_outlier_idx().to(A.device)
+                    else:
+                        state.idx = outlier_idx
                     state.subB = (state.CB[:, state.idx].float().t().contiguous()*(state.SCB/127)).half()
 
                 if state.idx is not None:
