@@ -66,7 +66,7 @@ class Int8Params(torch.nn.Parameter):
         else:
             # we store the 8-bit rows-major weight
             # we convert this weight to the turning/ampere weight during the first inference pass
-            B = self.data.contiguous().half().cuda()
+            B = self.data.contiguous().half().cuda(device)
             CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
             del CBt
             del SCBt
