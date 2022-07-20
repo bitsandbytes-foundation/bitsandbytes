@@ -52,7 +52,7 @@ class Linear8bit(nn.Linear):
 
 
 class Int8Params(torch.nn.Parameter):
-    def __new__(cls, data=None, requires_grad=True, has_fp16_weights=False):
+    def __new__(cls, data=None, requires_grad=True, has_fp16_weights=False, CB=None, SCB=None):
         cls.has_fp16_weights = has_fp16_weights
         cls.CB = None
         cls.SCB = None
