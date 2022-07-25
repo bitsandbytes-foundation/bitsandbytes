@@ -1183,6 +1183,7 @@ def test_transform_to_row(dim1, dim2, dtype, orderA, orderOut):
 
 def test_overflow():
     formatB = F.get_special_format_str()
+    print(formatB)
     for i in range(2):
         a = torch.arange(5, 15).cuda().to(torch.int8).view(-1,1 )
         b = torch.arange(5, 15).cuda().to(torch.int8).view(-1,1 )
