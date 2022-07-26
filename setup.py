@@ -11,13 +11,14 @@ def read(fname):
 
 
 version = os.getenv("CUDA_VERSION", "cpu")
+prefix = '' if version == 'cpu' else 'cuda'
 
 setup(
-    name="bitsandbytes",
+    name=f"bitsandbytes-{prefix}{version}",
     version=f"0.30.0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
-    description="8-bit optimizers and quantization routines.",
+    description="8-bit optimizers and matrix multiplication routines.",
     license="MIT",
     keywords="gpu optimizers optimization 8-bit quantization compression",
     url="http://packages.python.org/bitsandbytes",
