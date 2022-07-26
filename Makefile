@@ -27,13 +27,14 @@ COMPUTE_CAPABILITY += -gencode arch=compute_60,code=sm_60 # Pascal
 COMPUTE_CAPABILITY += -gencode arch=compute_61,code=sm_61 # Pascal
 COMPUTE_CAPABILITY += -gencode arch=compute_70,code=sm_70 # Volta
 COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
+COMPUTE_CAPABILITY := -gencode arch=compute_75,code=sm_75 # Volta 
 
 # CUDA 9.2 supports CC 3.0, but CUDA >= 11.0 does not
 CC_CUDA92 := -gencode arch=compute_30,code=sm_30
 
 # Later versions of CUDA support the new architectures
 CC_CUDA10x := -gencode arch=compute_30,code=sm_30
-CC_CUDA10x += -gencode arch=compute_75,code=sm_75
+CC_CUDA10x := -gencode arch=compute_75,code=sm_75
 
 CC_CUDA110 := -gencode arch=compute_75,code=sm_75
 CC_CUDA110 += -gencode arch=compute_80,code=sm_80
@@ -43,12 +44,12 @@ CC_CUDA11x += -gencode arch=compute_80,code=sm_80
 CC_CUDA11x += -gencode arch=compute_86,code=sm_86
 
 all: $(ROOT_DIR)/dependencies/cub $(BUILD_DIR) env
-	$(NVCC) $(COMPUTE_CAPABILITY) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
+	$(NVCC) $(COMPUTE_CAPABILITY) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR) -D NO_CUBLASLT
 	$(NVCC) $(COMPUTE_CAPABILITY) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o -o $(BUILD_DIR)/link.o 
 	$(GPP) -std=c++14 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes.so $(LIB)
 
 cuda92: $(ROOT_DIR)/dependencies/cub $(BUILD_DIR) env
-	$(NVCC) $(COMPUTE_CAPABILITY) $(CC_CUDA92) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
+	$(NVCC) $(COMPUTE_CAPABILITY) $(CC_CUDA92) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR) -D NO_CUBLASLT
 	$(NVCC) $(COMPUTE_CAPABILITY) $(CC_CUDA92) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o -o $(BUILD_DIR)/link.o 
 	$(GPP) -std=c++14 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes.so $(LIB)
 

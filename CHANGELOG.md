@@ -64,3 +64,6 @@ Features:
  - Added 8-bit Linear layers with 8-bit Params that perform memory efficient inference with an option for 8-bit mixed precision matrix decomposition for inference without performance degradation
  - Added quantization methods for "fake" quantization as well as optimized kernels vector-wise quantization and equalization as well as optimized cuBLASLt transformations
  - CPU only build now available (Thank you, @mryab)
+
+Deprecated:
+ - Pre-compiled release for CUDA 9.2, 10.0, 10.2 no longer available
