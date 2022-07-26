@@ -14,7 +14,7 @@ version = os.getenv("CUDA_VERSION", "cpu")
 
 setup(
     name="bitsandbytes",
-    version=f"0.26.0+{version}",
+    version=f"0.30.0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="8-bit optimizers and quantization routines.",
