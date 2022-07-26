@@ -1409,3 +1409,29 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
     x *= SA[1]/127
     x +=offset
     return x.to(dtype)
+
+def extract_outliers(A, SA, idx):
+    shapeA = SA[0]
+    formatA = SA[1]
+    assert formatA in ['col_turing', 'col_ampere']
+    assert A.device.type == 'cuda'
+
+    out = torch.zeros((shapeA[0], idx.numel()), dtype=torch.int8, device=A.device)
+
+    idx_size = ct.c_int32(idx.numel())
+    rows = ct.c_int32(shapeA[0])
+    cols = ct.c_int32(shapeA[1])
+    ptrA = get_ptr(A)
+    ptrIdx = get_ptr(idx)
+    ptrOut = get_ptr(out)
+
+    if formatA == 'col_turing':
+        lib.cextractOutliers_turing(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
+    elif formatA == 'col_ampere':
+        lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
+
+    return out
+
+
+
+

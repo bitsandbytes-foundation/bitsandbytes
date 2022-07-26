@@ -2592,9 +2592,16 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   } 
 }
 
+template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *out, int rowsA, int colsA, int tiledRowsA, int tiledColsA)
+{  
+} 
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
+
+template __global__ void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
+template __global__ void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 
 template __global__ void kspmm_coo_very_sparse_naive<half, 8, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
 template __global__ void kspmm_coo_very_sparse_naive<half, 16, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);

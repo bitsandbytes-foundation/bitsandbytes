@@ -1856,3 +1856,20 @@ def test_zp():
     print(err1, err2, err3, err4, err5, err6)
 
 
+
+def test_extract_outliers():
+    shapeA = (128, 128)
+    idx = torch.randint(0, shapeA[1], size=(10,)).int()
+    A = torch.randint(-128, 127, size=shapeA, device='cuda').to(torch.int8)
+    outliers1 = A[:, idx.long()]
+
+    CA, SA = F.transform(A, 'col_turing')
+
+    outliers2 = F.extract_outliers(CA, SA, idx)
+
+    assert outliers2.shape[0] == shapeA[0]
+    assert outliers2.shape[1] == idx.numel()
+
+
+
+    torch.testing.assert_allclose(outliers1, outliers2)
