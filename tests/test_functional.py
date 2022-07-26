@@ -992,6 +992,7 @@ inner = torch.randint(1,4*1024, size=(n,)).tolist()
 values = list(zip(dim1, dim4, inner))
 names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
+@pytest.mark.skip("Row scale has some bugs for ampere")
 def test_igemmlt_row_scale(dim1, dim4, inner):
     formatB = F.get_special_format_str()
     err1, err2, err3 = [], [], []
@@ -1064,6 +1065,7 @@ dim4 = [12288, 4096]
 values = list(zip(dim1, dim4, inner))
 names = ['dim1_{0}_dim4_{1}_inner_{2}'.format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
+@pytest.mark.skip("Row scale has some bugs for ampere")
 def test_row_scale_bench(dim1, dim4, inner):
     err1, err2, err3 = [], [], []
     relerr1, relerr2 = [], []

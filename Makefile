@@ -27,7 +27,6 @@ COMPUTE_CAPABILITY += -gencode arch=compute_60,code=sm_60 # Pascal
 COMPUTE_CAPABILITY += -gencode arch=compute_61,code=sm_61 # Pascal
 COMPUTE_CAPABILITY += -gencode arch=compute_70,code=sm_70 # Volta
 COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
-COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta 
 
 # CUDA 9.2 supports CC 3.0, but CUDA >= 11.0 does not
 CC_CUDA92 := -gencode arch=compute_30,code=sm_30
