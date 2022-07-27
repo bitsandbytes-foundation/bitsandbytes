@@ -1858,18 +1858,21 @@ def test_zp():
 
 
 def test_extract_outliers():
-    shapeA = (128, 128)
-    idx = torch.randint(0, shapeA[1], size=(10,)).int()
-    A = torch.randint(-128, 127, size=shapeA, device='cuda').to(torch.int8)
-    outliers1 = A[:, idx.long()]
+    for i in range(k):
+        shapeA = (4096, 4*4096)
+        idx = torch.unique(torch.randint(0, shapeA[1], size=(10,)).int()).cuda()
+        #idx = torch.Tensor([32]).int().cuda()
+        A = torch.randint(-128, 127, size=shapeA, device='cuda').to(torch.int8)
+        outliers1 = A[:, idx.long()]
 
-    CA, SA = F.transform(A, 'col_turing')
+        CA, SA = F.transform(A, 'col_turing')
 
-    outliers2 = F.extract_outliers(CA, SA, idx)
+        outliers2 = F.extract_outliers(CA, SA, idx)
 
-    assert outliers2.shape[0] == shapeA[0]
-    assert outliers2.shape[1] == idx.numel()
+        assert outliers2.shape[0] == shapeA[0]
+        assert outliers2.shape[1] == idx.numel()
 
+        #print(outliers1)
+        #print(outliers2)
 
-
-    torch.testing.assert_allclose(outliers1, outliers2)
+        torch.testing.assert_allclose(outliers1, outliers2)

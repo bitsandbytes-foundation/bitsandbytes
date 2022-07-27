@@ -586,8 +586,7 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
   int tiledCols = tiledCols = fill_up_to_nearest_multiple(cols, 32);
   int tiledRows = 0;
 
-	int elements = idx_size*cols; // matrix A is transposed, so we extract columns
-	int num_blocks = (elements+threads-1)/threads;
+	int num_blocks = idx_size;
 
   if(FORMAT == COL_TURING)
   {
@@ -598,7 +597,7 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
       tiledRows = fill_up_to_nearest_multiple(rows, 32);
 	}
 
-  kExtractOutliers<FORMAT><<<num_blocks, threads>>>(A, idx, out, rows, cols, tiledRows, tiledCols);
+  kExtractOutliers<FORMAT><<<num_blocks, threads>>>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
