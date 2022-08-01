@@ -1,7 +1,7 @@
 """
-build is dependent on
-- compute capability
-    - dependent on GPU family
+extract factors the build is dependent on:
+[X] compute capability  
+    [ ] TODO: Q - What if we have multiple GPUs of different makes?
 - CUDA version
 - Software:
     - CPU-only: only CPU quantization functions (no optimizer, no matrix multipl)
@@ -19,6 +19,8 @@ evaluation:
 """
 
 import ctypes
+import shlex
+import subprocess
 from os import environ as env
 from pathlib import Path
 from typing import Set, Union
@@ -26,10 +28,31 @@ from typing import Set, Union
 from .utils import print_err, warn_of_missing_prerequisite
 
 
+def execute_and_return(command_string: str) -> Tuple[str, str]:
+    def _decode(subprocess_err_out_tuple):
+        return tuple(
+            to_decode.decode("UTF-8").strip()
+            for to_decode in subprocess_err_out_tuple
+        )
+
+    def execute_and_return_decoded_std_streams(command_string):
+        return _decode(
+            subprocess.Popen(
+                shlex.split(command_string),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            ).communicate()
+        )
+
+    std_out, std_err = execute_and_return_decoded_std_streams()
+    return std_out, std_err
+
+
 def check_cuda_result(cuda, result_val):
     if result_val != 0:
+        # TODO: undefined name 'error_str'
         cuda.cuGetErrorString(result_val, ctypes.byref(error_str))
-        print(f"Count not initialize CUDA - failure!")
+        print("Count not initialize CUDA - failure!")
         raise Exception("CUDA exception!")
     return result_val
 
@@ -53,7 +76,9 @@ def get_compute_capability():
 
     result = ctypes.c_int()
     device = ctypes.c_int()
+    # TODO: local variable 'context' is assigned to but never used
     context = ctypes.c_void_p()
+    # TODO: local variable 'error_str' is assigned to but never used
     error_str = ctypes.c_char_p()
 
     result = check_cuda_result(cuda, cuda.cuInit(0))
@@ -61,7 +86,9 @@ def get_compute_capability():
     result = check_cuda_result(cuda, cuda.cuDeviceGetCount(ctypes.byref(nGpus)))
     ccs = []
     for i in range(nGpus.value):
-        result = check_cuda_result(cuda, cuda.cuDeviceGet(ctypes.byref(device), i))
+        result = check_cuda_result(
+            cuda, cuda.cuDeviceGet(ctypes.byref(device), i)
+        )
         result = check_cuda_result(
             cuda,
             cuda.cuDeviceComputeCapability(
@@ -114,11 +141,15 @@ def get_cuda_runtime_lib_path(
     } - non_existent_directories
 
     if len(cuda_runtime_libs) > 1:
-        err_msg = f"Found duplicate {CUDA_RUNTIME_LIB} files: {cuda_runtime_libs}.."
+        err_msg = (
+            f"Found duplicate {CUDA_RUNTIME_LIB} files: {cuda_runtime_libs}.."
+        )
         raise FileNotFoundError(err_msg)
 
     elif len(cuda_runtime_libs) < 1:
-        err_msg = f"Did not find {CUDA_RUNTIME_LIB} files: {cuda_runtime_libs}.."
+        err_msg = (
+            f"Did not find {CUDA_RUNTIME_LIB} files: {cuda_runtime_libs}.."
+        )
         raise FileNotFoundError(err_msg)
 
     single_cuda_runtime_lib_dir = next(iter(cuda_runtime_libs))

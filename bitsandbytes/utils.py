@@ -1,6 +1,6 @@
+import sys
 import shlex
 import subprocess
-import sys
 
 
 def execute_and_return(command_string: str) -> Tuple[str, str]:

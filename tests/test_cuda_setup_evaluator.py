@@ -3,8 +3,12 @@ from typing import List, NamedTuple
 
 import pytest
 
-from bitsandbytes.cuda_setup import (CUDA_RUNTIME_LIB, evaluate_cuda_setup,
-                                     get_cuda_runtime_lib_path, tokenize_paths)
+from bitsandbytes.cuda_setup import (
+    CUDA_RUNTIME_LIB,
+    evaluate_cuda_setup,
+    get_cuda_runtime_lib_path,
+    tokenize_paths,
+)
 
 
 class InputAndExpectedOutput(NamedTuple):
@@ -13,11 +17,26 @@ class InputAndExpectedOutput(NamedTuple):
 
 
 HAPPY_PATH__LD_LIB_TEST_PATHS: List[InputAndExpectedOutput] = [
-    (f"some/other/dir:dir/with/{CUDA_RUNTIME_LIB}", f"dir/with/{CUDA_RUNTIME_LIB}"),
-    (f":some/other/dir:dir/with/{CUDA_RUNTIME_LIB}", f"dir/with/{CUDA_RUNTIME_LIB}"),
-    (f"some/other/dir:dir/with/{CUDA_RUNTIME_LIB}:", f"dir/with/{CUDA_RUNTIME_LIB}"),
-    (f"some/other/dir::dir/with/{CUDA_RUNTIME_LIB}", f"dir/with/{CUDA_RUNTIME_LIB}"),
-    (f"dir/with/{CUDA_RUNTIME_LIB}:some/other/dir", f"dir/with/{CUDA_RUNTIME_LIB}"),
+    (
+        f"some/other/dir:dir/with/{CUDA_RUNTIME_LIB}",
+        f"dir/with/{CUDA_RUNTIME_LIB}",
+    ),
+    (
+        f":some/other/dir:dir/with/{CUDA_RUNTIME_LIB}",
+        f"dir/with/{CUDA_RUNTIME_LIB}",
+    ),
+    (
+        f"some/other/dir:dir/with/{CUDA_RUNTIME_LIB}:",
+        f"dir/with/{CUDA_RUNTIME_LIB}",
+    ),
+    (
+        f"some/other/dir::dir/with/{CUDA_RUNTIME_LIB}",
+        f"dir/with/{CUDA_RUNTIME_LIB}",
+    ),
+    (
+        f"dir/with/{CUDA_RUNTIME_LIB}:some/other/dir",
+        f"dir/with/{CUDA_RUNTIME_LIB}",
+    ),
     (
         f"dir/with/{CUDA_RUNTIME_LIB}:other/dir/libcuda.so",
         f"dir/with/{CUDA_RUNTIME_LIB}",

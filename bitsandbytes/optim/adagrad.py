@@ -23,7 +23,9 @@ class Adagrad(Optimizer1State):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(
+                "Invalid weight_decay value: {}".format(weight_decay)
+            )
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {}".format(eps))
         if initial_accumulator_value != 0.0:
@@ -63,7 +65,9 @@ class Adagrad8bit(Optimizer1State):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(
+                "Invalid weight_decay value: {}".format(weight_decay)
+            )
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {}".format(eps))
         if initial_accumulator_value != 0.0:
@@ -104,7 +108,9 @@ class Adagrad32bit(Optimizer1State):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(
+                "Invalid weight_decay value: {}".format(weight_decay)
+            )
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {}".format(eps))
         if initial_accumulator_value != 0.0:
