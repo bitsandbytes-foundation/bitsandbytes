@@ -131,8 +131,7 @@ def evaluate_cuda_setup():
     cc = get_compute_capability()
     binary_name = 'libbitsandbytes_cpu.so'
 
-    has_gpu = cc != ''
-    if not has_gpu:
+    if not (has_gpu := bool(cc)):
         print('WARNING: No GPU detected! Check our CUDA paths. Processing to load CPU-only library...')
         return binary_name
 
