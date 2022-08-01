@@ -1,13 +1,14 @@
 MKFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 ROOT_DIR := $(patsubst %/,%,$(dir $(MKFILE_PATH)))
 
-ifndef CUDA_VERSION
-$(error ERROR: CUDA_VERSION not set. Call make with CUDA string, for example: make cuda11x CUDA_VERSION=115 or make cpuonly CUDA_VERSION=CPU)
-endif
-
 GPP:= /usr/bin/g++
 ifeq ($(CUDA_HOME),)
 	CUDA_HOME:= $(shell which nvcc | rev | cut -d'/' -f3- | rev)
+endif
+
+ifndef CUDA_VERSION
+$(warning WARNING: CUDA_VERSION not set. Call make with CUDA string, for example: make cuda11x CUDA_VERSION=115 or make cpuonly CUDA_VERSION=CPU)
+CUDA_VERSION:=
 endif
 
 
@@ -92,7 +93,7 @@ cuda11x: $(BUILD_DIR) env
 	$(GPP) -std=c++14 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
 
 cpuonly: $(BUILD_DIR) env
-	$(GPP) -std=c++14 -shared -fPIC -I $(ROOT_DIR)/csrc -I $(ROOT_DIR)/include $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_$(CUDA_VERSION).so
+	$(GPP) -std=c++14 -shared -fPIC -I $(ROOT_DIR)/csrc -I $(ROOT_DIR)/include $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cpu.so
 
 env:
 	@echo "ENVIRONMENT"
@@ -116,7 +117,10 @@ $(ROOT_DIR)/dependencies/cub:
 	cd dependencies/cub; git checkout 1.11.0
 
 clean:
-	rm build/* ./bitsandbytes/libbitsandbytes.so
+	rm build/* 
 
 cleaneggs:
 	rm -rf *.egg*
+
+cleanlibs:
+	rm ./bitsandbytes/libbitsandbytes*.so
