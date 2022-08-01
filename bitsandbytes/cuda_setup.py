@@ -37,7 +37,7 @@ def check_cuda_result(cuda, result_val):
     if result_val != 0:
         cuda.cuGetErrorString(result_val, ctypes.byref(error_str))
         print(f"Count not initialize CUDA - failure!")
-        raise Exception('CUDA excepion!')
+        raise Exception('CUDA exception!')
     return result_val
 
 # taken from https://gist.github.com/f0k/63a664160d016a491b2cbea15913d549
