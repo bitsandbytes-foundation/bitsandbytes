@@ -1,4 +1,5 @@
 import pytest
+import os
 
 from typing import List
 
@@ -16,6 +17,7 @@ HAPPY_PATH__LD_LIB_TEST_PATHS: List[tuple[str,str]] = [
     (f"some/other/dir:dir/with/{CUDA_RUNTIME_LIB}:", f"dir/with/{CUDA_RUNTIME_LIB}"),
     (f"some/other/dir::dir/with/{CUDA_RUNTIME_LIB}", f"dir/with/{CUDA_RUNTIME_LIB}"),
     (f"dir/with/{CUDA_RUNTIME_LIB}:some/other/dir", f"dir/with/{CUDA_RUNTIME_LIB}"),
+    (f"dir/with/{CUDA_RUNTIME_LIB}:other/dir/libcuda.so", f"dir/with/{CUDA_RUNTIME_LIB}"),
 ]
 
 
@@ -64,3 +66,21 @@ def test_get_cuda_runtime_lib_path__non_existent_dir(capsys, tmp_path):
         match in std_err 
         for match in {"WARNING", "non-existent"}
     )
+
+def test_full_system():
+    ## this only tests the cuda version and not compute capability
+    ld_path = os.environ['LD_LIBRARY_PATH']
+    paths = ld_path.split(':')
+    version = ''
+    for p in paths:
+        if 'cuda' in p:
+            idx = p.rfind('cuda-')
+            version = p[idx+5:idx+5+4].replace('/', '')
+            version = float(version)
+            break
+
+    binary_name = evaluate_cuda_setup()
+    binary_name = binary_name.replace('libbitsandbytes_cuda', '')
+    assert binary_name.startswith(str(version).replace('.', ''))
+
+

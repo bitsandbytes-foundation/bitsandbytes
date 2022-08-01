@@ -23,6 +23,58 @@ from pathlib import Path
 from typing import Set, Union
 from .utils import warn_of_missing_prerequisite, print_err
 
+import ctypes
+import shlex
+import subprocess
+
+def execute_and_return(strCMD):
+    proc = subprocess.Popen(shlex.split(strCMD), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate()
+    out, err = out.decode("UTF-8").strip(), err.decode("UTF-8").strip()
+    return out, err
+
+def check_cuda_result(cuda, result_val):
+    if result_val != 0:
+        cuda.cuGetErrorString(result_val, ctypes.byref(error_str))
+        print(f"Count not initialize CUDA - failure!")
+        raise Exception('CUDA excepion!')
+    return result_val
+
+# taken from https://gist.github.com/f0k/63a664160d016a491b2cbea15913d549
+def get_compute_capability():
+    libnames = ('libcuda.so', 'libcuda.dylib', 'cuda.dll')
+    for libname in libnames:
+        try:
+            cuda = ctypes.CDLL(libname)
+        except OSError:
+            continue
+        else:
+            break
+    else:
+        raise OSError("could not load any of: " + ' '.join(libnames))
+
+
+    nGpus = ctypes.c_int()
+    cc_major = ctypes.c_int()
+    cc_minor = ctypes.c_int()
+
+    result = ctypes.c_int()
+    device = ctypes.c_int()
+    context = ctypes.c_void_p()
+    error_str = ctypes.c_char_p()
+
+    result = check_cuda_result(cuda, cuda.cuInit(0))
+
+    result = check_cuda_result(cuda, cuda.cuDeviceGetCount(ctypes.byref(nGpus)))
+    ccs = []
+    for i in range(nGpus.value):
+        result = check_cuda_result(cuda, cuda.cuDeviceGet(ctypes.byref(device), i))
+        result = check_cuda_result(cuda, cuda.cuDeviceComputeCapability(ctypes.byref(cc_major), ctypes.byref(cc_minor), device))
+        ccs.append(f'{cc_major.value}.{cc_minor.value}')
+
+    #TODO: handle different compute capabilities; for now, take the max
+    ccs.sort()
+    return ccs[-1]
 
 CUDA_RUNTIME_LIB: str = "libcudart.so"
 
@@ -72,12 +124,30 @@ def get_cuda_runtime_lib_path(
         raise FileNotFoundError(err_msg)
 
     single_cuda_runtime_lib_dir = next(iter(cuda_runtime_libs))
-    return ld_library_paths
+    return single_cuda_runtime_lib_dir
 
 def evaluate_cuda_setup():
-    # - if paths faulty, return meaningful error
-    # - else:
-    #     - determine CUDA version
-    #     - determine capabilities
-    #     - based on that set the default path
-    pass
+    cuda_path = get_cuda_runtime_lib_path()
+    cc = get_compute_capability()
+    binary_name = 'libbitsandbytes_cpu.so'
+
+    has_gpu = cc != ''
+    if not has_gpu:
+        print('WARNING: No GPU detected! Check our CUDA paths. Processding to load CPU-only library...')
+        return binary_name
+
+    has_cublaslt = cc in ['7.5', '8.0', '8.6']
+
+    # TODO: 
+    # (1) Model missing cases (no CUDA installed by CUDA driver (nvidia-smi accessible)
+    # (2) Multiple CUDA versions installed
+
+    cuda_home = str(Path(cuda_path).parent.parent)
+    ls_output, err = execute_and_return(f'{cuda_home}/bin/nvcc --version')
+    cuda_version = ls_output.split('\n')[3].split(',')[-1].strip().lower().replace('v', '')
+    major, minor, revision = cuda_version.split('.')
+    cuda_version_string = f'{major}{minor}'
+
+    binary_name = f'libbitsandbytes_cuda{cuda_version_string}_{("cublaslt" if has_cublaslt else "")}.so'
+
+    return binary_name
