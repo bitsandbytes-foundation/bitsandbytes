@@ -19,22 +19,11 @@ evaluation:
 """
 
 import ctypes
-import shlex
-import subprocess
 from os import environ as env
 from pathlib import Path
 from typing import Set, Union
 
 from .utils import print_err, warn_of_missing_prerequisite
-
-
-def execute_and_return(strCMD):
-    proc = subprocess.Popen(
-        shlex.split(strCMD), stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    out, err = proc.communicate()
-    out, err = out.decode("UTF-8").strip(), err.decode("UTF-8").strip()
-    return out, err
 
 
 def check_cuda_result(cuda, result_val):
