@@ -6,6 +6,15 @@ import os
 from setuptools import setup, find_packages
 
 
+import os
+
+def all_libs(directory):
+    paths = []
+    for (path, directories, filenames) in os.walk(directory):
+        for filename in filenames:
+            paths.append(os.path.join('..', path, filename))
+    return paths
+
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
@@ -15,7 +24,7 @@ prefix = '' if version == 'cpu' else 'cuda'
 
 setup(
     name=f"bitsandbytes-{prefix}{version}",
-    version=f"0.30.0",
+    version=f"0.30.2",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="8-bit optimizers and matrix multiplication routines.",
@@ -26,7 +35,7 @@ setup(
     entry_points={
         "console_scripts": ["debug_cuda = bitsandbytes.debug_cli:cli"],
     },
-    package_data={'': ['libbitsandbytes.so']},
+    package_data={'': ['libbitsandbytes*.so']},
     long_description=read('README.md'),
     long_description_content_type='text/markdown',
     classifiers=[

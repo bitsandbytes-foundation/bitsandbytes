@@ -133,7 +133,7 @@ def evaluate_cuda_setup():
 
     has_gpu = cc != ''
     if not has_gpu:
-        print('WARNING: No GPU detected! Check our CUDA paths. Processding to load CPU-only library...')
+        print('WARNING: No GPU detected! Check our CUDA paths. Processing to load CPU-only library...')
         return binary_name
 
     has_cublaslt = cc in ['7.5', '8.0', '8.6']
