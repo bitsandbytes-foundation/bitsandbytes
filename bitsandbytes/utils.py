@@ -2,6 +2,7 @@ import sys
 import shlex
 import subprocess
 
+from typing import Tuple
 
 def execute_and_return(command_string: str) -> Tuple[str, str]:
     def _decode(subprocess_err_out_tuple):
@@ -19,7 +20,7 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
             ).communicate()
         )
 
-    std_out, std_err = execute_and_return_decoded_std_streams()
+    std_out, std_err = execute_and_return_decoded_std_streams(command_string)
     return std_out, std_err
 
 
