@@ -1,6 +1,6 @@
 """
 extract factors the build is dependent on:
-[X] compute capability  
+[X] compute capability
     [ ] TODO: Q - What if we have multiple GPUs of different makes?
 - CUDA version
 - Software:
@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 from typing import Set, Union
 
-from .utils import print_err, warn_of_missing_prerequisite, execute_and_return
+from ..utils import print_err, warn_of_missing_prerequisite, execute_and_return
 
 
 def check_cuda_result(cuda, result_val):

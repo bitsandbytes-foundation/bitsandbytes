@@ -2,7 +2,7 @@ import ctypes as ct
 import os
 from warnings import warn
 
-from bitsandbytes.cuda_setup import evaluate_cuda_setup
+from bitsandbytes.cuda_setup.main import evaluate_cuda_setup
 
 
 class CUDALibrary_Singleton(object):
