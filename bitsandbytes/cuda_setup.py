@@ -68,8 +68,8 @@ def get_compute_capability():
     ccs = []
     for i in range(nGpus.value):
         check_cuda_result(cuda, cuda.cuDeviceGet(ctypes.byref(device), i))
-        ref_major = ctypes(cc_major)
-        ref_minor = ctypes(cc_minor)
+        ref_major = ctypes.byref(cc_major)
+        ref_minor = ctypes.byref(cc_minor)
         # 2. call extern C function to determine CC 
         check_cuda_result(cuda, cuda.cuDeviceComputeCapability(ref_major, ref_minor, device))
         ccs.append(f"{cc_major.value}.{cc_minor.value}")
