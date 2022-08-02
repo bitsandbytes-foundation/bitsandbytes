@@ -92,6 +92,9 @@ def test_get_cuda_runtime_lib_path__non_existent_dir(capsys, tmp_path):
 
 def test_full_system():
     ## this only tests the cuda version and not compute capability
+
+    # if CONDA_PREFIX exists, it has priority before all other env variables
+    # but it does not contain the library directly, so we need to look at the a sub-folder
     version = ''
     if 'CONDA_PREFIX' in os.environ:
         ls_output, err = bnb.utils.execute_and_return(f'ls -l {os.environ["CONDA_PREFIX"]}/lib/libcudart.so')
