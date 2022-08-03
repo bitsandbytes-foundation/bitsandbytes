@@ -19,53 +19,59 @@ using std::endl;
 void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n)
 {
   int threads = 512;
-  int blocks = n/threads;
-  blocks = n % threads == 0 ? blocks : blocks + 1;
-  kHistogramScatterAdd2D<<<blocks, 512>>>(histogram, index1, index2, src, maxidx1, n);
+  int num_blocks = n/threads;
+  num_blocks = n % threads == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
+  kHistogramScatterAdd2D<<<num_blocks, 512>>>(histogram, index1, index2, src, maxidx1, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
 {
-  int blocks = n/4096;
-  blocks = n % 4096 == 0 ? blocks : blocks + 1;
+  int num_blocks = n/4096;
+  num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
 	CUDA_CHECK_RETURN(cudaMemset(code, 0, 256*sizeof(float)));
-  kEstimateQuantiles<T><<<blocks, 512>>>(A, code, offset, std::numeric_limits<T>::max(), n);
+  kEstimateQuantiles<T><<<num_blocks, 512>>>(A, code, offset, std::numeric_limits<T>::max(), n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 void quantize(float *code, float *A, unsigned char *out, int n)
 {
-  int blocks = n/1024;
-  blocks = n % 1024 == 0 ? blocks : blocks + 1;
-  kQuantize<<<blocks, 1024>>>(code, A, out, n);
+  int num_blocks = n/1024;
+  num_blocks = n % 1024 == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
+  kQuantize<<<num_blocks, 1024>>>(code, A, out, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 void dequantize(float *code, unsigned char *A, float *out, int n)
 {
-  int blocks = n/1024;
-  blocks = n % 1024 == 0 ? blocks : blocks + 1;
-  kDequantize<<<blocks, 1024>>>(code, A, out, n);
+  int num_blocks = n/1024;
+  num_blocks = n % 1024 == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
+  kDequantize<<<num_blocks, 1024>>>(code, A, out, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float *rand, int rand_offset, const int n)
 {
-  int blocks = n/4096;
-  blocks = n % 4096 == 0 ? blocks : blocks + 1;
-  kQuantizeBlockwise<T, 4096, 4, STOCHASTIC><<<blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
+  int num_blocks = n/4096;
+  num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
+  kQuantizeBlockwise<T, 4096, 4, STOCHASTIC><<<num_blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int blocksize, const int n)
 {
-  int blocks = n/blocksize;
-  blocks = n % blocksize == 0 ? blocks : blocks + 1;
+  int num_blocks = n/blocksize;
+  num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
   if(blocksize == 4096)
-    kDequantizeBlockwise<T, 4096, 1024, 4><<<blocks, 4096/4>>>(code, A, absmax, out, n);
+    kDequantizeBlockwise<T, 4096, 1024, 4><<<num_blocks, 4096/4>>>(code, A, absmax, out, n);
   else if(blocksize == 2048)
-    kDequantizeBlockwise<T, 2048, 512, 4><<<blocks, 2048/4>>>(code, A, absmax, out, n);
+    kDequantizeBlockwise<T, 2048, 512, 4><<<num_blocks, 2048/4>>>(code, A, absmax, out, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -74,18 +80,19 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, bool skip_zeros, const int n)
 {
-  int blocks = n/4096;
-  blocks = n % 4096 == 0 ? blocks : blocks + 1;
+  int num_blocks = n/4096;
+  num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
 	switch(OPTIMIZER)
 	{
 		case ADAM:
       if(max_unorm > 0.0f)
 			{
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
-        kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<blocks, 512>>>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+        kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
       }
-			kOptimizer32bit2State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+			kOptimizer32bit2State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
 		case MOMENTUM:
@@ -95,11 +102,11 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       if(max_unorm > 0.0f)
 			{
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
-				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<blocks, 512>>>(g, p, state1, unorm, beta1, eps, weight_decay, step, lr, gnorm_scale, n);
+				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, unorm, beta1, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			}
 
-			kOptimizer32bit1State<T, OPTIMIZER><<<blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+			kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
 	}
@@ -115,8 +122,9 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
                 float weight_decay,
                 const float gnorm_scale, int n)
 {
-  int blocks = n/4096;
-  blocks = n % 4096 == 0 ? blocks : blocks + 1;
+  int num_blocks = n/4096;
+  num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
 
   if(max_unorm > 0.0f){ CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float))); }
 
@@ -125,9 +133,9 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 		case ADAM:
 			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
 			CUDA_CHECK_RETURN(cudaMemset(new_max2, 0, 1*sizeof(float)));
-			kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n);
+			kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
-			kOptimizerStatic8bit2State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
+			kOptimizerStatic8bit2State<T, OPTIMIZER><<<num_blocks, 1024>>>(p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
 																														quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
@@ -135,9 +143,9 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
     case RMSPROP:
     case ADAGRAD:
 			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
-			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 256>>>(p, g, state1, unorm, beta1, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, unorm, beta1, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
-			kOptimizerStatic8bit1State<T, OPTIMIZER><<<blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, eps, step, lr,
+			kOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, eps, step, lr,
 																														quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
@@ -156,22 +164,24 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n)
 {
 
-	int blocks = 0;
+	int num_blocks = 0;
 	switch(OPTIMIZER)
 	{
 		case ADAM:
-			blocks = n/BLOCKSIZE_2STATE;
-			blocks = n % BLOCKSIZE_2STATE == 0 ? blocks : blocks + 1;
-			kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE><<<blocks, BLOCKSIZE_2STATE/NUM_2STATE>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
+			num_blocks = n/BLOCKSIZE_2STATE;
+			num_blocks = n % BLOCKSIZE_2STATE == 0 ? num_blocks : num_blocks + 1;
+      assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
+			kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE><<<num_blocks, BLOCKSIZE_2STATE/NUM_2STATE>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
 																														quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
 		case MOMENTUM:
 		case RMSPROP:
     case ADAGRAD:
-			blocks = n/BLOCKSIZE_1STATE;
-			blocks = n % BLOCKSIZE_1STATE == 0 ? blocks : blocks + 1;
-			kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE><<<blocks, BLOCKSIZE_1STATE/NUM_1STATE>>>(p, g, state1, beta1, beta2, eps, step, lr,
+			num_blocks = n/BLOCKSIZE_1STATE;
+			num_blocks = n % BLOCKSIZE_1STATE == 0 ? num_blocks : num_blocks + 1;
+      assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
+			kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE><<<num_blocks, BLOCKSIZE_1STATE/NUM_1STATE>>>(p, g, state1, beta1, beta2, eps, step, lr,
 																														quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
@@ -182,10 +192,11 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n)
 {
-  int blocks = n/2048;
-  blocks = n % 2048 == 0 ? blocks : blocks + 1;
+  int num_blocks = n/2048;
+  num_blocks = n % 2048 == 0 ? num_blocks : num_blocks + 1;
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
 	CUDA_CHECK_RETURN(cudaMemset(&gnorm_vec[step % 100], 0, 1*sizeof(float)));
-  kPercentileClipping<T, 2048, 4><<<blocks, 512>>>(g, gnorm_vec, step, n);
+  kPercentileClipping<T, 2048, 4><<<num_blocks, 512>>>(g, gnorm_vec, step, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -445,6 +456,7 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   int num_blocks = numRows/subtile_rows;
   num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
   num_blocks = num_blocks*(tileCols/32);
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
   assert(threads <= tilesize);
 
   //cout << num_blocks << " blocks" << endl;
@@ -463,6 +475,9 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_r
   int tiledRows = fill_up_to_nearest_multiple(rows, STATS_ROWS);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/STATS_ROWS);
 
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
+
+
   if(nnz_threshold == 0.0)
     kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
   else if(nnz_threshold != 0.0)
@@ -480,6 +495,7 @@ void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col
   int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
   int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
 
   //cout << cols << " " << tiledCols << " " << tiledRows << endl;
   //cout << "num blocks " << num_blocks << endl;
@@ -503,6 +519,7 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
   int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
   int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
   int num_blocks = (tiledCols/tile_cols) * (tiledRows/tile_rows);
+  assert(num_blocks <= 65535 && "CUDA ERROR: Maximum number of blocks for kernel exceeded");
   int outCols = fill_up_to_nearest_multiple(cols, 32);
   int outRows = fill_up_to_nearest_multiple(rows, 32);
   if(FORMAT == COL_TURING)
