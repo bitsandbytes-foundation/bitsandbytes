@@ -1,8 +1,8 @@
 import ctypes as ct
-import os
+from pathlib import Path
 from warnings import warn
 
-from bitsandbytes.cuda_setup.main import evaluate_cuda_setup
+from .cuda_setup.main import evaluate_cuda_setup
 
 
 class CUDALibrary_Singleton(object):
@@ -12,18 +12,17 @@ class CUDALibrary_Singleton(object):
         raise RuntimeError("Call get_instance() instead")
 
     def initialize(self):
-        self.context = {}
         binary_name = evaluate_cuda_setup()
-        if not os.path.exists(os.path.dirname(__file__) + f"/{binary_name}"):
+        package_dir = Path(__file__).parent
+        binary_path = package_dir / binary_name
+
+        if not binary_path.exists():
             print(f"TODO: compile library for specific version: {binary_name}")
-            print("defaulting to libbitsandbytes.so")
-            self.lib = ct.cdll.LoadLibrary(
-                os.path.dirname(__file__) + "/libbitsandbytes.so"
-            )
+            legacy_binary_name = "libbitsandbytes.so"
+            print(f"Defaulting to {legacy_binary_name}...")
+            self.lib = ct.cdll.LoadLibrary(package_dir / legacy_binary_name)
         else:
-            self.lib = ct.cdll.LoadLibrary(
-                os.path.dirname(__file__) + f"/{binary_name}"
-            )
+            self.lib = ct.cdll.LoadLibrary(package_dir / binary_name)
 
     @classmethod
     def get_instance(cls):

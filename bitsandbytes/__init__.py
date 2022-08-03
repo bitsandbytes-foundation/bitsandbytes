@@ -22,3 +22,5 @@ __pdoc__ = {
     "optim.optimizer.Optimizer8bit": False,
     "optim.optimizer.MockArgs": False,
 }
+
+PACKAGE_GITHUB_URL = "https://github.com/TimDettmers/bitsandbytes"

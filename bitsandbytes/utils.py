@@ -1,8 +1,8 @@
-import sys
 import shlex
 import subprocess
-
+import sys
 from typing import Tuple
+
 
 def execute_and_return(command_string: str) -> Tuple[str, str]:
     def _decode(subprocess_err_out_tuple):
@@ -24,9 +24,9 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
     return std_out, std_err
 
 
-def print_err(s: str) -> None:
+def print_stderr(s: str) -> None:
     print(s, file=sys.stderr)
 
 
 def warn_of_missing_prerequisite(s: str) -> None:
-    print_err("WARNING, missing pre-requisite: " + s)
+    print_stderr("WARNING, missing pre-requisite: " + s)
