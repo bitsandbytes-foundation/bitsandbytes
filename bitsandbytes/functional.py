@@ -928,8 +928,6 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
 
     rows = n = shapeB[0]
     assert math.prod(list(shapeA)) > 0, f'Input tensor dimensions need to be > 0: {shapeA}'
-    print(shapeA, math.prod(shapeA), math.prod(list(shapeA)))
-    print('aaa')
 
     # if the tensor is empty, return a transformed empty tensor with the right dimensions
     if shapeA[0] == 0 and dimsA == 2:
