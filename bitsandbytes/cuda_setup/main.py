@@ -47,6 +47,7 @@ def get_compute_capabilities():
         cuda = ctypes.CDLL("libcuda.so")
     except OSError:
         # TODO: shouldn't we error or at least warn here?
+        print('ERROR: libcuda.so not found!')
         return None
 
     nGpus = ctypes.c_int()
@@ -70,7 +71,7 @@ def get_compute_capabilities():
         )
         ccs.append(f"{cc_major.value}.{cc_minor.value}")
 
-    return ccs.sort()
+    return ccs
 
 
 # def get_compute_capability()-> Union[List[str, ...], None]: # FIXME: error
@@ -80,7 +81,8 @@ def get_compute_capability():
     capabilities are downwards compatible. If no GPUs are detected, it returns
     None.
     """
-    if ccs := get_compute_capabilities() is not None:
+    ccs = get_compute_capabilities()
+    if ccs is not None:
         # TODO: handle different compute capabilities; for now, take the max
         return ccs[-1]
     return None
@@ -92,8 +94,7 @@ def evaluate_cuda_setup():
     cc = get_compute_capability()
     binary_name = "libbitsandbytes_cpu.so"
 
-    # FIXME: has_gpu is still unused
-    if not (has_gpu := bool(cc)):
+    if cc == '':
         print(
             "WARNING: No GPU detected! Check your CUDA paths. Processing to load CPU-only library..."
         )
@@ -115,6 +116,7 @@ def evaluate_cuda_setup():
         ls_output.split(" ")[-1].replace("libcudart.so.", "").split(".")
     )
     cuda_version_string = f"{major}{minor}"
+    print(f'CUDA_SETUP: Detected CUDA version {cuda_version_string}')
 
     def get_binary_name():
         "if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt.so"
@@ -122,6 +124,8 @@ def evaluate_cuda_setup():
         if has_cublaslt:
             return f"{bin_base_name}{cuda_version_string}.so"
         else:
-            return f"{bin_base_name}_nocublaslt.so"
+            return f"{bin_base_name}{cuda_version_string}_nocublaslt.so"
+
+    binary_name = get_binary_name()
 
     return binary_name

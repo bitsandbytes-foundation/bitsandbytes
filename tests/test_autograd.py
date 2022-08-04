@@ -351,9 +351,9 @@ def test_matmullt(
             err = torch.abs(out_bnb - out_torch).mean().item()
             # print(f'abs error {err:.4f}')
             idx = torch.isclose(out_bnb, out_torch, atol=0.01, rtol=0.1)
-            assert (idx == 0).sum().item() < n * 0.0175
+            assert (idx == 0).sum().item() <= n * 0.0175
             idx = torch.isclose(out_bnb, out_torch, atol=0.035, rtol=0.2)
-            assert (idx == 0).sum().item() < n * 0.001
+            assert (idx == 0).sum().item() <= n * 0.001
 
             if has_fp16_weights:
                 if any(req_grad):
@@ -391,9 +391,9 @@ def test_matmullt(
                         assert torch.abs(gradB2).sum() == 0.0
                     idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
 
-                    assert (idx == 0).sum().item() < n * 0.1
+                    assert (idx == 0).sum().item() <= n * 0.1
                     idx = torch.isclose(gradB1, gradB2, atol=0.10, rtol=0.3)
-                    assert (idx == 0).sum().item() < n * 0.02
+                    assert (idx == 0).sum().item() <= n * 0.02
                     torch.testing.assert_allclose(
                         gradB1, gradB2, atol=0.18, rtol=0.3
                     )

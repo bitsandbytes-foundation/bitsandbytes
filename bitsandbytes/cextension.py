@@ -17,12 +17,13 @@ class CUDALibrary_Singleton(object):
         binary_path = package_dir / binary_name
 
         if not binary_path.exists():
-            print(f"TODO: compile library for specific version: {binary_name}")
+            print(f"CUDA_SETUP: TODO: compile library for specific version: {binary_name}")
             legacy_binary_name = "libbitsandbytes.so"
-            print(f"Defaulting to {legacy_binary_name}...")
+            print(f"CUDA_SETUP: Defaulting to {legacy_binary_name}...")
             self.lib = ct.cdll.LoadLibrary(package_dir / legacy_binary_name)
         else:
-            self.lib = ct.cdll.LoadLibrary(package_dir / binary_name)
+            print(f"CUDA_SETUP: Loading binary {binary_path}...")
+            self.lib = ct.cdll.LoadLibrary(binary_path)
 
     @classmethod
     def get_instance(cls):
