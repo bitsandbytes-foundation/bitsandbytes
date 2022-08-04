@@ -1,28 +1,37 @@
 #!/bin/bash
 BASE_PATH=$1
 
+echo "MAKE SURE LD_LIBRARY_PATH IS EMPTY!"
+echo $LD_LIBRARY_PATH
+
+if [[ ! -z "${LD_LIBRARY_PATH}" ]]; then
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+
+
 module unload cuda
 module unload gcc
 
-#rm -rf dist build
-#make clean
-#make cleaneggs
-#export CUDA_HOME=
-#make cpuonly
-#
-#if [ ! -f "./bitsandbytes/libbitsandbytes.so" ]; then
-#  # Control will enter here if $DIRECTORY doesn't exist.
-#  echo "Compilation unsuccessul!" 1>&2
-#  exit 64
-#fi
-#CUDA_VERSION=cpu python -m build
-#python -m twine upload dist/* --verbose --repository testpypi
+rm -rf dist build
+make clean
+make cleaneggs
+export CUDA_HOME=
+make cpuonly
+
+if [ ! -f "./bitsandbytes/libbitsandbytes.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+CUDA_VERSION=cpu python -m build
+python -m twine upload dist/* --verbose --repository testpypi
 
 rm -rf dist build
 make clean
 make cleaneggs
 export CUDA_HOME=$BASE_PATH/cuda-11.0
-make cuda110
+make cuda110 
 
 if [ ! -f "./bitsandbytes/libbitsandbytes.so" ]; then
   # Control will enter here if $DIRECTORY doesn't exist.
@@ -102,20 +111,20 @@ fi
 CUDA_VERSION=115 python -m build
 python -m twine upload dist/* --verbose --repository testpypi
 
-#rm -rf dist build
-#make clean
-#make cleaneggs
-#export CUDA_HOME=$BASE_PATH/cuda-11.6
-#
-#make cuda11x
-#if [ ! -f "./bitsandbytes/libbitsandbytes.so" ]; then
-#  # Control will enter here if $DIRECTORY doesn't exist.
-#  echo "Compilation unsuccessul!" 1>&2
-#  exit 64
-#fi
-#CUDA_VERSION=116 python -m build
-#python -m twine upload dist/* --verbose --repository testpypi
-#
+rm -rf dist build
+make clean
+make cleaneggs
+export CUDA_HOME=$BASE_PATH/cuda-11.6
+
+make cuda11x
+if [ ! -f "./bitsandbytes/libbitsandbytes.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+CUDA_VERSION=116 python -m build
+python -m twine upload dist/* --verbose --repository testpypi
+
 rm -rf dist build
 make clean
 make cleaneggs
@@ -257,5 +266,4 @@ if [ ! -f "./bitsandbytes/libbitsandbytes.so" ]; then
   exit 64
 fi
 CUDA_VERSION=117-nomatmul python -m build
-python -m twine upload dist/* --verbose
 python -m twine upload dist/* --verbose --repository testpypi
