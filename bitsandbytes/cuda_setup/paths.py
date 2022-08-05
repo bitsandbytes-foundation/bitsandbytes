@@ -117,9 +117,15 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
         if env_var not in {"CONDA_PREFIX", "LD_LIBRARY_PATH"}
     }
 
+
+
     cuda_runtime_libs = set()
-    for env_var, value in remaining_candidate_env_vars:
+    for env_var, value in remaining_candidate_env_vars.items():
         cuda_runtime_libs.update(find_cuda_lib_in(value))
+
+    if len(cuda_runtime_libs) == 0:
+        print('CUDA_SETUP: WARNING! libcudart.so not found in any environmental path. Searching /usr/local/cuda/lib64...')
+        cuda_runtime_libs.update(find_cuda_lib_in('/usr/local/cuda/lib64'))
 
     warn_in_case_of_duplicates(cuda_runtime_libs)
 

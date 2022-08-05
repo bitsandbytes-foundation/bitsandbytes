@@ -133,7 +133,7 @@ def test_full_system():
         )
         version = float(f"{major}.{minor}")
 
-    if version == "" and "LD_LIBRARY_PATH":
+    if version == "" and "LD_LIBRARY_PATH" in os.environ:
         ld_path = os.environ["LD_LIBRARY_PATH"]
         paths = ld_path.split(":")
         version = ""
@@ -143,6 +143,7 @@ def test_full_system():
                 version = p[idx + 5 : idx + 5 + 4].replace("/", "")
                 version = float(version)
                 break
+
 
     assert version > 0
     binary_name = evaluate_cuda_setup()
