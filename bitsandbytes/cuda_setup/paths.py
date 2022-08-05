@@ -123,4 +123,4 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
 
     warn_in_case_of_duplicates(cuda_runtime_libs)
 
-    return next(iter(cuda_runtime_libs)) if cuda_runtime_libs else set()
+    return next(iter(cuda_runtime_libs)) if cuda_runtime_libs else None
