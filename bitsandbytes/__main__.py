@@ -30,7 +30,7 @@ print()
 
 
 from . import COMPILED_WITH_CUDA, PACKAGE_GITHUB_URL
-from .cuda_setup.main import get_compute_capabilities
+from .cuda_setup.main import get_compute_capabilities, get_cuda_lib_handle
 from .cuda_setup.env_vars import to_be_ignored
 from .utils import print_stderr
 
@@ -47,7 +47,8 @@ print(
 
 print_header("OTHER")
 print(f"{COMPILED_WITH_CUDA = }")
-print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities()}")
+cuda = get_cuda_lib_handle()
+print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities(cuda)}")
 print_header("")
 print_header("DEBUG INFO END")
 print_header("")
