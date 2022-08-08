@@ -6,6 +6,7 @@ import bitsandbytes.functional as F
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
 
+# math.prod not compatible with python < 3.8
 def prod(iterable):
     return reduce(operator.mul, iterable, 1)
 
