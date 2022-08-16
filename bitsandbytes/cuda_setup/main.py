@@ -45,6 +45,9 @@ def get_cuda_version(cuda, cudart_path):
     major = version//1000
     minor = (version-(major*1000))//10
 
+    if major < 11:
+       print('CUDA SETUP: CUDA version lower than 11 are currenlty not supported!')
+
     return f'{major}{minor}'
 
 
@@ -110,6 +113,10 @@ def get_compute_capability(cuda):
 
 
 def evaluate_cuda_setup():
+    print('')
+    print('='*35 + 'BUG REPORT' + '='*35)
+    print('Welcome to bitsandbytes. For bug reports, please use this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
+    print('='*80)
     binary_name = "libbitsandbytes_cpu.so"
     cudart_path = determine_cuda_runtime_lib_path()
     if cudart_path is None:
@@ -121,6 +128,7 @@ def evaluate_cuda_setup():
     print(f"CUDA SETUP: CUDA path found: {cudart_path}")
     cuda = get_cuda_lib_handle()
     cc = get_compute_capability(cuda)
+    print(f"CUDA SETUP: Highest compute capability among GPUs detected: {cc}")
     cuda_version_string = get_cuda_version(cuda, cudart_path)
 
 

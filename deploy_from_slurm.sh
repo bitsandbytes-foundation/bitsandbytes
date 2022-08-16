@@ -202,4 +202,4 @@ if [ ! -f "./bitsandbytes/libbitsandbytes_cuda117_nocublaslt.so" ]; then
 fi
 
 python -m build
-python -m twine upload dist/* --verbose --repository testpypi
+python -m twine upload dist/* --verbose
