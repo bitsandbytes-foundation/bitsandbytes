@@ -435,7 +435,7 @@ int fill_up_to_nearest_multiple(int value, int multiple)
   return value + (value % multiple == 0 ? 0 : (multiple - (value % multiple)));
 }
 
-void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, int numRows, int numCols)
+void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, half *bias, int numRows, int numCols)
 {
   int threads = 512;
   int tileCols = fill_up_to_nearest_multiple(numCols, 32);
@@ -447,7 +447,7 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   num_blocks = num_blocks*(tileCols/32);
   assert(threads <= tilesize);
 
-  kdequant_mm_int32_fp16<4, 128, 512><<<num_blocks, threads>>>(A, rowStats, colStats, out, newRowStats, newcolStats, numRows, numCols, tileCols, n);
+  kdequant_mm_int32_fp16<4, 128, 512><<<num_blocks, threads>>>(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -464,7 +464,6 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_r
 	row_tiles = row_tiles > 0 ? row_tiles : 1;
 	col_tiles = col_tiles > 0 ? col_tiles : 1;
   int num_blocks = row_tiles * col_tiles;
-
 
   if(nnz_threshold == 0.0)
     kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
