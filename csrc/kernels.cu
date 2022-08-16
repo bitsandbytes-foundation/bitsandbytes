@@ -1951,6 +1951,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
   float colStat = col >= numCols ? 0.0f : colStats[col];
+  float local_biasValue = ((bias == NULL) || (col >= numCols)) ? 0.0f : __half2float(bias[col]);
   // no block loads for rows for now -- keep it simple
   for(int j = threadIdx.x; j < SUBTILE_ROWS; j+=blockDim.x)
   {
@@ -1989,7 +1990,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
-      local_output[j] = __float2half(local_values[j]*MM_DEQUANT_CONST*local_rowStats[j]*colStat);
+      local_output[j] = __float2half((local_values[j]*MM_DEQUANT_CONST*local_rowStats[j]*colStat) + local_biasValue);
       //absmax_col = fmax(fabsf(local_output[j]), absmax_col);
 
     // we store data in row major
