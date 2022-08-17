@@ -1,21 +1,42 @@
 # bitsandbytes
 
-Bitsandbytes is a lightweight wrapper around CUDA custom functions, in particular 8-bit optimizers and quantization functions.
+The bitsandbytes is a lightweight wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions. 
 
-[Paper](https://arxiv.org/abs/2110.02861) -- [Video](https://www.youtube.com/watch?v=IxrlHAJtqKE) -- [Docs](https://bitsandbytes.readthedocs.io/en/latest/)
+
+
+Resources:
+- [8-bit Optimizer Paper](https://arxiv.org/abs/2110.02861) --  [Video](https://www.youtube.com/watch?v=IxrlHAJtqKE) -- [Docs](https://bitsandbytes.readthedocs.io/en/latest/)
+
+- [LLM.int8() Paper](https://arxiv.org/abs/2208.07339) -- [LLM.int8() Software Blog Post](https://huggingface.co/blog/hf-bitsandbytes-integration) -- [LLM.int8() Emergent Features Blog Post](https://timdettmers.com/2022/08/17/llm-int8-and-emergent-features/)
 
 ## TL;DR
 **Installation**:
-1. Note down version: ``conda list | grep cudatoolkit``
-2. Replace 111 with the version that you see: ``pip install bitsandbytes-cuda111``
+``pip install bitsandbytes``
 
-**Usage**:
+**Using 8-bit optimizer**:
 1. Comment out optimizer: ``#torch.optim.Adam(....)``
 2. Add 8-bit optimizer of your choice ``bnb.optim.Adam8bit(....)`` (arguments stay the same)
 3. Replace embedding layer if necessary: ``torch.nn.Embedding(..) -> bnb.nn.Embedding(..)``
 
 
+**Using 8-bit Inference**:
+1. Comment out torch.nn.Linear: ``#linear = torch.nn.Linear(...)``
+2. Add bnb 8-bit linear light module: ``linear = bnb.nn.Linear8bitLt(...)`` (base arguments stay the same)
+3. There are two modes:
+   - Mixed 8-bit training with 16-bit main weights. Pass the argument ``use_fp16_weights=True`` (default)
+   - Int8 inference. Pass the argument ``use_fp16_weights=False``
+4. To use the full LLM.int8() method, use the ``threshold=k`` argument. We recommend ``k=6.0``.
+```python
+# LLM.int8()
+linear = bnb.nn.Linear8bitLt(dim1, dim2, bias=True, use_fp16_weights=False, threshold=6.0)
+# inputs need to be fp16
+out = linear(x.to(torch.float16))
+```
+
+
 ## Features
+- 8-bit Matrix multiplication with mixed precision decomposition
+- LLM.int8() inference
 - 8-bit Optimizers: Adam, AdamW, RMSProp, LARS, LAMB (saves 75% memory)
 - Stable Embedding Layer: Improved stability through better initialization, and normalization
 - 8-bit quantization: Quantile, Linear, and Dynamic quantization
@@ -24,28 +45,25 @@ Bitsandbytes is a lightweight wrapper around CUDA custom functions, in particula
 ## Requirements & Installation
 
 Requirements: anaconda, cudatoolkit, pytorch
-Hardware requirements: NVIDIA Maxwell GPU or newer (>=GTX 9XX)
-Supported CUDA versions: 9.2 - 11.3
+
+Hardware requirements: 
+ - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or older).
+ - 8-bit optimizers and quantization: NVIDIA Maxwell GPU or newer (>=GTX 9XX).
+
+Supported CUDA versions: 10.2 - 11.7
 
 The requirements can best be fulfilled by installing pytorch via anaconda. You can install PyTorch by following the ["Get Started"](https://pytorch.org/get-started/locally/) instructions on the official website.
 
-bitsandbytes is compatible with all major PyTorch releases and cudatoolkit versions, but for now, you need to select the right version manually. To do this run:
-
-```conda list | grep cudatoolkit```
-
-and take note of the Cuda version that you have installed. Then you can install bitsandbytes via:
-```bash
-# choices: {cuda92, cuda 100, cuda101, cuda102, cuda110, cuda111, cuda113}
-# replace XXX with the respective number
-pip install bitsandbytes-cudaXXX
-```
-
-To check if your installation was successful, you can execute the following command, which runs a single bnb Adam update.
-```
-wget https://gist.githubusercontent.com/TimDettmers/1f5188c6ee6ed69d211b7fe4e381e713/raw/4d17c3d09ccdb57e9ab7eca0171f2ace6e4d2858/check_bnb_install.py && python check_bnb_install.py
-```
-
 ## Using bitsandbytes
+
+### Using Int8 Matrix Multiplication
+
+For straight Int8 matrix multiplication with mixed precision decomposition you can use ``bnb.matmul(...)``. To enable mixed precision decomposition, use the threshold parameter:
+```python
+bnb.matmul(..., threshold=6.0)
+```
+
+For instructions how to use LLM.int8() inference layers in your own code, see the TL;DR above or for extended instruction see [this blog post](https://github.com/huggingface/transformers).
 
 ### Using the 8-bit Optimizers
 
@@ -95,15 +113,23 @@ The majority of bitsandbytes is licensed under MIT, however portions of the proj
 
 We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fabiocannizzo/FastBinarySearch) which we use for CPU quantization.
 
-## Citation
-If you found this library and 8-bit optimizers or quantization routines useful, please consider citing out work.
+## How to cite us
+If you found this library and found LLM.int8() useful, please consider citing our work:
 ```
-@misc{dettmers2021optim8bit,
-      title={8-bit Optimizers via Block-wise Quantization},
-      author={Tim Dettmers and Mike Lewis and Sam Shleifer and Luke Zettlemoyer},
-      year={2021},
-      eprint={2110.02861},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+@article{dettmers2022llmint8,
+  title={LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale},
+  author={Dettmers, Tim and Lewis, Mike and Belkada, Younes and Zettlemoyer, Luke},
+  journal={arXiv preprint arXiv:2208.07339},
+  year={2022}
+}
+```
+
+For 8-bit optimizers or quantization routines please consider citing the following work.
+```
+@article{dettmers2022optimizers,
+  title={8-bit Optimizers via Block-wise Quantization},
+  author={Dettmers, Tim and Lewis, Mike and Shleifer, Sam and Zettlemoyer, Luke},
+  journal={9th International Conference on Learning Representations, ICLR},
+  year={2022}
 }
 ```
