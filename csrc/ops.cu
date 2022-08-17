@@ -371,6 +371,9 @@ template void transform<int32_t, COL32, ROW, false, 32>(cublasLtHandle_t ltHandl
 template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc) 
 {
 #ifdef NO_CUBLASLT
+  printf("ERROR: Your GPU does not support Int8 Matmul!");
+  assert(false);
+
 	return 0;
 #else
     int has_error = 0;

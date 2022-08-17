@@ -17,12 +17,17 @@ class CUDALibrary_Singleton(object):
         binary_path = package_dir / binary_name
 
         if not binary_path.exists():
-            print(f"CUDA_SETUP: TODO: compile library for specific version: {binary_name}")
+            print(f"CUDA SETUP: TODO: compile library for specific version: {binary_name}")
             legacy_binary_name = "libbitsandbytes.so"
-            print(f"CUDA_SETUP: Defaulting to {legacy_binary_name}...")
-            self.lib = ct.cdll.LoadLibrary(package_dir / legacy_binary_name)
+            print(f"CUDA SETUP: Defaulting to {legacy_binary_name}...")
+            binary_path = package_dir / legacy_binary_name
+            if not binary_path.exists():
+                print('CUDA SETUP: CUDA detection failed. Either CUDA driver not installed, CUDA not installed, or you have multiple conflicting CUDA libraries!')
+                print('CUDA SETUP: If you compiled from source, try again with `make CUDA_VERSION=DETECTED_CUDA_VERSION` for example, `make CUDA_VERSION=113`.')
+                raise Exception('CUDA SETUP: Setup Failed!')
+            self.lib = ct.cdll.LoadLibrary(binary_path)
         else:
-            print(f"CUDA_SETUP: Loading binary {binary_path}...")
+            print(f"CUDA SETUP: Loading binary {binary_path}...")
             self.lib = ct.cdll.LoadLibrary(binary_path)
 
     @classmethod

@@ -46,7 +46,7 @@ def get_cuda_version(cuda, cudart_path):
     minor = (version-(major*1000))//10
 
     if major < 11:
-       print('CUDA SETUP: CUDA version lower than 11 are currenlty not supported!')
+       print('CUDA SETUP: CUDA version lower than 11 are currenlty not supported for LLM.int8(). You will be only to use 8-bit optimizers and quantization routines!!')
 
     return f'{major}{minor}'
 
@@ -57,7 +57,7 @@ def get_cuda_lib_handle():
         cuda = ctypes.CDLL("libcuda.so")
     except OSError:
         # TODO: shouldn't we error or at least warn here?
-        print('ERROR: libcuda.so not found!')
+        raise Exception('CUDA SETUP: ERROR! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
         return None
     check_cuda_result(cuda, cuda.cuInit(0))
 
@@ -115,7 +115,8 @@ def get_compute_capability(cuda):
 def evaluate_cuda_setup():
     print('')
     print('='*35 + 'BUG REPORT' + '='*35)
-    print('Welcome to bitsandbytes. For bug reports, please use this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
+    print('Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues')
+    print('For effortless bug reporting copy-paste your error into this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
     print('='*80)
     binary_name = "libbitsandbytes_cpu.so"
     cudart_path = determine_cuda_runtime_lib_path()
@@ -125,7 +126,7 @@ def evaluate_cuda_setup():
         )
         return binary_name
 
-    print(f"CUDA SETUP: CUDA path found: {cudart_path}")
+    print(f"CUDA SETUP: CUDA runtime path found: {cudart_path}")
     cuda = get_cuda_lib_handle()
     cc = get_compute_capability(cuda)
     print(f"CUDA SETUP: Highest compute capability among GPUs detected: {cc}")
@@ -147,7 +148,7 @@ def evaluate_cuda_setup():
 
     # we use ls -l instead of nvcc to determine the cuda version
     # since most installations will have the libcudart.so installed, but not the compiler
-    print(f'CUDA_SETUP: Detected CUDA version {cuda_version_string}')
+    print(f'CUDA SETUP: Detected CUDA version {cuda_version_string}')
 
     def get_binary_name():
         "if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt.so"

@@ -67,3 +67,26 @@ Features:
 
 Deprecated:
  - Pre-compiled release for CUDA 9.2, 10.0, 10.2 no longer available
+
+### 0.31.0
+
+#### 8-bit Inference and Packaging Update
+
+Features:
+ - added direct outlier extraction. This enables outlier extraction without fp16 weights without performance degradation.
+ - Added automatic CUDA SETUP procedure and packaging all binaries into a single bitsandbytes package.
+
+### 0.32.0
+
+#### 8-bit Inference Performance Enhancements
+
+We added performance enhancements for small models. This makes small models about 2x faster for LLM.int8() inference.
+
+Features:
+ - Int32 dequantization now supports fused biases.
+ - Linear8bitLt now uses a fused bias implementation.
+ - Change `.data.storage().data_ptr()` to `.data.data_ptr()` to enhance inference performance.
+
+Bug fixes:
+ - Now throws and error if LLM.int8() is used on a GPU that is not supported.
+ - Enhances error messaging if CUDA SETUP fails.
