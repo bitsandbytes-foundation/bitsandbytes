@@ -47,6 +47,6 @@ try:
 except AttributeError:
     warn(
         "The installed version of bitsandbytes was compiled without GPU support. "
-        "8-bit optimizers and GPU quantization are unavailable."
+        "8-bit optimizers, GPU quantization and matrix multiplication are unavailable."
     )
     COMPILED_WITH_CUDA = False

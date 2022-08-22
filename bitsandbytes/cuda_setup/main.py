@@ -46,7 +46,7 @@ def get_cuda_version(cuda, cudart_path):
     minor = (version-(major*1000))//10
 
     if major < 11:
-       print('CUDA SETUP: CUDA version lower than 11 are currenlty not supported for LLM.int8(). You will be only to use 8-bit optimizers and quantization routines!!')
+       print('CUDA SETUP: CUDA versions lower than 11 are currently not supported for LLM.int8(). You will be able only to use 8-bit optimizers and quantization routines!!')
 
     return f'{major}{minor}'
 

@@ -5,7 +5,6 @@
 import ctypes as ct
 import operator
 import random
-import math
 import torch
 
 from typing import Tuple
@@ -1684,18 +1683,6 @@ def double_quant(
 
     return out_row, out_col, row_stats, col_stats, coo_tensor
 
-
-def get_special_format_str():
-    major, minor = torch.cuda.get_device_capability()
-    if major < 7:
-        print(
-            f"Device with CUDA capability of {major} not supported for 8-bit matmul. Device has no tensor cores!"
-        )
-        assert major >= 7
-
-    if major == 7: return 'col_turing'
-    elif major == 8: return 'col_ampere'
-    else: return 'col_turing'
 
 
 
