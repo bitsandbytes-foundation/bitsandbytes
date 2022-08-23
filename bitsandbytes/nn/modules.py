@@ -212,7 +212,7 @@ class Int8Params(torch.nn.Parameter):
             )
             new_param.CB = self.CB
             new_param.SCB = self.SCB
-            new_param.SCB = self.SCBt
+            new_param.SCBt = self.SCBt
 
             return new_param
 

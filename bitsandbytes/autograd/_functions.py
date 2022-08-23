@@ -368,7 +368,7 @@ class MatMul8bitLt(torch.autograd.Function):
                     Bt = (CB * SCB).t().contiguous()
                     CBt = (Bt / SCBt).t().to(torch.int8)
 
-                # intentionally, do not store CxBt into state  
+                # intentionally, do not store CxBt in state  
                 CxBt, SBt = F.transform(
                     CBt, to_order=formatB, transpose=True
                 )
