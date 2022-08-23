@@ -1686,11 +1686,10 @@ def double_quant(
 
 
 def get_special_format_str():
+    if not torch.cuda.is_available(): return 'col_turning'
     major, minor = torch.cuda.get_device_capability()
     if major < 7:
-        print(
-            f"Device with CUDA capability of {major} not supported for 8-bit matmul. Device has no tensor cores!"
-        )
+        print(f"Device with CUDA capability of {major} not supported for 8-bit matmul. Device has no tensor cores!")
         assert major >= 7
 
     if major == 7: return 'col_turing'
