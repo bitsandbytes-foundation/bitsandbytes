@@ -363,8 +363,8 @@ class MatMul8bitLt(torch.autograd.Function):
                     # Restore CBt from CB
                     assert state.CBt is None, "CBt should not be stored in state"
                     CB = state.CB.half()
-                    SCB = state.SCB.unsquezee(1).half()
-                    SCBt = state.SCBt.unsquezee(1).half()
+                    SCB = state.SCB.unsqueeze(1).half()
+                    SCBt = state.SCBt.unsqueeze(1).half()
                     Bt = (CB * SCB).t().contiguous()
                     CBt = (Bt / SCBt).t().to(torch.int8)
 
