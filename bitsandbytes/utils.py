@@ -26,7 +26,3 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
 
 def print_stderr(s: str) -> None:
     print(s, file=sys.stderr)
-
-
-def warn_of_missing_prerequisite(s: str) -> None:
-    print_stderr("WARNING, missing pre-requisite: " + s)

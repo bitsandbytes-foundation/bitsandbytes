@@ -5,7 +5,6 @@
 import ctypes as ct
 import operator
 import random
-import math
 import torch
 
 from typing import Tuple
@@ -246,23 +245,6 @@ def get_transform_func(dtype, orderA, orderOut, transpose=False):
         )
     else:
         return getattr(lib, name)
-
-
-class GlobalData(object):
-    _instance = None
-
-    def __init__(self):
-        raise RuntimeError("Call get_instance() instead")
-
-    def initialize(self):
-        self.data = {}
-
-    @classmethod
-    def get_instance(cls):
-        if cls._instance is None:
-            cls._instance = cls.__new__(cls)
-            cls._instance.initialize()
-        return cls._instance
 
 
 def get_transform_buffer(

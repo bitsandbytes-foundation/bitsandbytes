@@ -5,18 +5,7 @@ from warnings import warn
 from ..utils import print_stderr
 from .env_vars import get_potentially_lib_path_containing_env_vars
 
-
 CUDA_RUNTIME_LIB: str = "libcudart.so"
-
-
-def purge_unwanted_semicolon(tentative_path: Path) -> Path:
-    """
-    Special function to handle the following exception:
-    __LMOD_REF_COUNT_PATH=/sw/cuda/11.6.2/bin:2;/mmfs1/home/dettmers/git/sched/bin:1;/mmfs1/home/dettmers/data/anaconda3/bin:1;/mmfs1/home/dettmers/data/anaconda3/condabin:1;/mmfs1/home/dettmers/.local/bin:1;/mmfs1/home/dettmers/bin:1;/usr/local/bin:1;/usr/bin:1;/usr/local/sbin:1;/usr/sbin:1;/mmfs1/home/dettmers/.fzf/bin:1;/mmfs1/home/dettmers/data/local/cuda-11.4/bin:1
-    """
-    # if ';' in str(tentative_path):
-    #     path_as_str, _ = str(tentative_path).split(';')
-    pass
 
 
 def extract_candidate_paths(paths_list_candidate: str) -> Set[Path]:
@@ -116,8 +105,6 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
         env_var: value for env_var, value in candidate_env_vars.items()
         if env_var not in {"CONDA_PREFIX", "LD_LIBRARY_PATH"}
     }
-
-
 
     cuda_runtime_libs = set()
     for env_var, value in remaining_candidate_env_vars.items():
