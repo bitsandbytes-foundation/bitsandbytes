@@ -1,6 +1,5 @@
 import shlex
 import subprocess
-import sys
 from typing import Tuple
 
 
@@ -22,7 +21,3 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
 
     std_out, std_err = execute_and_return_decoded_std_streams(command_string)
     return std_out, std_err
-
-
-def print_stderr(s: str) -> None:
-    print(s, file=sys.stderr)

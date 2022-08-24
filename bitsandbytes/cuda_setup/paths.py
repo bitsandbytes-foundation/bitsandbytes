@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Set, Union
 from warnings import warn
 
-from ..utils import print_stderr
 from .env_vars import get_potentially_lib_path_containing_env_vars
 
 CUDA_RUNTIME_LIB: str = "libcudart.so"
@@ -18,7 +17,7 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
     }
 
     if non_existent_directories:
-        print_stderr(
+        warn(
             "WARNING: The following directories listed in your path were found to "
             f"be non-existent: {non_existent_directories}"
         )
