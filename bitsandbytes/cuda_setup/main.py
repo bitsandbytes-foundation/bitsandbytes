@@ -17,10 +17,7 @@ evaluation:
 """
 
 import ctypes
-import torch
-from pathlib import Path
 
-from ..utils import execute_and_return
 from .paths import determine_cuda_runtime_lib_path
 
 
@@ -81,7 +78,6 @@ def get_compute_capabilities(cuda):
     cc_major = ctypes.c_int()
     cc_minor = ctypes.c_int()
 
-    result = ctypes.c_int()
     device = ctypes.c_int()
 
     check_cuda_result(cuda, cuda.cuDeviceGetCount(ctypes.byref(nGpus)))

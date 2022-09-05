@@ -3,8 +3,9 @@
 # cli()
 import os
 import sys
-import torch
+from warnings import warn
 
+import torch
 
 HEADER_WIDTH = 60
 
@@ -32,8 +33,6 @@ print()
 from . import COMPILED_WITH_CUDA, PACKAGE_GITHUB_URL
 from .cuda_setup.main import get_compute_capabilities, get_cuda_lib_handle
 from .cuda_setup.env_vars import to_be_ignored
-from .utils import print_stderr
-
 
 print_header("POTENTIALLY LIBRARY-PATH-LIKE ENV VARS")
 for k, v in os.environ.items():
@@ -84,7 +83,7 @@ try:
 
 except ImportError:
     print()
-    print_stderr(
+    warn(
         f"WARNING: {__package__} is currently running as CPU-only!\n"
         "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
         f"If you think that this is so erroneously,\nplease report an issue!"
