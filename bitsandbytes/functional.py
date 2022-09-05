@@ -184,14 +184,9 @@ def create_dynamic_map(signed=True, n=7):
 
 
 def get_special_format_str():
+    if not torch.cuda.is_available(): return 'col_turing'
     major, minor = torch.cuda.get_device_capability()
-    if major < 7:
-        print(
-            f"Device with CUDA capability of {major} not supported for 8-bit matmul. Device has no tensor cores!"
-        )
-        assert major >= 7
-
-    if major == 7:
+    if major <= 7:
         return "col_turing"
     elif major == 8:
         return "col_ampere"
@@ -1665,21 +1660,6 @@ def double_quant(
     post_call(prev_device)
 
     return out_row, out_col, row_stats, col_stats, coo_tensor
-
-
-def get_special_format_str():
-    major, minor = torch.cuda.get_device_capability()
-    if major < 7:
-        print(
-            f"Device with CUDA capability of {major} not supported for 8-bit matmul. Device has no tensor cores!"
-        )
-        assert major >= 7
-
-    if major == 7: return 'col_turing'
-    elif major == 8: return 'col_ampere'
-    else: return 'col_turing'
-
-
 
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
