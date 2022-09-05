@@ -17,6 +17,7 @@ evaluation:
 """
 
 import ctypes
+import torch
 from pathlib import Path
 
 from ..utils import execute_and_return
@@ -28,7 +29,7 @@ def check_cuda_result(cuda, result_val):
     if result_val != 0:
         error_str = ctypes.c_char_p()
         cuda.cuGetErrorString(result_val, ctypes.byref(error_str))
-        raise Exception(f"CUDA exception! Error code: {error_str.value.decode()}")
+        print(f"CUDA exception! Error code: {error_str.value.decode()}")
 
 def get_cuda_version(cuda, cudart_path):
     # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
@@ -57,7 +58,7 @@ def get_cuda_lib_handle():
         cuda = ctypes.CDLL("libcuda.so")
     except OSError:
         # TODO: shouldn't we error or at least warn here?
-        raise Exception('CUDA SETUP: ERROR! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
+        print('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
         return None
     check_cuda_result(cuda, cuda.cuInit(0))
 
@@ -119,6 +120,10 @@ def evaluate_cuda_setup():
     print('For effortless bug reporting copy-paste your error into this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
     print('='*80)
     binary_name = "libbitsandbytes_cpu.so"
+    #if not torch.cuda.is_available():
+        #print('No GPU detected. Loading CPU library...')
+        #return binary_name
+
     cudart_path = determine_cuda_runtime_lib_path()
     if cudart_path is None:
         print(
