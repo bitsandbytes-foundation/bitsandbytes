@@ -115,7 +115,8 @@ We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fa
 
 ## How to cite us
 If you found this library and found LLM.int8() useful, please consider citing our work:
-```
+
+```bibtex
 @article{dettmers2022llmint8,
   title={LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale},
   author={Dettmers, Tim and Lewis, Mike and Belkada, Younes and Zettlemoyer, Luke},
@@ -124,8 +125,9 @@ If you found this library and found LLM.int8() useful, please consider citing ou
 }
 ```
 
-For 8-bit optimizers or quantization routines please consider citing the following work.
-```
+For 8-bit optimizers or quantization routines, please consider citing the following work:
+
+```bibtex
 @article{dettmers2022optimizers,
   title={8-bit Optimizers via Block-wise Quantization},
   author={Dettmers, Tim and Lewis, Mike and Shleifer, Sam and Zettlemoyer, Luke},
