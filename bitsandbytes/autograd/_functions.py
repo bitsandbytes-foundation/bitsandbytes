@@ -185,10 +185,9 @@ class MatmulLtState:
     idx = None
     is_training = True
     has_fp16_weights = True
+    memory_efficient_backward = False
     use_pool = False
     formatB = F.get_special_format_str()
-
-    memory_efficient_backward = False
 
     def reset_grads(self):
         self.CB = None
@@ -198,6 +197,7 @@ class MatmulLtState:
 
         self.CxBt = None
         self.SBt = None
+        self.CBt = None
 
 
 class MatMul8bitLt(torch.autograd.Function):
@@ -231,10 +231,6 @@ class MatMul8bitLt(torch.autograd.Function):
         # Cast A to fp16
         A_dtype = A.dtype
         A = A.to(torch.float16)
-
-        assert (
-            A.dtype == torch.float16
-        ), f"The input data type needs to be fp16 but {A.dtype} was found!"
 
         # 1. Quantize A
         if len(A.shape) == 3:
@@ -396,9 +392,6 @@ class MatMul8bitLt(torch.autograd.Function):
         grad_output.to(grad_output_dtype)
 
         return grad_A, grad_B, None, grad_bias, None
-
-
-matmul = MatMul8bitLt.apply
 
 
 def matmul(
