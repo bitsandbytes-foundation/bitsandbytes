@@ -40,6 +40,7 @@ names = [
     ids=names,
 )
 def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
+    if not torch.cuda.is_available(): pytest.skip('No GPU found.')
     if dim2 > 0:
         dim2 = dim2 - (dim2 % 16)
     dim3 = dim3 - (dim3 % 16)
@@ -306,6 +307,7 @@ def test_matmullt(
     has_fp16_weights,
     has_bias
 ):
+    if not torch.cuda.is_available(): pytest.skip('No GPU found.')
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
     outlier_dim = torch.randint(0, dimA[1], size=(dimA[1] // 8,), device="cuda")

@@ -12,7 +12,7 @@ from .autograd._functions import (
 )
 from .cextension import COMPILED_WITH_CUDA
 from .nn import modules
-from . import cuda_setup
+from . import cuda_setup, utils
 
 if COMPILED_WITH_CUDA:
     from .optim import adam

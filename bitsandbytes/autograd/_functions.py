@@ -1,6 +1,5 @@
 import operator
 import torch
-import bitsandbytes as bnb
 import bitsandbytes.functional as F
 
 from dataclasses import dataclass
@@ -381,9 +380,6 @@ class MatMul8bitLt(torch.autograd.Function):
             grad_bias = grad_output.sum(0)
 
         return grad_A, grad_B, None, grad_bias, None
-
-
-matmul = MatMul8bitLt.apply
 
 
 def matmul(
