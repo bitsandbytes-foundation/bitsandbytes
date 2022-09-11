@@ -221,9 +221,9 @@ class Linear8bitLt(nn.Linear):
         output_features,
         bias=True,
         has_fp16_weights=True,
+        memory_efficient_backward=False,
         threshold=0.0,
         index=None,
-        memory_efficient_backward=False
     ):
         super(Linear8bitLt, self).__init__(
             input_features, output_features, bias

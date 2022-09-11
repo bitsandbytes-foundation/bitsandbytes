@@ -1,6 +1,5 @@
 import operator
 import torch
-import bitsandbytes as bnb
 import bitsandbytes.functional as F
 
 from dataclasses import dataclass
