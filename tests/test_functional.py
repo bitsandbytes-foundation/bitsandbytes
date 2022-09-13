@@ -2133,18 +2133,18 @@ def test_blockwise_cpu_large():
     reldiffs = []
     batch = 128
     seq = 128
-    hidden = 14336
-    for blocksize in [4096, 16384]:
-        for i in range(2):
-            A1 = torch.randn(batch, seq, hidden, device='cpu')
-            t0 = time.time()
-            C, S = F.quantize_blockwise(A1, blocksize=blocksize)
-            A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
-            print(time.time() - t0)
-            diff = torch.abs(A1 - A2)
-            reldiff = diff / torch.abs(A1 + 1e-8)
-            diffs.append(diff.mean().item())
-            reldiffs.append(reldiff.mean().item())
-            assert diffs[-1] < 0.011
-        # print(sum(diffs)/len(diffs))
-        # print(sum(reldiffs)/len(reldiffs))
+    for hidden in [128, 14336]:
+        for blocksize in [4096, 16384]:
+            for i in range(2):
+                A1 = torch.randn(batch, seq, hidden, device='cpu')
+                t0 = time.time()
+                C, S = F.quantize_blockwise(A1, blocksize=blocksize)
+                A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
+                print(time.time() - t0)
+                diff = torch.abs(A1 - A2)
+                reldiff = diff / torch.abs(A1 + 1e-8)
+                diffs.append(diff.mean().item())
+                reldiffs.append(reldiff.mean().item())
+                assert diffs[-1] < 0.011
+            # print(sum(diffs)/len(diffs))
+            # print(sum(reldiffs)/len(reldiffs))
