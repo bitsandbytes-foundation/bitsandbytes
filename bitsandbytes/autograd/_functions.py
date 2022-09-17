@@ -318,7 +318,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # 4. Mixed-precision decomposition matmul
         if coo_tensorA is not None and subA is not None:
-            output.addmm_(output, subA, state.subB)
+            output += torch.matmul(subA, state.subB)
 
         # 5. Save state
         ctx.state = state
