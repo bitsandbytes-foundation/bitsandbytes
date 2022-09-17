@@ -569,7 +569,7 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         (o1 * grad_proj).sum().backward()
         grad_ref = grad_proj.flatten(2) @ w2.half() @ w1.half()
         scale = grad_ref.abs().mean()
-        assert torch.allclose(b1.grad, grad_ref, rtol=0, atol=0.01 * scale)
+        assert torch.allclose(b1.grad, grad_ref, rtol=0, atol=0.05 * scale)
 
 
 
