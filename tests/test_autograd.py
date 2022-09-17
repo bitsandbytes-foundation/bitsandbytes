@@ -354,7 +354,7 @@ def test_matmullt(
                     state.SCB,
                     SCBt,
                     coo_tensorB,
-                ) = bnb.functional.double_quant(B2)
+                ) = bnb.functional.double_quant(B2.half())
                 B2 = state.CB
 
             if not transpose[0] and transpose[1]:
