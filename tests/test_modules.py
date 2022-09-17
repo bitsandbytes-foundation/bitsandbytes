@@ -541,8 +541,8 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
     mlp = MLP8bit(
             32, 64, threshold=threshold, has_fp16_weights=False, memory_efficient_backward=memory_efficient_backward
         )
-    w1, w2 = mlp.fc1.weight.clone(), mlp.fc2.weight.clone()
-    mlp = mlp.cuda().half()
+    w1, w2 = mlp.fc1.weight.clone(), mlp.fc2.weight.clone()  # note: we grad original weights before quantization,
+    mlp = mlp.cuda().half()  # and this line triggers quantization
 
     for i in range(100):
         b1 = torch.randn(16, 8, 32, device="cuda").half()
@@ -567,8 +567,7 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
 
         mlp.zero_grad()
         (o1 * grad_proj).sum().backward()
-        assert False, (w1, w2)
-        grad_ref = grad_proj.flatten(2) @ w2 @ w1
+        grad_ref = grad_proj.flatten(2) @ w2.to(grad_proj.device) @ w1.to(grad_proj.device)
         assert torch.allclose(b1.grad, grad_ref)
 
 
