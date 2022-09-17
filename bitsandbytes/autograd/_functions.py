@@ -275,7 +275,7 @@ class MatMul8bitLt(torch.autograd.Function):
                     state.SCB,
                     state.SCBt,
                     coo_tensorB,
-                ) = F.double_quant(B)
+                ) = F.double_quant(B.to(torch.float16))
                 state.CxB, state.SB = F.transform(CB, to_order=formatB)
         else:
             has_grad = False
