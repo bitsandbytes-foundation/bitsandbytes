@@ -370,6 +370,8 @@ class MatMul8bitLt(torch.autograd.Function):
             if state.threshold > 0.0 and subA is not None:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
+            raise NotImplementedError("!!")
+
         if req_gradA:
             if state.CBt is not None:
                 C32grad, Sgrad = F.transform(Cgrad, "col32")
