@@ -328,7 +328,6 @@ class MatMul8bitLt(torch.autograd.Function):
 
         ctx.formatB = formatB
         ctx.grad_shape = input_shape
-        ctx.req_grads = [requires_gradA, requires_gradB, requires_gradBias]
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
         if requires_gradA or requires_gradB:
@@ -357,7 +356,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         if req_gradBias:
             # compute grad_bias first before changing grad_output dtype
-            grad_bias = grad_output.sum(0).to(ctx.bias_dtype)
+            grad_bias = grad_output.sum(0).to(ctx.dtype_bias)
 
         # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
