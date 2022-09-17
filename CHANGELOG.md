@@ -90,3 +90,19 @@ Features:
 Bug fixes:
  - Now throws and error if LLM.int8() is used on a GPU that is not supported.
  - Enhances error messaging if CUDA SETUP fails.
+
+
+### 0.33.0
+
+#### Various bug fixes
+
+Features:
+ - CPU quantization now supports a variable `blocksize` variable to enhance quantization speed or precision.
+
+Bug fixes:
+ - fixed an issue in CPU quantization where tensors with more than 2^31 elements would fail 19a7adca7a6c9bf7061a384d7e9d9b13676a1a88
+ - fixed a bug where cpu binaries would fail if no GPU would be detected eab4d8232d558f2e6bd7f7cc3d00e2e6e94f4e80
+ - fixed an issue where cpu binaries cause additional stdout messages 92a3363096e10ad6a5c4e944af898bd1186d806a
+ - fixed an import of bnb.utils 2e630b55f51d454f3bd723dffda68a07ef93190c
+
+We thank @mryab, @mbrukman, @chessgecko, @dbaranchuk for pull request with bug fixes and new features.

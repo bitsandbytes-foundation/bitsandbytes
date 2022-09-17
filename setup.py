@@ -18,7 +18,7 @@ def read(fname):
 
 setup(
     name=f"bitsandbytes",
-    version=f"0.32.3",
+    version=f"0.33.1",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="8-bit optimizers and matrix multiplication routines.",

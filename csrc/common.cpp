@@ -12,16 +12,16 @@ void *quantize_block(void *arguments) {
 
     // 1. find absmax in block
     float absmax_block = -FLT_MAX;
-    for (int i = args->block_idx; i < args->block_end; i++)
+    for (long long i = args->block_idx; i < args->block_end; i++)
         absmax_block = fmax(absmax_block, fabs(args->A[i]));
 
-    args->absmax[args->block_idx / BLOCK_SIZE] = absmax_block;
+    args->absmax[args->block_idx / args->blocksize] = absmax_block;
 
-    for (int i = args->block_idx; i < args->block_end; i++) {
+    for (long long i = args->block_idx; i < args->block_end; i++) {
         // 2. divide input value by absmax to normalize into [-1.0, 1.0]
         // 3. do binary search to find the closest value
         float normed_value = args->A[i] / absmax_block;
-        int idx = args->bin_searcher->scalar(normed_value);
+        long long idx = args->bin_searcher->scalar(normed_value);
 
         // 4. check minimal distance
         // The binary search returns always the value to the left, which might not be the closest value
