@@ -357,6 +357,11 @@ class MatMul8bitLt(torch.autograd.Function):
         SCAt, idx = ctx.tensor_states
         formatB = ctx.formatB
         state = ctx.state
+        grad_A = grad_B = grad_bias = None
+
+        if req_gradBias:
+            # compute grad_bias first before changing grad_output dtype
+            grad_bias = grad_output.sum(0)
 
         # Cast grad_output to fp16
         grad_output_dtype = grad_output.dtype
@@ -366,8 +371,6 @@ class MatMul8bitLt(torch.autograd.Function):
             grad_output = grad_output.reshape(
                 -1, grad_output.shape[-1]
             ).contiguous()
-
-        grad_A = grad_B = grad_bias = None
 
         Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output)
         if req_gradB:
@@ -394,9 +397,6 @@ class MatMul8bitLt(torch.autograd.Function):
                 grad_A = torch.mm(grad_output, CB).view(ctx.grad_shape)
             else:
                 raise Exception('State must contain either CBt or CB matrix for backward')
-
-        if req_gradBias:
-            grad_bias = grad_output.sum(0)
 
         # Cast grad_A back to grad_output_dtype
         grad_output = grad_output.to(grad_output_dtype)
