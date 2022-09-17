@@ -368,7 +368,7 @@ class MatMul8bitLt(torch.autograd.Function):
             gradB32, SgradB32 = F.igemmlt(C32grad, CxAt, Sgrad, SAt)
             grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt).to(ctx.dtype_B)
             if state.threshold > 0.0 and subA is not None:
-                grad_B[:, idx] += torch.mm(grad_output.t(), subA)
+                grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:
             if state.CBt is not None:
