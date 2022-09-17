@@ -234,6 +234,8 @@ class MatMul8bitLt(torch.autograd.Function):
         if A_dtype != torch.float16:
             warnings.warn(f"MatMul8bitLt: input matrix will be converted from {A_dtype} to float16")
             A = A.to(torch.float16)
+            if bias is not None:
+                bias = bias.to(torch.float16)
 
         # 1. Quantize A
         if len(A.shape) == 3:
