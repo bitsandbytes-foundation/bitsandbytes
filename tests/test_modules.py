@@ -545,6 +545,7 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         .to(torch.float16)
         .to("cuda")
     )
+    w1, w2 = mlp.fc1.weight.clone(), mlp.fc2.weight.clone()
 
     for i in range(100):
         b1 = torch.randn(16, 8, 32, device="cuda").half()
@@ -567,7 +568,14 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         assert o1.requires_grad
         grad_proj = torch.randn_like(o1)
 
+        mlp.zero_grad()
         (o1 * grad_proj).sum().backward()
+
+        grad_ref = grad_proj.flatten(2) @ w2 @ w1
+        assert torch.allclose(b1.grad, grad_ref)
+
+
+
 
 
 
