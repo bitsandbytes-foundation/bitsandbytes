@@ -354,7 +354,7 @@ def test_matmullt(
                     state.SCB,
                     SCBt,
                     coo_tensorB,
-                ) = bnb.functional.double_quant(B2.half())
+                ) = bnb.functional.double_quant(B2.to(torch.float16))
                 B2 = state.CB
 
             if not transpose[0] and transpose[1]:
@@ -366,6 +366,8 @@ def test_matmullt(
 
             if has_bias:
                 out_torch += bias
+
+            assert out_bnb.dtype == torch.dtype
 
             n = out_bnb.numel()
             err = torch.abs(out_bnb - out_torch).mean().item()
