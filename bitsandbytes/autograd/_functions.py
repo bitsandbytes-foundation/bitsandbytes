@@ -221,9 +221,6 @@ class MatMul8bitLt(torch.autograd.Function):
         # 3. Matmul
         # 4. Mixed-precision decomposition matmul
         # 5. Save state
-        requires_gradA = A.requires_grad
-        requires_gradB = B.requires_grad
-        requires_gradBias = bias is not None and bias.requires_grad
         formatB = state.formatB
         input_shape = A.shape
         if state.outlier_pool is None:
@@ -330,7 +327,7 @@ class MatMul8bitLt(torch.autograd.Function):
         ctx.grad_shape = input_shape
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
-        if requires_gradA or requires_gradB:
+        if any(ctx.needs_input_grad[:2]):
             ctx.tensors = (CAt, subA)
             ctx.tensor_states = (SCAt, state.idx)
         else:
