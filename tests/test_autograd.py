@@ -427,4 +427,4 @@ def test_matmullt(
                     )
 
                 if req_grad[2]:
-                    torch.testing.assert_allclose(gradBias1, gradBias2)
+                    torch.testing.assert_allclose(gradBias1, gradBias2, atol=0.18, rtol=0.3)
