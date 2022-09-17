@@ -538,14 +538,11 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
     assert mlp.fc1.weight.device.type == "cuda"
     assert mlp.fc2.weight.device.type == "cuda"
 
-    mlp = (
-        MLP8bit(
+    mlp = MLP8bit(
             32, 64, threshold=threshold, has_fp16_weights=False, memory_efficient_backward=memory_efficient_backward
         )
-        .to(torch.float16)
-        .to("cuda")
-    )
     w1, w2 = mlp.fc1.weight.clone(), mlp.fc2.weight.clone()
+    mlp = mlp.cuda().half()
 
     for i in range(100):
         b1 = torch.randn(16, 8, 32, device="cuda").half()
