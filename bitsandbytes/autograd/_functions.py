@@ -356,7 +356,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         if req_gradBias:
             # compute grad_bias first before changing grad_output dtype
-            grad_bias = grad_output.sum(0).to(ctx.dtype_bias)
+            grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
 
         # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
@@ -385,9 +385,8 @@ class MatMul8bitLt(torch.autograd.Function):
 
             elif state.CB is not None:
                 CB = state.CB.to(ctx.B_dtype)
-                SCB = (state.SCB.unsqueeze(1) / 127.0).half()
-                CB *= SCB
-                grad_A = torch.mm(grad_output, CB).view(ctx.grad_shape).to(ctx.A_dtype)
+                CB.mul_(state.SCB.unsqueeze(1).div_(127.0).to(ctx.B_dtype))
+                grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.A_dtype)
             else:
                 raise Exception('State must contain either CBt or CB matrix for backward')
 
