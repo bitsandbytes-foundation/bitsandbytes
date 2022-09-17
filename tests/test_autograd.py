@@ -372,8 +372,10 @@ def test_matmullt(
             n = out_bnb.numel()
             err = torch.abs(out_bnb - out_torch).mean().item()
             # print(f'abs error {err:.4f}')
+            out_error_rate = 0.0175 if dtype == torch.float16 else 0.02
+
             idx = torch.isclose(out_bnb, out_torch, atol=0.01, rtol=0.1)
-            assert (idx == 0).sum().item() <= n * 0.0175
+            assert (idx == 0).sum().item() <= n * out_error_rate
             idx = torch.isclose(out_bnb, out_torch, atol=0.035, rtol=0.2)
             assert (idx == 0).sum().item() <= n * 0.001
 

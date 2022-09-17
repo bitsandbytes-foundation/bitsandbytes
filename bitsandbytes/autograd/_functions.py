@@ -231,7 +231,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # Cast A to fp16
         if A.dtype != torch.float16:
-            warnings.warn(f"MatMul8bitLt: input matrix will be cast from {A.dtype} to float16")
+            warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
 
         # 1. Quantize A
         if len(A.shape) == 3:
