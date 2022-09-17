@@ -237,7 +237,9 @@ class Linear8bitLt(nn.Linear):
         if threshold > 0.0 and not has_fp16_weights:
             self.state.use_pool = True
 
-        self.weight = Int8Params(self.weight.data, has_fp16_weights=has_fp16_weights)
+        self.weight = Int8Params(
+            self.weight.data, has_fp16_weights=has_fp16_weights, requires_grad=has_fp16_weights
+        )
 
     def init_8bit_state(self):
         self.state.CB = self.weight.CB
