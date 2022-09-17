@@ -366,9 +366,8 @@ class MatMul8bitLt(torch.autograd.Function):
             CxAt, SAt = F.transform(CAt, formatB, transpose=True)
             C32grad, Sgrad = F.transform(Cgradt, "col32", transpose=True)
             gradB32, SgradB32 = F.igemmlt(C32grad, CxAt, Sgrad, SAt)
-            grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt).to(ctx.dtype_B)
+            grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
             if state.threshold > 0.0 and subA is not None:
-                assert False, idx
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:
@@ -382,8 +381,7 @@ class MatMul8bitLt(torch.autograd.Function):
                 grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
 
             elif state.CB is not None:
-                CB = state.CB.to(ctx.dtype_B)
-                CB.mul_(state.SCB.unsqueeze(1).div_(127.0).to(CB.dtype))
+                CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).div(127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             else:
                 raise Exception('State must contain either CBt or CB matrix for backward')
