@@ -381,7 +381,6 @@ class MatMul8bitLt(torch.autograd.Function):
                 grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
 
             elif state.CB is not None:
-                raise NotImplementedError("WIP")
                 CB = state.CB.to(ctx.dtype_B)
                 CB.mul_(state.SCB.unsqueeze(1).div_(127.0).to(CB.dtype))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
