@@ -253,7 +253,7 @@ for c in req_grad:
 
 transpose = [(False, True), (False, False)]
 str_transpose = ["NT", "NN"]
-dtype = [torch.float16]
+dtype = [torch.float16, torch.bfloat16]
 has_fp16_weights = [True, False]
 has_bias = [True, False]
 values = list(
