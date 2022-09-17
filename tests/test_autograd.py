@@ -367,7 +367,7 @@ def test_matmullt(
             if has_bias:
                 out_torch += bias
 
-            assert out_bnb.dtype == torch.dtype
+            assert out_bnb.dtype == out_torch.dtype
 
             n = out_bnb.numel()
             err = torch.abs(out_bnb - out_torch).mean().item()
