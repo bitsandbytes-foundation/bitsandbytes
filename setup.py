@@ -18,13 +18,13 @@ def read(fname):
 
 setup(
     name=f"bitsandbytes",
-    version=f"0.33.1",
+    version=f"0.34.0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="8-bit optimizers and matrix multiplication routines.",
     license="MIT",
     keywords="gpu optimizers optimization 8-bit quantization compression",
-    url="http://packages.python.org/bitsandbytes",
+    url="https://github.com/TimDettmers/bitsandbytes",
     packages=find_packages(),
     entry_points={
         "console_scripts": ["debug_cuda = bitsandbytes.debug_cli:cli"],

@@ -106,3 +106,14 @@ Bug fixes:
  - fixed an import of bnb.utils 2e630b55f51d454f3bd723dffda68a07ef93190c
 
 We thank @mryab, @mbrukman, @chessgecko, @dbaranchuk for pull request with bug fixes and new features.
+
+
+### 0.34.0
+
+#### Bug fixes and memory efficient backprop
+
+Features:
+ - Linear8bitLt layer now supports `memory_efficient_backward=True` which enables backprop of gradients through frozen weights.
+
+Bug fixes:
+ - fixed an issue where too many threads were created in blockwise quantization on the CPU for large tensors
