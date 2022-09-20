@@ -253,7 +253,7 @@ for c in req_grad:
 
 transpose = [(False, True), (False, False)]
 str_transpose = ["NT", "NN"]
-dtype = [torch.float16]
+dtype = [torch.float16, torch.bfloat16, torch.float32]
 has_fp16_weights = [True, False]
 has_bias = [True, False]
 values = list(
@@ -354,7 +354,7 @@ def test_matmullt(
                     state.SCB,
                     SCBt,
                     coo_tensorB,
-                ) = bnb.functional.double_quant(B2)
+                ) = bnb.functional.double_quant(B2.to(torch.float16))
                 B2 = state.CB
 
             if not transpose[0] and transpose[1]:
@@ -367,11 +367,14 @@ def test_matmullt(
             if has_bias:
                 out_torch += bias
 
+            assert out_bnb.dtype == A.dtype, f"bnb matmullt received {A.dtype} but returned {out_bnb.dtype}"
+
             n = out_bnb.numel()
             err = torch.abs(out_bnb - out_torch).mean().item()
             # print(f'abs error {err:.4f}')
+
             idx = torch.isclose(out_bnb, out_torch, atol=0.01, rtol=0.1)
-            assert (idx == 0).sum().item() <= n * 0.0175
+            assert (idx == 0).sum().item() <= n * (0.0175 if dtype == torch.float16 else 0.021)
             idx = torch.isclose(out_bnb, out_torch, atol=0.035, rtol=0.2)
             assert (idx == 0).sum().item() <= n * 0.001
 
