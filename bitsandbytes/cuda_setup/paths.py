@@ -1,3 +1,4 @@
+import errno
 from pathlib import Path
 from typing import Set, Union
 from warnings import warn
@@ -12,17 +13,23 @@ def extract_candidate_paths(paths_list_candidate: str) -> Set[Path]:
 
 
 def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
-    non_existent_directories: Set[Path] = {
-        path for path in candidate_paths if not path.exists()
-    }
+    existent_directories: Set[Path] = set()
+    for path in candidate_paths:
+        try:
+            if path.exists():
+                existent_directories.add(path)
+        except OSError as exc:
+            if exc.errno != errno.ENAMETOOLONG:
+                raise exc
 
+    non_existent_directories: Set[Path] = candidate_paths - existent_directories
     if non_existent_directories:
         warn(
             "WARNING: The following directories listed in your path were found to "
             f"be non-existent: {non_existent_directories}"
         )
 
-    return candidate_paths - non_existent_directories
+    return existent_directories
 
 
 def get_cuda_runtime_lib_paths(candidate_paths: Set[Path]) -> Set[Path]:
