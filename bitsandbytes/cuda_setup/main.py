@@ -103,7 +103,7 @@ def get_compute_capability(cuda):
     None.
     """
     ccs = get_compute_capabilities(cuda)
-    if ccs is not None:
+    if ccs:
         # TODO: handle different compute capabilities; for now, take the max
         return ccs[-1]
     return None
