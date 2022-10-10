@@ -10,6 +10,8 @@ Resources:
 - [LLM.int8() Paper](https://arxiv.org/abs/2208.07339) -- [LLM.int8() Software Blog Post](https://huggingface.co/blog/hf-bitsandbytes-integration) -- [LLM.int8() Emergent Features Blog Post](https://timdettmers.com/2022/08/17/llm-int8-and-emergent-features/)
 
 ## TL;DR
+**Requirements**
+Linux distribution (Ubuntu, MacOS, etc.) + CUDA >= 10.0. LLM.int8() requires Turing or Ampere GPUs.
 **Installation**:
 ``pip install bitsandbytes``
 
@@ -51,6 +53,8 @@ Hardware requirements:
  - 8-bit optimizers and quantization: NVIDIA Maxwell GPU or newer (>=GTX 9XX).
 
 Supported CUDA versions: 10.2 - 11.7
+
+The bitsandbytes library is currently only supported on Linux distributions. Windows is not supported at the moment.
 
 The requirements can best be fulfilled by installing pytorch via anaconda. You can install PyTorch by following the ["Get Started"](https://pytorch.org/get-started/locally/) instructions on the official website.
 

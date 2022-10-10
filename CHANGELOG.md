@@ -117,3 +117,16 @@ Features:
 
 Bug fixes:
  - fixed an issue where too many threads were created in blockwise quantization on the CPU for large tensors
+
+
+### 0.35.0
+
+#### CUDA 11.8 support and bug fixes
+
+Features:
+ - CUDA 11.8 support added and binaries added to the PyPI release.
+
+Bug fixes:
+ - fixed a bug where too long directory names would crash the CUDA SETUP #35 (thank you @tomaarsen)
+ - fixed a bug where CPU installations on Colab would run into an error  #34 (thank you @tomaarsen)
+ - fixed an issue where the default CUDA version with fast-DreamBooth was not supported #52
