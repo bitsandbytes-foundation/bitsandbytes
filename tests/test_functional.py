@@ -2148,3 +2148,94 @@ def test_blockwise_cpu_large():
                 assert diffs[-1] < 0.011
             # print(sum(diffs)/len(diffs))
             # print(sum(reldiffs)/len(reldiffs))
+
+def get_data(device, num_emb=200, hidden_dim=256):
+
+    emb = torch.randn(num_emb, hidden_dim, device=device)
+    batch = torch.abs(torch.randn(1000, 128, device=device)) # non-uniform distribution needed
+    batch = torch.round(batch/batch.max()*(num_emb-1)).to(torch.int64)
+    batch[:, 0] = 0 # simulate pad
+    x = emb[batch]
+    x += torch.randn_like(x)*3.0
+
+    return emb, batch, x
+
+def get_biserial_corr(state, x, t, num_emb, calc=False):
+    if calc:
+        tblm0, tblm1, tblsq, tbln = state
+        tbl = torch.zeros(num_emb, x.shape[-1], device=x.device)
+        for i in range(num_emb):
+            n0, n1 = tbln[i]
+            n = n0+n1
+            if n == 0: continue
+            m0 = tblm0[i]/n0
+            m1 = tblm1[i]/n1
+            m = (tblm0[i]+tblm1[i])/n
+            sq = tblsq[i]
+
+            variance = (sq/n) - torch.square(m)
+            variance[variance<0] = 0
+            std = torch.sqrt(variance)
+            idx = std==0
+            std[idx] = 1
+            tbl[i] = ((m1-m0)/std)*math.sqrt((n0*n1)/n)
+
+        return tbl
+    if state is None:
+        tblm0 = torch.zeros(num_emb, x.shape[-1], device=x.device)
+        tblm1 = torch.zeros(num_emb, x.shape[-1], device=x.device)
+        tblsq = torch.zeros(num_emb, x.shape[-1], device=x.device)
+        tbln = torch.zeros(num_emb, 2, device=x.device)
+        state = [tblm0, tblm1, tblsq, tbln]
+
+    tblm0, tblm1, tblsq, tbln = state
+    for i in range(num_emb):
+        idx1, idx2 = torch.where(t==i)
+        if idx1.numel() == 0: continue
+        data1 = x[idx1, idx2]
+        idx1, idx2 = torch.where(t!=i)
+        data0 = x[idx1, idx2]
+
+        m0 = data0.sum(0)
+        m1 = data1.sum(0)
+        sq = torch.square(x).sum([0, 1])
+        n0 = data0.shape[0]
+        n1 = data1.shape[0]
+
+        tblm0[i] += m0
+        tblm1[i] += m1
+        tblsq[i] += sq
+        tbln[i][0] += n0
+        tbln[i][1] += n1
+
+    return state
+
+
+#models = ['baseline', 'biserial', 'MA biserial']
+#values = list(product(models, num_embs))
+values = []
+values.append(('biserial', 100))
+names = ["model_{0}_num_emb_{1}".format(*vals) for vals in values]
+@pytest.mark.parametrize("model, num_emb", values, ids=names)
+def test_iterative_biserial(model, num_emb):
+    batch_size = 32
+    emb, embidx, x = get_data(torch.device('cuda'), num_emb=num_emb)
+
+    # iterative biserial
+    iters = 0
+    state1 = None
+    state2 = None
+    for start in range(0, x.shape[0], batch_size):
+        end = start+batch_size
+        bx = x[start:end]
+        bembidx = embidx[start:end]
+        state1 = get_biserial_corr(state1, bx, bembidx, num_emb)
+        state2 = F.gather_stats(state2, bx, bembidx, num_emb)
+
+    corr = get_biserial_corr(state1, bx, bembidx, num_emb, calc=True)
+
+    pred = torch.matmul(x, corr.t())
+    val, predidx = torch.topk(pred, k=1, dim=2)
+    predidx = predidx.squeeze(-1)
+    bicorr_acc = torch.eq(predidx, embidx).float().mean().item()
+    assert bicorr_acc > 0.92

@@ -19,6 +19,11 @@
 void estimateQuantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles<float>(A, code, offset, n); }
 void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles<half>(A, code, offset, n); }
 
+void gatherStats_biserial_half(half  *hstate, long long *__restrict__ const emb_ids,
+															 half *stats1, half *stats2, half *stats3, int *counters,
+															 int bsize, int seqsize, int hidsize, int num_emb)
+{ gatherStats<BISERIAL, half>(hstate, emb_ids, stats1, stats2, stats3, counters, bsize, seqsize, hidsize, num_emb); }
+
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
 void fname##32bit_g##gbits(gtype *g, gtype *p, \
@@ -286,8 +291,14 @@ extern "C"
 	void cextractOutliers_turing(char * A, int *idx, char *out, int idx_size, int rows, int cols){ extractOutliers_turing(A, idx, out, idx_size, rows, cols); }
 	void cextractOutliers_ampere(char * A, int *idx, char *out, int idx_size, int rows, int cols){ extractOutliers_ampere(A, idx, out, idx_size, rows, cols); }
 
+	void cgatherStats_biserial_half(half  *hstate, long long *__restrict__ const emb_ids,
+																 half *stats1, half *stats2, half *stats3, int *counters,
+																 int bsize, int seqsize, int hidsize, int num_emb)
+	{ cgatherStats_biserial_half(hstate, emb_ids, stats1, stats2, stats3, counters, bsize, seqsize, hidsize, num_emb); }
+
 #endif
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }
 	void cdequantize_blockwise_cpu_fp32(float *code, unsigned char *A, float *absmax, float *out, long long blocksize, long long n){ dequantize_cpu(code, A, absmax, out, blocksize, n); }
+
 }
 

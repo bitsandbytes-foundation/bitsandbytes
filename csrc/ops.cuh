@@ -58,6 +58,12 @@ inline int checkCublasStatus(cublasStatus_t status) {
     return 0;
 }
 
+
+typedef enum StatsModels_t
+{
+	BISERIAL = 0,
+} OStatsModels_t;
+
 typedef enum Operations_t
 {
 	ksmul = 0,
@@ -175,5 +181,7 @@ void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_val
 template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
 template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int idx_size, int rows, int cols);
-
+template <int MODEL, typename T> void gatherStats(T  *hstate, long long * emb_ids,
+																									half *stats1, half *stats2, half *stats3, int *counters,
+																									int bsize, int seqsize, int hidsize, int num_emb);
 #endif

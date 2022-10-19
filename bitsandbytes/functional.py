@@ -1923,3 +1923,44 @@ def extract_outliers(A, SA, idx):
     post_call(prev_device)
 
     return out
+
+
+def gather_stats(state, hstate, emb_ids, num_emb, num_stats=3):
+    assert hstate.device.type == 'cuda'
+    if state is None:
+        stats1 = torch.zeros(num_emb, hstate.shape[-1], device=hstate.device, dtype=torch.half)
+        stats2 = torch.zeros(num_emb, hstate.shape[-1], device=hstate.device, dtype=torch.half)
+        stats3 = torch.zeros(num_emb, hstate.shape[-1], device=hstate.device, dtype=torch.half)
+        counters = torch.zeros(num_emb, 2, device=hstate.device, dtype=torch.int32)
+        state = [stats1, stats2, stats3, counters]
+
+    if len(hstate.shape) == 3:
+        bsize, seqsize, hdim = hstate.shape
+        assert len(emb_ids.shape) == 2
+    else:
+        bsize = 1
+        seqsize = hstate.shape
+        assert len(emb_ids.shape) == 1
+
+    stats1, stats2, stats3, counters = state
+
+    ptr_hstate = get_ptr(hstate)
+    ptr_emb_ids = get_ptr(emb_ids)
+    ptr_stats1 = get_ptr(stats1)
+    ptr_stats2 = get_ptr(stats2)
+    ptr_stats3 = get_ptr(stats3)
+    ptr_counters = get_ptr(counters)
+
+    cnum_emb = ct.c_int32(num_emb)
+    cbsize = ct.c_int32(bsize)
+    cseqsize = ct.c_int32(seqsize)
+    chdim = ct.c_int32(hdim)
+
+    prev_device = pre_call(hstate.device)
+    #lib.cgatherStats_biserial_half(ptr_hstate, ptr_emb_ids, ptr_stats1, ptr_stats2, ptr_stats3, ptr_counters, cbsize, cseqsize, chdim, cnum_emb)
+    post_call(prev_device)
+
+    return state
+
+
+

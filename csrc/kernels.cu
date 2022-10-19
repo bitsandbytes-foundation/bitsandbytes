@@ -2655,9 +2655,40 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 	}
 } 
 
+// Algorithm:
+// 1. iterate over embeddings ids
+// 2. sum/sumsq all hidden states associated with word embedding; count occurances
+// 3. update corr matrix of size (num_embeddings, num_hidden)
+
+// Abstract algorithm
+// 1. iterate over embeddings ids
+// 2. calculate statistics
+// 3. update statistics
+
+// CUDA algorithm
+// 0. assign a single embedding id to block
+// 1. each thread scans embedding matrix for their next id and stores it in shared memory:
+//    (batch, seq) -> max dim maybe (128, 4096) -> max freq about 7-10% of that
+//    so max entries per emb_id is 52k
+//    have each thread scan for the _next_ id, then submit that to shared memory and wait
+//    each thread scans a section and remember its id
+// 2. The queue is worked through one ID at the time:
+//   a) Figure out index into hidden state
+//   b) sum statistics with cub
+//   c) store statistics in shared memory block for the global id
+template <int MODEL, typename T> __global__ void kgatherStats(T  *__restrict__ const hstate, long long *__restrict__ const emb_ids,
+                                                              half *stats1, half *stats2, half *stats3, int *counters,
+                                                              int bsize, int seqsize, int hidsize, int num_emb)
+{
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
+
+template  __global__ void kgatherStats<BISERIAL, half>(half  *__restrict__ const hstate, long long *__restrict__ const emb_ids,
+                                                       half *stats1, half *stats2, half *stats3, int *counters,
+                                                       int bsize, int seqsize, int hidsize, int num_emb);
 
 template __global__ void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 template __global__ void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
