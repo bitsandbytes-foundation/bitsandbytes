@@ -637,7 +637,7 @@ template <int MODEL, typename T> void gatherStats(T  *hstate, long long *emb_ids
 																									int bsize, int seqsize, int hidsize, int num_emb)
 {
 
-  kgatherStats<MODEL, T><<<num_emb, 512>>>(hstate, emb_ids, stats1, stats2, stats3, counters, bsize, seqsize, hidsize, num_emb);
+  kgatherStats<MODEL, T, 512><<<num_emb, 512>>>(hstate, emb_ids, stats1, stats2, stats3, counters, bsize, seqsize, hidsize, num_emb);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

@@ -1956,8 +1956,9 @@ def gather_stats(state, hstate, emb_ids, num_emb, num_stats=3):
     cseqsize = ct.c_int32(seqsize)
     chdim = ct.c_int32(hdim)
 
+
     prev_device = pre_call(hstate.device)
-    #lib.cgatherStats_biserial_half(ptr_hstate, ptr_emb_ids, ptr_stats1, ptr_stats2, ptr_stats3, ptr_counters, cbsize, cseqsize, chdim, cnum_emb)
+    lib.cgatherStats_biserial_half(ptr_hstate, ptr_emb_ids, ptr_stats1, ptr_stats2, ptr_stats3, ptr_counters, cbsize, cseqsize, chdim, cnum_emb)
     post_call(prev_device)
 
     return state

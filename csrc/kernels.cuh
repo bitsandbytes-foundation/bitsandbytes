@@ -120,7 +120,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 
 template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 
-template <int MODEL, typename T> __global__ void kgatherStats(T  *__restrict__ const hstate, long long *__restrict__ const emb_ids,
+template <int MODEL, typename T, int THREADS> __global__ void kgatherStats(T  *__restrict__ const hstate, long long *__restrict__ const emb_ids,
                                                               half *stats1, half *stats2, half *stats3, int *counters,
                                                               int bsize, int seqsize, int hidsize, int num_emb);
 

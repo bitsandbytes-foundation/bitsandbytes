@@ -2672,21 +2672,58 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //    so max entries per emb_id is 52k
 //    have each thread scan for the _next_ id, then submit that to shared memory and wait
 //    each thread scans a section and remember its id
-// 2. The queue is worked through one ID at the time:
+// 2. Create queue by sorting all ids
+// 3. The queue is worked through one ID at the time:
 //   a) Figure out index into hidden state
 //   b) sum statistics with cub
 //   c) store statistics in shared memory block for the global id
-template <int MODEL, typename T> __global__ void kgatherStats(T  *__restrict__ const hstate, long long *__restrict__ const emb_ids,
+template <int MODEL, typename T, int THREADS> __global__ void kgatherStats(T  *__restrict__ const hstate, long long *__restrict__ const emb_ids,
                                                               half *stats1, half *stats2, half *stats3, int *counters,
                                                               int bsize, int seqsize, int hidsize, int num_emb)
 {
+  __shared__ int smem_next_embids[THREADS];
+  __shared__ unsigned int smem_num_processed[1];
+  int my_idx = threadIdx.x;
+  const int n_emb = bsize*seqsize;
+  const int my_emb_id = blockIdx.x;
+
+  if(threadIdx.x == 0)
+    smem_num_processed[0] = 0;
+  __syncthreads();
+
+  bool finished = false;
+  while(true)
+  {
+    smem_next_embids[threadIdx.x] = -1;
+    for(;my_idx < n_emb; my_idx += blockDim.x)
+    {
+      long long emb_id = emb_ids[my_idx];
+      if(emb_id == my_emb_id)
+        smem_next_embids[threadIdx.x] = my_idx;
+    }
+
+    __syncthreads();
+
+    // count how many threads finished
+    if(my_idx >= n_emb && !finished)
+    {
+      atomicInc(&smem_num_processed[0], UINT_MAX);
+      finished = true;
+    }
+
+    // finish the processing loop if all threads finished
+    if(smem_num_processed[0] >= THREADS){ break; }
+  }
+
+
+
 }
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template  __global__ void kgatherStats<BISERIAL, half>(half  *__restrict__ const hstate, long long *__restrict__ const emb_ids,
+template  __global__ void kgatherStats<BISERIAL, half, 512>(half  *__restrict__ const hstate, long long *__restrict__ const emb_ids,
                                                        half *stats1, half *stats2, half *stats3, int *counters,
                                                        int bsize, int seqsize, int hidsize, int num_emb);
 
