@@ -130,3 +130,8 @@ Bug fixes:
  - fixed a bug where too long directory names would crash the CUDA SETUP #35 (thank you @tomaarsen)
  - fixed a bug where CPU installations on Colab would run into an error  #34 (thank you @tomaarsen)
  - fixed an issue where the default CUDA version with fast-DreamBooth was not supported #52
+
+### 0.35.1
+
+Bug fixes:
+ - Fixed a problem where warning messages would be displayed even though everything worked correctly.
