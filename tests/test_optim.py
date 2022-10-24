@@ -36,9 +36,6 @@ str2optimizers["momentum_pytorch"] = (
     lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9),
     bnb.optim.Adam,
 )
-# str2optimizers['lamb_apex'] = (None, lambda pxx: apex.optimizers.FusedLAMB(pxx, weight_decay=0.00, use_nvlamb=True), bnb.optim.Adam)
-# str2optimizers['lars_apex'] = (None, lambda pxx: apex.parallel.LARC.LARC(apex.optimizers.FusedSGD(pxx, 0.01, 0.9)), bnb.optim.Adam)
-
 str2optimizers["adam"] = (torch.optim.Adam, bnb.optim.Adam)
 # str2optimizers['fused_adam'] = (apex.optimizers.FusedAdam, bnb.optim.Adam)
 str2optimizers["momentum"] = (
@@ -49,7 +46,6 @@ str2optimizers["lars"] = (
     lambda pxx: bnb.optim.PytorchLARS(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.LARS(pxx, 0.01, 0.9),
 )
-# str2optimizers['lamb'] = (lambda pxx: apex.optimizers.FusedLAMB(pxx, weight_decay=0.0, max_grad_norm=10000.0, eps=1e-8, use_nvlamb=True), bnb.optim.LAMB)
 str2optimizers["rmsprop"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=False),
@@ -66,7 +62,6 @@ str2optimizers["rmsprop8bit"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.RMSprop8bit(pxx, 0.01, 0.9, block_wise=False),
 )
-# str2optimizers['lamb8bit'] = (lambda pxx: apex.optimizers.FusedLAMB(pxx, weight_decay=0.0, max_grad_norm=10000.0, eps=1e-8, use_nvlamb=True), bnb.optim.LAMB8bit)
 str2optimizers["lars8bit"] = (
     lambda pxx: bnb.optim.PytorchLARS(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.LARS8bit(pxx, 0.01, 0.9),
@@ -118,7 +113,7 @@ str2statenames["rmsprop8bit_blockwise"] = [
 dim1 = [1024]
 dim2 = [32, 1024, 4097, 1]
 gtype = [torch.float32, torch.float16]
-optimizer_names = ["adam", "momentum", "rmsprop", "lars", "lamb"]
+optimizer_names = ["adam", "momentum", "rmsprop", "lars"]
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = [
     "dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}".format(*vals) for vals in values
@@ -249,7 +244,6 @@ optimizer_names = [
     "momentum8bit",
     "rmsprop8bit",
     "adam8bit_blockwise",
-    "lamb8bit",
     "lars8bit",
     "momentum8bit_blockwise",
     "rmsprop8bit_blockwise",

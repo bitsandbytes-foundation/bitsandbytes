@@ -2,33 +2,49 @@ import ctypes as ct
 from pathlib import Path
 from warnings import warn
 
-from .cuda_setup.main import evaluate_cuda_setup
 
 
-class CUDALibrary_Singleton(object):
+class CUDASetup(object):
     _instance = None
 
     def __init__(self):
         raise RuntimeError("Call get_instance() instead")
 
     def initialize(self):
+        self.cuda_setup_log = []
+
+        from .cuda_setup.main import evaluate_cuda_setup
         binary_name = evaluate_cuda_setup()
         package_dir = Path(__file__).parent
         binary_path = package_dir / binary_name
 
-        if not binary_path.exists():
-            print(f"CUDA SETUP: TODO: compile library for specific version: {binary_name}")
-            legacy_binary_name = "libbitsandbytes.so"
-            print(f"CUDA SETUP: Defaulting to {legacy_binary_name}...")
-            binary_path = package_dir / legacy_binary_name
+        try:
             if not binary_path.exists():
-                print('CUDA SETUP: CUDA detection failed. Either CUDA driver not installed, CUDA not installed, or you have multiple conflicting CUDA libraries!')
-                print('CUDA SETUP: If you compiled from source, try again with `make CUDA_VERSION=DETECTED_CUDA_VERSION` for example, `make CUDA_VERSION=113`.')
-                raise Exception('CUDA SETUP: Setup Failed!')
-            self.lib = ct.cdll.LoadLibrary(binary_path)
-        else:
-            print(f"CUDA SETUP: Loading binary {binary_path}...")
-            self.lib = ct.cdll.LoadLibrary(binary_path)
+                self.add_log_entry(f"CUDA SETUP: TODO: compile library for specific version: {binary_name}")
+                legacy_binary_name = "libbitsandbytes.so"
+                self.add_log_entry(f"CUDA SETUP: Defaulting to {legacy_binary_name}...")
+                binary_path = package_dir / legacy_binary_name
+                if not binary_path.exists():
+                    self.add_log_entry('CUDA SETUP: CUDA detection failed. Either CUDA driver not installed, CUDA not installed, or you have multiple conflicting CUDA libraries!')
+                    self.add_log_entry('CUDA SETUP: If you compiled from source, try again with `make CUDA_VERSION=DETECTED_CUDA_VERSION` for example, `make CUDA_VERSION=113`.')
+                    self.print_log_stack()
+                    raise Exception('CUDA SETUP: Setup Failed!')
+                self.lib = ct.cdll.LoadLibrary(binary_path)
+            else:
+                self.add_log_entry(f"CUDA SETUP: Loading binary {binary_path}...")
+                self.lib = ct.cdll.LoadLibrary(binary_path)
+        except:
+            self.print_log_stack()
+
+    def add_log_entry(self, msg, is_warning=False):
+        self.cuda_setup_log.append((msg, is_warning))
+
+    def print_log_stack(self):
+        for msg, is_warning in self.cuda_setup_log:
+            if is_warning:
+                warn(msg)
+            else:
+                print(msg)
 
     @classmethod
     def get_instance(cls):
@@ -38,7 +54,7 @@ class CUDALibrary_Singleton(object):
         return cls._instance
 
 
-lib = CUDALibrary_Singleton.get_instance().lib
+lib = CUDASetup.get_instance().lib
 try:
     lib.cadam32bit_g32
     lib.get_context.restype = ct.c_void_p

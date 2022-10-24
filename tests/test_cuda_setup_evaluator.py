@@ -80,42 +80,10 @@ def happy_path_path_string(tmpdir, request):
         if CUDA_RUNTIME_LIB in path:
             (test_input / CUDA_RUNTIME_LIB).touch()
 
-
-@pytest.mark.parametrize("test_input, expected", HAPPY_PATH__LD_LIB_TEST_PATHS)
-def test_determine_cuda_runtime_lib_path__happy_path(
-    tmp_path, test_input: str, expected: str
-):
-    for path in extract_candidate_paths(test_input):
-        path.mkdir()
-        (path / CUDA_RUNTIME_LIB).touch()
-    assert determine_cuda_runtime_lib_path(test_input) == expected
-
-
 UNHAPPY_PATH__LD_LIB_TEST_PATHS = [
     f"a/b/c/{CUDA_RUNTIME_LIB}:d/e/f/{CUDA_RUNTIME_LIB}",
     f"a/b/c/{CUDA_RUNTIME_LIB}:d/e/f/{CUDA_RUNTIME_LIB}:g/h/j/{CUDA_RUNTIME_LIB}",
 ]
-
-
-@pytest.mark.parametrize("test_input", UNHAPPY_PATH__LD_LIB_TEST_PATHS)
-def test_determine_cuda_runtime_lib_path__unhappy_path(tmp_path, test_input: str):
-    test_input = tmp_path / test_input
-    (test_input / CUDA_RUNTIME_LIB).touch()
-    with pytest.raises(FileNotFoundError) as err_info:
-        determine_cuda_runtime_lib_path(test_input)
-    assert all(match in err_info for match in {"duplicate", CUDA_RUNTIME_LIB})
-
-
-def test_determine_cuda_runtime_lib_path__non_existent_dir(capsys, tmp_path):
-    existent_dir = tmp_path / "a/b"
-    existent_dir.mkdir()
-    non_existent_dir = tmp_path / "c/d"  # non-existent dir
-    test_input = ":".join([str(existent_dir), str(non_existent_dir)])
-
-    determine_cuda_runtime_lib_path(test_input)
-    std_err = capsys.readouterr().err
-
-    assert all(match in std_err for match in {"WARNING", "non-existent"})
 
 
 def test_full_system():

@@ -19,6 +19,7 @@ evaluation:
 import ctypes
 
 from .paths import determine_cuda_runtime_lib_path
+from bitsandbytes.cextension import CUDASetup
 
 
 def check_cuda_result(cuda, result_val):
@@ -26,15 +27,14 @@ def check_cuda_result(cuda, result_val):
     if result_val != 0:
         error_str = ctypes.c_char_p()
         cuda.cuGetErrorString(result_val, ctypes.byref(error_str))
-        print(f"CUDA exception! Error code: {error_str.value.decode()}")
+        CUDASetup.get_instance.add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
 
 def get_cuda_version(cuda, cudart_path):
     # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
     try:
         cudart = ctypes.CDLL(cudart_path)
     except OSError:
-        # TODO: shouldn't we error or at least warn here?
-        print(f'ERROR: libcudart.so could not be read from path: {cudart_path}!')
+        CUDASetup.get_instance.add_log_entry(f'ERROR: libcudart.so could not be read from path: {cudart_path}!')
         return None
 
     version = ctypes.c_int()
@@ -44,7 +44,7 @@ def get_cuda_version(cuda, cudart_path):
     minor = (version-(major*1000))//10
 
     if major < 11:
-       print('CUDA SETUP: CUDA version lower than 11 are currenlty not supported for LLM.int8(). You will be only to use 8-bit optimizers and quantization routines!!')
+       CUDASetup.get_instance().add_log_entry('CUDA SETUP: CUDA version lower than 11 are currenlty not supported for LLM.int8(). You will be only to use 8-bit optimizers and quantization routines!!')
 
     return f'{major}{minor}'
 
@@ -54,8 +54,7 @@ def get_cuda_lib_handle():
     try:
         cuda = ctypes.CDLL("libcuda.so")
     except OSError:
-        # TODO: shouldn't we error or at least warn here?
-        print('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
+        CUDA_RUNTIME_LIB.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
         return None
     check_cuda_result(cuda, cuda.cuInit(0))
 
@@ -110,34 +109,33 @@ def get_compute_capability(cuda):
 
 
 def evaluate_cuda_setup():
-    print('')
-    print('='*35 + 'BUG REPORT' + '='*35)
-    print('Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues')
-    print('For effortless bug reporting copy-paste your error into this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
-    print('='*80)
-    binary_name = "libbitsandbytes_cpu.so"
+    # we remove this for now and see how things go
+    #print('')
+    #print('='*35 + 'BUG REPORT' + '='*35)
+    #print('Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues')
+    #print('For effortless bug reporting copy-paste your error into this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
+    #print('='*80)
     #if not torch.cuda.is_available():
         #print('No GPU detected. Loading CPU library...')
         #return binary_name
 
+    binary_name = "libbitsandbytes_cpu.so"
+
+    cuda_setup = CUDASetup.get_instance()
     cudart_path = determine_cuda_runtime_lib_path()
     if cudart_path is None:
-        print(
-            "WARNING: No libcudart.so found! Install CUDA or the cudatoolkit package (anaconda)!"
-        )
+        cuda_setup.add_log_entry("WARNING: No libcudart.so found! Install CUDA or the cudatoolkit package (anaconda)!", is_warning=True)
         return binary_name
 
-    print(f"CUDA SETUP: CUDA runtime path found: {cudart_path}")
+    cuda_setup.add_log_entry((f"CUDA SETUP: CUDA runtime path found: {cudart_path}"))
     cuda = get_cuda_lib_handle()
     cc = get_compute_capability(cuda)
-    print(f"CUDA SETUP: Highest compute capability among GPUs detected: {cc}")
+    cuda_setup.add_log_entry(f"CUDA SETUP: Highest compute capability among GPUs detected: {cc}")
     cuda_version_string = get_cuda_version(cuda, cudart_path)
 
 
     if cc == '':
-        print(
-            "WARNING: No GPU detected! Check your CUDA paths. Processing to load CPU-only library..."
-        )
+        cuda_setup.add_log_entry("WARNING: No GPU detected! Check your CUDA paths. Processing to load CPU-only library...", is_warning=True)
         return binary_name
 
     # 7.5 is the minimum CC vor cublaslt
@@ -149,7 +147,7 @@ def evaluate_cuda_setup():
 
     # we use ls -l instead of nvcc to determine the cuda version
     # since most installations will have the libcudart.so installed, but not the compiler
-    print(f'CUDA SETUP: Detected CUDA version {cuda_version_string}')
+    cuda_setup.add_log_entry(f'CUDA SETUP: Detected CUDA version {cuda_version_string}')
 
     def get_binary_name():
         "if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt.so"
