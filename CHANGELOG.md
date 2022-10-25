@@ -133,5 +133,8 @@ Bug fixes:
 
 ### 0.35.1
 
+Features:
+ - Added CUDA instruction generator to fix some installations.
+
 Bug fixes:
  - Fixed a problem where warning messages would be displayed even though everything worked correctly.

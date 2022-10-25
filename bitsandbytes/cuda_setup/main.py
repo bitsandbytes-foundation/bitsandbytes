@@ -159,4 +159,4 @@ def evaluate_cuda_setup():
 
     binary_name = get_binary_name()
 
-    return binary_name
+    return binary_name, cudart_path, cuda, cc, cuda_version_string

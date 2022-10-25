@@ -93,12 +93,8 @@ def test_full_system():
     # but it does not contain the library directly, so we need to look at the a sub-folder
     version = ""
     if "CONDA_PREFIX" in os.environ:
-        ls_output, err = bnb.utils.execute_and_return(
-            f'ls -l {os.environ["CONDA_PREFIX"]}/lib/libcudart.so'
-        )
-        major, minor, revision = (
-            ls_output.split(" ")[-1].replace("libcudart.so.", "").split(".")
-        )
+        ls_output, err = bnb.utils.execute_and_return(f'ls -l {os.environ["CONDA_PREFIX"]}/lib/libcudart.so')
+        major, minor, revision = (ls_output.split(" ")[-1].replace("libcudart.so.", "").split("."))
         version = float(f"{major}.{minor}")
 
     if version == "" and "LD_LIBRARY_PATH" in os.environ:
@@ -114,6 +110,6 @@ def test_full_system():
 
 
     assert version > 0
-    binary_name = evaluate_cuda_setup()
+    binary_name, cudart_path, cuda, cc, cuda_version_string = evaluate_cuda_setup()
     binary_name = binary_name.replace("libbitsandbytes_cuda", "")
     assert binary_name.startswith(str(version).replace(".", ""))
