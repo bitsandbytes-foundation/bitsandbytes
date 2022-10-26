@@ -54,7 +54,7 @@ def get_cuda_lib_handle():
     try:
         cuda = ctypes.CDLL("libcuda.so")
     except OSError:
-        CUDA_RUNTIME_LIB.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
+        CUDASetup.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
         return None
     check_cuda_result(cuda, cuda.cuInit(0))
 
