@@ -27,14 +27,14 @@ def check_cuda_result(cuda, result_val):
     if result_val != 0:
         error_str = ctypes.c_char_p()
         cuda.cuGetErrorString(result_val, ctypes.byref(error_str))
-        CUDASetup.get_instance.add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
+        CUDASetup.get_instance().add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
 
 def get_cuda_version(cuda, cudart_path):
     # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
     try:
         cudart = ctypes.CDLL(cudart_path)
     except OSError:
-        CUDASetup.get_instance.add_log_entry(f'ERROR: libcudart.so could not be read from path: {cudart_path}!')
+        CUDASetup.get_instance().add_log_entry(f'ERROR: libcudart.so could not be read from path: {cudart_path}!')
         return None
 
     version = ctypes.c_int()
@@ -54,7 +54,7 @@ def get_cuda_lib_handle():
     try:
         cuda = ctypes.CDLL("libcuda.so")
     except OSError:
-        CUDA_RUNTIME_LIB.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
+        CUDASetup.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
         return None
     check_cuda_result(cuda, cuda.cuInit(0))
 
