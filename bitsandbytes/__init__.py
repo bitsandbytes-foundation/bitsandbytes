@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+from . import cuda_setup, utils
 from .autograd._functions import (
     MatmulLtState,
     bmm_cublas,
@@ -12,7 +13,6 @@ from .autograd._functions import (
 )
 from .cextension import COMPILED_WITH_CUDA
 from .nn import modules
-from . import cuda_setup, utils
 
 if COMPILED_WITH_CUDA:
     from .optim import adam

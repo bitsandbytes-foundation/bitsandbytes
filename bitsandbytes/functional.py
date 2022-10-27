@@ -5,13 +5,14 @@
 import ctypes as ct
 import operator
 import random
-import torch
-
+from functools import reduce  # Required in Python 3
 from typing import Tuple
+
+import torch
 from torch import Tensor
 
 from .cextension import COMPILED_WITH_CUDA, lib
-from functools import reduce  # Required in Python 3
+
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):

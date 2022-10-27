@@ -1,13 +1,13 @@
 import os
-import pytest
-import bitsandbytes as bnb
-
 from typing import List, NamedTuple
 
+import pytest
+
+import bitsandbytes as bnb
 from bitsandbytes.cuda_setup import (
     CUDA_RUNTIME_LIB,
-    evaluate_cuda_setup,
     determine_cuda_runtime_lib_path,
+    evaluate_cuda_setup,
     extract_candidate_paths,
 )
 

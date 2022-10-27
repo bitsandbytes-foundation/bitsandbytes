@@ -28,8 +28,8 @@ print()
 
 
 from . import COMPILED_WITH_CUDA, PACKAGE_GITHUB_URL
-from .cuda_setup.main import get_compute_capabilities, get_cuda_lib_handle
 from .cuda_setup.env_vars import to_be_ignored
+from .cuda_setup.main import get_compute_capabilities, get_cuda_lib_handle
 
 print_header("POTENTIALLY LIBRARY-PATH-LIKE ENV VARS")
 for k, v in os.environ.items():

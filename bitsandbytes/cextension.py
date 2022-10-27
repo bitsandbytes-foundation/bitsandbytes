@@ -1,8 +1,8 @@
 import ctypes as ct
-import torch
-
 from pathlib import Path
 from warnings import warn
+
+import torch
 
 
 class CUDASetup:

@@ -18,8 +18,9 @@ evaluation:
 
 import ctypes
 
-from .paths import determine_cuda_runtime_lib_path
 from bitsandbytes.cextension import CUDASetup
+
+from .paths import determine_cuda_runtime_lib_path
 
 
 def check_cuda_result(cuda, result_val):

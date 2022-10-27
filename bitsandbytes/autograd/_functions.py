@@ -1,11 +1,12 @@
 import operator
 import warnings
-
-import torch
-import bitsandbytes.functional as F
-
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
+
+import torch
+
+import bitsandbytes.functional as F
+
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
