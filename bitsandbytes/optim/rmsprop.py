@@ -23,10 +23,10 @@ class RMSprop(Optimizer1State):
     ):
         if alpha == 0:
             raise NotImplementedError(
-                f"RMSprop with alpha==0.0 is not supported!"
+                "RMSprop with alpha==0.0 is not supported!"
             )
         if centered:
-            raise NotImplementedError(f"Centered RMSprop is not supported!")
+            raise NotImplementedError("Centered RMSprop is not supported!")
         super().__init__(
             "rmsprop",
             params,
@@ -59,10 +59,10 @@ class RMSprop8bit(Optimizer1State):
     ):
         if alpha == 0:
             raise NotImplementedError(
-                f"RMSprop with alpha==0.0 is not supported!"
+                "RMSprop with alpha==0.0 is not supported!"
             )
         if centered:
-            raise NotImplementedError(f"Centered RMSprop is not supported!")
+            raise NotImplementedError("Centered RMSprop is not supported!")
         super().__init__(
             "rmsprop",
             params,
@@ -96,10 +96,10 @@ class RMSprop32bit(Optimizer1State):
 
         if alpha == 0:
             raise NotImplementedError(
-                f"RMSprop with alpha==0.0 is not supported!"
+                "RMSprop with alpha==0.0 is not supported!"
             )
         if centered:
-            raise NotImplementedError(f"Centered RMSprop is not supported!")
+            raise NotImplementedError("Centered RMSprop is not supported!")
         super().__init__(
             "rmsprop",
             params,

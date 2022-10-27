@@ -282,11 +282,11 @@ class Optimizer8bit(torch.optim.Optimizer):
         return config
 
     def init_state(self, group, p, gindex, pindex):
-        raise NotImplementedError(f"init_state method needs to be overidden")
+        raise NotImplementedError("init_state method needs to be overidden")
 
     def update_step(self, group, p, gindex, pindex):
         raise NotImplementedError(
-            f"The update_step method needs to be overidden"
+            "The update_step method needs to be overidden"
         )
 
 

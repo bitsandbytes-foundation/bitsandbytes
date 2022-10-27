@@ -25,7 +25,7 @@ class LARS(Optimizer1State):
     ):
         if momentum == 0:
             raise NotImplementedError(
-                f"LARS without momentum is not supported!"
+                "LARS without momentum is not supported!"
             )
         super().__init__(
             "lars",
@@ -59,7 +59,7 @@ class LARS8bit(Optimizer1State):
     ):
         if momentum == 0:
             raise NotImplementedError(
-                f"LARS without momentum is not supported!"
+                "LARS without momentum is not supported!"
             )
         super().__init__(
             "lars",
@@ -93,7 +93,7 @@ class LARS32bit(Optimizer1State):
     ):
         if momentum == 0:
             raise NotImplementedError(
-                f"LARS without momentum is not supported!"
+                "LARS without momentum is not supported!"
             )
         super().__init__(
             "lars",
