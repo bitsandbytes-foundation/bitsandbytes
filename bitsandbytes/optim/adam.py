@@ -28,7 +28,7 @@ class Adam(Optimizer2State):
         percentile_clipping=100,
         block_wise=True,
     ):
-        super(Adam, self).__init__(
+        super().__init__(
             "adam",
             params,
             lr,
@@ -57,7 +57,7 @@ class Adam8bit(Optimizer2State):
         percentile_clipping=100,
         block_wise=True,
     ):
-        super(Adam8bit, self).__init__(
+        super().__init__(
             "adam",
             params,
             lr,
@@ -86,7 +86,7 @@ class Adam32bit(Optimizer2State):
         percentile_clipping=100,
         block_wise=True,
     ):
-        super(Adam32bit, self).__init__(
+        super().__init__(
             "adam",
             params,
             lr,
@@ -146,7 +146,7 @@ class AnalysisAdam(torch.optim.Optimizer):
             weight_decay=weight_decay,
             amsgrad=amsgrad,
         )
-        super(AnalysisAdam, self).__init__(params, defaults)
+        super().__init__(params, defaults)
         self.analysis = bnb_analysis
         self.savedir = savedir
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from warnings import warn
 
 
-class CUDASetup(object):
+class CUDASetup:
     _instance = None
 
     def __init__(self):

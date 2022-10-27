@@ -127,7 +127,7 @@ def evaluate_cuda_setup():
         cuda_setup.add_log_entry("WARNING: No libcudart.so found! Install CUDA or the cudatoolkit package (anaconda)!", is_warning=True)
         return binary_name
 
-    cuda_setup.add_log_entry((f"CUDA SETUP: CUDA runtime path found: {cudart_path}"))
+    cuda_setup.add_log_entry(f"CUDA SETUP: CUDA runtime path found: {cudart_path}")
     cuda = get_cuda_lib_handle()
     cc = get_compute_capability(cuda)
     cuda_setup.add_log_entry(f"CUDA SETUP: Highest compute capability among GPUs detected: {cc}")

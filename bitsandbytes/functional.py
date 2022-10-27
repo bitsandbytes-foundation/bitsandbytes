@@ -82,7 +82,7 @@ if COMPILED_WITH_CUDA:
     )
 
 
-class CUBLAS_Context(object):
+class CUBLAS_Context:
     _instance = None
 
     def __init__(self):
@@ -112,7 +112,7 @@ class CUBLAS_Context(object):
         return self.context[device.index]
 
 
-class Cusparse_Context(object):
+class Cusparse_Context:
     _instance = None
 
     def __init__(self):
@@ -1417,7 +1417,7 @@ def get_colrow_absmax(
     return row_stats, col_stats, nnz_block_ptr
 
 
-class COOSparseTensor(object):
+class COOSparseTensor:
     def __init__(self, rows, cols, nnz, rowidx, colidx, values):
         assert rowidx.dtype == torch.int32
         assert colidx.dtype == torch.int32
@@ -1434,7 +1434,7 @@ class COOSparseTensor(object):
         self.values = values
 
 
-class CSRSparseTensor(object):
+class CSRSparseTensor:
     def __init__(self, rows, cols, nnz, rowptr, colidx, values):
         assert rowptr.dtype == torch.int32
         assert colidx.dtype == torch.int32
@@ -1451,7 +1451,7 @@ class CSRSparseTensor(object):
         self.values = values
 
 
-class CSCSparseTensor(object):
+class CSCSparseTensor:
     def __init__(self, rows, cols, nnz, colptr, rowidx, values):
         assert colptr.dtype == torch.int32
         assert rowidx.dtype == torch.int32

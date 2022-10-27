@@ -39,7 +39,7 @@ class StableEmbedding(torch.nn.Embedding):
         sparse: bool = False,
         _weight: Optional[Tensor] = None,
     ) -> None:
-        super(StableEmbedding, self).__init__(
+        super().__init__(
             num_embeddings,
             embedding_dim,
             padding_idx,
@@ -96,7 +96,7 @@ class Embedding(torch.nn.Embedding):
         sparse: bool = False,
         _weight: Optional[Tensor] = None,
     ) -> None:
-        super(Embedding, self).__init__(
+        super().__init__(
             num_embeddings,
             embedding_dim,
             padding_idx,
@@ -225,7 +225,7 @@ class Linear8bitLt(nn.Linear):
         threshold=0.0,
         index=None,
     ):
-        super(Linear8bitLt, self).__init__(
+        super().__init__(
             input_features, output_features, bias
         )
         self.state = bnb.MatmulLtState()

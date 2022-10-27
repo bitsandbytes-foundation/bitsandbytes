@@ -18,7 +18,7 @@ tensor = torch.Tensor
     This is particularly important for small models where outlier features
     are less systematic and occur with low frequency.
 """
-class GlobalOutlierPooler(object):
+class GlobalOutlierPooler:
     _instance = None
 
     def __init__(self):

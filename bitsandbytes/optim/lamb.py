@@ -23,7 +23,7 @@ class LAMB(Optimizer2State):
         block_wise=False,
         max_unorm=1.0,
     ):
-        super(LAMB, self).__init__(
+        super().__init__(
             "lamb",
             params,
             lr,
@@ -56,7 +56,7 @@ class LAMB8bit(Optimizer2State):
         block_wise=False,
         max_unorm=1.0,
     ):
-        super(LAMB8bit, self).__init__(
+        super().__init__(
             "lamb",
             params,
             lr,
@@ -89,7 +89,7 @@ class LAMB32bit(Optimizer2State):
         block_wise=False,
         max_unorm=1.0,
     ):
-        super(LAMB32bit, self).__init__(
+        super().__init__(
             "lamb",
             params,
             lr,

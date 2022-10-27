@@ -27,7 +27,7 @@ class RMSprop(Optimizer1State):
             )
         if centered:
             raise NotImplementedError(f"Centered RMSprop is not supported!")
-        super(RMSprop, self).__init__(
+        super().__init__(
             "rmsprop",
             params,
             lr,
@@ -63,7 +63,7 @@ class RMSprop8bit(Optimizer1State):
             )
         if centered:
             raise NotImplementedError(f"Centered RMSprop is not supported!")
-        super(RMSprop8bit, self).__init__(
+        super().__init__(
             "rmsprop",
             params,
             lr,
@@ -100,7 +100,7 @@ class RMSprop32bit(Optimizer1State):
             )
         if centered:
             raise NotImplementedError(f"Centered RMSprop is not supported!")
-        super(RMSprop32bit, self).__init__(
+        super().__init__(
             "rmsprop",
             params,
             lr,

@@ -18,7 +18,7 @@ k = 20
 
 
 def get_temp_dir():
-    path = "/tmp/autoswap/{0}".format(str(uuid.uuid4()))
+    path = f"/tmp/autoswap/{str(uuid.uuid4())}"
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -116,7 +116,7 @@ gtype = [torch.float32, torch.float16]
 optimizer_names = ["adam", "momentum", "rmsprop", "lars"]
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = [
-    "dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}".format(*vals) for vals in values
+    "dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values
 ]
 
 
@@ -187,7 +187,7 @@ dim1 = [1024]
 dim2 = [32, 1024, 4097]
 gtype = [torch.float32, torch.float16]
 values = list(product(dim1, dim2, gtype))
-names = ["dim1_{0}_dim2_{1}_gtype_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_gtype_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, gtype", values, ids=names)
@@ -250,7 +250,7 @@ optimizer_names = [
 ]
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = [
-    "dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}".format(*vals) for vals in values
+    "dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values
 ]
 
 
@@ -391,7 +391,7 @@ gtype = [torch.float32]
 optim_bits = [32, 8]
 values = list(product(dim1, dim2, gtype, optim_bits))
 names = [
-    "dim1_{0}_dim2_{1}_gtype_{2}_optim_bits_{3}".format(*vals)
+    "dim1_{}_dim2_{}_gtype_{}_optim_bits_{}".format(*vals)
     for vals in values
 ]
 
@@ -495,7 +495,7 @@ gtype = [torch.float32, torch.float16]
 optimizer_names = ["adam8bit_blockwise"]
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = [
-    "dim1_{0}_dim2_{1}_gtype_{2}_optim_{3}".format(*vals) for vals in values
+    "dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values
 ]
 
 
