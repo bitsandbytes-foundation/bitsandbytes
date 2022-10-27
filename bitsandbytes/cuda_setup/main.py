@@ -86,9 +86,7 @@ def get_compute_capabilities(cuda):
         ref_major = ctypes.byref(cc_major)
         ref_minor = ctypes.byref(cc_minor)
         # 2. call extern C function to determine CC
-        check_cuda_result(
-            cuda, cuda.cuDeviceComputeCapability(ref_major, ref_minor, device)
-        )
+        check_cuda_result(cuda, cuda.cuDeviceComputeCapability(ref_major, ref_minor, device))
         ccs.append(f"{cc_major.value}.{cc_minor.value}")
 
     return ccs
@@ -134,9 +132,9 @@ def evaluate_cuda_setup():
     cuda_version_string = get_cuda_version(cuda, cudart_path)
 
 
-    if cc == '':
+    if cc == '' or cc is None:
         cuda_setup.add_log_entry("WARNING: No GPU detected! Check your CUDA paths. Processing to load CPU-only library...", is_warning=True)
-        return binary_name
+        return binary_name, cudart_path, cuda, cc, cuda_version_string
 
     # 7.5 is the minimum CC vor cublaslt
     has_cublaslt = cc in ["7.5", "8.0", "8.6"]

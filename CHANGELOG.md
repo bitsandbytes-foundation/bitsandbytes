@@ -144,3 +144,8 @@ Bug fixes:
 
 Bug fixes:
  - Fixed a bug where the CUDA setup failed due to a wrong function call.
+
+### 0.35.3
+
+Bug fixes:
+ - Fixed a bug in the CUDA Setup which led to an incomprehensible error if no GPU was detected.
