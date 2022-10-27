@@ -181,7 +181,7 @@ class PytorchLARS(Optimizer):
                 state = self.state[p]
                 d_p = p.grad
                 if weight_decay != 0:
-                    d_p = d_p.add(param, alpha=weight_decay)
+                    d_p = d_p.add(p, alpha=weight_decay)
 
                 if momentum != 0:
                     buf = state.get("momentum_buffer", None)
