@@ -336,7 +336,7 @@ def test_matmullt(
             )
             bias = None
             bias2 = None
-            if has_bias: 
+            if has_bias:
                 bias = torch.randn(dim4, device='cuda', dtype=dtype, requires_grad=req_grad[2])
                 bias2 = bias.clone()
             torch.nn.init.xavier_uniform_(B)

@@ -1,6 +1,6 @@
-// Copyright (c) Facebook, Inc. and its affiliates. 
-//   
-// This source code is licensed under the MIT license found in the 
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 #include <kernels.cuh>
@@ -303,7 +303,7 @@ __global__ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* ou
   if(threadIdx.x % 32 < 8)
   {
     // offset: 8 values per 256 input values
-    // 
+    //
     int offset = BLOCK_SIZE*blockIdx.x*BLOCK_SIZE/32*8;
   }
 
@@ -572,7 +572,7 @@ __global__ void kDequantize(float *code, unsigned char *A, float *out, const int
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __launch_bounds__(BLOCK_SIZE/NUM_VALS, 1)
-__global__ void kPreconditionOptimizer32bit2State(T* g, T* p, 
+__global__ void kPreconditionOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n)
@@ -620,7 +620,7 @@ __global__ void kPreconditionOptimizer32bit2State(T* g, T* p,
       {
           switch(OPTIMIZER)
           {
-              case ADAM: 
+              case ADAM:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
                   s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
                   s1_vals[j] *= correction1;
@@ -651,7 +651,7 @@ __global__ void kPreconditionOptimizer32bit2State(T* g, T* p,
 
 template<typename T, int OPTIMIZER>
 __launch_bounds__(TH, 1)
-__global__ void kOptimizer32bit2State(T* g, T* p, 
+__global__ void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n)
@@ -714,7 +714,7 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
       {
           switch(OPTIMIZER)
           {
-              case ADAM: 
+              case ADAM:
 									if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
 									{
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
@@ -739,7 +739,7 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __launch_bounds__(BLOCK_SIZE/NUM_VALS, 1)
-__global__ void kPreconditionOptimizer32bit1State(T* g, T* p, 
+__global__ void kPreconditionOptimizer32bit1State(T* g, T* p,
                 float* state1, float *unorm,
                 const float beta1, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n)
@@ -781,19 +781,19 @@ __global__ void kPreconditionOptimizer32bit1State(T* g, T* p,
       {
           switch(OPTIMIZER)
           {
-              case MOMENTUM: 
+              case MOMENTUM:
                   if(step == 1)
                     s1_vals[j] = (float)g_vals[j]; // state update
                   else
                     s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]); // state update
                   s1_vals[j] = s1_vals[j]*s1_vals[j]; // update norm
                   break;
-              case RMSPROP: 
+              case RMSPROP:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j])); // state update
                   s1_vals[j] = __fdividef((float)g_vals[j],sqrtf(s1_vals[j])+eps); // update value
                   s1_vals[j] = s1_vals[j]*s1_vals[j]; // update norm
                   break;
-              case ADAGRAD: 
+              case ADAGRAD:
                   s1_vals[j] = s1_vals[j] + ((float)g_vals[j])*((float)g_vals[j]); // state update
                   s1_vals[j] = __fdividef((float)g_vals[j],sqrtf(s1_vals[j])+eps); // update value
                   s1_vals[j] = s1_vals[j]*s1_vals[j]; // update norm
@@ -817,7 +817,7 @@ __global__ void kPreconditionOptimizer32bit1State(T* g, T* p,
 
 template<typename T, int OPTIMIZER>
 __launch_bounds__(TH, 1)
-__global__ void kOptimizer32bit1State(T *g, T *p, 
+__global__ void kOptimizer32bit1State(T *g, T *p,
                 float *state1, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n)
@@ -880,7 +880,7 @@ __global__ void kOptimizer32bit1State(T *g, T *p,
 					{
 						switch(OPTIMIZER)
 						{
-								case MOMENTUM: 
+								case MOMENTUM:
 										if(step == 1)
 											s1_vals[j] = (float)g_vals[j];
 										else
@@ -888,11 +888,11 @@ __global__ void kOptimizer32bit1State(T *g, T *p,
 
 										p_vals[j] = ((float)p_vals[j]) + update_scale*(-lr*(s1_vals[j]));
 										break;
-								case RMSPROP: 
+								case RMSPROP:
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j]));
 										p_vals[j] = ((float)p_vals[j]) - update_scale*(lr*__fdividef((float)g_vals[j],sqrtf((float)s1_vals[j])+eps));
 										break;
-								case ADAGRAD: 
+								case ADAGRAD:
 										s1_vals[j] = s1_vals[j] + ((float)g_vals[j])*((float)g_vals[j]);
 										p_vals[j] = ((float)p_vals[j]) - lr*__fdividef((float)g_vals[j],sqrtf((float)s1_vals[j])+eps);
 										break;
@@ -1154,12 +1154,12 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 template<typename T, int OPTIMIZER>
 __global__ void
 __launch_bounds__(NUM_THREADS, 2)
-kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, 
+kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1,
                 float *unorm,
-                const float beta1, 
+                const float beta1,
                 const float eps, const int step,
-                float* __restrict__ const quantiles1, 
-                float* max1, float* new_max1, 
+                float* __restrict__ const quantiles1,
+                float* max1, float* new_max1,
                 const float weight_decay,
                 const float gnorm_scale, const int n)
 {
@@ -1209,7 +1209,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
             s1_vals[j] = smem_quantiles1[m_c1[j]]*max1[0];
             switch(OPTIMIZER)
             {
-                case MOMENTUM: 
+                case MOMENTUM:
                     if(step == 1)
                       s1_vals[j] = (float)g_vals[j];
                     else
@@ -1217,7 +1217,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                     if(unorm != NULL)
                       local_unorm += s1_vals[j]*s1_vals[j];
                     break;
-              case RMSPROP: 
+              case RMSPROP:
                     s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
                   break;
             }
@@ -1242,10 +1242,10 @@ template<typename T, int OPTIMIZER>
 __global__ void
 kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 const float *unorm, const float max_unorm, const float param_norm,
-                const float beta1, 
+                const float beta1,
                 const float eps, const int step, const float lr,
-                float* __restrict__ const quantiles1, 
-                float* max1, float* new_max1, 
+                float* __restrict__ const quantiles1,
+                float* max1, float* new_max1,
                 float weight_decay,
                 const float gnorm_scale, const int n)
 {
@@ -1311,7 +1311,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
 
             switch(OPTIMIZER)
             {
-                case MOMENTUM: 
+                case MOMENTUM:
                   if(step == 1)
                     s1_vals[j] = g_vals[j];
                   else
@@ -1319,7 +1319,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
 
                   p_vals[j] = ((float)p_vals[j]) + (-lr*update_scale*(s1_vals[j]));
                   break;
-              case RMSPROP: 
+              case RMSPROP:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
                   p_vals[j] = ((float)p_vals[j]) - (lr*__fdividef(g_val,sqrtf(s1_vals[j])+eps));
                   break;
@@ -1399,7 +1399,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                float* absmax1, float* absmax2, 
+                float* absmax1, float* absmax2,
                 float weight_decay,
                 const float gnorm_scale, const bool skip_zeros, const int n)
 {
@@ -1543,7 +1543,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         StoreT(temp_storage.storeh).Store(&(p[i]), g_vals, valid_items);
 
         //  quantizaztion: 2.67/1.70  -> 3.4/3.3
-        # pragma unroll N_PER_TH 
+        # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
             c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], __fdividef(s1_vals[j],new_local_abs_max1));
@@ -1656,16 +1656,16 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
 							switch(OPTIMIZER)
 							{
-									case MOMENTUM: 
+									case MOMENTUM:
 										if(step == 1)
 											s1_vals[j] = g_val;
 										else
 											s1_vals[j] = (s1_vals[j]*beta1) + g_val;
 										break;
-									case RMSPROP: 
+									case RMSPROP:
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
 										break;
-									case ADAGRAD: 
+									case ADAGRAD:
 										s1_vals[j] = s1_vals[j] + (g_val*g_val);
 										break;
 							}
@@ -1696,14 +1696,14 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 						{
 							switch(OPTIMIZER)
 							{
-									case MOMENTUM: 
+									case MOMENTUM:
 										p_vals[j] = ((float)p_vals[j]) - lr*(s1_vals[j]);
 										break;
-									case RMSPROP: 
+									case RMSPROP:
 										g_val = g_vals[j];
 										p_vals[j] = ((float)p_vals[j]) - lr*(__fdividef(g_val, sqrtf(s1_vals[j])+eps));
 										break;
-									case ADAGRAD: 
+									case ADAGRAD:
 										g_val = g_vals[j];
 										p_vals[j] = ((float)p_vals[j]) - lr*(__fdividef(g_val, sqrtf(s1_vals[j])+eps));
 										break;
@@ -1716,7 +1716,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
 
         //  quantizaztion: 2.67/1.70  -> 3.4/3.3
-        # pragma unroll N_PER_TH 
+        # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
             c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], __fdividef(s1_vals[j],new_local_abs_max1));
@@ -1893,9 +1893,9 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 {
 
   // Strategy: To dequantize we need to load col/row statistics. This can be very expensive
-  // since different row/col stats need to be loaded with each thread. 
+  // since different row/col stats need to be loaded with each thread.
   // (1, bad algorithm) Loading 32 items per thread would only occur 1 row load, but this increases register pressure
-  // and would lead to low global load utilization. 
+  // and would lead to low global load utilization.
   // (2, bad algorithm) If each thread loads some columns and multiple rows one needs to do lot of row loads
   // for each thread and this is duplicated by a factor of 32/num-cols-per-thread.
   // (3, good algorithm) Combining (1) and (2) we use sub-tiles of size 32xk in shared memory per threadblock.
@@ -1903,7 +1903,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
   // We can run for example 32x128 sub-tiles and warp-strided loads of 4 elements so that each thread has
   // the same col statistic but needs to load 4 row stats from shared memory. To prevent bank conflicts
   // we use a block-striped shared memory config [1, 31, 63, 95] so no bank conflicts happen during the
-  // shared memory loads. 
+  // shared memory loads.
 
   // data is in 32 column-tile major with tile width 32 columns and numRows rows
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
@@ -2140,7 +2140,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 
 
   // To have efficient loads and stores if we transpose we need 128 consequitive bytes which at 1 byte are 128 values
-  // As such we need: 
+  // As such we need:
   // at least 32*4 shared memory tiles for col32; preferably 32*32
   // at least 32*6 shared memory tiles for col32_ampere: preferably 32*32
   // at least 32*8 shared memory tiles for col4_turing: preferably 32*32
@@ -2150,7 +2150,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   // we have 64k sharded mem per SM in Turing which is 8 blocks per SM which is 2*8 = 32 warps = 100% occupancy
   // for turing and 50% for A100 and 75% for RTX 30s / A40 which is probably good enough
   // register pressure should be low with: 8 registers from local memoryh per block and 64 registers per SM
-  // 
+  //
   // to make the shared memory work with that occupancy we might need to union the block loads/stores
 
   // each block loads TILE_COLs columns and TILE_ROW rows
@@ -2239,7 +2239,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 
           switch(FORMAT)
           {
-              case COL32: 
+              case COL32:
                 if(TRANSPOSE)
                 {
                   // data lies in shared memory in the following way:
@@ -2264,7 +2264,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 
                     // each 32 columns we have new tile
                     // each tile has size outRows*32 and base_row is done in increments of 32
-                    offset = base_row*outRows; 
+                    offset = base_row*outRows;
                     out[offset + (base_col + jrow + subrow_loop_row)*32 + threadIdx.x] = data;
                   }
                 }
@@ -2310,7 +2310,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // we increase by row_tile_column every 32 columns
                     // base_row increase in increments of 32
                     //int row_tile_column = 256*outRows/8; // there are outRows/8 row tiles, and each tile is 256 elements
-                    //int col_offset = (base_row/32)*row_tile_column; 
+                    //int col_offset = (base_row/32)*row_tile_column;
                     // -> we can remove the divisions to speed up compute since outRows is always a multiple of 8
                     // 256*outRows/8*base_row/32 = outRows*base_row
                     int col_offset = outRows*base_row;
@@ -2347,7 +2347,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // this happends every 8 rows anew (subrow % 8)
                     // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
                     int subcol = warp_lane;
-                    
+
                     // add local offset (4x4 sub-tile)
                     if(subrow % 2 == 1)
                       // odd
@@ -2387,7 +2387,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 											// we increase by row_tile_column every 32 columns
 											// base_row increase in increments of 32
 											//int row_tile_column = 1024*outRows/32; // there are outRows/32 row tiles, and each tile is 1024 elements
-											//int col_offset = (base_row/32)*row_tile_column; 
+											//int col_offset = (base_row/32)*row_tile_column;
 											// -> we can remove the divisions to speed up compute since outRows is always a multiple of 8
 											// 1024*outRows/32*base_row/32 = outRows*base_row
 											int col_offset = outRows*base_row;
@@ -2445,7 +2445,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 #define C 1.0f/127.0f
 #define MAX_SPARSE_COUNT 32
 #define SMEM_SIZE 8*256
-template <typename T, int SPMM_ITEMS, int BITS> 
+template <typename T, int SPMM_ITEMS, int BITS>
 __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB)
 {
 
@@ -2575,7 +2575,7 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
           #pragma unroll num_items
           for(int k = 0; k < num_items; k++)
             local_valC[(j/num_items) + k] = (float)local_valC[(j/num_items) + k] + (float)local_valOut[k];
-            
+
           reinterpret_cast<float4*>(out)[idx_val/num_items] = reinterpret_cast<float4(&)[num_items]>(local_valC)[j/num_items];
       }
       else
@@ -2589,11 +2589,11 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
 
     idx_col_B += blockDim.x*SPMM_ITEMS;
     local_idx_col_B_offset += blockDim.x*SPMM_ITEMS;
-  } 
+  }
 }
 
 template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA)
-{  
+{
 	int local_colidx = idx[blockIdx.x];
 
 	if(FORMAT==COL_TURING)
@@ -2653,7 +2653,7 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 			out[out_idx] = val;
 		}
 	}
-} 
+}
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

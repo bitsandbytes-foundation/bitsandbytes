@@ -1,6 +1,6 @@
-// Copyright (c) Facebook, Inc. and its affiliates. 
-//   
-// This source code is licensed under the MIT license found in the 
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 #include <ops.cuh>
@@ -212,7 +212,7 @@ void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, in
 
 }
 
-void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc, 
+void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc,
                     long long int strideA, long long int strideB, long long int strideC, int batchCount)
 {
   const int falpha = 1;
@@ -322,7 +322,7 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   cublasLtOrder_t orderOut = get_order<TARGET>();
   int ldA = get_leading_dim<SRC>(dim1, dim2);
   int ldOut = get_leading_dim<TARGET>(dim1, dim2);
-  
+
   cublasLtMatrixLayout_t A_desc = NULL, out_desc = NULL;
   cublasLtMatrixTransformDesc_t A2Out_desc = NULL;
   cublasOperation_t opTranspose = CUBLAS_OP_T;
@@ -368,7 +368,7 @@ template void transform<int8_t, ROW, COL_AMPERE, false, 8>(cublasLtHandle_t ltHa
 template void transform<int8_t, COL32, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int32_t, COL32, ROW, false, 32>(cublasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
 
-template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc) 
+template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
 {
 #ifdef NO_CUBLASLT
   cout << "" << endl;

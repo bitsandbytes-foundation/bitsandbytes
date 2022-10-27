@@ -15,7 +15,7 @@ tensor = torch.Tensor
 
 """
     This class pools outlier dimensions across layers.
-    This is particularly important for small models where outlier features 
+    This is particularly important for small models where outlier features
     are less systematic and occur with low frequency.
 """
 class GlobalOutlierPooler(object):

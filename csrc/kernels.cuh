@@ -1,6 +1,6 @@
-// Copyright (c) Facebook, Inc. and its affiliates. 
-//   
-// This source code is licensed under the MIT license found in the 
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 #include <float.h>
@@ -18,49 +18,49 @@ template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC> __global__ 
 template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH> __global__ void kDequantizeBlockwise(float *code, unsigned char * __restrict__ const A, float * __restrict__ const absmax, T *out, const int n);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
-__global__ void kPreconditionOptimizer32bit2State(T* g, T* p, 
+__global__ void kPreconditionOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n);
 
 template<typename T, int OPTIMIZER>
-__global__ void kOptimizer32bit2State(T* g, T* p, 
+__global__ void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
-__global__ void kPreconditionOptimizer32bit1State(T* g, T* p, 
+__global__ void kPreconditionOptimizer32bit1State(T* g, T* p,
                 float* state1, float *unorm,
                 const float beta1, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n);
 
 template<typename T, int OPTIMIZER>
-__global__ void kOptimizer32bit1State(T* g, T* p, 
+__global__ void kOptimizer32bit1State(T* g, T* p,
                 float* state1,  float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
 
 template<typename T, int OPTIMIZER>
 __global__ void
-kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, 
+kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1,
                 float *unorm,
-                const float beta1, 
-                const float eps, const int step, 
-                float* __restrict__ const quantiles1, 
-                float* max1, float* new_max1, 
+                const float beta1,
+                const float eps, const int step,
+                float* __restrict__ const quantiles1,
+                float* max1, float* new_max1,
                 const float weight_decay,
                 const float gnorm_scale, const int n);
 
 
 template<typename T, int OPTIMIZER>
 __global__ void
-kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1, 
+kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 const float *unorm, const float max_unorm, const float param_norm,
-                const float beta1, 
-                const float eps, const int step, const float lr, 
-                float* __restrict__ const quantiles1, 
-                float* max1, float* new_max1, 
+                const float beta1,
+                const float eps, const int step, const float lr,
+                float* __restrict__ const quantiles1,
+                float* max1, float* new_max1,
                 float weight_decay, const float gnorm_scale, const int n);
 
 
@@ -70,7 +70,7 @@ __global__ void
 kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2,
                 float *unorm,
                 const float beta1, const float beta2,
-                const float eps, const int step, 
+                const float eps, const int step,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 const float gnorm_scale, const int n);
@@ -81,7 +81,7 @@ __global__ void
 kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned char* state2,
                 const float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2,
-                const float eps, const int step, const float lr, 
+                const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay, const float gnorm_scale, const int n);
@@ -121,5 +121,3 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 
 #endif
-
-

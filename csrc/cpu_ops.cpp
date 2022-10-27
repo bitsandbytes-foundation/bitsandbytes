@@ -62,7 +62,7 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
 
       for (int i = 0; i < valid_chunks; i++)
           int err = pthread_join(threads[i], NULL);
-      
+
       free(threads);
       for (int i = 0; i < valid_chunks; i++)
           free(args[i]);

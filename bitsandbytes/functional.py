@@ -1133,7 +1133,7 @@ def igemm(
     ptr = CUBLAS_Context.get_instance().get_context(A.device)
 
     # B^T @ A^T = C^T
-    # [km, nk -> mn] 
+    # [km, nk -> mn]
     is_on_gpu([B, A, out])
     lib.cigemm(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))

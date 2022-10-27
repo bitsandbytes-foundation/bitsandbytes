@@ -267,7 +267,7 @@ class Linear8bitLt(nn.Linear):
                 self.weight.data = self.state.CxB
             elif self.state.memory_efficient_backward and self.state.CxB is not None:
                 # For memory efficient backward, we convert 8-bit row major to turing/ampere format at each inference pass.
-                # Thus, we delete CxB from the state. 
+                # Thus, we delete CxB from the state.
                 del self.state.CxB
 
         return out
