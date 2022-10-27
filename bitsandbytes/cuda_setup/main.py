@@ -17,6 +17,7 @@ evaluation:
 """
 
 import ctypes
+import os
 
 from .paths import determine_cuda_runtime_lib_path
 from bitsandbytes.cextension import CUDASetup
@@ -107,15 +108,17 @@ def get_compute_capability(cuda):
 
 
 def evaluate_cuda_setup():
-    # we remove this for now and see how things go
-    #print('')
-    #print('='*35 + 'BUG REPORT' + '='*35)
-    #print('Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues')
-    #print('For effortless bug reporting copy-paste your error into this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
-    #print('='*80)
-    #if not torch.cuda.is_available():
-        #print('No GPU detected. Loading CPU library...')
-        #return binary_name
+    if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
+        print('')
+        print('=' * 35 + 'BUG REPORT' + '=' * 35)
+        print('Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues')
+        print('For effortless bug reporting copy-paste your error into this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
+        print('To hide this message, set the BITSANDBYTES_NOWELCOME variable like so: export BITSANDBYTES_NOWELCOME=1')
+        print('=' * 80)
+
+    # if not torch.cuda.is_available():
+    #     print('No GPU detected. Loading CPU library...')
+    #     return binary_name
 
     binary_name = "libbitsandbytes_cpu.so"
 
