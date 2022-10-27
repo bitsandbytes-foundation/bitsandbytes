@@ -1,6 +1,3 @@
-# from bitsandbytes.debug_cli import cli
-
-# cli()
 import os
 import sys
 from warnings import warn

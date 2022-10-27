@@ -26,9 +26,6 @@ setup(
     keywords="gpu optimizers optimization 8-bit quantization compression",
     url="https://github.com/TimDettmers/bitsandbytes",
     packages=find_packages(),
-    entry_points={
-        "console_scripts": ["debug_cuda = bitsandbytes.debug_cli:cli"],
-    },
     package_data={"": libs},
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
