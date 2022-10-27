@@ -2,24 +2,11 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterator,
-    Mapping,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-    overload,
-)
+from typing import Optional, TypeVar, Union, overload
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
-from torch.nn.parameter import Parameter
 
 import bitsandbytes as bnb
 from bitsandbytes.optim import GlobalOptimManager
