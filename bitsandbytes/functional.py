@@ -959,7 +959,7 @@ def histogram_scatter_add_2d(
 
     maxdim1 = ct.c_int32(histogram.shape[0])
     n = ct.c_int32(index1.numel())
-    is_on_gpu([histogram, index1, index2d, source])
+    is_on_gpu([histogram, index1, index2, source])
     lib.chistogram_scatter_add_2d(get_ptr(histogram), get_ptr(index1), get_ptr(index2), get_ptr(source), maxdim1, n)
 
 def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8):
