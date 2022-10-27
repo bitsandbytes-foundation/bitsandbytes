@@ -138,3 +138,9 @@ Features:
 
 Bug fixes:
  - Fixed a problem where warning messages would be displayed even though everything worked correctly.
+
+
+### 0.35.2
+
+Bug fixes:
+ - Fixed a bug where the CUDA setup failed due to a wrong function call.
