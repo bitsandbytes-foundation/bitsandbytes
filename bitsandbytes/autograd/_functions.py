@@ -50,8 +50,9 @@ class GlobalOutlierPooler:
 
 class MatMul8bit(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, A, B, out=None, quant_type="vector", precision=[8, 8, 8]):
-
+    def forward(ctx, A, B, out=None, quant_type="vector", precision=None):
+        if precision is None:
+            precision = [8, 8, 8]
         if precision[0] != 8:
             with torch.no_grad():
                 output = torch.matmul(A, B)
