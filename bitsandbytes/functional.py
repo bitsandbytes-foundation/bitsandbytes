@@ -133,8 +133,7 @@ class Cusparse_Context:
 def create_linear_map(signed=True):
     if signed:
         return torch.linspace(-1.0, 1.0, 256)
-    else:
-        return torch.linspace(0.0, 1.0, 256)
+    return torch.linspace(0.0, 1.0, 256)
 
 
 def create_dynamic_map(signed=True, n=7):
@@ -186,13 +185,12 @@ def create_dynamic_map(signed=True, n=7):
 
 def get_special_format_str():
     if not torch.cuda.is_available(): return 'col_turing'
-    major, minor = torch.cuda.get_device_capability()
+    major, _minor = torch.cuda.get_device_capability()
     if major <= 7:
         return "col_turing"
-    elif major == 8:
+    if major == 8:
         return "col_ampere"
-    else:
-        return "col_turing"
+    return "col_turing"
 
 
 
