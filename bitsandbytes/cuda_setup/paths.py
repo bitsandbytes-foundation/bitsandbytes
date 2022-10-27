@@ -87,7 +87,7 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
         if conda_cuda_libs:
             return next(iter(conda_cuda_libs))
 
-        CUDASetup.get_instance.add_log_entry(f'{candidate_env_vars["CONDA_PREFIX"]} did not contain '
+        CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["CONDA_PREFIX"]} did not contain '
             f'{CUDA_RUNTIME_LIB} as expected! Searching further paths...', is_warning=True)
 
     if "LD_LIBRARY_PATH" in candidate_env_vars:
