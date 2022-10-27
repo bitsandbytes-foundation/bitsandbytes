@@ -317,8 +317,6 @@ def nvidia_transform(
         dim2 = ct.c_int32(shape[2])
 
     ptr = CUBLAS_Context.get_instance().get_context(A.device)
-    ptrA = get_ptr(A)
-    ptrOut = get_ptr(out)
     func(ptr, get_ptr(A), get_ptr(out), dim1, dim2)
 
     return out, new_state
@@ -1614,8 +1612,6 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
         dim1 = ct.c_int32(shape[0] * shape[1])
         dim2 = ct.c_int32(shape[2])
 
-    ptrA = get_ptr(A)
-    ptrOut = get_ptr(out)
     is_on_gpu([A, out])
     if to_order == 'col32':
         if transpose:
