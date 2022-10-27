@@ -27,7 +27,7 @@ def check_cuda_result(cuda, result_val):
     if result_val != 0:
         error_str = ctypes.c_char_p()
         cuda.cuGetErrorString(result_val, ctypes.byref(error_str))
-        CUDASetup.get_instance.add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
+        CUDASetup.get_instance().add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
 
 def get_cuda_version(cuda, cudart_path):
     # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
