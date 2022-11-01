@@ -17,6 +17,7 @@ evaluation:
 """
 
 import ctypes
+
 import torch
 
 from bitsandbytes.cextension import CUDASetup
