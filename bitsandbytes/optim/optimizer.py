@@ -56,9 +56,9 @@ class GlobalOptimManager:
         """
         Overrides initial optimizer config for specific parameters.
 
-        The key-values of the optimizer config for the input parameters are overidden
+        The key-values of the optimizer config for the input parameters are overridden
         This can be both, optimizer parameters like "betas", or "lr" or it can be
-        8-bit specific paramters like "optim_bits", "percentile_clipping".
+        8-bit specific parameters like "optim_bits", "percentile_clipping".
 
         Parameters
         ----------
@@ -282,11 +282,11 @@ class Optimizer8bit(torch.optim.Optimizer):
         return config
 
     def init_state(self, group, p, gindex, pindex):
-        raise NotImplementedError("init_state method needs to be overidden")
+        raise NotImplementedError("init_state method needs to be overridden")
 
     def update_step(self, group, p, gindex, pindex):
         raise NotImplementedError(
-            "The update_step method needs to be overidden"
+            "The update_step method needs to be overridden"
         )
 
 

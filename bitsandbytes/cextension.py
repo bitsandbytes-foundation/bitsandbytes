@@ -116,7 +116,7 @@ try:
         CUDASetup.get_instance().generate_instructions()
         CUDASetup.get_instance().print_log_stack()
         raise RuntimeError('''
-        CUDA Setup failed despite GPU being available. Inspect the CUDA SETUP outputs aboveto fix your environment!
+        CUDA Setup failed despite GPU being available. Inspect the CUDA SETUP outputs above to fix your environment!
         If you cannot find any issues and suspect a bug, please open an issue with detals about your environment:
         https://github.com/TimDettmers/bitsandbytes/issues''')
     lib.cadam32bit_g32
