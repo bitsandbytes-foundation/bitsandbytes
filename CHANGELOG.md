@@ -149,3 +149,9 @@ Bug fixes:
 
 Bug fixes:
  - Fixed a bug in the CUDA Setup which led to an incomprehensible error if no GPU was detected.
+
+### 0.35.4
+
+Bug fixes:
+ - Fixed a bug in the CUDA Setup failed with the cuda runtime was found, but not the cuda library.
+ - Fixed a bug where not finding the cuda runtime led to an incomprehensible error.
