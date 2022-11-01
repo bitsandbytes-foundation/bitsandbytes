@@ -138,3 +138,20 @@ Features:
 
 Bug fixes:
  - Fixed a problem where warning messages would be displayed even though everything worked correctly.
+
+
+### 0.35.2
+
+Bug fixes:
+ - Fixed a bug where the CUDA setup failed due to a wrong function call.
+
+### 0.35.3
+
+Bug fixes:
+ - Fixed a bug in the CUDA Setup which led to an incomprehensible error if no GPU was detected.
+
+### 0.35.4
+
+Bug fixes:
+ - Fixed a bug in the CUDA Setup failed with the cuda runtime was found, but not the cuda library.
+ - Fixed a bug where not finding the cuda runtime led to an incomprehensible error.

@@ -62,7 +62,7 @@ def warn_in_case_of_duplicates(results_paths: Set[Path]) -> None:
             "If you get `CUDA error: invalid device function` errors, the above "
             "might be the cause and the solution is to make sure only one "
             f"{CUDA_RUNTIME_LIB} in the paths that we search based on your env.")
-        CUDASetup.get_instance.add_log_entry(warning_msg, is_warning=True)
+        CUDASetup.get_instance().add_log_entry(warning_msg, is_warning=True)
 
 
 def determine_cuda_runtime_lib_path() -> Union[Path, None]:
@@ -88,7 +88,7 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
         if conda_cuda_libs:
             return next(iter(conda_cuda_libs))
 
-        CUDASetup.get_instance.add_log_entry(f'{candidate_env_vars["CONDA_PREFIX"]} did not contain '
+        CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["CONDA_PREFIX"]} did not contain '
             f'{CUDA_RUNTIME_LIB} as expected! Searching further paths...', is_warning=True)
 
     if "LD_LIBRARY_PATH" in candidate_env_vars:
