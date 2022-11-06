@@ -130,11 +130,17 @@ class Cusparse_Context(object):
         return cls._instance
 
 
-def create_linear_map(signed=True):
-    if signed:
-        return torch.linspace(-1.0, 1.0, 256)
+def create_linear_map(signed=True, bits=8):
+    sign = (-1.0 if signed else 0.0)
+
+    values = torch.linspace(sign, 1.0, 2**bits)
+    gap = 256 - values.numel()
+    if gap == 0:
+        return values
     else:
-        return torch.linspace(0.0, 1.0, 256)
+        l = values.numel()//2
+        #return torch.Tensor(values[:l].tolist() + [-1e-6]*((gap//2)-1) + [0]*2 + [1e-6]*((gap//2)-1) + values[l:].tolist())
+        return torch.Tensor(values[:l].tolist() + [0]*gap + values[l:].tolist())
 
 
 def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2):
