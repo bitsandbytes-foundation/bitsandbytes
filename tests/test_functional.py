@@ -151,30 +151,41 @@ def test_dynamic_quantization():
 
 
 def test_dynamic_blockwise_quantization():
-    diffs = []
-    reldiffs = []
-    for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
-        C, S = F.quantize_blockwise(A1)
-        A2 = F.dequantize_blockwise(C, S)
-        diff = torch.abs(A1 - A2)
-        reldiff = diff / torch.abs(A1 + 1e-8)
-        diffs.append(diff.mean().item())
-        reldiffs.append(reldiff.mean().item())
-        assert diffs[-1] < 0.011
-    # print(sum(diffs)/len(diffs))
-    # print(sum(reldiffs)/len(reldiffs))
+    #print('')
+    for blocksize in [4096, 2048, 1024, 512]:
+        diffs = []
+        reldiffs = []
+        for i in range(100):
+            A1 = torch.randn(1024, 1024, device="cuda")
+            C, S = F.quantize_blockwise(A1)
+            A2 = F.dequantize_blockwise(C, S)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff / torch.abs(A1 + 1e-8)
+            diffs.append(diff.mean().item())
+            reldiffs.append(reldiff.mean().item())
+        abserr = sum(diffs)/len(diffs)
+        relerr = sum(reldiffs)/len(reldiffs)
+        assert abserr < 0.011
+        assert relerr < 0.018
+        #print('randn', blocksize, sum(diffs)/len(diffs))
+        #print('randn', blocksize, sum(reldiffs)/len(reldiffs))
 
-    diffs = []
-    for i in range(100):
-        A1 = torch.rand(1024, 1024, device="cuda")
-        C, S = F.quantize_blockwise(A1)
-        A2 = F.dequantize_blockwise(C, S)
-        diff = torch.abs(A1 - A2).mean().item()
-        assert diff < 0.0033
-        diffs.append(diff)
-        torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
-    # print(sum(diffs)/len(diffs))
+        diffs = []
+        for i in range(100):
+            A1 = torch.rand(1024, 1024, device="cuda")
+            C, S = F.quantize_blockwise(A1)
+            A2 = F.dequantize_blockwise(C, S)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff / torch.abs(A1 + 1e-8)
+            diffs.append(diff.mean().item())
+            reldiffs.append(reldiff.mean().item())
+            torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+        abserr = sum(diffs)/len(diffs)
+        relerr = sum(reldiffs)/len(reldiffs)
+        assert abserr < 0.0035
+        assert relerr < 0.015
+        #print('rand', blocksize, sum(diffs)/len(diffs))
+        #print('rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 def test_dynamic_blockwise_stochastic_quantization():
@@ -1618,17 +1629,6 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
     # print(time.time() - t0)
 
 
-def test_layout():
-    a1 = torch.rand(16, 64, device="cuda", dtype=torch.float16)
-    a1 = torch.arange(16 * 64, device="cuda").reshape(16, 64).byte()
-    a2, s2 = F.transform(a1, "col_turing")
-    print(a2.shape)
-
-    print(a1.flatten()[8 * 64 : 8 * 64 + 32])
-    for i in range(4):
-        print(a2.flatten()[i * 8 * 32 : i * 8 * 32 + 32], 0)
-
-
 def test_coo2csr():
     threshold = 1
     A = torch.randn(128, 128).half().cuda()
@@ -2062,8 +2062,8 @@ def test_fp8_quant():
             abserr.append(diff.mean().item())
             relerr.append(reldiff.mean().item())
             #assert diff < 0.0075
-        print(sum(abserr)/len(abserr))
-        print(sum(relerr)/len(relerr))
+        #print(sum(abserr)/len(abserr))
+        #print(sum(relerr)/len(relerr))
 
         abserr = []
         relerr = []
@@ -2076,8 +2076,8 @@ def test_fp8_quant():
             abserr.append(diff.mean().item())
             relerr.append(reldiff.mean().item())
             #assert diff < 0.0075
-        print(sum(abserr)/len(abserr))
-        print(sum(relerr)/len(relerr))
+        #print(sum(abserr)/len(abserr))
+        #print(sum(relerr)/len(relerr))
 
         abserr = []
         relerr = []
@@ -2090,21 +2090,21 @@ def test_fp8_quant():
             abserr.append(diff.mean().item())
             relerr.append(reldiff.mean().item())
             #assert diff < 0.0075
-        print(3, sum(abserr)/len(abserr))
-        print(3, sum(relerr)/len(relerr))
+        #print(3, sum(abserr)/len(abserr))
+        #print(3, sum(relerr)/len(relerr))
 
 
 def test_few_bit_quant():
 
-    print('')
+    #print('')
     for bits in range(2, 9):
-        print('='*30, bits, '='*30)
+        #print('='*30, bits, '='*30)
         for method in ['linear', 'fp8', 'dynamic', 'quantile']:
             abserrs = []
             relerrs = []
             code = None
             if method == 'linear':
-                code = F.create_linear_map(True, bits=bits).cuda()
+                code = F.create_linear_map(True, total_bits=bits).cuda()
             elif method == 'fp8':
                 ebits = math.ceil(bits/2)
                 pbits = bits-ebits-1
@@ -2122,7 +2122,7 @@ def test_few_bit_quant():
 
                 q /= q.abs().max()
                 code, idx = torch.sort(q)
-            print(method, (code==0).sum())
+            #print(method, (code==0).sum())
             assert code.numel() == 256
             for i in range(10):
 
@@ -2154,7 +2154,7 @@ def test_few_bit_quant():
 
                 else:
                     torch.testing.assert_allclose(q1, q2)
-            print(method, 'abserr:', sum(abserrs)/len(abserrs), 'relerr:', sum(relerrs)/len(relerrs))
+            #print(method, 'abserr:', sum(abserrs)/len(abserrs), 'relerr:', sum(relerrs)/len(relerrs))
 
 
 def test_kbit_quantile_estimation():
