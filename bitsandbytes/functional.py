@@ -466,7 +466,7 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
 
     if absmax is None:
         n = A.numel()
-        blocksize = (blocksize if A.device.type == 'cpu' else 4096)
+        blocksize = (blocksize if A.device.type == 'cuda' else 4096)
         blocks = n // blocksize
         blocks += 1 if n % blocksize > 0 else 0
         absmax = torch.zeros((blocks,), device=A.device)
@@ -550,17 +550,15 @@ def dequantize_blockwise(
 
 
     if A.device.type != 'cpu':
-        if blocksize not in [2048, 4096]:
-            raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048 4096]")
+        if blocksize not in [2048, 4096, 1024, 512]:
+            raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512]")
         is_on_gpu([A, out])
         if out.dtype == torch.float32:
             lib.cdequantize_blockwise_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
         elif out.dtype == torch.float16:
             lib.cdequantize_blockwise_fp16(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
         else:
-            raise ValueError(
-                f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}"
-            )
+            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     else:
         lib.cdequantize_blockwise_cpu_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))
 
