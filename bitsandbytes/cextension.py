@@ -94,7 +94,6 @@ class CUDASetup(object):
             else:
                 self.add_log_entry(f"CUDA SETUP: Loading binary {binary_path}...")
                 self.lib = ct.cdll.LoadLibrary(binary_path)
-                print(self.lib)
         except Exception as ex:
             self.add_log_entry(str(ex))
             self.print_log_stack()

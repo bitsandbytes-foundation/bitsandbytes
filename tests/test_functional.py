@@ -2166,3 +2166,19 @@ def test_kbit_quantile_estimation():
             val2 = F.estimate_quantiles(data, offset=0, num_quantiles=2**bits)
             err = torch.abs(val1-val2).mean()
             assert err < 0.035
+
+
+def test_bench_dequantization():
+    a = torch.rand(1024, 1024, device='cuda').half()
+    qa, SA = F.quantize_blockwise(a)
+
+    max_theoretical_mu =  1024*1024*2/1024**3/672*1000*1000
+    #print(max_theoretical_mu)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        F.dequantize_blockwise(qa, SA, blocksize=2048)
+    torch.cuda.synchronize()
+    #print((time.time()-t0)/1e6)
+
