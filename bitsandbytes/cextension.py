@@ -52,8 +52,13 @@ class CUDASetup:
         self.add_log_entry('python setup.py install')
 
     def initialize(self):
-        self.cuda_setup_log = []
+        self.has_printed = False
         self.lib = None
+        self.run_cuda_setup()
+
+    def run_cuda_setup(self):
+        self.initialized = True
+        self.cuda_setup_log = []
 
         from .cuda_setup.main import evaluate_cuda_setup
         binary_name, cudart_path, cuda, cc, cuda_version_string = evaluate_cuda_setup()
@@ -89,7 +94,8 @@ class CUDASetup:
             else:
                 self.add_log_entry(f"CUDA SETUP: Loading binary {binary_path}...")
                 self.lib = ct.cdll.LoadLibrary(binary_path)
-        except:
+        except Exception as ex:
+            self.add_log_entry(str(ex))
             self.print_log_stack()
 
     def add_log_entry(self, msg, is_warning=False):

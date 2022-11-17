@@ -6,12 +6,14 @@ from itertools import product
 import einops
 import pytest
 import torch
+import numpy as np
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
+from scipy.stats import norm
 
 torch.set_printoptions(
-    precision=4, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000
+    precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000
 )
 k = 20
 
@@ -149,30 +151,41 @@ def test_dynamic_quantization():
 
 
 def test_dynamic_blockwise_quantization():
-    diffs = []
-    reldiffs = []
-    for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
-        C, S = F.quantize_blockwise(A1)
-        A2 = F.dequantize_blockwise(C, S)
-        diff = torch.abs(A1 - A2)
-        reldiff = diff / torch.abs(A1 + 1e-8)
-        diffs.append(diff.mean().item())
-        reldiffs.append(reldiff.mean().item())
-        assert diffs[-1] < 0.011
-    # print(sum(diffs)/len(diffs))
-    # print(sum(reldiffs)/len(reldiffs))
+    #print('')
+    for blocksize in [4096, 2048, 1024, 512]:
+        diffs = []
+        reldiffs = []
+        for i in range(100):
+            A1 = torch.randn(1024, 1024, device="cuda")
+            C, S = F.quantize_blockwise(A1, blocksize=blocksize)
+            A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff / torch.abs(A1 + 1e-8)
+            diffs.append(diff.mean().item())
+            reldiffs.append(reldiff.mean().item())
+        abserr = sum(diffs)/len(diffs)
+        relerr = sum(reldiffs)/len(reldiffs)
+        assert abserr < 0.011
+        assert relerr < 0.018
+        #print('randn', blocksize, sum(diffs)/len(diffs))
+        #print('randn', blocksize, sum(reldiffs)/len(reldiffs))
 
-    diffs = []
-    for i in range(100):
-        A1 = torch.rand(1024, 1024, device="cuda")
-        C, S = F.quantize_blockwise(A1)
-        A2 = F.dequantize_blockwise(C, S)
-        diff = torch.abs(A1 - A2).mean().item()
-        assert diff < 0.0033
-        diffs.append(diff)
-        torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
-    # print(sum(diffs)/len(diffs))
+        diffs = []
+        for i in range(100):
+            A1 = torch.rand(1024, 1024, device="cuda")
+            C, S = F.quantize_blockwise(A1, blocksize=blocksize)
+            A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff / torch.abs(A1 + 1e-8)
+            diffs.append(diff.mean().item())
+            reldiffs.append(reldiff.mean().item())
+            #torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+        abserr = sum(diffs)/len(diffs)
+        relerr = sum(reldiffs)/len(reldiffs)
+        assert abserr < 0.0035
+        assert relerr < 0.015
+        #print('rand', blocksize, sum(diffs)/len(diffs))
+        #print('rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 def test_dynamic_blockwise_stochastic_quantization():
@@ -1616,17 +1629,6 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
     # print(time.time() - t0)
 
 
-def test_layout():
-    a1 = torch.rand(16, 64, device="cuda", dtype=torch.float16)
-    a1 = torch.arange(16 * 64, device="cuda").reshape(16, 64).byte()
-    a2, s2 = F.transform(a1, "col_turing")
-    print(a2.shape)
-
-    print(a1.flatten()[8 * 64 : 8 * 64 + 32])
-    for i in range(4):
-        print(a2.flatten()[i * 8 * 32 : i * 8 * 32 + 32], 0)
-
-
 def test_coo2csr():
     threshold = 1
     A = torch.randn(128, 128).half().cuda()
@@ -2040,3 +2042,143 @@ def test_blockwise_cpu_large():
                 assert diffs[-1] < 0.011
             # print(sum(diffs)/len(diffs))
             # print(sum(reldiffs)/len(reldiffs))
+
+
+
+def test_fp8_quant():
+    for e_bits in range(1, 7):
+        p_bits = 7-e_bits
+        code = F.create_fp8_map(True, e_bits, p_bits).cuda()
+
+        print(e_bits, p_bits)
+        abserr = []
+        relerr = []
+        for i in range(100):
+            A1 = torch.randn(1024, 1024, device="cuda")
+            C, SC = F.quantize_blockwise(A1, code=code)
+            A2 = F.dequantize_blockwise(C, SC)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff/torch.abs(A1+1e-8)
+            abserr.append(diff.mean().item())
+            relerr.append(reldiff.mean().item())
+            #assert diff < 0.0075
+        #print(sum(abserr)/len(abserr))
+        #print(sum(relerr)/len(relerr))
+
+        abserr = []
+        relerr = []
+        for i in range(100):
+            A1 = torch.rand(1024, 1024, device="cuda")
+            C, SC = F.quantize_blockwise(A1, code=code)
+            A2 = F.dequantize_blockwise(C, SC)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff/torch.abs(A1+1e-8)
+            abserr.append(diff.mean().item())
+            relerr.append(reldiff.mean().item())
+            #assert diff < 0.0075
+        #print(sum(abserr)/len(abserr))
+        #print(sum(relerr)/len(relerr))
+
+        abserr = []
+        relerr = []
+        for i in range(100):
+            A1 = torch.randn(1024, 1024, device="cuda")
+            C, SC = F.quantize_blockwise(A1)
+            A2 = F.dequantize_blockwise(C, SC)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff/torch.abs(A1+1e-8)
+            abserr.append(diff.mean().item())
+            relerr.append(reldiff.mean().item())
+            #assert diff < 0.0075
+        #print(3, sum(abserr)/len(abserr))
+        #print(3, sum(relerr)/len(relerr))
+
+
+def test_few_bit_quant():
+
+    #print('')
+    for bits in range(2, 9):
+        #print('='*30, bits, '='*30)
+        for method in ['linear', 'fp8', 'dynamic', 'quantile']:
+            abserrs = []
+            relerrs = []
+            code = None
+            if method == 'linear':
+                code = F.create_linear_map(True, total_bits=bits).cuda()
+            elif method == 'fp8':
+                ebits = math.ceil(bits/2)
+                pbits = bits-ebits-1
+                code = F.create_fp8_map(True, ebits, pbits, bits).cuda()
+            elif method == 'dynamic':
+                code = F.create_dynamic_map(True, bits-0, bits).cuda()
+            elif method == 'quantile':
+                values = torch.randn(2048, 2048, device='cuda')
+                q = F.estimate_quantiles(values, offset= 1/(2*(2**bits)), num_quantiles=2**bits)
+                gap = 256-q.numel()
+                q = q.tolist()
+                for i in range(gap):
+                    q.append(0)
+                q = torch.Tensor(q).cuda()
+
+                q /= q.abs().max()
+                code, idx = torch.sort(q)
+            #print(method, (code==0).sum())
+            assert code.numel() == 256
+            for i in range(10):
+
+                values = torch.randn(1, 32, device='cuda')
+                values /= values.abs().max()
+                #values[values.abs() < 1e-6] += 1e-5
+
+                q1 = []
+                v1 = []
+                for v in values[0]:
+                    idx = torch.abs(v-code).argmin()
+                    q1.append(idx.item())
+                    v1.append(code[idx].item())
+
+                q1 = torch.Tensor(q1).cuda()
+                v1 = torch.Tensor(v1).cuda()
+
+                q2, S2 = F.quantize(values, code=code)
+                v2 = F.dequantize(q2, S2)
+
+                idx = torch.isclose(q1.int(), q2.int())
+                err2 = torch.abs(v2-values)
+                abserrs.append(err2.mean().item())
+                relerrs.append((err2/(1e-10+values).abs()).mean().item())
+                if idx.sum():
+                    # some weird cases
+                    err1 = torch.abs(v1-values).mean()
+                    assert err2.mean() <= err1
+
+                else:
+                    torch.testing.assert_allclose(q1, q2)
+            #print(method, 'abserr:', sum(abserrs)/len(abserrs), 'relerr:', sum(relerrs)/len(relerrs))
+
+
+def test_kbit_quantile_estimation():
+    for i in range(100):
+        data = torch.randn(1024, 1024, device='cuda')
+        for bits in range(2, 9):
+            p = np.linspace(1.3e-4, 1-1.3e-4, 2**bits)
+            val1 = torch.Tensor(norm.ppf(p)).cuda()
+            val2 = F.estimate_quantiles(data, offset=0, num_quantiles=2**bits)
+            err = torch.abs(val1-val2).mean()
+            assert err < 0.035
+
+
+def test_bench_dequantization():
+    a = torch.rand(1024, 1024, device='cuda').half()
+    qa, SA = F.quantize_blockwise(a)
+
+    max_theoretical_mu =  1024*1024*2/1024**3/672*1000*1000
+    #print(max_theoretical_mu)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        F.dequantize_blockwise(qa, SA, blocksize=2048)
+    torch.cuda.synchronize()
+    #print((time.time()-t0)/1e6)
+
