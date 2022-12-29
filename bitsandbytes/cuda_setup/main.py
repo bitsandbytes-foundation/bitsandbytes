@@ -143,7 +143,14 @@ def evaluate_cuda_setup():
         cuda_setup.add_log_entry(f'CUDA SETUP: Detected CUDA version {cuda_version_string}')
 
     # 7.5 is the minimum CC vor cublaslt
-    has_cublaslt = cc in ["7.5", "8.0", "8.6"]
+    has_cublaslt = False
+    if cc is not None:
+        cc_major, cc_minor = cc.split('.')
+        if int(cc_major) < 7 or (int(cc_major) == 7 and int(cc_minor) < 5):
+            failure = True
+            cuda_setup.add_log_entry("WARNING: Compute capability < 7.5 detected! Proceeding to load CPU-only library...", is_warning=True)
+        else:
+            has_cublaslt = True
 
     # TODO:
     # (1) CUDA missing cases (no CUDA installed by CUDA driver (nvidia-smi accessible)
