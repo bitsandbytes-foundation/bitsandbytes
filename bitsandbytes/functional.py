@@ -3,15 +3,19 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import ctypes as ct
+import itertools
 import operator
 import random
 import torch
+import itertools
+import math
 
+from functools import reduce  # Required in Python 3
 from typing import Tuple
 from torch import Tensor
 
 from .cextension import COMPILED_WITH_CUDA, lib
-from functools import reduce  # Required in Python 3
+
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
@@ -82,7 +86,7 @@ if COMPILED_WITH_CUDA:
     )
 
 
-class CUBLAS_Context(object):
+class CUBLAS_Context:
     _instance = None
 
     def __init__(self):
@@ -112,7 +116,7 @@ class CUBLAS_Context(object):
         return self.context[device.index]
 
 
-class Cusparse_Context(object):
+class Cusparse_Context:
     _instance = None
 
     def __init__(self):
@@ -129,14 +133,73 @@ class Cusparse_Context(object):
         return cls._instance
 
 
-def create_linear_map(signed=True):
-    if signed:
-        return torch.linspace(-1.0, 1.0, 256)
+def create_linear_map(signed=True, total_bits=8, add_zero=True):
+    sign = (-1.0 if signed else 0.0)
+    total_values = 2**total_bits
+    if add_zero or total_bits < 8:
+        # add a zero
+        # since we simulate less bits by having zeros in the data type, we
+        # we need to center the quantization around zero and as such lose
+        # a single value
+        total_values = (2**total_bits if not signed else 2**total_bits-1)
+
+    values = torch.linspace(sign, 1.0, total_values)
+    gap = 256 - values.numel()
+    if gap == 0:
+        return values
     else:
-        return torch.linspace(0.0, 1.0, 256)
+        l = values.numel()//2
+        #return torch.Tensor(values[:l].tolist() + [-1e-6]*((gap//2)-1) + [0]*2 + [1e-6]*((gap//2)-1) + values[l:].tolist())
+        return torch.Tensor(values[:l].tolist() + [0]*gap + values[l:].tolist())
 
 
-def create_dynamic_map(signed=True, n=7):
+def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8):
+    e = exponent_bits
+    p = precision_bits
+    has_sign = 1 if signed else 0
+    assert e+p == total_bits-has_sign
+    # the exponent is biased to 2^(e-1) -1 == 0
+    evalues = []
+    pvalues = []
+    for i, val in enumerate(range(-((2**(exponent_bits-has_sign))), 2**(exponent_bits-has_sign), 1)):
+        evalues.append(2**val)
+
+
+    values = []
+    lst = list(itertools.product([0, 1], repeat=precision_bits))
+    #for ev in evalues:
+    bias = 2**(exponent_bits-1)-1
+    for evalue in range(2**(exponent_bits)):
+        for bit_pattern in lst:
+            value = (1 if evalue != 0 else 0)
+            for i, pval in enumerate(list(bit_pattern)):
+                value += pval*(2**-(i+1))
+            if evalue == 0:
+                # subnormals
+                value = value*2**-(bias-1)
+            else:
+                # normals
+                value = value*2**-(evalue-bias-2)
+            values.append(value)
+            if signed:
+                values.append(-value)
+
+
+    assert len(values) == 2**total_bits
+    values.sort()
+    if total_bits < 8:
+        gap = 256 - len(values)
+        for i in range(gap):
+            values.append(0)
+    values.sort()
+    code = torch.Tensor(values)
+    code /= code.max()
+
+    return code
+
+
+
+def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     """
     Creates the dynamic quantiztion map.
 
@@ -157,41 +220,58 @@ def create_dynamic_map(signed=True, n=7):
     # these are additional items that come from the case
     # where all the exponent bits are zero and no
     # indicator bit is present
-    additional_items = 2 ** (7 - n) - 1
+    non_sign_bits = total_bits - (1 if signed else 0)
+    additional_items = 2 ** (non_sign_bits - max_exponent_bits) - 1
     if not signed:
         additional_items = 2 * additional_items
-    for i in range(n):
-        fraction_items = (
-            2 ** (i + 7 - n) + 1 if signed else 2 ** (i + 7 - n + 1) + 1
-        )
+    for i in range(max_exponent_bits):
+        fraction_items = int((2 ** (i + non_sign_bits - max_exponent_bits) + 1 if signed else 2 ** (i + non_sign_bits - max_exponent_bits + 1) + 1))
         boundaries = torch.linspace(0.1, 1, fraction_items)
         means = (boundaries[:-1] + boundaries[1:]) / 2.0
-        data += ((10 ** (-(n - 1) + i)) * means).tolist()
+        data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
         if signed:
-            data += (-(10 ** (-(n - 1) + i)) * means).tolist()
+            data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
 
-    if additional_items > 0:
-        boundaries = torch.linspace(0.1, 1, additional_items + 1)
-        means = (boundaries[:-1] + boundaries[1:]) / 2.0
-        data += ((10 ** (-(n - 1) + i)) * means).tolist()
-        if signed:
-            data += (-(10 ** (-(n - 1) + i)) * means).tolist()
+        if additional_items > 0:
+            boundaries = torch.linspace(0.1, 1, additional_items + 1)
+            means = (boundaries[:-1] + boundaries[1:]) / 2.0
+            data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
+            if signed:
+                data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
 
     data.append(0)
     data.append(1.0)
+
+    gap = 256 - len(data)
+    for i in range(gap):
+        data.append(0)
+
     data.sort()
     return Tensor(data)
 
+def create_quantile_map(A, total_bits=8):
+    q = estimate_quantiles(A, num_quantiles=2**total_bits-1)
+    q = q.tolist()
+    q.append(0)
+
+    gap = 256 - len(q)
+    for i in range(gap):
+        q.append(0)
+
+    q.sort()
+
+    q = Tensor(q)
+    q = q/q.abs().max()
+    return q
 
 def get_special_format_str():
     if not torch.cuda.is_available(): return 'col_turing'
-    major, minor = torch.cuda.get_device_capability()
+    major, _minor = torch.cuda.get_device_capability()
     if major <= 7:
         return "col_turing"
-    elif major == 8:
+    if major == 8:
         return "col_ampere"
-    else:
-        return "col_turing"
+    return "col_turing"
 
 
 
@@ -318,16 +398,12 @@ def nvidia_transform(
         dim2 = ct.c_int32(shape[2])
 
     ptr = CUBLAS_Context.get_instance().get_context(A.device)
-    ptrA = get_ptr(A)
-    ptrOut = get_ptr(out)
     func(ptr, get_ptr(A), get_ptr(out), dim1, dim2)
 
     return out, new_state
 
 
-def estimate_quantiles(
-    A: Tensor, out: Tensor = None, offset: float = 1 / 512
-) -> Tensor:
+def estimate_quantiles(A: Tensor, out: Tensor = None, offset: float = 1 / 512, num_quantiles=256) -> Tensor:
     '''
     Estimates 256 equidistant quantiles on the input tensor eCDF.
 
@@ -347,25 +423,37 @@ def estimate_quantiles(
     out : torch.Tensor
         Tensor with the 256 estimated quantiles.
     offset : float
-        The offset for the first and last quantile from 0 and 1. Default: 1/512
+        The offset for the first and last quantile from 0 and 1. Default: 1/(2*num_quantiles)
+    num_quantiles : int
+        The number of equally spaced quantiles.
 
     Returns
     -------
     torch.Tensor:
         The 256 quantiles in float32 datatype.
     '''
+    if A.numel() < 256: raise NotImplementedError(f'Quantile estimation needs at least 256 values in the Tensor, but Tensor had only {A.numel()} values.')
+    if num_quantiles > 256: raise NotImplementedError(f"Currently only a maximum of 256 equally spaced quantiles are supported, but the argument num_quantiles={num_quantiles}")
+    if num_quantiles < 256 and offset == 1/(512):
+        # override default arguments
+        offset = 1/(2*num_quantiles)
+
     if out is None: out = torch.zeros((256,), dtype=torch.float32, device=A.device)
     is_on_gpu([A, out])
+    device = pre_call(A.device)
     if A.dtype == torch.float32:
-        lib.cestimate_quantiles_fp32(
-            get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel())
-        )
+        lib.cestimate_quantiles_fp32(get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel()))
     elif A.dtype == torch.float16:
-        lib.cestimate_quantiles_fp16(
-            get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel())
-        )
+        lib.cestimate_quantiles_fp16(get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel()))
     else:
         raise NotImplementedError(f"Not supported data type {A.dtype}")
+    post_call(device)
+
+    if num_quantiles < 256:
+        step = round(256/num_quantiles)
+        idx = torch.linspace(0, 255, num_quantiles).long().to(A.device)
+        out = out[idx]
+
     return out
 
 
@@ -398,15 +486,14 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
         The quantization state to undo the quantization.
     """
 
+
     if code is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
         code = name2qmap["dynamic"]
-        code = code.to(A.device)
 
     if absmax is None:
         n = A.numel()
-        blocksize = (blocksize if A.device.type == 'cpu' else 4096)
         blocks = n // blocksize
         blocks += 1 if n % blocksize > 0 else 0
         absmax = torch.zeros((blocks,), device=A.device)
@@ -415,8 +502,13 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
         out = torch.zeros_like(A, dtype=torch.uint8)
 
     if A.device.type != 'cpu':
-        is_on_gpu([code, A, absmax, out, rand])
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+        cblocksize = ct.c_int32(blocksize)
+        prev_device = pre_call(A.device)
+        code = code.to(A.device)
         if rand is not None:
+            is_on_gpu([code, A, out, absmax, rand])
+            assert blocksize==4096
             assert rand.numel() >= 1024
             rand_offset = random.randint(0, 1023)
             if A.dtype == torch.float32:
@@ -424,20 +516,19 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
             elif A.dtype == torch.float16:
                 lib.cquantize_blockwise_stochastic_fp16(get_ptr(code), get_ptr(A),get_ptr(absmax), get_ptr(out), get_ptr(rand), ct.c_int32(rand_offset), ct.c_int(A.numel()))
             else:
-                raise ValueError(
-                    f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}"
-                )
+                raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
         else:
+            is_on_gpu([code, A, out, absmax])
             if A.dtype == torch.float32:
-                lib.cquantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out),ct.c_int(A.numel()))
+                lib.cquantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), cblocksize, ct.c_int(A.numel()))
             elif A.dtype == torch.float16:
-                lib.cquantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out),ct.c_int(A.numel()))
+                lib.cquantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), cblocksize, ct.c_int(A.numel()))
             else:
-                raise ValueError(
-                    f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}"
-                )
+                raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
+        post_call(A.device)
     else:
         # cpu
+        code = code.cpu()
         assert rand is None
         lib.cquantize_blockwise_cpu_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))
 
@@ -482,27 +573,30 @@ def dequantize_blockwise(
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
         code = name2qmap["dynamic"]
-        code = code.to(A.device)
 
     if out is None:
         out = torch.zeros_like(A, dtype=torch.float32)
     if quant_state is None:
         quant_state = (absmax, code)
+    else:
+        absmax, code = quant_state
 
 
     if A.device.type != 'cpu':
-        if blocksize not in [2048, 4096]:
-            raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048 4096]")
+        device = pre_call(A.device)
+        code = code.to(A.device)
+        if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
+            raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
         is_on_gpu([A, out])
         if out.dtype == torch.float32:
-            lib.cdequantize_blockwise_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+            lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
         elif out.dtype == torch.float16:
-            lib.cdequantize_blockwise_fp16(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+            lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
         else:
-            raise ValueError(
-                f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}"
-            )
+            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
+        post_call(A.device)
     else:
+        code = code.cpu()
         lib.cdequantize_blockwise_cpu_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))
 
     return out
@@ -958,7 +1052,7 @@ def histogram_scatter_add_2d(
 
     maxdim1 = ct.c_int32(histogram.shape[0])
     n = ct.c_int32(index1.numel())
-    is_on_gpu([histogram, index1, index2d, source])
+    is_on_gpu([histogram, index1, index2, source])
     lib.chistogram_scatter_add_2d(get_ptr(histogram), get_ptr(index1), get_ptr(index2), get_ptr(source), maxdim1, n)
 
 def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8):
@@ -1133,7 +1227,7 @@ def igemm(
     ptr = CUBLAS_Context.get_instance().get_context(A.device)
 
     # B^T @ A^T = C^T
-    # [km, nk -> mn] 
+    # [km, nk -> mn]
     is_on_gpu([B, A, out])
     lib.cigemm(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
@@ -1417,7 +1511,7 @@ def get_colrow_absmax(
     return row_stats, col_stats, nnz_block_ptr
 
 
-class COOSparseTensor(object):
+class COOSparseTensor:
     def __init__(self, rows, cols, nnz, rowidx, colidx, values):
         assert rowidx.dtype == torch.int32
         assert colidx.dtype == torch.int32
@@ -1434,7 +1528,7 @@ class COOSparseTensor(object):
         self.values = values
 
 
-class CSRSparseTensor(object):
+class CSRSparseTensor:
     def __init__(self, rows, cols, nnz, rowptr, colidx, values):
         assert rowptr.dtype == torch.int32
         assert colidx.dtype == torch.int32
@@ -1451,7 +1545,7 @@ class CSRSparseTensor(object):
         self.values = values
 
 
-class CSCSparseTensor(object):
+class CSCSparseTensor:
     def __init__(self, rows, cols, nnz, colptr, rowidx, values):
         assert colptr.dtype == torch.int32
         assert rowidx.dtype == torch.int32
@@ -1615,8 +1709,6 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
         dim1 = ct.c_int32(shape[0] * shape[1])
         dim2 = ct.c_int32(shape[2])
 
-    ptrA = get_ptr(A)
-    ptrOut = get_ptr(out)
     is_on_gpu([A, out])
     if to_order == 'col32':
         if transpose:

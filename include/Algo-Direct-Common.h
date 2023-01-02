@@ -121,7 +121,7 @@ template <unsigned char Gap, typename T>
 struct DirectTraits<true,Gap,T>
 {
     typedef FVec1<SSE, T> fVec1;
-    
+
     static void checkH(T scaler, T H_Times_x0, T xN)
     {
         union {
@@ -177,9 +177,9 @@ struct DirectInfo
             , cst0(fun_t::cst0(H, x[0]))
         {
             myassert(((bws != NULL) && (isAligned(bws,64))), "bucket pointer not allocated or incorrectly aligned");
-            
+
             uint32 nb = 1 + fun_t::f(H, cst0, x[n-1]);
-            
+
             const uint32 npad = Gap-1;
             const uint32 n_sz = n + npad;   // size of padded vector
 
@@ -320,7 +320,7 @@ struct DirectInfo
         T cst0 = fun_t::cst0(H, px[0]);
         const uint32 maxIndex = fun_t::f(H, cst0, px[n-1]);
         buckets.resize(maxIndex + 1);
-        
+
         data = Data(px, n, H, buckets.begin(), (npad? xi.begin(): NULL));
     }
 

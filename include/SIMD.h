@@ -203,7 +203,7 @@ struct IVec<SSE, double> : IVecBase<SSE>
 #if 1
         // takes 4 cycles
         __m128i hi = _mm_shuffle_epi32(vec, 2);  // 1 cycle
-        __m128i s = _mm_add_epi32(vec, hi);      
+        __m128i s = _mm_add_epi32(vec, hi);
         int32 x = _mm_cvtsi128_si32(s);
         return -x;
 #else

@@ -1,6 +1,6 @@
 # bitsandbytes
 
-The bitsandbytes is a lightweight wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions. 
+The bitsandbytes is a lightweight wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions.
 
 
 
@@ -48,7 +48,7 @@ out = linear(x.to(torch.float16))
 
 Requirements: anaconda, cudatoolkit, pytorch
 
-Hardware requirements: 
+Hardware requirements:
  - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or older).
  - 8-bit optimizers and quantization: NVIDIA Maxwell GPU or newer (>=GTX 9XX).
 
@@ -87,7 +87,7 @@ Note that by default all parameter tensors with less than 4096 elements are kept
 ```
 # parameter tensors with less than 16384 values are optimized in 32-bit
 # it is recommended to use multiplies of 4096
-adam = bnb.optim.Adam8bit(model.parameters(), min_8bit_size=16384) 
+adam = bnb.optim.Adam8bit(model.parameters(), min_8bit_size=16384)
 ```
 
 ### Change Bits and other Hyperparameters for Individual Parameters

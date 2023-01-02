@@ -1,6 +1,6 @@
-// Copyright (c) Facebook, Inc. and its affiliates. 
-//   
-// This source code is licensed under the MIT license found in the 
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 #include <ops.cuh>
@@ -50,11 +50,29 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float *rand, int rand_offset, const int n)
+template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float *rand, int rand_offset, int blocksize, const int n)
 {
-  int num_blocks = n/4096;
-  num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
-  kQuantizeBlockwise<T, 4096, 4, STOCHASTIC><<<num_blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
+  int num_blocks = n/blocksize;
+  num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
+  if(STOCHASTIC == 1)
+    assert(blocksize == 4096);
+
+  if(blocksize == 4096)
+    kQuantizeBlockwise<T, 4096, 4, STOCHASTIC><<<num_blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
+  else if(blocksize == 2048)
+    kQuantizeBlockwise<T, 2048, 4, 0><<<num_blocks, 512>>>(code, A, absmax, out, rand, rand_offset, n);
+  else if(blocksize == 1024)
+    kQuantizeBlockwise<T, 1024, 4, 0><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
+  else if(blocksize == 512)
+    kQuantizeBlockwise<T, 512, 2, 0><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
+  else if(blocksize == 256)
+    kQuantizeBlockwise<T, 256, 2, 0><<<num_blocks, 128>>>(code, A, absmax, out, rand, rand_offset, n);
+  else if(blocksize == 128)
+    kQuantizeBlockwise<T, 128, 2, 0><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+  else if(blocksize == 64)
+    kQuantizeBlockwise<T, 64, 1, 0><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+
+
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -66,6 +84,17 @@ template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, flo
     kDequantizeBlockwise<T, 4096, 1024, 4><<<num_blocks, 4096/4>>>(code, A, absmax, out, n);
   else if(blocksize == 2048)
     kDequantizeBlockwise<T, 2048, 512, 4><<<num_blocks, 2048/4>>>(code, A, absmax, out, n);
+  else if(blocksize == 1024)
+    kDequantizeBlockwise<T, 1024, 256, 4><<<num_blocks, 1024/4>>>(code, A, absmax, out, n);
+  else if(blocksize == 512)
+    kDequantizeBlockwise<T, 512, 256, 2><<<num_blocks, 512/2>>>(code, A, absmax, out, n);
+  else if(blocksize == 256)
+    kDequantizeBlockwise<T, 256, 128, 2><<<num_blocks, 256/2>>>(code, A, absmax, out, n);
+  else if(blocksize == 128)
+    kDequantizeBlockwise<T, 128, 64, 2><<<num_blocks, 128/2>>>(code, A, absmax, out, n);
+  else if(blocksize == 64)
+    kDequantizeBlockwise<T, 64, 64, 1><<<num_blocks, 64/1>>>(code, A, absmax, out, n);
+
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -212,7 +241,7 @@ void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, in
 
 }
 
-void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc, 
+void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc,
                     long long int strideA, long long int strideB, long long int strideC, int batchCount)
 {
   const int falpha = 1;
@@ -322,7 +351,7 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   cublasLtOrder_t orderOut = get_order<TARGET>();
   int ldA = get_leading_dim<SRC>(dim1, dim2);
   int ldOut = get_leading_dim<TARGET>(dim1, dim2);
-  
+
   cublasLtMatrixLayout_t A_desc = NULL, out_desc = NULL;
   cublasLtMatrixTransformDesc_t A2Out_desc = NULL;
   cublasOperation_t opTranspose = CUBLAS_OP_T;
@@ -368,7 +397,7 @@ template void transform<int8_t, ROW, COL_AMPERE, false, 8>(cublasLtHandle_t ltHa
 template void transform<int8_t, COL32, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int32_t, COL32, ROW, false, 32>(cublasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
 
-template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc) 
+template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
 {
 #ifdef NO_CUBLASLT
   cout << "" << endl;
@@ -659,10 +688,10 @@ template void transformRowToFormat<COL_AMPERE, 1>(char * A, char *out, int rows,
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);
 
-template void quantizeBlockwise<half, 0>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
-template void quantizeBlockwise<float, 0>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
-template void quantizeBlockwise<half, 1>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
-template void quantizeBlockwise<float, 1>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
+template void quantizeBlockwise<half, 0>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<float, 0>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<half, 1>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<float, 1>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void dequantizeBlockwise<half>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
 template void dequantizeBlockwise<float>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
 

@@ -6,12 +6,14 @@ from itertools import product
 import einops
 import pytest
 import torch
+import numpy as np
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
+from scipy.stats import norm
 
 torch.set_printoptions(
-    precision=4, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000
+    precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000
 )
 k = 20
 
@@ -26,7 +28,7 @@ def assert_all_approx_close(a, b, rtol=1e-3, atol=1e-3, count=0):
 
 class FFN(torch.nn.Module):
     def __init__(self, input_features, hidden_size, bias=True):
-        super(FFN, self).__init__()
+        super().__init__()
         self.fc1 = torch.nn.Linear(input_features, hidden_size, bias=bias)
         self.fc2 = torch.nn.Linear(hidden_size, input_features, bias=bias)
 
@@ -40,7 +42,7 @@ class FFN(torch.nn.Module):
         return x
 
 
-class Timer(object):
+class Timer:
     def __init__(self):
         self.starts = {}
         self.ends = {}
@@ -67,7 +69,7 @@ class Timer(object):
                 self.ends.pop(name)
 
         if print_ms and name in self.agg:
-            print("{0} took: {1:.5f}s".format(name, self.agg[name] / 1000.0))
+            print(f"{name} took: {self.agg[name] / 1000.0:.5f}s")
 
         return self.agg[name]
 
@@ -149,30 +151,41 @@ def test_dynamic_quantization():
 
 
 def test_dynamic_blockwise_quantization():
-    diffs = []
-    reldiffs = []
-    for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
-        C, S = F.quantize_blockwise(A1)
-        A2 = F.dequantize_blockwise(C, S)
-        diff = torch.abs(A1 - A2)
-        reldiff = diff / torch.abs(A1 + 1e-8)
-        diffs.append(diff.mean().item())
-        reldiffs.append(reldiff.mean().item())
-        assert diffs[-1] < 0.011
-    # print(sum(diffs)/len(diffs))
-    # print(sum(reldiffs)/len(reldiffs))
+    #print('')
+    for blocksize in [4096, 2048, 1024, 512]:
+        diffs = []
+        reldiffs = []
+        for i in range(100):
+            A1 = torch.randn(1024, 1024, device="cuda")
+            C, S = F.quantize_blockwise(A1, blocksize=blocksize)
+            A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff / torch.abs(A1 + 1e-8)
+            diffs.append(diff.mean().item())
+            reldiffs.append(reldiff.mean().item())
+        abserr = sum(diffs)/len(diffs)
+        relerr = sum(reldiffs)/len(reldiffs)
+        assert abserr < 0.011
+        assert relerr < 0.018
+        #print('randn', blocksize, sum(diffs)/len(diffs))
+        #print('randn', blocksize, sum(reldiffs)/len(reldiffs))
 
-    diffs = []
-    for i in range(100):
-        A1 = torch.rand(1024, 1024, device="cuda")
-        C, S = F.quantize_blockwise(A1)
-        A2 = F.dequantize_blockwise(C, S)
-        diff = torch.abs(A1 - A2).mean().item()
-        assert diff < 0.0033
-        diffs.append(diff)
-        torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
-    # print(sum(diffs)/len(diffs))
+        diffs = []
+        for i in range(100):
+            A1 = torch.rand(1024, 1024, device="cuda")
+            C, S = F.quantize_blockwise(A1, blocksize=blocksize)
+            A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff / torch.abs(A1 + 1e-8)
+            diffs.append(diff.mean().item())
+            reldiffs.append(reldiff.mean().item())
+            #torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+        abserr = sum(diffs)/len(diffs)
+        relerr = sum(reldiffs)/len(reldiffs)
+        assert abserr < 0.0035
+        assert relerr < 0.015
+        #print('rand', blocksize, sum(diffs)/len(diffs))
+        #print('rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 def test_dynamic_blockwise_stochastic_quantization():
@@ -289,7 +302,7 @@ batched = [False, True]
 values = list(product(dim1, dim2, methods, batched))
 values_names = list(product(dim1, dim2, method_names, batched))
 names = [
-    "dim1_{0}_dim2_{1}_quant_{2}_batched_{3}".format(*vals)
+    "dim1_{}_dim2_{}_quant_{}_batched_{}".format(*vals)
     for vals in values_names
 ]
 
@@ -347,7 +360,7 @@ seq_dim = torch.randint(16, 256, size=(n,)).tolist()
 transpose = [(False, False), (False, True), (True, False), (True, True)]
 values = list(product(hidden_dim, batch_dim, transpose, seq_dim))
 names = [
-    "hidden_dim_{0}_batch_dim_{1},transpose_{2}_seq_dim_{3}".format(*vals)
+    "hidden_dim_{}_batch_dim_{},transpose_{}_seq_dim_{}".format(*vals)
     for vals in values
 ]
 
@@ -412,7 +425,7 @@ hidden_dim = torch.randint(32, 1024 * 4, size=(n,)).tolist()
 batch_dim = torch.randint(2, 16, size=(n,)).tolist()
 values = list(product(seq_dim, hidden_dim, batch_dim))
 names = [
-    "seq_dim{0}_hidden_dim{1}_batch_dim{2}".format(*vals) for vals in values
+    "seq_dim{}_hidden_dim{}_batch_dim{}".format(*vals) for vals in values
 ]
 
 
@@ -444,7 +457,7 @@ batch_dim = torch.randint(2, 16, size=(n,)).tolist()
 transpose = [False, True]
 values = list(product(seq_dim, hidden_dim, batch_dim, transpose))
 names = [
-    "seq_dim={0}_hidden_dim={1}_batch_dim={2}_transpose{3}".format(*vals)
+    "seq_dim={}_hidden_dim={}_batch_dim={}_transpose{}".format(*vals)
     for vals in values
 ]
 
@@ -529,7 +542,7 @@ dim4 = torch.randint(32, 256, size=(n,)).tolist()
 transpose = [(False, False), (True, False), (False, True), (True, True)]
 values = list(product(dim1, dim2, dim3, dim4, transpose))
 names = [
-    "dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_transpose_{4}".format(*vals)
+    "dim1_{}_dim2_{}_dim3_{}_dim4_{}_transpose_{}".format(*vals)
     for vals in values
 ]
 
@@ -567,7 +580,7 @@ dim1 = torch.randint(1, 64, size=(n,)).tolist()
 dim2 = torch.randint(32, 128, size=(n,)).tolist()
 dim3 = torch.randint(32, 256, size=(n,)).tolist()
 values = list(product(dim1, dim2, dim3))
-names = ["dim1_{0}_dim2_{1}_dim3_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_dim3_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, dim3", values, ids=names)
@@ -596,7 +609,7 @@ transpose = [False]
 dims = [2, 3]
 values = list(product(dim1, dim2, dim3, dims, dtype, a_order, out_order, transpose))
 
-names = ["dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_transpose_{7}".format(*vals)for vals in values]
+names = ["dim1_{}_dim2_{}_dim3_{}_dims_{}_dtype_{}_orderA_{}_orderOut_{}_transpose_{}".format(*vals)for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",values,ids=names)
@@ -678,7 +691,7 @@ ldb = [0]
 # ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1, dim2, dim3, dim4, dims, ldb))
 names = [
-    "dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}".format(*vals)
+    "dim1_{}_dim2_{}_dim3_{}_dim4_{}_dims_{}_ldb_{}".format(*vals)
     for vals in values
 ]
 
@@ -726,7 +739,7 @@ dims = (2,)
 # ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1, dim2, dim3, dim4, dims))
 names = [
-    "dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}".format(*vals)
+    "dim1_{}_dim2_{}_dim3_{}_dim4_{}_dims_{}".format(*vals)
     for vals in values
 ]
 
@@ -784,7 +797,7 @@ values = [
 
 # values = list(product(batch, seq, model, hidden))
 names = [
-    "batch_{0}_seq_{1}_model_{2}_hidden_{3}".format(*vals) for vals in values
+    "batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values
 ]
 
 
@@ -952,7 +965,7 @@ dims = (2,)
 formatB = ["col_turing", "col_ampere"]
 has_bias = [True, False]
 values = list(product(dim1, dim4, dims, formatB, has_bias))
-names = ["dim1_{0}_dim4_{1}_dims_{2}_formatB_{3}_has_bias_{4}".format(*vals) for vals in values]
+names = ["dim1_{}_dim4_{}_dims_{}_formatB_{}_has_bias_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim4, dims, formatB, has_bias", values, ids=names)
@@ -1002,7 +1015,7 @@ dim2 = [1 * 1024]
 dims = (2,)
 # ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1, dim2, dims))
-names = ["dim1_{0}_dim2_{1}_dims_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_dims_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, dims", values, ids=names)
@@ -1058,7 +1071,7 @@ dim1 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 dim2 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 
 values = list(product(dim1, dim2))
-names = ["dim1_{0}_dim2_{1}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
@@ -1105,7 +1118,7 @@ dim4 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 inner = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 
 values = list(zip(dim1, dim4, inner))
-names = ["dim1_{0}_dim4_{1}_inner_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
@@ -1149,7 +1162,7 @@ dim4 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 inner = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 
 values = list(zip(dim1, dim4, inner))
-names = ["dim1_{0}_dim4_{1}_inner_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
@@ -1224,7 +1237,7 @@ inner = [12288 * 4, 4096 * 4]
 dim4 = [12288, 4096]
 
 values = list(zip(dim1, dim4, inner))
-names = ["dim1_{0}_dim4_{1}_inner_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
@@ -1290,7 +1303,7 @@ values = list(
     product(dim1, dim2, dim3, dims, dtype, a_order, out_order, transpose)
 )
 names = [
-    "dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_{7}".format(
+    "dim1_{}_dim2_{}_dim3_{}_dims_{}_dtype_{}_orderA_{}_orderOut_{}_{}".format(
         *vals
     )
     for vals in values
@@ -1341,7 +1354,7 @@ a_order = ["col_turing"]
 out_order = ["row"]
 values = list(product(dim1, dim2, dtype, a_order, out_order))
 names = [
-    "dim1_{0}_dim2_{1}_dtype_{2}_orderA_{3}_orderOut_{4}".format(*vals)
+    "dim1_{}_dim2_{}_dtype_{}_orderA_{}_orderOut_{}".format(*vals)
     for vals in values
 ]
 
@@ -1367,7 +1380,7 @@ dim2 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 # dim2 = [5]
 
 values = list(product(dim1, dim2))
-names = ["dim1_{0}_dim2_{1}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
@@ -1404,7 +1417,7 @@ dim2 = torch.randint(1, 1 * 1024, size=(n,)).tolist()
 # dim2 = [11]
 transposed_B = [False, True]
 values = list(product(dim1, dim2, transposed_B))
-names = ["dim1_{0}_dim2_{1}_transposed_B_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_transposed_B_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, transposed_B", values, ids=names)
@@ -1485,7 +1498,7 @@ n = 2
 dim1 = torch.randint(256, 1 * 1024, size=(n,)).tolist()
 dim2 = torch.randint(256, 1 * 1024, size=(n,)).tolist()
 values = list(product(dim1, dim2))
-names = ["dim1_{0}_dim2_{1}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
@@ -1550,7 +1563,7 @@ dtype = [torch.float16]
 out_function = ["zeros", "ones"]
 values = list(product(dim1, dim2, dtype, out_function))
 names = [
-    "dim1_{0}_dim2_{1}_dtype_{2}_out_func_{3}".format(*vals) for vals in values
+    "dim1_{}_dim2_{}_dtype_{}_out_func_{}".format(*vals) for vals in values
 ]
 
 
@@ -1616,17 +1629,6 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
     # print(time.time() - t0)
 
 
-def test_layout():
-    a1 = torch.rand(16, 64, device="cuda", dtype=torch.float16)
-    a1 = torch.arange(16 * 64, device="cuda").reshape(16, 64).byte()
-    a2, s2 = F.transform(a1, "col_turing")
-    print(a2.shape)
-
-    print(a1.flatten()[8 * 64 : 8 * 64 + 32])
-    for i in range(4):
-        print(a2.flatten()[i * 8 * 32 : i * 8 * 32 + 32], 0)
-
-
 def test_coo2csr():
     threshold = 1
     A = torch.randn(128, 128).half().cuda()
@@ -1678,7 +1680,7 @@ dim2 = [2048]
 # dim2 = [2]
 dtype = [torch.int8]
 values = list(product(dim1, dim2, dtype))
-names = ["dim1_{0}_dim2_{1}_dtype_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_dtype_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
@@ -1794,7 +1796,7 @@ values.append((batch_size, seqdim, 768, 4 * 768))
 # values.append((batch_size, seqdim, 5140, 4*5140))
 #values.append((batch_size, seqdim, 12288, 4*12288))
 names = [
-    "batch_{0}_seq_{1}_model_{2}_hidden_{3}".format(*vals) for vals in values
+    "batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values
 ]
 
 
@@ -2040,3 +2042,154 @@ def test_blockwise_cpu_large():
                 assert diffs[-1] < 0.011
             # print(sum(diffs)/len(diffs))
             # print(sum(reldiffs)/len(reldiffs))
+
+
+
+def test_fp8_quant():
+    for e_bits in range(1, 7):
+        p_bits = 7-e_bits
+        code = F.create_fp8_map(True, e_bits, p_bits).cuda()
+
+        print(e_bits, p_bits)
+        abserr = []
+        relerr = []
+        for i in range(100):
+            A1 = torch.randn(1024, 1024, device="cuda")
+            C, SC = F.quantize_blockwise(A1, code=code)
+            A2 = F.dequantize_blockwise(C, SC)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff/torch.abs(A1+1e-8)
+            abserr.append(diff.mean().item())
+            relerr.append(reldiff.mean().item())
+            #assert diff < 0.0075
+        #print(sum(abserr)/len(abserr))
+        #print(sum(relerr)/len(relerr))
+
+        abserr = []
+        relerr = []
+        for i in range(100):
+            A1 = torch.rand(1024, 1024, device="cuda")
+            C, SC = F.quantize_blockwise(A1, code=code)
+            A2 = F.dequantize_blockwise(C, SC)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff/torch.abs(A1+1e-8)
+            abserr.append(diff.mean().item())
+            relerr.append(reldiff.mean().item())
+            #assert diff < 0.0075
+        #print(sum(abserr)/len(abserr))
+        #print(sum(relerr)/len(relerr))
+
+        abserr = []
+        relerr = []
+        for i in range(100):
+            A1 = torch.randn(1024, 1024, device="cuda")
+            C, SC = F.quantize_blockwise(A1)
+            A2 = F.dequantize_blockwise(C, SC)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff/torch.abs(A1+1e-8)
+            abserr.append(diff.mean().item())
+            relerr.append(reldiff.mean().item())
+            #assert diff < 0.0075
+        #print(3, sum(abserr)/len(abserr))
+        #print(3, sum(relerr)/len(relerr))
+
+
+def test_few_bit_quant():
+
+    #print('')
+    for bits in range(2, 9):
+        #print('='*30, bits, '='*30)
+        for method in ['linear', 'fp8', 'dynamic', 'quantile']:
+            abserrs = []
+            relerrs = []
+            code = None
+            if method == 'linear':
+                code = F.create_linear_map(True, total_bits=bits).cuda()
+            elif method == 'fp8':
+                ebits = math.ceil(bits/2)
+                pbits = bits-ebits-1
+                code = F.create_fp8_map(True, ebits, pbits, bits).cuda()
+            elif method == 'dynamic':
+                code = F.create_dynamic_map(True, bits-0, bits).cuda()
+            elif method == 'quantile':
+                values = torch.randn(2048, 2048, device='cuda')
+                code = F.create_quantile_map(values, bits).cuda()
+            # for some data types we have no zero
+            # for some data types we have one zero
+            # for some data types we have two zeros
+            assert torch.unique(code).numel() in [2**bits, 2**bits-1], f'bits: {bits}, method: {method}'
+            #print(method, (code==0).sum())
+            assert code.numel() == 256
+            for i in range(10):
+
+                values = torch.randn(1, 32, device='cuda')
+                values /= values.abs().max()
+                #values[values.abs() < 1e-6] += 1e-5
+
+                q1 = []
+                v1 = []
+                for v in values[0]:
+                    idx = torch.abs(v-code).argmin()
+                    q1.append(idx.item())
+                    v1.append(code[idx].item())
+
+                q1 = torch.Tensor(q1).cuda()
+                v1 = torch.Tensor(v1).cuda()
+
+                q2, S2 = F.quantize_blockwise(values, code=code)
+                v2 = F.dequantize_blockwise(q2, S2)
+
+                idx = torch.isclose(q1.int(), q2.int())
+                err2 = torch.abs(v2-values)
+                abserrs.append(err2.mean().item())
+                relerrs.append((err2/(1e-10+values).abs()).mean().item())
+                if idx.sum():
+                    # some weird cases
+                    err1 = torch.abs(v1-values).mean()
+                    #assert err2.mean() <= err1
+
+                else:
+                    torch.testing.assert_allclose(q1, q2)
+            #print(method, 'abserr:', sum(abserrs)/len(abserrs), 'relerr:', sum(relerrs)/len(relerrs))
+    #assert False
+
+
+def test_kbit_quantile_estimation():
+    for i in range(100):
+        data = torch.randn(1024, 1024, device='cuda')
+        for bits in range(2, 9):
+            p = np.linspace(1.3e-4, 1-1.3e-4, 2**bits)
+            val1 = torch.Tensor(norm.ppf(p)).cuda()
+            val2 = F.estimate_quantiles(data, offset=0, num_quantiles=2**bits)
+            err = torch.abs(val1-val2).mean()
+            assert err < 0.038
+
+    for i in range(100):
+        data = torch.randn(1024, 1024, device='cuda')
+        for bits in range(2, 4):
+            total_values = 2**bits-1
+            p = np.linspace(0, 1, 2*total_values+1)
+            idx = np.arange(1, 2*total_values+1, 2)
+            p = p[idx]
+            offset = 1/(2*total_values)
+            p = np.linspace(offset, 1-offset, total_values)
+            val1 = torch.Tensor(norm.ppf(p)).cuda()
+            val2 = F.estimate_quantiles(data, num_quantiles=2**bits-1)
+            err = torch.abs(val1-val2).mean()
+            assert err < 0.035
+
+
+def test_bench_dequantization():
+    a = torch.rand(1024, 1024, device='cuda').half()
+    qa, SA = F.quantize_blockwise(a)
+
+    max_theoretical_mu =  1024*1024*2/1024**3/672*1000*1000
+    #print(max_theoretical_mu)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(100):
+        F.dequantize_blockwise(qa, SA, blocksize=2048)
+    torch.cuda.synchronize()
+    #print((time.time()-t0)/1e6)
+

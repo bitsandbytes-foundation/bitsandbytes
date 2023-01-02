@@ -1,6 +1,6 @@
-// Copyright (c) Facebook, Inc. and its affiliates. 
-//   
-// This source code is licensed under the MIT license found in the 
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 
@@ -128,10 +128,10 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
 
 void quantize(float *code, float *A, unsigned char *out, int n);
 void dequantize(float *code, unsigned char *A, float *out, int n);
-template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n);
+template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n);
 
-template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p, 
+template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2, float eps, float weight_decay,
                 int step, float lr, const float gnorm_scale, bool skip_zeros, int n);
@@ -139,15 +139,15 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g, unsigned char* state1, unsigned char* state2,
                 float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2,
-                float eps, int step, float lr, 
+                float eps, int step, float lr,
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay,
                 const float gnorm_scale, int n);
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
-                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, 
-                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, 
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,
+                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale,
 								bool skip_zeros, int n);
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);
@@ -155,7 +155,7 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
 void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n);
 
 void gemmex(Context * context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
-void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc, 
+void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc,
                     long long int strideA, long long int strideB, long long int strideC, int batchCount);
 
 

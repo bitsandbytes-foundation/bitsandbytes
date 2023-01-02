@@ -1,11 +1,11 @@
 import ctypes as ct
-import torch
-
 from pathlib import Path
 from warnings import warn
 
+import torch
 
-class CUDASetup(object):
+
+class CUDASetup:
     _instance = None
 
     def __init__(self):
@@ -52,8 +52,13 @@ class CUDASetup(object):
         self.add_log_entry('python setup.py install')
 
     def initialize(self):
-        self.cuda_setup_log = []
+        self.has_printed = False
         self.lib = None
+        self.run_cuda_setup()
+
+    def run_cuda_setup(self):
+        self.initialized = True
+        self.cuda_setup_log = []
 
         from .cuda_setup.main import evaluate_cuda_setup
         binary_name, cudart_path, cuda, cc, cuda_version_string = evaluate_cuda_setup()
@@ -89,7 +94,8 @@ class CUDASetup(object):
             else:
                 self.add_log_entry(f"CUDA SETUP: Loading binary {binary_path}...")
                 self.lib = ct.cdll.LoadLibrary(binary_path)
-        except:
+        except Exception as ex:
+            self.add_log_entry(str(ex))
             self.print_log_stack()
 
     def add_log_entry(self, msg, is_warning=False):
@@ -116,7 +122,7 @@ try:
         CUDASetup.get_instance().generate_instructions()
         CUDASetup.get_instance().print_log_stack()
         raise RuntimeError('''
-        CUDA Setup failed despite GPU being available. Inspect the CUDA SETUP outputs to fix your environment!
+        CUDA Setup failed despite GPU being available. Inspect the CUDA SETUP outputs above to fix your environment!
         If you cannot find any issues and suspect a bug, please open an issue with detals about your environment:
         https://github.com/TimDettmers/bitsandbytes/issues''')
     lib.cadam32bit_g32
@@ -124,8 +130,6 @@ try:
     lib.get_cusparse.restype = ct.c_void_p
     COMPILED_WITH_CUDA = True
 except AttributeError:
-    warn(
-        "The installed version of bitsandbytes was compiled without GPU support. "
-        "8-bit optimizers and GPU quantization are unavailable."
-    )
+    warn("The installed version of bitsandbytes was compiled without GPU support. "
+        "8-bit optimizers and GPU quantization are unavailable.")
     COMPILED_WITH_CUDA = False
