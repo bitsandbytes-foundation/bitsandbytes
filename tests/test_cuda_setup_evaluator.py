@@ -4,7 +4,7 @@ from typing import List, NamedTuple
 import pytest
 
 import bitsandbytes as bnb
-from bitsandbytes.cuda_setup import (
+from bitsandbytes.cuda_setup.main import (
     CUDA_RUNTIME_LIB,
     determine_cuda_runtime_lib_path,
     evaluate_cuda_setup,
