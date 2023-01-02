@@ -1,6 +1,6 @@
-// Copyright (c) Facebook, Inc. and its affiliates. 
-//   
-// This source code is licensed under the MIT license found in the 
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 #if BUILD_CUDA
@@ -9,7 +9,7 @@
 #include <cpu_ops.h>
 
 // We cannot call templated code from C, so we wrap the template in a C compatible call here if necessary.
-// We use macro functions to expand all the different optimizers. Looks ugly, and is ugly, but its better than to 
+// We use macro functions to expand all the different optimizers. Looks ugly, and is ugly, but its better than to
 // maintain all that boilerplate
 //===================================================================================
 //                               UNMANGLED CALLS
@@ -290,4 +290,3 @@ extern "C"
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }
 	void cdequantize_blockwise_cpu_fp32(float *code, unsigned char *A, float *absmax, float *out, long long blocksize, long long n){ dequantize_cpu(code, A, absmax, out, blocksize, n); }
 }
-

@@ -3,17 +3,19 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import ctypes as ct
+import itertools
 import operator
 import random
 import torch
 import itertools
 import math
 
+from functools import reduce  # Required in Python 3
 from typing import Tuple
 from torch import Tensor
 
 from .cextension import COMPILED_WITH_CUDA, lib
-from functools import reduce  # Required in Python 3
+
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
@@ -84,7 +86,7 @@ if COMPILED_WITH_CUDA:
     )
 
 
-class CUBLAS_Context(object):
+class CUBLAS_Context:
     _instance = None
 
     def __init__(self):
@@ -114,7 +116,7 @@ class CUBLAS_Context(object):
         return self.context[device.index]
 
 
-class Cusparse_Context(object):
+class Cusparse_Context:
     _instance = None
 
     def __init__(self):
@@ -264,13 +266,12 @@ def create_quantile_map(A, total_bits=8):
 
 def get_special_format_str():
     if not torch.cuda.is_available(): return 'col_turing'
-    major, minor = torch.cuda.get_device_capability()
+    major, _minor = torch.cuda.get_device_capability()
     if major <= 7:
         return "col_turing"
-    elif major == 8:
+    if major == 8:
         return "col_ampere"
-    else:
-        return "col_turing"
+    return "col_turing"
 
 
 
@@ -397,8 +398,6 @@ def nvidia_transform(
         dim2 = ct.c_int32(shape[2])
 
     ptr = CUBLAS_Context.get_instance().get_context(A.device)
-    ptrA = get_ptr(A)
-    ptrOut = get_ptr(out)
     func(ptr, get_ptr(A), get_ptr(out), dim1, dim2)
 
     return out, new_state
@@ -1053,7 +1052,7 @@ def histogram_scatter_add_2d(
 
     maxdim1 = ct.c_int32(histogram.shape[0])
     n = ct.c_int32(index1.numel())
-    is_on_gpu([histogram, index1, index2d, source])
+    is_on_gpu([histogram, index1, index2, source])
     lib.chistogram_scatter_add_2d(get_ptr(histogram), get_ptr(index1), get_ptr(index2), get_ptr(source), maxdim1, n)
 
 def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8):
@@ -1228,7 +1227,7 @@ def igemm(
     ptr = CUBLAS_Context.get_instance().get_context(A.device)
 
     # B^T @ A^T = C^T
-    # [km, nk -> mn] 
+    # [km, nk -> mn]
     is_on_gpu([B, A, out])
     lib.cigemm(ptr, ct.c_bool(transposed_B), ct.c_bool(transposed_A), ct.c_int32(m), ct.c_int32(n), ct.c_int32(k),
                get_ptr(B), get_ptr(A), get_ptr(out), ct.c_int32(lda), ct.c_int32(ldb), ct.c_int32(ldc))
@@ -1512,7 +1511,7 @@ def get_colrow_absmax(
     return row_stats, col_stats, nnz_block_ptr
 
 
-class COOSparseTensor(object):
+class COOSparseTensor:
     def __init__(self, rows, cols, nnz, rowidx, colidx, values):
         assert rowidx.dtype == torch.int32
         assert colidx.dtype == torch.int32
@@ -1529,7 +1528,7 @@ class COOSparseTensor(object):
         self.values = values
 
 
-class CSRSparseTensor(object):
+class CSRSparseTensor:
     def __init__(self, rows, cols, nnz, rowptr, colidx, values):
         assert rowptr.dtype == torch.int32
         assert colidx.dtype == torch.int32
@@ -1546,7 +1545,7 @@ class CSRSparseTensor(object):
         self.values = values
 
 
-class CSCSparseTensor(object):
+class CSCSparseTensor:
     def __init__(self, rows, cols, nnz, colptr, rowidx, values):
         assert colptr.dtype == torch.int32
         assert rowidx.dtype == torch.int32
@@ -1710,8 +1709,6 @@ def transform(A, to_order, from_order='row', out=None, transpose=False, state=No
         dim1 = ct.c_int32(shape[0] * shape[1])
         dim2 = ct.c_int32(shape[2])
 
-    ptrA = get_ptr(A)
-    ptrOut = get_ptr(out)
     is_on_gpu([A, out])
     if to_order == 'col32':
         if transpose:

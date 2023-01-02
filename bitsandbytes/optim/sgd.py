@@ -21,8 +21,8 @@ class SGD(Optimizer1State):
         block_wise=True,
     ):
         if momentum == 0:
-            raise NotImplementedError(f"SGD without momentum is not supported!")
-        super(SGD, self).__init__(
+            raise NotImplementedError("SGD without momentum is not supported!")
+        super().__init__(
             "momentum",
             params,
             lr,
@@ -52,8 +52,8 @@ class SGD8bit(Optimizer1State):
         block_wise=True,
     ):
         if momentum == 0:
-            raise NotImplementedError(f"SGD without momentum is not supported!")
-        super(SGD8bit, self).__init__(
+            raise NotImplementedError("SGD without momentum is not supported!")
+        super().__init__(
             "momentum",
             params,
             lr,
@@ -83,8 +83,8 @@ class SGD32bit(Optimizer1State):
         block_wise=True,
     ):
         if momentum == 0:
-            raise NotImplementedError(f"SGD without momentum is not supported!")
-        super(SGD32bit, self).__init__(
+            raise NotImplementedError("SGD without momentum is not supported!")
+        super().__init__(
             "momentum",
             params,
             lr,

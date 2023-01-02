@@ -17,10 +17,12 @@ evaluation:
 """
 
 import ctypes
+
 import torch
 
-from .paths import determine_cuda_runtime_lib_path
 from bitsandbytes.cextension import CUDASetup
+
+from .paths import determine_cuda_runtime_lib_path
 
 
 def check_cuda_result(cuda, result_val):
@@ -48,7 +50,7 @@ def get_cuda_version(cuda, cudart_path):
     minor = (version-(major*1000))//10
 
     if major < 11:
-       CUDASetup.get_instance().add_log_entry('CUDA SETUP: CUDA version lower than 11 are currenlty not supported for LLM.int8(). You will be only to use 8-bit optimizers and quantization routines!!')
+        CUDASetup.get_instance().add_log_entry('CUDA SETUP: CUDA version lower than 11 are currently not supported for LLM.int8(). You will be only to use 8-bit optimizers and quantization routines!!')
 
     return f'{major}{minor}'
 
@@ -129,7 +131,7 @@ def evaluate_cuda_setup():
         failure = True
         cuda_setup.add_log_entry("WARNING: No libcudart.so found! Install CUDA or the cudatoolkit package (anaconda)!", is_warning=True)
     else:
-        cuda_setup.add_log_entry((f"CUDA SETUP: CUDA runtime path found: {cudart_path}"))
+        cuda_setup.add_log_entry(f"CUDA SETUP: CUDA runtime path found: {cudart_path}")
 
     if cc == '' or cc is None:
         failure = True

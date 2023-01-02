@@ -1,11 +1,12 @@
 import operator
 import warnings
-
-import torch
-import bitsandbytes.functional as F
-
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
+
+import torch
+
+import bitsandbytes.functional as F
+
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
@@ -15,10 +16,10 @@ tensor = torch.Tensor
 
 """
     This class pools outlier dimensions across layers.
-    This is particularly important for small models where outlier features 
+    This is particularly important for small models where outlier features
     are less systematic and occur with low frequency.
 """
-class GlobalOutlierPooler(object):
+class GlobalOutlierPooler:
     _instance = None
 
     def __init__(self):
@@ -49,8 +50,9 @@ class GlobalOutlierPooler(object):
 
 class MatMul8bit(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, A, B, out=None, quant_type="vector", precision=[8, 8, 8]):
-
+    def forward(ctx, A, B, out=None, quant_type="vector", precision=None):
+        if precision is None:
+            precision = [8, 8, 8]
         if precision[0] != 8:
             with torch.no_grad():
                 output = torch.matmul(A, B)

@@ -76,6 +76,3 @@ if [[ -n "$CUDA_VERSION" ]]; then
 else
   echo ""
 fi
-
-
-

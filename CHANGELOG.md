@@ -49,7 +49,7 @@ Features:
 Bug fixes:
  - Fixed a bug where weight decay was incorrectly applied to 32-bit Adam. #13
  - Fixed an unsafe use of eval. #8
- - Fixed a bug where the StableEmbedding layer 32-bit optimizer override would not work without registering the whole model first (`bnb.optim.GlobalOptimManager.get_instance().register_parameters(model.parameters())`).  #13 #15 
+ - Fixed a bug where the StableEmbedding layer 32-bit optimizer override would not work without registering the whole model first (`bnb.optim.GlobalOptimManager.get_instance().register_parameters(model.parameters())`).  #13 #15
 
 Docs:
  - Added instructions how to solve "\_\_fatbinwrap_" errors.

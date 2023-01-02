@@ -20,7 +20,7 @@ class AdamW(Optimizer2State):
         percentile_clipping=100,
         block_wise=True,
     ):
-        super(AdamW, self).__init__(
+        super().__init__(
             "adam",
             params,
             lr,
@@ -49,7 +49,7 @@ class AdamW8bit(Optimizer2State):
         percentile_clipping=100,
         block_wise=True,
     ):
-        super(AdamW8bit, self).__init__(
+        super().__init__(
             "adam",
             params,
             lr,
@@ -78,7 +78,7 @@ class AdamW32bit(Optimizer2State):
         percentile_clipping=100,
         block_wise=True,
     ):
-        super(AdamW32bit, self).__init__(
+        super().__init__(
             "adam",
             params,
             lr,

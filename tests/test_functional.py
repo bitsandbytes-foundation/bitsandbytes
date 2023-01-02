@@ -28,7 +28,7 @@ def assert_all_approx_close(a, b, rtol=1e-3, atol=1e-3, count=0):
 
 class FFN(torch.nn.Module):
     def __init__(self, input_features, hidden_size, bias=True):
-        super(FFN, self).__init__()
+        super().__init__()
         self.fc1 = torch.nn.Linear(input_features, hidden_size, bias=bias)
         self.fc2 = torch.nn.Linear(hidden_size, input_features, bias=bias)
 
@@ -42,7 +42,7 @@ class FFN(torch.nn.Module):
         return x
 
 
-class Timer(object):
+class Timer:
     def __init__(self):
         self.starts = {}
         self.ends = {}
@@ -69,7 +69,7 @@ class Timer(object):
                 self.ends.pop(name)
 
         if print_ms and name in self.agg:
-            print("{0} took: {1:.5f}s".format(name, self.agg[name] / 1000.0))
+            print(f"{name} took: {self.agg[name] / 1000.0:.5f}s")
 
         return self.agg[name]
 
@@ -302,7 +302,7 @@ batched = [False, True]
 values = list(product(dim1, dim2, methods, batched))
 values_names = list(product(dim1, dim2, method_names, batched))
 names = [
-    "dim1_{0}_dim2_{1}_quant_{2}_batched_{3}".format(*vals)
+    "dim1_{}_dim2_{}_quant_{}_batched_{}".format(*vals)
     for vals in values_names
 ]
 
@@ -360,7 +360,7 @@ seq_dim = torch.randint(16, 256, size=(n,)).tolist()
 transpose = [(False, False), (False, True), (True, False), (True, True)]
 values = list(product(hidden_dim, batch_dim, transpose, seq_dim))
 names = [
-    "hidden_dim_{0}_batch_dim_{1},transpose_{2}_seq_dim_{3}".format(*vals)
+    "hidden_dim_{}_batch_dim_{},transpose_{}_seq_dim_{}".format(*vals)
     for vals in values
 ]
 
@@ -425,7 +425,7 @@ hidden_dim = torch.randint(32, 1024 * 4, size=(n,)).tolist()
 batch_dim = torch.randint(2, 16, size=(n,)).tolist()
 values = list(product(seq_dim, hidden_dim, batch_dim))
 names = [
-    "seq_dim{0}_hidden_dim{1}_batch_dim{2}".format(*vals) for vals in values
+    "seq_dim{}_hidden_dim{}_batch_dim{}".format(*vals) for vals in values
 ]
 
 
@@ -457,7 +457,7 @@ batch_dim = torch.randint(2, 16, size=(n,)).tolist()
 transpose = [False, True]
 values = list(product(seq_dim, hidden_dim, batch_dim, transpose))
 names = [
-    "seq_dim={0}_hidden_dim={1}_batch_dim={2}_transpose{3}".format(*vals)
+    "seq_dim={}_hidden_dim={}_batch_dim={}_transpose{}".format(*vals)
     for vals in values
 ]
 
@@ -542,7 +542,7 @@ dim4 = torch.randint(32, 256, size=(n,)).tolist()
 transpose = [(False, False), (True, False), (False, True), (True, True)]
 values = list(product(dim1, dim2, dim3, dim4, transpose))
 names = [
-    "dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_transpose_{4}".format(*vals)
+    "dim1_{}_dim2_{}_dim3_{}_dim4_{}_transpose_{}".format(*vals)
     for vals in values
 ]
 
@@ -580,7 +580,7 @@ dim1 = torch.randint(1, 64, size=(n,)).tolist()
 dim2 = torch.randint(32, 128, size=(n,)).tolist()
 dim3 = torch.randint(32, 256, size=(n,)).tolist()
 values = list(product(dim1, dim2, dim3))
-names = ["dim1_{0}_dim2_{1}_dim3_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_dim3_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, dim3", values, ids=names)
@@ -609,7 +609,7 @@ transpose = [False]
 dims = [2, 3]
 values = list(product(dim1, dim2, dim3, dims, dtype, a_order, out_order, transpose))
 
-names = ["dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_transpose_{7}".format(*vals)for vals in values]
+names = ["dim1_{}_dim2_{}_dim3_{}_dims_{}_dtype_{}_orderA_{}_orderOut_{}_transpose_{}".format(*vals)for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",values,ids=names)
@@ -691,7 +691,7 @@ ldb = [0]
 # ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1, dim2, dim3, dim4, dims, ldb))
 names = [
-    "dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}_ldb_{5}".format(*vals)
+    "dim1_{}_dim2_{}_dim3_{}_dim4_{}_dims_{}_ldb_{}".format(*vals)
     for vals in values
 ]
 
@@ -739,7 +739,7 @@ dims = (2,)
 # ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1, dim2, dim3, dim4, dims))
 names = [
-    "dim1_{0}_dim2_{1}_dim3_{2}_dim4_{3}_dims_{4}".format(*vals)
+    "dim1_{}_dim2_{}_dim3_{}_dim4_{}_dims_{}".format(*vals)
     for vals in values
 ]
 
@@ -797,7 +797,7 @@ values = [
 
 # values = list(product(batch, seq, model, hidden))
 names = [
-    "batch_{0}_seq_{1}_model_{2}_hidden_{3}".format(*vals) for vals in values
+    "batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values
 ]
 
 
@@ -965,7 +965,7 @@ dims = (2,)
 formatB = ["col_turing", "col_ampere"]
 has_bias = [True, False]
 values = list(product(dim1, dim4, dims, formatB, has_bias))
-names = ["dim1_{0}_dim4_{1}_dims_{2}_formatB_{3}_has_bias_{4}".format(*vals) for vals in values]
+names = ["dim1_{}_dim4_{}_dims_{}_formatB_{}_has_bias_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim4, dims, formatB, has_bias", values, ids=names)
@@ -1015,7 +1015,7 @@ dim2 = [1 * 1024]
 dims = (2,)
 # ldb = list(range(256, 1*1024, 256))
 values = list(product(dim1, dim2, dims))
-names = ["dim1_{0}_dim2_{1}_dims_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_dims_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, dims", values, ids=names)
@@ -1071,7 +1071,7 @@ dim1 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 dim2 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 
 values = list(product(dim1, dim2))
-names = ["dim1_{0}_dim2_{1}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
@@ -1118,7 +1118,7 @@ dim4 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 inner = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 
 values = list(zip(dim1, dim4, inner))
-names = ["dim1_{0}_dim4_{1}_inner_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
@@ -1162,7 +1162,7 @@ dim4 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 inner = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 
 values = list(zip(dim1, dim4, inner))
-names = ["dim1_{0}_dim4_{1}_inner_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
@@ -1237,7 +1237,7 @@ inner = [12288 * 4, 4096 * 4]
 dim4 = [12288, 4096]
 
 values = list(zip(dim1, dim4, inner))
-names = ["dim1_{0}_dim4_{1}_inner_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
@@ -1303,7 +1303,7 @@ values = list(
     product(dim1, dim2, dim3, dims, dtype, a_order, out_order, transpose)
 )
 names = [
-    "dim1_{0}_dim2_{1}_dim3_{2}_dims_{3}_dtype_{4}_orderA_{5}_orderOut_{6}_{7}".format(
+    "dim1_{}_dim2_{}_dim3_{}_dims_{}_dtype_{}_orderA_{}_orderOut_{}_{}".format(
         *vals
     )
     for vals in values
@@ -1354,7 +1354,7 @@ a_order = ["col_turing"]
 out_order = ["row"]
 values = list(product(dim1, dim2, dtype, a_order, out_order))
 names = [
-    "dim1_{0}_dim2_{1}_dtype_{2}_orderA_{3}_orderOut_{4}".format(*vals)
+    "dim1_{}_dim2_{}_dtype_{}_orderA_{}_orderOut_{}".format(*vals)
     for vals in values
 ]
 
@@ -1380,7 +1380,7 @@ dim2 = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 # dim2 = [5]
 
 values = list(product(dim1, dim2))
-names = ["dim1_{0}_dim2_{1}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
@@ -1417,7 +1417,7 @@ dim2 = torch.randint(1, 1 * 1024, size=(n,)).tolist()
 # dim2 = [11]
 transposed_B = [False, True]
 values = list(product(dim1, dim2, transposed_B))
-names = ["dim1_{0}_dim2_{1}_transposed_B_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_transposed_B_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, transposed_B", values, ids=names)
@@ -1498,7 +1498,7 @@ n = 2
 dim1 = torch.randint(256, 1 * 1024, size=(n,)).tolist()
 dim2 = torch.randint(256, 1 * 1024, size=(n,)).tolist()
 values = list(product(dim1, dim2))
-names = ["dim1_{0}_dim2_{1}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
@@ -1563,7 +1563,7 @@ dtype = [torch.float16]
 out_function = ["zeros", "ones"]
 values = list(product(dim1, dim2, dtype, out_function))
 names = [
-    "dim1_{0}_dim2_{1}_dtype_{2}_out_func_{3}".format(*vals) for vals in values
+    "dim1_{}_dim2_{}_dtype_{}_out_func_{}".format(*vals) for vals in values
 ]
 
 
@@ -1680,7 +1680,7 @@ dim2 = [2048]
 # dim2 = [2]
 dtype = [torch.int8]
 values = list(product(dim1, dim2, dtype))
-names = ["dim1_{0}_dim2_{1}_dtype_{2}".format(*vals) for vals in values]
+names = ["dim1_{}_dim2_{}_dtype_{}".format(*vals) for vals in values]
 
 
 @pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
@@ -1796,7 +1796,7 @@ values.append((batch_size, seqdim, 768, 4 * 768))
 # values.append((batch_size, seqdim, 5140, 4*5140))
 #values.append((batch_size, seqdim, 12288, 4*12288))
 names = [
-    "batch_{0}_seq_{1}_model_{2}_hidden_{3}".format(*vals) for vals in values
+    "batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values
 ]
 
 

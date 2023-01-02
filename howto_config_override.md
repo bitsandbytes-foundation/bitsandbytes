@@ -14,16 +14,16 @@ mng.register_parameters(model.parameters()) # 1. register parameters while still
 
 model = model.cuda()
 # use 8-bit optimizer states for all parameters
-adam = bnb.optim.Adam(model.parameters(), lr=0.001, optim_bits=8) 
+adam = bnb.optim.Adam(model.parameters(), lr=0.001, optim_bits=8)
 
 # 2a. override: the parameter model.fc1.weight now uses 32-bit Adam
-mng.override_config(model.fc1.weight, 'optim_bits', 32) 
+mng.override_config(model.fc1.weight, 'optim_bits', 32)
 
 # 2b. override: the two special layers use
 # sparse optimization + different learning rate + different Adam betas
 mng.override_config([model.special.weight, model.also_special.weight],
-                    key_value_dict ={'is_sparse': True, 'lr': 1e-5, 'betas'=(0.9, 0.98)}) 
-``` 
+                    key_value_dict ={'is_sparse': True, 'lr': 1e-5, 'betas'=(0.9, 0.98)})
+```
 Possible options for the config override are: `betas, eps, weight_decay, lr, optim_bits, min_8bit_size, percentile_clipping, block_wise, max_unorm`
 
 For overrides for particular layers we recommend overriding locally in each module. You can do this by passing the module, the parameter, and its attribute name to the GlobalOptimManager:

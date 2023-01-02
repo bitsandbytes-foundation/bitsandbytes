@@ -7,7 +7,7 @@ from torch import nn
 import bitsandbytes as bnb
 
 
-class MockArgs(object):
+class MockArgs:
     def __init__(self, initial_data):
         for key in initial_data:
             setattr(self, key, initial_data[key])
@@ -15,7 +15,7 @@ class MockArgs(object):
 
 class MLP8bit(torch.nn.Module):
     def __init__(self, dim1, dim2, has_fp16_weights=True, memory_efficient_backward=False, threshold=0.0):
-        super(MLP8bit, self).__init__()
+        super().__init__()
         self.fc1 = bnb.nn.Linear8bitLt(
             dim1, dim2, has_fp16_weights=has_fp16_weights, memory_efficient_backward=memory_efficient_backward,
             threshold=threshold
@@ -289,7 +289,7 @@ class LinearFunction(torch.autograd.Function):
 
 class Linear8bit(nn.Module):
     def __init__(self, input_features, output_features, bias=True, args=None):
-        super(Linear8bit, self).__init__()
+        super().__init__()
         self.input_features = input_features
         self.output_features = output_features
         self.args = args
@@ -312,7 +312,7 @@ class Linear8bit(nn.Module):
 
 threshold = [0.0, 3.0]
 values = threshold
-names = ["threshold_{0}".format(vals) for vals in values]
+names = [f"threshold_{vals}" for vals in values]
 
 
 @pytest.mark.parametrize("threshold", values, ids=names)
@@ -378,7 +378,7 @@ def test_linear8bitlt_accumulated_gradient():
 
 threshold = [0.0, 2.0]
 values = threshold
-names = ["threshold_{0}".format(vals) for vals in values]
+names = [f"threshold_{vals}" for vals in values]
 
 
 @pytest.mark.parametrize("threshold", values, ids=names)

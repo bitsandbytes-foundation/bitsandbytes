@@ -21,18 +21,18 @@ class Adagrad(Optimizer1State):
         block_wise=True,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
             raise ValueError(
-                "Invalid weight_decay value: {}".format(weight_decay)
+                f"Invalid weight_decay value: {weight_decay}"
             )
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if initial_accumulator_value != 0.0:
             raise ValueError("Initial accumulator value != 0.0 not supported!")
         if lr_decay != 0.0:
             raise ValueError("Lr Decay != 0.0 not supported!")
-        super(Adagrad, self).__init__(
+        super().__init__(
             "adagrad",
             params,
             lr,
@@ -63,19 +63,19 @@ class Adagrad8bit(Optimizer1State):
         block_wise=True,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
             raise ValueError(
-                "Invalid weight_decay value: {}".format(weight_decay)
+                f"Invalid weight_decay value: {weight_decay}"
             )
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if initial_accumulator_value != 0.0:
             raise ValueError("Initial accumulator value != 0.0 not supported!")
         if lr_decay != 0.0:
             raise ValueError("Lr Decay != 0.0 not supported!")
         assert block_wise
-        super(Adagrad8bit, self).__init__(
+        super().__init__(
             "adagrad",
             params,
             lr,
@@ -106,18 +106,18 @@ class Adagrad32bit(Optimizer1State):
         block_wise=True,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
             raise ValueError(
-                "Invalid weight_decay value: {}".format(weight_decay)
+                f"Invalid weight_decay value: {weight_decay}"
             )
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if initial_accumulator_value != 0.0:
             raise ValueError("Initial accumulator value != 0.0 not supported!")
         if lr_decay != 0.0:
             raise ValueError("Lr Decay != 0.0 not supported!")
-        super(Adagrad32bit, self).__init__(
+        super().__init__(
             "adagrad",
             params,
             lr,

@@ -12,13 +12,13 @@ import torch
 import bitsandbytes.functional as F
 
 
-class MockArgs(object):
+class MockArgs:
     def __init__(self, initial_data):
         for key in initial_data:
             setattr(self, key, initial_data[key])
 
 
-class GlobalOptimManager(object):
+class GlobalOptimManager:
     _instance = None
 
     def __init__(self):
@@ -56,9 +56,9 @@ class GlobalOptimManager(object):
         """
         Overrides initial optimizer config for specific parameters.
 
-        The key-values of the optimizer config for the input parameters are overidden
+        The key-values of the optimizer config for the input parameters are overridden
         This can be both, optimizer parameters like "betas", or "lr" or it can be
-        8-bit specific paramters like "optim_bits", "percentile_clipping".
+        8-bit specific parameters like "optim_bits", "percentile_clipping".
 
         Parameters
         ----------
@@ -93,13 +93,12 @@ class GlobalOptimManager(object):
 
 class Optimizer8bit(torch.optim.Optimizer):
     def __init__(self, params, defaults, optim_bits=32):
-        super(Optimizer8bit, self).__init__(params, defaults)
+        super().__init__(params, defaults)
         self.initialized = False
         self.name2qmap = {}
 
         self.mng = GlobalOptimManager.get_instance()
-        self.non_castable_tensor_keys = set(
-            [
+        self.non_castable_tensor_keys = {
                 "qmap1",
                 "qmap2",
                 "max1",
@@ -112,8 +111,7 @@ class Optimizer8bit(torch.optim.Optimizer):
                 "absmax1",
                 "absmax2",
                 "unorm_vec",
-            ]
-        )
+        }
 
         if optim_bits == 8:
             self.fill_qmap()
@@ -123,7 +121,7 @@ class Optimizer8bit(torch.optim.Optimizer):
         self.name2qmap["udynamic"] = F.create_dynamic_map(signed=False)
 
     def __setstate__(self, state):
-        super(Optimizer8bit, self).__setstate__(state)
+        super().__setstate__(state)
 
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
@@ -155,8 +153,8 @@ class Optimizer8bit(torch.optim.Optimizer):
         id_map = {
             old_id: p
             for old_id, p in zip(
-                chain.from_iterable((g["params"] for g in saved_groups)),
-                chain.from_iterable((g["params"] for g in groups)),
+                chain.from_iterable(g["params"] for g in saved_groups),
+                chain.from_iterable(g["params"] for g in groups),
             )
         }
 
@@ -284,11 +282,11 @@ class Optimizer8bit(torch.optim.Optimizer):
         return config
 
     def init_state(self, group, p, gindex, pindex):
-        raise NotImplementedError(f"init_state method needs to be overidden")
+        raise NotImplementedError("init_state method needs to be overridden")
 
     def update_step(self, group, p, gindex, pindex):
         raise NotImplementedError(
-            f"The update_step method needs to be overidden"
+            "The update_step method needs to be overridden"
         )
 
 
@@ -310,9 +308,9 @@ class Optimizer2State(Optimizer8bit):
         skip_zeros=False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if isinstance(betas, str):
             # format: '(beta1, beta2)'
             betas = betas.replace("(", "").replace(")", "").strip().split(",")
@@ -324,10 +322,10 @@ class Optimizer2State(Optimizer8bit):
                 )
         if not 0.0 <= weight_decay:
             raise ValueError(
-                "Invalid weight_decay value: {}".format(weight_decay)
+                f"Invalid weight_decay value: {weight_decay}"
             )
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        super(Optimizer2State, self).__init__(params, defaults, optim_bits)
+        super().__init__(params, defaults, optim_bits)
 
         if args is None:
             args = {}
@@ -542,9 +540,9 @@ class Optimizer1State(Optimizer8bit):
         skip_zeros=False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         for i in range(len(betas)):
             if not 0.0 <= betas[i] < 1.0:
                 raise ValueError(
@@ -552,10 +550,10 @@ class Optimizer1State(Optimizer8bit):
                 )
         if not 0.0 <= weight_decay:
             raise ValueError(
-                "Invalid weight_decay value: {}".format(weight_decay)
+                f"Invalid weight_decay value: {weight_decay}"
             )
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        super(Optimizer1State, self).__init__(params, defaults, optim_bits)
+        super().__init__(params, defaults, optim_bits)
 
         if args is None:
             args = {}

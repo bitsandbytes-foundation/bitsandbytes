@@ -2,24 +2,11 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterator,
-    Mapping,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-    overload,
-)
+from typing import Optional, TypeVar, Union, overload
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
-from torch.nn.parameter import Parameter
 
 import bitsandbytes as bnb
 from bitsandbytes.optim import GlobalOptimManager
@@ -39,7 +26,7 @@ class StableEmbedding(torch.nn.Embedding):
         sparse: bool = False,
         _weight: Optional[Tensor] = None,
     ) -> None:
-        super(StableEmbedding, self).__init__(
+        super().__init__(
             num_embeddings,
             embedding_dim,
             padding_idx,
@@ -96,7 +83,7 @@ class Embedding(torch.nn.Embedding):
         sparse: bool = False,
         _weight: Optional[Tensor] = None,
     ) -> None:
-        super(Embedding, self).__init__(
+        super().__init__(
             num_embeddings,
             embedding_dim,
             padding_idx,
@@ -225,7 +212,7 @@ class Linear8bitLt(nn.Linear):
         threshold=0.0,
         index=None,
     ):
-        super(Linear8bitLt, self).__init__(
+        super().__init__(
             input_features, output_features, bias
         )
         self.state = bnb.MatmulLtState()
@@ -267,7 +254,7 @@ class Linear8bitLt(nn.Linear):
                 self.weight.data = self.state.CxB
             elif self.state.memory_efficient_backward and self.state.CxB is not None:
                 # For memory efficient backward, we convert 8-bit row major to turing/ampere format at each inference pass.
-                # Thus, we delete CxB from the state. 
+                # Thus, we delete CxB from the state.
                 del self.state.CxB
 
         return out
