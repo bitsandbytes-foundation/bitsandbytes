@@ -63,7 +63,7 @@ class CUDASetup:
         elif self.cuda_version_string[:2] == '11' and int(self.cuda_version_string[2]) > 0:
             make_cmd += ' make cuda11x'
 
-        has_cublaslt = self.cc in ["7.5", "8.0", "8.6"]
+        has_cublaslt = is_cublasLt_compatible(self.cc)
         if not has_cublaslt:
             make_cmd += '_nomatmul'
 
@@ -94,7 +94,7 @@ class CUDASetup:
         try:
             if not binary_path.exists():
                 self.add_log_entry(f"CUDA SETUP: Required library version not found: {binary_name}. Maybe you need to compile it from source?")
-                legacy_binary_name = "libbitsandbytes.so"
+                legacy_binary_name = "libbitsandbytes_cpu.so"
                 self.add_log_entry(f"CUDA SETUP: Defaulting to {legacy_binary_name}...")
                 binary_path = package_dir / legacy_binary_name
                 if not binary_path.exists():
@@ -137,6 +137,15 @@ class CUDASetup:
         return cls._instance
 
 
+def is_cublasLt_compatible(cc):
+    has_cublaslt = False
+    if cc is not None:
+        cc_major, cc_minor = cc.split('.')
+        if int(cc_major) < 7 or (int(cc_major) == 7 and int(cc_minor) < 5):
+            cuda_setup.add_log_entry("WARNING: Compute capability < 7.5 detected! Proceeding to load CPU-only library...", is_warning=True)
+        else:
+            has_cublaslt = True
+    return has_cublaslt
 
 def extract_candidate_paths(paths_list_candidate: str) -> Set[Path]:
     return {Path(ld_path) for ld_path in paths_list_candidate.split(":") if ld_path}
@@ -368,13 +377,7 @@ def evaluate_cuda_setup():
         cuda_setup.add_log_entry(f'CUDA SETUP: Detected CUDA version {cuda_version_string}')
 
     # 7.5 is the minimum CC vor cublaslt
-    has_cublaslt = False
-    if cc is not None:
-        cc_major, cc_minor = cc.split('.')
-        if int(cc_major) < 7 or (int(cc_major) == 7 and int(cc_minor) < 5):
-            cuda_setup.add_log_entry("WARNING: Compute capability < 7.5 detected! Proceeding to load CPU-only library...", is_warning=True)
-        else:
-            has_cublaslt = True
+    has_cublaslt = is_cublasLt_compatible(cc)
 
     # TODO:
     # (1) CUDA missing cases (no CUDA installed by CUDA driver (nvidia-smi accessible)
