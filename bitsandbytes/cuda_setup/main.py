@@ -268,7 +268,10 @@ def check_cuda_result(cuda, result_val):
     if result_val != 0:
         error_str = ct.c_char_p()
         cuda.cuGetErrorString(result_val, ct.byref(error_str))
-        CUDASetup.get_instance().add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
+        if error_str.value is not None:
+            CUDASetup.get_instance().add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
+        else:
+            CUDASetup.get_instance().add_log_entry(f"Unknown CUDA exception! Please check your CUDA install. It might also be that your GPU is too old.")
 
 
 # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
