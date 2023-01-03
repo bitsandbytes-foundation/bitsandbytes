@@ -62,6 +62,11 @@ class CUDASetup:
             make_cmd += ' make cuda110'
         elif self.cuda_version_string[:2] == '11' and int(self.cuda_version_string[2]) > 0:
             make_cmd += ' make cuda11x'
+        elif self.cuda_version_string == '100':
+            self.add_log_entry('CUDA SETUP: CUDA 10.0 not supported. Please use a different CUDA version.')
+            self.add_log_entry('CUDA SETUP: Before you try again running bitsandbytes, make sure old CUDA 10.0 versions are uninstalled and removed from $LD_LIBRARY_PATH variables.')
+            return
+
 
         has_cublaslt = is_cublasLt_compatible(self.cc)
         if not has_cublaslt:
