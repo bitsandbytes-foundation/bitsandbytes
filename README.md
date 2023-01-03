@@ -11,7 +11,7 @@ Resources:
 
 ## TL;DR
 **Requirements**
-Linux distribution (Ubuntu, MacOS, etc.) + CUDA >= 10.0. LLM.int8() requires Turing or Ampere GPUs.
+Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + CUDA > 10.0. LLM.int8() requires Turing or Ampere GPUs.
 **Installation**:
 ``pip install bitsandbytes``
 
