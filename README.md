@@ -52,7 +52,7 @@ Hardware requirements:
  - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or older).
  - 8-bit optimizers and quantization: NVIDIA Maxwell GPU or newer (>=GTX 9XX).
 
-Supported CUDA versions: 10.2 - 11.7
+Supported CUDA versions: 10.2 - 11.8
 
 The bitsandbytes library is currently only supported on Linux distributions. Windows is not supported at the moment.
 
