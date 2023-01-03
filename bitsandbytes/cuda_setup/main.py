@@ -281,7 +281,12 @@ def get_cuda_version(cuda, cudart_path):
         return None
 
     version = ct.c_int()
-    check_cuda_result(cuda, cudart.cudaRuntimeGetVersion(ct.byref(version)))
+    try:
+        check_cuda_result(cuda, cudart.cudaRuntimeGetVersion(ct.byref(version)))
+    except AttributeError as e:
+        CUDASetup.get_instance().add_log_entry(f'ERROR: {str(e)}')
+        CUDASetup.get_instance().add_log_entry(f'CUDA SETUP: libcudart.so path is {cudart_path}')
+        CUDASetup.get_instance().add_log_entry(f'CUDA SETUP: Is seems that your cuda installation is not in your path. See https://github.com/TimDettmers/bitsandbytes/issues/85 for more information.')
     version = int(version.value)
     major = version//1000
     minor = (version-(major*1000))//10
