@@ -42,7 +42,7 @@ print(
 )
 
 print_header("OTHER")
-print(f"{COMPILED_WITH_CUDA = }")
+print(f"COMPILED_WITH_CUDA = {COMPILED_WITH_CUDA}")
 cuda = get_cuda_lib_handle()
 print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities(cuda)}")
 print_header("")
