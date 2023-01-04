@@ -139,7 +139,6 @@ Features:
 Bug fixes:
  - Fixed a problem where warning messages would be displayed even though everything worked correctly.
 
-
 ### 0.35.2
 
 Bug fixes:
@@ -155,3 +154,38 @@ Bug fixes:
 Bug fixes:
  - Fixed a bug in the CUDA Setup failed with the cuda runtime was found, but not the cuda library.
  - Fixed a bug where not finding the cuda runtime led to an incomprehensible error.
+
+
+### 0.36.0
+
+#### Improvements, Ada/Hopper support, fake k-bit quantization.
+
+Features:
+ - CUDA 11.8 and 12.0 support added
+ - support for Ada and Hopper GPUs added (compute capability 8.9 and 9.0)
+ - support for fake k-bit block-wise quantization for Int, Float, quantile quantization, and dynamic exponent data types added
+ - Added CUDA instruction generator to fix some installations.
+ - Added additional block sizes for quantization {64, 128, 256, 512, 1024}
+ - Added SRAM Quantile algorithm to quickly estimate less than 256 quantiles
+ - Added option to suppress the bitsandbytes welcome message (@Cyberes)
+
+Regression:
+ - Compute capability 3.0 removed: GTX 600s and 700s series is no longer supported (except GTX 780 and GTX 780 Ti)
+
+Bug fixes:
+ - fixed a bug where too long directory names would crash the CUDA SETUP #35 (@tomaarsen)
+ - fixed a bug where CPU installations on Colab would run into an error  #34 (@tomaarsen)
+ - fixed an issue where the default CUDA version with fast-DreamBooth was not supported #52
+ - fixed a bug where the CUDA setup failed due to a wrong function call.
+ - fixed a bug in the CUDA Setup which led to an incomprehensible error if no GPU was detected.
+ - fixed a bug in the CUDA Setup failed with the cuda runtime was found, but not the cuda library.
+ - fixed a bug where not finding the cuda runtime led to an incomprehensible error.
+ - fixed a bug where with missing CUDA the default was an error instead of the loading the CPU library
+ - fixed a bug where the CC version of the GPU was not detected appropriately (@BlackHC)
+ - fixed a bug in CPU quantization which lead to errors when the input buffer exceeded 2^31 elements
+
+Improvements:
+ - multiple improvements in formatting, removal of unused imports, and slight performance improvements (@tomaarsen)
+ - StableEmbedding layer now has device and dtype parameters to make it 1:1 replaceable with regular Embedding layers (@lostmsu)
+ - runtime performance of block-wise quantization slightly improved
+ - added error message for the case multiple libcudart.so are installed and bitsandbytes picks the wrong one
