@@ -1,4 +1,5 @@
 import ctypes as ct
+import os
 import torch
 
 from pathlib import Path
@@ -10,6 +11,8 @@ from bitsandbytes.cuda_setup.main import CUDASetup
 setup = CUDASetup.get_instance()
 if setup.initialized != True:
     setup.run_cuda_setup()
+    if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
+        setup.print_log_stack()
 
 lib = setup.lib
 try:
