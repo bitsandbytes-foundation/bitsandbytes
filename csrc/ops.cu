@@ -477,11 +477,11 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   int tileCols = fill_up_to_nearest_multiple(numCols, 32);
   int n = numRows*tileCols;
   int subtile_rows = 128;
-  int tilesize = 32*subtile_rows;
+  //int tilesize = 32*subtile_rows; // Get rid of compile warning in release in MSVC, don't need to declare this variable when assert() isn't ever run. can just shove the value into the assert.
   int num_blocks = numRows/subtile_rows;
   num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
   num_blocks = num_blocks*(tileCols/32);
-  assert(threads <= tilesize);
+  assert(threads <= 32 * subtile_rows);
 
   kdequant_mm_int32_fp16<4, 128, 512><<<num_blocks, threads>>>(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());

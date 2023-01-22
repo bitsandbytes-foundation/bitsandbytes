@@ -7,9 +7,9 @@ add_library (bitsandbytes SHARED
 	cpu_ops.cpp
 	pythonInterface.cpp)
 
-include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../include ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/cub ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/pthread-win32-master/ ${CUDA_TOOLKIT_ROOT_DIR}/include)
+include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../include ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/cub ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/pthread-win32/ ${CUDA_TOOLKIT_ROOT_DIR}/include)
 
-target_link_directories(bitsandbytes PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/pthread-win32-master/build/Release/ ${CUDA_TOOLKIT_ROOT_DIR}/lib64 )
+target_link_directories(bitsandbytes PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/pthread-win32/build/Release/ ${CUDA_TOOLKIT_ROOT_DIR}/lib64 )
 add_compile_definitions(BUILD_CUDA)
 target_compile_options(bitsandbytes PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
                        --generate-line-info
