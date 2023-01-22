@@ -54,7 +54,7 @@ Hardware requirements:
 
 Supported CUDA versions: 10.2 - 12.0
 
-The bitsandbytes library is currently only supported on Linux distributions. Windows is not supported at the moment.
+The bitsandbytes library is currently only supported on Linux distributions. ["Windows build system status"] (https://github.com/TimDettmers/bitsandbytes/issues/30)
 
 The requirements can best be fulfilled by installing pytorch via anaconda. You can install PyTorch by following the ["Get Started"](https://pytorch.org/get-started/locally/) instructions on the official website.
 
