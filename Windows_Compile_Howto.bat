@@ -1,7 +1,7 @@
 SET bitsandbytesroot=%cd%
 
-conda env create -f environment.yml
-conda activate 8-bit
+Rem conda env create -f environment.yml
+Rem conda activate 8-bit
 
 mkdir dependencies
 cd dependencies
@@ -16,6 +16,8 @@ cmake --build ./ -j4 --config Release
 cd %bitsandbytesroot%
 mkdir build
 cd build
+Rem Note: You can target a specific cuda version assuming you have it installed with visual studio integration with: ```cmake .. -T cuda=12.0 ```
+Rem instead of ```cmake ..```
 cmake ..
 cmake --build ./ -j4 --config Release
 
