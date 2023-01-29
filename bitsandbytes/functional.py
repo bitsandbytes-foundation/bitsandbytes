@@ -168,7 +168,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     values = []
     lst = list(itertools.product([0, 1], repeat=precision_bits))
     #for ev in evalues:
-    bias = 2**(exponent_bits-1)-1
+    bias = 2**(exponent_bits-1)
     for evalue in range(2**(exponent_bits)):
         for bit_pattern in lst:
             value = (1 if evalue != 0 else 0)
@@ -176,10 +176,10 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
                 value += pval*(2**-(i+1))
             if evalue == 0:
                 # subnormals
-                value = value*2**-(bias-1)
+                value = value*2**-(bias)
             else:
                 # normals
-                value = value*2**-(evalue-bias-2)
+                value = value*2**-(evalue-bias-1)
             values.append(value)
             if signed:
                 values.append(-value)

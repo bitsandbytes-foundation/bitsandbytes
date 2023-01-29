@@ -10,6 +10,7 @@ from torch import Tensor, device, dtype, nn
 
 import bitsandbytes as bnb
 from bitsandbytes.optim import GlobalOptimManager
+from bitsandbytes.utils import OutlierTracer, find_outlier_dims
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -132,6 +133,83 @@ class Embedding(torch.nn.Embedding):
         )
 
         return emb
+
+class OutlierAwareLinear(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True):
+        super().__init__(input_features, output_features, bias)
+        self.outlier_dim = None
+        self.is_quantized = False
+
+    def forward_with_outliers(self, x, outlier_idx):
+        raise NotImplementedError('Please override the `forward_with_outliers(self, x, outlier_idx)` function')
+
+    def quantize_weight(self, w, outlier_idx):
+        raise NotImplementedError('Please override the `quantize_weights(self, w, outlier_idx)` function')
+
+    def forward(self, x):
+        if self.outlier_dim is None:
+            tracer = OutlierTracer.get_instance()
+            if not tracer.is_initialized():
+                print('Please use OutlierTracer.initialize(model) before using the OutlierAwareLinear layer')
+            outlier_idx = tracer.get_outliers(self.weight)
+            #print(outlier_idx, tracer.get_hvalue(self.weight))
+            self.outlier_dim = outlier_idx
+
+        if not self.is_quantized:
+            w = self.quantize_weight(self.weight, self.outlier_dim)
+            self.weight.data.copy_(w)
+            self.is_quantized = True
+
+        return self.forward_with_outliers(x, self.outlier_dim)
+
+
+class Fake4bitLinear(OutlierAwareLinear):
+    def __init__(self, input_features, output_features, bias=True, codebook=bnb.functional.create_fp8_map(True, 3, 0, total_bits=4)):
+        super().__init__(input_features, output_features, bias)
+        self.codebook = codebook
+
+    def quantize_weight(self, w, outlier_idx):
+        if outlier_idx.numel() > 0:
+            subw = w[:, outlier_idx].clone()
+            w[:, outlier_idx] = 0
+        wdtype = w.dtype
+        code = self.codebook.to(w.device)
+        cw, state = bnb.functional.quantize_blockwise(w, code=code, blocksize=64)
+        w = bnb.functional.dequantize_blockwise(cw, state, blocksize=64)
+        w = w.to(wdtype)
+        if outlier_idx.numel() > 0:
+            w[:, outlier_idx] = subw
+        self.is_quantized = True
+        return w
+
+    def forward_with_outliers(self, x, outlier_idx):
+        dims = torch.abs(x> 4).sum(dim=list(range(len(x.shape)-1)))
+        outlier_idx2 = torch.where(dims > 0)[0]
+        outlier_idx = torch.cat([outlier_idx, outlier_idx2]).unique()
+        n = x.shape[-1]
+        idx = torch.arange(n, device=x.device)
+        idx[outlier_idx] = -1
+        inverse_idx = torch.where(idx >= 0)[0]
+        if outlier_idx.numel() > 0:
+            subx = x[..., outlier_idx].clone()
+            #print(1, subx, 1)
+            #x[..., outlier_idx] = 0
+        inverse_x = x[...,inverse_idx]
+        xdtype = x.dtype
+        #code = bnb.functional.create_fp8_map(True, 4-3, 2, 4).to(x.device)
+        #code = bnb.functional.create_quantile_map(x, 4).to(x.device)
+        code = bnb.functional.create_dynamic_map(True, total_bits=4.0).to(x.device)
+        c, state = bnb.functional.quantize_blockwise(inverse_x, code=code, blocksize=64)
+        inverse_x = bnb.functional.dequantize_blockwise(c, state, blocksize=64)
+        #c, state = bnb.functional.quantize_blockwise(x, code=code, blocksize=64)
+        #x = bnb.functional.dequantize_blockwise(c, state, blocksize=64)
+        x = x.to(xdtype)
+        x[..., inverse_idx] = inverse_x.to(x.dtype)
+        #if outlier_idx.numel() > 0:
+            #x[..., outlier_idx] = subx
+
+        return torch.nn.functional.linear(x, self.weight, self.bias)
+
 
 
 class Int8Params(torch.nn.Parameter):

@@ -543,7 +543,9 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * abs
       // load code through read-only cache via __ldg
       #pragma unroll NUM_PER_TH
       for(int j = 0; j < NUM_PER_TH; j++)
+      {
         vals[j] = __ldg(&code[qvals[j]])*local_abs_max;
+      }
 
       __syncthreads();
       StoreT(storet).Store(&(out[i]), vals, valid_items);

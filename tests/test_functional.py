@@ -2109,6 +2109,7 @@ def test_few_bit_quant():
                 ebits = math.ceil(bits/2)
                 pbits = bits-ebits-1
                 code = F.create_fp8_map(True, ebits, pbits, bits).cuda()
+                print(code)
             elif method == 'dynamic':
                 code = F.create_dynamic_map(True, bits-0, bits).cuda()
             elif method == 'quantile':
@@ -2181,7 +2182,9 @@ def test_kbit_quantile_estimation():
 
 def test_bench_dequantization():
     a = torch.rand(1024, 1024, device='cuda').half()
-    qa, SA = F.quantize_blockwise(a)
+    code =F.create_fp8_map(True, 3, 0, 4).cuda()
+    qa, SA = F.quantize_blockwise(a, code=code)
+    print(qa.max())
 
     max_theoretical_mu =  1024*1024*2/1024**3/672*1000*1000
     #print(max_theoretical_mu)
@@ -2192,4 +2195,5 @@ def test_bench_dequantization():
         F.dequantize_blockwise(qa, SA, blocksize=2048)
     torch.cuda.synchronize()
     #print((time.time()-t0)/1e6)
+
 
