@@ -189,3 +189,15 @@ Improvements:
  - StableEmbedding layer now has device and dtype parameters to make it 1:1 replaceable with regular Embedding layers (@lostmsu)
  - runtime performance of block-wise quantization slightly improved
  - added error message for the case multiple libcudart.so are installed and bitsandbytes picks the wrong one
+
+
+### 0.37.0
+
+#### Int8 Matmul + backward support for all GPUs
+
+Features:
+ - Int8 MatmulLt now supports backward through inversion of the ColTuring/ColAmpere format. Slow, but memory efficient. Big thanks to @borzunov
+ - Int8 now supported on all GPUs. On devices with compute capability < 7.5, the Int weights are cast to 16/32-bit for the matrix multiplication. Contributed by @borzunov
+
+Improvements:
+ - Improved logging for the CUDA detection mechanism.

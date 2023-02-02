@@ -80,9 +80,10 @@ class CUDASetup:
         self.add_log_entry('python setup.py install')
 
     def initialize(self):
-        self.has_printed = False
-        self.lib = None
-        self.initialized = False
+        if not getattr(self, 'initialized', False):
+            self.has_printed = False
+            self.lib = None
+            self.initialized = False
 
     def run_cuda_setup(self):
         self.initialized = True
@@ -103,7 +104,7 @@ class CUDASetup:
                 legacy_binary_name = "libbitsandbytes_cpu.so"
                 self.add_log_entry(f"CUDA SETUP: Defaulting to {legacy_binary_name}...")
                 binary_path = package_dir / legacy_binary_name
-                if not binary_path.exists():
+                if not binary_path.exists() or torch.cuda.is_available():
                     self.add_log_entry('')
                     self.add_log_entry('='*48 + 'ERROR' + '='*37)
                     self.add_log_entry('CUDA SETUP: CUDA detection failed! Possible reasons:')
@@ -112,6 +113,7 @@ class CUDASetup:
                     self.add_log_entry('3. You have multiple conflicting CUDA libraries')
                     self.add_log_entry('4. Required library not pre-compiled for this bitsandbytes release!')
                     self.add_log_entry('CUDA SETUP: If you compiled from source, try again with `make CUDA_VERSION=DETECTED_CUDA_VERSION` for example, `make CUDA_VERSION=113`.')
+                    self.add_log_entry('CUDA SETUP: The CUDA version for the compile might depend on your conda install. Inspect CUDA version via `conda list | grep cuda`.')
                     self.add_log_entry('='*80)
                     self.add_log_entry('')
                     self.generate_instructions()
@@ -148,7 +150,7 @@ def is_cublasLt_compatible(cc):
     if cc is not None:
         cc_major, cc_minor = cc.split('.')
         if int(cc_major) < 7 or (int(cc_major) == 7 and int(cc_minor) < 5):
-            cuda_setup.add_log_entry("WARNING: Compute capability < 7.5 detected! Proceeding to load CPU-only library...", is_warning=True)
+            cuda_setup.add_log_entry("WARNING: Compute capability < 7.5 detected! Only slow 8-bit matmul is supported for your GPU!", is_warning=True)
         else:
             has_cublaslt = True
     return has_cublaslt
@@ -362,7 +364,6 @@ def evaluate_cuda_setup():
         print('')
         print('='*35 + 'BUG REPORT' + '='*35)
         print('Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues')
-        print('For effortless bug reporting copy-paste your error into this form: https://docs.google.com/forms/d/e/1FAIpQLScPB8emS3Thkp66nvqwmjTEgxp8Y9ufuWTzFyr9kJ5AoI47dQ/viewform?usp=sf_link')
         print('='*80)
     if not torch.cuda.is_available(): return 'libsbitsandbytes_cpu.so', None, None, None, None
 
