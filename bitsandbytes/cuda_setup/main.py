@@ -150,6 +150,7 @@ def is_cublasLt_compatible(cc):
     if cc is not None:
         cc_major, cc_minor = cc.split('.')
         if int(cc_major) < 7 or (int(cc_major) == 7 and int(cc_minor) < 5):
+            cuda_setup = CUDASetup.get_instance()
             cuda_setup.add_log_entry("WARNING: Compute capability < 7.5 detected! Only slow 8-bit matmul is supported for your GPU!", is_warning=True)
         else:
             has_cublaslt = True
