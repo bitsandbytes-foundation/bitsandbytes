@@ -12,6 +12,7 @@ Resources:
 ## TL;DR
 **Requirements**
 Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + CUDA > 10.0. LLM.int8() requires Turing or Ampere GPUs.
+
 **Installation**:
 ``pip install bitsandbytes``
 
@@ -57,6 +58,10 @@ Supported CUDA versions: 10.2 - 12.0
 The bitsandbytes library is currently only supported on Linux distributions. Windows is not supported at the moment.
 
 The requirements can best be fulfilled by installing pytorch via anaconda. You can install PyTorch by following the ["Get Started"](https://pytorch.org/get-started/locally/) instructions on the official website.
+
+To install run:
+
+``pip install bitsandbytes``
 
 ## Using bitsandbytes
 
