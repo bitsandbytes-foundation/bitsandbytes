@@ -128,8 +128,8 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
 
 void quantize(float *code, float *A, unsigned char *out, int n);
 void dequantize(float *code, unsigned char *A, float *out, int n);
-template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n);
+template <typename T, int STOCHASTIC, int FP4> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template<typename T, int FP4> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n);
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,

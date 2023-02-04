@@ -152,7 +152,7 @@ def test_dynamic_quantization():
 
 def test_dynamic_blockwise_quantization():
     #print('')
-    for blocksize in [4096, 2048, 1024, 512]:
+    for blocksize in [4096, 2048, 1024, 512, 256, 128, 64]:
         diffs = []
         reldiffs = []
         for i in range(100):
@@ -2189,7 +2189,88 @@ def test_bench_dequantization():
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(100):
-        F.dequantize_blockwise(qa, SA, blocksize=2048)
+        #F.dequantize_blockwise(qa, SA, blocksize=2048)
+        qa, SA = F.quantize_blockwise(a)
     torch.cuda.synchronize()
     #print((time.time()-t0)/1e6)
+
+
+
+def test_fp4_quant():
+    vals = list(product([0, 1], repeat=4))
+
+    code = {}
+    for bits in vals:
+        result = 0
+        bias = 3
+        sign, e1, e2, p1 = bits
+        idx = sign*8 + e1*4 + e2*2 + p1*1
+        sign = -1.0 if sign else 1.0
+        exp = e1*2 + e2*1
+        if exp == 0:
+            # sub-normal
+            if p1 == 0: result = 0
+            else: result = sign*0.0625
+        else:
+            # normal
+            exp = 2**(-exp + bias + 1)
+            frac = 1.5 if p1 else 1.0
+            result = sign*exp*frac
+        code[idx] = result
+
+    A1 = torch.randn(1024, 1024, device='cuda').half()
+    qa, SA = F.quantize_fp4(A1, blocksize=64)
+    A2 = F.dequantize_fp4(qa, SA)
+    #qa, SA = F.quantize_fp4(A1, blocksize=128)
+    #A2 = F.dequantize_fp4(qa, SA, blocksize=128)
+
+    #A1 = A1.flatten().sort()[0]
+    #A2 = A2.flatten().sort()[0]
+
+    #print(A1)
+    #print(A2)
+
+    err = (A1 - A2).abs().float()
+    relerr = (err/A1.abs().float()).mean()
+    err = err.mean()
+
+    print(err, relerr)
+
+
+
+
+    #assert err.item() < 0.1
+    #assert relerr.item() < 0.28
+
+
+def test_bench_fp4_dequant():
+    blocksize = 256
+    a = torch.rand(1024*12*4, 1024*12, device='cuda').half()
+    qa, SA = F.quantize_fp4(a, blocksize=blocksize)
+
+    input_size = a.numel()/2
+    output_size = a.numel()*2
+    num_bytes = input_size+output_size
+    GB = num_bytes/1e9
+    max_theoretical_s =  GB/768
+    print(max_theoretical_s*1e6)
+    b = torch.randn(128, 1024*12, device='cuda').half()
+
+    iters = 5
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        F.dequantize_fp4(qa, SA, blocksize=blocksize)
+        #b.copy_(a)
+    torch.cuda.synchronize()
+    print((time.time()-t0)/iters*1e6)
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        torch.matmul(b, a.t())
+    torch.cuda.synchronize()
+    print((time.time()-t0)/iters*1e6)
+
+
 

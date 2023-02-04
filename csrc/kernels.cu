@@ -43,6 +43,79 @@ __device__ float atomicMin(float* address, float val) {
   return __int_as_float(old);
 }
 
+__device__ float dDequantizeFP4(unsigned char val, float absmax)
+{
+  float sign = (val & 0b1000) == 8 ? -1.0f : 1.0f;
+  if((val & 0b0110) == 0)
+  {
+    // subnormal
+    if((val & 0b0001) == 0)
+      return 0.0f;
+    else
+      return sign*0.0625f*absmax;
+  }
+  else
+  {
+    // normal
+    float exponent = ((val & 0b0100) == 4 ? 2.0f : 8.0f) + ((val & 0b0010) == 2 ? 0.0f : 2.0f);
+    float fraction = (val & 0b0001) == 1 ? 1.5f : 1.0f;
+
+    return sign*exponent*fraction*absmax;
+  }
+}
+
+__device__ unsigned char dQuantizeFP4(float x)
+{
+  // FP4 with bias of 3
+  // first bit is a sign
+  // subnormals
+  // 0b000 = 0
+  // 0b001 = 0.0625
+  // 0b110 = 2
+  // 0b111 = 3
+  // 0b100 = 4
+  // 0b101 = 6
+  // 0b010 = 8
+  // 0b011 = 12
+
+  int sign = x < 0 ? 0b1000 : 0b0000;
+  x = fabsf(x);
+  if(x > 3.5f)
+  {
+    if( x > 7.0f)
+    {
+      if( x > 10.0f)
+        return 0b0011+sign;
+      else
+        return 0b0010+sign;
+    }
+    else
+    {
+      if(x > 5.0f)
+        return 0b101+sign;
+      else
+        return 0b100+sign;
+    }
+  }
+  else
+  {
+    if(x > 1.03125f)
+    {
+      if(x > 2.5f)
+        return 0b0111+sign;
+      else
+        return 0b0110+sign;
+    }
+    else
+    {
+      if(x > 0.03125f)
+        return 0b0001+sign;
+      else
+        return 0b0000+sign;
+    }
+  }
+}
+
 template <int STOCHASTIC>
 __device__ unsigned char dQuantize(float* smem_code, const float rand, float x)
 {
@@ -427,7 +500,7 @@ __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned c
   }
 }
 
-template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC>
+template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int FP4>
 //__launch_bounds__(TH, 4)
 __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n)
 {
@@ -437,13 +510,13 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
 
   T vals[NUM_PER_TH];
   float rand_vals[NUM_PER_TH];
-  unsigned char qvals[NUM_PER_TH];
+  unsigned char qvals[FP4 ? NUM_PER_TH/2 : NUM_PER_TH];
   //float local_abs_max = -FLT_MAX;
   float local_abs_max = 0.0f;
   int local_rand_idx = 0;
 
   typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-  typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+  typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, FP4 ? NUM_PER_TH/2 : NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
   typedef cub::BlockReduce<float, BLOCK_SIZE/NUM_PER_TH> BlockReduce;
   typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
 
@@ -454,8 +527,9 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
   __shared__ float smem_code[256];
   __shared__ float smem_absmax_value[1];
 
-  for(int i = threadIdx.x; i < 256; i+=blockDim.x)
-    smem_code[i] = code[i];
+  if(!FP4)
+    for(int i = threadIdx.x; i < 256; i+=blockDim.x)
+      smem_code[i] = code[i];
 
   for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
   {
@@ -495,60 +569,137 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
       LoadFloat(loadf).Load(&rand[local_rand_idx], rand_vals, BLOCK_SIZE, 0);
     }
 
-    #pragma unroll NUM_PER_TH
-    for(int j = 0; j < NUM_PER_TH; j++)
+    if(FP4)
     {
-      if(!STOCHASTIC)
-       qvals[j] = dQuantize<0>(smem_code, 0.0f, ((float)vals[j])*local_abs_max);
-      else
-       qvals[j] = dQuantize<1>(smem_code, rand_vals[j], ((float)vals[j])*local_abs_max);
+      #pragma unroll NUM_PER_TH
+      for(int j = 0; j < NUM_PER_TH/2; j++)
+      {
+        unsigned char packed_fp4 = 0;
+        packed_fp4 |= dQuantizeFP4(((float)vals[2*j])*local_abs_max*12.0f) << 4;
+        packed_fp4 |= dQuantizeFP4(((float)vals[2*j+1])*local_abs_max*12.0f);
+        qvals[j] = packed_fp4;
+      }
+    }
+    else
+    {
+      #pragma unroll NUM_PER_TH
+      for(int j = 0; j < NUM_PER_TH; j++)
+      {
+          if(!STOCHASTIC)
+           qvals[j] = dQuantize<0>(smem_code, 0.0f, ((float)vals[j])*local_abs_max);
+          else
+           qvals[j] = dQuantize<1>(smem_code, rand_vals[j], ((float)vals[j])*local_abs_max);
+      }
     }
 
     __syncthreads();
-    StoreChar(storec).Store(&(out[i]), qvals, valid_items);
+    StoreChar(storec).Store(&(out[FP4 ? i/2 : i]), qvals, FP4 ? (valid_items+1)/2 : valid_items);
   }
 }
 
-template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH>
-__global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int n)
+template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int FP4>
+__global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n)
 {
 
-  const int n_full = gridDim.x * BLOCK_SIZE;
-  int valid_items = 0;
-  const int base_idx = (blockIdx.x * BLOCK_SIZE);
+  const int n_load = (gridDim.x * TILE_SIZE);
+  int valid_items_load = 0;
+  int valid_items_store = 0;
+  const int base_idx = (blockIdx.x * TILE_SIZE);
 
-  T vals[NUM_PER_TH];
+  T vals[NUM_PER_TH*(FP4 ? 2 : 1)];
   unsigned char qvals[NUM_PER_TH];
   float local_abs_max = -FLT_MAX;
 
   typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
-  typedef cub::BlockStore<T, THREADS, NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+  typedef cub::BlockStore<T, THREADS, NUM_PER_TH*(FP4 ? 2 : 1), cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
   __shared__ typename LoadChar::TempStorage loadchar;
   __shared__ typename StoreT::TempStorage storet;
-  //__shared__ float smem_code[256];
-  //float local_code[16];
 
-  //if(threadIdx.x < 256)
-    //smem_code[threadIdx.x] = code[threadIdx.x];
-
-  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
+  for (unsigned int i = base_idx; i < n_load; i += gridDim.x*TILE_SIZE)
   {
-      valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
-      local_abs_max = absmax[i/BLOCK_SIZE];
+      if(FP4)
+      {
+        valid_items_load = (n+1)/2 - i > TILE_SIZE ? TILE_SIZE : (n+1)/2 - i;
+        valid_items_store = n - i*2 > TILE_SIZE*2 ? TILE_SIZE*2 : n - i*2;
+      }
+      else
+      {
+        valid_items_load = n - i > TILE_SIZE ? TILE_SIZE : n - i;
+        valid_items_store = n - i > TILE_SIZE ? TILE_SIZE : n - i;
+      }
+      local_abs_max = __ldg(&absmax[(i+threadIdx.x*NUM_PER_TH)/(blocksize)]);
 
       __syncthreads();
-      LoadChar(loadchar).Load(&(A[i]), qvals, valid_items, 128);
+      LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
 
-      // load code through read-only cache via __ldg
-      #pragma unroll NUM_PER_TH
-      for(int j = 0; j < NUM_PER_TH; j++)
-        vals[j] = __ldg(&code[qvals[j]])*local_abs_max;
+
+      if(FP4)
+      {
+        #pragma unroll NUM_PER_TH
+        for(int j = 0; j < NUM_PER_TH; j++)
+        {
+          vals[j*2] = dDequantizeFP4(qvals[j] >> 4, local_abs_max*0.083333f);
+          vals[j*2 + 1] = dDequantizeFP4(qvals[j] & 0x0F, local_abs_max*0.083333);
+        }
+      }
+      else
+      {
+        // load code through read-only cache via __ldg
+        #pragma unroll NUM_PER_TH
+        for(int j = 0; j < NUM_PER_TH; j++)
+          vals[j] = __ldg(&code[qvals[j]])*local_abs_max;
+      }
 
       __syncthreads();
-      StoreT(storet).Store(&(out[i]), vals, valid_items);
+      StoreT(storet).Store(&(out[FP4 ? i*2 : i]), vals, valid_items_store);
   }
 }
+
+//template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int TILE_SIZE>
+//__global__ void kDequantizeBlockwiseFP4(unsigned char * A, float * absmax, T *out, const int n_store)
+//{
+//
+//  const int n_load = n_store/2;
+//  const int base_idx = (blockIdx.x * TILE_SIZE);
+//
+//  T vals[NUM_PER_TH*2];
+//  unsigned char qvals[NUM_PER_TH];
+//
+//  int valid_items = (base_idx + TILE_SIZE) > n_load ? ((base_idx+TILE_SIZE) - n_load) : TILE_SIZE;
+//  int idx = base_idx + (threadIdx.x*NUM_PER_TH);
+//
+//  float local_abs_max = __ldg(&absmax[idx/BLOCK_SIZE]);
+//
+//  if(valid_items == TILE_SIZE)
+//  {
+//    // we do 64 byte loads so we can 128 byte stores
+//    reinterpret_cast<int2(&)[NUM_PER_THREAD/8]>(qvals)[0] = reinterpret_cast<int2*>(A)[idx/8];
+//  }
+//  else
+//  {
+//    #pragma unroll
+//    for(int j = 0; j < NUM_PER_TH; j++)
+//      if(idx+j < n_load)
+//        qvals[j] = A[idx+j];
+//      else
+//        qvals[j] = 0;
+//  }
+//
+//
+//  #pragma unroll NUM_PER_TH
+//  for(int j = 0; j < NUM_PER_TH; j++)
+//  {
+//    vals[j*2] = dDequantizeFP4(qvals[j] & 0xF0, local_abs_max*12.0f);
+//    vals[j*2 + 1] = dDequantizeFP4(qvals[j] & 0x0F, local_abs_max*12.0f);
+//  }
+//
+//
+//  reinterpret_cast<int4(&)[NUM_PER_THREAD/8]>(qvals)[0] = reinterpret_cast<int4*>(A)[idx/8];
+//  reinterpret_cast<int4*>(A)[idx/16] = reinterpret_cast<int4(&)[16]>(local_valC)[j/num_items];
+//
+//
+//}
 
 
 __global__ void kDequantize(float *code, unsigned char *A, float *out, const int n)
@@ -2523,7 +2674,6 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
           // 4. Multiply the tile -> accumulate outputs in shared memory until 128 bytes it reached
           int idx = idx_col_B + (warp_idx*SPMM_ITEMS) + j;
           if(idx >= colsB){ break; }
-          //printf("%i %i\n", (row_offset+idx) % num_items, row_offset+idx);
           if((idx+num_items < colsB))
           {
             if(BITS == 8)
@@ -2543,8 +2693,6 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
           #pragma unroll num_items
           for(int k = 0; k < num_items; k++)
           {
-            //if((float)local_valsB[k] != 0.0)
-            //  printf("%f %i %i %i\n", (float)local_valsB[k], k, idx, colsB);
             if(BITS == 8 && dequant_stats != NULL)
               // we do texture cache reads (__ldg) on dequant_stats which should be super fast
             {
@@ -2789,38 +2937,42 @@ MAKE_optimizerStatic8bit2State(ADAM, float)
 template __global__ void kPercentileClipping<float, 2048, 4>(float * __restrict__ g, float *gnorm_vec, int step, const int n);
 template __global__ void kPercentileClipping<half, 2048, 4>(half * __restrict__ g, float *gnorm_vec, int step, const int n);
 
-template __global__ void kQuantizeBlockwise<half, 4096, 4, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<float, 4096, 4, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<half, 4096, 4, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<float, 4096, 4, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<half, 2048, 4, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<float, 2048, 4, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<half, 1024, 4, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<float, 1024, 4, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<half, 512, 2, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<float, 512, 2, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<half, 256, 2, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<float, 256, 2, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<half, 128, 2, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<float, 128, 2, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<half, 64, 1, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template __global__ void kQuantizeBlockwise<float, 64, 1, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 4096, 4, 0, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 4096, 4, 0, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 4096, 4, 1, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 4096, 4, 1, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 2048, 4, 0, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 2048, 4, 0, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 1024, 4, 0, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 1024, 4, 0, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 512, 2, 0, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 512, 2, 0, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 256, 2, 0, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 256, 2, 0, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 128, 2, 0, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 128, 2, 0, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 64, 2, 0, 0>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 64, 2, 0, 0>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
 
-template __global__ void kDequantizeBlockwise<half, 4096, 1024, 4>(float *code, unsigned char * A, float * absmax, half *out, const int n);
-template __global__ void kDequantizeBlockwise<float, 4096, 1024, 4>(float *code, unsigned char * A, float * absmax, float *out, const int n);
-template __global__ void kDequantizeBlockwise<half, 2048, 512, 4>(float *code, unsigned char * A, float * absmax, half *out, const int n);
-template __global__ void kDequantizeBlockwise<float, 2048, 512, 4>(float *code, unsigned char * A, float * absmax, float *out, const int n);
-template __global__ void kDequantizeBlockwise<half, 1024, 256, 4>(float *code, unsigned char * A, float * absmax, half *out, const int n);
-template __global__ void kDequantizeBlockwise<float, 1024, 256, 4>(float *code, unsigned char * A, float * absmax, float *out, const int n);
-template __global__ void kDequantizeBlockwise<half, 512, 256, 2>(float *code, unsigned char * A, float * absmax, half *out, const int n);
-template __global__ void kDequantizeBlockwise<float, 512, 256, 2>(float *code, unsigned char * A, float * absmax, float *out, const int n);
-template __global__ void kDequantizeBlockwise<half, 256, 128, 2>(float *code, unsigned char * A, float * absmax, half *out, const int n);
-template __global__ void kDequantizeBlockwise<float, 256, 128, 2>(float *code, unsigned char * A, float * absmax, float *out, const int n);
-template __global__ void kDequantizeBlockwise<half, 128, 64, 2>(float *code, unsigned char * A, float * absmax, half *out, const int n);
-template __global__ void kDequantizeBlockwise<float, 128, 64, 2>(float *code, unsigned char * A, float * absmax, float *out, const int n);
-template __global__ void kDequantizeBlockwise<half, 64, 64, 1>(float *code, unsigned char * A, float * absmax, half *out, const int n);
-template __global__ void kDequantizeBlockwise<float, 64, 64, 1>(float *code, unsigned char * A, float * absmax, float *out, const int n);
+template __global__ void kQuantizeBlockwise<half, 4096, 4, 0, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 4096, 4, 0, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 2048, 4, 0, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 2048, 4, 0, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 1024, 4, 0, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 1024, 4, 0, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 512, 2, 0, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 512, 2, 0, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 256, 2, 0, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 256, 2, 0, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 128, 2, 0, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 128, 2, 0, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<half, 64, 2, 0, 1>(float * code, half * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template __global__ void kQuantizeBlockwise<float, 64, 2, 0, 1>(float * code, float * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
 
+template __global__ void kDequantizeBlockwise<half, 512, 64, 8, 1>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
+template __global__ void kDequantizeBlockwise<float, 512, 64, 8, 1>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n);
+template __global__ void kDequantizeBlockwise<half, 512, 64, 8, 0>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
+template __global__ void kDequantizeBlockwise<float, 512, 64, 8, 0>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n);
 
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \

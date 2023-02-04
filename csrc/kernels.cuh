@@ -14,8 +14,8 @@ template<typename T>__global__ void kEstimateQuantiles(T *__restrict__ const A, 
 __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n);
 __global__ void kDequantize(float *code, unsigned char *A, float *out, const int n);
 
-template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC> __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
-template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH> __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int n);
+template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int FP4> __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int FP4> __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPreconditionOptimizer32bit2State(T* g, T* p,

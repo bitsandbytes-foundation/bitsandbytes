@@ -168,7 +168,8 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     values = []
     lst = list(itertools.product([0, 1], repeat=precision_bits))
     #for ev in evalues:
-    bias = 2**(exponent_bits-1)-1
+    bias = 2**(exponent_bits-1)+1
+    print(bias)
     for evalue in range(2**(exponent_bits)):
         for bit_pattern in lst:
             value = (1 if evalue != 0 else 0)
@@ -176,10 +177,12 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
                 value += pval*(2**-(i+1))
             if evalue == 0:
                 # subnormals
-                value = value*2**-(bias-1)
+                value = value*2**-(bias)
             else:
                 # normals
-                value = value*2**-(evalue-bias-2)
+                print(value, 1)
+                value = value*2**-(evalue-bias-1)
+                print(value, 2)
             values.append(value)
             if signed:
                 values.append(-value)
@@ -193,7 +196,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
             values.append(0)
     values.sort()
     code = torch.Tensor(values)
-    code /= code.max()
+    #code /= code.max()
 
     return code
 
@@ -587,7 +590,7 @@ def dequantize_blockwise(
         code = code.to(A.device)
         if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
             raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
-        is_on_gpu([A, out])
+        is_on_gpu([A, absmax, out])
         if out.dtype == torch.float32:
             lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
         elif out.dtype == torch.float16:
@@ -600,6 +603,116 @@ def dequantize_blockwise(
         lib.cdequantize_blockwise_cpu_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))
 
     return out
+
+
+def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64) -> Tensor:
+    """
+    Quantize tensor A in blocks of FP4 values.
+
+    Quantizes tensor A by dividing it into blocks which are independently quantized to FP4.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        The input tensor.
+    absmax : torch.Tensor
+        The absmax values.
+    out : torch.Tensor
+        The output tensor (8-bit).
+    blocksize : int
+        The blocksize used in quantization.
+
+    Returns
+    -------
+    torch.Tensor:
+        The 8-bit tensor with packed 4-bit values.
+    tuple(torch.Tensor, torch.Size, torch.dtype):
+        The quantization state to undo the quantization.
+    """
+    if A.device.type != 'cuda':
+        raise NotImplementedError(f'Device type not supported for FP4 quantization: {A.device.type}')
+
+    n = A.numel()
+    input_shape = A.shape
+
+    if absmax is None:
+        blocks = n // blocksize
+        blocks += 1 if n % blocksize > 0 else 0
+        absmax = torch.zeros((blocks,), device=A.device)
+
+    state = (absmax, input_shape, A.dtype)
+
+    if out is None:
+        out = torch.zeros(((n+1)//2,), dtype=torch.uint8, device=A.device)
+
+    assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+
+    prev_device = pre_call(A.device)
+    is_on_gpu([A, out, absmax])
+
+    if A.dtype == torch.float32:
+        lib.cquantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+    elif A.dtype == torch.float16:
+        lib.cquantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+    else:
+        raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
+    post_call(A.device)
+
+    return out, state
+
+
+def dequantize_fp4(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+    """
+    Dequantizes FP4 blockwise quantized values.
+
+    Dequantizes the tensor A with maximum absolute values absmax in blocks of size blocksize.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        The input 8-bit tensor (packed 4-bit values).
+    quant_state : tuple(torch.Tensor, torch.Size, torch.dtype)
+        Tuple of absmax values, original tensor shape and original dtype.
+    absmax : torch.Tensor
+        The absmax values.
+    out : torch.Tensor
+        Dequantized output tensor.
+
+
+    Returns
+    -------
+    torch.Tensor:
+        Dequantized tensor.
+    """
+    if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
+        raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
+
+    if quant_state is None:
+        assert absmax is not None and out is not None
+        shape = out.shape
+        dtype = out.dtype
+    else:
+        absmax, shape, dtype = quant_state
+
+
+    if out is None:
+        out = torch.empty(shape, dtype=dtype, device=A.device)
+
+    n = out.numel()
+
+    device = pre_call(A.device)
+    is_on_gpu([A, absmax, out])
+    if out.dtype == torch.float32:
+        lib.cdequantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+    elif out.dtype == torch.float16:
+        lib.cdequantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+    else:
+        raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
+    post_call(A.device)
+
+    return out
+
+
 
 
 def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
