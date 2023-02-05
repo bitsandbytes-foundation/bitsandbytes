@@ -496,7 +496,7 @@ class MatMulFP4(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_fp4(B, state).to(A.dtype), bias)
+        output = torch.nn.functional.linear(A, F.dequantize_fp4(B, state).to(A.dtype).t(), bias)
 
         # 3. Save state
         ctx.state = state
@@ -531,7 +531,7 @@ class MatMulFP4(torch.autograd.Function):
 
         # not supported by PyTorch. TODO: create work-around
         #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
-        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_fp4(B, ctx.state).to(ctx.dtype_A))
+        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_fp4(B, ctx.state).to(ctx.dtype_A).t())
 
         return grad_A, grad_B, None, grad_bias, None
 

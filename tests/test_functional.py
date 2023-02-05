@@ -1835,7 +1835,7 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
-        bnb.matmul_fp4(A, B_fp4, quant_state=state)
+        bnb.matmul_fp4(A, B_fp4.t(), quant_state=state)
     torch.cuda.synchronize()
     print( f"bnb fp4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
