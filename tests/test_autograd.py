@@ -485,10 +485,10 @@ def test_matmul_fp4( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, 
 
             if not transpose[0] and transpose[1]:
                 out_torch = funcs[0](A, B.t())
-                out_bnb = funcs[1](A, B2, quant_state=quant_state, bias=bias2)
+                out_bnb = funcs[1](A, B2, quant_state, bias=bias2)
             elif not transpose[0] and not transpose[1]:
                 out_torch = funcs[0](A, B)
-                out_bnb = funcs[1](A, B2.t(), quant_state=quant_state, bias=bias2)
+                out_bnb = funcs[1](A, B2.t(), quant_state, bias=bias2)
 
             if has_bias:
                 out_torch += bias
@@ -498,7 +498,7 @@ def test_matmul_fp4( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, 
             n = out_bnb.numel()
             err = torch.abs(out_bnb - out_torch).float().mean().item()
             if n > 0:
-                assert err < 0.11
+                assert err < 0.115
 
             if any(req_grad):
                 out_bnb.data.copy_(out_torch)

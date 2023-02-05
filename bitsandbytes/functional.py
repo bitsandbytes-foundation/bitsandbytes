@@ -169,7 +169,6 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     lst = list(itertools.product([0, 1], repeat=precision_bits))
     #for ev in evalues:
     bias = 2**(exponent_bits-1)+1
-    print(bias)
     for evalue in range(2**(exponent_bits)):
         for bit_pattern in lst:
             value = (1 if evalue != 0 else 0)
@@ -180,9 +179,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
                 value = value*2**-(bias)
             else:
                 # normals
-                print(value, 1)
                 value = value*2**-(evalue-bias-1)
-                print(value, 2)
             values.append(value)
             if signed:
                 values.append(-value)
@@ -196,7 +193,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
             values.append(0)
     values.sort()
     code = torch.Tensor(values)
-    #code /= code.max()
+    code /= code.max()
 
     return code
 

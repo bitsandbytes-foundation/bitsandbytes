@@ -495,7 +495,7 @@ class MatMulFP4(torch.autograd.Function):
 
 
         # 1. Dequantize
-        # 2. Matmul
+        # 2. MatmulnN
         output = torch.nn.functional.linear(A, F.dequantize_fp4(B, state).to(A.dtype), bias)
 
         # 3. Save state
@@ -550,5 +550,6 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_fp4(A: tensor, B: tensor, out: tensor = None, quant_state: List = None, bias=None):
+def matmul_fp4(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
+    assert quant_state is not None
     return MatMulFP4.apply(A, B, out, bias, quant_state)

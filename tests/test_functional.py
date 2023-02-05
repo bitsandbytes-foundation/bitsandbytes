@@ -1788,18 +1788,14 @@ batch_size = 1
 seqdim = 1
 values = []
 values.append((batch_size, seqdim, 768, 4 * 768))
-# values.append((batch_size, seqdim, 1024, 4*1024))
-# values.append((batch_size, seqdim, 1536, 4*1536))
-# values.append((batch_size, seqdim, 2048, 4*2048))
-# values.append((batch_size, seqdim, 2560, 4*2560))
-# values.append((batch_size, seqdim, 4096, 4*4096))
-# values.append((batch_size, seqdim, 5140, 4*5140))
+#values.append((batch_size, seqdim, 1024, 4*1024))
+#values.append((batch_size, seqdim, 1536, 4*1536))
+#values.append((batch_size, seqdim, 2048, 4*2048))
+#values.append((batch_size, seqdim, 2560, 4*2560))
+#values.append((batch_size, seqdim, 4096, 4*4096))
+#values.append((batch_size, seqdim, 5140, 4*5140))
 #values.append((batch_size, seqdim, 12288, 4*12288))
-names = [
-    "batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values
-]
-
-
+names = ["batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
     iters = 128
@@ -1809,16 +1805,19 @@ def test_bench_matmul(batch, seq, model, hidden):
     B = torch.empty(hidden, model, dtype=torch.float16, device="cuda")
     torch.nn.init.xavier_uniform_(B)
 
+    B_fp4, state = F.quantize_fp4(B)
+
     linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
     linear8bit.eval()
 
     outliers = torch.randint(0, model, size=(5,)).cuda()
     A[:, :, outliers] = 8.0
 
-    linearMixedBit = (
-        bnb.nn.Linear8bitLt(model, hidden, False, threshold=6.0).cuda().half()
-    )
+    linearMixedBit = (bnb.nn.Linear8bitLt(model, hidden, False, threshold=6.0).cuda().half())
     linearMixedBit.eval()
+
+    linear8bit_train = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
+    linear8bit_train_thresh = bnb.nn.Linear8bitLt(model, hidden, False, threshold=6.0).cuda().half()
 
     # warmup
     for i in range(iters):
@@ -1831,9 +1830,14 @@ def test_bench_matmul(batch, seq, model, hidden):
     for i in range(iters):
         torch.matmul(A, B.t())
     torch.cuda.synchronize()
-    print(
-        f"pytorch fp16: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
-    )
+    print( f"pytorch fp16: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        bnb.matmul_fp4(A, B_fp4, quant_state=state)
+    torch.cuda.synchronize()
+    print( f"bnb fp4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
     torch.cuda.synchronize()
     t0 = time.time()
@@ -1872,7 +1876,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         Cout, Sout = F.nvidia_transform(out32, "row", state=Sout32)
         F.vectorwise_mm_dequant(Cout, statsA, statsB.t())
     torch.cuda.synchronize()
-    #print(f"vector pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    print(f"vector pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
     BA, statsB = F.vectorwise_quant(B, dim=1, quant_type="linear")
     CxB, SB = F.nvidia_transform(CB, to_order=formatB)
@@ -1886,7 +1890,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         Cout, Sout = F.nvidia_transform(out32, "row", state=Sout32)
         out = Cout * statsB * statsA * (1.0 / (127 * 127))
     torch.cuda.synchronize()
-    #print(f"linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    print(f"linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
     linear8bit(A)
     torch.cuda.synchronize()
@@ -1894,9 +1898,7 @@ def test_bench_matmul(batch, seq, model, hidden):
     for i in range(iters):
         linear8bit(A)
     torch.cuda.synchronize()
-    print(
-        f"bnb linear8bitlt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
-    )
+    print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
     linearMixedBit(A)
     torch.cuda.synchronize()
@@ -1904,9 +1906,23 @@ def test_bench_matmul(batch, seq, model, hidden):
     for i in range(iters):
         linearMixedBit(A)
     torch.cuda.synchronize()
-    print(
-        f"bnb linear8bitlt with threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
-    )
+    print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+
+    linear8bit_train(A)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        linear8bit_train(A)
+    torch.cuda.synchronize()
+    print( f"bnb linear8bitlt (training): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+
+    linear8bit_train_thresh(A)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        linear8bit_train(A)
+    torch.cuda.synchronize()
+    print( f"bnb linear8bitlt with threshold (training): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
 def test_zeropoint():
     def quant_zp(x):
@@ -2050,7 +2066,6 @@ def test_fp8_quant():
         p_bits = 7-e_bits
         code = F.create_fp8_map(True, e_bits, p_bits).cuda()
 
-        print(e_bits, p_bits)
         abserr = []
         relerr = []
         for i in range(100):
@@ -2189,7 +2204,6 @@ def test_bench_dequantization():
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(100):
-        #F.dequantize_blockwise(qa, SA, blocksize=2048)
         qa, SA = F.quantize_blockwise(a)
     torch.cuda.synchronize()
     #print((time.time()-t0)/1e6)
@@ -2240,7 +2254,7 @@ def test_bench_fp4_dequant():
     num_bytes = input_size+output_size
     GB = num_bytes/1e9
     max_theoretical_s =  GB/768
-    print(max_theoretical_s*1e6)
+    #print(max_theoretical_s*1e6)
     b = torch.randn(128, 1024*12, device='cuda').half()
 
     iters = 5
@@ -2250,14 +2264,14 @@ def test_bench_fp4_dequant():
         F.dequantize_fp4(qa, SA, blocksize=blocksize)
         #b.copy_(a)
     torch.cuda.synchronize()
-    print((time.time()-t0)/iters*1e6)
+    #print((time.time()-t0)/iters*1e6)
 
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        torch.matmul(b, a.t())
-    torch.cuda.synchronize()
-    print((time.time()-t0)/iters*1e6)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    torch.matmul(b, a.t())
+    #torch.cuda.synchronize()
+    #print((time.time()-t0)/iters*1e6)
 
 
 
