@@ -480,7 +480,6 @@ def test_matmul_fp4( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, 
                 bias = torch.randn(dim4, device='cuda', dtype=dtype, requires_grad=req_grad[2])
                 bias2 = bias.clone()
             torch.nn.init.xavier_uniform_(B)
-            B2 = B.clone()
 
             B2, quant_state = bnb.functional.quantize_fp4(B)
 
@@ -526,21 +525,6 @@ def test_matmul_fp4( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, 
 
                 if req_grad[0]:
                     torch.testing.assert_allclose( gradA1, gradA2, atol=0.015, rtol=0.1)
-                if req_grad[1]:
-                    n = gradB1.numel()
-                    if dim2 > 0:
-                        assert torch.abs(gradB1).sum() > 0.0
-                        assert torch.abs(gradB2).sum() > 0.0
-                    else:
-                        assert torch.abs(gradB1).sum() == 0.0
-                        assert torch.abs(gradB2).sum() == 0.0
-                    idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
-
-                    assert (idx == 0).sum().item() <= n * 0.1
-                    idx = torch.isclose(gradB1, gradB2, atol=0.10, rtol=0.3)
-                    assert (idx == 0).sum().item() <= n * 0.02
-                    torch.testing.assert_allclose(gradB1, gradB2, atol=0.18, rtol=0.3
-                    )
 
                 if req_grad[2]:
                     torch.testing.assert_allclose(gradBias1, gradBias2)

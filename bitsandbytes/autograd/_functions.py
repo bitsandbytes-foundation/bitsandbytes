@@ -503,11 +503,9 @@ class MatMulFP4(torch.autograd.Function):
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
         if any(ctx.needs_input_grad[:2]):
-            ctx.tensors = A
+            ctx.tensors = (A, B)
         else:
-            ctx.tensors = [None, None]
-            ctx.tensor_states = (None, None)
-            ctx.save_for_backward(None, None)
+            ctx.tensors = (None, None)
 
         return output
 
@@ -517,9 +515,11 @@ class MatMulFP4(torch.autograd.Function):
             bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
-        req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
-        A = ctx.tensors
+        req_gradA, _, _, req_gradBias, _= ctx.needs_input_grad
+        A, B = ctx.tensors
         state = ctx.state
+
+        grad_A, grad_B, grad_bias = None, None, None
 
         if req_gradBias:
             # compute grad_bias first before changing grad_output dtype
@@ -529,7 +529,8 @@ class MatMulFP4(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
+        # not supported by PyTorch. TODO: create work-around
+        #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_fp4(B, ctx.state).to(ctx.dtype_A))
 
         return grad_A, grad_B, None, grad_bias, None
