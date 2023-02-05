@@ -133,6 +133,67 @@ class Embedding(torch.nn.Embedding):
 
         return emb
 
+class FP4Params(torch.nn.Parameter):
+    def __new__(cls, data=None, requires_grad=True, quant_state=None):
+        cls.quant_state = None
+        if data is None:
+            data = torch.empty(0)
+        return torch.Tensor._make_subclass(cls, data, requires_grad)
+
+    def cuda(self, device):
+        w = self.data.contiguous().half().cuda(device)
+        w_fp4, quant_state = bnb.functional.quantize_fp4(w)
+        self.data = w_fp4
+        self.quant_state = quant_state
+
+        return self
+
+    @overload
+    def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ..., non_blocking: bool = ...,) -> T:
+        ...
+
+    @overload
+    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T:
+        ...
+
+    @overload
+    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T:
+        ...
+
+    def to(self, *args, **kwargs):
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+
+        if (device is not None and device.type == "cuda" and self.data.device.type == "cpu"):
+            return self.cuda(device)
+        else:
+            new_param = FP4Params(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
+                                  requires_grad=self.requires_grad, quant_state=self.quant_state)
+
+            return new_param
+
+
+class LinearFP4(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True):
+        super().__init__(input_features, output_features, bias)
+        self.state = bnb.MatmulLtState()
+        self.weight = FP4Params(self.weight.data, requires_grad=False)
+
+    def init_8bit_state(self):
+        pass
+
+    def forward(self, x: torch.Tensor):
+        self.state.is_training = self.training
+
+        # weights are cast automatically as Int8Params, but the bias has to be cast manually
+        if self.bias is not None and self.bias.dtype != x.dtype:
+            self.bias.data = self.bias.data.to(x.dtype)
+
+        if getattr(self.weight, 'state', None) is None:
+            print('FP4 state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+        out = bnb.matmul_fp(x, self.weight, bias=self.bias, state=self.weight.state)
+
+        return out
+
 
 class Int8Params(torch.nn.Parameter):
     def __new__(
@@ -206,6 +267,7 @@ class Int8Params(torch.nn.Parameter):
             new_param.SCB = self.SCB
 
             return new_param
+
 
 
 class Linear8bitLt(nn.Linear):

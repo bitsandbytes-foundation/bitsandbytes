@@ -626,7 +626,7 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
     -------
     torch.Tensor:
         The 8-bit tensor with packed 4-bit values.
-    tuple(torch.Tensor, torch.Size, torch.dtype):
+    tuple(torch.Tensor, torch.Size, torch.dtype, int):
         The quantization state to undo the quantization.
     """
     if A.device.type != 'cuda':
@@ -640,10 +640,10 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
         blocks += 1 if n % blocksize > 0 else 0
         absmax = torch.zeros((blocks,), device=A.device)
 
-    state = (absmax, input_shape, A.dtype)
+    state = (absmax, input_shape, A.dtype, blocksize)
 
     if out is None:
-        out = torch.zeros(((n+1)//2,), dtype=torch.uint8, device=A.device)
+        out = torch.zeros(((n+1)//2, 1), dtype=torch.uint8, device=A.device)
 
     assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
 
@@ -692,13 +692,14 @@ def dequantize_fp4(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: 
         shape = out.shape
         dtype = out.dtype
     else:
-        absmax, shape, dtype = quant_state
+        absmax, shape, dtype, blocksize = quant_state
 
 
     if out is None:
         out = torch.empty(shape, dtype=dtype, device=A.device)
 
     n = out.numel()
+
 
     device = pre_call(A.device)
     is_on_gpu([A, absmax, out])
@@ -710,9 +711,9 @@ def dequantize_fp4(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: 
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     post_call(A.device)
 
-    return out
-
-
+    is_transposed = (True if A.shape[0] == 1 else False)
+    if is_transposed: return out.t()
+    else: return out
 
 
 def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:

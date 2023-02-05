@@ -2221,26 +2221,13 @@ def test_fp4_quant():
     A1 = torch.randn(1024, 1024, device='cuda').half()
     qa, SA = F.quantize_fp4(A1, blocksize=64)
     A2 = F.dequantize_fp4(qa, SA)
-    #qa, SA = F.quantize_fp4(A1, blocksize=128)
-    #A2 = F.dequantize_fp4(qa, SA, blocksize=128)
-
-    #A1 = A1.flatten().sort()[0]
-    #A2 = A2.flatten().sort()[0]
-
-    #print(A1)
-    #print(A2)
 
     err = (A1 - A2).abs().float()
     relerr = (err/A1.abs().float()).mean()
     err = err.mean()
 
-    print(err, relerr)
-
-
-
-
-    #assert err.item() < 0.1
-    #assert relerr.item() < 0.28
+    assert err.item() < 0.1
+    assert relerr.item() < 0.28
 
 
 def test_bench_fp4_dequant():
