@@ -188,9 +188,9 @@ class LinearFP4(nn.Linear):
         if self.bias is not None and self.bias.dtype != x.dtype:
             self.bias.data = self.bias.data.to(x.dtype)
 
-        if getattr(self.weight, 'state', None) is None:
-            print('FP4 state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
-        out = bnb.matmul_fp(x, self.weight, bias=self.bias, state=self.weight.state)
+        if getattr(self.weight, 'quant_state', None) is None:
+            print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+        out = bnb.matmul_fp4(x, self.weight.t(), bias=self.bias, quant_state=self.weight.quant_state)
 
         return out
 
