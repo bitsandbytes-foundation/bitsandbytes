@@ -352,10 +352,10 @@ class LinearFP8(nn.Linear):
 
     def forward(self, x: torch.Tensor):
         if self.fw_code is None:
-            self.bw_code = F.create_fp8_map(True, 5, 2, 8).to(x.device)
-            self.fw_code = F.create_fp8_map(True, 4, 3, 8).to(x.device)
+            self.bw_code = bnb.functional.create_fp8_map(True, 5, 2, 8).to(x.device)
+            self.fw_code = bnb.functional.create_fp8_map(True, 4, 3, 8).to(x.device)
 
-        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.fw_code, code=self.bw_code)
+        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.fw_code, bw_code=self.bw_code)
         if self.bias is not None:
             out += self.bias
 
