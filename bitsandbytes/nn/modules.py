@@ -343,3 +343,19 @@ class Linear8bitLt(nn.Linear):
                 del self.state.CxB
 
         return out
+
+class LinearFP8(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True):
+        super().__init__(input_features, output_features, bias)
+        self.bw_code = None
+        self.fw_code = None
+
+    def forward(self, x: torch.Tensor):
+        if self.fw_code is None:
+            self.bw_code = F.create_fp8_map(True, 5, 2, 8).to(x.device)
+            self.fw_code = F.create_fp8_map(True, 4, 3, 8).to(x.device)
+
+        out = bnb.matmul_fp8(x, self.weight.t(), bias=self.bias, fw_code=self.fw_code, code=self.bw_code)
+
+        return out
+
