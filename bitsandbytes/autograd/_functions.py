@@ -525,13 +525,9 @@ class MatMulFP4(torch.autograd.Function):
             # compute grad_bias first before changing grad_output dtype
             grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
 
-        # Cast grad_output to fp16
-        if len(grad_output.shape) == 3:
-            grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
-
         # not supported by PyTorch. TODO: create work-around
         #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
-        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_fp4(B, ctx.state).to(ctx.dtype_A).t())
+        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_fp4(B, ctx.state).to(grad_output.dtype).t())
 
         return grad_A, grad_B, None, grad_bias, None
 
