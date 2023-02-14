@@ -54,23 +54,21 @@ template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A,
 {
   int num_blocks = n/blocksize;
   num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
-  if(STOCHASTIC == 1)
-    assert(blocksize == 4096);
 
   if(blocksize == 4096)
     kQuantizeBlockwise<T, 4096, 4, STOCHASTIC><<<num_blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 2048)
-    kQuantizeBlockwise<T, 2048, 4, 0><<<num_blocks, 512>>>(code, A, absmax, out, rand, rand_offset, n);
+    kQuantizeBlockwise<T, 2048, 4, STOCHASTIC><<<num_blocks, 512>>>(code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 1024)
-    kQuantizeBlockwise<T, 1024, 4, 0><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
+    kQuantizeBlockwise<T, 1024, 4, STOCHASTIC><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 512)
-    kQuantizeBlockwise<T, 512, 2, 0><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
+    kQuantizeBlockwise<T, 512, 2, STOCHASTIC><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 256)
-    kQuantizeBlockwise<T, 256, 2, 0><<<num_blocks, 128>>>(code, A, absmax, out, rand, rand_offset, n);
+    kQuantizeBlockwise<T, 256, 2, STOCHASTIC><<<num_blocks, 128>>>(code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 128)
-    kQuantizeBlockwise<T, 128, 2, 0><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+    kQuantizeBlockwise<T, 128, 2, STOCHASTIC><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 64)
-    kQuantizeBlockwise<T, 64, 1, 0><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+    kQuantizeBlockwise<T, 64, 1, STOCHASTIC><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
 
 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());

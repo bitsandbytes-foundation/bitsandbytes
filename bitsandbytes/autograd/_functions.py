@@ -413,10 +413,10 @@ class MatMulFP8(torch.autograd.Function):
         # 2. MatmulnN
 
         cA, state = F.quantize_blockwise(A, code=fw_code, blocksize=1024)
-        fp8A = F.dequantize_blockwise(cA, state).to(A.dtype)
+        fp8A = F.dequantize_blockwise(cA, state, blocksize=1024).to(A.dtype)
 
         cB, state = F.quantize_blockwise(B, code=fw_code, blocksize=1024)
-        fp8B = F.dequantize_blockwise(cB, state).to(B.dtype)
+        fp8B = F.dequantize_blockwise(cB, state, blocksize=1024).to(B.dtype)
 
         output = torch.matmul(fp8A, fp8B)
 
@@ -443,7 +443,7 @@ class MatMulFP8(torch.autograd.Function):
         grad_A, grad_B = None, None
 
         cgrad_out, state = F.quantize_blockwise(grad_output, code=ctx.bw_code, blocksize=1024)
-        fp8out = F.dequantize_blockwise(cgrad_out, state).to(grad_output.dtype)
+        fp8out = F.dequantize_blockwise(cgrad_out, state, blocksize=1024).to(grad_output.dtype)
 
         # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
