@@ -395,15 +395,14 @@ class MatMulFP8(torch.autograd.Function):
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
 
     @staticmethod
-    def forward(ctx, A, B, out=None, bias=None, fw_code=None, bw_code=None):
+    def forward(ctx, A, B, out=None, fw_code=None, bw_code=None):
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
             ctx.is_empty = True
             ctx.A = A
             ctx.B = B
-            ctx.bias = bias
-            B_shape = state[1]
+            B_shape = B.shape
             if A.shape[-1] == B_shape[0]:
                 return torch.empty(A.shape[:-1] + B_shape[1:], dtype=A.dtype, device=A.device)
             else:
@@ -414,17 +413,17 @@ class MatMulFP8(torch.autograd.Function):
         # 2. MatmulnN
 
         cA, state = F.quantize_blockwise(A, code=fw_code, blocksize=1024)
-        fp8A = F.dequantize_blockwise(cA, state)
+        fp8A = F.dequantize_blockwise(cA, state).to(A.dtype)
 
         cB, state = F.quantize_blockwise(B, code=fw_code, blocksize=1024)
-        fp8B = F.dequantize_blockwise(cB, state)
+        fp8B = F.dequantize_blockwise(cB, state).to(B.dtype)
 
-        output = torch.nn.functional.linear(fp8A, fp8B)
+        output = torch.matmul(fp8A, fp8B)
 
 
         # 3. Save state
         ctx.bw_code = bw_code
-        ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
+        ctx.dtype_A, ctx.dtype_B = A.dtype, B.dtype
 
         if any(ctx.needs_input_grad[:2]):
             ctx.tensors = (fp8A, fp8B)
@@ -436,21 +435,15 @@ class MatMulFP8(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.is_empty:
-            bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
-            return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
+            return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, None, None
 
-        req_gradA, _, _, req_gradBias, _= ctx.needs_input_grad
+        req_gradA, req_gradB, _, _, _ = ctx.needs_input_grad
         fp8A, B = ctx.tensors
-        state = ctx.state
 
-        grad_A, grad_B, grad_bias = None, None, None
+        grad_A, grad_B = None, None
 
-        cgrad_out, state = F.quantize_blockwise(grad_ouput, code=ctx.bw_code, blocksize=1024)
-        fp8out = F.dequantize_blockwise(cgrad_out, state)
-
-        if req_gradBias:
-            # compute grad_bias first before changing grad_output dtype
-            grad_bias = fp8out.sum(0, dtype=ctx.dtype_bias)
+        cgrad_out, state = F.quantize_blockwise(grad_output, code=ctx.bw_code, blocksize=1024)
+        fp8out = F.dequantize_blockwise(cgrad_out, state).to(grad_output.dtype)
 
         # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
@@ -461,7 +454,7 @@ class MatMulFP8(torch.autograd.Function):
         if req_gradA: grad_A = torch.matmul(fp8out, B.t())
         if req_gradB: grad_B = torch.matmul(fp8A.t(), fp8out)
 
-        return grad_A, grad_B, None, grad_bias, None, None
+        return grad_A, grad_B, None, None, None
 
 
 def matmul(
@@ -478,9 +471,8 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_fp8(A: tensor, B: tensor, fw_code: tensor, bw_code: tensor, out: tensor = None, bias=None):
-    assert quant_state is not None
-    return MatMulFP8.apply(A, B, out, bias, fw_code, bw_code)
+def matmul_fp8(A: tensor, B: tensor, fw_code: tensor, bw_code: tensor, out: tensor = None):
+    return MatMulFP8.apply(A, B, out, fw_code, bw_code)
 
 
 def matmul(
