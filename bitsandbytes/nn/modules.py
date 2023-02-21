@@ -224,6 +224,34 @@ class Linear8bitLt(nn.Linear):
 
         self.weight = Int8Params(self.weight.data, has_fp16_weights=has_fp16_weights, requires_grad=has_fp16_weights)
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+
+        # we only need to save SCB as extra data, because CB for quantized weights is already stored in weight.data
+        weight_name = "SCB"
+
+        # case 1: .cuda was called, SCB is in self.weight
+        param_from_weight = getattr(self.weight, weight_name)
+        # case 2: self.init_8bit_state was called, SCB is in self.state
+        param_from_state = getattr(self.state, weight_name)
+
+        key_name = prefix + f"{weight_name}"
+        if param_from_weight is not None:
+            destination[key_name] = param_from_weight if keep_vars else param_from_weight.detach()
+        elif not self.state.has_fp16_weights and param_from_state is not None:
+            destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+                                      error_msgs)
+        for key in unexpected_keys:
+            input_name = key[len(prefix):]
+            if input_name == "SCB":
+                input_param = state_dict[key]
+                self.weight.SCB.copy_(input_param)
+                unexpected_keys.remove(key)
+
     def init_8bit_state(self):
         self.state.CB = self.weight.CB
         self.state.SCB = self.weight.SCB

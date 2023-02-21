@@ -1,10 +1,13 @@
-import bitsandbytes as bnb
+from copy import deepcopy
+
 import pytest
 import torch
-from bitsandbytes import functional as F
 
+import bitsandbytes as bnb
+from bitsandbytes import functional as F
 from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
 from bitsandbytes.nn.modules import Linear8bitLt
+
 
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
@@ -26,6 +29,7 @@ def test_layout_exact_match():
         assert restored_x.is_contiguous()
         assert torch.all(torch.eq(restored_x, x))
 
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 def test_linear_no_igemmlt():
     linear = torch.nn.Linear(1024, 3072)
@@ -43,7 +47,7 @@ def test_linear_no_igemmlt():
         linear.weight.data.clone(), requires_grad=False, has_fp16_weights=False
     ).to(linear.weight.dtype)
     linear_custom.bias = linear.bias
-    linear = linear_custom.cuda()
+    linear_custom = linear_custom.cuda()
     linear = linear.half().cuda()
 
     x_ref = x.clone().cuda().requires_grad_(True)
@@ -59,3 +63,49 @@ def test_linear_no_igemmlt():
     assert not linear_custom.state.has_fp16_weights
     assert linear_custom.state.CB is not None
     assert linear_custom.state.CxB is None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+@pytest.mark.parametrize("has_fp16_weights", [False, True])
+def test_linear_serialization(has_fp16_weights):
+    linear = torch.nn.Linear(16, 32)
+    x = torch.randn(3, 16, dtype=torch.half)
+
+    linear_custom = Linear8bitLt(
+        linear.in_features,
+        linear.out_features,
+        linear.bias is not None,
+        has_fp16_weights=has_fp16_weights,
+        threshold=6.0,
+    )
+    linear_custom.state.force_no_igemmlt = True
+    linear_custom.weight = bnb.nn.Int8Params(
+        linear.weight.data.clone(), requires_grad=False, has_fp16_weights=has_fp16_weights
+    ).to(linear.weight.dtype)
+    linear_custom.bias = linear.bias
+    linear_custom = linear_custom.cuda()
+
+    x_first = x.clone().cuda().requires_grad_(True)
+    fx_first = linear_custom(x_first).float()
+    grad_proj = torch.randn_like(fx_first)
+    (fx_first * grad_proj).mean().backward()
+
+    state_dict = deepcopy(linear_custom.state_dict())
+
+    new_linear_custom = Linear8bitLt(
+        linear.in_features,
+        linear.out_features,
+        linear.bias is not None,
+        has_fp16_weights=has_fp16_weights,
+        threshold=6.0,
+    )
+    linear_custom.state.force_no_igemmlt = True
+    new_linear_custom = new_linear_custom.cuda()
+    new_linear_custom.load_state_dict(state_dict, strict=True)
+
+    x_second = x.clone().cuda().requires_grad_(True)
+    fx_second = new_linear_custom(x_second).float()
+    (fx_second * grad_proj).mean().backward()
+
+    assert torch.allclose(fx_first, fx_second, atol=1e-5)
+    assert torch.allclose(x_first.grad, x_second.grad, atol=1e-5)
