@@ -415,8 +415,8 @@ class MatMulFP8(torch.autograd.Function):
         cA, state = F.quantize_blockwise(A, code=fw_code, blocksize=1024)
         fp8A = F.dequantize_blockwise(cA, state, blocksize=1024).to(A.dtype)
 
-        cB, state = F.quantize_blockwise(B, code=fw_code, blocksize=1024)
-        fp8B = F.dequantize_blockwise(cB, state, blocksize=1024).to(B.dtype)
+        cB, state = F.quantize(B.float(), code=fw_code)
+        fp8B = F.dequantize(cB, state).to(B.dtype)
 
         output = torch.matmul(fp8A, fp8B)
 
@@ -450,9 +450,13 @@ class MatMulFP8(torch.autograd.Function):
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
         # not supported by PyTorch. TODO: create work-around
-        #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
-        if req_gradA: grad_A = torch.matmul(fp8out, B.t())
-        if req_gradB: grad_B = torch.matmul(fp8A.t(), fp8out)
+        if req_gradA: grad_A = torch.matmul(fp8out, B.t().to(fp8out.dtype)).to(fp8A.dtype)
+        if req_gradB:
+            if fp8A.ndim == 3:
+                fp8At = fp8A.transpose(2, 1)
+            elif fp8A.ndim == 2:
+                fp8At = fp8A.t()
+            grad_B = torch.matmul(fp8At.to(fp8out.dtype), fp8out).to(B.dtype)
 
         return grad_A, grad_B, None, None, None
 

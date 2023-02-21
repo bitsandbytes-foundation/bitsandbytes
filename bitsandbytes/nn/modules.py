@@ -326,10 +326,11 @@ class Linear8bitLt(nn.Linear):
             self.init_8bit_state()
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
-        if self.bias is not None and self.bias.dtype != torch.float16:
-            self.bias.data = self.bias.data.half()
+        # if self.bias is not None and self.bias.dtype != torch.float16:
+        #     self.bias.data = self.bias.data.half()
 
-        out = bnb.matmul(x, self.weight, bias=self.bias, state=self.state)
+        #out = bnb.matmul(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
+        out = bnb.matmul(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
 
         if not self.state.has_fp16_weights:
             if not self.state.memory_efficient_backward and self.state.CB is not None:
@@ -344,6 +345,28 @@ class Linear8bitLt(nn.Linear):
 
         return out
 
+
+class Linear8bitLtThresh(Linear8bitLt):
+    def __init__(
+        self,
+        input_features,
+        output_features,
+        bias=True,
+        has_fp16_weights=True,
+        memory_efficient_backward=False,
+        threshold=6.0,
+        index=None,
+    ):
+        super().__init__(
+            input_features, 
+            output_features, 
+            bias=bias, 
+            has_fp16_weights=has_fp16_weights, 
+            memory_efficient_backward=memory_efficient_backward, 
+            threshold=threshold, 
+            index=index
+        )
+
 class LinearFP8(nn.Linear):
     def __init__(self, input_features, output_features, bias=True):
         super().__init__(input_features, output_features, bias)
@@ -356,6 +379,36 @@ class LinearFP8(nn.Linear):
             self.fw_code = bnb.functional.create_fp8_map(True, 4, 3, 8).to(x.device)
 
         out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.fw_code, bw_code=self.bw_code)
+        if self.bias is not None:
+            out += self.bias
+
+        return out
+
+class LinearInt8(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True):
+        super().__init__(input_features, output_features, bias)
+        self.code = None
+
+    def forward(self, x: torch.Tensor):
+        if self.code is None:
+            self.code = bnb.functional.create_linear_map(True, 8).to(x.device)
+
+        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.code, bw_code=self.code)
+        if self.bias is not None:
+            out += self.bias
+
+        return out
+
+class LinearInt8Cast(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True):
+        super().__init__(input_features, output_features, bias)
+        self.code = None
+
+    def forward(self, x: torch.Tensor):
+        if self.code is None:
+            self.code = bnb.functional.create_linear_map(True, 8).to(x.device)
+
+        out = bnb.matmul_fp8(x.half(), self.weight.half().t(), fw_code=self.code, bw_code=self.code)
         if self.bias is not None:
             out += self.bias
 
