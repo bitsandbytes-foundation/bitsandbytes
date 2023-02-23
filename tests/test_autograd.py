@@ -239,7 +239,7 @@ dim4 = torch.randint(32, 96, size=(n,)).tolist()
 dim2.append(0)
 
 decomp = [0.0, 6.0]
-funcs = [(torch.matmul, bnb.matmul)]
+funcs = [(torch.matmul, bnb.matmul_mixed)]
 str_funcs = ["matmul"]
 req_grad = [(False, False), (True, False), (True, True), (False, True)]
 req_grad = list(product([True, False], repeat=3))
