@@ -395,38 +395,41 @@ class MatMulFP8(torch.autograd.Function):
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
 
     @staticmethod
-    def forward(ctx, A, B, out=None, fw_code=None, bw_code=None):
+    def forward(ctx, A, B, out=None, fw_code=None, bw_code=None, bsz=1024):
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
             ctx.is_empty = True
             ctx.A = A
             ctx.B = B
+
             B_shape = B.shape
             if A.shape[-1] == B_shape[0]:
                 return torch.empty(A.shape[:-1] + B_shape[1:], dtype=A.dtype, device=A.device)
             else:
                 return torch.empty(A.shape[:-1] + B_shape[:1], dtype=A.dtype, device=A.device)
 
-
         # 1. Dequantize
         # 2. MatmulnN
-
-        cA, state = F.quantize_blockwise(A, code=fw_code, blocksize=1024)
-        fp8A = F.dequantize_blockwise(cA, state, blocksize=1024).to(A.dtype)
+        cA, state = F.quantize_blockwise(A, code=fw_code, blocksize=bsz)
+        fp8A = F.dequantize_blockwise(cA, state, blocksize=bsz).to(A.dtype)
 
         cB, state = F.quantize(B.float(), code=fw_code)
         fp8B = F.dequantize(cB, state).to(B.dtype)
 
         output = torch.matmul(fp8A, fp8B)
 
+        # output is half
 
         # 3. Save state
+        ctx.fw_code = fw_code
         ctx.bw_code = bw_code
+        ctx.bsz = bsz
         ctx.dtype_A, ctx.dtype_B = A.dtype, B.dtype
 
         if any(ctx.needs_input_grad[:2]):
-            ctx.tensors = (fp8A, fp8B)
+            # NOTE: we send back A, and re-quant.
+            ctx.tensors = (A, fp8B)
         else:
             ctx.tensors = (None, None)
 
@@ -435,30 +438,36 @@ class MatMulFP8(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.is_empty:
-            return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, None, None
+            return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, None, None, None
 
-        req_gradA, req_gradB, _, _, _ = ctx.needs_input_grad
-        fp8A, B = ctx.tensors
+        req_gradA, req_gradB, _, _, _, _ = ctx.needs_input_grad
+        A, B = ctx.tensors
 
         grad_A, grad_B = None, None
 
-        cgrad_out, state = F.quantize_blockwise(grad_output, code=ctx.bw_code, blocksize=1024)
-        fp8out = F.dequantize_blockwise(cgrad_out, state, blocksize=1024).to(grad_output.dtype)
+        # TODO: Fix blocksize to be output_dim
+        cgrad_out, state = F.quantize_blockwise(grad_output, code=ctx.bw_code, blocksize=ctx.bsz)
+        fp8out = F.dequantize_blockwise(cgrad_out, state, blocksize=ctx.bsz).to(grad_output.dtype)
 
-        # Cast grad_output to fp16
-        if len(grad_output.shape) == 3:
-            grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+        cgrad_output_2, state_2 = F.quantize(grad_output.float(), code=ctx.bw_code)
+        fp8out_2 = F.dequantize(cgrad_output_2, state_2).to(grad_output.dtype)
+
+        # grad_output_reshape = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+        # fp8grad_transpose, stategrad_transpose = F.vectorwise_quant(grad_output_reshape, dim=0, quant_type='vector')
+        # fp8out_transpose = (fp8grad_transpose / 7) * stategrad_transpose
+        # fp8out_transpose = fp8out_transpose.view(grad_output.shape[0], grad_output.shape[1], grad_output.shape[2])
 
         # not supported by PyTorch. TODO: create work-around
-        if req_gradA: grad_A = torch.matmul(fp8out, B.t().to(fp8out.dtype)).to(fp8A.dtype)
-        if req_gradB:
-            if fp8A.ndim == 3:
-                fp8At = fp8A.transpose(2, 1)
-            elif fp8A.ndim == 2:
-                fp8At = fp8A.t()
-            grad_B = torch.matmul(fp8At.to(fp8out.dtype), fp8out).to(B.dtype)
+        if req_gradA: 
+            grad_A = torch.matmul(fp8out, B.t().to(fp8out.dtype)).to(A.dtype)
 
-        return grad_A, grad_B, None, None, None
+        if req_gradB:
+            At = A.transpose(2, 1).contiguous()
+            cA, state = F.quantize(At.float(), code=ctx.fw_code)
+            fp8At = F.dequantize(cA, state).to(A.dtype)
+            grad_B = torch.matmul(fp8At.to(fp8out_2.dtype), fp8out_2).to(B.dtype)
+
+        return grad_A, grad_B, None, None, None, None
 
 
 class MatMul8bitMixed(torch.autograd.Function):
@@ -659,8 +668,8 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_fp8(A: tensor, B: tensor, fw_code: tensor, bw_code: tensor, out: tensor = None):
-    return MatMulFP8.apply(A, B, out, fw_code, bw_code)
+def matmul_fp8(A: tensor, B: tensor, fw_code: tensor, bw_code: tensor, out: tensor = None, bsz : int = -1):
+    return MatMulFP8.apply(A, B, out, fw_code, bw_code, bsz)
 
 
 def matmul_mixed(

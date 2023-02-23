@@ -346,6 +346,68 @@ class Linear8bitLt(nn.Linear):
         return out
 
 
+# Not in use for now...
+class Linear8bitLt2(nn.Linear):
+    def __init__(
+        self,
+        input_features,
+        output_features,
+        bias=True,
+        has_fp16_weights=True,
+        memory_efficient_backward=False,
+        threshold=0.0,
+        index=None,
+    ):
+        super().__init__(
+            input_features, output_features, bias
+        )
+        self.state = bnb.MatmulLtState()
+        self.index = index
+
+        self.state.threshold = threshold
+        self.state.has_fp16_weights = has_fp16_weights
+        self.state.memory_efficient_backward = memory_efficient_backward
+        if threshold > 0.0 and not has_fp16_weights:
+            self.state.use_pool = True
+
+        self.weight = Int8Params(
+            self.weight.data, has_fp16_weights=has_fp16_weights, requires_grad=has_fp16_weights
+        )
+
+    def init_8bit_state(self):
+        self.state.CB = self.weight.CB
+        self.state.SCB = self.weight.SCB
+        self.weight.CB = None
+        self.weight.SCB = None
+
+    def forward(self, x):
+        self.state.is_training = self.training
+
+        if self.weight.CB is not None:
+            self.init_8bit_state()
+
+        # weights are cast automatically as Int8Params, but the bias has to be cast manually
+        # if self.bias is not None and self.bias.dtype != torch.float16:
+        #     self.bias.data = self.bias.data.half()
+
+        #out = bnb.matmul(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
+        out = bnb.matmul(x, self.weight, bias=None, state=self.state) + self.bias
+        #out = torch.matmul(x.half(), W.half().t()) + self.bias
+
+        if not self.state.has_fp16_weights:
+            if not self.state.memory_efficient_backward and self.state.CB is not None:
+                # we converted 8-bit row major to turing/ampere format in the first inference pass
+                # we no longer need the row-major weight
+                del self.state.CB
+                self.weight.data = self.state.CxB
+            elif self.state.memory_efficient_backward and self.state.CxB is not None:
+                # For memory efficient backward, we convert 8-bit row major to turing/ampere format at each inference pass.
+                # Thus, we delete CxB from the state.
+                del self.state.CxB
+
+        return out
+
+
 class Linear8bitLtThresh(Linear8bitLt):
     def __init__(
         self,
@@ -363,7 +425,7 @@ class Linear8bitLtThresh(Linear8bitLt):
             bias=bias, 
             has_fp16_weights=has_fp16_weights, 
             memory_efficient_backward=memory_efficient_backward, 
-            threshold=threshold, 
+            threshold=6., 
             index=index
         )
 
@@ -372,13 +434,19 @@ class LinearFP8(nn.Linear):
         super().__init__(input_features, output_features, bias)
         self.bw_code = None
         self.fw_code = None
+        array = [4096, 2048, 1024, 512, 256, 128, 64, 0]
+        for i, k in enumerate(array):
+            if input_features > array[i + 1]:
+                self.bsz = k
+                break
+        print('block size is', self.bsz)
 
     def forward(self, x: torch.Tensor):
         if self.fw_code is None:
             self.bw_code = bnb.functional.create_fp8_map(True, 5, 2, 8).to(x.device)
             self.fw_code = bnb.functional.create_fp8_map(True, 4, 3, 8).to(x.device)
 
-        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.fw_code, bw_code=self.bw_code)
+        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.fw_code, bw_code=self.bw_code, bsz=self.bsz)
         if self.bias is not None:
             out += self.bias
 
@@ -388,27 +456,39 @@ class LinearInt8(nn.Linear):
     def __init__(self, input_features, output_features, bias=True):
         super().__init__(input_features, output_features, bias)
         self.code = None
+        array = [4096, 2048, 1024, 512, 256, 128, 64, 0]
+        for i, k in enumerate(array):
+            if input_features > array[i + 1]:
+                self.bsz = k
+                break
 
     def forward(self, x: torch.Tensor):
         if self.code is None:
             self.code = bnb.functional.create_linear_map(True, 8).to(x.device)
 
-        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.code, bw_code=self.code)
+        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.code, bw_code=self.code, bsz=self.bsz)
         if self.bias is not None:
             out += self.bias
 
         return out
 
+# This is 4 bit version.
 class LinearInt8Cast(nn.Linear):
     def __init__(self, input_features, output_features, bias=True):
         super().__init__(input_features, output_features, bias)
         self.code = None
+        array = [4096, 2048, 1024, 512, 256, 128, 64, 0]
+        for i, k in enumerate(array):
+            if input_features > array[i + 1]:
+                self.bsz = k
+                break
+
 
     def forward(self, x: torch.Tensor):
         if self.code is None:
-            self.code = bnb.functional.create_linear_map(True, 8).to(x.device)
+            self.code = bnb.functional.create_linear_map(True, 4).to(x.device)
 
-        out = bnb.matmul_fp8(x.half(), self.weight.half().t(), fw_code=self.code, bw_code=self.code)
+        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.code, bw_code=self.code, bsz=self.bsz)
         if self.bias is not None:
             out += self.bias
 
