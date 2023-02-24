@@ -404,10 +404,10 @@ class MatMul8bitLt(torch.autograd.Function):
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
         if any(ctx.needs_input_grad[:2]):
-            ctx.tensors = (CAt, subA)
+            ctx.tensors = (CAt, subA, A)
             ctx.tensor_states = (SCAt, state.idx)
         else:
-            ctx.tensors = [None, None]
+            ctx.tensors = [None, None, A]
             ctx.tensor_states = (None, None)
             ctx.save_for_backward(None, None)
 
@@ -420,7 +420,7 @@ class MatMul8bitLt(torch.autograd.Function):
             bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
-        CAt, subA = ctx.tensors
+        CAt, subA, A = ctx.tensors
         SCAt, idx = ctx.tensor_states
         formatB = ctx.formatB
         state = ctx.state
@@ -436,6 +436,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
+            #grad_B = torch.matmul(grad_output.t(), A)
             CxAt, SAt = F.transform(CAt, formatB, transpose=True)
             C32grad, Sgrad = F.transform(Cgradt, "col32", transpose=True)
             gradB32, SgradB32 = F.igemmlt(C32grad, CxAt, Sgrad, SAt)
