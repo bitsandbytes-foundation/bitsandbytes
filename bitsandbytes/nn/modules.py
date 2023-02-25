@@ -236,20 +236,7 @@ class Linear8bitLt(nn.Linear):
 
         try:
             if reorder_layout:
-                if self.state.tile_indices is None:
-                    order, tile_size = self.state.formatB, self.state.get_tile_size()
-                    transform = lambda x: \
-                        bitsandbytes.functional.transform(x.to(self.weight.data.device), from_order="row",
-                                                          to_order=order)[0].to(x.device)
-                    with torch.no_grad():
-                        self.state.tile_indices = get_inverse_transform_indices(transform, tile_size).to(
-                            self.state.CxB.device)
-
-                CB = (
-                    undo_layout(self.state.CxB, self.state.tile_indices)
-                )
-
-                self.weight.data = CB
+                self.weight.data = undo_layout(self.state.CxB, self.state.tile_indices)
 
             super()._save_to_state_dict(destination, prefix, keep_vars)
 
