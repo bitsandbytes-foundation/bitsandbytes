@@ -801,7 +801,6 @@ __global__ void kPreconditionOptimizer32bit1State(T* g, T* p,
               case LION:
                   // using eps as beta2
                   s1_vals[j] = s1_vals[j]*eps + ((1.0f-eps)*(float)g_vals[j]); // state update
-                  s1_vals[j] = s1_vals[j]*s1_vals[j]; // update norm
                   break;
               case RMSPROP:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j])); // state update
