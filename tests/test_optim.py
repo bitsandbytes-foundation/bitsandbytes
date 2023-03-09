@@ -50,10 +50,6 @@ str2optimizers["rmsprop"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=False),
 )
-str2optimizers["rmsprop"] = (
-    lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=False),
-)
 str2optimizers["adam8bit"] = (
     torch.optim.Adam,
     lambda pxx: bnb.optim.Adam8bit(pxx, block_wise=False),
