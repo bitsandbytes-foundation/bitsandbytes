@@ -18,12 +18,13 @@ class Lion(Optimizer1State):
         percentile_clipping=100,
         block_wise=True,
     ):
+        beta1, beta2 = betas
         super().__init__(
             "lion",
             params,
             lr,
-            betas,
-            0.,
+            (beta1, 0.),
+            beta2,
             weight_decay,
             optim_bits,
             args,
@@ -44,13 +45,14 @@ class Lion8bit(Optimizer1State):
         min_8bit_size=4096,
         percentile_clipping=100,
         block_wise=True,
-    ):        
+    ):
+        beta1, beta2 = betas
         super().__init__(
             "lion",
             params,
             lr,
-            betas,
-            0.,
+            (beta1, 0.),
+            beta2,
             weight_decay,
             8,
             args,
@@ -72,12 +74,13 @@ class Lion32bit(Optimizer1State):
         percentile_clipping=100,
         block_wise=True,
     ):
+        beta1, beta2 = betas
         super().__init__(
             "lion",
             params,
             lr,
-            betas,
-            0.,
+            (beta1, 0.),
+            beta2,
             weight_decay,
             32,
             args,
