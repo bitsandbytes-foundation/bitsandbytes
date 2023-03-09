@@ -1691,6 +1691,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 							if(weight_decay > 0.0f) {
 								switch(OPTIMIZER) {
                   case MOMENTUM:
+                  case ADAGRAD:
                   case RMSPROP:
                     g_val += ((float)p_vals[j])*weight_decay;
                     break;
