@@ -217,6 +217,14 @@ __device__ __forceinline__ unsigned char quantize_quadrant(int QUADRANT, float *
     }
 }
 
+// sign function for lion
+// taken from https://stackoverflow.com/a/4609795, but not sure if there's a proper way to do this in CUDA
+
+template <typename T>
+__device__ int sgn(T val) {
+  return (T(0) < val) - (val < T(0));
+}
+
 __global__ void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n)
 {
   const int tid = threadIdx.x + (blockDim.x*blockIdx.x);
