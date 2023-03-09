@@ -40,7 +40,7 @@ out = linear(x.to(torch.float16))
 ## Features
 - 8-bit Matrix multiplication with mixed precision decomposition
 - LLM.int8() inference
-- 8-bit Optimizers: Adam, AdamW, RMSProp, LARS, LAMB (saves 75% memory)
+- 8-bit Optimizers: Adam, AdamW, RMSProp, LARS, LAMB, Lion (saves 75% memory)
 - Stable Embedding Layer: Improved stability through better initialization, and normalization
 - 8-bit quantization: Quantile, Linear, and Dynamic quantization
 - Fast quantile estimation: Up to 100x faster than other algorithms

@@ -790,6 +790,7 @@ __global__ void kPreconditionOptimizer32bit1State(T* g, T* p,
                     s1_vals[j] = s1_vals[j]*beta1 + ((float)g_vals[j]); // state update
                   s1_vals[j] = s1_vals[j]*s1_vals[j]; // update norm
                   break;
+              case LION:
               case RMSPROP:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j])); // state update
                   s1_vals[j] = __fdividef((float)g_vals[j],sqrtf(s1_vals[j])+eps); // update value
@@ -890,6 +891,7 @@ __global__ void kOptimizer32bit1State(T *g, T *p,
 
 										p_vals[j] = ((float)p_vals[j]) + update_scale*(-lr*(s1_vals[j]));
 										break;
+                case LION:
 								case RMSPROP:
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j]));
 										p_vals[j] = ((float)p_vals[j]) - update_scale*(lr*__fdividef((float)g_vals[j],sqrtf((float)s1_vals[j])+eps));
@@ -1219,6 +1221,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                     if(unorm != NULL)
                       local_unorm += s1_vals[j]*s1_vals[j];
                     break;
+              case LION:
               case RMSPROP:
                     s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
                   break;
@@ -1321,6 +1324,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
 
                   p_vals[j] = ((float)p_vals[j]) + (-lr*update_scale*(s1_vals[j]));
                   break;
+              case LION:
               case RMSPROP:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
                   p_vals[j] = ((float)p_vals[j]) - (lr*__fdividef(g_val,sqrtf(s1_vals[j])+eps));
@@ -1664,6 +1668,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 										else
 											s1_vals[j] = (s1_vals[j]*beta1) + g_val;
 										break;
+                  case LION:
 									case RMSPROP:
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
 										break;
@@ -1701,6 +1706,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 									case MOMENTUM:
 										p_vals[j] = ((float)p_vals[j]) - lr*(s1_vals[j]);
 										break;
+                  case LION:
 									case RMSPROP:
 										g_val = g_vals[j];
 										p_vals[j] = ((float)p_vals[j]) - lr*(__fdividef(g_val, sqrtf(s1_vals[j])+eps));
@@ -2699,6 +2705,8 @@ MAKE_PreconditionOptimizer32bit1State(MOMENTUM, half)
 MAKE_PreconditionOptimizer32bit1State(MOMENTUM, float)
 MAKE_PreconditionOptimizer32bit1State(RMSPROP, half)
 MAKE_PreconditionOptimizer32bit1State(RMSPROP, float)
+MAKE_PreconditionOptimizer32bit1State(LION, half)
+MAKE_PreconditionOptimizer32bit1State(LION, float)
 MAKE_PreconditionOptimizer32bit1State(ADAGRAD, half)
 MAKE_PreconditionOptimizer32bit1State(ADAGRAD, float)
 
@@ -2710,6 +2718,8 @@ MAKE_Optimizer32bit1State(MOMENTUM, half)
 MAKE_Optimizer32bit1State(MOMENTUM, float)
 MAKE_Optimizer32bit1State(RMSPROP, half)
 MAKE_Optimizer32bit1State(RMSPROP, float)
+MAKE_Optimizer32bit1State(LION, half)
+MAKE_Optimizer32bit1State(LION, float)
 MAKE_Optimizer32bit1State(ADAGRAD, half)
 MAKE_Optimizer32bit1State(ADAGRAD, float)
 
@@ -2742,6 +2752,8 @@ MAKE_PreconditionStatic8bit1State(MOMENTUM, half)
 MAKE_PreconditionStatic8bit1State(MOMENTUM, float)
 MAKE_PreconditionStatic8bit1State(RMSPROP, half)
 MAKE_PreconditionStatic8bit1State(RMSPROP, float)
+MAKE_PreconditionStatic8bit1State(LION, half)
+MAKE_PreconditionStatic8bit1State(LION, float)
 
 #define MAKE_optimizerStatic8bit1State(oname, gtype) \
 template __global__ void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1,  \
@@ -2758,6 +2770,8 @@ MAKE_optimizerStatic8bit1State(MOMENTUM, half)
 MAKE_optimizerStatic8bit1State(MOMENTUM, float)
 MAKE_optimizerStatic8bit1State(RMSPROP, half)
 MAKE_optimizerStatic8bit1State(RMSPROP, float)
+MAKE_optimizerStatic8bit1State(LION, half)
+MAKE_optimizerStatic8bit1State(LION, float)
 
 #define MAKE_PreconditionStatic8bit2State(oname, gtype) \
 template __global__ void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2, \
@@ -2849,5 +2863,7 @@ MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, half, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, half, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, float, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, half, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, half, 2048, 8)

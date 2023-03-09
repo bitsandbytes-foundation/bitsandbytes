@@ -19,7 +19,7 @@ class Lion(Optimizer1State):
         block_wise=True,
     ):
         super().__init__(
-            "rmsprop",
+            "lion",
             params,
             lr,
             betas,
@@ -46,7 +46,7 @@ class Lion8bit(Optimizer1State):
         block_wise=True,
     ):        
         super().__init__(
-            "rmsprop",
+            "lion",
             params,
             lr,
             betas,
@@ -73,7 +73,7 @@ class Lion32bit(Optimizer1State):
         block_wise=True,
     ):
         super().__init__(
-            "rmsprop",
+            "lion",
             params,
             lr,
             betas,
