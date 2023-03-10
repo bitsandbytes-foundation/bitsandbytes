@@ -1712,8 +1712,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 											s1_vals[j] = (s1_vals[j]*beta1) + g_val;
 										break;
 									case LION:
-										// using eps as beta2
-										s1_vals[j] = s1_vals[j]*eps + ((1.0f-eps)*g_val);
+										s1_vals[j] = s1_vals[j]*beta2 + ((1.0f-beta2)*g_val);
 										break;
 									case RMSPROP:
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
