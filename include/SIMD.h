@@ -49,6 +49,12 @@ struct IVec;
 template <InstrSet I, class T>
 struct FVec1;
 
+template <InstrSet I, class T> 
+    struct InstrFloatTraits
+{
+    typedef T vec_t;
+};
+
 template <> struct InstrIntTraits<SSE>
 {
     typedef __m128i vec_t;
