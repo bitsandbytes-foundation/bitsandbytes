@@ -128,6 +128,16 @@ if [ ! -f "./bitsandbytes/libbitsandbytes_cuda120.so" ]; then
   exit 64
 fi
 
+make clean
+export CUDA_HOME=$BASE_PATH/cuda-12.1
+make cuda12x CUDA_VERSION=121
+
+if [ ! -f "./bitsandbytes/libbitsandbytes_cuda121.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+
 
 make clean
 export CUDA_HOME=$BASE_PATH/cuda-10.2
@@ -236,6 +246,16 @@ export CUDA_HOME=$BASE_PATH/cuda-12.0
 make cuda12x_nomatmul CUDA_VERSION=120
 
 if [ ! -f "./bitsandbytes/libbitsandbytes_cuda120_nocublaslt.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+
+make clean
+export CUDA_HOME=$BASE_PATH/cuda-12.1
+make cuda12x_nomatmul CUDA_VERSION=121
+
+if [ ! -f "./bitsandbytes/libbitsandbytes_cuda121_nocublaslt.so" ]; then
   # Control will enter here if $DIRECTORY doesn't exist.
   echo "Compilation unsuccessul!" 1>&2
   exit 64
