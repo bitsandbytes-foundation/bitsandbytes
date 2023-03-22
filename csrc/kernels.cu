@@ -1682,10 +1682,10 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         {
             g_val = float(g_vals[j]);
             g_val *= gnorm_scale;
-						if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
-						{
-							if(weight_decay > 0.0f) {
-								switch(OPTIMIZER) {
+            if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
+            {
+              if(weight_decay > 0.0f) {
+                switch(OPTIMIZER) {
                   case MOMENTUM:
                   case ADAGRAD:
                   case RMSPROP:
