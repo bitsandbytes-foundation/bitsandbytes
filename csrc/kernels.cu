@@ -1708,9 +1708,9 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 											s1_vals[j] = (s1_vals[j]*beta1) + g_val;
 										break;
 									case LION:
-                    // here, using gvals[j] to store the gradient smoothed by beta1
-                    // then update the momentum state1, to make sure the order is correct
-                    g_vals[j] = lr*sgn(((float)s1_vals[j])*beta1 + ((1.0f-beta1)*g_val));
+										// here, using gvals[j] to store the gradient smoothed by beta1
+										// then update the momentum state1, to make sure the order is correct
+										g_vals[j] = lr*sgn(((float)s1_vals[j])*beta1 + ((1.0f-beta1)*g_val));
 										s1_vals[j] = s1_vals[j]*beta2 + ((1.0f-beta2)*g_val);
 										break;
 									case RMSPROP:
