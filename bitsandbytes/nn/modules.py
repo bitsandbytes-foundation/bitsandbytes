@@ -173,10 +173,11 @@ class FP4Params(torch.nn.Parameter):
 
 
 class LinearFP4(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None):
         super().__init__(input_features, output_features, bias)
         self.state = bnb.MatmulLtState()
         self.weight = FP4Params(self.weight.data, requires_grad=False)
+        self.compute_dtype = compute_dtype
 
     def init_8bit_state(self):
         pass
@@ -191,9 +192,12 @@ class LinearFP4(nn.Linear):
         if getattr(self.weight, 'quant_state', None) is None:
             print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
         inp_dtype = x.dtype
-        x = x.to(torch.float16)
+        if self.compute_dtype is not None:
+            x = x.to(self.compute_dtype)
+
         bias = None if self.bias is None else self.bias.half()
         out = bnb.matmul_fp4(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
+
         out = out.to(inp_dtype)
 
         return out

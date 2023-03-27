@@ -1784,17 +1784,17 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     print("partial matmul", time.time() - t0)
 
 
-batch_size = 1
-seqdim = 1
+batch_size = 4
+seqdim = 256
 values = []
 values.append((batch_size, seqdim, 768, 4 * 768))
-#values.append((batch_size, seqdim, 1024, 4*1024))
-#values.append((batch_size, seqdim, 1536, 4*1536))
-#values.append((batch_size, seqdim, 2048, 4*2048))
-#values.append((batch_size, seqdim, 2560, 4*2560))
-#values.append((batch_size, seqdim, 4096, 4*4096))
-#values.append((batch_size, seqdim, 5140, 4*5140))
-#values.append((batch_size, seqdim, 12288, 4*12288))
+values.append((batch_size, seqdim, 1024, 4*1024))
+values.append((batch_size, seqdim, 1536, 4*1536))
+values.append((batch_size, seqdim, 2048, 4*2048))
+values.append((batch_size, seqdim, 2560, 4*2560))
+values.append((batch_size, seqdim, 4096, 4*4096))
+values.append((batch_size, seqdim, 5140, 4*5140))
+values.append((batch_size, seqdim, 12288, 4*12288))
 names = ["batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
@@ -1839,90 +1839,90 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.cuda.synchronize()
     print( f"bnb fp4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        bnb.matmul(A, B)
-    torch.cuda.synchronize()
-    print(f"CB -> CxB conversion (each iteration): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    bnb.matmul(A, B)
+    #torch.cuda.synchronize()
+    #print(f"CB -> CxB conversion (each iteration): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        bnb.matmul(A, B, threshold=6.0)
-    torch.cuda.synchronize()
-    print(f"CB -> CxB conversion + threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    bnb.matmul(A, B, threshold=6.0)
+    #torch.cuda.synchronize()
+    #print(f"CB -> CxB conversion + threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=0.0)
-    C32A, SA = F.transform(CA, "col32")
-    CB, CBt, SCB, SCBt, coo_tensorB = F.double_quant(B)
-    CxB, SB = F.transform(CB, to_order=formatB)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
-    torch.cuda.synchronize()
-    print(f"no overhead matmul-lt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=0.0)
+    #C32A, SA = F.transform(CA, "col32")
+    #CB, CBt, SCB, SCBt, coo_tensorB = F.double_quant(B)
+    #CxB, SB = F.transform(CB, to_order=formatB)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
+    #torch.cuda.synchronize()
+    #print(f"no overhead matmul-lt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    BA, statsB = F.vectorwise_quant(B, dim=1)
-    CxB, SB = F.nvidia_transform(CB, to_order=formatB)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        A2 = A.view(-1, A.shape[-1]).contiguous()
-        CA, statsA = F.vectorwise_quant(A2, dim=1)
-        C32A, SA = F.nvidia_transform(CA, "col32")
-        out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
-        Cout, Sout = F.nvidia_transform(out32, "row", state=Sout32)
-        F.vectorwise_mm_dequant(Cout, statsA, statsB.t())
-    torch.cuda.synchronize()
-    print(f"vector pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #BA, statsB = F.vectorwise_quant(B, dim=1)
+    #CxB, SB = F.nvidia_transform(CB, to_order=formatB)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    A2 = A.view(-1, A.shape[-1]).contiguous()
+    #    CA, statsA = F.vectorwise_quant(A2, dim=1)
+    #    C32A, SA = F.nvidia_transform(CA, "col32")
+    #    out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
+    #    Cout, Sout = F.nvidia_transform(out32, "row", state=Sout32)
+    #    F.vectorwise_mm_dequant(Cout, statsA, statsB.t())
+    #torch.cuda.synchronize()
+    #print(f"vector pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    BA, statsB = F.vectorwise_quant(B, dim=1, quant_type="linear")
-    CxB, SB = F.nvidia_transform(CB, to_order=formatB)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        A2 = A.view(-1, A.shape[-1]).contiguous()
-        CA, statsA = F.vectorwise_quant(A2, dim=1, quant_type="linear")
-        C32A, SA = F.nvidia_transform(CA, "col32")
-        out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
-        Cout, Sout = F.nvidia_transform(out32, "row", state=Sout32)
-        out = Cout * statsB * statsA * (1.0 / (127 * 127))
-    torch.cuda.synchronize()
-    print(f"linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #BA, statsB = F.vectorwise_quant(B, dim=1, quant_type="linear")
+    #CxB, SB = F.nvidia_transform(CB, to_order=formatB)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    A2 = A.view(-1, A.shape[-1]).contiguous()
+    #    CA, statsA = F.vectorwise_quant(A2, dim=1, quant_type="linear")
+    #    C32A, SA = F.nvidia_transform(CA, "col32")
+    #    out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
+    #    Cout, Sout = F.nvidia_transform(out32, "row", state=Sout32)
+    #    out = Cout * statsB * statsA * (1.0 / (127 * 127))
+    #torch.cuda.synchronize()
+    #print(f"linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    linear8bit(A)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        linear8bit(A)
-    torch.cuda.synchronize()
-    print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #linear8bit(A)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    linear8bit(A)
+    #torch.cuda.synchronize()
+    #print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    linearMixedBit(A)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        linearMixedBit(A)
-    torch.cuda.synchronize()
-    print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #linearMixedBit(A)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    linearMixedBit(A)
+    #torch.cuda.synchronize()
+    #print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    linear8bit_train(A)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        linear8bit_train(A)
-    torch.cuda.synchronize()
-    print( f"bnb linear8bitlt (training): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #linear8bit_train(A)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    linear8bit_train(A)
+    #torch.cuda.synchronize()
+    #print( f"bnb linear8bitlt (training): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    linear8bit_train_thresh(A)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        linear8bit_train(A)
-    torch.cuda.synchronize()
-    print( f"bnb linear8bitlt with threshold (training): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #linear8bit_train_thresh(A)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    linear8bit_train(A)
+    #torch.cuda.synchronize()
+    #print( f"bnb linear8bitlt with threshold (training): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
 def test_zeropoint():
     def quant_zp(x):
