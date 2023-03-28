@@ -9,55 +9,34 @@ set(FILES_CPP csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.c)
 
 option(MAKE_CUDA_BUILD "Build using CUDA" ON)
 option(NO_CUBLASLT "Don't use CUBLAST" OFF)
-option(USE_AVX2 "Enable AVX2 for CPU side" ON)
 
 set(COMPUTE_CAPABILITY 
-        "-gencode arch=compute_50,code=sm_50"
-        "-gencode arch=compute_52,code=sm_52" # Maxwell
-        "-gencode arch=compute_60,code=sm_60" # Pascal
-        "-gencode arch=compute_61,code=sm_61" # Pascal
-        "-gencode arch=compute_70,code=sm_70" # Volta
-        "-gencode arch=compute_72,code=sm_72" # Volta
+        50 52 60 61 70 72
     )
 
-set(CC_KEPLER 
-    "-gencode arch=compute_35,code=sm_35"
-        "-gencode arch=compute_37,code=sm_37")
+set(CC_KEPLER 35 37)
 # Later versions of CUDA support the new architectures
-set(CC_CUDA10x 
-    "-gencode arch=compute_75,code=sm_75")
+set(CC_CUDA10x 75)
 
-set(CC_CUDA110 
-    "-gencode arch=compute_75,code=sm_75"
-    "-gencode arch=compute_80,code=sm_80")
-set(CC_CUDA11x 
-    "-gencode arch=compute_75,code=sm_75"
-    "-gencode arch=compute_80,code=sm_80"
-    "-gencode arch=compute_86,code=sm_86")
-set(CC_cublasLt110 
-    "-gencode arch=compute_75,code=sm_75"
-    "-gencode arch=compute_80,code=sm_80")
+set(CC_CUDA110 75 80)
+set(CC_CUDA11x 75 80 86)
+set(CC_cublasLt110 75 80)
 
-set(CC_cublasLt111 
-    "-gencode arch=compute_75,code=sm_75"
-    "-gencode arch=compute_80,code=sm_80"
-    "-gencode arch=compute_86,code=sm_86")
-set(CC_ADA_HOPPER
-    "-gencode arch=compute_89,code=sm_89"
-    "-gencode arch=compute_90,code=sm_90"
-)
+set(CC_cublasLt111 75 80 86)
+set(CC_ADA_HOPPER 89 90)
 
 if( MAKE_CUDA_BUILD ) 
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         set(CMAKE_CUDA_ARCHITECTURES 75 80 86)
     endif()
-    set(ADDITIONAL_CUDA_FLAGS "--use_fast_math")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${ADDITIONAL_CUDA_FLAGS}")
-    
+   
     if(NOT DEFINED CMAKE_CUDA_STANDARD)
         set(CMAKE_CUDA_STANDARD 11)
         set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     endif()
+
+    set(ADDITIONAL_CUDA_FLAGS "--use_fast_math")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${ADDITIONAL_CUDA_FLAGS}")
 
     add_library(libbitsandbytes_cuda SHARED 
         ${FILES_CPP}
@@ -67,9 +46,8 @@ if( MAKE_CUDA_BUILD )
     if(NO_CUBLASLT)
         add_definitions(-DNO_CUBLASLT)
     endif(NO_CUBLASLT)
-    if(USE_AVX2)
-        add_definitions(-DUSE_AVX2 -DUSE_AVX)
-    endif(USE_AVX2)
+
+    add_definitions(-DUSE_AVX2 -DUSE_AVX)
     set_target_properties(libbitsandbytes_cuda PROPERTIES
                                 CUDA_SEPARABLE_COMPILATION ON)
     set_target_properties(libbitsandbytes_cuda PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -85,6 +63,18 @@ if( MAKE_CUDA_BUILD )
         curand
         cusparse
     )
-else()   
-endif(MAKE_CUDA_BUILD)     
+endif(MAKE_CUDA_BUILD)  
+
+add_library(libbitsandbytes_cpu SHARED 
+    ${FILES_CPP}
+)
+add_definitions(-DUSE_AVX2 -DUSE_AVX)
+set_target_properties(libbitsandbytes_cpu PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+target_include_directories(libbitsandbytes_cpu PRIVATE
+    "${PROJECT_SOURCE_DIR}/csrc/"
+    "${PROJECT_SOURCE_DIR}/include/"
+)
+
+    
 
