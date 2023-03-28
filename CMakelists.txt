@@ -9,26 +9,31 @@ set(FILES_CPP csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.c)
 
 option(MAKE_CUDA_BUILD "Build using CUDA" ON)
 option(NO_CUBLASLT "Don't use CUBLAST" OFF)
-
-set(COMPUTE_CAPABILITY 
-        50 52 60 61 70 72
-    )
-
-set(CC_KEPLER 35 37)
+set(CUDA_VERSION "11.7" CACHE STRING "CUDA Version DLL Name: 11.0, 11.7, 11.6")
+set(CUDA_VERSION_FIXED "")
+set(CUDA_VERSION_MAJOR "")
+string(REPLACE "." "" CUDA_VERSION_FIXED "${CUDA_VERSION}")
+string(REGEX MATCH "[^\.]+" CUDA_VERSION_MAJOR "${CUDA_VERSION}")
+    
 # Later versions of CUDA support the new architectures
 set(CC_CUDA10x 75)
-
 set(CC_CUDA110 75 80)
 set(CC_CUDA11x 75 80 86)
-set(CC_cublasLt110 75 80)
-
-set(CC_cublasLt111 75 80 86)
-set(CC_ADA_HOPPER 89 90)
+set(CC_CUDA12x 89 90)
 
 add_definitions(-DUSE_AVX2 -DUSE_AVX)
 if( MAKE_CUDA_BUILD ) 
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-        set(CMAKE_CUDA_ARCHITECTURES 75 80 86)
+        if(${CUDA_VERSION} EQUAL "11.0")
+            set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA110})
+        elseif(${CUDA_VERSION_MAJOR} EQUAL "11")
+            set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA11x})
+        elseif(${CUDA_VERSION_MAJOR} EQUAL "12")
+            set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA12x})
+        else()
+            set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA10x})
+            set(NO_CUBLASLT ON)
+        endif()
     endif()
    
     if(NOT DEFINED CMAKE_CUDA_STANDARD)
@@ -54,7 +59,7 @@ if( MAKE_CUDA_BUILD )
         POSITION_INDEPENDENT_CODE ON
         CUDA_SEPARABLE_COMPILATION ON
         PREFIX ""
-        OUTPUT_NAME "libbitsandbytes_cuda${CMAKE_CUDA_STANDARD}7"
+        OUTPUT_NAME "libbitsandbytes_cuda${CUDA_VERSION_FIXED}"
         LINKER_LANGUAGE C 
         WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
 #    add_link_options(-Wl,--export-all-symbols)
