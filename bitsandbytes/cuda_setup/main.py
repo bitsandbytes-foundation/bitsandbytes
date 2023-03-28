@@ -106,7 +106,7 @@ class CUDASetup:
         try:
             if not binary_path.exists():
                 self.add_log_entry(f"CUDA SETUP: Required library version not found: {binary_name}. Maybe you need to compile it from source?")
-                legacy_binary_name = "libbitsandbytes_cpu.so"
+                legacy_binary_name = "libbitsandbytes_cpu" + SHARED_LIB_EXTENSION
                 self.add_log_entry(f"CUDA SETUP: Defaulting to {legacy_binary_name}...")
                 binary_path = package_dir / legacy_binary_name
                 if not binary_path.exists() or torch.cuda.is_available():
@@ -124,7 +124,7 @@ class CUDASetup:
                     self.generate_instructions()
                     self.print_log_stack()
                     raise Exception('CUDA SETUP: Setup Failed!')
-                self.lib = ct.cdll.LoadLibrary(binary_path)
+                self.lib = ct.cdll.LoadLibrary(str(binary_path))
             else:
                 self.add_log_entry(f"CUDA SETUP: Loading binary {binary_path}...")
                 self.lib = ct.cdll.LoadLibrary(str(binary_path))
