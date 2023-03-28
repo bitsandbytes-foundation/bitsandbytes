@@ -1,5 +1,7 @@
 #include <BinSearch.h>
-#include <pthread.h>
+#include <thread>
+#include <vector>
+#include <future>
 #include <common.h>
 
 using namespace BinSearch;
@@ -23,16 +25,16 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
     num_blocks += n % blocksize == 0 ? 0 : 1;
 
     const uint32 elements_code = 256;
-    BinAlgo<Scalar, float, Direct2> bin_searcher(code, elements_code);
+    BinAlgo<AVX, float, Direct2> bin_searcher(code, elements_code);
 
     int thread_wave_size = 256;
+    std::vector<std::future<void>> wave_storage;
+    wave_storage.reserve(thread_wave_size); // prealloc
     // we chunk the thresds into waves of 256 since the max limit is
     // between 16k and 64k on Linux (we reach this when running BLOOM-176B with a large batch size)
     for(long long offset = 0; offset < num_blocks; offset+=thread_wave_size)
     {
       long long valid_chunks = num_blocks - offset >= thread_wave_size ? thread_wave_size : num_blocks - offset;
-      pthread_t *threads = (pthread_t *) malloc(sizeof(pthread_t) * valid_chunks);
-
       struct quantize_block_args **args = (quantize_block_args **) malloc(valid_chunks * sizeof(quantize_block_args *));
 
       for(long long i = 0; i < valid_chunks; i++)
@@ -55,19 +57,18 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
           arg->threadidx = block_idx / blocksize;
           arg->blocksize = blocksize;
 
-          pthread_create(&threads[chunks_processed], NULL, &quantize_block, (void *) arg);
+          wave_storage.emplace_back(std::async(std::launch::async, [arg] {quantize_block(arg); }));
           chunks_processed += 1;
           if(chunks_processed == valid_chunks){ break; }
       }
 
-      for (int i = 0; i < valid_chunks; i++)
-          int err = pthread_join(threads[i], NULL);
+      for (int i = 0; i < wave_storage.size(); i++)
+          wave_storage[i].wait();
+      wave_storage.clear();
 
-      free(threads);
       for (int i = 0; i < valid_chunks; i++)
           free(args[i]);
       free(args);
-
     }
 
 }

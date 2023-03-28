@@ -8,7 +8,7 @@ using namespace BinSearch;
 #define BLOCK_SIZE 16384
 
 struct quantize_block_args {
-    BinAlgo<Scalar, float, Direct2> *bin_searcher;
+    BinAlgo<AVX, float, Direct2> *bin_searcher;
     float *code;
     float *A;
     float *absmax;

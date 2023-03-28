@@ -9,7 +9,9 @@
 
 #include <stdio.h>
 #include <iostream>
+#if !defined(_MSC_VER) && !defined(_WIN32)
 #include <unistd.h>
+#endif
 #include <assert.h>
 
 #include <cuda_runtime_api.h>
