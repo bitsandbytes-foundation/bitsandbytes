@@ -1,7 +1,7 @@
 import os
 from typing import Dict
-
-
+import platform
+IS_WINDOWS_PLATFORM: bool = (platform.system()=="Windows")
 def to_be_ignored(env_var: str, value: str) -> bool:
     ignorable = {
         "PWD",  # PWD: this is how the shell keeps track of the current working dir
@@ -15,16 +15,18 @@ def to_be_ignored(env_var: str, value: str) -> bool:
         "MAIL",  # something related to emails
         "SHELL",  # binary for currently invoked shell
         "DBUS_SESSION_BUS_ADDRESS",  # hardware related
-        "PATH",  # this is for finding binaries, not libraries
         "LESSOPEN",  # related to the `less` command
         "LESSCLOSE",
         "_",  # current Python interpreter
     }
+    if not IS_WINDOWS_PLATFORM :
+        ignorable.add("PATH"),  # this is for finding binaries, not libraries in linux.
+    
     return env_var in ignorable
 
 
 def might_contain_a_path(candidate: str) -> bool:
-    return "/" in candidate
+    return "/" in candidate or (IS_WINDOWS_PLATFORM and "\\" in candidate)
 
 
 def is_active_conda_env(env_var: str) -> bool:

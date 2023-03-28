@@ -20,14 +20,19 @@ import ctypes as ct
 import os
 import errno
 import torch
+import platform
 from warnings import warn
 
 from pathlib import Path
 from typing import Set, Union
 from .env_vars import get_potentially_lib_path_containing_env_vars
 
-CUDA_RUNTIME_LIB: str = "libcudart.so"
 
+IS_WINDOWS_PLATFORM: bool = (platform.system()=="Windows")
+PATH_COLLECTION_SEPARATOR: str = ":" if not IS_WINDOWS_PLATFORM else ";"
+CUDA_RUNTIME_LIB: str = "libcudart.so" if not IS_WINDOWS_PLATFORM else "cudart64_110.dll"
+CUDA_SHARED_LIB_NAME: str = "libcuda.so" if not IS_WINDOWS_PLATFORM else "C:\\Windows\\System32\\nvcuda.dll"
+SHARED_LIB_EXTENSION: str = ".so" if not IS_WINDOWS_PLATFORM else ".dll"
 class CUDASetup:
     _instance = None
 
@@ -122,7 +127,7 @@ class CUDASetup:
                 self.lib = ct.cdll.LoadLibrary(binary_path)
             else:
                 self.add_log_entry(f"CUDA SETUP: Loading binary {binary_path}...")
-                self.lib = ct.cdll.LoadLibrary(binary_path)
+                self.lib = ct.cdll.LoadLibrary(str(binary_path))
         except Exception as ex:
             self.add_log_entry(str(ex))
             self.print_log_stack()
@@ -156,7 +161,7 @@ def is_cublasLt_compatible(cc):
     return has_cublaslt
 
 def extract_candidate_paths(paths_list_candidate: str) -> Set[Path]:
-    return {Path(ld_path) for ld_path in paths_list_candidate.split(":") if ld_path}
+    return {Path(ld_path) for ld_path in paths_list_candidate.split(PATH_COLLECTION_SEPARATOR) if ld_path}
 
 
 def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
@@ -246,10 +251,29 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
 
         CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["LD_LIBRARY_PATH"]} did not contain '
             f'{CUDA_RUNTIME_LIB} as expected! Searching further paths...', is_warning=True)
+        
+    if "PATH" in candidate_env_vars:
+        lib_ld_cuda_libs = find_cuda_lib_in(candidate_env_vars["PATH"])
 
+        if lib_ld_cuda_libs:
+            return next(iter(lib_ld_cuda_libs))
+        warn_in_case_of_duplicates(lib_ld_cuda_libs)
+
+        CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["PATH"]} did not contain '
+            f'{CUDA_RUNTIME_LIB} as expected! Searching further paths...', is_warning=True)
+    if "CUDA_PATH" in candidate_env_vars:
+        lib_ld_cuda_libs = find_cuda_lib_in(candidate_env_vars["CUDA_PATH"]+"/bin")
+
+        if lib_ld_cuda_libs:
+            return next(iter(lib_ld_cuda_libs))
+        warn_in_case_of_duplicates(lib_ld_cuda_libs)
+
+        CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["PATH"]} did not contain '
+            f'{CUDA_RUNTIME_LIB} as expected! Searching further paths...', is_warning=True)
+        
     remaining_candidate_env_vars = {
         env_var: value for env_var, value in candidate_env_vars.items()
-        if env_var not in {"CONDA_PREFIX", "LD_LIBRARY_PATH"}
+        if env_var not in {"CONDA_PREFIX", "LD_LIBRARY_PATH", "PATH"}
     }
 
     cuda_runtime_libs = set()
@@ -281,7 +305,7 @@ def get_cuda_version(cuda, cudart_path):
     if cuda is None: return None
 
     try:
-        cudart = ct.CDLL(cudart_path)
+        cudart = ct.CDLL(str(cudart_path))
     except OSError:
         CUDASetup.get_instance().add_log_entry(f'ERROR: libcudart.so could not be read from path: {cudart_path}!')
         return None
@@ -306,7 +330,7 @@ def get_cuda_version(cuda, cudart_path):
 def get_cuda_lib_handle():
     # 1. find libcuda.so library (GPU driver) (/usr/lib)
     try:
-        cuda = ct.CDLL("libcuda.so")
+        cuda = ct.CDLL(CUDA_SHARED_LIB_NAME)
     except OSError:
         CUDASetup.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
         return None
@@ -402,11 +426,11 @@ def evaluate_cuda_setup():
     # since most installations will have the libcudart.so installed, but not the compiler
 
     if failure:
-        binary_name = "libbitsandbytes_cpu.so"
+        binary_name = "libbitsandbytes_cpu" + SHARED_LIB_EXTENSION
     elif has_cublaslt:
-        binary_name = f"libbitsandbytes_cuda{cuda_version_string}.so"
+        binary_name = f"libbitsandbytes_cuda{cuda_version_string}" + SHARED_LIB_EXTENSION
     else:
-        "if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt.so"
-        binary_name = f"libbitsandbytes_cuda{cuda_version_string}_nocublaslt.so"
+        "if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt"
+        binary_name = f"libbitsandbytes_cuda{cuda_version_string}_nocublaslt" +  SHARED_LIB_EXTENSION
 
     return binary_name, cudart_path, cuda, cc, cuda_version_string

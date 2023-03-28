@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.21)
 list(APPEND CMAKE_PREFIX_PATH $CONDA_PREFIX)
 
 project(bitsandbytes LANGUAGES CXX CUDA)
@@ -25,6 +25,7 @@ set(CC_cublasLt110 75 80)
 set(CC_cublasLt111 75 80 86)
 set(CC_ADA_HOPPER 89 90)
 
+add_definitions(-DUSE_AVX2 -DUSE_AVX)
 if( MAKE_CUDA_BUILD ) 
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         set(CMAKE_CUDA_ARCHITECTURES 75 80 86)
@@ -42,16 +43,22 @@ if( MAKE_CUDA_BUILD )
         ${FILES_CPP}
         ${FILES_CUDA}
     )
-    add_definitions(-DBUILD_CUDA)
+    set_source_files_properties(${FILES_CPP} PROPERTIES LANGUAGE CXX)
+    set_target_properties(libbitsandbytes_cuda PROPERTIES COMPILE_DEFINITIONS "BUILD_CUDA")
     if(NO_CUBLASLT)
-        add_definitions(-DNO_CUBLASLT)
+        set_target_properties(libbitsandbytes_cuda PROPERTIES COMPILE_DEFINITIONS "BUILD_CUDA;NO_CUBLASLT")
     endif(NO_CUBLASLT)
 
-    add_definitions(-DUSE_AVX2 -DUSE_AVX)
+    
     set_target_properties(libbitsandbytes_cuda PROPERTIES
-                                CUDA_SEPARABLE_COMPILATION ON)
-    set_target_properties(libbitsandbytes_cuda PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
+        POSITION_INDEPENDENT_CODE ON
+        CUDA_SEPARABLE_COMPILATION ON
+        PREFIX ""
+        OUTPUT_NAME "libbitsandbytes_cuda${CMAKE_CUDA_STANDARD}7"
+        LINKER_LANGUAGE C 
+        WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+#    add_link_options(-Wl,--export-all-symbols)
+#    add_link_options( -Wl,--add-stdcall-alias)
     target_include_directories(libbitsandbytes_cuda PRIVATE
         "${PROJECT_SOURCE_DIR}/csrc/"
         "${PROJECT_SOURCE_DIR}/include/"
@@ -68,8 +75,13 @@ endif(MAKE_CUDA_BUILD)
 add_library(libbitsandbytes_cpu SHARED 
     ${FILES_CPP}
 )
-add_definitions(-DUSE_AVX2 -DUSE_AVX)
-set_target_properties(libbitsandbytes_cpu PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_source_files_properties(${FILES_CPP} PROPERTIES LANGUAGE CXX)
+#add_link_options(-Wl,--export-all-symbols)
+#add_link_options(-Wl,--add-stdcall-alias)
+set_target_properties(libbitsandbytes_cpu PROPERTIES 
+    POSITION_INDEPENDENT_CODE ON
+    WINDOWS_EXPORT_ALL_SYMBOLS TRUE
+    )
 
 target_include_directories(libbitsandbytes_cpu PRIVATE
     "${PROJECT_SOURCE_DIR}/csrc/"
