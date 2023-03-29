@@ -8,34 +8,61 @@ set(FILES_CUDA csrc/ops.cu csrc/kernels.cu)
 set(FILES_CPP csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.c)
 
 option(MAKE_CUDA_BUILD "Build using CUDA" ON)
-option(NO_CUBLASLT "Don't use CUBLAST" OFF)
-set(CUDA_VERSION "11.7" CACHE STRING "CUDA Version DLL Name: 11.0, 11.7, 11.6")
-set(CUDA_VERSION_FIXED "")
-set(CUDA_VERSION_MAJOR "")
-string(REPLACE "." "" CUDA_VERSION_FIXED "${CUDA_VERSION}")
-string(REGEX MATCH "[^\.]+" CUDA_VERSION_MAJOR "${CUDA_VERSION}")
-    
-# Later versions of CUDA support the new architectures
-set(CC_CUDA10x 75)
-set(CC_CUDA110 75 80)
-set(CC_CUDA11x 75 80 86)
-set(CC_CUDA12x 89 90)
+option(USE_AVX2 "AVX2 Instruction Set" ON)
+option(USE_AVX "AVX Instruction Set" ON)
 
-add_definitions(-DUSE_AVX2 -DUSE_AVX)
+if(USE_AVX2)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2") 
+elseif(USE_AVX)    
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX") 
+endif()
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
+
 if( MAKE_CUDA_BUILD ) 
-    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-        if(${CUDA_VERSION} EQUAL "11.0")
-            set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA110})
-        elseif(${CUDA_VERSION_MAJOR} EQUAL "11")
-            set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA11x})
-        elseif(${CUDA_VERSION_MAJOR} EQUAL "12")
-            set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA12x})
-        else()
-            set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA10x})
-            set(NO_CUBLASLT ON)
-        endif()
+    # Later versions of CUDA support the new architectures
+    set(CC_CUDA10x 75)
+    set(CC_CUDA110 75 80)
+    set(CC_CUDA11x 75 80 86)
+    set(CC_CUDA12x 89 90)
+
+    option(NO_CUBLASLT "Don't use CUBLAST" OFF)
+    set(CUDA_TARGET_ARCH_FEATURE_LEVEL "11.x" CACHE STRING 
+        "CUDA Target Architectures by Feature Level. DLL name is autodetected from installed cuda compiler.\n \
+        Examples : 10.0, 11.0, 11.x, 12.x\n \
+        \n \
+        Note : to change the CUDA compiler you're using and the DLL NAME\n \
+            - Clean the build folder\n \
+            - when promped for additional parameters of the Visual C Generator add 'cuda=11.6'\n ")
+
+    set(CUDA_VERSION_DLLNAME "")
+    set(CUDA_VERSION_TARGET_FEATURE_MAJOR "")
+    string(REGEX MATCH "[0123456789]+\.[0123456789]+" CUDA_VERSION_DLLNAME "${CMAKE_CUDA_COMPILER_VERSION}")
+    string(REPLACE "." "" CUDA_VERSION_DLLNAME "${CUDA_VERSION_DLLNAME}")
+    string(REGEX MATCH "[^\.]+" CUDA_VERSION_TARGET_FEATURE_MAJOR "${CUDA_TARGET_ARCH_FEATURE_LEVEL}")
+
+    message(CONFIGURE_LOG "\nConfiguring using Cuda Compiler ${CMAKE_CUDA_COMPILER_VERSION}; Visual Studio Integration: ${CMAKE_VS_PLATFORM_TOOLSET_CUDA}\n")
+
+    if(${CUDA_TARGET_ARCH_FEATURE_LEVEL} STREQUAL "11.0")
+        set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA110})
+    elseif(${CUDA_VERSION_TARGET_FEATURE_MAJOR} STREQUAL "11")
+        set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA11x})
+    elseif(${CUDA_VERSION_TARGET_FEATURE_MAJOR} STREQUAL "12")
+        set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA12x})
+    else()
+        set(CMAKE_CUDA_ARCHITECTURES ${CC_CUDA10x})
+        set(NO_CUBLASLT ON)
     endif()
-   
+
+    message(CONFIGURE_LOG " CUDA Targeting feature level ${CUDA_TARGET_ARCH_FEATURE_LEVEL}, with architectures ${CMAKE_CUDA_ARCHITECTURES}")
+    
+    set (LIBBITSANDBYTESNAME "libbitsandbytes_cuda${CUDA_VERSION_DLLNAME}")
+    if(NO_CUBLASLT)
+        set (LIBBITSANDBYTESNAME "libbitsandbytes_cuda${CUDA_VERSION_DLLNAME}_nocublaslt")
+    endif(NO_CUBLASLT)
+
+    message(CONFIGURE_LOG " Shared library name being used: ${LIBBITSANDBYTESNAME}")
+
     if(NOT DEFINED CMAKE_CUDA_STANDARD)
         set(CMAKE_CUDA_STANDARD 11)
         set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -59,11 +86,9 @@ if( MAKE_CUDA_BUILD )
         POSITION_INDEPENDENT_CODE ON
         CUDA_SEPARABLE_COMPILATION ON
         PREFIX ""
-        OUTPUT_NAME "libbitsandbytes_cuda${CUDA_VERSION_FIXED}"
+        OUTPUT_NAME "${LIBBITSANDBYTESNAME}"
         LINKER_LANGUAGE C 
         WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
-#    add_link_options(-Wl,--export-all-symbols)
-#    add_link_options( -Wl,--add-stdcall-alias)
     target_include_directories(libbitsandbytes_cuda PRIVATE
         "${PROJECT_SOURCE_DIR}/csrc/"
         "${PROJECT_SOURCE_DIR}/include/"
@@ -75,14 +100,18 @@ if( MAKE_CUDA_BUILD )
         curand
         cusparse
     )
+    add_custom_command(TARGET libbitsandbytes_cuda POST_BUILD        # Adds a post-build event to MyTest
+        COMMAND ${CMAKE_COMMAND} -E copy_directory  # which executes "cmake - E copy_if_different..."
+        $<TARGET_FILE_DIR:libbitsandbytes_cuda>
+        "${PROJECT_SOURCE_DIR}/bitsandbytes" )
+        
+
 endif(MAKE_CUDA_BUILD)  
 
 add_library(libbitsandbytes_cpu SHARED 
     ${FILES_CPP}
 )
 set_source_files_properties(${FILES_CPP} PROPERTIES LANGUAGE CXX)
-#add_link_options(-Wl,--export-all-symbols)
-#add_link_options(-Wl,--add-stdcall-alias)
 set_target_properties(libbitsandbytes_cpu PROPERTIES 
     POSITION_INDEPENDENT_CODE ON
     WINDOWS_EXPORT_ALL_SYMBOLS TRUE
@@ -92,6 +121,7 @@ target_include_directories(libbitsandbytes_cpu PRIVATE
     "${PROJECT_SOURCE_DIR}/csrc/"
     "${PROJECT_SOURCE_DIR}/include/"
 )
-
-    
-
+add_custom_command(TARGET libbitsandbytes_cpu POST_BUILD        # Adds a post-build event to MyTest
+    COMMAND ${CMAKE_COMMAND} -E copy_directory  # which executes "cmake - E copy_if_different..."
+    $<TARGET_FILE_DIR:libbitsandbytes_cpu>
+    "${PROJECT_SOURCE_DIR}/bitsandbytes" )

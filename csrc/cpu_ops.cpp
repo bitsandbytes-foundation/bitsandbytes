@@ -25,7 +25,7 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
     num_blocks += n % blocksize == 0 ? 0 : 1;
 
     const uint32 elements_code = 256;
-    BinAlgo<AVX, float, Direct2> bin_searcher(code, elements_code);
+    BinAlgo<INSTR_SET, float, Direct2> bin_searcher(code, elements_code);
 
     int thread_wave_size = 256;
     std::vector<std::future<void>> wave_storage;

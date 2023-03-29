@@ -2,7 +2,7 @@
 
 ## Windows
 
-CPU NOT TESTED
+cpu: most tests fail, this library requires CUDA to use the special bits.
 
 Ensure you have your environment you want to bring in bitsandbytes. (a bloom setup, textgen-ui, etc) - via conda.
 I'd suggest to install MAMBA  and use it, as it's way faster.
@@ -30,6 +30,8 @@ dependencies:
   - jupyter
   - notebook
   - pytest
+  - einops
+  - scipy
 ```
 
 2. Then open POWERSHELL
@@ -41,16 +43,27 @@ mamba env activate mycompileenv
 ```
 At this point - select your visual studio installation - aka hit 1
 
-3. Go into your bitsandbytes folder and run `cmake-gui .` 
-4. Make sure you put the build folder correctly, append "build" to Where to build the binaries
+3. Go into your bitsandbytes folder and run `cmake-gui -S . -B ./build` 
 5. Hit Configure
-6. Set your CUDA_VERSION to whatever you have. If you deselect MAKE_CUDA_BUILD, leave as is
-7. Hit Configure again, then Generate
-8. Open Visual Studio and select Release as configuration. Build Solution
-9. copy everything from `build\Release\*.*` over in the `bitsandbytes` folder (the one with the python modules)
-10. run tests `python -m pytest`. You may need to use `mamba` to install other modules
-11. build wheel `mamba install build` and then `python -m build --wheel`
-12. install wheel  `pip install .\dist\*.whl`
+6. Set `cuda=11.7`, nothing, or other version in the `Optional toolset to use` when selecting the generator to . You can leave it blank. If you don't see the generate, delete the `build` folder and run cmake-gui again with the above command line.
+
+The `Optional toolset to use` will determine the dll name. You need to have that CUDA toolkit and VS integration installed using the NVIDIA installer
+7. You should see in the log some info:
+```
+CONFIGURE_LOG
+Configuring using Cuda Compiler 11.7.64; Visual Studio Integration: 11.7
+
+CONFIGURE_LOG CUDA Targeting feature level 11.x, with architectures 52
+CONFIGURE_LOG Shared library name being used: libbitsandbytes_cuda117
+```
+7. Set `CUDA_TARGET_ARCH_FEATURE_LEVEL` to you desired feature level. Supported: 10.x, 11.0, 11.x, 12.x
+8. `CMAKE_CUDA_ARCHITECTURES` is overwritten by `CUDA_TARGET_ARCH_FEATURE_LEVEL` for now
+9. Select other options. Hit Generate.
+10. Open Visual Studio and select Release as configuration. Build Solution
+11. Everything should be copied in the right place
+12. run tests `python -m pytest`. You may need to use `mamba` to install other modules
+13. build wheel `mamba install build` and then `python -m build --wheel`
+14. install wheel  `pip install .\dist\*.whl`
 
 
 ## Linux

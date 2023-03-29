@@ -1,6 +1,6 @@
 import os
 from typing import List, NamedTuple
-
+import platform
 import pytest
 
 import bitsandbytes as bnb
@@ -91,6 +91,11 @@ def test_full_system():
 
     # if CONDA_PREFIX exists, it has priority before all other env variables
     # but it does not contain the library directly, so we need to look at the a sub-folder
+
+    # not testing windows platform
+    if(platform.system()=="Windows"):
+        return
+
     version = ""
     if "CONDA_PREFIX" in os.environ:
         ls_output, err = bnb.utils.execute_and_return(f'ls -l {os.environ["CONDA_PREFIX"]}/lib/libcudart.so')

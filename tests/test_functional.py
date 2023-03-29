@@ -17,6 +17,7 @@ torch.set_printoptions(
 )
 k = 20
 
+DEFAULT_DEVICE : str = "cuda" if torch.cuda.is_available() else "cpu"
 
 def assert_all_approx_close(a, b, rtol=1e-3, atol=1e-3, count=0):
     idx = torch.isclose(a, b, rtol, atol)
@@ -92,14 +93,14 @@ def teardown():
     "dtype", [torch.float32, torch.float16], ids=["float", "half"]
 )
 def test_estimate_quantiles(dtype):
-    A = torch.rand(1024, 1024, device="cuda")
+    A = torch.rand(1024, 1024, device=DEFAULT_DEVICE)
     A = A.to(dtype)
     code = F.estimate_quantiles(A)
 
     percs = torch.linspace(1 / 512, 511 / 512, 256, device=A.device)
     torch.testing.assert_allclose(percs, code, atol=1e-3, rtol=1e-2)
 
-    A = torch.randn(1024, 1024, device="cuda")
+    A = torch.randn(1024, 1024, device=DEFAULT_DEVICE)
     A = A.to(dtype)
     code = F.estimate_quantiles(A)
 
@@ -110,14 +111,14 @@ def test_estimate_quantiles(dtype):
 
 def test_quantile_quantization():
     for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
+        A1 = torch.randn(1024, 1024, device=DEFAULT_DEVICE)
         code = F.estimate_quantiles(A1)
         C = F.quantize_no_absmax(A1, code)
         A2 = F.dequantize_no_absmax(C, code)
         diff = torch.abs(A1 - A2).mean().item()
         assert diff < 0.0075
 
-        A1 = torch.rand(1024, 1024, device="cuda")
+        A1 = torch.rand(1024, 1024, device=DEFAULT_DEVICE)
         code = F.estimate_quantiles(A1)
         C = F.quantize_no_absmax(A1, code)
         A2 = F.dequantize_no_absmax(C, code)
@@ -130,7 +131,7 @@ def test_dynamic_quantization():
     diffs = []
     reldiffs = []
     for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
+        A1 = torch.randn(1024, 1024, device=DEFAULT_DEVICE)
         C, S = F.quantize(A1)
         A2 = F.dequantize(C, S)
         diff = torch.abs(A1 - A2)
@@ -142,7 +143,7 @@ def test_dynamic_quantization():
     # print(sum(reldiffs)/len(reldiffs))
 
     for i in range(100):
-        A1 = torch.rand(1024, 1024, device="cuda")
+        A1 = torch.rand(1024, 1024, device=DEFAULT_DEVICE)
         C, S = F.quantize(A1)
         A2 = F.dequantize(C, S)
         diff = torch.abs(A1 - A2).mean().item()
@@ -156,7 +157,7 @@ def test_dynamic_blockwise_quantization():
         diffs = []
         reldiffs = []
         for i in range(100):
-            A1 = torch.randn(1024, 1024, device="cuda")
+            A1 = torch.randn(1024, 1024, device=DEFAULT_DEVICE)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize)
             A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
             diff = torch.abs(A1 - A2)
@@ -172,7 +173,7 @@ def test_dynamic_blockwise_quantization():
 
         diffs = []
         for i in range(100):
-            A1 = torch.rand(1024, 1024, device="cuda")
+            A1 = torch.rand(1024, 1024, device=DEFAULT_DEVICE)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize)
             A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
             diff = torch.abs(A1 - A2)
@@ -193,7 +194,7 @@ def test_dynamic_blockwise_stochastic_quantization():
     reldiffs = []
     rand = torch.rand(1024).cuda()
     for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
+        A1 = torch.randn(1024, 1024, device=DEFAULT_DEVICE)
         C1, S1 = F.quantize_blockwise(A1, rand=rand)
         C2, S2 = F.quantize_blockwise(A1)
         # a maximunm distance of quantized values of 1
@@ -209,14 +210,14 @@ def test_dynamic_blockwise_stochastic_quantization():
     "gtype", [torch.float32, torch.float16], ids=["float", "half"]
 )
 def test_percentile_clipping(gtype):
-    gnorm_vec1 = torch.zeros(100, device="cuda")
-    gnorm_vec2 = torch.zeros(100, device="cuda")
+    gnorm_vec1 = torch.zeros(100, device=DEFAULT_DEVICE)
+    gnorm_vec2 = torch.zeros(100, device=DEFAULT_DEVICE)
     n = 4
     step = 0
     percentile = 5
     for i in range(k):
         step += 1
-        g = torch.randn(n, n, dtype=gtype, device="cuda")
+        g = torch.randn(n, n, dtype=gtype, device=DEFAULT_DEVICE)
         gnorm1, clip2, gnorm_scale = F.percentile_clipping(
             g, gnorm_vec2, step, percentile=percentile
         )
@@ -318,13 +319,13 @@ def test_approx_igemm(dim1, dim2, quant_methods, batched):
     print("")
     for i in range(5):
         if batched:
-            A = torch.normal(0, 0.5, size=(32, dim1, dim2 // 32), device="cuda")
-            B = torch.normal(0, 0.5, size=(32, dim2 // 32, dim1), device="cuda")
+            A = torch.normal(0, 0.5, size=(32, dim1, dim2 // 32), device=DEFAULT_DEVICE)
+            B = torch.normal(0, 0.5, size=(32, dim2 // 32, dim1), device=DEFAULT_DEVICE)
             maxA, Ac = quant_methods[0](A, 2)
             maxB, Bc = quant_methods[1](B, 1)
         else:
-            A = torch.normal(0, 0.5, size=(dim1, dim2), device="cuda")
-            B = torch.normal(0, 0.5, size=(dim2, dim1), device="cuda")
+            A = torch.normal(0, 0.5, size=(dim1, dim2), device=DEFAULT_DEVICE)
+            B = torch.normal(0, 0.5, size=(dim2, dim1), device=DEFAULT_DEVICE)
             maxA, Ac = quant_methods[0](A, 1)
             maxB, Bc = quant_methods[1](B, 0)
         torch.testing.assert_allclose(
@@ -383,8 +384,8 @@ def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
             if transpose[1]
             else (hidden_dim, 32 * random.randint(1, 4))
         )
-        A = torch.randint(-128, 127, size=shapeA, device="cuda").to(torch.int8)
-        B = torch.randint(-128, 127, size=shapeB, device="cuda").to(torch.int8)
+        A = torch.randint(-128, 127, size=shapeA, device=DEFAULT_DEVICE).to(torch.int8)
+        B = torch.randint(-128, 127, size=shapeB, device=DEFAULT_DEVICE).to(torch.int8)
         if not transpose[0] and not transpose[1]:
             out2 = torch.matmul(A.float(), B.float())
             out = F.igemm(A, B)
@@ -407,8 +408,8 @@ def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
             if transpose[1]
             else (hidden_dim, 32 * random.randint(1, 4))
         )
-        A = torch.randint(-128, 127, size=shapeA, device="cuda").to(torch.int8)
-        B = torch.randint(-128, 127, size=shapeB, device="cuda").to(torch.int8)
+        A = torch.randint(-128, 127, size=shapeA, device=DEFAULT_DEVICE).to(torch.int8)
+        B = torch.randint(-128, 127, size=shapeB, device=DEFAULT_DEVICE).to(torch.int8)
         if not transpose[0] and not transpose[1]:
             out2 = torch.matmul(A.float(), B.float())
             out = F.igemm(A, B)
@@ -436,10 +437,10 @@ def test_dim3_igemm(seq_dim, hidden_dim, batch_dim):
     batch_dim = batch_dim - (batch_dim % 2)
     for i in range(25):
         A = torch.randint(
-            -128, 127, size=(batch_dim, seq_dim, hidden_dim), device="cuda"
+            -128, 127, size=(batch_dim, seq_dim, hidden_dim), device=DEFAULT_DEVICE
         ).to(torch.int8)
         B = torch.randint(
-            -128, 127, size=(batch_dim, seq_dim, 1024), device="cuda"
+            -128, 127, size=(batch_dim, seq_dim, 1024), device=DEFAULT_DEVICE
         ).to(torch.int8)
         out2 = torch.einsum("bsi, bso->io", A.float(), B.float())
         iout = torch.empty(
@@ -481,12 +482,12 @@ def test_minmax_igemm(seq_dim, hidden_dim, batch_dim, transpose):
     relerrs2 = []
     for i in range(k):
         A = torch.normal(
-            0.0, 0.5, size=(batch_dim, seq_dim, hidden_dim), device="cuda"
+            0.0, 0.5, size=(batch_dim, seq_dim, hidden_dim), device=DEFAULT_DEVICE
         )
         if transpose:
-            B = torch.normal(0, 0.5, size=(256, hidden_dim), device="cuda")
+            B = torch.normal(0, 0.5, size=(256, hidden_dim), device=DEFAULT_DEVICE)
         else:
-            B = torch.normal(0, 0.5, size=(hidden_dim, 256), device="cuda")
+            B = torch.normal(0, 0.5, size=(hidden_dim, 256), device=DEFAULT_DEVICE)
         Ac, minA, scale = min_max(A)
         if transpose:
             maxB, Bc = quant_multi(B, dim=(1 if transpose else 0))
@@ -555,8 +556,8 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
     for i in range(k):
         shapeA = (dim1, dim3, dim2) if transpose[0] else (dim1, dim2, dim3)
         shapeB = (dim1, dim4, dim3) if transpose[1] else (dim1, dim3, dim4)
-        A = torch.randint(-128, 127, size=shapeA, device="cuda").to(torch.int8)
-        B = torch.randint(-128, 127, size=shapeB, device="cuda").to(torch.int8)
+        A = torch.randint(-128, 127, size=shapeA, device=DEFAULT_DEVICE).to(torch.int8)
+        B = torch.randint(-128, 127, size=shapeB, device=DEFAULT_DEVICE).to(torch.int8)
 
         if not transpose[0] and not transpose[1]:
             out2 = torch.bmm(A.float(), B.float())
@@ -588,7 +589,7 @@ def test_vector_quant(dim1, dim2, dim3):
     dim2 = dim2 - (dim2 % 16)
     dim3 = dim3 - (dim3 % 16)
     for i in range(k):
-        A = torch.randn(size=(dim2, dim3), device="cuda")
+        A = torch.randn(size=(dim2, dim3), device=DEFAULT_DEVICE)
         qA, SA = F.vectorwise_quant(A, dim=0)
         A1 = F.vectorwise_dequant(qA, SA)
         n = A1.numel()
@@ -621,9 +622,9 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
     func = F.get_transform_func(dtype, orderA, orderOut, transpose)
 
     if dims == 2:
-        A = torch.randint(-128, 127, size=(dim1, dim2), device="cuda").to(dtype)
+        A = torch.randint(-128, 127, size=(dim1, dim2), device=DEFAULT_DEVICE).to(dtype)
     elif dims == 3:
-        A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device="cuda").to(
+        A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device=DEFAULT_DEVICE).to(
             dtype
         )
 
@@ -700,14 +701,14 @@ names = [
 def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
     for i in range(k):
         if dims == 2:
-            A = torch.randint(-128, 127, size=(dim1, dim3), device="cuda").to(
+            A = torch.randint(-128, 127, size=(dim1, dim3), device=DEFAULT_DEVICE).to(
                 torch.int8
             )
         elif dims == 3:
             A = torch.randint(
-                -128, 127, size=(dim1, dim2, dim3), device="cuda"
+                -128, 127, size=(dim1, dim2, dim3), device=DEFAULT_DEVICE
             ).to(torch.int8)
-        B = torch.randint(-128, 127, size=(dim4, dim3), device="cuda").to(
+        B = torch.randint(-128, 127, size=(dim4, dim3), device=DEFAULT_DEVICE).to(
             torch.int8
         )
         C1 = torch.matmul(A.float(), B.t().float())
@@ -719,7 +720,7 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         torch.testing.assert_allclose(C1, C3.float())
 
         # transpose
-        B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(
+        B = torch.randint(-128, 127, size=(dim3, dim4), device=DEFAULT_DEVICE).to(
             torch.int8
         )
         C1 = torch.matmul(A.float(), B.float())
@@ -749,12 +750,12 @@ def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
     formatB = F.get_special_format_str()
     for i in range(k):
         if dims == 2:
-            A = torch.normal(0, 0.5, size=(dim1, dim3), device="cuda").half()
+            A = torch.normal(0, 0.5, size=(dim1, dim3), device=DEFAULT_DEVICE).half()
         elif dims == 3:
             A = torch.normal(
-                0, 0.5, size=(dim1, dim2, dim3), device="cuda"
+                0, 0.5, size=(dim1, dim2, dim3), device=DEFAULT_DEVICE
             ).half()
-        B = torch.randn((dim4, dim3), device="cuda").half()
+        B = torch.randn((dim4, dim3), device=DEFAULT_DEVICE).half()
         torch.nn.init.xavier_uniform_(B)
         C1 = torch.matmul(A, B.t())
         C2 = bnb.matmul(A, B.t())
@@ -804,10 +805,10 @@ names = [
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_8bit_training(batch, seq, model, hidden):
     formatB = F.get_special_format_str()
-    A = torch.randn(batch, seq, model, device="cuda").half()
-    grad = torch.randn(batch, seq, model, device="cuda").half()
-    w1 = torch.randint(-128, 127, size=(hidden, model), device="cuda").half()
-    w2 = torch.randint(-128, 127, size=(model, hidden), device="cuda").half()
+    A = torch.randn(batch, seq, model, device=DEFAULT_DEVICE).half()
+    grad = torch.randn(batch, seq, model, device=DEFAULT_DEVICE).half()
+    w1 = torch.randint(-128, 127, size=(hidden, model), device=DEFAULT_DEVICE).half()
+    w2 = torch.randint(-128, 127, size=(model, hidden), device=DEFAULT_DEVICE).half()
     print("")
 
     # torch.cuda.synchronize()
@@ -975,8 +976,8 @@ def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
     if has_bias: bias = torch.randn(dim4, device='cuda', dtype=torch.float16)
     formatB = F.get_special_format_str()
     for i in range(1):
-        A = torch.randn(dim1, inner, device="cuda")
-        B = torch.randn(dim4, inner, device="cuda")
+        A = torch.randn(dim1, inner, device=DEFAULT_DEVICE)
+        B = torch.randn(dim4, inner, device=DEFAULT_DEVICE)
         C1 = torch.matmul(A.half(), B.t().half())
         if has_bias: C1 += bias
 
@@ -1022,7 +1023,7 @@ names = ["dim1_{}_dim2_{}_dims_{}".format(*vals) for vals in values]
 def test_colrow_absmax(dim1, dim2, dims):
     for i in range(k):
         threshold = 3.0
-        A = torch.randn(dim1, dim2, device="cuda").half()
+        A = torch.randn(dim1, dim2, device=DEFAULT_DEVICE ).half()
         A_truncated = A.clone()
         A_truncated[torch.abs(A_truncated) >= 3.0] = 0.0
         if dims == 2:
@@ -1077,7 +1078,7 @@ names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_double_quant(dim1, dim2):
     for i in range(k):
-        A = torch.randn(dim1, dim2, device="cuda").half()
+        A = torch.randn(dim1, dim2, device=DEFAULT_DEVICE).half()
         out_col1, Scol = F.vectorwise_quant(A, dim=0)
         out_row1, Srow = F.vectorwise_quant(A, dim=1)
 
@@ -1124,8 +1125,8 @@ names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
 def test_integrated_igemmlt(dim1, dim4, inner):
     for i in range(k):
-        A = torch.randn(dim1, inner, device="cuda").half()
-        B = torch.randn(dim4, inner, device="cuda").half()
+        A = torch.randn(dim1, inner, device=DEFAULT_DEVICE).half()
+        B = torch.randn(dim4, inner, device=DEFAULT_DEVICE).half()
 
         out1 = torch.matmul(A.half(), B.t().half())
 
@@ -1173,8 +1174,8 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
     relerr1, relerr2 = [], []
     scale = 1
     for i in range(k):
-        A = torch.randn(dim1, inner, device="cuda").half()
-        B = torch.randn(dim4, inner, device="cuda").half()
+        A = torch.randn(dim1, inner, device=DEFAULT_DEVICE).half()
+        B = torch.randn(dim4, inner, device=DEFAULT_DEVICE).half()
         torch.nn.init.xavier_uniform_(B)
         C1 = torch.matmul(A, B.t())
 
@@ -1246,8 +1247,8 @@ def test_row_scale_bench(dim1, dim4, inner):
     err1, err2, err3 = [], [], []
     relerr1, relerr2 = [], []
     scale = 1
-    A = torch.randn(dim1, inner, device="cuda").half()
-    B = torch.randn(dim4, inner, device="cuda").half()
+    A = torch.randn(dim1, inner, device=DEFAULT_DEVICE).half()
+    B = torch.randn(dim4, inner, device=DEFAULT_DEVICE).half()
     torch.nn.init.xavier_uniform_(B)
     # warmpup
     for i in range(k):
@@ -1318,12 +1319,12 @@ names = [
 def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     for i in range(k):
         if dims == 2:
-            A = torch.randint(10, 99, size=(dim1, dim2), device="cuda").to(
+            A = torch.randint(10, 99, size=(dim1, dim2), device=DEFAULT_DEVICE).to(
                 dtype
             )
         elif dims == 3:
             A = torch.randint(
-                10, 99, size=(dim1, dim2, dim3), device="cuda"
+                10, 99, size=(dim1, dim2, dim3), device=DEFAULT_DEVICE
             ).to(dtype)
 
         A.view(-1)[-1] = -1
@@ -1387,7 +1388,7 @@ names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 def test_coo_double_quant(dim1, dim2):
     threshold = 3.00
     for i in range(k):
-        A = torch.randn(dim1, dim2, device="cuda").half()
+        A = torch.randn(dim1, dim2, device=DEFAULT_DEVICE).half()
 
         idx = torch.abs(A) >= threshold
         CA2, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
@@ -1460,8 +1461,8 @@ def test_spmm_bench():
     dim2 = model
     dim3 = hidden
     threshold = 4
-    A = torch.randn(dim1, dim2, device="cuda").half()
-    B = torch.randn(dim2, dim3, device="cuda").half()
+    A = torch.randn(dim1, dim2, device=DEFAULT_DEVICE).half()
+    B = torch.randn(dim2, dim3, device=DEFAULT_DEVICE).half()
     for i in range(10):
         C1 = bnb.matmul(A, B.t())
 
@@ -1574,12 +1575,12 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
     threshold = 3.3
     # threshold = 2.8
     # threshold = 0.0
-    A = torch.randn(dim1, dim2, device="cuda").half()
+    A = torch.randn(dim1, dim2, device=DEFAULT_DEVICE).half()
     if dtype == torch.float16:
-        B = torch.randn(dim2, dim2 * 4, device="cuda").half()
+        B = torch.randn(dim2, dim2 * 4, device=DEFAULT_DEVICE).half()
         torch.nn.init.xavier_uniform_(B)
     else:
-        B = torch.randn(dim2, dim2 * 4, device="cuda").half()
+        B = torch.randn(dim2, dim2 * 4, device=DEFAULT_DEVICE).half()
         torch.nn.init.xavier_uniform_(B)
         B, SB = F.vectorwise_quant(B, quant_type="linear")
         # B = torch.randint(-127, 127, size=(dim2, dim2*4), device='cuda').to(torch.int8)
@@ -1688,8 +1689,8 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     threshold = 6.0
     # threshold = 2.8
     # threshold = 0.0
-    A = torch.randn(dim1, dim2, device="cuda").half()
-    B = torch.empty(dim2, dim2 * 4, device="cuda", dtype=torch.float16)
+    A = torch.randn(dim1, dim2, device=DEFAULT_DEVICE).half()
+    B = torch.empty(dim2, dim2 * 4, device=DEFAULT_DEVICE, dtype=torch.float16)
     torch.nn.init.xavier_uniform_(B)
     Bt = B.t().contiguous()
 
@@ -1805,8 +1806,8 @@ def test_bench_matmul(batch, seq, model, hidden):
     iters = 128
     formatB = F.get_special_format_str()
 
-    A = torch.randn(batch, seq, model, device="cuda").half()
-    B = torch.empty(hidden, model, dtype=torch.float16, device="cuda")
+    A = torch.randn(batch, seq, model, device=DEFAULT_DEVICE).half()
+    B = torch.empty(hidden, model, dtype=torch.float16, device=DEFAULT_DEVICE)
     torch.nn.init.xavier_uniform_(B)
 
     linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
@@ -1927,8 +1928,8 @@ def test_zeropoint():
     seq = 512
     model = 1024
     hidden = 4 * model
-    A = torch.randn(batch * seq, model, device="cuda").half() * 0.1
-    B = torch.randn(model, hidden, device="cuda").half() * 0.1
+    A = torch.randn(batch * seq, model, device=DEFAULT_DEVICE).half() * 0.1
+    B = torch.randn(model, hidden, device=DEFAULT_DEVICE).half() * 0.1
 
     C0 = torch.matmul(A, B)
 
@@ -1999,7 +2000,7 @@ def test_extract_outliers():
         shapeA = (4096, 4096 * 4)
         idx = torch.unique(torch.randint(0, shapeA[1], size=(10,)).int()).cuda()
         # idx = torch.Tensor([0]).int().cuda()
-        A = torch.randint(-128, 127, size=shapeA, device="cuda").to(torch.int8)
+        A = torch.randint(-128, 127, size=shapeA, device=DEFAULT_DEVICE).to(torch.int8)
         outliers1 = A[:, idx.long()]
 
         CA, SA = F.transform(A, "col_turing")
@@ -2054,7 +2055,7 @@ def test_fp8_quant():
         abserr = []
         relerr = []
         for i in range(100):
-            A1 = torch.randn(1024, 1024, device="cuda")
+            A1 = torch.randn(1024, 1024, device=DEFAULT_DEVICE)
             C, SC = F.quantize_blockwise(A1, code=code)
             A2 = F.dequantize_blockwise(C, SC)
             diff = torch.abs(A1 - A2)
@@ -2068,7 +2069,7 @@ def test_fp8_quant():
         abserr = []
         relerr = []
         for i in range(100):
-            A1 = torch.rand(1024, 1024, device="cuda")
+            A1 = torch.rand(1024, 1024, device=DEFAULT_DEVICE)
             C, SC = F.quantize_blockwise(A1, code=code)
             A2 = F.dequantize_blockwise(C, SC)
             diff = torch.abs(A1 - A2)
@@ -2082,7 +2083,7 @@ def test_fp8_quant():
         abserr = []
         relerr = []
         for i in range(100):
-            A1 = torch.randn(1024, 1024, device="cuda")
+            A1 = torch.randn(1024, 1024, device=DEFAULT_DEVICE)
             C, SC = F.quantize_blockwise(A1)
             A2 = F.dequantize_blockwise(C, SC)
             diff = torch.abs(A1 - A2)

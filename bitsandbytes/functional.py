@@ -109,12 +109,14 @@ class CUBLAS_Context:
 
     def get_context(self, device):
         if device.index not in self.context:
-            prev_device = torch.cuda.current_device()
-            torch.cuda.set_device(device)
-            self.context[device.index] = ct.c_void_p(lib.get_context())
-            torch.cuda.set_device(prev_device)
+            if torch.cuda.is_available():
+                prev_device = torch.cuda.current_device()
+                torch.cuda.set_device(device)
+                self.context[device.index] = ct.c_void_p(lib.get_context())
+                torch.cuda.set_device(prev_device)
+            else:
+                self.context[device.index] = ct.c_void_p(lib.get_context())
         return self.context[device.index]
-
 
 class Cusparse_Context:
     _instance = None
@@ -302,13 +304,17 @@ def get_ptr(A: Tensor) -> ct.c_void_p:
 
 
 def pre_call(device):
-    prev_device = torch.cuda.current_device()
-    torch.cuda.set_device(device)
-    return prev_device
+    if torch.cuda.is_available():
+        prev_device = torch.cuda.current_device()
+        torch.cuda.set_device(device)
+        return prev_device
+    else:
+        return device
 
 
 def post_call(prev_device):
-    torch.cuda.set_device(prev_device)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(prev_device)
 
 
 def get_transform_func(dtype, orderA, orderOut, transpose=False):
