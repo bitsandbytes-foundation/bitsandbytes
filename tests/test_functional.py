@@ -152,7 +152,7 @@ def test_dynamic_quantization():
 
 def test_dynamic_blockwise_quantization():
     #print('')
-    for blocksize in [4096, 2048, 1024, 512, 256, 128, 64]:
+    for blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32]:
         diffs = []
         reldiffs = []
         for i in range(100):
@@ -167,8 +167,8 @@ def test_dynamic_blockwise_quantization():
         relerr = sum(reldiffs)/len(reldiffs)
         assert abserr < 0.011
         assert relerr < 0.018
-        #print('randn', blocksize, sum(diffs)/len(diffs))
-        #print('randn', blocksize, sum(reldiffs)/len(reldiffs))
+        print('randn', blocksize, sum(diffs)/len(diffs))
+        print('randn', blocksize, sum(reldiffs)/len(reldiffs))
 
         diffs = []
         for i in range(100):
@@ -184,8 +184,8 @@ def test_dynamic_blockwise_quantization():
         relerr = sum(reldiffs)/len(reldiffs)
         assert abserr < 0.0035
         assert relerr < 0.015
-        #print('rand', blocksize, sum(diffs)/len(diffs))
-        #print('rand', blocksize, sum(reldiffs)/len(reldiffs))
+        print('rand', blocksize, sum(diffs)/len(diffs))
+        print('rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 def test_dynamic_blockwise_stochastic_quantization():
