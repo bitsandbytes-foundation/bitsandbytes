@@ -1,7 +1,7 @@
 
 import torch
 import json
-from bitsandbytes.nn.triton_based_modules import SwitchBackGlobalMLP, SwitchBackGlobalLinear, MyLinear
+from bitsandbytes.nn.triton_based_modules import SwitchBackGlobalMLP, SwitchBackGlobalLinear, StandardLinear
 import time
 
 # class AttentionOld(torch.nn.Module):
@@ -116,7 +116,7 @@ if __name__ == '__main__':
             va = torch.randn( batch // 256, 256, dim ).cuda().requires_grad_(True)
 
             standard = Attention(dim).cuda()
-            my_standard = Attention(dim, linear_module=MyLinear).cuda()
+            my_standard = Attention(dim, linear_module=StandardLinear).cuda()
             sb = Attention(dim, linear_module=SwitchBackGlobalLinear).cuda()
             standard_compiled = torch.compile(standard)
             ln_model = torch.nn.Sequential(

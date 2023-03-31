@@ -1,7 +1,7 @@
 
 import torch
 import json
-from bitsandbytes.nn.triton_based_modules import SwitchBackGlobalMLP, SwitchBackGlobalLinear, MyLinear
+from bitsandbytes.nn.triton_based_modules import SwitchBackGlobalMLP, SwitchBackGlobalLinear, StandardLinear
 import time
 
 if __name__ == '__main__':
@@ -26,9 +26,9 @@ if __name__ == '__main__':
             ).cuda()
 
             my_standard = torch.nn.Sequential(
-                MyLinear(dim, 4 * dim),
+                StandardLinear(dim, 4 * dim),
                 torch.nn.GELU(),
-                MyLinear(4 * dim, dim),
+                StandardLinear(4 * dim, dim),
             ).cuda()
 
             fused_mlp = SwitchBackGlobalMLP(dim, 4 * dim).cuda()

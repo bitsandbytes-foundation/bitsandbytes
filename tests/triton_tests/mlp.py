@@ -3,7 +3,7 @@ import time
 import torch
 import torch.nn as nn
 import bitsandbytes.nn as bnn
-from bitsandbytes.nn.triton_based_modules import SwitchBackLinear, SwitchBackGlobalLinear, MyLinear
+from bitsandbytes.nn.triton_based_modules import SwitchBackLinear, SwitchBackGlobalLinear, StandardLinear
 
 def construct_model(dim, layers, module):
     modules = []
@@ -41,7 +41,7 @@ if __name__ == '__main__':
 
     # construct models
     standard = construct_model(dim, layers, nn.Linear).half()
-    my_standard = construct_model(dim, layers, MyLinear).half()
+    my_standard = construct_model(dim, layers, StandardLinear).half()
     switchback = construct_model(dim, layers, SwitchBackLinear).half()
     switchback_global = construct_model(dim, layers, SwitchBackGlobalLinear).half()
     #bnb_8bitmixed = construct_model(dim, layers, bnn.Linear8bitLt)
