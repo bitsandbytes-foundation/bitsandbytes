@@ -454,14 +454,15 @@ for c in req_grad:
 transpose = [(False, True), (False, False)]
 str_transpose = ["NT", "NN"]
 dtype = [torch.float16, torch.float32]
+compress_statistics = [False, True]
 has_fp16_weights = [True, False]
 has_bias = [True, False]
-values = list(product(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, has_bias))
-str_values = list(product(dim1, dim2, dim3, dim4, str_funcs, dtype, req_grad_str, str_transpose, has_bias))
-names = ["dim1_{}_dim2_{}_dim3_{}_dim4_{}_func_{}_dtype_{}_requires_grad_{}_transpose_{}_has_bias_{}".format(*vals) for vals in str_values]
+values = list(product(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, has_bias, compress_statistics))
+str_values = list(product(dim1, dim2, dim3, dim4, str_funcs, dtype, req_grad_str, str_transpose, has_bias, compress_statistics))
+names = ["dim1_{}_dim2_{}_dim3_{}_dim4_{}_func_{}_dtype_{}_requires_grad_{}_transpose_{}_has_bias_{}_compress_statistics".format(*vals) for vals in str_values]
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
-@pytest.mark.parametrize( "dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, has_bias", values, ids=names)
-def test_matmul_fp4( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, has_bias):
+@pytest.mark.parametrize( "dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, has_bias, compress_statistics", values, ids=names)
+def test_matmul_fp4( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, has_bias, compress_statistics):
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
     if has_bias == False:
@@ -481,7 +482,7 @@ def test_matmul_fp4( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, 
                 bias2 = bias.clone()
             torch.nn.init.xavier_uniform_(B)
 
-            B2, quant_state = bnb.functional.quantize_fp4(B)
+            B2, quant_state = bnb.functional.quantize_fp4(B, compress_statistics=compress_statistics)
 
             if not transpose[0] and transpose[1]:
                 out_torch = funcs[0](A, B.t())

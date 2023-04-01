@@ -507,7 +507,7 @@ def test_linear_kbit_fp32_bias(module):
         assert l1.bias is None
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
-@pytest.mark.parametrize("module", [bnb.nn.Linear8bitLt, bnb.nn.LinearFP4], ids=['Int8Lt', 'FP4'])
+@pytest.mark.parametrize("module", [bnb.nn.Linear8bitLt, bnb.nn.LinearFP4, lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True)], ids=['Int8Lt', 'FP4', 'FP4+C'])
 def test_kbit_backprop(module):
     b = 17
     dim1 = 37

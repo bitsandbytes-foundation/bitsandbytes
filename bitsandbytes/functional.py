@@ -155,7 +155,7 @@ def create_linear_map(signed=True, total_bits=8, add_zero=True):
         #return torch.Tensor(values[:l].tolist() + [-1e-6]*((gap//2)-1) + [0]*2 + [1e-6]*((gap//2)-1) + values[l:].tolist())
         return torch.Tensor(values[:l].tolist() + [0]*gap + values[l:].tolist())
 
-def custom_map(seed=0, scale=0.01):
+def create_custom_map(seed=0, scale=0.01):
     v = [12, 10, 8, 6, 3, 2, 1]
     # 16-bit 7B 22.33, 4-bit best 22.88, FP4 23.25, 4-bit 95 22.97, 4-bit evo 22.45
     # 16-bit 13B 70.35, 4-bit best 67.16, FP4 100.78, 4-bit-95 69.39, 4-bit evo 70.48
@@ -191,13 +191,13 @@ def custom_map(seed=0, scale=0.01):
     # 13B evo start
     #v = [1.6077535089716468, 1.1914902148179205, 0.8999752421085561, 0.6967904489387543, 0.4949093928311768, 0.30920472033044544, 0.15391602735952042]
     #v = [1.586363722436466, 1.202610827188916, 0.9003332576346587, 0.6904888715206972, 0.49490974688233724, 0.2971151461329376, 0.15683230810738283]
-    v = [1.5842247437829478, 1.2037228884260156, 0.900369059187269, 0.6898587137788914, 0.4949097822874533, 0.2959061887131868, 0.15712393618216908]
+    #v = [1.5842247437829478, 1.2037228884260156, 0.900369059187269, 0.6898587137788914, 0.4949097822874533, 0.2959061887131868, 0.15712393618216908]
 
     # mean evo 7B + 13B
     #v = [1.5993337549066253, 1.1965624035328402, 0.9000864380418481, 0.6925840978034195, 0.5011181210961458, 0.32040328389777434, 0.13570386022711237]
 
     # theoretically optiomal (0.93333)
-    # v = [1.501085946044025, 1.1331700302595604, 0.8761428492468408, 0.6670160135425023, 0.48373855304610314, 0.3155014472579608, 0.15580024666388428] # 0.9333333333333333
+    v = [1.501085946044025, 1.1331700302595604, 0.8761428492468408, 0.6670160135425023, 0.48373855304610314, 0.3155014472579608, 0.15580024666388428] # 0.9333333333333333
 
 
 
@@ -599,7 +599,9 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
         assert rand is None
         lib.cquantize_blockwise_cpu_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))
 
-    return out, (absmax, code)
+    state = (absmax, code, blocksize)
+
+    return out, state
 
 
 def dequantize_blockwise(
@@ -644,9 +646,9 @@ def dequantize_blockwise(
     if out is None:
         out = torch.zeros_like(A, dtype=torch.float32)
     if quant_state is None:
-        quant_state = (absmax, code)
+        quant_state = (absmax, code, blocksize)
     else:
-        absmax, code = quant_state
+        absmax, code, blocksize = quant_state
 
 
     if A.device.type != 'cpu':
@@ -669,7 +671,7 @@ def dequantize_blockwise(
     return out
 
 
-def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64) -> Tensor:
+def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False) -> Tensor:
     """
     Quantize tensor A in blocks of FP4 values.
 
@@ -704,12 +706,11 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
         blocks += 1 if n % blocksize > 0 else 0
         absmax = torch.zeros((blocks,), device=A.device)
 
-    state = (absmax, input_shape, A.dtype, blocksize)
 
     if out is None:
         out = torch.zeros(((n+1)//2, 1), dtype=torch.uint8, device=A.device)
 
-    assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+    assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32]
 
     prev_device = pre_call(A.device)
     is_on_gpu([A, out, absmax])
@@ -721,6 +722,17 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     post_call(A.device)
+
+    if compress_statistics:
+        offset = absmax.mean()
+        absmax -= offset
+        #code = create_custom_map().to(absmax.device)
+        #qabsmax, state2 = quantize_blockwise(absmax, code=code, blocksize=256)
+        qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
+        del absmax
+        state = (qabsmax, input_shape, A.dtype, blocksize, (offset, state2))
+    else:
+        state = (absmax, input_shape, A.dtype, blocksize, None)
 
     return out, state
 
@@ -756,8 +768,12 @@ def dequantize_fp4(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: 
         shape = out.shape
         dtype = out.dtype
     else:
-        absmax, shape, dtype, blocksize = quant_state
+        absmax, shape, dtype, blocksize, compressed_stats = quant_state
 
+    if compressed_stats is not None:
+        offset, state2 = compressed_stats
+        absmax = dequantize_blockwise(absmax, state2)
+        absmax += offset
 
     if out is None:
         out = torch.empty(shape, dtype=dtype, device=A.device)
@@ -1986,8 +2002,6 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     ccolsB = ct.c_int32(B.shape[1])
     cldb = ct.c_int32(ldb)
     cldc = ct.c_int32(ldc)
-    # print(cooA.rowidx[:64])
-    # print(cooA.colidx[:64].sort()[0])
 
     is_on_gpu([cooA.rowidx, cooA.colidx, cooA.values, B, out, dequant_stats])
     if B.dtype == torch.float16:

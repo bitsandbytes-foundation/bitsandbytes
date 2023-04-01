@@ -134,15 +134,17 @@ class Embedding(torch.nn.Embedding):
         return emb
 
 class FP4Params(torch.nn.Parameter):
-    def __new__(cls, data=None, requires_grad=True, quant_state=None):
+    def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True):
         cls.quant_state = None
+        cls.blocksize = blocksize
+        cls.compress_statistics = compress_statistics
         if data is None:
             data = torch.empty(0)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def cuda(self, device):
         w = self.data.contiguous().half().cuda(device)
-        w_fp4, quant_state = bnb.functional.quantize_fp4(w)
+        w_fp4, quant_state = bnb.functional.quantize_fp4(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics)
         self.data = w_fp4
         self.quant_state = quant_state
 
@@ -173,10 +175,10 @@ class FP4Params(torch.nn.Parameter):
 
 
 class LinearFP4(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, compute_dtype=None):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
         super().__init__(input_features, output_features, bias)
         self.state = bnb.MatmulLtState()
-        self.weight = FP4Params(self.weight.data, requires_grad=False)
+        self.weight = FP4Params(self.weight.data, requires_grad=False, compress_statistics=compress_statistics)
         self.compute_dtype = compute_dtype
 
     def init_8bit_state(self):

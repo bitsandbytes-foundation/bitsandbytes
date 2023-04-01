@@ -167,8 +167,8 @@ def test_dynamic_blockwise_quantization():
         relerr = sum(reldiffs)/len(reldiffs)
         assert abserr < 0.011
         assert relerr < 0.018
-        print('randn', blocksize, sum(diffs)/len(diffs))
-        print('randn', blocksize, sum(reldiffs)/len(reldiffs))
+        #print('randn', blocksize, sum(diffs)/len(diffs))
+        #print('randn', blocksize, sum(reldiffs)/len(reldiffs))
 
         diffs = []
         for i in range(100):
@@ -184,8 +184,8 @@ def test_dynamic_blockwise_quantization():
         relerr = sum(reldiffs)/len(reldiffs)
         assert abserr < 0.0035
         assert relerr < 0.015
-        print('rand', blocksize, sum(diffs)/len(diffs))
-        print('rand', blocksize, sum(reldiffs)/len(reldiffs))
+        #print('rand', blocksize, sum(diffs)/len(diffs))
+        #print('rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 def test_dynamic_blockwise_stochastic_quantization():
@@ -1806,6 +1806,7 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.nn.init.xavier_uniform_(B)
 
     B_fp4, state = F.quantize_fp4(B)
+    B_fp4_c, state_c = F.quantize_fp4(B, compress_statistics=True)
 
     linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
     linear8bit.eval()
@@ -1838,6 +1839,13 @@ def test_bench_matmul(batch, seq, model, hidden):
         bnb.matmul_fp4(A, B_fp4.t(), quant_state=state)
     torch.cuda.synchronize()
     print( f"bnb fp4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        bnb.matmul_fp4(A, B_fp4.t(), quant_state=state_c)
+    torch.cuda.synchronize()
+    print( f"bnb fp4 + compressed stats: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
     #torch.cuda.synchronize()
     #t0 = time.time()
@@ -2242,6 +2250,42 @@ def test_fp4_quant():
 
     assert err.item() < 0.1
     assert relerr.item() < 0.28
+
+
+def test_fp4_compressed_stats():
+    for blocksize in [128, 64]:
+        errs1 = []
+        errs2 = []
+        for i in range(10):
+            A1 = torch.randn(1024, 1024, device='cuda').half()
+            q2, SA2 = F.quantize_fp4(A1, blocksize=blocksize)
+            q3, SA3= F.quantize_fp4(A1, blocksize=blocksize, compress_statistics=True)
+            A2 = F.dequantize_fp4(q2, SA2)
+            A3 = F.dequantize_fp4(q3, SA3)
+
+
+            err = (A1 - A2).abs().float()
+            relerr = (err/(A1.abs().float()+1e-15)).mean()
+            err = err.mean()
+
+            errs1.append(err.item())
+
+            assert err.item() < 0.11
+            assert relerr.item() < 0.28
+
+            err = (A1 - A3).abs().float()
+            relerr = (err/(A1.abs().float()+1e-15)).mean()
+            err = err.mean()
+
+            errs2.append(err.item())
+
+            assert err.item() < 0.11
+            assert relerr.item() < 0.28
+
+        #print(sum(errs1)/len(errs1), blocksize)
+        #print(sum(errs2)/len(errs2), blocksize)
+
+
 
 
 def test_bench_fp4_dequant():
