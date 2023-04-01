@@ -12,12 +12,18 @@ if __name__ == '__main__':
     fig = plt.figure(tight_layout=True, figsize=(12,3.5))
     gs = gridspec.GridSpec(1, 2)
 
+    dims_to_consider = [1024, 1280, 1408, 1664, 2048, 4096]
+    batch_size_for_plot1 = 32768
+    batch_sizes_for_plot2 = [2**14, 2**15, 2**16, 2**17]
+    dims_to_xtick = [1024, 2048, 4096]
+    logscale_plot1 = True
 
     ax = fig.add_subplot(gs[0, 0])
 
-    rdf = pd.read_json('tests/triton_tests/info.jsonl', lines=True)
-    df = rdf[rdf.batch_size == 32768]
+    rdf = pd.read_json('speed_benchmark/info_a100_py2.jsonl', lines=True)
+    df = rdf[rdf.batch_size == batch_size_for_plot1]
 
+    # first plot the time occupied by different operations
     for k, marker, ls, color, name in [
         ('standard_gx+standard_gw+standard_fwd', 's', '-', 'C2', 'Standard fp16 (sum of parts)'),
         ('x_quantize_rowwise+g_quantize_rowwise+w_quantize_global+w_quantize_global_transpose+standard_gw+global_fwd+global_bwd', 'o', '-', 'C4', 'SwitchBack int8 (sum of parts)'),
@@ -29,17 +35,15 @@ if __name__ == '__main__':
         ('global_fwd', '^', '--', 'C4', 'Int8 Matmul XW (switchback)'),
         ('global_bwd', '^', '-.', 'C4', 'Int8 Matmul GW (switchback)'),
         
-        ####                 time_global = info['x_quantize_rowwise'] + info['g_quantize_rowwise'] + info['w_quantize_global'] + info['w_quantize_global_transpose'] + info['standard_gw'] + info['global_fwd'] + info['global_bwd']
-
         ('x_quantize_rowwise', 'P', '--', 'C4', 'Quantize rowwise X (switchback)'),
         ('g_quantize_rowwise', 'P', '-.', 'C4', 'Quantize rowwise G (switchback)'),
         ('w_quantize_global', '.', '--', 'C4', 'Quatnize global W (switchback)'),
         ('w_quantize_global_transpose', '.', '-.', 'C4', 'Quantize gloabl and\ntranspose W (switchback)'),
-        #('standard_gw', '.', '--', 'C1', 'standard_gw'),
     ]:
         xs = []
         ys = []
-        for embed_dim in [1024, 1280, 1408, 1664, 2048, 4096]:
+        for embed_dim in dims_to_consider:
+            # average over dim -> 4*dim and 4*dim -> dim
             df_ = df[df.dim_in == embed_dim]
             df_ = df_[df_.dim_out == embed_dim * 4]
             xs.append(embed_dim)
@@ -56,24 +60,20 @@ if __name__ == '__main__':
         ax.plot(xs, ys, color=color, label=name, marker=marker, markersize=5 if marker=='s' else 5, linestyle=ls, linewidth=2 if '+' in k else 1.)
 
 
-
-
     ax.set_xlabel('dim', fontsize=13)
     ax.set_ylabel('time (ms)', fontsize=13)
-    # make a legend which is below the plot
-
-
 
     ax.grid()
 
     ax.set_xscale('log')
-    #ax.set_yscale('log')
+    if logscale_plot1:
+        ax.set_yscale('log')
     
     ax.tick_params(axis='x', labelsize=11)
     ax.tick_params(axis='y', labelsize=11)
 
-    ax.set_xticks([1024, 2048, 4096])
-    ax.set_xticklabels([1024, 2048, 4096])
+    ax.set_xticks(dims_to_xtick)
+    ax.set_xticklabels(dims_to_xtick)
     ax.set_xticks([], minor=True)
 
     leg = ax.legend(loc='upper center', bbox_to_anchor=(-0.64,  1.), ncol=1, fontsize=10)
@@ -86,7 +86,7 @@ if __name__ == '__main__':
     ax = fig.add_subplot(gs[0, 1])
 
     # now plot the % speedup for different batch sizes
-    for j, batch_size in enumerate([2**14, 2**15, 2**16, 2**17]):
+    for j, batch_size in enumerate(batch_sizes_for_plot2):
         all_xs, all_ys = [], []
         for k, marker, ls, color, name in [
             ('standard_gx+standard_gw+standard_fwd', 's', '-', 'C2', 'Standard fp16 (total time)'),
@@ -95,7 +95,7 @@ if __name__ == '__main__':
         
             xs, ys = [], []
             df = rdf[rdf.batch_size == batch_size]
-            for embed_dim in [1024, 1280, 1408, 1664, 2048, 4096]:
+            for embed_dim in dims_to_consider:
                 df_ = df[df.dim_in == embed_dim]
                 df_ = df_[df_.dim_out == embed_dim * 4]
                 xs.append(embed_dim)
@@ -125,13 +125,13 @@ if __name__ == '__main__':
     ax.tick_params(axis='x', labelsize=11)
     ax.tick_params(axis='y', labelsize=11)
 
-    ax.set_xticks([1024, 2048, 4096])
-    ax.set_xticklabels([1024, 2048, 4096])
+    ax.set_xticks(dims_to_xtick)
+    ax.set_xticklabels(dims_to_xtick)
     ax.set_xticks([], minor=True)
 
     ax.set_title('  Linear layer summary, varying dimensions', fontsize=10, loc='left', y=1.05, pad=-20)
 
 
 
-    plt.savefig('tests/triton_tests/plot1.pdf', bbox_inches='tight')
+    plt.savefig('speed_benchmark/plot_with_info.pdf', bbox_inches='tight')
 

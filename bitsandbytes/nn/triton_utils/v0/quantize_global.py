@@ -5,7 +5,7 @@ import triton
 import triton.language as tl
 from triton.ops.matmul_perf_model import early_config_prune, estimate_matmul_time
 
-# TODO: autotune this better.
+# global quantize
 @triton.autotune(
         configs=[
             triton.Config({'BLOCK_SIZE': 1024,}, num_warps=4),
@@ -42,6 +42,7 @@ def quantize_global(x: torch.Tensor):
     return output, absmax
 
 
+# global quantize and transpose
 @triton.autotune(
         configs=[
             triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'GROUP_M': 8}, num_warps=4),
@@ -97,34 +98,3 @@ def quantize_global_transpose(input):
     _quantize_global_transpose[grid](input, absmax_inv, out, input.stride(0), input.stride(1), out.stride(0), out.stride(1), M, N)
     return out, absmax
 
-if __name__ == '__main__':
-
-
-    w = torch.randn(768, 1280).cuda().to(torch.float16)
-    W_int8, state_w = quantize_global(w)
-    r_state_w = w.abs().max()
-    r_W_int8 = ((127 * w.float()) / state_w).round().to(torch.int8)
-    print((r_W_int8 == W_int8).float().mean())
-
-    # print(r_W_int8)
-    # print(W_int8)
-    exit()
-    repeat = 16
-
-    for _ in range(8):
-        out = quantize_global(w)
-
-    triton_graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(triton_graph):
-        out = quantize_global(w)
-
-    triton_graph.replay()
-
-    torch.cuda.synchronize()
-    start = time.time()
-    for _ in range(repeat):
-        triton_graph.replay()
-    torch.cuda.synchronize()
-    end = time.time()
-
-    print(f"time: {(end - start) / repeat * 1000:.3f} ms")

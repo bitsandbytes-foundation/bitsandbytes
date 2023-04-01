@@ -4,6 +4,10 @@ import triton
 import triton.language as tl
 from triton.ops.matmul_perf_model import early_config_prune, estimate_matmul_time
 
+# This is a matmul kernel based on triton.ops.matmul
+# It is modified to support rowwise quantized input and columnwise quantized weight
+# It's purpose is fused matmul then dequantize
+# It does support bias.
 
 def init_to_zero(name):
     return lambda nargs: nargs[name].zero_()
@@ -60,7 +64,7 @@ def get_configs_io_bound():
     'EVEN_K': lambda args: args['K'] % (args['BLOCK_K'] * args['SPLIT_K']) == 0,
 })
 @triton.jit
-def _kernel(A, B, C, state_x_ptr, state_w_ptr, M, N, K, divfactor,
+def _int8_matmul_rowwise_dequantize(A, B, C, bias, state_x_ptr, state_w_ptr, M, N, K, divfactor, has_bias : tl.constexpr,
             stride_am, stride_ak,
             stride_bk, stride_bn,
             stride_cm, stride_cn,
@@ -113,6 +117,10 @@ def _kernel(A, B, C, state_x_ptr, state_w_ptr, M, N, K, divfactor,
     acc = (w_factor * (x_factor * (acc * divfactor)))
     acc = acc.to(C.dtype.element_ty)
 
+    if has_bias:
+        bias = tl.load(bias + rn).to(C.dtype.element_ty)
+        acc = acc + bias[None, :]
+
     C = C + (rm[:, None] * stride_cm + rn[None, :] * stride_cn)
     mask = (rm < M)[:, None] & (rn < N)[None, :]
     # handles write-back with reduction-splitting
@@ -122,8 +130,10 @@ def _kernel(A, B, C, state_x_ptr, state_w_ptr, M, N, K, divfactor,
         tl.atomic_add(C, acc, mask=mask)
 
 
-def int8_matmul_rowwise_dequantize(a, b, state_x, state_w):
+def int8_matmul_rowwise_dequantize(a, b, state_x, state_w, bias):
     divfactor = 1. / (127. * 127.)
+
+    has_bias = 0 if bias is None else 1
 
     device = a.device
     # handle non-contiguous inputs if necessary
@@ -139,9 +149,9 @@ def int8_matmul_rowwise_dequantize(a, b, state_x, state_w):
     c = torch.empty((M, N), device=device, dtype=torch.float16)
     # accumulator types
     ACC_TYPE = tl.float32 #if a.dtype in [torch.float16, torch.bfloat16, torch.float32] else tl.int32
-    # launch kernel
+    # launch int8_matmul_rowwise_dequantize kernel
     grid = lambda META: (triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']), META['SPLIT_K'])
-    _kernel[grid](a, b, c, state_x, state_w, M, N, K, divfactor,
+    _int8_matmul_rowwise_dequantize[grid](a, b, c, bias, state_x, state_w, M, N, K, divfactor, has_bias,
                     a.stride(0), a.stride(1),
                     b.stride(0), b.stride(1),
                     c.stride(0), c.stride(1),
