@@ -97,5 +97,6 @@ if __name__ == '__main__':
 
                 info_json = json.dumps(info)
 
-                with open("speed_benchmark/info_a100_py2.jsonl", "a") as file:
+                # TODO: change this to what you want.
+                with open("speed_benchmark/info.jsonl", "a") as file:
                     file.write(info_json + "\n")

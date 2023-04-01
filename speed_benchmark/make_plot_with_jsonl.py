@@ -20,6 +20,7 @@ if __name__ == '__main__':
 
     ax = fig.add_subplot(gs[0, 0])
 
+    # TODO: change this to what you want.
     rdf = pd.read_json('speed_benchmark/info_a100_py2.jsonl', lines=True)
     df = rdf[rdf.batch_size == batch_size_for_plot1]
 
