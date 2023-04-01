@@ -26,6 +26,8 @@ def get_temp_dir():
 def rm_path(path):
     shutil.rmtree(path)
 
+str2bf16support = {}
+str2bf16support['adam8bit_blockwise'] = True
 
 str2optimizers = {}
 str2optimizers["adam_pytorch"] = (None, torch.optim.Adam, bnb.optim.Adam)
@@ -238,7 +240,7 @@ def test_global_config(dim1, dim2, gtype):
 
 dim1 = [1024]
 dim2 = [32, 1024, 4097]
-gtype = [torch.float32, torch.float16]
+gtype = [torch.float32, torch.float16, torch.bfloat16]
 optimizer_names = [
     "adam8bit",
     "momentum8bit",
@@ -256,6 +258,7 @@ names = [
 
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_optimizer8bit(dim1, dim2, gtype, optim_name):
+    if gtype == torch.bfloat16 and optim_name not in str2bf16support: return
     if dim1 == 1 and dim2 == 1:
         return
     p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
@@ -269,7 +272,9 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     if gtype == torch.float32:
         atol, rtol = 3e-3, 1e-3
         patol, prtol = 1e-5, 1e-3
-
+    elif gtype == torch.bfloat16:
+        atol, rtol = 3e-3, 1e-3
+        patol, prtol = 1e-4, 1e-2
     else:
         atol, rtol = 3e-3, 1e-3
         patol, prtol = 1e-5, 1e-3
@@ -314,8 +319,12 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
 
         err = torch.abs(p1 - p2)
         relerr = err / torch.abs(p1)
-        assert err.mean() < 0.0001
-        assert relerr.mean() < 0.001
+        if g.dtype == torch.bfloat16:
+            assert err.mean() < 0.00015
+            assert relerr.mean() < 0.0015
+        else:
+            assert err.mean() < 0.0001
+            assert relerr.mean() < 0.001
 
         errors.append(err.mean().item())
         relerrors.append(relerr.mean().item())
@@ -335,12 +344,8 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
                 bnb_optimizer = str2optimizers[optim_name][1]([p2])
                 bnb_optimizer.load_state_dict(torch.load(join(path, "opt.pt")))
                 rm_path(path)
-                torch.testing.assert_allclose(
-                    raws1cpy, bnb_optimizer.state[p2][name2]
-                )
-                torch.testing.assert_allclose(
-                    qmap1, bnb_optimizer.state[p2][qmap]
-                )
+                torch.testing.assert_allclose(raws1cpy, bnb_optimizer.state[p2][name2])
+                torch.testing.assert_allclose(qmap1, bnb_optimizer.state[p2][qmap])
 
                 if "blockwise" in optim_name:
                     s1 = F.dequantize_blockwise(
@@ -357,28 +362,16 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
                     )
                 torch.testing.assert_allclose(s1cpy, s1)
 
-                num_not_close = (
-                    torch.isclose(
-                        torch_optimizer.state[p1][name1],
-                        s1,
-                        atol=atol,
-                        rtol=rtol,
-                    )
-                    == 0
-                )
+                num_not_close = (torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol) == 0)
                 assert num_not_close.sum().item() < 20
-            torch.testing.assert_allclose(
-                p1, p2.float(), atol=patol, rtol=prtol
-            )
+            torch.testing.assert_allclose(p1, p2.float(), atol=patol, rtol=prtol)
 
         # the parameters diverge quickly. Here we keep them close
         # together so we can test against the Adam error
         p1.data = p1.data.to(gtype).float()
         p2.copy_(p1.data)
         torch.testing.assert_allclose(p1.to(gtype), p2)
-        for (name1, name2, qmap, max_val), s in zip(
-            str2statenames[optim_name], dequant_states
-        ):
+        for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
             torch_optimizer.state[p1][name1].copy_(s.data)
 
     # print(sum(errors)/len(errors))
