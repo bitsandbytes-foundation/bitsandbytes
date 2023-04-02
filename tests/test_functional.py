@@ -2246,7 +2246,9 @@ def test_fp4_quant():
 
     err = (A1 - A2).abs().float()
     relerr = (err/A1.abs().float()).mean()
+    idx = err > 1.0
     err = err.mean()
+
 
     assert err.item() < 0.1
     assert relerr.item() < 0.28
@@ -2256,7 +2258,7 @@ def test_fp4_compressed_stats():
     for blocksize in [128, 64]:
         errs1 = []
         errs2 = []
-        for i in range(10):
+        for i in range(10000):
             A1 = torch.randn(1024, 1024, device='cuda').half()
             q2, SA2 = F.quantize_fp4(A1, blocksize=blocksize)
             q3, SA3= F.quantize_fp4(A1, blocksize=blocksize, compress_statistics=True)
@@ -2268,7 +2270,7 @@ def test_fp4_compressed_stats():
             relerr = (err/(A1.abs().float()+1e-15)).mean()
             err = err.mean()
 
-            errs1.append(err.item())
+            errs1.append(relerr.item())
 
             assert err.item() < 0.11
             assert relerr.item() < 0.28
@@ -2277,7 +2279,7 @@ def test_fp4_compressed_stats():
             relerr = (err/(A1.abs().float()+1e-15)).mean()
             err = err.mean()
 
-            errs2.append(err.item())
+            errs2.append(relerr.item())
 
             assert err.item() < 0.11
             assert relerr.item() < 0.28
@@ -2301,7 +2303,7 @@ def test_bench_fp4_dequant():
     #print(max_theoretical_s*1e6)
     b = torch.randn(128, 1024*12, device='cuda').half()
 
-    iters = 5
+    iters = 500
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
