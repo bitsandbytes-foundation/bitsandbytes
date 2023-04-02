@@ -218,7 +218,7 @@ def create_custom_map(seed=0, scale=0.01):
     assert values.numel() == 256
     return values
 
-def create_normal_map(offset=0.966666, use_extra_value=True):
+def create_normal_map(offset=0.9677083, use_extra_value=True):
 
     if use_extra_value:
         # one more positive value, this is an asymmetric type

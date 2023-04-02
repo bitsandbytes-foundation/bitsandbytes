@@ -2318,3 +2318,19 @@ def test_bench_fp4_dequant():
     #    torch.matmul(b, a.t())
     #torch.cuda.synchronize()
     #print((time.time()-t0)/iters*1e6)
+
+
+
+def test_normal_map_tree():
+    code = F.create_normal_map()
+    values =code[:8].tolist() + code[-8:].tolist()
+    num_pivots = 1
+    while num_pivots <16:
+        idx = list(range(16//num_pivots//2, 16, 16//num_pivots))
+        print(idx)
+        num_pivots *= 2
+        pivots = []
+        for i in idx:
+            pivots.append((values[i-1]+values[i])/2)
+        print(pivots)
+
