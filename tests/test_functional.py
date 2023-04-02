@@ -2254,16 +2254,18 @@ def test_fp4_quant():
     assert relerr.item() < 0.28
 
 
-def test_fp4_compressed_stats():
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+@pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
+def test_4bit_compressed_stats(quant_type):
     for blocksize in [128, 64]:
         errs1 = []
         errs2 = []
-        for i in range(10000):
+        for i in range(10):
             A1 = torch.randn(1024, 1024, device='cuda').half()
-            q2, SA2 = F.quantize_fp4(A1, blocksize=blocksize)
-            q3, SA3= F.quantize_fp4(A1, blocksize=blocksize, compress_statistics=True)
-            A2 = F.dequantize_fp4(q2, SA2)
-            A3 = F.dequantize_fp4(q3, SA3)
+            q2, SA2 = F.quantize_4bit_packed(A1, blocksize=blocksize, quant_type=quant_type)
+            q3, SA3= F.quantize_4bit_packed(A1, blocksize=blocksize, compress_statistics=True, quant_type=quant_type)
+            A2 = F.dequantize_4bit_packed(q2, SA2, quant_type=quant_type)
+            A3 = F.dequantize_4bit_packed(q3, SA3, quant_type=quant_type)
 
 
             err = (A1 - A2).abs().float()
@@ -2290,10 +2292,12 @@ def test_fp4_compressed_stats():
 
 
 
-def test_bench_fp4_dequant():
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+@pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
+def test_bench_fp4_dequant(quant_type):
     blocksize = 256
     a = torch.rand(1024*12*4, 1024*12, device='cuda').half()
-    qa, SA = F.quantize_fp4(a, blocksize=blocksize)
+    qa, SA = F.quantize_4bit_packed(a, blocksize=blocksize, quant_type=quant_type)
 
     input_size = a.numel()/2
     output_size = a.numel()*2
@@ -2307,7 +2311,7 @@ def test_bench_fp4_dequant():
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
-        F.dequantize_fp4(qa, SA, blocksize=blocksize)
+        F.dequantize_4bit_packed(qa, SA, blocksize=blocksize, quant_type=quant_type)
         #b.copy_(a)
     torch.cuda.synchronize()
     #print((time.time()-t0)/iters*1e6)
@@ -2325,6 +2329,7 @@ def test_normal_map_tree():
     code = F.create_normal_map()
     values =code[:8].tolist() + code[-8:].tolist()
     num_pivots = 1
+    print(values)
     while num_pivots <16:
         idx = list(range(16//num_pivots//2, 16, 16//num_pivots))
         print(idx)

@@ -688,8 +688,13 @@ def dequantize_blockwise(
 
     return out
 
+def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
+    return quantize_4bit_packed(A, absmax, out, blocksize, compress_statistics, 'fp4')
 
-def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False) -> Tensor:
+def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
+    return quantize_4bit_packed(A, absmax, out, blocksize, compress_statistics, 'nf4')
+
+def quantize_4bit_packed(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
     """
     Quantize tensor A in blocks of FP4 values.
 
@@ -705,6 +710,8 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
         The output tensor (8-bit).
     blocksize : int
         The blocksize used in quantization.
+    quant_type : str
+        The 4-bit quantization data type {fp4, nf4}
 
     Returns
     -------
@@ -715,6 +722,8 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
     """
     if A.device.type != 'cuda':
         raise NotImplementedError(f'Device type not supported for FP4 quantization: {A.device.type}')
+    if quant_type not in ['fp4', 'nf4']:
+        raise NotImplementedError(f'4-bit quantization data type {quant_type} is not implemented.')
 
     n = A.numel()
     input_shape = A.shape
@@ -734,9 +743,15 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
     is_on_gpu([A, out, absmax])
 
     if A.dtype == torch.float32:
-        lib.cquantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+        if quant_type == 'fp4':
+            lib.cquantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+        else:
+            lib.cquantize_blockwise_fp32_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
     elif A.dtype == torch.float16:
-        lib.cquantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+        if quant_type == 'fp4':
+            lib.cquantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+        else:
+            lib.cquantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     post_call(A.device)
@@ -754,8 +769,13 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
 
     return out, state
 
+def dequantize_fp4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+    return dequantize_4bit_packed(A, quant_state, absmax, out, blocksize, 'fp4')
 
-def dequantize_fp4(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+def dequantize_nf4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+    return dequantize_4bit_packed(A, quant_state, absmax, out, blocksize, 'nf4')
+
+def dequantize_4bit_packed(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
 
@@ -771,6 +791,10 @@ def dequantize_fp4(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: 
         The absmax values.
     out : torch.Tensor
         Dequantized output tensor.
+    blocksize : int
+        The blocksize used in quantization.
+    quant_type : str
+        The 4-bit quantization data type {fp4, nf4}
 
 
     Returns
@@ -780,6 +804,8 @@ def dequantize_fp4(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: 
     """
     if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
         raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
+    if quant_type not in ['fp4', 'nf4']:
+        raise NotImplementedError(f'4-bit quantization data type {quant_type} is not implemented.')
 
     if quant_state is None:
         assert absmax is not None and out is not None
@@ -802,9 +828,15 @@ def dequantize_fp4(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: 
     device = pre_call(A.device)
     is_on_gpu([A, absmax, out])
     if out.dtype == torch.float32:
-        lib.cdequantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+        if quant_type == 'fp4':
+            lib.cdequantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+        else:
+            lib.cdequantize_blockwise_fp32_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
     elif out.dtype == torch.float16:
-        lib.cdequantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+        if quant_type == 'fp4':
+            lib.cdequantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+        else:
+            lib.cdequantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     post_call(A.device)
