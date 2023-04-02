@@ -2318,6 +2318,3 @@ def test_bench_fp4_dequant():
     #    torch.matmul(b, a.t())
     #torch.cuda.synchronize()
     #print((time.time()-t0)/iters*1e6)
-
-
-
