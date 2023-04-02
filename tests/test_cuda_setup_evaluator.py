@@ -10,6 +10,7 @@ from bitsandbytes.cuda_setup.main import (
     evaluate_cuda_setup,
     extract_candidate_paths,
 )
+from testutil import skip_if_no_cuda
 
 """
 'LD_LIBRARY_PATH': ':/mnt/D/titus/local/cuda-11.1/lib64/'
@@ -73,6 +74,7 @@ HAPPY_PATH__LD_LIB_TEST_PATHS: List[InputAndExpectedOutput] = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.fixture(params=HAPPY_PATH__LD_LIB_TEST_PATHS)
 def happy_path_path_string(tmpdir, request):
     for path in extract_candidate_paths(request.param):
@@ -85,8 +87,8 @@ UNHAPPY_PATH__LD_LIB_TEST_PATHS = [
     f"a/b/c/{CUDA_RUNTIME_LIB}:d/e/f/{CUDA_RUNTIME_LIB}:g/h/j/{CUDA_RUNTIME_LIB}",
 ]
 
-
-def test_full_system():
+@skip_if_no_cuda()
+def test_full_system_cuda():
     ## this only tests the cuda version and not compute capability
 
     # if CONDA_PREFIX exists, it has priority before all other env variables
