@@ -2,6 +2,36 @@
 
 #include "Portable.h"
 
+
+namespace BinSearch {
+namespace Details {
+
+template <InstrSet I, typename T>
+struct FTOITraits{};
+
+template <InstrSet I, class T>
+struct FVec;
+
+template <InstrSet I, class T>
+struct IVec;
+
+template <InstrSet I, class T>
+struct FVec1;
+
+template <> struct InstrFloatTraits<Scalar, float>
+{
+    typedef __m128  vec_t;
+};
+
+template <> struct InstrFloatTraits<Scalar, double>
+{
+    typedef __m128d vec_t;
+};
+
+}
+}
+
+#if !defined(__aarch64__)
 #ifdef USE_SSE42
 #ifndef _MSC_VER
 #include <popcntintrin.h>
@@ -40,15 +70,6 @@ FORCE_INLINE int popcnt32(int x32)
 namespace BinSearch {
 namespace Details {
 
-template <InstrSet I, class T>
-struct FVec;
-
-template <InstrSet I, class T>
-struct IVec;
-
-template <InstrSet I, class T>
-struct FVec1;
-
 template <> struct InstrIntTraits<SSE>
 {
     typedef __m128i vec_t;
@@ -64,8 +85,8 @@ template <> struct InstrFloatTraits<SSE, double>
     typedef __m128d vec_t;
 };
 
-template <InstrSet I, typename T>
-struct FTOITraits
+template <>
+struct FTOITraits<SSE, float>
 {
     typedef IVec<SSE, float> vec_t;
 };
@@ -560,3 +581,4 @@ FORCE_INLINE FVec<AVX, double> mulSub(const FVec<AVX, double>& a, const FVec<AVX
 
 } // namepsace Details
 } // namespace BinSearch
+#endif // !defined(__aarch64__)
