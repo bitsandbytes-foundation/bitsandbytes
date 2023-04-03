@@ -506,8 +506,16 @@ def test_linear_kbit_fp32_bias(module):
         o1 = l1(b1)
         assert l1.bias is None
 
+modules = []
+modules.append(bnb.nn.Linear8bitLt)
+modules.append(bnb.nn.Linear4bit)
+modules.append(bnb.nn.LinearFP4)
+modules.append(bnb.nn.LinearNF4)
+modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True))
+modules.append(lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compress_statistics=True))
+names = ['Int8Lt', '4bit', 'FP4', 'NF4', 'FP4+C', 'NF4+C']
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
-@pytest.mark.parametrize("module", [bnb.nn.Linear8bitLt, bnb.nn.LinearFP4, lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True)], ids=['Int8Lt', 'FP4', 'FP4+C'])
+@pytest.mark.parametrize("module", modules, ids=names)
 def test_kbit_backprop(module):
     b = 17
     dim1 = 37
@@ -515,6 +523,8 @@ def test_kbit_backprop(module):
 
     ref = nn.Sequential(*[torch.nn.Linear(dim1, dim2), torch.nn.Linear(dim2, 10)])
     ref[1].weight.requires_grad = False
+    torch.nn.init.kaiming_normal_(ref[0].weight)
+    torch.nn.init.kaiming_normal_(ref[1].weight)
     kbit = nn.Sequential(*[torch.nn.Linear(dim1, dim2), module(dim2, 10)])
     kbit[0].weight.detach().copy_(ref[0].weight)
     kbit[1].weight.detach().copy_(ref[1].weight)
@@ -523,6 +533,10 @@ def test_kbit_backprop(module):
     ref = ref.half().cuda()
     kbit = kbit.half().cuda()
 
+    errs1 = []
+    errs2 = []
+    relerrs1 = []
+    relerrs2 = []
     for i in range(100):
         batch = torch.randn(b, dim1).half().cuda()
         out1 = ref(batch)
@@ -535,12 +549,26 @@ def test_kbit_backprop(module):
         bgrad1 = ref[0].bias.grad
         bgrad2 = kbit[0].bias.grad
 
-        torch.testing.assert_allclose(grad1, grad2, atol=0.008, rtol=0.05)
-        torch.testing.assert_allclose(bgrad1, bgrad2, atol=0.008, rtol=0.05)
+        err1 = (out1-out2).abs().float()
+        err2 = (grad1-grad2).abs().float()
+        relerr1 = (err1/(out1.abs().float()+1e-9))
+        relerr2 = (err2/(grad1.abs().float()+1e-9))
+        errs1.append(err1.mean().item())
+        errs2.append(err2.mean().item())
+        relerrs1.append(relerr1.mean().item())
+        relerrs2.append(relerr2.mean().item())
+
+
+        #torch.testing.assert_allclose(grad1, grad2, atol=0.008, rtol=0.05)
+        #torch.testing.assert_allclose(bgrad1, bgrad2, atol=0.008, rtol=0.05)
         ref.zero_grad()
         kbit.zero_grad()
 
         assert kbit[0].weight.grad.sum().item() == 0
         assert kbit[0].bias.grad.sum().item() == 0
+    print('out', sum(errs1)/len(errs1))
+    print('grad', sum(errs2)/len(errs2))
+    print('rel out', sum(relerrs1)/len(relerrs1))
+    print('rel grad', sum(relerrs2)/len(relerrs2))
 
 

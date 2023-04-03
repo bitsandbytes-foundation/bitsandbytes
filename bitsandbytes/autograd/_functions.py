@@ -475,7 +475,7 @@ class MatMul8bitLt(torch.autograd.Function):
         return grad_A, grad_B, None, grad_bias, None
 
 
-class MatMulFP4(torch.autograd.Function):
+class MatMul4Bit(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
 
@@ -547,6 +547,6 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_fp4(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
+def matmul_4bit(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
     assert quant_state is not None
-    return MatMulFP4.apply(A, B, out, bias, quant_state)
+    return MatMul4Bit.apply(A, B, out, bias, quant_state)

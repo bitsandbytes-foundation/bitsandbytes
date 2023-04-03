@@ -689,14 +689,14 @@ def dequantize_blockwise(
     return out
 
 def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
-    return quantize_4bit_packed(A, absmax, out, blocksize, compress_statistics, 'fp4')
+    return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4')
 
 def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
-    return quantize_4bit_packed(A, absmax, out, blocksize, compress_statistics, 'nf4')
+    return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4')
 
-def quantize_4bit_packed(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
+def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
     """
-    Quantize tensor A in blocks of FP4 values.
+    Quantize tensor A in blocks of 4-bit values.
 
     Quantizes tensor A by dividing it into blocks which are independently quantized to FP4.
 
@@ -763,19 +763,19 @@ def quantize_4bit_packed(A: Tensor, absmax: Tensor = None, out: Tensor = None, b
         #qabsmax, state2 = quantize_blockwise(absmax, code=code, blocksize=256)
         qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
         del absmax
-        state = (qabsmax, input_shape, A.dtype, blocksize, (offset, state2))
+        state = (qabsmax, input_shape, A.dtype, blocksize, (offset, state2), quant_type)
     else:
-        state = (absmax, input_shape, A.dtype, blocksize, None)
+        state = (absmax, input_shape, A.dtype, blocksize, None, quant_type)
 
     return out, state
 
 def dequantize_fp4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
-    return dequantize_4bit_packed(A, quant_state, absmax, out, blocksize, 'fp4')
+    return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'fp4')
 
 def dequantize_nf4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
-    return dequantize_4bit_packed(A, quant_state, absmax, out, blocksize, 'nf4')
+    return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'nf4')
 
-def dequantize_4bit_packed(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
+def dequantize_4bit(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
 
@@ -812,7 +812,8 @@ def dequantize_4bit_packed(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, 
         shape = out.shape
         dtype = out.dtype
     else:
-        absmax, shape, dtype, blocksize, compressed_stats = quant_state
+        absmax, shape, dtype, blocksize, compressed_stats, quant_type = quant_state
+
 
     if compressed_stats is not None:
         offset, state2 = compressed_stats

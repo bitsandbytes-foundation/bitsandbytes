@@ -133,18 +133,19 @@ class Embedding(torch.nn.Embedding):
 
         return emb
 
-class FP4Params(torch.nn.Parameter):
-    def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True):
+class Params4bit(torch.nn.Parameter):
+    def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True, quant_type='fp4'):
         cls.quant_state = None
         cls.blocksize = blocksize
         cls.compress_statistics = compress_statistics
+        cls.quant_type = quant_type
         if data is None:
             data = torch.empty(0)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def cuda(self, device):
         w = self.data.contiguous().half().cuda(device)
-        w_fp4, quant_state = bnb.functional.quantize_fp4(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics)
+        w_fp4, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
         self.data = w_fp4
         self.quant_state = quant_state
 
@@ -168,17 +169,16 @@ class FP4Params(torch.nn.Parameter):
         if (device is not None and device.type == "cuda" and self.data.device.type == "cpu"):
             return self.cuda(device)
         else:
-            new_param = FP4Params(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
+            new_param = Params4bit(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
                                   requires_grad=self.requires_grad, quant_state=self.quant_state)
 
             return new_param
 
-
-class LinearFP4(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
+class Linear4bit(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4'):
         super().__init__(input_features, output_features, bias)
         self.state = bnb.MatmulLtState()
-        self.weight = FP4Params(self.weight.data, requires_grad=False, compress_statistics=compress_statistics)
+        self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
         self.compute_dtype = compute_dtype
 
     def init_8bit_state(self):
@@ -198,11 +198,19 @@ class LinearFP4(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.half()
-        out = bnb.matmul_fp4(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
+        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
 
         out = out.to(inp_dtype)
 
         return out
+
+class LinearFP4(Linear4bit):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
+        super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'fp4')
+
+class LinearNF4(Linear4bit):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
+        super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'nf4')
 
 
 class Int8Params(torch.nn.Parameter):

@@ -1784,8 +1784,8 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     print("partial matmul", time.time() - t0)
 
 
-batch_size = 4
-seqdim = 256
+batch_size = 2
+seqdim = 2048
 values = []
 values.append((batch_size, seqdim, 768, 4 * 768))
 values.append((batch_size, seqdim, 1024, 4*1024))
@@ -1798,7 +1798,7 @@ values.append((batch_size, seqdim, 12288, 4*12288))
 names = ["batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
-    iters = 128
+    iters = 32
     formatB = F.get_special_format_str()
 
     A = torch.randn(batch, seq, model, device="cuda").half()
@@ -1807,6 +1807,8 @@ def test_bench_matmul(batch, seq, model, hidden):
 
     B_fp4, state = F.quantize_fp4(B)
     B_fp4_c, state_c = F.quantize_fp4(B, compress_statistics=True)
+
+    B_nf4, state_nf4= F.quantize_nf4(B)
 
     linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
     linear8bit.eval()
@@ -1836,16 +1838,23 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
-        bnb.matmul_fp4(A, B_fp4.t(), quant_state=state)
+        bnb.matmul_4bit(A, B_fp4.t(), quant_state=state)
     torch.cuda.synchronize()
     print( f"bnb fp4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
-        bnb.matmul_fp4(A, B_fp4.t(), quant_state=state_c)
+        bnb.matmul_4bit(A, B_fp4.t(), quant_state=state_c)
     torch.cuda.synchronize()
     print( f"bnb fp4 + compressed stats: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
+
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        bnb.matmul_4bit(A, B_nf4.t(), quant_state=state_nf4)
+    torch.cuda.synchronize()
+    print( f"bnb nf4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
     #torch.cuda.synchronize()
     #t0 = time.time()
@@ -2262,17 +2271,18 @@ def test_4bit_compressed_stats(quant_type):
         errs2 = []
         for i in range(10):
             A1 = torch.randn(1024, 1024, device='cuda').half()
-            q2, SA2 = F.quantize_4bit_packed(A1, blocksize=blocksize, quant_type=quant_type)
-            q3, SA3= F.quantize_4bit_packed(A1, blocksize=blocksize, compress_statistics=True, quant_type=quant_type)
-            A2 = F.dequantize_4bit_packed(q2, SA2, quant_type=quant_type)
-            A3 = F.dequantize_4bit_packed(q3, SA3, quant_type=quant_type)
+            q2, SA2 = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
+            q3, SA3= F.quantize_4bit(A1, blocksize=blocksize, compress_statistics=True, quant_type=quant_type)
+            A2 = F.dequantize_4bit(q2, SA2, quant_type=quant_type)
+            A3 = F.dequantize_4bit(q3, SA3, quant_type=quant_type)
 
 
             err = (A1 - A2).abs().float()
             relerr = (err/(A1.abs().float()+1e-15)).mean()
             err = err.mean()
 
-            errs1.append(relerr.item())
+            errs1.append(err.item())
+
 
             assert err.item() < 0.11
             assert relerr.item() < 0.28
@@ -2281,23 +2291,23 @@ def test_4bit_compressed_stats(quant_type):
             relerr = (err/(A1.abs().float()+1e-15)).mean()
             err = err.mean()
 
-            errs2.append(relerr.item())
+            errs2.append(err.item())
 
             assert err.item() < 0.11
             assert relerr.item() < 0.28
 
-        #print(sum(errs1)/len(errs1), blocksize)
-        #print(sum(errs2)/len(errs2), blocksize)
+        #print(sum(errs1)/len(errs1), blocksize, quant_type)
+        #print(sum(errs2)/len(errs2), blocksize, quant_type)
 
 
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
-def test_bench_fp4_dequant(quant_type):
+def test_bench_4bit_dequant(quant_type):
     blocksize = 256
     a = torch.rand(1024*12*4, 1024*12, device='cuda').half()
-    qa, SA = F.quantize_4bit_packed(a, blocksize=blocksize, quant_type=quant_type)
+    qa, SA = F.quantize_4bit(a, blocksize=blocksize, quant_type=quant_type)
 
     input_size = a.numel()/2
     output_size = a.numel()*2
@@ -2311,7 +2321,7 @@ def test_bench_fp4_dequant(quant_type):
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
-        F.dequantize_4bit_packed(qa, SA, blocksize=blocksize, quant_type=quant_type)
+        F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
         #b.copy_(a)
     torch.cuda.synchronize()
     #print((time.time()-t0)/iters*1e6)
