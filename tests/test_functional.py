@@ -150,13 +150,13 @@ def test_dynamic_quantization():
         assert diff < 0.004
 
 
-def test_dynamic_blockwise_quantization():
-    #print('')
+def test_dynamic_blockwise_quantization(device):
+    if device == "mps": pytest.skip("MPS is not yet implmenented")
     for blocksize in [4096, 2048, 1024, 512]:
         diffs = []
         reldiffs = []
         for i in range(100):
-            A1 = torch.randn(1024, 1024, device="cuda")
+            A1 = torch.randn(1024, 1024, device=device)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize)
             A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
             diff = torch.abs(A1 - A2)
@@ -172,7 +172,7 @@ def test_dynamic_blockwise_quantization():
 
         diffs = []
         for i in range(100):
-            A1 = torch.rand(1024, 1024, device="cuda")
+            A1 = torch.rand(1024, 1024, device=device)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize)
             A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
             diff = torch.abs(A1 - A2)
