@@ -6,6 +6,7 @@ import glob
 import os
 
 from setuptools import find_packages, setup
+from setuptools.dist import Distribution
 
 libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.so"))
 libs = [os.path.basename(p) for p in libs]
@@ -15,6 +16,10 @@ print("libs:", libs)
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
+# Tested with wheel v0.29.0
+class BinaryDistribution(Distribution):
+    def has_ext_modules(foo):
+        return True
 
 setup(
     name=f"bitsandbytes",
@@ -33,4 +38,5 @@ setup(
         "Development Status :: 4 - Beta",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
+    distclass=BinaryDistribution
 )
