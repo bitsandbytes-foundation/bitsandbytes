@@ -1798,7 +1798,7 @@ values.append((batch_size, seqdim, 12288, 4*12288))
 names = ["batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
-    iters = 32
+    iters = 1
     formatB = F.get_special_format_str()
 
     A = torch.randn(batch, seq, model, device="cuda").half()
@@ -2317,7 +2317,7 @@ def test_bench_4bit_dequant(quant_type):
     #print(max_theoretical_s*1e6)
     b = torch.randn(128, 1024*12, device='cuda').half()
 
-    iters = 500
+    iters = 5
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):

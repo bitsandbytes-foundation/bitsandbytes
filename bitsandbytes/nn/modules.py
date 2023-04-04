@@ -136,12 +136,14 @@ class Embedding(torch.nn.Embedding):
 class Params4bit(torch.nn.Parameter):
     def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True, quant_type='fp4'):
         cls.quant_state = None
-        cls.blocksize = blocksize
-        cls.compress_statistics = compress_statistics
-        cls.quant_type = quant_type
         if data is None:
             data = torch.empty(0)
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+
+        self = torch.Tensor._make_subclass(cls, data, requires_grad)
+        self.blocksize = blocksize
+        self.compress_statistics = compress_statistics
+        self.quant_type = quant_type
+        return self
 
     def cuda(self, device):
         w = self.data.contiguous().half().cuda(device)
@@ -177,16 +179,10 @@ class Params4bit(torch.nn.Parameter):
 class Linear4bit(nn.Linear):
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4'):
         super().__init__(input_features, output_features, bias)
-        self.state = bnb.MatmulLtState()
         self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
         self.compute_dtype = compute_dtype
 
-    def init_8bit_state(self):
-        pass
-
     def forward(self, x: torch.Tensor):
-        self.state.is_training = self.training
-
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:
             self.bias.data = self.bias.data.to(x.dtype)
@@ -197,7 +193,7 @@ class Linear4bit(nn.Linear):
         if self.compute_dtype is not None:
             x = x.to(self.compute_dtype)
 
-        bias = None if self.bias is None else self.bias.half()
+        bias = None if self.bias is None else self.bias.half(self.compute_dtype)
         out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
 
         out = out.to(inp_dtype)

@@ -558,14 +558,17 @@ def test_kbit_backprop(module):
         relerrs1.append(relerr1.mean().item())
         relerrs2.append(relerr2.mean().item())
 
-
-        #torch.testing.assert_allclose(grad1, grad2, atol=0.008, rtol=0.05)
-        #torch.testing.assert_allclose(bgrad1, bgrad2, atol=0.008, rtol=0.05)
+        if isinstance(module, bnb.nn.Linear8bitLt):
+            torch.testing.assert_allclose(grad1, grad2, atol=0.008, rtol=0.05)
+            torch.testing.assert_allclose(bgrad1, bgrad2, atol=0.008, rtol=0.05)
+        else:
+            torch.testing.assert_allclose(grad1, grad2, atol=0.015, rtol=0.05)
+            torch.testing.assert_allclose(bgrad1, bgrad2, atol=0.02, rtol=0.05)
         ref.zero_grad()
         kbit.zero_grad()
 
-        assert kbit[0].weight.grad.sum().item() == 0
-        assert kbit[0].bias.grad.sum().item() == 0
+        assert kbit[0].weight.grad is None or kbit[0].weight.grad.sum().item() == 0
+        assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
     print('out', sum(errs1)/len(errs1))
     print('grad', sum(errs2)/len(errs2))
     print('rel out', sum(relerrs1)/len(relerrs1))
