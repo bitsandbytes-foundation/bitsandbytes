@@ -11,6 +11,7 @@ import torch
 
 import bitsandbytes as bnb
 import bitsandbytes.functional as F
+from testutil import skip_if_no_cuda
 
 # import apex
 
@@ -120,6 +121,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_optimizer32bit(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1:
@@ -190,6 +192,7 @@ values = list(product(dim1, dim2, gtype))
 names = ["dim1_{}_dim2_{}_gtype_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, gtype", values, ids=names)
 def test_global_config(dim1, dim2, gtype):
     if dim1 == 1 and dim2 == 1:
@@ -254,6 +257,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1:
@@ -396,6 +400,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_bits", values, ids=names)
 def test_adam_percentile_clipping(dim1, dim2, gtype, optim_bits):
     if dim1 == 1 and dim2 == 1:
@@ -499,6 +504,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1:

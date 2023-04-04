@@ -1,11 +1,14 @@
+import math
 from itertools import product
 
 import pytest
 import torch
 from torch import nn
+import einops
 
 import bitsandbytes as bnb
 
+from testutil import skip_if_no_cuda
 
 class MockArgs:
     def __init__(self, initial_data):
@@ -315,6 +318,7 @@ values = threshold
 names = [f"threshold_{vals}" for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("threshold", values, ids=names)
 def test_linear8bitlt_inference(threshold):
     l1 = bnb.nn.Linear8bitLt(32, 64, threshold=threshold).cuda().half()
@@ -329,12 +333,13 @@ def test_linear8bitlt_inference(threshold):
             assert l1.state.CxB is not None
 
 
-def test_linear8bitlt_accumulated_gradient():
+@skip_if_no_cuda()
+def test_linear8bitlt_accumulated_gradient(device):
     l1 = torch.nn.Sequential(
-        *[bnb.nn.Linear8bitLt(32, 32).cuda().half() for i in range(2)]
+        *[bnb.nn.Linear8bitLt(32, 32).to(device).half() for i in range(2)]
     )
     l2 = torch.nn.Sequential(
-        *[torch.nn.Linear(32, 32).cuda().half() for i in range(2)]
+        *[torch.nn.Linear(32, 32).to(device).half() for i in range(2)]
     )
     l2[0].weight = torch.nn.Parameter(l1[0].weight.clone())
     l2[0].bias = torch.nn.Parameter(l1[0].bias.clone())
@@ -346,7 +351,7 @@ def test_linear8bitlt_accumulated_gradient():
     acc_steps = 10
 
     for i in range(10):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device).half()
         o1 = l1(b1)
         o2 = l2(b1)
         loss1 = o1.mean()
@@ -381,6 +386,7 @@ values = threshold
 names = [f"threshold_{vals}" for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("threshold", values, ids=names)
 @pytest.mark.parametrize("memory_efficient_backward", [False])
 def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
@@ -503,7 +509,7 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         idx = torch.isclose(b1.grad, grad_ref, atol=0.01 * scale, rtol=0.1)
         assert (idx == 0).sum().item() <= b1.numel() * 0.005
 
-
+@skip_if_no_cuda()
 def test_linear8bitlt_fp32_bias():
     # casts model to fp16 -> int8 automatically
     l1 = bnb.nn.Linear8bitLt(32, 64, has_fp16_weights=False).cuda()

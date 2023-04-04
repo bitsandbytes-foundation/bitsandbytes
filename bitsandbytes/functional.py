@@ -108,12 +108,14 @@ class CUBLAS_Context:
         return cls._instance
 
     def get_context(self, device):
-        if device.index not in self.context:
-            prev_device = torch.cuda.current_device()
-            torch.cuda.set_device(device)
-            self.context[device.index] = ct.c_void_p(lib.get_context())
-            torch.cuda.set_device(prev_device)
-        return self.context[device.index]
+        if device.type == "cuda":
+            if device.index not in self.context:
+                prev_device = torch.cuda.current_device()
+                torch.cuda.set_device(device)
+                self.context[device.index] = ct.c_void_p(lib.get_context())
+                torch.cuda.set_device(prev_device)
+            return self.context[device.index]
+        return None
 
 
 class Cusparse_Context:
@@ -302,12 +304,16 @@ def get_ptr(A: Tensor) -> ct.c_void_p:
 
 
 def pre_call(device):
+    if device.type != "cuda":
+        return
     prev_device = torch.cuda.current_device()
     torch.cuda.set_device(device)
     return prev_device
 
 
 def post_call(prev_device):
+    if not prev_device or prev_device.type != "cuda":
+        return
     torch.cuda.set_device(prev_device)
 
 
@@ -1056,7 +1062,7 @@ def histogram_scatter_add_2d(
     lib.chistogram_scatter_add_2d(get_ptr(histogram), get_ptr(index1), get_ptr(index2), get_ptr(source), maxdim1, n)
 
 def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8):
-    if not torch.cuda.is_initialized(): torch.cuda.init()
+    if A.device.type == "cuda" and not torch.cuda.is_initialized(): torch.cuda.init()
     if A.dtype != expected_type or B.dtype != expected_type:
         raise TypeError(
             f"Expected torch.int8 input tensors A and B, but got {A.dtype} and {B.dtype}"
@@ -1603,7 +1609,7 @@ def double_quant(
 ):
     device = A.device
     assert A.dtype == torch.half
-    assert device.type == "cuda"
+    #assert device.type == "cuda"
     prev_device = pre_call(A.device)
 
     cols = A.shape[-1]

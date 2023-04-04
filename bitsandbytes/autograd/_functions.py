@@ -6,7 +6,8 @@ from typing import Tuple, Optional
 
 import torch
 
-import bitsandbytes.functional as F
+from .. import functional as F
+from ..utils import is_cuda_device
 
 
 # math.prod not compatible with python < 3.8
@@ -270,7 +271,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
-        using_igemmlt = torch.cuda.get_device_capability(device=A.device) >= (7, 5) and not state.force_no_igemmlt
+        using_igemmlt = is_cuda_device(A.device) and torch.cuda.get_device_capability(device=A.device) >= (7, 5) and not state.force_no_igemmlt
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:

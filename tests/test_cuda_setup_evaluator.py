@@ -75,19 +75,6 @@ HAPPY_PATH__LD_LIB_TEST_PATHS: List[InputAndExpectedOutput] = [
 
 
 @skip_if_no_cuda()
-@pytest.fixture(params=HAPPY_PATH__LD_LIB_TEST_PATHS)
-def happy_path_path_string(tmpdir, request):
-    for path in extract_candidate_paths(request.param):
-        test_dir.mkdir()
-        if CUDA_RUNTIME_LIB in path:
-            (test_input / CUDA_RUNTIME_LIB).touch()
-
-UNHAPPY_PATH__LD_LIB_TEST_PATHS = [
-    f"a/b/c/{CUDA_RUNTIME_LIB}:d/e/f/{CUDA_RUNTIME_LIB}",
-    f"a/b/c/{CUDA_RUNTIME_LIB}:d/e/f/{CUDA_RUNTIME_LIB}:g/h/j/{CUDA_RUNTIME_LIB}",
-]
-
-@skip_if_no_cuda()
 def test_full_system_cuda():
     ## this only tests the cuda version and not compute capability
 

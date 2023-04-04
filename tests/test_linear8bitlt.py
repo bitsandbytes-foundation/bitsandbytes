@@ -6,6 +6,8 @@ from bitsandbytes import functional as F
 from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
 from bitsandbytes.nn.modules import Linear8bitLt
 
+from testutil import skip_if_no_cuda
+
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
 
@@ -26,7 +28,7 @@ def test_layout_exact_match():
         assert restored_x.is_contiguous()
         assert torch.all(torch.eq(restored_x, x))
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+@skip_if_no_cuda()
 def test_linear_no_igemmlt():
     linear = torch.nn.Linear(1024, 3072)
     x = torch.randn(3, 1024, dtype=torch.half)

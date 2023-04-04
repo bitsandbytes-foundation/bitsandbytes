@@ -5,6 +5,8 @@ import torch
 
 import bitsandbytes as bnb
 
+from testutil import skip_if_no_cuda
+
 n = 1
 k = 25
 dim1 = torch.randint(16, 64, size=(n,)).tolist()
@@ -34,13 +36,13 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize(
     "dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose",
     values,
     ids=names,
 )
 def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
-    if not torch.cuda.is_available(): pytest.skip('No GPU found.')
     if dim2 > 0:
         dim2 = dim2 - (dim2 % 16)
     dim3 = dim3 - (dim3 % 16)
@@ -289,6 +291,7 @@ str_values = list(
 names = ["dim1_{}_dim2_{}_dim3_{}_dim4_{}_func_{}_dtype_{}_requires_grad_{}_transpose_{}_decomp_{}_has_fp16_weights_{}_has_bias_{}".format(*vals) for vals in str_values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize(
     "dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights, has_bias",
     values,
@@ -307,7 +310,6 @@ def test_matmullt(
     has_fp16_weights,
     has_bias
 ):
-    if not torch.cuda.is_available(): pytest.skip('No GPU found.')
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
     outlier_dim = torch.randint(0, dimA[1], size=(dimA[1] // 8,), device="cuda")

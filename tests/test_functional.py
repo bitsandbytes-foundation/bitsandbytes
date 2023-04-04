@@ -12,6 +12,8 @@ import bitsandbytes as bnb
 from bitsandbytes import functional as F
 from scipy.stats import norm
 
+from testutil import skip_if_no_cuda
+
 torch.set_printoptions(
     precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000
 )
@@ -88,6 +90,7 @@ def teardown():
     pass
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize(
     "dtype", [torch.float32, torch.float16], ids=["float", "half"]
 )
@@ -108,6 +111,7 @@ def test_estimate_quantiles(dtype):
     assert (diff > 5e-02).sum().item() == 0
 
 
+@skip_if_no_cuda()
 def test_quantile_quantization():
     for i in range(100):
         A1 = torch.randn(1024, 1024, device="cuda")
@@ -126,11 +130,12 @@ def test_quantile_quantization():
         assert diff < 0.001
 
 
-def test_dynamic_quantization():
+@skip_if_no_cuda()
+def test_dynamic_quantization(device):
     diffs = []
     reldiffs = []
     for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
+        A1 = torch.randn(1024, 1024, device=device)
         C, S = F.quantize(A1)
         A2 = F.dequantize(C, S)
         diff = torch.abs(A1 - A2)
@@ -142,7 +147,7 @@ def test_dynamic_quantization():
     # print(sum(reldiffs)/len(reldiffs))
 
     for i in range(100):
-        A1 = torch.rand(1024, 1024, device="cuda")
+        A1 = torch.rand(1024, 1024, device=device)
         C, S = F.quantize(A1)
         A2 = F.dequantize(C, S)
         diff = torch.abs(A1 - A2).mean().item()
@@ -188,6 +193,7 @@ def test_dynamic_blockwise_quantization(device):
         #print('rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
+@skip_if_no_cuda()
 def test_dynamic_blockwise_stochastic_quantization():
     diffs = []
     reldiffs = []
@@ -205,6 +211,7 @@ def test_dynamic_blockwise_stochastic_quantization():
         )
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize(
     "gtype", [torch.float32, torch.float16], ids=["float", "half"]
 )
@@ -307,6 +314,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize(
     "dim1, dim2, quant_methods, batched", values, ids=names
 )
@@ -365,10 +373,11 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize(
     "hidden_dim, batch_dim, transpose, seq_dim", values, ids=names
 )
-def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
+def test_igemm(device, hidden_dim, batch_dim, transpose, seq_dim):
     hidden_dim = hidden_dim - (hidden_dim % 32)
     batch_dim = batch_dim - (batch_dim % 16)
     seq_dim = seq_dim - (seq_dim % 16)
@@ -383,8 +392,8 @@ def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
             if transpose[1]
             else (hidden_dim, 32 * random.randint(1, 4))
         )
-        A = torch.randint(-128, 127, size=shapeA, device="cuda").to(torch.int8)
-        B = torch.randint(-128, 127, size=shapeB, device="cuda").to(torch.int8)
+        A = torch.randint(-128, 127, size=shapeA, device=device).to(torch.int8)
+        B = torch.randint(-128, 127, size=shapeB, device=device).to(torch.int8)
         if not transpose[0] and not transpose[1]:
             out2 = torch.matmul(A.float(), B.float())
             out = F.igemm(A, B)
@@ -407,8 +416,8 @@ def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
             if transpose[1]
             else (hidden_dim, 32 * random.randint(1, 4))
         )
-        A = torch.randint(-128, 127, size=shapeA, device="cuda").to(torch.int8)
-        B = torch.randint(-128, 127, size=shapeB, device="cuda").to(torch.int8)
+        A = torch.randint(-128, 127, size=shapeA, device=device).to(torch.int8)
+        B = torch.randint(-128, 127, size=shapeB, device=device).to(torch.int8)
         if not transpose[0] and not transpose[1]:
             out2 = torch.matmul(A.float(), B.float())
             out = F.igemm(A, B)
@@ -429,6 +438,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("seq_dim, hidden_dim, batch_dim", values, ids=names)
 def test_dim3_igemm(seq_dim, hidden_dim, batch_dim):
     seq_dim = seq_dim - (seq_dim % 32)
@@ -462,6 +472,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize(
     "seq_dim, hidden_dim, batch_dim, transpose", values, ids=names
 )
@@ -547,6 +558,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, transpose", values, ids=names)
 def test_ibmm(dim1, dim2, dim3, dim4, transpose):
     dim2 = dim2 - (dim2 % 16)
@@ -583,6 +595,7 @@ values = list(product(dim1, dim2, dim3))
 names = ["dim1_{}_dim2_{}_dim3_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, dim3", values, ids=names)
 def test_vector_quant(dim1, dim2, dim3):
     dim2 = dim2 - (dim2 % 16)
@@ -612,6 +625,7 @@ values = list(product(dim1, dim2, dim3, dims, dtype, a_order, out_order, transpo
 names = ["dim1_{}_dim2_{}_dim3_{}_dims_{}_dtype_{}_orderA_{}_orderOut_{}_transpose_{}".format(*vals)for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",values,ids=names)
 def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     if dims == 3 and out_order != "col32":
@@ -696,6 +710,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
 def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
     for i in range(k):
@@ -744,6 +759,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims", values, ids=names)
 def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
     formatB = F.get_special_format_str()
@@ -801,6 +817,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_8bit_training(batch, seq, model, hidden):
     formatB = F.get_special_format_str()
@@ -968,6 +985,7 @@ values = list(product(dim1, dim4, dims, formatB, has_bias))
 names = ["dim1_{}_dim4_{}_dims_{}_formatB_{}_has_bias_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim4, dims, formatB, has_bias", values, ids=names)
 def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
     inner = torch.randint(1, 128, size=(1,)).item()
@@ -1018,6 +1036,7 @@ values = list(product(dim1, dim2, dims))
 names = ["dim1_{}_dim2_{}_dims_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, dims", values, ids=names)
 def test_colrow_absmax(dim1, dim2, dims):
     for i in range(k):
@@ -1074,6 +1093,7 @@ values = list(product(dim1, dim2))
 names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_double_quant(dim1, dim2):
     for i in range(k):
@@ -1121,6 +1141,7 @@ values = list(zip(dim1, dim4, inner))
 names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
 def test_integrated_igemmlt(dim1, dim4, inner):
     for i in range(k):
@@ -1165,6 +1186,7 @@ values = list(zip(dim1, dim4, inner))
 names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
 @pytest.mark.skip("Row scale has some bugs for ampere")
 def test_igemmlt_row_scale(dim1, dim4, inner):
@@ -1240,6 +1262,7 @@ values = list(zip(dim1, dim4, inner))
 names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
 @pytest.mark.skip("Row scale has some bugs for ampere")
 def test_row_scale_bench(dim1, dim4, inner):
@@ -1310,6 +1333,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize(
     "dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",
     values,
@@ -1359,6 +1383,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 def test_overflow():
     formatB = F.get_special_format_str()
     print(formatB)
@@ -1383,6 +1408,7 @@ values = list(product(dim1, dim2))
 names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_coo_double_quant(dim1, dim2):
     threshold = 3.00
@@ -1420,6 +1446,7 @@ values = list(product(dim1, dim2, transposed_B))
 names = ["dim1_{}_dim2_{}_transposed_B_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, transposed_B", values, ids=names)
 def test_spmm_coo(dim1, dim2, transposed_B):
     threshold = 1.5
@@ -1451,6 +1478,7 @@ def test_spmm_coo(dim1, dim2, transposed_B):
         assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=30)
 
 
+@skip_if_no_cuda()
 def test_spmm_bench():
     batch = 2
     model = 1024 * 1
@@ -1501,6 +1529,7 @@ values = list(product(dim1, dim2))
 names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_integrated_sparse_decomp(dim1, dim2):
     threshold = 3.0
@@ -1537,6 +1566,7 @@ def test_integrated_sparse_decomp(dim1, dim2):
         assert err2 < err1
 
 
+@skip_if_no_cuda()
 def test_matmuls():
     a = torch.randn(256, 512).half().cuda()
     b = torch.randn(256, 512).half().cuda()
@@ -1567,6 +1597,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, dtype, out_func", values, ids=names)
 def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
     out_func = getattr(torch, out_func)
@@ -1629,6 +1660,7 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
     # print(time.time() - t0)
 
 
+@skip_if_no_cuda()
 def test_coo2csr():
     threshold = 1
     A = torch.randn(128, 128).half().cuda()
@@ -1649,6 +1681,7 @@ def test_coo2csr():
     torch.testing.assert_allclose(A2[idx], csrA.values)
 
 
+@skip_if_no_cuda()
 def test_coo2csc():
     threshold = 1
     A = torch.randn(128, 128).half().cuda()
@@ -1683,6 +1716,7 @@ values = list(product(dim1, dim2, dtype))
 names = ["dim1_{}_dim2_{}_dtype_{}".format(*vals) for vals in values]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
 def test_spmm_coo_dequant(dim1, dim2, dtype):
     threshold = 6.0
@@ -1800,6 +1834,7 @@ names = [
 ]
 
 
+@skip_if_no_cuda()
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
     iters = 128
@@ -1908,6 +1943,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         f"bnb linear8bitlt with threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
     )
 
+@skip_if_no_cuda()
 def test_zeropoint():
     def quant_zp(x):
         dtype = x.dtype
@@ -1994,6 +2030,7 @@ def test_zeropoint():
     print(err1, err2, err3, err4, err5, err6)
 
 
+@skip_if_no_cuda()
 def test_extract_outliers():
     for i in range(k):
         shapeA = (4096, 4096 * 4)
@@ -2045,6 +2082,7 @@ def test_blockwise_cpu_large():
 
 
 
+@skip_if_no_cuda()
 def test_fp8_quant():
     for e_bits in range(1, 7):
         p_bits = 7-e_bits
@@ -2094,8 +2132,8 @@ def test_fp8_quant():
         #print(3, sum(relerr)/len(relerr))
 
 
+@skip_if_no_cuda()
 def test_few_bit_quant():
-
     #print('')
     for bits in range(2, 9):
         #print('='*30, bits, '='*30)
@@ -2154,6 +2192,7 @@ def test_few_bit_quant():
     #assert False
 
 
+@skip_if_no_cuda()
 def test_kbit_quantile_estimation():
     for i in range(100):
         data = torch.randn(1024, 1024, device='cuda')
@@ -2179,6 +2218,7 @@ def test_kbit_quantile_estimation():
             assert err < 0.035
 
 
+@skip_if_no_cuda()
 def test_bench_dequantization():
     a = torch.rand(1024, 1024, device='cuda').half()
     qa, SA = F.quantize_blockwise(a)
