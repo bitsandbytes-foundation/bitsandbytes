@@ -5,6 +5,8 @@ import torch.nn as nn
 import bitsandbytes.nn as bnn
 from bitsandbytes.nn.triton_based_modules import SwitchBackLinear, SwitchBackGlobalLinear, MyLinear
 
+import triton.language as tl
+
 def construct_model(dim, layers, module):
     modules = []
     for _ in range(layers):

@@ -24,17 +24,17 @@ if __name__ == '__main__':
 
         ('standard_fwd', '^', '--', 'C2', 'Matmul XW (standard)'),
         ('standard_gw', '^', '-.', 'C2', 'Matmul GW (standard)'),
-        ('standard_gx', '^', ':', 'gray', 'Matmul GX (both)'),
+        ('standard_gx', '^', ':', 'gray', 'Matmul G^TX (both)'),
 
         ('global_fwd', '^', '--', 'C4', 'Int8 Matmul XW (switchback)'),
         ('global_bwd', '^', '-.', 'C4', 'Int8 Matmul GW (switchback)'),
         
         ####                 time_global = info['x_quantize_rowwise'] + info['g_quantize_rowwise'] + info['w_quantize_global'] + info['w_quantize_global_transpose'] + info['standard_gw'] + info['global_fwd'] + info['global_bwd']
 
-        ('x_quantize_rowwise', 'P', '--', 'C4', 'Quantize rowwise X (switchback)'),
-        ('g_quantize_rowwise', 'P', '-.', 'C4', 'Quantize rowwise G (switchback)'),
-        ('w_quantize_global', '.', '--', 'C4', 'Quatnize global W (switchback)'),
-        ('w_quantize_global_transpose', '.', '-.', 'C4', 'Quantize gloabl and\ntranspose W (switchback)'),
+        ('x_quantize_rowwise', 'P', '--', 'C4', 'Row-wise quantize X (switchback)'),
+        ('g_quantize_rowwise', 'P', '-.', 'C4', 'Row-wise quantize G (switchback)'),
+        ('w_quantize_global', '.', '--', 'C4', 'Tensor quantize W (switchback)'),
+        ('w_quantize_global_transpose', '.', '-.', 'C4', 'Tensor quantize and\ntranspose W (switchback)'),
         #('standard_gw', '.', '--', 'C1', 'standard_gw'),
     ]:
         xs = []
