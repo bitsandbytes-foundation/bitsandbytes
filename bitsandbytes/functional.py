@@ -232,12 +232,12 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
         if signed:
             data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
 
-        if additional_items > 0:
-            boundaries = torch.linspace(0.1, 1, additional_items + 1)
-            means = (boundaries[:-1] + boundaries[1:]) / 2.0
-            data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
-            if signed:
-                data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
+    if additional_items > 0:
+        boundaries = torch.linspace(0.1, 1, additional_items + 1)
+        means = (boundaries[:-1] + boundaries[1:]) / 2.0
+        data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
+        if signed:
+            data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
 
     data.append(0)
     data.append(1.0)
