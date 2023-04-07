@@ -362,9 +362,13 @@ def get_special_format_str():
 
 def is_on_gpu(tensors):
     on_gpu = True
+    gpu_ids = set()
     for t in tensors:
         if t is None: continue # NULL pointers are fine
         on_gpu &= t.device.type == 'cuda'
+        gpu_ids.add(t.device.index)
+    if len(gpu_ids) > 1:
+        raise TypeError(f'Input tensors need to be on the same GPU, but found the following tensor and device combinations:{[(t.shape, t.device) for t in tensors]}')
     return on_gpu
 
 def get_ptr(A: Tensor) -> ct.c_void_p:
@@ -617,7 +621,7 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
         assert rand is None
         lib.cquantize_blockwise_cpu_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))
 
-    state = (absmax, code, blocksize)
+    state = [absmax, code, blocksize]
 
     return out, state
 
@@ -763,9 +767,9 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
         #qabsmax, state2 = quantize_blockwise(absmax, code=code, blocksize=256)
         qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
         del absmax
-        state = (qabsmax, input_shape, A.dtype, blocksize, (offset, state2), quant_type)
+        state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type]
     else:
-        state = (absmax, input_shape, A.dtype, blocksize, None, quant_type)
+        state = [absmax, input_shape, A.dtype, blocksize, None, quant_type]
 
     return out, state
 

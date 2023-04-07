@@ -1681,6 +1681,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     unsigned char c1s[N_PER_TH];
     unsigned char c2s[N_PER_TH];
     T g_vals[N_PER_TH];
+    T p_vals[N_PER_TH];
     typedef cub::BlockLoad<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
     typedef cub::BlockLoad<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
 
@@ -1742,16 +1743,24 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            g_val = float(g_vals[j]);
-            g_val *= gnorm_scale;
-						if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
+            if(!isnan((float)g_vals[j]) && !isinf((float)g_vals[j]))
 						{
+							s2_vals[j] = smem_quantiles2[lane_id][c2s[j]]*absmax2[i/BLOCK_SIZE];
+              g_val = g_vals[j];
+              //float ratio = (g_val*g_val)/fmaxf(s2_vals[j], eps*eps);
+              //g_val = ratio > 2.0f ? 2.0f*g_val/ratio : g_val;
+              g_val *= gnorm_scale;
+              
+							s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
+
 							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
 							s1_vals[j] = (s1_vals[j]*beta1) + (((1.0f-beta1)*g_val));
-
-							s2_vals[j] = smem_quantiles2[lane_id][c2s[j]]*absmax2[i/BLOCK_SIZE];
-							s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
 						}
+            else
+            {
+              s1_vals[j] = 0.0f;
+              s2_vals[j] = 0.0f;
+            }
 
             new_local_abs_max1 = fmaxf(new_local_abs_max1, fabsf(s1_vals[j]));
             new_local_abs_max2 = fmaxf(new_local_abs_max2, fabsf(s2_vals[j]));
@@ -1782,22 +1791,23 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         }
 
         __syncthreads();
-        LoadT(temp_storage.loadh).Load(&(p[i]), g_vals, valid_items, (T)0.0f);
+        LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
         //  reduce: 2.67/1.69 -> 2.67/1.70
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-						if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
+						//if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
+            if(!isnan((float)g_vals[j]) && !isinf((float)g_vals[j]))
 						{
-							g_vals[j] = (T)(((float)g_vals[j]) + ((step_size*(__fdividef(s1_vals[j],(sqrtf(s2_vals[j])+(correction2*eps)))))));
+							p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(__fdividef(s1_vals[j],(sqrtf(s2_vals[j])+(correction2*eps)))))));
 							if(weight_decay > 0.0f)
-									g_vals[j] = ((float)g_vals[j])*(1.0f-(lr*weight_decay));
+									p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
 						}
         }
 
         //  store: 0.85/1.44 -> 2.48/1.57
         __syncthreads();
-        StoreT(temp_storage.storeh).Store(&(p[i]), g_vals, valid_items);
+        StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
 
         //  quantizaztion: 2.67/1.70  -> 3.4/3.3
         # pragma unroll N_PER_TH

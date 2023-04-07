@@ -135,7 +135,6 @@ class Embedding(torch.nn.Embedding):
 
 class Params4bit(torch.nn.Parameter):
     def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True, quant_type='fp4'):
-        cls.quant_state = None
         if data is None:
             data = torch.empty(0)
 
@@ -143,12 +142,14 @@ class Params4bit(torch.nn.Parameter):
         self.blocksize = blocksize
         self.compress_statistics = compress_statistics
         self.quant_type = quant_type
+        self.quant_state = quant_state
+        self.data = data
         return self
 
     def cuda(self, device):
         w = self.data.contiguous().half().cuda(device)
-        w_fp4, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
-        self.data = w_fp4
+        w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
+        self.data = w_4bit
         self.quant_state = quant_state
 
         return self
@@ -171,8 +172,19 @@ class Params4bit(torch.nn.Parameter):
         if (device is not None and device.type == "cuda" and self.data.device.type == "cpu"):
             return self.cuda(device)
         else:
+            s = self.quant_state
+            if s is not None:
+                # make sure the quantization state is on the right device
+                s[0] = s[0].to(device)
+                if self.compress_statistics:
+                    # TODO: refactor this. This is a nightmare
+                    s[-2][0] = s[-2][0].to(device) # offset
+                    s[-2][1][0] = s[-2][1][0].to(device) # nested quantiation state statitics
+                    s[-2][1][1] = s[-2][1][1].to(device) # nested quantiation codebook
             new_param = Params4bit(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
-                                  requires_grad=self.requires_grad, quant_state=self.quant_state)
+                                  requires_grad=self.requires_grad, quant_state=self.quant_state,
+                                   blocksize=self.blocksize, compress_statistics=self.compress_statistics,
+                                   quant_type=self.quant_type)
 
             return new_param
 
@@ -199,6 +211,38 @@ class Linear4bit(nn.Linear):
         out = out.to(inp_dtype)
 
         return out
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+
+        # we only need to save extra state if .cuda was called
+        # then we have the (1) quantization weight and the (2) quantization config
+
+        #quant_state = getattr(self.weight, 'quant_state', None)
+        #if quant_state is not None:
+        #    # 2. quantization state
+        #    destination[prefix + 'quant_state'] = quant_state
+
+        #destination[prefix + 'weight'] = self.weight.detach()
+
+
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+                                      error_msgs)
+        #for key in unexpected_keys:
+        #    input_name = key[len(prefix):]
+        #    if input_name == "quant_state":
+        #        if getattr(self.weight, 'quant_state', None) is None:
+        #            # buffers not yet initialized, can't call them directly without
+        #            raise RuntimeError("Loading a quantized checkpoint into non-quantized Linear4bit is "
+        #                               "not supported. Please call module.cuda() before module.load_state_dict()")
+
+        #        input_param = state_dict[key]
+        #        self.weight.quant_state = input_param
+        #        assert isinstance(self.weight, Param4bit)
+        #        unexpected_keys.remove(key)
 
 class LinearFP4(Linear4bit):
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
