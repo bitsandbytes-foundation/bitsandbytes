@@ -112,8 +112,6 @@ class _switchback_global_mem_efficient(torch.autograd.Function):
         del X
         W_int8, state_W = quantize_global(W)
 
-        print('in mem eff backward.')
-
         # save for backward.
         ctx.save_for_backward = X_int8, state_X, W_int8, state_W
 
