@@ -24,28 +24,36 @@ jobs:
     steps:
       # Check out code
     - uses: actions/checkout@v3
-      # Install Python
+      # Compile C++ code
+    - name: Set up Docker multiarch
+      if: startsWith(matrix.os, 'ubuntu')
+      uses: docker/setup-qemu-action@v2
+    - name: Build C++
+      run: |
+        build_os=${{ matrix.os }}
+        build_arch=${{ matrix.arch }}
+        make $PWD/dependencies/cub # git is not available in container, so pre-build this
+        if [ ${build_os:0:6} == ubuntu ]; then 
+          image=nvidia/cuda:12.1.0-devel-ubuntu20.04
+          echo "Using image $image"
+          docker run --platform linux/$build_arch --user $(id -u) -i -w /src -v $PWD:/src $image make cpuonly cuda
+        else
+          make cpuonly TARGET_ARCH=${{ matrix.arch }}
+        fi
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
-      # Install Python dependencies
-    - run: |
+      # 
+    - name: Install Python dependencies
+      run: |
         pip install --upgrade pip
         pip install -r requirements.txt
-      # Compile C++ code
-    - name: Build C++ CPU
-      run: |
-        make cpuonly
-    - name: Build C++ CUDA
-      if: startsWith(matrix.os, 'ubuntu')
-      run: |
-        image=nvidia/cuda:12.1.0-devel-ubuntu20.04
-        echo "Using image $image"
-        docker run --user $(id -u) -i -w /src -v $PWD:/src $image make cuda
-    - name: Test
-      run: |
-        PYTHONPATH=. pytest --log-cli-level=DEBUG tests
+    # TODO: How to run CUDA tests on GitHub actions?
+    #- name: Run unit tests
+    #  if: ${{ matrix.arch == 'x86_64' }} # Tests are too slow to run in emulation. Wait for real aarch64 agents
+    #  run: |
+    #    PYTHONPATH=. pytest --log-cli-level=DEBUG tests
     - name: Build wheel
       run: |
         python setup.py bdist_wheel
