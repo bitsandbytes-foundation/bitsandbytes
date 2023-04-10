@@ -9,30 +9,31 @@ on:
     types: [ published ]
 
 jobs:
-  build:
+  build-shared-libs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
         arch: [x86_64, aarch64]
         exclude:
           - os: windows-latest # This probably requres arm64 Windows agents
             arch: aarch64
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
       # Check out code
     - uses: actions/checkout@v3
-      # Compile C++ code
+      # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
     - name: Set up Docker multiarch
       if: startsWith(matrix.os, 'ubuntu')
       uses: docker/setup-qemu-action@v2
+      # Windows: We install Cuda on the agent (slow)
     - uses: Jimver/cuda-toolkit@v0.2.10
       if: startsWith(matrix.os, 'windows')
       id: cuda-toolkit
       with:
         cuda: '12.1.0'
-        method: 'network'
-        sub-packages: '["nvcc", "visual_studio_integration"]'
+        #method: 'network'
+        #sub-packages: '["nvcc", "visual_studio_integration"]'
+      # Compile C++ code
     - name: Build C++
       shell: bash
       run: |
@@ -46,6 +47,39 @@ jobs:
         else
           make cpuonly TARGET_ARCH=${{ matrix.arch }}
         fi
+        mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
+        ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: shared_library
+        path: output/*
+        retention-days: 7
+  build-wheels:
+    needs: build-shared-libs
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        arch: [x86_64, aarch64]
+        exclude:
+          - os: windows-latest # This probably requres arm64 Windows agents
+            arch: aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Check out code
+    - uses: actions/checkout@v3
+      # Download shared libraries
+    - name: Download build artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: shared_library
+        path: output/
+    - name: Copy correct platform shared library
+      shell: bash
+      run: |
+        cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
+      # Compile C++ code
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
@@ -72,7 +106,7 @@ jobs:
         path: dist/bitsandbytes-*.whl
         retention-days: 7
   publish:
-    needs: build
+    needs: build-wheels
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
