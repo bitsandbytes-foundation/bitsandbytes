@@ -373,7 +373,8 @@ def evaluate_cuda_setup():
     if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
         print('')
         print('='*35 + 'BUG REPORT' + '='*35)
-        print('Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues')
+        print(('Welcome to bitsandbytes. For bug reports, please run\n\npython -m bitsandbytes\n\n'),
+              ('and submit this information together with your error trace to: https://github.com/TimDettmers/bitsandbytes/issues'))
         print('='*80)
     if not torch.cuda.is_available(): return 'libbitsandbytes_cpu.so', None, None, None, None
 

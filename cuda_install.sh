@@ -77,8 +77,8 @@ FILE=$(basename $URL)
 if [[ -n "$CUDA_VERSION" ]]; then
   echo $URL
   echo $FILE
-  #wget $URL
-  #bash $FILE --no-drm --no-man-page --override --toolkitpath=$BASE_PATH/$FOLDER/ --toolkit --silent
+  wget $URL
+  bash $FILE --no-drm --no-man-page --override --toolkitpath=$BASE_PATH/$FOLDER/ --toolkit --silent
   if [ "$EXPORT_BASHRC" -eq "1" ]; then
     echo "export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$BASE_PATH/$FOLDER/lib64" >> ~/.bashrc
     echo "export PATH=\$PATH:$BASE_PATH/$FOLDER/bin" >> ~/.bashrc
