@@ -14,7 +14,24 @@ Resources:
 Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + CUDA > 10.0. LLM.int8() requires Turing or Ampere GPUs.
 
 **Installation**:
+
 ``pip install bitsandbytes``
+
+In some cases it can happen that you need to compile from source. In that case, you can install CUDA with the install script in the repository. No sudo is required for this install.
+
+```bash
+wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh
+# Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
+#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121}
+#   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
+
+# For example, the following installs CUDA 11.8 to ~/local/cuda-11.8 and exports the path to your .bashrc
+bash cuda install 118 ~/local 1 
+```
+
+To use a specific CUDA version just for a single compile run, you can set the variable `CUDA_HOME`, for example the following command compiles `libbitsandbytes_cuda117.so` using compiler flags for cuda11x with the cuda version at `~/local/cuda-11.7`:
+
+``CUDA_HOME=~/local/cuda-11.7 CUDA_VERSION=117 make cuda11x``
 
 **Using 8-bit optimizer**:
 1. Comment out optimizer: ``#torch.optim.Adam(....)``
