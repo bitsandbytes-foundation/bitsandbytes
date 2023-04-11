@@ -148,7 +148,7 @@ To compile from source, you need an installation of CUDA. If `nvcc` is not insta
 ```bash
 wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
-#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121}
+#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121}
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
 
 # For example, the following installs CUDA 11.8 to ~/local/cuda-11.8 and exports the path to your .bashrc
