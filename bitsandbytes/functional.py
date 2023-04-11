@@ -35,6 +35,10 @@ if COMPILED_WITH_CUDA:
         lib.crmsprop32bit_g32,
         lib.crmsprop32bit_g16,
     )
+    str2optimizer32bit["lion"] = (
+        lib.clion32bit_g32,
+        lib.clion32bit_g16,
+    )
     str2optimizer32bit["adagrad"] = (
         lib.cadagrad32bit_g32,
         lib.cadagrad32bit_g16,
@@ -58,6 +62,10 @@ if COMPILED_WITH_CUDA:
         lib.crmsprop_static_8bit_g32,
         lib.crmsprop_static_8bit_g16,
     )
+    str2optimizer8bit["lion"] = (
+        lib.clion_static_8bit_g32,
+        lib.clion_static_8bit_g16,
+    )
     str2optimizer8bit["lamb"] = (
         lib.cadam_static_8bit_g32,
         lib.cadam_static_8bit_g16,
@@ -79,6 +87,10 @@ if COMPILED_WITH_CUDA:
     str2optimizer8bit_blockwise["rmsprop"] = (
         lib.crmsprop_8bit_blockwise_fp32,
         lib.crmsprop_8bit_blockwise_fp16,
+    )
+    str2optimizer8bit_blockwise["lion"] = (
+        lib.clion_8bit_blockwise_fp32,
+        lib.clion_8bit_blockwise_fp16,
     )
     str2optimizer8bit_blockwise["adagrad"] = (
         lib.cadagrad_8bit_blockwise_fp32,

@@ -70,6 +70,7 @@ typedef enum Optimizer_t
   RMSPROP = 2,
   LARS = 3,
   ADAGRAD = 4,
+  LION = 5,
 } Optimizer_t;
 
 typedef enum Transform_t

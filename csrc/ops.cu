@@ -120,17 +120,28 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 		case MOMENTUM:
     case RMSPROP:
     case ADAGRAD:
-
       if(max_unorm > 0.0f)
 			{
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
-				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, unorm, beta1, eps, weight_decay, step, lr, gnorm_scale, n);
+				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			}
 
-			kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+			kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
+    case LION:
+      // in lion, the momentum update after the parameter update
+      kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+      CUDA_CHECK_RETURN(cudaPeekAtLastError());
+
+      if(max_unorm > 0.0f)
+      {
+        CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
+        kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+        CUDA_CHECK_RETURN(cudaPeekAtLastError());
+      }
+      break;
 	}
 }
 
@@ -164,12 +175,22 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
     case RMSPROP:
     case ADAGRAD:
 			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
-			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, unorm, beta1, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
-			kOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, eps, step, lr,
+			kOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
 																														quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
+    case LION:
+      // in lion, the momentum update happens after the parameter update
+      kOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
+                                                            quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+      CUDA_CHECK_RETURN(cudaPeekAtLastError());
+
+      CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
+      kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+      CUDA_CHECK_RETURN(cudaPeekAtLastError());
+      break;
 		default:
 			break;
 	}
@@ -198,6 +219,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 		case MOMENTUM:
 		case RMSPROP:
     case ADAGRAD:
+    case LION:
 			num_blocks = n/BLOCKSIZE_1STATE;
 			num_blocks = n % BLOCKSIZE_1STATE == 0 ? num_blocks : num_blocks + 1;
 			kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE><<<num_blocks, BLOCKSIZE_1STATE/NUM_1STATE>>>(p, g, state1, beta1, beta2, eps, step, lr,
@@ -707,6 +729,8 @@ MAKE_optimizer32bit(MOMENTUM, half)
 MAKE_optimizer32bit(MOMENTUM, float)
 MAKE_optimizer32bit(RMSPROP, half)
 MAKE_optimizer32bit(RMSPROP, float)
+MAKE_optimizer32bit(LION, half)
+MAKE_optimizer32bit(LION, float)
 MAKE_optimizer32bit(ADAGRAD, half)
 MAKE_optimizer32bit(ADAGRAD, float)
 
@@ -726,6 +750,8 @@ MAKE_optimizerStatic8bit(MOMENTUM, half)
 MAKE_optimizerStatic8bit(MOMENTUM, float)
 MAKE_optimizerStatic8bit(RMSPROP, half)
 MAKE_optimizerStatic8bit(RMSPROP, float)
+MAKE_optimizerStatic8bit(LION, half)
+MAKE_optimizerStatic8bit(LION, float)
 
 #define MAKE_optimizerStatic8bitBlockwise(gtype, optim_name) \
 template void optimizerStatic8bitBlockwise<gtype, optim_name>(gtype* p, gtype* g, \
@@ -738,6 +764,8 @@ MAKE_optimizerStatic8bitBlockwise(half, MOMENTUM);
 MAKE_optimizerStatic8bitBlockwise(float, MOMENTUM);
 MAKE_optimizerStatic8bitBlockwise(half, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(float, RMSPROP);
+MAKE_optimizerStatic8bitBlockwise(half, LION);
+MAKE_optimizerStatic8bitBlockwise(float, LION);
 MAKE_optimizerStatic8bitBlockwise(half, ADAGRAD);
 MAKE_optimizerStatic8bitBlockwise(float, ADAGRAD);
 
