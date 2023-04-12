@@ -184,7 +184,7 @@ class MatMulFP8Global(torch.autograd.Function):
         return grad_A, grad_B, None, None, None, None, None
 
 
-class MatMul8bitMixed(torch.autograd.Function):
+class SwitchBackBnb(torch.autograd.Function):
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState()):
         # default to pytorch behavior if inputs are empty
@@ -408,4 +408,4 @@ def switchback_bnb(
     state = state or MatmulLtState()
     if threshold > 0.0:
         state.threshold = threshold
-    return MatMul8bitMixed.apply(A, B, out, bias, state)
+    return SwitchBackBnb.apply(A, B, out, bias, state)
