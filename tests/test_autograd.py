@@ -441,8 +441,8 @@ dim4 = torch.randint(32, 96, size=(n,)).tolist()
 
 dim2.append(0)
 
-funcs = [(torch.matmul, bnb.research.matmul_fp8)]
-str_funcs = ["matmul"]
+funcs = [(torch.matmul, bnb.research.matmul_fp8_mixed), (torch.matmul, bnb.research.matmul_fp8_global)]
+str_funcs = ["matmul_fp8_mixed", 'matmul_fp8_global']
 req_grad = list(product([True, False], repeat=3))
 req_grad_str = []
 for c in req_grad:

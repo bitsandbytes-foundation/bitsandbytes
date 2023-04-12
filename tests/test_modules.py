@@ -532,9 +532,9 @@ def test_fp8linear():
     h = 1024
     inp = torch.randn(b, h).cuda()
     fp32 = torch.nn.Linear(h, h*2).cuda()
-    fp8 = bnb.nn.LinearFP8(h, h*2).cuda()
+    fp8 = bnb.research.nn.LinearFP8Mixed(h, h*2).cuda()
     fp32b = torch.nn.Linear(h*2, h).cuda()
-    fp8b = bnb.nn.LinearFP8(h*2, h).cuda()
+    fp8b = bnb.research.nn.LinearFP8Mixed(h*2, h).cuda()
 
     fp8.weight.data.copy_(fp32.weight.data)
     fp8.bias.data.copy_(fp32.bias.data)
