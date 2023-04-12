@@ -382,7 +382,7 @@ names = [f"threshold_{vals}" for vals in values]
 
 
 @pytest.mark.parametrize("threshold", values, ids=names)
-@pytest.mark.parametrize("memory_efficient_backward", [True, False])
+@pytest.mark.parametrize("memory_efficient_backward", [False])
 def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
     l1 = (
         bnb.nn.Linear8bitLt(

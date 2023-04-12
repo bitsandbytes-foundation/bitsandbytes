@@ -2,6 +2,7 @@ import operator
 import warnings
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
+from typing import Tuple, Optional
 
 import torch
 
@@ -13,6 +14,12 @@ def prod(iterable):
     return reduce(operator.mul, iterable, 1)
 
 tensor = torch.Tensor
+
+
+# The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
+# https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
+
+
 
 """
     This class pools outlier dimensions across layers.
@@ -46,6 +53,51 @@ class GlobalOutlierPooler:
 
     def get_current_outlier_idx(self):
         return torch.Tensor(list(self.outliers)).to(torch.int64)
+
+
+def get_inverse_transform_indices(transform_tile: callable, tile_size: Tuple[int, int]):
+    """
+    Compute a permutation of indices that invert the specified (tiled) matrix transformation
+
+    :param transform_tile: a function that applies forward transform to a tensor of shape [dim1, dim2]
+    :param tile_size: higher-level tile dimensions, i.e. (8, 32) for Turing and (32, 32) for Ampere
+    :note: we assume that tile_transform applies to a cpu-based int8 tensor of shape tile_size
+    :example: transform_tile function for the turing layout (bitsandbytes.functional as F)
+    :returns: indices
+    """
+    d1, d2 = tile_size
+    assert 0 < d1 * d2 < 2**64
+    tile_indices = torch.arange(d1 * d2, dtype=torch.int64).view(d1, d2)
+    # encode each position in tile as a tuple of <= 8 unique bytes
+    permuted_tile_indices = torch.zeros_like(tile_indices)
+    for i in range(8):
+        # select i-th byte, apply transformation and trace where each index ended up
+        ith_dim_indices = torch.div(tile_indices, 256**i, rounding_mode="trunc") % 256
+        sample_tile_i = (ith_dim_indices - 128).to(torch.int8).contiguous()
+        assert torch.all(sample_tile_i.int() + 128 == ith_dim_indices), "int overflow"
+        permuted_tile_i = transform_tile(sample_tile_i)
+        ith_permuted_indices = permuted_tile_i.to(tile_indices.dtype) + 128
+        permuted_tile_indices += ith_permuted_indices * (256**i)
+        if d1 * d2 < 256**i:
+            break  # if all indices fit in i bytes, stop early
+    return permuted_tile_indices
+
+def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -> torch.Tensor:
+    """
+    Undo a tiled permutation such as turing or ampere layout
+
+    :param permuted_tensor: torch tensor in a permuted layout
+    :param tile_indices: reverse transformation indices, from get_inverse_transform_indices
+    :return: contiguous row-major tensor
+    """
+    (rows, cols), (tile_rows, tile_cols) = permuted_tensor.shape, tile_indices.shape
+    assert rows % tile_rows == cols % tile_cols == 0, "tensor must contain a whole number of tiles"
+    tensor = permuted_tensor.reshape(-1, tile_indices.numel()).t()
+    outputs = torch.empty_like(tensor)  # note: not using .index_copy because it was slower on cuda
+    outputs[tile_indices.flatten()] = tensor
+    outputs = outputs.reshape(tile_rows, tile_cols, cols // tile_cols, rows // tile_rows)
+    outputs = outputs.permute(3, 0, 2, 1)  # (rows // tile_rows, tile_rows), (cols // tile_cols, tile_cols)
+    return outputs.reshape(rows, cols).contiguous()
 
 
 class MatMul8bit(torch.autograd.Function):
@@ -169,8 +221,21 @@ bmm_cublas = MatMul8bit.apply
 matmul_cublas = MatMul8bit.apply
 
 
+def supports_igemmlt(device: torch.device) -> bool:
+    """check if this device supports the optimized int8 kernel"""
+    if torch.cuda.get_device_capability(device=device) < (7, 5):
+        return False
+    device_name = torch.cuda.get_device_name(device=device)
+    nvidia16_models = ('GTX 1630', 'GTX 1650', 'GTX 1660')  # https://en.wikipedia.org/wiki/GeForce_16_series
+    if any(model_name in device_name for model_name in nvidia16_models):
+        return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
+    return True
+
+
 @dataclass
 class MatmulLtState:
+    _tile_indices: Optional[torch.Tensor] = None
+    force_no_igemmlt: bool = False
     CB = None
     CxB = None
     SB = None
@@ -202,11 +267,31 @@ class MatmulLtState:
         self.SBt = None
         self.CBt = None
 
+    def get_tile_size(self):
+        assert self.formatB in (
+            "col_turing",
+            "col_ampere",
+        ), f"please find this assert and manually enter tile size for {self.formatB}"
+        return (8, 32) if self.formatB == "col_turing" else (32, 32)
+
+    @property
+    def tile_indices(self):
+        if self._tile_indices is None:
+            device = self.CxB.device
+            transform = lambda x: F.transform(x.to(device), from_order="row", to_order=self.formatB)[0].to(x.device)
+            with torch.no_grad():
+                self._tile_indices = get_inverse_transform_indices(transform, self.get_tile_size()).to(device)
+        return self._tile_indices
+
 
 class MatMul8bitLt(torch.autograd.Function):
+    # forward is the same, but we added the fallback for pre-turing GPUs
+    # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
+
     @staticmethod
-    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState()):
-        # default to pytorch behavior if inputs are empty
+    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
+        using_igemmlt = supports_igemmlt(A.device) and not state.force_no_igemmlt
+        # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
             ctx.is_empty = True
@@ -214,9 +299,9 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.B = B
             ctx.bias = bias
             if A.shape[-1] == B.shape[0]:
-                return torch.empty(A.shape[:-1]+B.shape[1:], dtype=A.dtype, device=A.device)
+                return torch.empty(A.shape[:-1] + B.shape[1:], dtype=A.dtype, device=A.device)
             else:
-                return torch.empty(A.shape[:-1]+B.shape[:1], dtype=A.dtype, device=A.device)
+                return torch.empty(A.shape[:-1] + B.shape[:1], dtype=A.dtype, device=A.device)
 
         # 1. Quantize A
         # 2. Quantize B
@@ -235,9 +320,7 @@ class MatMul8bitLt(torch.autograd.Function):
         # 1. Quantize A
         if len(A.shape) == 3:
             A = A.view(-1, A.shape[-1]).contiguous()
-        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(
-            A.to(torch.float16), threshold=state.threshold
-        )
+        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
 
         if state.threshold > 0.0 and coo_tensorA is not None:
             if state.has_fp16_weights:
@@ -248,12 +331,12 @@ class MatMul8bitLt(torch.autograd.Function):
                 state.subB = B[:, idx].t().contiguous()
                 state.idx = idx
             else:
-                if state.CxB is None:
+                if state.CxB is None and using_igemmlt:
                     # B in in 8-bit row-major, we can transform it back to 16-bit to extract outlier dimensions
                     # we also need to convert it to the turing/ampere format
                     state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
         else:
-            if not state.has_fp16_weights and state.CxB is None:
+            if not state.has_fp16_weights and state.CxB is None and using_igemmlt:
                 state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
             subA = None
 
@@ -273,7 +356,10 @@ class MatMul8bitLt(torch.autograd.Function):
                     state.SCBt,
                     coo_tensorB,
                 ) = F.double_quant(B.to(torch.float16))
-                state.CxB, state.SB = F.transform(CB, to_order=formatB)
+                if using_igemmlt:
+                    state.CxB, state.SB = F.transform(CB, to_order=formatB)
+                else:
+                    state.CB = CB
         else:
             has_grad = False
 
@@ -288,18 +374,17 @@ class MatMul8bitLt(torch.autograd.Function):
             #    state.idx = state.outlier_pool.get_current_outlier_idx().to(A.device)
             # else:
             #    state.idx = outlier_idx
-            outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
-            state.subB = (
-                (outliers * state.SCB.view(-1, 1) / 127.0)
-                .t()
-                .contiguous()
-                .to(A.dtype)
-            )
+            if state.CxB is not None:
+                outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
+            else:
+                outliers = state.CB[:, state.idx.long()].clone()
+
+            state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
             CA[:, state.idx.long()] = 0
             CAt[:, state.idx.long()] = 0
             subA = A[:, state.idx.long()]
 
-        shapeB = state.SB[0]
+        shapeB = state.SB[0] if state.SB else B.shape
 
         if len(input_shape) == 3:
             output_shape = (input_shape[0], input_shape[1], shapeB[0])
@@ -307,16 +392,25 @@ class MatMul8bitLt(torch.autograd.Function):
             output_shape = (input_shape[0], shapeB[0])
 
         # 3. Matmul
-        C32A, SA = F.transform(CA, "col32")
-        out32, Sout32 = F.igemmlt(C32A, state.CxB, SA, state.SB)
-        # we apply the fused bias here
+        if using_igemmlt:
+            C32A, SA = F.transform(CA, "col32")
+            out32, Sout32 = F.igemmlt(C32A, state.CxB, SA, state.SB)
+            if bias is None or bias.dtype == torch.float16:
+                # we apply the fused bias here
+                output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=bias)
+                output = output.to(A.dtype)
+            else:  # apply bias separately
+                output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=None)
+                output = output.to(A.dtype).add_(bias)
 
-        if bias is None or bias.dtype == torch.float16:
-            output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=bias)
-            output = output.to(A.dtype)
-        else:  # apply bias separately
-            output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=None)
-            output = output.to(A.dtype).add_(bias)
+        else:
+            A_wo_outliers = A.clone()
+            if state.idx is not None:
+                A_wo_outliers[:, state.idx.long()] = 0
+            output = torch.nn.functional.linear(A_wo_outliers, state.CB.to(A.dtype))
+            output = output.mul_(state.SCB.unsqueeze(0).mul(1.0 / 127.0))
+            if bias is not None:
+                output = output.add_(bias)
 
         # 4. Mixed-precision decomposition matmul
         if coo_tensorA is not None and subA is not None:
@@ -337,14 +431,13 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.tensor_states = (None, None)
             ctx.save_for_backward(None, None)
 
-
-        clone_func = torch.clone if len(output_shape) == 3 else lambda x : x
+        clone_func = torch.clone if len(output_shape) == 3 else lambda x: x
         return clone_func(output.view(output_shape))
 
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.is_empty:
-            bias_grad = (None if ctx.bias is None else torch.zeros_like(ctx.bias))
+            bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
         CAt, subA = ctx.tensors
@@ -359,9 +452,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
-            grad_output = grad_output.reshape(
-                -1, grad_output.shape[-1]
-            ).contiguous()
+            grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
         Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
@@ -376,17 +467,22 @@ class MatMul8bitLt(torch.autograd.Function):
             if state.CBt is not None:
                 C32grad, Sgrad = F.transform(Cgrad, "col32")
                 if state.CxBt is None:
-                    state.CxBt, state.SBt = F.transform(
-                        state.CBt, to_order=formatB, transpose=True
-                    )
+                    state.CxBt, state.SBt = F.transform(state.CBt, to_order=formatB, transpose=True)
                 gradA32, SgradA32 = F.igemmlt(C32grad, state.CxBt, Sgrad, state.SBt)
                 grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
 
             elif state.CB is not None:
-                CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1. / 127.0))
+                CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+                grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
+            elif state.CxB is not None:
+                CB = (
+                    undo_layout(state.CxB, state.tile_indices)
+                    .to(ctx.dtype_A)
+                    .mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+                )
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             else:
-                raise Exception('State must contain either CBt or CB matrix for backward')
+                raise Exception("State must contain either CBt or CB or CxB matrix for backward")
 
         return grad_A, grad_B, None, grad_bias, None
 

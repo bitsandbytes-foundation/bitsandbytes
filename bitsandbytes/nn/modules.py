@@ -9,6 +9,8 @@ import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
 
 import bitsandbytes as bnb
+import bitsandbytes.functional
+from bitsandbytes.autograd._functions import get_inverse_transform_indices, undo_layout
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import OutlierTracer, find_outlier_dims
 
@@ -238,19 +240,10 @@ class Int8Params(torch.nn.Parameter):
 
 
 class Linear8bitLt(nn.Linear):
-    def __init__(
-        self,
-        input_features,
-        output_features,
-        bias=True,
-        has_fp16_weights=True,
-        memory_efficient_backward=False,
-        threshold=0.0,
-        index=None,
-    ):
-        super().__init__(
-            input_features, output_features, bias
-        )
+    def __init__(self, input_features, output_features, bias=True, has_fp16_weights=True,
+                       memory_efficient_backward=False, threshold=0.0, index=None):
+        super().__init__(input_features, output_features, bias)
+        assert not memory_efficient_backward, "memory_efficient_backward is no longer required and the argument is deprecated in 0.37.0 and will be removed in 0.39.0"
         self.state = bnb.MatmulLtState()
         self.index = index
 
@@ -260,9 +253,54 @@ class Linear8bitLt(nn.Linear):
         if threshold > 0.0 and not has_fp16_weights:
             self.state.use_pool = True
 
-        self.weight = Int8Params(
-            self.weight.data, has_fp16_weights=has_fp16_weights, requires_grad=has_fp16_weights
-        )
+        self.weight = Int8Params(self.weight.data, has_fp16_weights=has_fp16_weights, requires_grad=has_fp16_weights)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        if not self.state.has_fp16_weights and self.state.CB is None and self.state.CxB is not None:
+            # reorder weight layout back from ampere/turing to row
+            reorder_layout = True
+            weight_clone = self.weight.data.clone()
+        else:
+            reorder_layout = False
+
+        try:
+            if reorder_layout:
+                self.weight.data = undo_layout(self.state.CxB, self.state.tile_indices)
+
+            super()._save_to_state_dict(destination, prefix, keep_vars)
+
+            # we only need to save SCB as extra data, because CB for quantized weights is already stored in weight.data
+            weight_name = "SCB"
+
+            # case 1: .cuda was called, SCB is in self.weight
+            param_from_weight = getattr(self.weight, weight_name)
+            # case 2: self.init_8bit_state was called, SCB is in self.state
+            param_from_state = getattr(self.state, weight_name)
+
+            key_name = prefix + f"{weight_name}"
+            if param_from_weight is not None:
+                destination[key_name] = param_from_weight if keep_vars else param_from_weight.detach()
+            elif not self.state.has_fp16_weights and param_from_state is not None:
+                destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
+        finally:
+            if reorder_layout:
+                self.weight.data = weight_clone
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+                                      error_msgs)
+        for key in unexpected_keys:
+            input_name = key[len(prefix):]
+            if input_name == "SCB":
+                if self.weight.SCB is None:
+                    # buffers not yet initialized, can't call them directly without
+                    raise RuntimeError("Loading a quantized checkpoint into non-quantized Linear8bitLt is "
+                                       "not supported. Please call module.cuda() before module.load_state_dict()")
+
+                input_param = state_dict[key]
+                self.weight.SCB.copy_(input_param)
+                unexpected_keys.remove(key)
 
     def init_8bit_state(self):
         self.state.CB = self.weight.CB
@@ -270,30 +308,23 @@ class Linear8bitLt(nn.Linear):
         self.weight.CB = None
         self.weight.SCB = None
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         self.state.is_training = self.training
-
         if self.weight.CB is not None:
             self.init_8bit_state()
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
-        # if self.bias is not None and self.bias.dtype != torch.float16:
-        #     self.bias.data = self.bias.data.half()
+        if self.bias is not None and self.bias.dtype != x.dtype:
+            self.bias.data = self.bias.data.to(x.dtype)
 
-        #out = bnb.matmul(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
-        out = bnb.matmul(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
+        out = bnb.matmul(x, self.weight, bias=self.bias, state=self.state)
 
         if not self.state.has_fp16_weights:
-            if not self.state.memory_efficient_backward and self.state.CB is not None:
+            if self.state.CB is not None and self.state.CxB is not None:
                 # we converted 8-bit row major to turing/ampere format in the first inference pass
                 # we no longer need the row-major weight
                 del self.state.CB
                 self.weight.data = self.state.CxB
-            elif self.state.memory_efficient_backward and self.state.CxB is not None:
-                # For memory efficient backward, we convert 8-bit row major to turing/ampere format at each inference pass.
-                # Thus, we delete CxB from the state.
-                del self.state.CxB
-
         return out
 
 
@@ -336,22 +367,4 @@ class SwitchBackLinearBnb(nn.Linear):
         if self.weight.CB is not None:
             self.init_8bit_state()
 
-        # weights are cast automatically as Int8Params, but the bias has to be cast manually
-        # if self.bias is not None and self.bias.dtype != torch.float16:
-        #     self.bias.data = self.bias.data.half()
-
-        #out = bnb.matmul(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
         out = bnb.matmul_mixed(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
-
-        if not self.state.has_fp16_weights:
-            if not self.state.memory_efficient_backward and self.state.CB is not None:
-                # we converted 8-bit row major to turing/ampere format in the first inference pass
-                # we no longer need the row-major weight
-                del self.state.CB
-                self.weight.data = self.state.CxB
-            elif self.state.memory_efficient_backward and self.state.CxB is not None:
-                # For memory efficient backward, we convert 8-bit row major to turing/ampere format at each inference pass.
-                # Thus, we delete CxB from the state.
-                del self.state.CxB
-
-        return out

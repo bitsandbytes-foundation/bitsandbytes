@@ -189,3 +189,35 @@ Improvements:
  - StableEmbedding layer now has device and dtype parameters to make it 1:1 replaceable with regular Embedding layers (@lostmsu)
  - runtime performance of block-wise quantization slightly improved
  - added error message for the case multiple libcudart.so are installed and bitsandbytes picks the wrong one
+
+
+### 0.37.0
+
+#### Int8 Matmul + backward support for all GPUs
+
+Features:
+ - Int8 MatmulLt now supports backward through inversion of the ColTuring/ColAmpere format. Slow, but memory efficient. Big thanks to @borzunov
+ - Int8 now supported on all GPUs. On devices with compute capability < 7.5, the Int weights are cast to 16/32-bit for the matrix multiplication. Contributed by @borzunov
+
+Improvements:
+ - Improved logging for the CUDA detection mechanism.
+
+### 0.38.0
+
+#### 8-bit Lion, Load/Store 8-bit Models directly from/to HF Hub
+
+Features:
+ - Support for 32 and 8-bit Lion has been added. Thank you @lucidrains
+ - Support for serialization of Linear8bitLt layers (LLM.int8()). This allows to store and load 8-bit weights directly from the HuggingFace Hub. Thank you @myrab
+ - New bug report features `python -m bitsandbytes` now gives extensive debugging details to debug CUDA setup failures.
+
+Bug fixes:
+ - Fixed a bug where some bitsandbytes methods failed in a model-parallel setup on multiple GPUs. Thank you @tonylins
+ - Fixed a bug where cudart.so libraries could not be found in newer PyTorch releases.
+
+Improvements:
+ - Improved the CUDA Setup procedure by doing a more extensive search for CUDA libraries
+
+Deprecated:
+ - Devices with compute capability 3.0 (GTX 700s, K10) and 3.2 (Tegra K1, Jetson TK1) are now deprecated and support will be removed in 0.39.0.
+ - Support for CUDA 10.0 and 10.2 will be removed in bitsandbytes 0.39.0

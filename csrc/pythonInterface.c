@@ -33,6 +33,8 @@ MAKE_FUNC32(adam, ADAM, float, 32)
 MAKE_FUNC32(adam, ADAM, half, 16)
 MAKE_FUNC32(rmsprop, RMSPROP, float, 32)
 MAKE_FUNC32(rmsprop, RMSPROP, half, 16)
+MAKE_FUNC32(lion, LION, float, 32)
+MAKE_FUNC32(lion, LION, half, 16)
 MAKE_FUNC32(adagrad, ADAGRAD, float, 32)
 MAKE_FUNC32(adagrad, ADAGRAD, half, 16)
 
@@ -55,6 +57,8 @@ MAKE_FUNC8(momentum, MOMENTUM, float, 32)
 MAKE_FUNC8(momentum, MOMENTUM, half, 16)
 MAKE_FUNC8(rmsprop, RMSPROP, float, 32)
 MAKE_FUNC8(rmsprop, RMSPROP, half, 16)
+MAKE_FUNC8(lion, LION, float, 32)
+MAKE_FUNC8(lion, LION, half, 16)
 
 #define MAKE_BLOCKWISE8(fname, optim_name, gtype, gbits) \
 void fname##_8bit_blockwise_fp##gbits(gtype* p, gtype* g, \
@@ -68,6 +72,8 @@ MAKE_BLOCKWISE8(momentum, MOMENTUM, half, 16)
 MAKE_BLOCKWISE8(momentum, MOMENTUM, float, 32)
 MAKE_BLOCKWISE8(rmsprop, RMSPROP, half, 16)
 MAKE_BLOCKWISE8(rmsprop, RMSPROP, float, 32)
+MAKE_BLOCKWISE8(lion, LION, half, 16)
+MAKE_BLOCKWISE8(lion, LION, float, 32)
 MAKE_BLOCKWISE8(adagrad, ADAGRAD, half, 16)
 MAKE_BLOCKWISE8(adagrad, ADAGRAD, float, 32)
 
@@ -161,6 +167,8 @@ extern "C"
 	MAKE_CFUNC32(momentum, half, 16)
 	MAKE_CFUNC32(rmsprop, float, 32)
 	MAKE_CFUNC32(rmsprop, half, 16)
+	MAKE_CFUNC32(lion, float, 32)
+	MAKE_CFUNC32(lion, half, 16)
 	MAKE_CFUNC32(adagrad, float, 32)
 	MAKE_CFUNC32(adagrad, half, 16)
 
@@ -183,6 +191,8 @@ extern "C"
 	MAKE_CFUNC8(momentum, half, 16)
 	MAKE_CFUNC8(rmsprop, float, 32)
 	MAKE_CFUNC8(rmsprop, half, 16)
+	MAKE_CFUNC8(lion, float, 32)
+	MAKE_CFUNC8(lion, half, 16)
 
   #define MAKE_CBLOCKWISE8(fname, optim_name, gtype, gbits) \
   void c##fname##_8bit_blockwise_fp##gbits(gtype* p, gtype* g, \
@@ -196,6 +206,8 @@ extern "C"
 	MAKE_CBLOCKWISE8(momentum, MOMENTUM, float, 32)
 	MAKE_CBLOCKWISE8(rmsprop, RMSPROP, half, 16)
 	MAKE_CBLOCKWISE8(rmsprop, RMSPROP, float, 32)
+	MAKE_CBLOCKWISE8(lion, LION, half, 16)
+	MAKE_CBLOCKWISE8(lion, LION, float, 32)
 	MAKE_CBLOCKWISE8(adagrad, ADAGRAD, half, 16)
 	MAKE_CBLOCKWISE8(adagrad, ADAGRAD, float, 32)
 
