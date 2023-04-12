@@ -4,11 +4,11 @@ import time
 import torch
 import torch.nn as nn
 
-from bitsandbytes.nn.triton_utils.v0.quantize_rowwise import quantize_rowwise
-from bitsandbytes.nn.triton_utils.v0.quantize_columnwise_and_transpose import quantize_columnwise_and_transpose
-from bitsandbytes.nn.triton_utils.v0.int8_matmul_rowwise_dequantize import int8_matmul_rowwise_dequantize
-from bitsandbytes.nn.triton_utils.v0.quantize_global import quantize_global, quantize_global_transpose
-from bitsandbytes.nn.triton_utils.v0.int8_matmul_mixed_dequanitze import int8_matmul_mixed_dequanitze
+from bitsandbytes.triton.quantize_rowwise import quantize_rowwise
+from bitsandbytes.triton.quantize_columnwise_and_transpose import quantize_columnwise_and_transpose
+from bitsandbytes.triton.int8_matmul_rowwise_dequantize import int8_matmul_rowwise_dequantize
+from bitsandbytes.triton.quantize_global import quantize_global, quantize_global_transpose
+from bitsandbytes.triton.int8_matmul_mixed_dequanitze import int8_matmul_mixed_dequanitze
 
 # KNOW ISSUE: need to optimize "w_quantize_colwise_transpose" when embeddim is too large.
 

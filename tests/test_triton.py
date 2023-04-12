@@ -5,6 +5,7 @@ from bitsandbytes.nn.triton_based_modules import SwitchBackLinear
 from bitsandbytes.nn import Linear8bitLt
 
 
+@pytest.mark.skipif(not torch.cuda.is_available() or not torch.cuda.get_device_capability()[0] >= 8, reason="This test requires a GPU with compute capability 8.0 or higher.")
 @pytest.mark.parametrize("vectorrize", [False, True])
 def test_switchback(vectorrize):
     for dim in [83, 17, 128]:
@@ -26,6 +27,7 @@ def test_switchback(vectorrize):
             out_standard = standard(x1)
             (2**10 * out_standard.abs().mean()).backward()
 
+            print(x2.dtype)
             out_sb = switchback(x2)
             (2**10 * out_sb.abs().mean()).backward()
 

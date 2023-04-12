@@ -239,8 +239,8 @@ dim4 = torch.randint(32, 96, size=(n,)).tolist()
 dim2.append(0)
 
 decomp = [0.0, 6.0]
-funcs = [(torch.matmul, bnb.matmul_mixed)]
-str_funcs = ["matmul"]
+funcs = [(torch.matmul, bnb.matmul), (torch.matmul, bnb.research.switchback_bnb)]
+str_funcs = ["matmullt", 'switchback_bnb']
 req_grad = [(False, False), (True, False), (True, True), (False, True)]
 req_grad = list(product([True, False], repeat=3))
 req_grad_str = []
@@ -441,7 +441,7 @@ dim4 = torch.randint(32, 96, size=(n,)).tolist()
 
 dim2.append(0)
 
-funcs = [(torch.matmul, bnb.matmul_fp8)]
+funcs = [(torch.matmul, bnb.research.matmul_fp8)]
 str_funcs = ["matmul"]
 req_grad = list(product([True, False], repeat=3))
 req_grad_str = []

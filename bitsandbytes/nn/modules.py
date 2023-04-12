@@ -163,55 +163,6 @@ class OutlierAwareLinear(nn.Linear):
         return self.forward_with_outliers(x, self.outlier_dim)
 
 
-class Fake4bitLinear(OutlierAwareLinear):
-    def __init__(self, input_features, output_features, bias=True, codebook=bnb.functional.create_fp8_map(True, 3, 0, total_bits=4)):
-        super().__init__(input_features, output_features, bias)
-        self.codebook = codebook
-
-    def quantize_weight(self, w, outlier_idx):
-        if outlier_idx.numel() > 0:
-            subw = w[:, outlier_idx].clone()
-            w[:, outlier_idx] = 0
-        wdtype = w.dtype
-        code = self.codebook.to(w.device)
-        cw, state = bnb.functional.quantize_blockwise(w, code=code, blocksize=64)
-        w = bnb.functional.dequantize_blockwise(cw, state, blocksize=64)
-        w = w.to(wdtype)
-        if outlier_idx.numel() > 0:
-            w[:, outlier_idx] = subw
-        self.is_quantized = True
-        return w
-
-    def forward_with_outliers(self, x, outlier_idx):
-        dims = torch.abs(x> 4).sum(dim=list(range(len(x.shape)-1)))
-        outlier_idx2 = torch.where(dims > 0)[0]
-        outlier_idx = torch.cat([outlier_idx, outlier_idx2]).unique()
-        n = x.shape[-1]
-        idx = torch.arange(n, device=x.device)
-        idx[outlier_idx] = -1
-        inverse_idx = torch.where(idx >= 0)[0]
-        if outlier_idx.numel() > 0:
-            subx = x[..., outlier_idx].clone()
-            #print(1, subx, 1)
-            #x[..., outlier_idx] = 0
-        inverse_x = x[...,inverse_idx]
-        xdtype = x.dtype
-        #code = bnb.functional.create_fp8_map(True, 4-3, 2, 4).to(x.device)
-        #code = bnb.functional.create_quantile_map(x, 4).to(x.device)
-        code = bnb.functional.create_dynamic_map(True, total_bits=4.0).to(x.device)
-        c, state = bnb.functional.quantize_blockwise(inverse_x, code=code, blocksize=64)
-        inverse_x = bnb.functional.dequantize_blockwise(c, state, blocksize=64)
-        #c, state = bnb.functional.quantize_blockwise(x, code=code, blocksize=64)
-        #x = bnb.functional.dequantize_blockwise(c, state, blocksize=64)
-        x = x.to(xdtype)
-        x[..., inverse_idx] = inverse_x.to(x.dtype)
-        #if outlier_idx.numel() > 0:
-            #x[..., outlier_idx] = subx
-
-        return torch.nn.functional.linear(x, self.weight, self.bias)
-
-
-
 class Int8Params(torch.nn.Parameter):
     def __new__(
         cls,
@@ -346,67 +297,6 @@ class Linear8bitLt(nn.Linear):
         return out
 
 
-# Not in use for now...
-class Linear8bitLt2(nn.Linear):
-    def __init__(
-        self,
-        input_features,
-        output_features,
-        bias=True,
-        has_fp16_weights=True,
-        memory_efficient_backward=False,
-        threshold=0.0,
-        index=None,
-    ):
-        super().__init__(
-            input_features, output_features, bias
-        )
-        self.state = bnb.MatmulLtState()
-        self.index = index
-
-        self.state.threshold = threshold
-        self.state.has_fp16_weights = has_fp16_weights
-        self.state.memory_efficient_backward = memory_efficient_backward
-        if threshold > 0.0 and not has_fp16_weights:
-            self.state.use_pool = True
-
-        self.weight = Int8Params(
-            self.weight.data, has_fp16_weights=has_fp16_weights, requires_grad=has_fp16_weights
-        )
-
-    def init_8bit_state(self):
-        self.state.CB = self.weight.CB
-        self.state.SCB = self.weight.SCB
-        self.weight.CB = None
-        self.weight.SCB = None
-
-    def forward(self, x):
-        self.state.is_training = self.training
-
-        if self.weight.CB is not None:
-            self.init_8bit_state()
-
-        # weights are cast automatically as Int8Params, but the bias has to be cast manually
-        # if self.bias is not None and self.bias.dtype != torch.float16:
-        #     self.bias.data = self.bias.data.half()
-
-        #out = bnb.matmul(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
-        out = bnb.matmul(x, self.weight, bias=None, state=self.state) + self.bias
-        #out = torch.matmul(x.half(), W.half().t()) + self.bias
-
-        if not self.state.has_fp16_weights:
-            if not self.state.memory_efficient_backward and self.state.CB is not None:
-                # we converted 8-bit row major to turing/ampere format in the first inference pass
-                # we no longer need the row-major weight
-                del self.state.CB
-                self.weight.data = self.state.CxB
-            elif self.state.memory_efficient_backward and self.state.CxB is not None:
-                # For memory efficient backward, we convert 8-bit row major to turing/ampere format at each inference pass.
-                # Thus, we delete CxB from the state.
-                del self.state.CxB
-
-        return out
-
 class Linear8bitLtMixed(nn.Linear):
     def __init__(
         self,
@@ -508,7 +398,7 @@ class LinearFP8(nn.Linear):
             self.bw_code = bnb.functional.create_fp8_map(True, 5, 2, 8).to(x.device)
             self.fw_code = bnb.functional.create_fp8_map(True, 4, 3, 8).to(x.device)
 
-        out = bnb.matmul_fp8(x, self.weight.t(), fw_code=self.fw_code, bw_code=self.bw_code, bsz=self.bsz, bsz2=self.bsz2)
+        out = bnb.research.matmul_fp8(x, self.weight.t(), fw_code=self.fw_code, bw_code=self.bw_code, bsz=self.bsz, bsz2=self.bsz2)
         if self.bias is not None:
             out += self.bias
 
@@ -534,7 +424,7 @@ class LinearFP8Mixed(nn.Linear):
             self.bw_code = bnb.functional.create_fp8_map(True, 5, 2, 8).to(x.device)
             self.fw_code = bnb.functional.create_fp8_map(True, 4, 3, 8).to(x.device)
 
-        out = bnb.matmul_fp8_mixed(x, self.weight.t(), fw_code=self.fw_code, bw_code=self.bw_code, bsz=self.bsz, bsz2=self.bsz2)
+        out = bnb.research.matmul_fp8_mixed(x, self.weight.t(), fw_code=self.fw_code, bw_code=self.bw_code, bsz=self.bsz, bsz2=self.bsz2)
         if self.bias is not None:
             out += self.bias
 

@@ -3,12 +3,12 @@ import torch.nn as nn
 import time
 from functools import partial
 
-from .triton_utils.v0.dequantize_rowwise import dequantize_rowwise
-from .triton_utils.v0.quantize_rowwise import quantize_rowwise
-from .triton_utils.v0.quantize_columnwise_and_transpose import quantize_columnwise_and_transpose
-from .triton_utils.v0.int8_matmul_rowwise_dequantize import int8_matmul_rowwise_dequantize
-from .triton_utils.v0.quantize_global import quantize_global, quantize_global_transpose
-from .triton_utils.v0.int8_matmul_mixed_dequanitze import int8_matmul_mixed_dequanitze
+from bitsandbytes.triton.dequantize_rowwise import dequantize_rowwise
+from bitsandbytes.triton.quantize_rowwise import quantize_rowwise
+from bitsandbytes.triton.quantize_columnwise_and_transpose import quantize_columnwise_and_transpose
+from bitsandbytes.triton.int8_matmul_rowwise_dequantize import int8_matmul_rowwise_dequantize
+from bitsandbytes.triton.quantize_global import quantize_global, quantize_global_transpose
+from bitsandbytes.triton.int8_matmul_mixed_dequanitze import int8_matmul_mixed_dequanitze
 
 
 class _switchback_global(torch.autograd.Function):
@@ -55,7 +55,7 @@ class _switchback_global(torch.autograd.Function):
             grad_bias = G.sum(dim=0)
 
         return grad_X, grad_W, grad_bias
-    
+
 class _switchback_vectorrize(torch.autograd.Function):
 
     @staticmethod
@@ -74,7 +74,7 @@ class _switchback_vectorrize(torch.autograd.Function):
         return int8_matmul_rowwise_dequantize(
             X_int8, W_int8.t(), state_X, state_W, bias
         ).view(*X_3D.size()[:-1], -1)
-    
+
     @staticmethod
     def backward(ctx, G_3D):
         X, W = ctx.save_for_backward
@@ -98,7 +98,7 @@ class _switchback_vectorrize(torch.autograd.Function):
             grad_bias = G.sum(dim=0)
 
         return grad_X, grad_W, grad_bias
-    
+
 class _switchback_global_mem_efficient(torch.autograd.Function):
 
     @staticmethod
@@ -149,11 +149,11 @@ class _switchback_global_mem_efficient(torch.autograd.Function):
 
 class SwitchBackLinear(nn.Linear):
     def __init__(
-            self, 
-            in_features: int, 
-            out_features: int, 
+            self,
+            in_features: int,
+            out_features: int,
             bias: bool = True,
-            device=None, 
+            device=None,
             dtype=None,
             vectorize: bool = False,
             mem_efficient : bool = False,
@@ -186,7 +186,7 @@ class SwitchBackLinear(nn.Linear):
             W_int8, state_W = quantize_rowwise(self.weight)
         else:
             W_int8, state_W = quantize_global(self.weight)
-        
+
         self.register_buffer("W_int8", W_int8)
         self.register_buffer("state_W", state_W)
 
@@ -199,7 +199,7 @@ class SwitchBackLinear(nn.Linear):
             # If it hasn't been "prepared for eval", run the standard forward pass.
             if not hasattr(self, "W_int8"):
                 return self._fn.apply(x, self.weight, self.bias)
-            
+
             # Otherwise, use pre-computed weights.
             X = x.view(-1, x.size(-1))
             X_int8, state_X = quantize_rowwise(X)
@@ -250,4 +250,3 @@ class StandardLinear(nn.Linear):
 
     def forward(self, x):
         return StandardLinearFunction.apply(x, self.weight, self.bias)
-    
