@@ -157,7 +157,7 @@ class SwitchBackLinear(nn.Linear):
             bias: bool = True,
             device=None,
             dtype=None,
-            vectorize: bool = False,
+            vector_wise_quantization: bool = False,
             mem_efficient : bool = False,
         ):
         super().__init__(in_features, out_features, bias, device, dtype)
@@ -167,11 +167,11 @@ class SwitchBackLinear(nn.Linear):
                                Alternatively, you can use bnb.nn.SwitchBackLinearBnb, but it will be slower''')
 
         # By default, we use the global quantization.
-        self.vectorize = vectorize
-        if self.vectorize:
+        self.vector_wise_quantization = vector_wise_quantization
+        if self.vector_wise_quantization:
             self._fn = _switchback_vectorrize
             if mem_efficient:
-                print('mem efficient is not supported for vectorize mode.')
+                print('mem efficient is not supported for vector-wise quantization.')
                 exit(1)
         else:
             if mem_efficient:
@@ -188,7 +188,7 @@ class SwitchBackLinear(nn.Linear):
         #         m.prepare_for_eval()
         # model.apply(cond_prepare)
         print('=> preparing for eval.')
-        if self.vectorize:
+        if self.vector_wise_quantization:
             W_int8, state_W = quantize_rowwise(self.weight)
         else:
             W_int8, state_W = quantize_global(self.weight)
@@ -210,7 +210,7 @@ class SwitchBackLinear(nn.Linear):
             X = x.view(-1, x.size(-1))
             X_int8, state_X = quantize_rowwise(X)
 
-            if self.vectorize:
+            if self.vector_wise_quantization:
                 return int8_matmul_rowwise_dequantize(
                     X_int8, self.W_int8.t(), state_X, self.state_W, self.bias
                 ).view(*x.size()[:-1], -1)
@@ -219,9 +219,9 @@ class SwitchBackLinear(nn.Linear):
                     X_int8, self.W_int8.t(), state_X, self.state_W, self.bias
                 ).view(*x.size()[:-1], -1)
 
-SwitchBackLinearGlobal = partial(SwitchBackLinear, vectorize=False)
-SwitchBackLinearGlobalMemEfficient = partial(SwitchBackLinear, vectorize=False, mem_efficient=True)
-SwitchBackLinearVectorized = partial(SwitchBackLinear, vectorize=True)
+SwitchBackLinearGlobal = partial(SwitchBackLinear, vector_wise_quantization=False)
+SwitchBackLinearGlobalMemEfficient = partial(SwitchBackLinear, vector_wise_quantization=False, mem_efficient=True)
+SwitchBackLinearVectorwise = partial(SwitchBackLinear, vector_wise_quantization=True)
 
 # This is just the standard linear function.
 class StandardLinearFunction(torch.autograd.Function):

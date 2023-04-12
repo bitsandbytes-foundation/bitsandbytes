@@ -221,3 +221,10 @@ Improvements:
 Deprecated:
  - Devices with compute capability 3.0 (GTX 700s, K10) and 3.2 (Tegra K1, Jetson TK1) are now deprecated and support will be removed in 0.39.0.
  - Support for CUDA 10.0 and 10.2 will be removed in bitsandbytes 0.39.0
+
+
+### 0.38.1
+
+Features:
+ - Added Int8 SwitchBack layers
+ - Added Fake FP8 layers for research purposes (available under `bnb.research.nn. ...`)
