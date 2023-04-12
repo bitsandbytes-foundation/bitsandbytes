@@ -19,6 +19,7 @@ evaluation:
 import ctypes as ct
 import os
 import errno
+import logging
 import torch
 from warnings import warn
 from itertools import product
@@ -26,6 +27,8 @@ from itertools import product
 from pathlib import Path
 from typing import Set, Union
 from .env_vars import get_potentially_lib_path_containing_env_vars
+
+LOGGER = logging.getLogger(__name__)
 
 # these are the most common libs names
 # libcudart.so is missing by default for a conda install with PyTorch 2.0 and instead
@@ -107,7 +110,7 @@ class CUDASetup:
         package_dir = Path(__file__).parent.parent
         binary_path = package_dir / binary_name
 
-        print('bin', binary_path)
+        LOGGER.info(f"bin: {binary_path}")
 
         try:
             if not binary_path.exists():
@@ -144,7 +147,7 @@ class CUDASetup:
             if is_warning:
                 warn(msg)
             else:
-                print(msg)
+                LOGGER.info(msg)
 
     @classmethod
     def get_instance(cls):
