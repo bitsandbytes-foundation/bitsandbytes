@@ -665,7 +665,7 @@ class Optimizer1State(Optimizer8bit):
                 step,
                 config["lr"],
                 None,
-                0.0,
+                config['betas'][1],
                 config["weight_decay"],
                 gnorm_scale,
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,

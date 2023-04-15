@@ -10,8 +10,8 @@ if [[ ! -z "${LD_LIBRARY_PATH}" ]]; then
 fi
 
 
-module unload cuda
-module unload gcc
+module unload cuda && echo "no module function available. Probably not on a slurm cluster."
+module unload gcc && echo "no module function available. Probably not on a slurm cluster."
 
 rm -rf dist build
 make cleaneggs

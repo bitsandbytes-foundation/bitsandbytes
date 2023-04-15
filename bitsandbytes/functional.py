@@ -35,6 +35,10 @@ if COMPILED_WITH_CUDA:
         lib.crmsprop32bit_g32,
         lib.crmsprop32bit_g16,
     )
+    str2optimizer32bit["lion"] = (
+        lib.clion32bit_g32,
+        lib.clion32bit_g16,
+    )
     str2optimizer32bit["adagrad"] = (
         lib.cadagrad32bit_g32,
         lib.cadagrad32bit_g16,
@@ -58,6 +62,10 @@ if COMPILED_WITH_CUDA:
         lib.crmsprop_static_8bit_g32,
         lib.crmsprop_static_8bit_g16,
     )
+    str2optimizer8bit["lion"] = (
+        lib.clion_static_8bit_g32,
+        lib.clion_static_8bit_g16,
+    )
     str2optimizer8bit["lamb"] = (
         lib.cadam_static_8bit_g32,
         lib.cadam_static_8bit_g16,
@@ -79,6 +87,10 @@ if COMPILED_WITH_CUDA:
     str2optimizer8bit_blockwise["rmsprop"] = (
         lib.crmsprop_8bit_blockwise_fp32,
         lib.crmsprop_8bit_blockwise_fp16,
+    )
+    str2optimizer8bit_blockwise["lion"] = (
+        lib.clion_8bit_blockwise_fp32,
+        lib.clion_8bit_blockwise_fp16,
     )
     str2optimizer8bit_blockwise["adagrad"] = (
         lib.cadagrad_8bit_blockwise_fp32,
@@ -170,7 +182,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     values = []
     lst = list(itertools.product([0, 1], repeat=precision_bits))
     #for ev in evalues:
-    bias = 2**(exponent_bits-1)-1
+    bias = 2**(exponent_bits-1)
     for evalue in range(2**(exponent_bits)):
         for bit_pattern in lst:
             value = (1 if evalue != 0 else 0)
@@ -178,10 +190,10 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
                 value += pval*(2**-(i+1))
             if evalue == 0:
                 # subnormals
-                value = value*2**-(bias-1)
+                value = value*2**-(bias)
             else:
                 # normals
-                value = value*2**-(evalue-bias-2)
+                value = value*2**-(evalue-bias-1)
             values.append(value)
             if signed:
                 values.append(-value)
@@ -514,13 +526,12 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
         code = code.to(A.device)
         if rand is not None:
             is_on_gpu([code, A, out, absmax, rand])
-            assert blocksize==4096
             assert rand.numel() >= 1024
             rand_offset = random.randint(0, 1023)
             if A.dtype == torch.float32:
-                lib.cquantize_blockwise_stochastic_fp32(get_ptr(code), get_ptr(A),get_ptr(absmax), get_ptr(out), get_ptr(rand), ct.c_int32(rand_offset), ct.c_int(A.numel()))
+                lib.cquantize_blockwise_stochastic_fp32(get_ptr(code), get_ptr(A),get_ptr(absmax), get_ptr(out), get_ptr(rand), ct.c_int32(rand_offset), cblocksize, ct.c_int(A.numel()))
             elif A.dtype == torch.float16:
-                lib.cquantize_blockwise_stochastic_fp16(get_ptr(code), get_ptr(A),get_ptr(absmax), get_ptr(out), get_ptr(rand), ct.c_int32(rand_offset), ct.c_int(A.numel()))
+                lib.cquantize_blockwise_stochastic_fp16(get_ptr(code), get_ptr(A),get_ptr(absmax), get_ptr(out), get_ptr(rand), ct.c_int32(rand_offset), cblocksize, ct.c_int(A.numel()))
             else:
                 raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
         else:
@@ -662,9 +673,11 @@ def quantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
     torch.Tensor:
         Quantized 8-bit tensor.
     '''
+    prev_device = pre_call(A.device)
     if out is None: out = torch.zeros_like(A, dtype=torch.uint8)
     is_on_gpu([A, out])
     lib.cquantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
+    post_call(prev_device)
     return out
 
 
@@ -689,9 +702,11 @@ def dequantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
     torch.Tensor:
         32-bit output tensor.
     '''
+    prev_device = pre_call(A.device)
     if out is None: out = torch.zeros_like(A, dtype=torch.float32)
     is_on_gpu([code, A, out])
     lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
+    post_call(prev_device)
     return out
 
 
@@ -760,6 +775,8 @@ def optimizer_update_32bit(
             f'Optimizer not implemented: {optimizer_name}. Choices: {",".join(str2optimizer32bit.keys())}'
         )
 
+    prev_device = pre_call(g.device)
+    is_on_gpu([g, p, state1, state2, unorm_vec])
     if g.dtype == torch.float32 and state1.dtype == torch.float32:
         str2optimizer32bit[optimizer_name][0](
             get_ptr(g),
@@ -802,6 +819,7 @@ def optimizer_update_32bit(
         raise ValueError(
             f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}"
         )
+    post_call(prev_device)
 
 
 def optimizer_update_8bit(
@@ -880,6 +898,8 @@ def optimizer_update_8bit(
     if max_unorm > 0.0:
         param_norm = torch.norm(p.data.float())
 
+    prev_device = pre_call(g.device)
+    is_on_gpu([g, p, state1, state2, unorm_vec, qmap1, qmap2, max1, max2, new_max1, new_max2])
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
         str2optimizer8bit[optimizer_name][0](
             get_ptr(p),
@@ -932,6 +952,7 @@ def optimizer_update_8bit(
         raise ValueError(
             f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}"
         )
+    post_call(prev_device)
 
 
 def optimizer_update_8bit_blockwise(
@@ -954,6 +975,8 @@ def optimizer_update_8bit_blockwise(
     skip_zeros=False,
 ) -> None:
 
+    prev_device = pre_call(g.device)
+    is_on_gpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
     if g.dtype == torch.float32 and state1.dtype == torch.uint8:
         str2optimizer8bit_blockwise[optimizer_name][0](
             get_ptr(p),
@@ -998,6 +1021,7 @@ def optimizer_update_8bit_blockwise(
         raise ValueError(
             f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}"
         )
+    post_call(prev_device)
 
 
 def percentile_clipping(
@@ -1013,6 +1037,7 @@ def percentile_clipping(
         The current optimiation steps (number of past gradient norms).
 
     """
+    prev_device = pre_call(grad.device)
     is_on_gpu([grad, gnorm_vec])
     if grad.dtype == torch.float32:
         lib.cpercentile_clipping_g32(
@@ -1030,6 +1055,7 @@ def percentile_clipping(
         )
     else:
         raise ValueError(f"Gradient type {grad.dtype} not supported!")
+    post_call(prev_device)
 
     current_gnorm = torch.sqrt(gnorm_vec[step % 100])
     vals, idx = torch.sort(gnorm_vec)
@@ -1786,6 +1812,7 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
             (cooA.rows, B.shape[1]), device=B.device, dtype=cooA.values.dtype
         )
     nnz = cooA.nnz
+    prev_device = pre_call(B.device)
     assert cooA.rowidx.numel() == nnz
     assert cooA.colidx.numel() == nnz
     assert cooA.values.numel() == nnz
@@ -1862,6 +1889,7 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
             ccolsB,
         )
     # else: assertion error
+    post_call(prev_device)
 
     return out
 
