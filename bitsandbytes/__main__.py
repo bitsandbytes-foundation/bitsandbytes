@@ -63,7 +63,7 @@ def generate_bug_report_information():
         print('')
 
     print_header("LD_LIBRARY CUDA PATHS")
-    lib_path = os.environ['LD_LIBRARY_PATH'].strip()
+    lib_path = os.environ.get('LD_LIBRARY_PATH', '').strip()
     for path in set(lib_path.split(':')):
         try:
             if isdir(path):
@@ -102,8 +102,9 @@ from .cuda_setup.main import get_compute_capabilities, get_cuda_lib_handle
 
 print_header("OTHER")
 print(f"COMPILED_WITH_CUDA = {COMPILED_WITH_CUDA}")
-cuda = get_cuda_lib_handle()
-print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities(cuda)}")
+if COMPILED_WITH_CUDA:
+    cuda = get_cuda_lib_handle()
+    print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities(cuda)}")
 print_header("")
 print_header("DEBUG INFO END")
 print_header("")

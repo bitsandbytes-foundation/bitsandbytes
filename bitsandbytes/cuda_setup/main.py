@@ -93,10 +93,10 @@ class CUDASetup:
             self.has_printed = False
             self.lib = None
             self.initialized = False
+            self.cuda_setup_log = []
 
     def run_cuda_setup(self):
         self.initialized = True
-        self.cuda_setup_log = []
 
         binary_name, cudart_path, cuda, cc, cuda_version_string = evaluate_cuda_setup()
         self.cudart_path = cudart_path

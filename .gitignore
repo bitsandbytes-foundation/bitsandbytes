@@ -10,6 +10,14 @@ __pycache__/
 
 # CMake generated files
 CMakeCache.txt
+cmake_install.cmake
+Makefile
+CMakeFiles/
+*.sln
+*.vcxproj*
+bitsandbytes.dir/
+Debug/
+Release/
 
 # Distribution / packaging
 .Python

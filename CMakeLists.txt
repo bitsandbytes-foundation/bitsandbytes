@@ -1,17 +1,34 @@
-cmake_minimum_required(VERSION 3.26.0)
+cmake_minimum_required(VERSION 3.16.3)
 
-# Set cuda12x supported archs only for now
-# This has to be set before project()
-set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90")
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    if(APPLE)
+        # No CUDA on macOS
+        set(CMAKE_CUDA_ARCHITECTURES "")
+    else()
+        # Set cuda12x supported archs only for now
+        # This has to be set before project()
+        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90")
+    endif()
+endif()
 
-project(bitsandbytes LANGUAGES CXX CUDA)
+if(CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+    message("Building without CUDA support")
+    set(LIBSUFFIX "cpu")
 
-find_package(CUDAToolkit REQUIRED)
+    project(bitsandbytes LANGUAGES CXX)
+else()
+    message("Building CUDA support for ${CMAKE_CUDA_ARCHITECTURES}")
+    # Find CUDA tools if we are compiling with CUDA
+    find_package(CUDAToolkit REQUIRED)
+    set(LIBSUFFIX "cuda${CUDAToolkit_VERSION_MAJOR}${CUDAToolkit_VERSION_MINOR}")
+
+    project(bitsandbytes LANGUAGES CXX CUDA)
+    add_compile_definitions(BUILD_CUDA)
+endif()
 
 # Set global flags
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CUDA_STANDARD 14)
-add_compile_definitions(BUILD_CUDA)
 
 if(WIN32)
     # Mute warnings
@@ -39,28 +56,26 @@ add_library(bitsandbytes SHARED
 target_include_directories(bitsandbytes PUBLIC
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CUDA_TOOLKIT_ROOT_DIR}/include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# Pass options to NVCC
-target_compile_options(bitsandbytes PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-    --use_fast_math
-    -Xptxas=-v
-    -dc
-    >)
+if(NOT CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+    target_include_directories(bitsandbytes PUBLIC ${CUDA_TOOLKIT_ROOT_DIR}/include)
 
-set_target_properties(
-    bitsandbytes
-    PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON)
+    # Pass options to NVCC
+    target_compile_options(bitsandbytes PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+        --use_fast_math
+        -Xptxas=-v
+        -dc
+        >)
 
-if(WIN32)
-    # pthread does not exist on Windows
-    add_dependencies(bitsandbytes pthread-win32)
-    target_link_libraries(bitsandbytes CUDA::cudart CUDA::cublas CUDA::cublasLt CUDA::cusparse pthreadVC3)
-else()
+    set_target_properties(
+        bitsandbytes
+        PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON)
+
     target_link_libraries(bitsandbytes CUDA::cudart CUDA::cublas CUDA::cublasLt CUDA::cusparse)
 endif()
 
 # Set the output name of the CUDA library
-set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME "bitsandbytes_cuda120")
+set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY ./bitsandbytes)
+set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME "bitsandbytes_${LIBSUFFIX}")

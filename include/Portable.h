@@ -31,7 +31,7 @@ typedef struct {double a; double b;} __m128d;
 #ifdef __FMA__
 #define USE_FMA
 #endif
-#ifndef __SSE2__
+#if !defined(__SSE2__) && !defined(_MSC_VER)
 #error Compiler must support SSE2
 #endif
 #define USE_SSE2

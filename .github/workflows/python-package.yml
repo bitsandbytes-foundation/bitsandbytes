@@ -9,6 +9,10 @@ on:
     types: [ published ]
 
 jobs:
+  
+  ##
+  # This job matrix builds the non-CUDA versions of the libraries for all supported platforms.
+  ##
   build-shared-libs:
     strategy:
       matrix:
@@ -21,31 +25,95 @@ jobs:
     steps:
       # Check out code
     - uses: actions/checkout@v3
+      # On Linux we use CMake within Docker
+    - name: Setup cmake
+      uses: jwlawson/actions-setup-cmake@v1.13
+      with:
+        cmake-version: '3.26.x'
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v1.1
+      if: ${{ startsWith(matrix.os, 'windows') }}
+      # Compile C++ code
+    - name: Build C++
+      shell: bash
+      run: |
+        set -ex
+        build_os=${{ matrix.os }}
+        build_arch=${{ matrix.arch }}
+        ( git clone https://github.com/NVlabs/cub ./dependencies/cub; cd dependencies/cub; git checkout 1.11.0 )
+        if [ ${build_os:0:6} == ubuntu -a ${build_arch} == aarch64 ]; then
+          # Allow cross-compile om aarch64
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+        fi
+        if [ ${build_os:0:5} == macos -a ${build_arch} == aarch64 ]; then
+          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_CUDA_ARCHITECTURES= .
+        else
+          cmake -DCMAKE_CUDA_ARCHITECTURES= .
+        fi
+        if [ ${build_os:0:7} == windows ]; then
+          pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
+          cp ./Release/*.dll ./bitsandbytes/
+        else
+          make
+        fi
+        mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
+        ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: shared_library
+        path: output/*
+        retention-days: 7
+  ##
+  # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
+  ##
+  build-shared-libs-cuda:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        arch: [x86_64, aarch64]
+        cuda_version: ['12.1.0']
+        exclude:
+          - os: windows-latest # This probably requres arm64 Windows agents
+            arch: aarch64
+    runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
+    steps:
+      # Check out code
+    - uses: actions/checkout@v3
       # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
     - name: Set up Docker multiarch
       if: startsWith(matrix.os, 'ubuntu')
       uses: docker/setup-qemu-action@v2
+      # On Linux we use CMake within Docker
+    - name: Setup cmake
+      if: ${{ !startsWith(matrix.os, 'linux') }}
+      uses: jwlawson/actions-setup-cmake@v1.13
+      with:
+        cmake-version: '3.26.x'
       # Windows: We install Cuda on the agent (slow)
     - uses: Jimver/cuda-toolkit@v0.2.10
       if: startsWith(matrix.os, 'windows')
       id: cuda-toolkit
       with:
-        cuda: '12.1.0'
-        #method: 'network'
-        #sub-packages: '["nvcc", "visual_studio_integration"]'
+        cuda: ${{ matrix.cuda_version }}
+        method: 'network'
+        sub-packages: '["nvcc"]'
       # Compile C++ code
     - name: Build C++
       shell: bash
       run: |
+        set -ex
         build_os=${{ matrix.os }}
         build_arch=${{ matrix.arch }}
-        make $PWD/dependencies/cub # git is not available in container, so pre-build this
+        ( git clone https://github.com/NVlabs/cub ./dependencies/cub; cd dependencies/cub; git checkout 1.11.0 )
         if [ ${build_os:0:6} == ubuntu ]; then 
-          image=nvidia/cuda:12.1.0-devel-ubuntu20.04
+          image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu20.04
           echo "Using image $image"
-          docker run --platform linux/$build_arch --user $(id -u) -i -w /src -v $PWD:/src $image make cpuonly cuda
+          docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c "apt-get update && apt-get install -y --no-install-recommends cmake && cmake . && make"
         else
-          make cpuonly TARGET_ARCH=${{ matrix.arch }}
+          cmake .
+          pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
+          cp ./Release/*.dll ./bitsandbytes/
         fi
         mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
         ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
@@ -56,7 +124,9 @@ jobs:
         path: output/*
         retention-days: 7
   build-wheels:
-    needs: build-shared-libs
+    needs:
+    - build-shared-libs
+    - build-shared-libs-cuda
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
