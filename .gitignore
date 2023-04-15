@@ -2,9 +2,14 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
+*.dll
+*.dylib
+*.o
+*.obj
+
+# CMake generated files
+CMakeCache.txt
 
 # Distribution / packaging
 .Python
