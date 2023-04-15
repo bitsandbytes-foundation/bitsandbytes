@@ -28,18 +28,6 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /arch:AVX2")
 endif()
 
-# pthread does not exist on Windows
-if(WIN32)
-    include(ExternalProject)
-    ExternalProject_Add(pthread-win32
-        GIT_REPOSITORY https://github.com/GerHobbelt/pthread-win32
-        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${EXTERNAL_INSTALL_LOCATION}
-    )
-
-    include_directories(${EXTERNAL_INSTALL_LOCATION}/include)
-    link_directories(${EXTERNAL_INSTALL_LOCATION}/lib)
-endif()
-
 # Add csrc files
 add_library(bitsandbytes SHARED
 	csrc/ops.cu
