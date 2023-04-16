@@ -97,7 +97,7 @@ jobs:
       with:
         cuda: ${{ matrix.cuda_version }}
         method: 'network'
-        sub-packages: '["nvcc"]'
+        sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","visual_studio_integration"]'
       # Compile C++ code
     - name: Build C++
       shell: bash
@@ -107,9 +107,13 @@ jobs:
         build_arch=${{ matrix.arch }}
         ( git clone https://github.com/NVlabs/cub ./dependencies/cub; cd dependencies/cub; git checkout 1.11.0 )
         if [ ${build_os:0:6} == ubuntu ]; then 
-          image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu20.04
+          image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
           echo "Using image $image"
-          docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c "apt-get update && apt-get install -y --no-install-recommends cmake && cmake . && make"
+          docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
+            "apt-get update \
+            && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
+            && cmake . \
+            && make"
         else
           cmake .
           pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
