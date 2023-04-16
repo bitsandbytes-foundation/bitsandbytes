@@ -97,7 +97,7 @@ jobs:
       with:
         cuda: ${{ matrix.cuda_version }}
         method: 'network'
-        sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","visual_studio_integration"]'
+        sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","cusparse_dev","visual_studio_integration"]'
       # Compile C++ code
     - name: Build C++
       shell: bash
