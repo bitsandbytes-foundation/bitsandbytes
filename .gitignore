@@ -9,6 +9,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+build_*/
 develop-eggs/
 dist/
 downloads/

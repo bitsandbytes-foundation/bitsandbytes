@@ -43,6 +43,11 @@ mamba env activate mycompileenv
 ```
 At this point - select your visual studio installation - aka hit 1
 
+3. you can now build with Conda 11.6 and 11.7 by & `./buildall.ps1` Feel free to customize the script as per your needs.
+
+
+### Manual configuration with cmake-gui
+
 3. Go into your bitsandbytes folder and run `cmake-gui -S . -B ./build` 
 5. Hit Configure
 6. Set `cuda=11.7`, nothing, or other version in the `Optional toolset to use` when selecting the generator to . You can leave it blank. If you don't see the generate, delete the `build` folder and run cmake-gui again with the above command line.
