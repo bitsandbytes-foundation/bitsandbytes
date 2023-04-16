@@ -35,12 +35,15 @@ else()
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 endif()
 
+set(CMAKE_CXX_STANDARD 14)
 set(CXX_STANDARD_REQUIRED C++14)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
 
 if(WIN32)
     # Mute warnings
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -diag-suppress=177")
+
+    # Enable fast math on VC++
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
 
     # Export all symbols
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
