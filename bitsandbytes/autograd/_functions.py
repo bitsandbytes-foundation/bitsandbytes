@@ -221,9 +221,20 @@ bmm_cublas = MatMul8bit.apply
 matmul_cublas = MatMul8bit.apply
 
 
+def supports_igemmlt(device: torch.device) -> bool:
+    """check if this device supports the optimized int8 kernel"""
+    if torch.cuda.get_device_capability(device=device) < (7, 5):
+        return False
+    device_name = torch.cuda.get_device_name(device=device)
+    nvidia16_models = ('GTX 1630', 'GTX 1650', 'GTX 1660')  # https://en.wikipedia.org/wiki/GeForce_16_series
+    if any(model_name in device_name for model_name in nvidia16_models):
+        return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
+    return True
+
+
 @dataclass
 class MatmulLtState:
-    tile_indices: Optional[torch.Tensor] = None
+    _tile_indices: Optional[torch.Tensor] = None
     force_no_igemmlt: bool = False
     CB = None
     CxB = None
@@ -263,6 +274,15 @@ class MatmulLtState:
         ), f"please find this assert and manually enter tile size for {self.formatB}"
         return (8, 32) if self.formatB == "col_turing" else (32, 32)
 
+    @property
+    def tile_indices(self):
+        if self._tile_indices is None:
+            device = self.CxB.device
+            transform = lambda x: F.transform(x.to(device), from_order="row", to_order=self.formatB)[0].to(x.device)
+            with torch.no_grad():
+                self._tile_indices = get_inverse_transform_indices(transform, self.get_tile_size()).to(device)
+        return self._tile_indices
+
 
 class MatMul8bitLt(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
@@ -270,7 +290,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
-        using_igemmlt = torch.cuda.get_device_capability(device=A.device) >= (7, 5) and not state.force_no_igemmlt
+        using_igemmlt = supports_igemmlt(A.device) and not state.force_no_igemmlt
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
@@ -455,13 +475,6 @@ class MatMul8bitLt(torch.autograd.Function):
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             elif state.CxB is not None:
-
-                if state.tile_indices is None:
-                    order, tile_size = state.formatB, state.get_tile_size()
-                    transform = lambda x: F.transform(x.cuda(), from_order="row", to_order=order)[0].to(x.device)
-                    with torch.no_grad():
-                        state.tile_indices = get_inverse_transform_indices(transform, tile_size).to(state.CxB.device)
-
                 CB = (
                     undo_layout(state.CxB, state.tile_indices)
                     .to(ctx.dtype_A)
@@ -472,7 +485,6 @@ class MatMul8bitLt(torch.autograd.Function):
                 raise Exception("State must contain either CBt or CB or CxB matrix for backward")
 
         return grad_A, grad_B, None, grad_bias, None
-
 
 def matmul(
     A: tensor,

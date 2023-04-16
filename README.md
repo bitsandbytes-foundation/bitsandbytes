@@ -11,10 +11,40 @@ Resources:
 
 ## TL;DR
 **Requirements**
-Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + CUDA > 10.0. LLM.int8() requires Turing or Ampere GPUs.
+Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + CUDA > 10.0.
+
+(Deprecated: CUDA 10.0 is deprecated and only CUDA >= 11.0) will be supported with release 0.39.0)
 
 **Installation**:
+
 ``pip install bitsandbytes``
+
+In some cases it can happen that you need to compile from source. If this happens please consider submitting a bug report with `python -m bitsandbytes` information. What now follows is some short instructions which might work out of the box if `nvcc` is installed. If these do not work see further below.
+
+Compilation quickstart:
+```bash
+git clone https://github.com/timdettmers/bitsandbytes.git
+cd bitsandbytes
+
+# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 120}
+# make argument in {cuda110, cuda11x, cuda12x}
+# if you do not know what CUDA you have, try looking at the output of: python -m bitsandbytes
+CUDA_VERSION=117 make cuda11x
+python setup.py install
+```
+
+**Using Int8 inference with HuggingFace Transformers**
+
+```python
+from transformers import AutoModelForCausalLM
+model = AutoModelForCausalLM.from_pretrained(
+  'decapoda-research/llama-7b-hf,
+  device_map='auto',
+  load_in_8bit=True,
+  max_memory=f'{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB')
+```
+
+A more detailed example, can be found in [examples/int8_inference_huggingface.py](examples/int8_inference_huggingface.py).
 
 **Using 8-bit optimizer**:
 1. Comment out optimizer: ``#torch.optim.Adam(....)``
@@ -40,7 +70,7 @@ out = linear(x.to(torch.float16))
 ## Features
 - 8-bit Matrix multiplication with mixed precision decomposition
 - LLM.int8() inference
-- 8-bit Optimizers: Adam, AdamW, RMSProp, LARS, LAMB (saves 75% memory)
+- 8-bit Optimizers: Adam, AdamW, RMSProp, LARS, LAMB, Lion (saves 75% memory)
 - Stable Embedding Layer: Improved stability through better initialization, and normalization
 - 8-bit quantization: Quantile, Linear, and Dynamic quantization
 - Fast quantile estimation: Up to 100x faster than other algorithms
@@ -113,8 +143,23 @@ For upcoming features and changes and full history see [Patch Notes](CHANGELOG.m
 2. __fatbinwrap_.. [Solution](errors_and_solutions.md#fatbinwrap_)
 
 ## Compile from source
+To compile from source, you need an installation of CUDA. If `nvcc` is not installed, you can install the CUDA Toolkit with nvcc through the following commands.
 
-To compile from source, please follow the [compile_from_source.md](compile_from_source.md) instructions.
+```bash
+wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh
+# Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
+#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121}
+#   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
+
+# For example, the following installs CUDA 11.8 to ~/local/cuda-11.8 and exports the path to your .bashrc
+bash cuda install 118 ~/local 1 
+```
+
+To use a specific CUDA version just for a single compile run, you can set the variable `CUDA_HOME`, for example the following command compiles `libbitsandbytes_cuda117.so` using compiler flags for cuda11x with the cuda version at `~/local/cuda-11.7`:
+
+``CUDA_HOME=~/local/cuda-11.7 CUDA_VERSION=117 make cuda11x``
+
+For more detailed instruction, please follow the [compile_from_source.md](compile_from_source.md) instructions.
 
 ## License
 

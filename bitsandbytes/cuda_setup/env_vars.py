@@ -11,6 +11,7 @@ def to_be_ignored(env_var: str, value: str) -> bool:
         "HOME",  # Linux shell default
         "TMUX",  # Terminal Multiplexer
         "XDG_DATA_DIRS",  # XDG: Desktop environment stuff
+        "XDG_GREETER_DATA_DIR",  # XDG: Desktop environment stuff
         "XDG_RUNTIME_DIR",
         "MAIL",  # something related to emails
         "SHELL",  # binary for currently invoked shell
