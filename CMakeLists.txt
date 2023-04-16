@@ -83,12 +83,9 @@ if(ENABLE_CUDA)
 endif()
 
 # Set the output name of the CUDA library
-set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY ./bitsandbytes)
-set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME "bitsandbytes_${LIBSUFFIX}")
-
 if(MSVC)
-    add_custom_command(TARGET libbitsandbytes_cuda POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory  # which executes "cmake - E copy_if_different..."
-        $<TARGET_FILE_DIR:bitsandbytes_${LIBSUFFIX}>
-        "${PROJECT_SOURCE_DIR}/bitsandbytes" )
+set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELEASE ./bitsandbytes)
+set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_DEBUG ./bitsandbytes)
 endif()
+
+set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY ./bitsandbytes)
