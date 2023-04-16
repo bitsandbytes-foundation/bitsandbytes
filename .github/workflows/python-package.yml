@@ -46,13 +46,13 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
         fi
         if [ ${build_os:0:5} == macos -a ${build_arch} == aarch64 ]; then
-          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_CUDA_ARCHITECTURES= .
+          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DENABLE_CUDA=OFF .
         else
-          cmake -DCMAKE_CUDA_ARCHITECTURES= .
+          cmake -DENABLE_CUDA=OFF .
         fi
         if [ ${build_os:0:7} == windows ]; then
           pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
-          cp ./Release/*.dll ./bitsandbytes/
+          # cp ./Release/*.dll ./bitsandbytes/
         else
           make
         fi
@@ -112,12 +112,12 @@ jobs:
           docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
             "apt-get update \
             && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-            && cmake . \
+            && cmake -DENABLE_CUDA=ON . \
             && make"
         else
           cmake .
           pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
-          cp ./Release/*.dll ./bitsandbytes/
+          # cp ./Release/*.dll ./bitsandbytes/
         fi
         mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
         ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )

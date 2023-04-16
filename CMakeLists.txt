@@ -1,17 +1,20 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+option(ENABLE_CUDA "Build for CUDA" OFF)
+
+if(ENABLE_CUDA)
     if(APPLE)
-        # No CUDA on macOS
-        set(CMAKE_CUDA_ARCHITECTURES "")
+        message( FATAL_ERROR "CUDA is not supported on macOS" )
+    endif()
+    option(NO_CUBLASLT "Don't use CUBLAST" OFF)
+    if(NO_CUBLASLT)
+        set(CMAKE_CUDA_ARCHITECTURES 50 52 60 61 70 72)
     else()
-        # Set cuda12x supported archs only for now
-        # This has to be set before project()
-        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90")
+        set(CMAKE_CUDA_ARCHITECTURES 75 80 86 89 90)
     endif()
 endif()
 
-if(CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+if(NOT ENABLE_CUDA)
     message("Building without CUDA support")
     set(LIBSUFFIX "cpu")
 
@@ -20,15 +23,20 @@ else()
     message("Building CUDA support for ${CMAKE_CUDA_ARCHITECTURES}")
     # Find CUDA tools if we are compiling with CUDA
     find_package(CUDAToolkit REQUIRED)
-    set(LIBSUFFIX "cuda${CUDAToolkit_VERSION_MAJOR}${CUDAToolkit_VERSION_MINOR}")
+    if(NO_CUBLASLT)
+        set(LIBSUFFIX "cuda${CUDAToolkit_VERSION_MAJOR}${CUDAToolkit_VERSION_MINOR}_nocublaslt")
+    else()
+        set(LIBSUFFIX "cuda${CUDAToolkit_VERSION_MAJOR}${CUDAToolkit_VERSION_MINOR}")
+    endif()
 
     project(bitsandbytes LANGUAGES CXX CUDA)
     add_compile_definitions(BUILD_CUDA)
+    set(CMAKE_CUDA_STANDARD 14)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 endif()
 
-# Set global flags
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CUDA_STANDARD 14)
+set(CXX_STANDARD_REQUIRED C++14)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
 
 if(WIN32)
     # Mute warnings
@@ -58,15 +66,10 @@ target_include_directories(bitsandbytes PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-if(NOT CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+if(ENABLE_CUDA)
     target_include_directories(bitsandbytes PUBLIC ${CUDA_TOOLKIT_ROOT_DIR}/include)
 
-    # Pass options to NVCC
-    target_compile_options(bitsandbytes PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-        --use_fast_math
-        -Xptxas=-v
-        -dc
-        >)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --use_fast_math")
 
     set_target_properties(
         bitsandbytes
@@ -79,3 +82,10 @@ endif()
 # Set the output name of the CUDA library
 set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY ./bitsandbytes)
 set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME "bitsandbytes_${LIBSUFFIX}")
+
+if(MSVC)
+    add_custom_command(TARGET libbitsandbytes_cuda POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory  # which executes "cmake - E copy_if_different..."
+        $<TARGET_FILE_DIR:bitsandbytes_${LIBSUFFIX}>
+        "${PROJECT_SOURCE_DIR}/bitsandbytes" )
+endif()
