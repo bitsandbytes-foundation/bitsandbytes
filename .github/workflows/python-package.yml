@@ -163,7 +163,6 @@ jobs:
     - name: Install Python dependencies
       shell: bash
       run: |
-        pip install --upgrade pip
         pip install -r requirements.txt
     # TODO: How to run CUDA tests on GitHub actions?
     #- name: Run unit tests
