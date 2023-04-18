@@ -23,7 +23,7 @@ try:
         CUDA Setup failed despite GPU being available. Inspect the CUDA SETUP outputs above to fix your environment!
         If you cannot find any issues and suspect a bug, please open an issue with detals about your environment:
         https://github.com/TimDettmers/bitsandbytes/issues''')
-    lib.cadam32bit_g32
+    lib.cadam_8bit_blockwise_fp32
     lib.get_context.restype = ct.c_void_p
     lib.get_cusparse.restype = ct.c_void_p
     COMPILED_WITH_CUDA = True

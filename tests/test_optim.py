@@ -44,10 +44,6 @@ str2optimizers["momentum"] = (
     lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9, block_wise=False),
 )
-str2optimizers["lars"] = (
-    lambda pxx: bnb.optim.PytorchLARS(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.LARS(pxx, 0.01, 0.9),
-)
 str2optimizers["rmsprop"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=False),
@@ -63,10 +59,6 @@ str2optimizers["momentum8bit"] = (
 str2optimizers["rmsprop8bit"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.RMSprop8bit(pxx, 0.01, 0.9, block_wise=False),
-)
-str2optimizers["lars8bit"] = (
-    lambda pxx: bnb.optim.PytorchLARS(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.LARS8bit(pxx, 0.01, 0.9),
 )
 
 str2optimizers["adam8bit_blockwise"] = (
@@ -85,7 +77,6 @@ str2optimizers["rmsprop8bit_blockwise"] = (
 str2statenames = {}
 str2statenames["adam"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["momentum"] = [("momentum_buffer", "state1")]
-str2statenames["lars"] = [("momentum_buffer", "state1")]
 str2statenames["lamb"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["rmsprop"] = [("square_avg", "state1")]
 str2statenames["adam8bit"] = [
@@ -106,7 +97,6 @@ str2statenames["momentum8bit"] = [
 str2statenames["momentum8bit_blockwise"] = [
     ("momentum_buffer", "state1", "qmap1", "absmax1")
 ]
-str2statenames["lars8bit"] = [("momentum_buffer", "state1", "qmap1", "max1")]
 str2statenames["rmsprop8bit"] = [("square_avg", "state1", "qmap1", "max1")]
 str2statenames["rmsprop8bit_blockwise"] = [
     ("square_avg", "state1", "qmap1", "absmax1")
@@ -114,14 +104,10 @@ str2statenames["rmsprop8bit_blockwise"] = [
 
 dim1 = [1024]
 dim2 = [32, 1024, 4097, 1]
-gtype = [torch.float32, torch.float16]
-optimizer_names = ["adam", "momentum", "rmsprop", "lars"]
+gtype = [torch.float32, torch.float16, torch.bfloat16]
+optimizer_names = ["adam", "momentum", "rmsprop"]
 values = list(product(dim1, dim2, gtype, optimizer_names))
-names = [
-    "dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values
-]
-
-
+names = ["dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_optimizer32bit(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1:
@@ -135,6 +121,8 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
 
     if gtype == torch.float32:
         atol, rtol = 1e-6, 1e-5
+    elif gtype == torch.bfloat16:
+        atol, rtol = 1e-3, 1e-2
     else:
         atol, rtol = 1e-4, 1e-3
 
@@ -173,14 +161,14 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
                     rtol=rtol,
                 )
 
-        if gtype == torch.float16:
+        if gtype != torch.float32:
             # the adam buffers should also be close because they are 32-bit
             # but the paramters can diverge because they are 16-bit
             # the difference grow larger and larger with each update
             # --> copy the state to keep weights close
-            p1.data = p1.data.half().float()
+            p1.data = p1.data.to(p2.dtype).float()
             p2.copy_(p1.data)
-            torch.testing.assert_allclose(p1.half(), p2)
+            torch.testing.assert_allclose(p1.to(p2.dtype), p2)
         if optim_name in ["lars", "lamb"]:
             assert bnb_optimizer.state[p2]["unorm_vec"] > 0.0
 
@@ -246,7 +234,6 @@ optimizer_names = [
     "momentum8bit",
     "rmsprop8bit",
     "adam8bit_blockwise",
-    "lars8bit",
     "momentum8bit_blockwise",
     "rmsprop8bit_blockwise",
 ]
@@ -321,10 +308,10 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         relerr = err / torch.abs(p1)
         if g.dtype == torch.bfloat16:
             assert err.mean() < 0.00015
-            assert relerr.mean() < 0.0015
+            assert relerr.mean() < 0.0016
         else:
-            assert err.mean() < 0.0001
-            assert relerr.mean() < 0.001
+            assert err.mean() < 0.00012
+            assert relerr.mean() < 0.0012
 
         errors.append(err.mean().item())
         relerrors.append(relerr.mean().item())

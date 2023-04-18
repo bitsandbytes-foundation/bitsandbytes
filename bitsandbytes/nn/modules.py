@@ -178,6 +178,13 @@ class Params4bit(torch.nn.Parameter):
                 s[0] = s[0].to(device)
                 if self.compress_statistics:
                     # TODO: refactor this. This is a nightmare
+                    # for 4-bit: 
+                    # state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type]
+                    # state2 = [absmax, input_shape, A.dtype, blocksize, None, quant_type]
+                    #s[-2][0] = s[-2][0].to(device) # offset
+                    #s[-2][1][0] = s[-2][1][0].to(device) # nested absmax
+
+                    # for 8-bit
                     s[-2][0] = s[-2][0].to(device) # offset
                     s[-2][1][0] = s[-2][1][0].to(device) # nested quantiation state statitics
                     s[-2][1][1] = s[-2][1][1].to(device) # nested quantiation codebook

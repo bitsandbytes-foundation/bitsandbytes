@@ -29,8 +29,9 @@ void fname##32bit_g##gbits(gtype *g, gtype *p, \
 
 MAKE_FUNC32(momentum, MOMENTUM, float, 32)
 MAKE_FUNC32(momentum, MOMENTUM, half, 16)
-MAKE_FUNC32(adam, ADAM, float, 32)
-MAKE_FUNC32(adam, ADAM, half, 16)
+MAKE_FUNC32(adam, ADAM, float, fp32)
+MAKE_FUNC32(adam, ADAM, half, fp16)
+MAKE_FUNC32(adam, ADAM, __nv_bfloat16, bf16)
 MAKE_FUNC32(rmsprop, RMSPROP, float, 32)
 MAKE_FUNC32(rmsprop, RMSPROP, half, 16)
 MAKE_FUNC32(adagrad, ADAGRAD, float, 32)
@@ -173,8 +174,9 @@ extern "C"
 								 const int step, const float lr, const float gnorm_scale, bool skip_zeros, const int n) \
 	{ name##32bit_g##gbits(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n); } \
 
-	MAKE_CFUNC32(adam, float, 32)
-	MAKE_CFUNC32(adam, half, 16)
+	MAKE_CFUNC32(adam, float, fp32)
+	MAKE_CFUNC32(adam, half, fp16)
+	MAKE_CFUNC32(adam, __nv_bfloat16, bf16)
 	MAKE_CFUNC32(momentum, float, 32)
 	MAKE_CFUNC32(momentum, half, 16)
 	MAKE_CFUNC32(rmsprop, float, 32)
