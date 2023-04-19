@@ -150,42 +150,44 @@ def test_dynamic_quantization():
         assert diff < 0.004
 
 
-def test_dynamic_blockwise_quantization():
-    #print('')
-    for blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32]:
-        diffs = []
-        reldiffs = []
-        for i in range(100):
-            A1 = torch.randn(1024, 1024, device="cuda")
-            C, S = F.quantize_blockwise(A1, blocksize=blocksize)
-            A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
-            diff = torch.abs(A1 - A2)
-            reldiff = diff / torch.abs(A1 + 1e-8)
-            diffs.append(diff.mean().item())
-            reldiffs.append(reldiff.mean().item())
-        abserr = sum(diffs)/len(diffs)
-        relerr = sum(reldiffs)/len(reldiffs)
-        assert abserr < 0.011
-        assert relerr < 0.018
-        #print('randn', blocksize, sum(diffs)/len(diffs))
-        #print('randn', blocksize, sum(reldiffs)/len(reldiffs))
 
-        diffs = []
-        for i in range(100):
-            A1 = torch.rand(1024, 1024, device="cuda")
-            C, S = F.quantize_blockwise(A1, blocksize=blocksize)
-            A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
-            diff = torch.abs(A1 - A2)
-            reldiff = diff / torch.abs(A1 + 1e-8)
-            diffs.append(diff.mean().item())
-            reldiffs.append(reldiff.mean().item())
-            #torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
-        abserr = sum(diffs)/len(diffs)
-        relerr = sum(reldiffs)/len(reldiffs)
-        assert abserr < 0.0035
-        assert relerr < 0.015
-        #print('rand', blocksize, sum(diffs)/len(diffs))
-        #print('rand', blocksize, sum(reldiffs)/len(reldiffs))
+@pytest.mark.parametrize("nested", [False, True], ids=["False", "True"])
+@pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
+def test_dynamic_blockwise_quantization(nested, blocksize):
+    #print('')
+    diffs = []
+    reldiffs = []
+    for i in range(100):
+        A1 = torch.randn(1024, 1024, device="cuda")
+        C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested)
+        A2 = F.dequantize_blockwise(C, S)
+        diff = torch.abs(A1 - A2)
+        reldiff = diff / torch.abs(A1 + 1e-8)
+        diffs.append(diff.mean().item())
+        reldiffs.append(reldiff.mean().item())
+    abserr = sum(diffs)/len(diffs)
+    relerr = sum(reldiffs)/len(reldiffs)
+    assert abserr < 0.011
+    assert relerr < 0.018
+    print('nested=', nested, 'randn', blocksize, sum(diffs)/len(diffs))
+    print('nested=', nested, 'randn', blocksize, sum(reldiffs)/len(reldiffs))
+
+    diffs = []
+    for i in range(100):
+        A1 = torch.rand(1024, 1024, device="cuda")
+        C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested)
+        A2 = F.dequantize_blockwise(C, S)
+        diff = torch.abs(A1 - A2)
+        reldiff = diff / torch.abs(A1 + 1e-8)
+        diffs.append(diff.mean().item())
+        reldiffs.append(reldiff.mean().item())
+        #torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+    abserr = sum(diffs)/len(diffs)
+    relerr = sum(reldiffs)/len(reldiffs)
+    assert abserr < 0.0035
+    assert relerr < 0.015
+    print('nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
+    print('nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 def test_dynamic_blockwise_stochastic_quantization():

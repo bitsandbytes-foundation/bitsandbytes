@@ -541,7 +541,7 @@ def estimate_quantiles(A: Tensor, out: Tensor = None, offset: float = 1 / 512, n
     return out
 
 
-def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, rand=None, out: Tensor = None, blocksize=4096) -> Tensor:
+def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, rand=None, out: Tensor = None, blocksize=4096, nested=False) -> Tensor:
     """
     Quantize tensor A in blocks of size 4096 values.
 
@@ -586,7 +586,7 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
         out = torch.zeros_like(A, dtype=torch.uint8)
 
     if A.device.type != 'cpu':
-        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32]
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
         cblocksize = ct.c_int32(blocksize)
         prev_device = pre_call(A.device)
         code = code.to(A.device)
@@ -616,7 +616,15 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ra
         assert rand is None
         lib.cquantize_blockwise_cpu_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))
 
-    state = [absmax, code, blocksize]
+    if nested:
+        offset = absmax.mean()
+        absmax -= offset
+        qabsmax, state2 = quantize_blockwise(absmax, blocksize=blocksize, nested=False)
+        state = [qabsmax, code, blocksize, nested, offset, state2]
+    else:
+        state = [absmax, code, blocksize, nested, None, None]
+
+
 
     return out, state
 
@@ -628,6 +636,7 @@ def dequantize_blockwise(
     code: Tensor = None,
     out: Tensor = None,
     blocksize: int = 4096,
+    nested=False
 ) -> Tensor:
     """
     Dequantizes blockwise quantized values.
@@ -665,13 +674,15 @@ def dequantize_blockwise(
     if quant_state is None:
         quant_state = (absmax, code, blocksize)
     else:
-        absmax, code, blocksize = quant_state
-
+        absmax, code, blocksize, nested, offset, state2 = quant_state
+        if nested:
+            absmax = dequantize_blockwise(absmax, state2)
+            absmax += offset
 
     if A.device.type != 'cpu':
         device = pre_call(A.device)
         code = code.to(A.device)
-        if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64, 32]:
+        if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
             raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
         is_on_gpu([A, absmax, out])
         if out.dtype == torch.float32:
@@ -736,7 +747,7 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
     if out is None:
         out = torch.zeros(((n+1)//2, 1), dtype=torch.uint8, device=A.device)
 
-    assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32]
+    assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
 
     prev_device = pre_call(A.device)
     is_on_gpu([A, out, absmax])
