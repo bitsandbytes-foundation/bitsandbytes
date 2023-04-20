@@ -259,14 +259,10 @@ class Linear8bitLt(nn.Linear):
         if not self.state.has_fp16_weights and self.state.CB is None and self.state.CxB is not None:
             # reorder weight layout back from ampere/turing to row
             reorder_layout = True
-            weight_clone = self.weight.data.clone()
+            self.weight.data = self.state.CxB = undo_layout(self.state.CxB, self.state.tile_indices)
         else:
             reorder_layout = False
-
         try:
-            if reorder_layout:
-                self.weight.data = undo_layout(self.state.CxB, self.state.tile_indices)
-
             super()._save_to_state_dict(destination, prefix, keep_vars)
 
             # we only need to save SCB as extra data, because CB for quantized weights is already stored in weight.data
@@ -284,7 +280,8 @@ class Linear8bitLt(nn.Linear):
                 destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
         finally:
             if reorder_layout:
-                self.weight.data = weight_clone
+                self.state.CxB, _ = bitsandbytes.functional.transform(self.state.CxB, to_order=self.state.formatB)
+                self.weight.data = self.state.CxB
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
