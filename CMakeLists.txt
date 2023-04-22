@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-option(ENABLE_CUDA "Build for CUDA" OFF)
+option(ENABLE_CUDA "Build for CUDA (Nvidia)" OFF)
+option(ENABLE_MPS "Build for Metal Performance Shaders (Apple)" OFF)
 
 if(ENABLE_CUDA)
     if(APPLE)
-        message( FATAL_ERROR "CUDA is not supported on macOS" )
+        message(FATAL_ERROR "CUDA is not supported on macOS" )
     endif()
     option(NO_CUBLASLT "Don't use CUBLAST" OFF)
     if(NO_CUBLASLT)
@@ -14,12 +15,7 @@ if(ENABLE_CUDA)
     endif()
 endif()
 
-if(NOT ENABLE_CUDA)
-    message("Building without CUDA support")
-    set(LIBSUFFIX "cpu")
-
-    project(bitsandbytes LANGUAGES CXX)
-else()
+if(ENABLE_CUDA)
     message("Building CUDA support for ${CMAKE_CUDA_ARCHITECTURES}")
     # Find CUDA tools if we are compiling with CUDA
     find_package(CUDAToolkit REQUIRED)
@@ -33,6 +29,22 @@ else()
     add_compile_definitions(BUILD_CUDA)
     set(CMAKE_CUDA_STANDARD 14)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    set(GPU_SOURCES csrc/ops.cu csrc/kernels.cu)
+elseif(ENABLE_MPS)
+    if(NOT APPLE)
+        message(FATAL_ERROR "MPS is only supported on macOS" )
+    endif()
+    message("Building MPS support")
+    set(LIBSUFFIX "mps")
+    project(bitsandbytes LANGUAGES CXX OBJCXX)
+    add_compile_definitions(BUILD_MPS)
+    set(GPU_SOURCES csrc/mps_ops.mm)
+else()
+    message("Building with CPU only")
+    set(LIBSUFFIX "cpu")
+
+    project(bitsandbytes LANGUAGES CXX)
+    set(GPU_SOURCES)
 endif()
 
 set(CMAKE_CXX_STANDARD 14)
@@ -58,8 +70,7 @@ endif()
 
 # Add csrc files
 add_library(bitsandbytes SHARED
-	csrc/ops.cu
-	csrc/kernels.cu
+	${GPU_SOURCES}
 	csrc/common.cpp
 	csrc/cpu_ops.cpp
 	csrc/pythonInterface.cpp)

@@ -46,7 +46,7 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
         fi
         if [ ${build_os:0:5} == macos -a ${build_arch} == aarch64 ]; then
-          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DENABLE_CUDA=OFF .
+          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DENABLE_CUDA=OFF -DENABLE_MPS=ON .
         else
           cmake -DENABLE_CUDA=OFF .
         fi
