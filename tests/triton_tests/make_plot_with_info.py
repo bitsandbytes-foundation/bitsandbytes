@@ -22,19 +22,13 @@ if __name__ == '__main__':
         ('standard_gx+standard_gw+standard_fwd', 's', '-', 'C2', 'Standard fp16 (sum of parts)'),
         ('x_quantize_rowwise+g_quantize_rowwise+w_quantize_global+w_quantize_global_transpose+standard_gw+global_fwd+global_bwd', 'o', '-', 'C4', 'SwitchBack int8 (sum of parts)'),
 
-        ('standard_fwd', '^', '--', 'C2', 'Matmul XW (standard)'),
-        ('standard_gw', '^', '-.', 'C2', 'Matmul GW (standard)'),
-        ('standard_gx', '^', ':', 'gray', 'Matmul G^TX (both)'),
+        ('standard_fwd+standard_gw+standard_gx', '^', '--', 'C2', 'Average fp16 matmul'),
 
-        ('global_fwd', '^', '--', 'C4', 'Int8 Matmul XW (switchback)'),
-        ('global_bwd', '^', '-.', 'C4', 'Int8 Matmul GW (switchback)'),
+        ('global_fwd+global_bwd', 'v', '--', 'C4', 'Average int8 matmul'),
         
         ####                 time_global = info['x_quantize_rowwise'] + info['g_quantize_rowwise'] + info['w_quantize_global'] + info['w_quantize_global_transpose'] + info['standard_gw'] + info['global_fwd'] + info['global_bwd']
 
-        ('x_quantize_rowwise', 'P', '--', 'C4', 'Row-wise quantize X (switchback)'),
-        ('g_quantize_rowwise', 'P', '-.', 'C4', 'Row-wise quantize G (switchback)'),
-        ('w_quantize_global', '.', '--', 'C4', 'Tensor quantize W (switchback)'),
-        ('w_quantize_global_transpose', '.', '-.', 'C4', 'Tensor quantize and\ntranspose W (switchback)'),
+        ('x_quantize_rowwise+g_quantize_rowwise+w_quantize_global+w_quantize_global_transpose', 'x', ':', 'C4', 'Average quantize operation'),
         #('standard_gw', '.', '--', 'C1', 'standard_gw'),
     ]:
         xs = []
@@ -50,10 +44,13 @@ if __name__ == '__main__':
             df_ = df_[df_.dim_out == embed_dim]
             for k_ in k.split('+'):
                 y_ += df_[k_].values[0]
+            
+            if 'average' in name.lower():
+                y_ = y_ / len(k.split('+'))
             ys.append(y_ * 0.5)
 
         
-        ax.plot(xs, ys, color=color, label=name, marker=marker, markersize=5 if marker=='s' else 5, linestyle=ls, linewidth=2 if '+' in k else 1.)
+        ax.plot(xs, ys, color=color, label=name, marker=marker, markersize=6 if marker=='s' else 6, linestyle=ls, linewidth=2 if '+' in k else 1.)
 
 
 

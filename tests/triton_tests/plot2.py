@@ -51,7 +51,7 @@ if __name__ == '__main__':
     ax.set_xlabel('dim', fontsize=13)
     ax.set_xscale('log')
     ax.grid()
-    ax.set_ylabel(r'% time occupied by quantize ops', fontsize=12)
+    ax.set_ylabel(r'Quantization overhead', fontsize=12)
 
 
     ax.tick_params(axis='x', labelsize=11)
