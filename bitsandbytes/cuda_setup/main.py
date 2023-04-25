@@ -290,19 +290,7 @@ def check_cuda_result(cuda, result_val):
 def get_cuda_version(cuda, cudart_path):
     if cuda is None: return None
 
-    try:
-        cudart = ct.CDLL(cudart_path)
-    except OSError:
-        CUDASetup.get_instance().add_log_entry(f'ERROR: libcudart.so could not be read from path: {cudart_path}!')
-        return None
-
-    version = ct.c_int()
-    try:
-        check_cuda_result(cuda, cudart.cudaRuntimeGetVersion(ct.byref(version)))
-    except AttributeError as e:
-        CUDASetup.get_instance().add_log_entry(f'ERROR: {str(e)}')
-        CUDASetup.get_instance().add_log_entry(f'CUDA SETUP: libcudart.so path is {cudart_path}')
-        CUDASetup.get_instance().add_log_entry(f'CUDA SETUP: Is seems that your cuda installation is not in your path. See https://github.com/TimDettmers/bitsandbytes/issues/85 for more information.')
+    version = torch._C._cuda_getCompiledVersion()
     version = int(version.value)
     major = version//1000
     minor = (version-(major*1000))//10
