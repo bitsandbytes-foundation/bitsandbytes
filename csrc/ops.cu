@@ -665,6 +665,63 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 }
 
 
+
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+
+#include <cute/tensor.hpp>
+
+template <typename TA, typename TB, typename TC,
+          typename Alpha, typename Beta>
+void
+gemm(int m, int n, int k,
+     Alpha alpha,
+     TA const* A, int ldA,
+     TB const* B, int ldB,
+     Beta beta,
+     TC      * C, int ldC,
+     cudaStream_t stream = 0)
+{
+  using namespace cute;
+
+  // Define shapes (dynamic)
+  auto M = int(m);
+  auto N = int(n);
+  auto K = int(k);
+
+  // Define strides (mixed)
+  auto dA = make_stride(Int<1>{}, ldA);
+  auto dB = make_stride(Int<1>{}, ldB);
+  auto dC = make_stride(Int<1>{}, ldC);
+
+  // Define block sizes (static)
+  auto bM = Int<128>{};
+  auto bN = Int<128>{};
+  auto bK = Int<  8>{};
+
+  // Define the block layouts (static)
+  auto sA = make_layout(make_shape(bM,bK));
+  auto sB = make_layout(make_shape(bN,bK));
+  auto sC = make_layout(make_shape(bM,bN));
+
+  // Define the thread layouts (static)
+  auto tA = make_layout(make_shape(Int<32>{}, Int< 8>{}));
+  auto tB = make_layout(make_shape(Int<32>{}, Int< 8>{}));
+  auto tC = make_layout(make_shape(Int<16>{}, Int<16>{}));
+
+  dim3 dimBlock(size(tC));
+  dim3 dimGrid(ceil_div(size(M), size(bM)),
+               ceil_div(size(N), size(bN)));
+  gemm_device
+      <<< dimGrid, dimBlock, 0, stream >>>
+      (M,  N,  K,
+       A, dA, sA, tA,
+       B, dB, sB, tB,
+       C, dC, sC, tC,
+       alpha, beta);
+}
+
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
