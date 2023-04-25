@@ -90,6 +90,17 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+
+void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rowsA, int colsA, int colsB)
+{
+	int num_blocks = (colsB+32-1)/32;
+	kMatmul_inference_4bit<NF4, half, half, half><<<num_blocks, 256>>>(A, B, out, lda, ldb, rowsA, colsA, colsB);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <int QUANT_TYPE, typename INP_TYPE, typename COMP_TYPE, typename OUT_TYPE>__global__ void kMatmul_inference_4bit(INP_TYPE *A, unsigned char *B, OUT_TYPE *C, int lda, int ldb, int rowsA, int colsA, int colsB);
+
+
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
@@ -652,6 +663,7 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
   kExtractOutliers<FORMAT><<<num_blocks, threads>>>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
+
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

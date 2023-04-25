@@ -183,4 +183,6 @@ template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, 
 
 template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 
+void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rowsA, int colsA, int colsB);
+
 #endif

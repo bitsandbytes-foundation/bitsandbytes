@@ -2919,10 +2919,35 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 	}
 }
 
+
+template <int QUANT_TYPE, typename INPT, typename COMPT, typename OUTT> __global__ void kMatmul_inference_4bit(INPT *A, unsigned char *B, OUTT *out, int lda, int ldb, int rowsA, int colsA, int colsB)
+{
+// element-wise kernel
+// 1. Load batch x k into registers
+// 2. Load k x k into registers
+// 3. dequantize and store in second pair of k x k
+// 4. matmul
+// 5. sum with cub
+// 6. store outputs
+// TC kernel
+// use k warps per thread block
+// 1. threadblock use read-only cache to read in register tile for A into shared memory
+// 2. each warp loops over shared memory tiles of A of size 8x16 and loads them into fragments
+// 3. each warp reads a segment of values 16x32 from B 
+// 4. do dequantization from register of B into second pair of registers
+// 5. store (4) into fragment
+// 6. matmul aggregate into fragment C
+// 7. aggreecate files of C into shared memroy block C
+// 8. sum (7)
+// 9. write outputs to matmul output matrix
+}
+
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
+template __global__ void kMatmul_inference_4bit<NF4, half, half, half>(half *A, unsigned char *B, half *out, int lda, int ldb, int rowsA, int colsA, int colsB);
 template __global__ void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 template __global__ void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 
