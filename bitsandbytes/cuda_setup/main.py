@@ -275,15 +275,15 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
     return next(iter(cuda_runtime_libs)) if cuda_runtime_libs else None
 
 
-def check_cuda_result(cuda, result_val):
-    # 3. Check for CUDA errors
-    if result_val != 0:
-        error_str = ct.c_char_p()
-        cuda.cuGetErrorString(result_val, ct.byref(error_str))
-        if error_str.value is not None:
-            CUDASetup.get_instance().add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
-        else:
-            CUDASetup.get_instance().add_log_entry(f"Unknown CUDA exception! Please check your CUDA install. It might also be that your GPU is too old.")
+# def check_cuda_result(cuda, result_val):
+#     # 3. Check for CUDA errors
+#     if result_val != 0:
+#         error_str = ct.c_char_p()
+#         cuda.cuGetErrorString(result_val, ct.byref(error_str))
+#         if error_str.value is not None:
+#             CUDASetup.get_instance().add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
+#         else:
+#             CUDASetup.get_instance().add_log_entry(f"Unknown CUDA exception! Please check your CUDA install. It might also be that your GPU is too old.")
 
 
 # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
@@ -291,7 +291,6 @@ def get_cuda_version(cuda, cudart_path):
     if cuda is None: return None
 
     version = torch._C._cuda_getCompiledVersion()
-    version = int(version.value)
     major = version//1000
     minor = (version-(major*1000))//10
 
@@ -308,7 +307,7 @@ def get_cuda_lib_handle():
     except OSError:
         CUDASetup.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
         return None
-    check_cuda_result(cuda, cuda.cuInit(0))
+    # check_cuda_result(cuda, cuda.cuInit(0))
 
     return cuda
 
