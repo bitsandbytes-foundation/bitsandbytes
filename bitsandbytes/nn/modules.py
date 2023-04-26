@@ -228,6 +228,7 @@ class LinearNF4(Linear4bit):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'nf4')
 
 
+
 class Int8Params(torch.nn.Parameter):
     def __new__(
         cls,

@@ -666,10 +666,8 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 
 
 
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-
 #include <cute/tensor.hpp>
+
 
 template <typename TA, typename TB, typename TC,
           typename Alpha, typename Beta>

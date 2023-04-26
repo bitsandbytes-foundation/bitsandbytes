@@ -12,6 +12,14 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 #include <math_constants.h>
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+
+#include <cute/tensor.hpp>
+#include "cutlass/util/print_error.hpp"
+#include "cutlass/util/GPU_Clock.hpp"
+#include "cutlass/util/cublas_wrappers.hpp"
+#include "cutlass/util/helper_cuda.hpp"
 
 #define HLF_MAX 65504
 #define TH 1024
@@ -2709,7 +2717,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   }
 }
 
-#define C 1.0f/127.0f
+#define DENORM 1.0f/127.0f
 #define MAX_SPARSE_COUNT 32
 #define SMEM_SIZE 8*256
 template <typename T, int SPMM_ITEMS, int BITS>
@@ -2813,7 +2821,7 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
               float valB = local_valsB[k];
               float valA = local_valA[i];
               if(valB != 0.0 && valA != 0.0)
-                local_valC[j+k] = (float)local_valC[j+k] + ((float)smem_dequant_stats[idx+k-local_idx_col_B_offset])*C*valB*valA;
+                local_valC[j+k] = (float)local_valC[j+k] + ((float)smem_dequant_stats[idx+k-local_idx_col_B_offset])*DENORM*valB*valA;
             }
             else
               local_valC[j+k] = (float)local_valC[j+k] + (float)local_valsB[k]*(float)local_valA[i];
@@ -2960,7 +2968,7 @@ void
 gemm_device(MShape M, NShape N, KShape K,
             TA const* A, AStride dA, ABlockLayout blockA, AThreadLayout tA,
             TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
-            TC      * C, CStride dC, CBlockLayout       , CThreadLayout tC,
+            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
             Alpha alpha, Beta beta)
 {
   using namespace cute;
@@ -2991,7 +2999,7 @@ gemm_device(MShape M, NShape N, KShape K,
   // Represent the full tensors
   auto mA = make_tensor(make_gmem_ptr(A), make_shape(M,K), dA);      // (M,K)
   auto mB = make_tensor(make_gmem_ptr(B), make_shape(N,K), dB);      // (N,K)
-  auto mC = make_tensor(make_gmem_ptr(C), make_shape(M,N), dC);      // (M,N)
+  auto mC = make_tensor(make_gmem_ptr(out), make_shape(M,N), dC);      // (M,N)
 
   // Get the appropriate blocks for this thread block --
   // potential for thread block locality
@@ -3034,7 +3042,6 @@ gemm_device(MShape M, NShape N, KShape K,
   // Clear the accumulators
   clear(tCrC);
 
-#if 1
 
   // TUTORIAL: Example of a very simple compute loop
   //   Data is read from global to shared memory via the tA|tB partitioning
@@ -3071,7 +3078,6 @@ gemm_device(MShape M, NShape N, KShape K,
     __syncthreads();
   }
 
-#endif
 
   axpby(alpha, tCrC, beta, tCgC);
 }
