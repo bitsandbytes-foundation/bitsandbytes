@@ -20,6 +20,11 @@
 #include <vector>
 #include <functional>
 
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+
+
+
 #define CUDA_CHECK_RETURN(value) {                      \
   cudaError_t _m_cudaStat = value;                    \
   if (_m_cudaStat != cudaSuccess) {                   \
@@ -184,5 +189,12 @@ template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, 
 template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 
 void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rowsA, int colsA, int colsB);
+
+void gemm_host(int m, int n, int k,
+     float alpha,
+     float const* A, int ldA,
+     float const* B, int ldB,
+     float beta,
+     float      * C, int ldC);
 
 #endif

@@ -91,14 +91,12 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
 }
 
 
-void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rowsA, int colsA, int colsB)
-{
-	int num_blocks = (colsB+32-1)/32;
-	kMatmul_inference_4bit<NF4, half, half, half><<<num_blocks, 256>>>(A, B, out, lda, ldb, rowsA, colsA, colsB);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-template <int QUANT_TYPE, typename INP_TYPE, typename COMP_TYPE, typename OUT_TYPE>__global__ void kMatmul_inference_4bit(INP_TYPE *A, unsigned char *B, OUT_TYPE *C, int lda, int ldb, int rowsA, int colsA, int colsB);
+//void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rowsA, int colsA, int colsB)
+//{
+//	int num_blocks = (colsB+32-1)/32;
+//	kMatmul_inference_4bit<NF4, half, half, half><<<num_blocks, 256>>>(A, B, out, lda, ldb, rowsA, colsA, colsB);
+//  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+//}
 
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
@@ -666,59 +664,46 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 
 
 
+
 #include <cute/tensor.hpp>
+#include "cutlass/util/helper_cuda.hpp"
 
 
-template <typename TA, typename TB, typename TC,
-          typename Alpha, typename Beta>
-void
-gemm(int m, int n, int k,
-     Alpha alpha,
-     TA const* A, int ldA,
-     TB const* B, int ldB,
-     Beta beta,
-     TC      * C, int ldC,
-     cudaStream_t stream = 0)
+void gemm_host(int m, int n, int k,
+     float alpha,
+     float const* A, int lda,
+     float const* B, int ldb,
+     float beta,
+     float      * C, int ldc)
 {
+  cute::device_init(0);
   using namespace cute;
+
+
 
   // Define shapes (dynamic)
   auto M = int(m);
   auto N = int(n);
   auto K = int(k);
 
-  // Define strides (mixed)
-  auto dA = make_stride(Int<1>{}, ldA);
-  auto dB = make_stride(Int<1>{}, ldB);
-  auto dC = make_stride(Int<1>{}, ldC);
 
-  // Define block sizes (static)
-  auto bM = Int<128>{};
-  auto bN = Int<128>{};
-  auto bK = Int<  8>{};
+  printf("%i %i %i %i %i %i\n", m, n, k, lda, ldb, ldc);
 
-  // Define the block layouts (static)
-  auto sA = make_layout(make_shape(bM,bK));
-  auto sB = make_layout(make_shape(bN,bK));
-  auto sC = make_layout(make_shape(bM,bN));
-
-  // Define the thread layouts (static)
-  auto tA = make_layout(make_shape(Int<32>{}, Int< 8>{}));
-  auto tB = make_layout(make_shape(Int<32>{}, Int< 8>{}));
-  auto tC = make_layout(make_shape(Int<16>{}, Int<16>{}));
-
-  dim3 dimBlock(size(tC));
-  dim3 dimGrid(ceil_div(size(M), size(bM)),
-               ceil_div(size(N), size(bN)));
+  dim3 dimBlock(16, 16);
+  dim3 dimGrid((M+127)/128, (N+127)/128);
+//   auto tC = make_layout(make_shape(Int<16>{}, Int<16>{}));
+//-
+//-  dim3 dimBlock(size(tC));
+//-  dim3 dimGrid(ceil_div(size(M), size(bM)),
+//-               ceil_div(size(N), size(bN)));
   gemm_device
-      <<< dimGrid, dimBlock, 0, stream >>>
+      <<< dimGrid, dimBlock, 0, 0 >>>
       (M,  N,  K,
-       A, dA, sA, tA,
-       B, dB, sB, tB,
-       C, dC, sC, tC,
+       A, 
+       B, 
+       C, lda, ldb, ldc,
        alpha, beta);
 }
-
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

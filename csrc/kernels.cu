@@ -19,7 +19,6 @@
 #include "cutlass/util/print_error.hpp"
 #include "cutlass/util/GPU_Clock.hpp"
 #include "cutlass/util/cublas_wrappers.hpp"
-#include "cutlass/util/helper_cuda.hpp"
 
 #define HLF_MAX 65504
 #define TH 1024
@@ -2928,73 +2927,84 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 }
 
 
-template <int QUANT_TYPE, typename INPT, typename COMPT, typename OUTT> __global__ void kMatmul_inference_4bit(INPT *A, unsigned char *B, OUTT *out, int lda, int ldb, int rowsA, int colsA, int colsB)
-{
-// element-wise kernel
-// 1. Load batch x k into registers
-// 2. Load k x k into registers
-// 3. dequantize and store in second pair of k x k
-// 4. matmul
-// 5. sum with cub
-// 6. store outputs
-// TC kernel
-// use k warps per thread block
-// 1. threadblock use read-only cache to read in register tile for A into shared memory
-// 2. each warp loops over shared memory tiles of A of size 8x16 and loads them into fragments
-// 3. each warp reads a segment of values 16x32 from B 
-// 4. do dequantization from register of B into second pair of registers
-// 5. store (4) into fragment
-// 6. matmul aggregate into fragment C
-// 7. aggreecate files of C into shared memroy block C
-// 8. sum (7)
-// 9. write outputs to matmul output matrix
-}
+//template <int QUANT_TYPE, typename INPT, typename COMPT, typename OUTT> __global__ void kMatmul_inference_4bit(INPT *A, unsigned char *B, OUTT *out, int lda, int ldb, int rowsA, int colsA, int colsB)
+//{
+//// element-wise kernel
+//// 1. Load batch x k into registers
+//// 2. Load k x k into registers
+//// 3. dequantize and store in second pair of k x k
+//// 4. matmul
+//// 5. sum with cub
+//// 6. store outputs
+//// TC kernel
+//// use k warps per thread block
+//// 1. threadblock use read-only cache to read in register tile for A into shared memory
+//// 2. each warp loops over shared memory tiles of A of size 8x16 and loads them into fragments
+//// 3. each warp reads a segment of values 16x32 from B 
+//// 4. do dequantization from register of B into second pair of registers
+//// 5. store (4) into fragment
+//// 6. matmul aggregate into fragment C
+//// 7. aggreecate files of C into shared memroy block C
+//// 8. sum (7)
+//// 9. write outputs to matmul output matrix
+//}
 
 #include "cutlass/util/print_error.hpp"
 #include "cutlass/util/GPU_Clock.hpp"
 #if defined(CUTLASS_ENABLE_CUBLAS) && CUTLASS_ENABLE_CUBLAS != 0
 #  include "cutlass/util/cublas_wrappers.hpp"
 #endif
-#include "cutlass/util/helper_cuda.hpp"
+//#include "cutlass/util/helper_cuda.hpp"
 
-template <class MShape, class NShape, class KShape,
-          class TA, class AStride, class ABlockLayout, class AThreadLayout,
-          class TB, class BStride, class BBlockLayout, class BThreadLayout,
-          class TC, class CStride, class CBlockLayout, class CThreadLayout,
-          class Alpha, class Beta>
-__global__ static
-__launch_bounds__(decltype(size(CThreadLayout{}))::value)
-void
-gemm_device(MShape M, NShape N, KShape K,
-            TA const* A, AStride dA, ABlockLayout blockA, AThreadLayout tA,
-            TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
-            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
-            Alpha alpha, Beta beta)
+__global__ void gemm_device(int M, int N, int K,
+            float const* A, 
+            float const* B, 
+            float      * out,  int lda, int ldb, int ldc,
+            float alpha, float beta)
 {
   using namespace cute;
   using X = Underscore;
 
   // Preconditions
-  CUTE_STATIC_ASSERT(is_static<ABlockLayout>::value);
-  CUTE_STATIC_ASSERT(is_static<BBlockLayout>::value);
-  CUTE_STATIC_ASSERT(is_static<CBlockLayout>::value);
+  //CUTE_STATIC_ASSERT(is_static<ABlockLayout>::value);
+  //CUTE_STATIC_ASSERT(is_static<BBlockLayout>::value);
+  //CUTE_STATIC_ASSERT(is_static<CBlockLayout>::value);
 
-  CUTE_STATIC_ASSERT(is_static<AThreadLayout>::value);
-  CUTE_STATIC_ASSERT(is_static<BThreadLayout>::value);
-  CUTE_STATIC_ASSERT(is_static<CThreadLayout>::value);
+  //CUTE_STATIC_ASSERT(is_static<AThreadLayout>::value);
+  //CUTE_STATIC_ASSERT(is_static<BThreadLayout>::value);
+  //CUTE_STATIC_ASSERT(is_static<CThreadLayout>::value);
 
-  CUTE_STATIC_ASSERT_V(size(tA) == size(tC));
-  CUTE_STATIC_ASSERT_V(size(tB) == size(tC));
+  //CUTE_STATIC_ASSERT_V(size(tA) == size(tC));
+  //CUTE_STATIC_ASSERT_V(size(tB) == size(tC));
+
+  // Define block sizes (static)
+  auto bM = Int<128>{};
+  auto bN = Int<128>{};
+  auto bK = Int<  8>{};
+
+  // Define the block layouts (static)
+  auto bA = make_layout(make_shape(bM,bK));
+  auto bB = make_layout(make_shape(bN,bK));
+  auto bC = make_layout(make_shape(bM,bN));
+
+  // Define the thread layouts (static)
+  auto tA = make_layout(make_shape(Int<32>{}, Int< 8>{}));
+  auto tB = make_layout(make_shape(Int<32>{}, Int< 8>{}));
+  auto tC = make_layout(make_shape(Int<16>{}, Int<16>{}));
 
   //CUTE_STATIC_ASSERT_V(shape<0>(blockA) == shape<0>(blockC));      // BLK_M
   //CUTE_STATIC_ASSERT_V(shape<0>(blockB) == shape<1>(blockC));      // BLK_N
-  CUTE_STATIC_ASSERT_V(shape<1>(blockA) == shape<1>(blockB));        // BLK_K
+  //CUTE_STATIC_ASSERT_V(shape<1>(blockA) == shape<1>(blockB));        // BLK_K
 
   // Shared memory buffers
-  __shared__ TA smemA[cosize_v<ABlockLayout>];
-  __shared__ TB smemB[cosize_v<BBlockLayout>];
-  auto sA = make_tensor(make_smem_ptr(smemA), blockA);               // (BLK_M,BLK_K)
-  auto sB = make_tensor(make_smem_ptr(smemB), blockB);               // (BLK_N,BLK_K)
+  __shared__ float smemA[128*8];
+  __shared__ float smemB[128*8];
+  auto sA = make_tensor(make_smem_ptr(smemA), bA);               // (BLK_M,BLK_K)
+  auto sB = make_tensor(make_smem_ptr(smemB), bB);               // (BLK_N,BLK_K)
+
+  auto dA = make_stride(Int<1>{}, lda);
+  auto dB = make_stride(Int<1>{}, ldb);
+  auto dC = make_stride(Int<1>{}, ldc);
 
   // Represent the full tensors
   auto mA = make_tensor(make_gmem_ptr(A), make_shape(M,K), dA);      // (M,K)
@@ -3083,11 +3093,27 @@ gemm_device(MShape M, NShape N, KShape K,
 }
 
 
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template __global__ void kMatmul_inference_4bit<NF4, half, half, half>(half *A, unsigned char *B, half *out, int lda, int ldb, int rowsA, int colsA, int colsB);
+//template <class MShape, class NShape, class KShape,
+//          class TA, class AStride, class ABlockLayout, class AThreadLayout,
+//          class TB, class BStride, class BBlockLayout, class BThreadLayout,
+//          class TC, class CStride, class CBlockLayout, class CThreadLayout,
+//          class Alpha, class Beta>
+//__global__ static
+//__launch_bounds__(decltype(size(CThreadLayout{}))::value)
+//void
+//gemm_device(MShape M, NShape N, KShape K,
+//            TA const* A, AStride dA, ABlockLayout blockA, AThreadLayout tA,
+//            TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
+//            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
+//            half alpha, half beta);
+
+
+//template __global__ void kMatmul_inference_4bit<NF4, half, half, half>(half *A, unsigned char *B, half *out, int lda, int ldb, int rowsA, int colsA, int colsB);
 template __global__ void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 template __global__ void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 

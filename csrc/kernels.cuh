@@ -9,7 +9,7 @@
 #ifndef kernels
 #define kernels
 
-template <int QUANT_TYPE, typename INP_TYPE, typename COMP_TYPE, typename OUT_TYPE>__global__ void kMatmul_inference_4bit(INP_TYPE *A, unsigned char *B, OUT_TYPE *out, int lda, int ldb, int rowsA, int colsA, int colsB);
+//template <int QUANT_TYPE, typename INP_TYPE, typename COMP_TYPE, typename OUT_TYPE>__global__ void kMatmul_inference_4bit(INP_TYPE *A, unsigned char *B, OUT_TYPE *out, int lda, int ldb, int rowsA, int colsA, int colsB);
 
 template<typename T>__global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset, const T max_val, const int n);
 
@@ -121,5 +121,25 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> __global__ void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
 
 template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
+
+//template <class MShape, class NShape, class KShape,
+//          class TA, class AStride, class ABlockLayout, class AThreadLayout,
+//          class TB, class BStride, class BBlockLayout, class BThreadLayout,
+//          class TC, class CStride, class CBlockLayout, class CThreadLayout,
+//          class Alpha, class Beta>
+//__global__ static
+//__launch_bounds__(decltype(size(CThreadLayout{}))::value)
+//void
+//gemm_device(MShape M, NShape N, KShape K,
+//            TA const* A, AStride dA, ABlockLayout blockA, AThreadLayout tA,
+//            TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
+//            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
+//            Alpha alpha, Beta beta);
+
+__global__ void gemm_device(int M, int N, int K,
+            float const* A, 
+            float const* B, 
+            float      * out,  int lda, int ldb, int ldc,
+            float alpha, float beta);
 
 #endif

@@ -2351,3 +2351,24 @@ def test_normal_map_tree():
             pivots.append((values[i-1]+values[i])/2)
         print(pivots)
 
+
+def test_cutlass3_gemm():
+    #A = torch.rand(2, 2).cuda()
+    #B = torch.rand(2, 2).cuda()
+    A = torch.arange(4).reshape(2, 2).float().cuda().contiguous()
+    B = torch.ones(2, 2).float().cuda()
+
+    print('')
+    print(A)
+    print(B)
+
+    C1 = torch.matmul(A, B)
+    print(C1)
+    C2 = F.cutlass3_gemm(A, B.t())
+    print(C2)
+    C2 = F.cutlass3_gemm(A, B)
+    print(C2)
+    C2 = F.cutlass3_gemm(B.t(), A.t().contiguous())
+    print(C2)
+
+

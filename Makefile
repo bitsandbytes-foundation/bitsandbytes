@@ -55,8 +55,8 @@ CC_cublasLt110 := -gencode arch=compute_75,code=sm_75
 CC_cublasLt110 += -gencode arch=compute_80,code=sm_80
 
 CC_cublasLt111 := -gencode arch=compute_75,code=sm_75
-CC_cublasLt111 += -gencode arch=compute_80,code=sm_80
-CC_cublasLt111 += -gencode arch=compute_86,code=sm_86
+#CC_cublasLt111 += -gencode arch=compute_80,code=sm_80
+#CC_cublasLt111 += -gencode arch=compute_86,code=sm_86
 
 CC_ADA_HOPPER := -gencode arch=compute_89,code=sm_89
 CC_ADA_HOPPER += -gencode arch=compute_90,code=sm_90
@@ -103,9 +103,9 @@ cuda11x: $(BUILD_DIR) env
 	$(GPP) -std=c++14 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
 
 cuda11x_cutlass: $(BUILD_DIR) env cutlass
-	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(INCLUDE_cutlass) $(LIB) --output-directory $(BUILD_DIR)
+	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' --use_fast_math --expt-relaxed-constexpr -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(INCLUDE_cutlass) $(LIB) --output-directory $(BUILD_DIR)
 	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o -o $(BUILD_DIR)/link.o
-	$(GPP) -std=c++17 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
+	$(GPP) -std=c++17 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(INCLUDE_cutlass) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
 
 cuda12x: $(BUILD_DIR) env
 	$(NVCC) $(CC_cublasLt111) $(CC_ADA_HOPPER) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
