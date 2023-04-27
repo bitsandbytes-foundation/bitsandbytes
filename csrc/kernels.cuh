@@ -135,6 +135,8 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //            TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
 //            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
 //            Alpha alpha, Beta beta);
+template <size_t stages_count /* Pipeline with stages_count stages */>
+__global__ void with_staging_unified(float const* global_in, float * global_out, size_t size, size_t batch_sz);
 
 __global__ void gemm_device(int M, int N, int K,
             float const* A, 

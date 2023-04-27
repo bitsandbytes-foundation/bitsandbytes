@@ -197,4 +197,6 @@ void gemm_host(int m, int n, int k,
      float beta,
      float      * C, int ldC);
 
+
+void pipeline_test(float *A, float *B, size_t n, size_t batch_size);
 #endif

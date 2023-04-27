@@ -2341,3 +2341,8 @@ def extract_outliers(A, SA, idx):
     post_call(prev_device)
 
     return out
+
+def pipeline_test(A, batch_size):
+    out = torch.zeros_like(A)
+    lib.cpipeline_test(get_ptr(A), get_ptr(out), ct.c_size_t(A.numel()), ct.c_size_t(batch_size))
+    return out

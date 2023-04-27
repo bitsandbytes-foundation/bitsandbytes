@@ -663,6 +663,17 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 }
 
 
+void pipeline_test(float *A, float *B, size_t n, size_t batch_size)
+{
+
+  int threads = 256;
+  int num_blocks = (n+(256*batch_size)+1)/(batch_size*256);
+
+  printf("%i %i\n", num_blocks, batch_size);
+
+  with_staging_unified<2><<<num_blocks, threads>>>(A, B, n, batch_size);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
 
 
 

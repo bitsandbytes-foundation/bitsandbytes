@@ -2366,3 +2366,8 @@ def test_cutlass3_gemm():
     C2 = F.cutlass3_gemm(A, B)
 
 
+def test_pipeline_func():
+    a = torch.rand(2, 4).cuda()
+    out = F.pipeline_test(a, 2)
+    print(a)
+    print(out)
