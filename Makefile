@@ -1,8 +1,8 @@
 MKFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 ROOT_DIR := $(patsubst %/,%,$(dir $(MKFILE_PATH)))
 
-#GPP:= /usr/bin/g++
-GPP:= /sw/gcc/11.2.0/bin/g++
+GPP:= /usr/bin/g++
+#GPP:= /sw/gcc/11.2.0/bin/g++
 ifeq ($(CUDA_HOME),)
 	CUDA_HOME:= $(shell which nvcc | rev | cut -d'/' -f3- | rev)
 endif
@@ -26,7 +26,6 @@ FILES_CPP := $(CSRC)/common.cpp $(CSRC)/cpu_ops.cpp $(CSRC)/pythonInterface.c
 
 INCLUDE :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/csrc -I $(CONDA_PREFIX)/include -I $(ROOT_DIR)/include
 INCLUDE_10x :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/csrc -I $(ROOT_DIR)/dependencies/cub -I $(ROOT_DIR)/include
-INCLUDE_cutlass :=  -I $(ROOT_DIR)/dependencies/cutlass/include -I $(ROOT_DIR)/dependencies/cutlass/tools/util/include/ -I $(ROOT_DIR)/dependencies/cutlass/include/cute/util/
 LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcublas -lcublasLt -lcurand -lcusparse -L $(CONDA_PREFIX)/lib
 
 # NVIDIA NVCC compilation flags
@@ -63,8 +62,8 @@ CC_ADA_HOPPER += -gencode arch=compute_90,code=sm_90
 
 
 all: $(BUILD_DIR) env
-	$(NVCC) $(CC_CUDA11x) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR) 
-	$(NVCC) $(CC_CUDA11x) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o -o $(BUILD_DIR)/link.o
+	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
+	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o -o $(BUILD_DIR)/link.o
 	$(GPP) -std=c++14 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
 
 cuda92: $(ROOT_DIR)/dependencies/cub $(BUILD_DIR) env
@@ -101,11 +100,6 @@ cuda11x: $(BUILD_DIR) env
 	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)
 	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o -o $(BUILD_DIR)/link.o
 	$(GPP) -std=c++14 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
-
-cuda11x_cutlass: $(BUILD_DIR) env cutlass
-	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' --use_fast_math --expt-relaxed-constexpr -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(INCLUDE_cutlass) $(LIB) --output-directory $(BUILD_DIR)
-	$(NVCC) $(CC_cublasLt111) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o -o $(BUILD_DIR)/link.o
-	$(GPP) -std=c++17 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(INCLUDE_cutlass) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
 
 cuda12x: $(BUILD_DIR) env
 	$(NVCC) $(CC_cublasLt111) $(CC_ADA_HOPPER) -Xcompiler '-fPIC' --use_fast_math -Xptxas=-v -dc $(FILES_CUDA) $(INCLUDE) $(LIB) --output-directory $(BUILD_DIR)

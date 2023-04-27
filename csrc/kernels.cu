@@ -15,11 +15,6 @@
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 
-#include <cute/tensor.hpp>
-#include "cutlass/util/print_error.hpp"
-#include "cutlass/util/GPU_Clock.hpp"
-#include "cutlass/util/cublas_wrappers.hpp"
-
 #define HLF_MAX 65504
 #define TH 1024
 #define NUM 4
@@ -2949,147 +2944,42 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //// 9. write outputs to matmul output matrix
 //}
 
-#include "cutlass/util/print_error.hpp"
-#include "cutlass/util/GPU_Clock.hpp"
-#if defined(CUTLASS_ENABLE_CUBLAS) && CUTLASS_ENABLE_CUBLAS != 0
-#  include "cutlass/util/cublas_wrappers.hpp"
-#endif
-//#include "cutlass/util/helper_cuda.hpp"
-
 __global__ void gemm_device(int M, int N, int K,
             float const* A, 
             float const* B, 
             float      * out,  int lda, int ldb, int ldc,
             float alpha, float beta)
 {
-  using namespace cute;
-  using X = Underscore;
+// 0. We want to fill a 8x128 tile for a thread block so we have 8x16 tile for each warp
+// 1. Load dataB into register
+// 2. Dequantize B
+// 3. Fetch data from A and multiply
 
-  // Preconditions
-  //CUTE_STATIC_ASSERT(is_static<ABlockLayout>::value);
-  //CUTE_STATIC_ASSERT(is_static<BBlockLayout>::value);
-  //CUTE_STATIC_ASSERT(is_static<CBlockLayout>::value);
+  typedef cub::BlockLoad<float, 256 , 1, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadA;
+  __shared__ typename LoadA::TempStorage loada;
+	float dataA[1];
+	int valid_items = 0;
 
-  //CUTE_STATIC_ASSERT(is_static<AThreadLayout>::value);
-  //CUTE_STATIC_ASSERT(is_static<BThreadLayout>::value);
-  //CUTE_STATIC_ASSERT(is_static<CThreadLayout>::value);
-
-  //CUTE_STATIC_ASSERT_V(size(tA) == size(tC));
-  //CUTE_STATIC_ASSERT_V(size(tB) == size(tC));
-
-  // Define block sizes (static)
-  auto bM = Int<128>{};
-  auto bN = Int<128>{};
-  auto bK = Int<  8>{};
-
-  // Define the block layouts (static)
-  auto bA = make_layout(make_shape(bM,bK));
-  auto bB = make_layout(make_shape(bN,bK));
-  auto bC = make_layout(make_shape(bM,bN));
-
-  // Define the thread layouts (static)
-  auto tA = make_layout(make_shape(Int<32>{}, Int< 8>{}));
-  auto tB = make_layout(make_shape(Int<32>{}, Int< 8>{}));
-  auto tC = make_layout(make_shape(Int<16>{}, Int<16>{}));
-
-  //CUTE_STATIC_ASSERT_V(shape<0>(blockA) == shape<0>(blockC));      // BLK_M
-  //CUTE_STATIC_ASSERT_V(shape<0>(blockB) == shape<1>(blockC));      // BLK_N
-  //CUTE_STATIC_ASSERT_V(shape<1>(blockA) == shape<1>(blockB));        // BLK_K
-
-  // Shared memory buffers
-  __shared__ float smemA[128*8];
-  __shared__ float smemB[128*8];
-  auto sA = make_tensor(make_smem_ptr(smemA), bA);               // (BLK_M,BLK_K)
-  auto sB = make_tensor(make_smem_ptr(smemB), bB);               // (BLK_N,BLK_K)
-
-  auto dA = make_stride(Int<1>{}, lda);
-  auto dB = make_stride(Int<1>{}, ldb);
-  auto dC = make_stride(Int<1>{}, ldc);
-
-  // Represent the full tensors
-  auto mA = make_tensor(make_gmem_ptr(A), make_shape(M,K), dA);      // (M,K)
-  auto mB = make_tensor(make_gmem_ptr(B), make_shape(N,K), dB);      // (N,K)
-  auto mC = make_tensor(make_gmem_ptr(out), make_shape(M,N), dC);      // (M,N)
-
-  // Get the appropriate blocks for this thread block --
-  // potential for thread block locality
-  auto blk_shape = make_shape(size<0>(sA), size<0>(sB), size<1>(sB));// (BLK_M,BLK_N,BLK_K)
-  auto blk_coord = make_coord(blockIdx.x, blockIdx.y, _);            // (m,n,k)
-
-  auto gA = local_tile(mA, blk_shape, blk_coord, Step<_1, X,_1>{});  // (BLK_M,BLK_K,k)
-  auto gB = local_tile(mB, blk_shape, blk_coord, Step< X,_1,_1>{});  // (BLK_N,BLK_K,k)
-  auto gC = local_tile(mC, blk_shape, blk_coord, Step<_1,_1, X>{});  // (BLK_M,BLK_N)
-
-  //
-  // Partition the copying of A and B tiles across the threads
-  //
-
-  // TUTORIAL: Example of simple partitioning of A|B tiles over tA|tB
-  //   Default is a raked partition, but can be changed with Step<X,Y> parameter
-
-  auto tAgA = local_partition(gA, tA, threadIdx.x);                  // (THR_M,THR_K,k)
-  auto tAsA = local_partition(sA, tA, threadIdx.x);                  // (THR_M,THR_K)
-
-  auto tBgB = local_partition(gB, tB, threadIdx.x);                  // (THR_N,THR_K,k)
-  auto tBsB = local_partition(sB, tB, threadIdx.x);                  // (THR_N,THR_K)
-
-  //
-  // Define C accumulators and A/B partitioning
-  //
-
-  // TUTORIAL: Example of partitioning via projections of tC
-
-  // Partition sA (M,K) by the rows of tC
-  auto tCsA = local_partition(sA, tC, threadIdx.x, Step<_1, X>{});   // (THR_M,BLK_K)
-  // Partition sB (N,K) by the cols of tC
-  auto tCsB = local_partition(sB, tC, threadIdx.x, Step< X,_1>{});   // (THR_N,BLK_K)
-  // Partition gC (M,N) by the tile of tC
-  auto tCgC = local_partition(gC, tC, threadIdx.x, Step<_1,_1>{});   // (THR_M,THR_N)
-
-  // Allocate the accumulators -- same size as the projected data
-  auto tCrC = make_fragment_like(tCgC);                              // (THR_M,THR_N)
-
-  // Clear the accumulators
-  clear(tCrC);
+	__shared__ float[16*256] tileA;
 
 
-  // TUTORIAL: Example of a very simple compute loop
-  //   Data is read from global to shared memory via the tA|tB partitioning
-  //   gemm(.) operates on the shared memory directly via the tC partitioning
-
-  auto k_max = size<2>(tAgA);
-
-  for (int k = 0; k < k_max; ++k)
-  {
-    // Copy gmem to smem
-    copy(tAgA(_,_,k), tAsA);
-    copy(tBgB(_,_,k), tBsB);
-
-    // In case copy uses cp.async, make sure that the cp.async
-    // instructions are ordered with respect to other cp.async
-    // instructions (fence), then wait on all the outstanding copy
-    // operations (wait<0>()).  __syncthreads() alone does not do
-    // this.
-    //
-    // NOTE: cp_async_wait<0>() currently issues cp.async.wait_all.
-    // This is equivalent to cp.async.commit_group followed by
-    // cp.async_wait_group 0.  This should make the first
-    // cp_async_fence() (which also issues cp.async.commit_group)
-    // redundant.  The tutorial works as-is, so we'll leave the
-    // redundant fence in for now and study its removal later.
-    cp_async_fence();
-    cp_async_wait<0>();
-
-    __syncthreads();
-
-    // Compute gemm on smem
-    gemm(tCsA, tCsB, tCrC);
-
-    __syncthreads();
-  }
+	for(int idxA = 0; idxA < M*K; idxA+= 256)
+	{
+		valid_items = M*K - idxA > 256 ? 256 : M*K - idxA;
+		int baserow = 0;
+		for(int row = baserow; row < baserow+16 && row < M + ; row++)
+		{
+			LoadA(loada).Load(&(A[(row*lda) + i]), dataA, valid_items, 0.0f);
+			tileA[row*256 + threadIdx.x] = dataA[0];
+		__syncthreads();
+		}
+		baserow += 16;
 
 
-  axpby(alpha, tCrC, beta, tCgC);
+	}
+
+
+
 }
 
 

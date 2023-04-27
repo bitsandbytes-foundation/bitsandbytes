@@ -2363,12 +2363,6 @@ def test_cutlass3_gemm():
     print(B)
 
     C1 = torch.matmul(A, B)
-    print(C1)
-    C2 = F.cutlass3_gemm(A, B.t())
-    print(C2)
     C2 = F.cutlass3_gemm(A, B)
-    print(C2)
-    C2 = F.cutlass3_gemm(B.t(), A.t().contiguous())
-    print(C2)
 
 

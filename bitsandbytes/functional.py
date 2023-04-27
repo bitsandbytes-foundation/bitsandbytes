@@ -1456,7 +1456,7 @@ def cutlass3_gemm(
     # [km, nk -> mn]
     lda = ldb = ldc = 1
     #lda = 1
-    print(m, n, k, lda, ldb, ldc)
+    #print(m, n, k, lda, ldb, ldc)
     is_on_gpu([B, A, out])
     m = ct.c_int32(m)
     n = ct.c_int32(n)
@@ -1466,7 +1466,7 @@ def cutlass3_gemm(
     ldc = ct.c_int32(ldc)
     alpha = ct.c_float(1.0)
     beta = ct.c_float(0.0)
-    lib.ccutlass_gemm(m, n, k, alpha, get_ptr(B), lda, get_ptr(A), ldb, beta, get_ptr(out), ldc)
+    lib.ccutlass_gemm(m, n, k, alpha, get_ptr(A), ldb, get_ptr(B), lda, beta, get_ptr(out), ldc)
 
     return out
 

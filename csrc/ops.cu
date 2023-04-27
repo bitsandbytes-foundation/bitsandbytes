@@ -665,9 +665,6 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 
 
 
-#include <cute/tensor.hpp>
-#include "cutlass/util/helper_cuda.hpp"
-
 
 void gemm_host(int m, int n, int k,
      float alpha,
@@ -676,29 +673,14 @@ void gemm_host(int m, int n, int k,
      float beta,
      float      * C, int ldc)
 {
-  cute::device_init(0);
-  using namespace cute;
 
+  dim3 dimBlock(256);
+	int num_blocks = (n+31)/32;
 
-
-  // Define shapes (dynamic)
-  auto M = int(m);
-  auto N = int(n);
-  auto K = int(k);
-
-
-  printf("%i %i %i %i %i %i\n", m, n, k, lda, ldb, ldc);
-
-  dim3 dimBlock(16, 16);
-  dim3 dimGrid((M+127)/128, (N+127)/128);
-//   auto tC = make_layout(make_shape(Int<16>{}, Int<16>{}));
-//-
-//-  dim3 dimBlock(size(tC));
-//-  dim3 dimGrid(ceil_div(size(M), size(bM)),
-//-               ceil_div(size(N), size(bN)));
+	cout << num_blocks << endl;
   gemm_device
-      <<< dimGrid, dimBlock, 0, 0 >>>
-      (M,  N,  K,
+      <<< num_blocks, dimBlock, 0, 0 >>>
+      (m,  n,  k,
        A, 
        B, 
        C, lda, ldb, ldc,
