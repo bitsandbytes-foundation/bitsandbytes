@@ -279,9 +279,7 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
 def get_cuda_version(cuda, cudart_path):
     if cuda is None: return None
 
-    version = torch._C._cuda_getCompiledVersion()
-    major = version//1000
-    minor = (version-(major*1000))//10
+    major, minor = map(int, torch.version.cuda.split("."))
 
     if major < 11:
         CUDASetup.get_instance().add_log_entry('CUDA SETUP: CUDA version lower than 11 are currently not supported for LLM.int8(). You will be only to use 8-bit optimizers and quantization routines!!')
@@ -302,7 +300,9 @@ def get_cuda_lib_handle():
 
 def get_compute_capabilities(cuda):
     ccs = []
-    ccs.append(torch.version.cuda)
+    for i in range(torch.cuda.device_count()):
+        cc_major, cc_minor = torch.cuda.get_device_capability(torch.cuda.device(i))
+        ccs.append(f"{cc_major}.{cc_minor}")
 
     return ccs
 
