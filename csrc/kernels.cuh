@@ -138,6 +138,6 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 template <size_t stages_count /* Pipeline with stages_count stages */>
 __global__ void with_staging_unified(float const* global_in, float * global_out, size_t size, size_t batch_sz);
 
-template <typename T, int ITEMS, int THREADS> __global__ void gemm_device(int M, int N, int K, T const* A,  T* B,  T * out,  int lda, int ldb, int ldc);
+template <typename T, int ITEMS, int THREADS> __global__ void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc);
 
 #endif

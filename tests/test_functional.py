@@ -2355,11 +2355,11 @@ def test_normal_map_tree():
 #@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
 @pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
 def test_cutlass3_gemm(dtype):
-    for i in range(2):
-        A = torch.rand(2, 4092, dtype=dtype, device='cuda')
-        B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
-        #A = torch.rand(2, 4, dtype=dtype, device='cuda')
-        #B = torch.rand(4, 4, dtype=dtype, device='cuda')
+    for i in range(1):
+        #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
+        #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
+        A = torch.rand(1, 4096, dtype=dtype, device='cuda')
+        B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
 
         #print('')
         #print(A)
@@ -2371,7 +2371,7 @@ def test_cutlass3_gemm(dtype):
         #print(C1)
         #print(C2)
 
-        #torch.testing.assert_close(C1, C2)
+        torch.testing.assert_close(C1, C2, atol=1e-05, rtol=0.005)
 
 
 def test_pipeline_func():

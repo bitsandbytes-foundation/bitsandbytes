@@ -675,10 +675,10 @@ void pipeline_test(float *A, float *B, size_t n, size_t batch_size)
 
 
 
-template <typename T> void gemm_host(int m, int n, int k, T const* A,  T* B,  T * out,  int lda, int ldb, int ldc)
+template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc)
 {
 
-  dim3 dimBlock(256);
+  dim3 dimBlock(128);
 	int num_blocks = (m+7)/8;
 
 	cout << num_blocks << endl;
@@ -689,7 +689,7 @@ template <typename T> void gemm_host(int m, int n, int k, T const* A,  T* B,  T 
 	cout << m << endl;
 	cout << n << endl;
 	cout << k << endl;
-  gemm_device<T, 8, 256>
+  gemm_device<T, 16, 128>
       <<< num_blocks, dimBlock, 0, 0 >>>
       (m,  n,  k,
        A, 
@@ -701,8 +701,8 @@ template <typename T> void gemm_host(int m, int n, int k, T const* A,  T* B,  T 
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template void gemm_host<float>(int m, int n, int k, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc);
-template void gemm_host<half>(int m, int n, int k, half const* A,  half* B,  half * out,  int lda, int ldb, int ldc);
+template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc);
+template void gemm_host<half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc);
 template void extractOutliers<COL_TURING>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 
