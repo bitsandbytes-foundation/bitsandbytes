@@ -26,7 +26,7 @@ Compilation quickstart:
 git clone https://github.com/timdettmers/bitsandbytes.git
 cd bitsandbytes
 
-# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 120}
+# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121}
 # make argument in {cuda110, cuda11x, cuda12x}
 # if you do not know what CUDA you have, try looking at the output of: python -m bitsandbytes
 CUDA_VERSION=117 make cuda11x
