@@ -1429,7 +1429,7 @@ def cutlass3_gemm(
 
         m = sB[1]
         k = sB[0]
-        lda = B.stride()[(1 if transposed_B else 0)]
+        lda = B.stride()[0]
         ldc = sB[1]
     elif len(sB) == 3:
         # special case
@@ -1446,7 +1446,7 @@ def cutlass3_gemm(
         n = sA[2]
         k = sB[0] * sB[1]
 
-        lda = m
+        lda = n
         ldb = sA[2]
         ldc = m
 
@@ -1454,7 +1454,7 @@ def cutlass3_gemm(
 
     # B^T @ A^T = C^T
     # [km, nk -> mn]
-    lda = ldb = ldc = 1
+    #lda = ldb = ldc = 1
     #lda = 1
     #print(m, n, k, lda, ldb, ldc)
     is_on_gpu([B, A, out])
@@ -1466,7 +1466,7 @@ def cutlass3_gemm(
     ldc = ct.c_int32(ldc)
     alpha = ct.c_float(1.0)
     beta = ct.c_float(0.0)
-    lib.ccutlass_gemm(m, n, k, alpha, get_ptr(A), ldb, get_ptr(B), lda, beta, get_ptr(out), ldc)
+    lib.ccutlass_gemm(m, n, k, alpha, get_ptr(A), lda, get_ptr(B), ldb, beta, get_ptr(out), ldc)
 
     return out
 

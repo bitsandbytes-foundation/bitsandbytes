@@ -193,7 +193,7 @@ void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rows
 void gemm_host(int m, int n, int k,
      float alpha,
      float const* A, int ldA,
-     float const* B, int ldB,
+     float * B, int ldB,
      float beta,
      float      * C, int ldC);
 

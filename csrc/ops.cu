@@ -669,8 +669,6 @@ void pipeline_test(float *A, float *B, size_t n, size_t batch_size)
   int threads = 256;
   int num_blocks = (n+(256*batch_size)+1)/(batch_size*256);
 
-  printf("%i %i\n", num_blocks, batch_size);
-
   with_staging_unified<2><<<num_blocks, threads>>>(A, B, n, batch_size);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -680,15 +678,22 @@ void pipeline_test(float *A, float *B, size_t n, size_t batch_size)
 void gemm_host(int m, int n, int k,
      float alpha,
      float const* A, int lda,
-     float const* B, int ldb,
+     float * B, int ldb,
      float beta,
      float      * C, int ldc)
 {
 
   dim3 dimBlock(256);
-	int num_blocks = (n+31)/32;
+	int num_blocks = (m+7)/8;
 
 	cout << num_blocks << endl;
+	cout << lda << endl;
+	cout << ldb << endl;
+	cout << ldc << endl;
+
+	cout << m << endl;
+	cout << n << endl;
+	cout << k << endl;
   gemm_device
       <<< num_blocks, dimBlock, 0, 0 >>>
       (m,  n,  k,

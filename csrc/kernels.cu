@@ -2947,9 +2947,11 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //// 9. write outputs to matmul output matrix
 //}
 
+
+#define ROWS 2
 __global__ void gemm_device(int M, int N, int K,
             float const* A, 
-            float const* B, 
+            float* B, 
             float      * out,  int lda, int ldb, int ldc,
             float alpha, float beta)
 {
@@ -2958,28 +2960,105 @@ __global__ void gemm_device(int M, int N, int K,
 // 2. Dequantize B
 // 3. Fetch data from A and multiply
 
-  typedef cub::BlockLoad<float, 256 , 1, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadA;
-  __shared__ typename LoadA::TempStorage loada;
-	float dataA[1];
+  typedef cub::BlockLoad<float, 256 , 4, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadA;
+  //__shared__ typename LoadA::TempStorage loada;
+  typedef cub::BlockLoad<float, 256 , 4, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadB;
+  //__shared__ typename LoadB::TempStorage loadb;
+  typedef cub::BlockReduce<float, 256> BlockReduce;
+  // Allocate shared memory for BlockReduce
+  //__shared__ typename BlockReduce::TempStorage reduce;
+
+  __shared__ union {
+    typename BlockReduce::TempStorage reduce;
+    typename LoadB::TempStorage loadb;
+    typename LoadA::TempStorage loada;
+  } temp_storage;
+
+
+	float dataA[4];
+  float local_B[4];
+  float local_accC[ROWS];
 	int valid_items = 0;
+  const int warp_id = threadIdx.x/32;
+  const int warp_lane = threadIdx.x % 32;
+  const int col_offset = blockIdx.x * 8;
 
-	__shared__ float[16*256] tileA;
+	__shared__ float tileA[ROWS*1024];
+	__shared__ float accumulatorC[ROWS*8];
+
+  //#pragma unroll 8
+  //for(int i = 0; i < 8; i++)
+  //  tileA[threadIdx.x + (i*256)] = 0.0f;
+  //__syncthreads();
+  if(threadIdx.x < 64)
+    accumulatorC[threadIdx.x] = 0.0f;
+  __syncthreads();
 
 
-	for(int idxA = 0; idxA < M*K; idxA+= 256)
+	for(int inner_idx = 0; inner_idx < K; inner_idx+= 1024)
 	{
-		valid_items = M*K - idxA > 256 ? 256 : M*K - idxA;
+		valid_items = K - inner_idx > 1024 ? 1024 : K - inner_idx;
 		int baserow = 0;
-		for(int row = baserow; row < baserow+16 && row < M + ; row++)
+		for(int row = baserow; row < (baserow+ROWS) && row < N; row++)
 		{
-			LoadA(loada).Load(&(A[(row*lda) + i]), dataA, valid_items, 0.0f);
-			tileA[row*256 + threadIdx.x] = dataA[0];
+			LoadA(temp_storage.loada).Load(&(A[(row*K) + inner_idx]), dataA, valid_items, 0.0f);
+
+      #pragma unroll 4
+      for(int k = 0; k < 4; k++)
+          tileA[row*1024 + threadIdx.x + (k*blockDim.x)] = dataA[k];
+
 		__syncthreads();
 		}
-		baserow += 16;
+		baserow += ROWS;
 
+    // load 16 columns from B at a time. B is transposed, so its like loading rows
+    // each warp loads one row
+    // each thread loads 128 byte
 
+    // col: inner_idx + warp_lane
+    // row: ldb*(offset + warp_id)
+    for(int col = 0; col < 8 && (col_offset + col) < M; col++)
+    {
+      int colB = col_offset + col;
+
+      for(int k = 0; k < ROWS; k++)
+        local_accC[k] = 0.0f;
+
+      int base_idxB = ldb*colB;
+      valid_items = K - inner_idx > 1024 ? 1024 : K - inner_idx;
+      LoadB(temp_storage.loadb).Load(&(B[base_idxB + inner_idx]), local_B, valid_items, 0.0f);
+      __syncthreads();
+
+      for(int row = 0; row < ROWS && row < N; row++)
+      {
+        #pragma unroll 4
+        for(int k = 0; k < 4; k++)
+        {
+          int idxA = row*1024 + threadIdx.x + (blockDim.x*k);
+          local_accC[row] += tileA[idxA]*local_B[k];
+        }
+
+        local_accC[row] = BlockReduce(temp_storage.reduce).Reduce(local_accC[row], cub::Sum());
+        if(threadIdx.x == 0)
+          atomicAdd(&accumulatorC[row*8 + col], local_accC[row]);
+      }
+    }
 	}
+
+  for(int row = 0; row < ROWS && row < N; row++)
+  {
+    int out_idx = ldc*row + col_offset;
+
+    //if(threadIdx.x < 8)
+    //  if(accumulatorC[row*8 + threadIdx.x] != 0.0)
+    //    printf("%i %i %i %i %f idx %i %i %i\n", row, col_offset, threadIdx.x, N, accumulatorC[row*8 + threadIdx.x], ldc, out_idx, blockIdx.x);
+
+    if(threadIdx.x < 8 && (col_offset + threadIdx.x) < M)
+    {
+      //printf("%i %i %i %i %f idx %i %i\n", row, col_offset, threadIdx.x, N, accumulatorC[row*8 + threadIdx.x], ldc, out_idx);
+      out[out_idx + threadIdx.x] = accumulatorC[row*8 + threadIdx.x];
+    }
+  }
 
 
 

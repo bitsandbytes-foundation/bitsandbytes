@@ -140,7 +140,7 @@ __global__ void with_staging_unified(float const* global_in, float * global_out,
 
 __global__ void gemm_device(int M, int N, int K,
             float const* A, 
-            float const* B, 
+            float * B, 
             float      * out,  int lda, int ldb, int ldc,
             float alpha, float beta);
 

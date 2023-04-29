@@ -24,7 +24,7 @@ void
 cppgemm(int m, int n, int k,
      float alpha,
      float const* A, int ldA,
-     float const* B, int ldB,
+     float * B, int ldB,
      float beta,
      float      * C, int ldC)
 { gemm_host(m, n, k, alpha, A, ldA, B, ldB, beta, C, ldC);}
@@ -320,7 +320,7 @@ extern "C"
 	void ccutlass_gemm(int m, int n, int k,
      float alpha,
      float const* A, int ldA,
-     float const* B, int ldB,
+     float * B, int ldB,
      float beta,
      float      * C, int ldC)
 		{ cppgemm(m, n, k, alpha, A, ldA, B, ldB, beta, C, ldC);}

@@ -2353,17 +2353,19 @@ def test_normal_map_tree():
 
 
 def test_cutlass3_gemm():
-    #A = torch.rand(2, 2).cuda()
-    #B = torch.rand(2, 2).cuda()
-    A = torch.arange(4).reshape(2, 2).float().cuda().contiguous()
-    B = torch.ones(2, 2).float().cuda()
+    A = torch.rand(2, 4092).cuda()
+    B = torch.rand(4*4092, 4092).cuda()
 
-    print('')
-    print(A)
-    print(B)
+    #print('')
+    #print(A)
+    #print(B.t())
 
-    C1 = torch.matmul(A, B)
-    C2 = F.cutlass3_gemm(A, B)
+    C1 = torch.matmul(A, B.t())
+    C2 = F.cutlass3_gemm(A, B.t())
+    #print(C1)
+    #print(C2)
+
+    torch.testing.assert_close(C1, C2)
 
 
 def test_pipeline_func():
