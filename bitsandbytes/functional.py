@@ -1464,9 +1464,7 @@ def cutlass3_gemm(
     lda = ct.c_int32(lda)
     ldb = ct.c_int32(ldb)
     ldc = ct.c_int32(ldc)
-    alpha = ct.c_float(1.0)
-    beta = ct.c_float(0.0)
-    lib.ccutlass_gemm(m, n, k, alpha, get_ptr(A), lda, get_ptr(B), ldb, beta, get_ptr(out), ldc)
+    lib.cgemm_host_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
 
     return out
 

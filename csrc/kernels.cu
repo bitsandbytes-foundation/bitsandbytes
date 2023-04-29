@@ -2949,22 +2949,18 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 
 
 #define ROWS 2
-__global__ void gemm_device(int M, int N, int K,
-            float const* A, 
-            float* B, 
-            float      * out,  int lda, int ldb, int ldc,
-            float alpha, float beta)
+template <typename T> __global__ void gemm_device(int M, int N, int K, T const* A,  T* B,  T * out,  int lda, int ldb, int ldc)
 {
 // 0. We want to fill a 8x128 tile for a thread block so we have 8x16 tile for each warp
 // 1. Load dataB into register
 // 2. Dequantize B
 // 3. Fetch data from A and multiply
 
-  typedef cub::BlockLoad<float, 256 , 4, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadA;
+  typedef cub::BlockLoad<T, 256 , 4, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadA;
   //__shared__ typename LoadA::TempStorage loada;
-  typedef cub::BlockLoad<float, 256 , 4, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadB;
+  typedef cub::BlockLoad<T, 256 , 4, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadB;
   //__shared__ typename LoadB::TempStorage loadb;
-  typedef cub::BlockReduce<float, 256> BlockReduce;
+  typedef cub::BlockReduce<T, 256> BlockReduce;
   // Allocate shared memory for BlockReduce
   //__shared__ typename BlockReduce::TempStorage reduce;
 
@@ -2975,16 +2971,16 @@ __global__ void gemm_device(int M, int N, int K,
   } temp_storage;
 
 
-	float dataA[4];
-  float local_B[4];
-  float local_accC[ROWS];
+	T dataA[4];
+  T local_B[4];
+  T local_accC[ROWS];
 	int valid_items = 0;
   const int warp_id = threadIdx.x/32;
   const int warp_lane = threadIdx.x % 32;
   const int col_offset = blockIdx.x * 8;
 
-	__shared__ float tileA[ROWS*1024];
-	__shared__ float accumulatorC[ROWS*8];
+	__shared__ T tileA[ROWS*1024];
+	__shared__ T accumulatorC[ROWS*8];
 
   //#pragma unroll 8
   //for(int i = 0; i < 8; i++)
@@ -3128,6 +3124,7 @@ __global__ void with_staging_unified(float const* global_in, float * global_out,
 //            TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
 //            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
 //            half alpha, half beta);
+template __global__ void gemm_device<float>(int M, int N, int K, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc);
 
 
 //template __global__ void kMatmul_inference_4bit<NF4, half, half, half>(half *A, unsigned char *B, half *out, int lda, int ldb, int rowsA, int colsA, int colsB);

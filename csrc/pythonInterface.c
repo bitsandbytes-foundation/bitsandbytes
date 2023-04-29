@@ -20,14 +20,8 @@ void estimateQuantiles_fp32(float *A, float *code, float offset, int n){ estimat
 void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles<half>(A, code, offset, n); }
 
 
-void 
-cppgemm(int m, int n, int k,
-     float alpha,
-     float const* A, int ldA,
-     float * B, int ldB,
-     float beta,
-     float      * C, int ldC)
-{ gemm_host(m, n, k, alpha, A, ldA, B, ldB, beta, C, ldC);}
+void gemm_host_fp32(int M, int N, int K, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc)
+{ gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc); }
 
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
@@ -317,13 +311,8 @@ extern "C"
 	void cextractOutliers_ampere(char * A, int *idx, char *out, int idx_size, int rows, int cols){ extractOutliers_ampere(A, idx, out, idx_size, rows, cols); }
 	void cpipeline_test(float *A, float *B, size_t n, size_t batch_size){ pipeline_test(A, B, n, batch_size); }
 
-	void ccutlass_gemm(int m, int n, int k,
-     float alpha,
-     float const* A, int ldA,
-     float * B, int ldB,
-     float beta,
-     float      * C, int ldC)
-		{ cppgemm(m, n, k, alpha, A, ldA, B, ldB, beta, C, ldC);}
+	void cgemm_host_fp32(int M, int N, int K, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc)
+	{ gemm_host_fp32(M, N, K, A, B, out, lda, ldb, ldc); }
 
 #endif
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }
