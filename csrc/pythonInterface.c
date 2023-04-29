@@ -21,9 +21,9 @@ void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimate
 
 
 void gemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
-{ gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc); }
+{ gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc, 32); }
 void gemm_host_fp16(int M, int N, int K, half * A,  half* B,  half * out,  int lda, int ldb, int ldc)
-{ gemm_host<half>(M, N, K, A, B, out, lda, ldb, ldc); }
+{ gemm_host<half>(M, N, K, A, B, out, lda, ldb, ldc, 16); }
 
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \

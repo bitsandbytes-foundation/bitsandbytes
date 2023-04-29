@@ -2352,8 +2352,8 @@ def test_normal_map_tree():
         print(pivots)
 
 
-#@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
-@pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
+#@pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
 def test_cutlass3_gemm(dtype):
     for i in range(1):
         #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
