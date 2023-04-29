@@ -1381,9 +1381,9 @@ def cutlass3_gemm(
     transposed_A=False,
     transposed_B=False,
 ):
-    sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.float32)
+    sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if out is None:
-        out = torch.zeros(size=sout, dtype=torch.float32, device=A.device)
+        out = torch.zeros(size=sout, dtype=A.dtype, device=A.device)
 
     sA = A.shape
     sB = B.shape
@@ -1464,7 +1464,12 @@ def cutlass3_gemm(
     lda = ct.c_int32(lda)
     ldb = ct.c_int32(ldb)
     ldc = ct.c_int32(ldc)
-    lib.cgemm_host_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
+    if A.dtype == torch.float32:
+        lib.cgemm_host_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
+    elif A.dtype == torch.float16:
+        lib.cgemm_host_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
+    else:
+        raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
 
     return out
 

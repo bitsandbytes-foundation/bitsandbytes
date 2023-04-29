@@ -689,7 +689,7 @@ template <typename T> void gemm_host(int m, int n, int k, T const* A,  T* B,  T 
 	cout << m << endl;
 	cout << n << endl;
 	cout << k << endl;
-  gemm_device
+  gemm_device<T, 8, 256>
       <<< num_blocks, dimBlock, 0, 0 >>>
       (m,  n,  k,
        A, 
@@ -702,6 +702,7 @@ template <typename T> void gemm_host(int m, int n, int k, T const* A,  T* B,  T 
 //==============================================================
 
 template void gemm_host<float>(int m, int n, int k, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc);
+template void gemm_host<half>(int m, int n, int k, half const* A,  half* B,  half * out,  int lda, int ldb, int ldc);
 template void extractOutliers<COL_TURING>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 

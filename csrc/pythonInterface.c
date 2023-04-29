@@ -22,6 +22,8 @@ void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimate
 
 void gemm_host_fp32(int M, int N, int K, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc)
 { gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc); }
+void gemm_host_fp16(int M, int N, int K, half const* A,  half* B,  half * out,  int lda, int ldb, int ldc)
+{ gemm_host<half>(M, N, K, A, B, out, lda, ldb, ldc); }
 
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
@@ -313,6 +315,9 @@ extern "C"
 
 	void cgemm_host_fp32(int M, int N, int K, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc)
 	{ gemm_host_fp32(M, N, K, A, B, out, lda, ldb, ldc); }
+
+	void cgemm_host_fp16(int M, int N, int K, half const* A,  half* B,  half * out,  int lda, int ldb, int ldc)
+	{ gemm_host_fp16(M, N, K, A, B, out, lda, ldb, ldc); }
 
 #endif
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }

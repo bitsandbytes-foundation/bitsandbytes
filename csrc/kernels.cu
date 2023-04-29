@@ -2949,18 +2949,18 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 
 
 #define ROWS 2
-template <typename T> __global__ void gemm_device(int M, int N, int K, T const* A,  T* B,  T * out,  int lda, int ldb, int ldc)
+template <typename T, int ITEMS, int THREADS> __global__ void gemm_device(int M, int N, int K, T const* A,  T* B,  T * out,  int lda, int ldb, int ldc)
 {
 // 0. We want to fill a 8x128 tile for a thread block so we have 8x16 tile for each warp
 // 1. Load dataB into register
 // 2. Dequantize B
 // 3. Fetch data from A and multiply
 
-  typedef cub::BlockLoad<T, 256 , 4, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadA;
+  typedef cub::BlockLoad<T, THREADS , ITEMS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadA;
   //__shared__ typename LoadA::TempStorage loada;
-  typedef cub::BlockLoad<T, 256 , 4, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadB;
+  typedef cub::BlockLoad<T, THREADS , ITEMS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadB;
   //__shared__ typename LoadB::TempStorage loadb;
-  typedef cub::BlockReduce<T, 256> BlockReduce;
+  typedef cub::BlockReduce<T, THREADS> BlockReduce;
   // Allocate shared memory for BlockReduce
   //__shared__ typename BlockReduce::TempStorage reduce;
 
@@ -2971,15 +2971,13 @@ template <typename T> __global__ void gemm_device(int M, int N, int K, T const* 
   } temp_storage;
 
 
-	T dataA[4];
-  T local_B[4];
+	T dataA[ITEMS];
+  T local_B[ITEMS];
   T local_accC[ROWS];
 	int valid_items = 0;
-  const int warp_id = threadIdx.x/32;
-  const int warp_lane = threadIdx.x % 32;
   const int col_offset = blockIdx.x * 8;
 
-	__shared__ T tileA[ROWS*1024];
+	__shared__ T tileA[ROWS*THREADS*ITEMS];
 	__shared__ T accumulatorC[ROWS*8];
 
   //#pragma unroll 8
@@ -2991,17 +2989,17 @@ template <typename T> __global__ void gemm_device(int M, int N, int K, T const* 
   __syncthreads();
 
 
-	for(int inner_idx = 0; inner_idx < K; inner_idx+= 1024)
+	for(int inner_idx = 0; inner_idx < K; inner_idx+= THREADS*ITEMS)
 	{
-		valid_items = K - inner_idx > 1024 ? 1024 : K - inner_idx;
+		valid_items = K - inner_idx > THREADS*ITEMS ? THREADS*ITEMS : K - inner_idx;
 		int baserow = 0;
 		for(int row = baserow; row < (baserow+ROWS) && row < N; row++)
 		{
 			LoadA(temp_storage.loada).Load(&(A[(row*K) + inner_idx]), dataA, valid_items, 0.0f);
 
-      #pragma unroll 4
-      for(int k = 0; k < 4; k++)
-          tileA[row*1024 + threadIdx.x + (k*blockDim.x)] = dataA[k];
+      #pragma unroll ITEMS
+      for(int k = 0; k < ITEMS; k++)
+          tileA[row*THREADS*ITEMS + threadIdx.x + (k*THREADS)] = dataA[k];
 
 		__syncthreads();
 		}
@@ -3021,16 +3019,16 @@ template <typename T> __global__ void gemm_device(int M, int N, int K, T const* 
         local_accC[k] = 0.0f;
 
       int base_idxB = ldb*colB;
-      valid_items = K - inner_idx > 1024 ? 1024 : K - inner_idx;
+      valid_items = K - inner_idx > THREADS*ITEMS ? THREADS*ITEMS : K - inner_idx;
       LoadB(temp_storage.loadb).Load(&(B[base_idxB + inner_idx]), local_B, valid_items, 0.0f);
       __syncthreads();
 
       for(int row = 0; row < ROWS && row < N; row++)
       {
-        #pragma unroll 4
-        for(int k = 0; k < 4; k++)
+        #pragma unroll ITEMS
+        for(int k = 0; k < ITEMS; k++)
         {
-          int idxA = row*1024 + threadIdx.x + (blockDim.x*k);
+          int idxA = row*THREADS*ITEMS + threadIdx.x + (THREADS*k);
           local_accC[row] += tileA[idxA]*local_B[k];
         }
 
@@ -3124,7 +3122,10 @@ __global__ void with_staging_unified(float const* global_in, float * global_out,
 //            TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
 //            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
 //            half alpha, half beta);
-template __global__ void gemm_device<float>(int M, int N, int K, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc);
+template __global__ void gemm_device<float, 4, 256>(int M, int N, int K, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc);
+template __global__ void gemm_device<half, 4, 256>(int M, int N, int K, half const* A,  half* B,  half * out,  int lda, int ldb, int ldc);
+template __global__ void gemm_device<float, 8, 256>(int M, int N, int K, float const* A,  float* B,  float * out,  int lda, int ldb, int ldc);
+template __global__ void gemm_device<half, 8, 256>(int M, int N, int K, half const* A,  half* B,  half * out,  int lda, int ldb, int ldc);
 
 
 //template __global__ void kMatmul_inference_4bit<NF4, half, half, half>(half *A, unsigned char *B, half *out, int lda, int ldb, int rowsA, int colsA, int colsB);
