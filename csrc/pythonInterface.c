@@ -25,6 +25,9 @@ void gemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  in
 void gemm_host_fp16(int M, int N, int K, half * A,  half* B,  half * out,  int lda, int ldb, int ldc)
 { gemm_host<half>(M, N, K, A, B, out, lda, ldb, ldc, 16); }
 
+void gemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
+{ gemm_4bit_inference<half>(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
+
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
 void fname##32bit_g##gbits(gtype *g, gtype *p, \
@@ -318,6 +321,9 @@ extern "C"
 
 	void cgemm_host_fp16(int M, int N, int K, half * A,  half* B,  half * out,  int lda, int ldb, int ldc)
 	{ gemm_host_fp16(M, N, K, A, B, out, lda, ldb, ldc); }
+
+	void cgemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
+	{ gemm_4bit_inference(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize); }
 
 #endif
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }

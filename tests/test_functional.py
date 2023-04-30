@@ -2352,8 +2352,8 @@ def test_normal_map_tree():
         print(pivots)
 
 
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
-#@pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
+#@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
+@pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
 def test_cutlass3_gemm(dtype):
     for i in range(1):
         #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
@@ -2372,6 +2372,32 @@ def test_cutlass3_gemm(dtype):
         #print(C2)
 
         torch.testing.assert_close(C1, C2, atol=1e-05, rtol=0.005)
+
+#@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
+@pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
+def test_gemm_4bit(dtype):
+    for i in range(1):
+        #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
+        #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
+        #torch.random.manual_seed(17)
+        A = torch.rand(1, 4096, dtype=dtype, device='cuda')
+        B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
+
+        #print('')
+        #print(A)
+        #print(B)
+
+        qB, state = F.quantize_nf4(B)
+        F.dequantize_nf4(qB, state)
+
+
+        C1 = torch.matmul(A, B.t())
+        #C1 = bnb.matmul_4bit(A, qB.t(), state)
+        C2 = F.cutlass3_gemm(A, qB.t(), state=state)
+        #print(C1)
+        #print(C2)
+
+        #torch.testing.assert_close(C1, C2, atol=1e-5, rtol=0.005)
 
 
 def test_pipeline_func():

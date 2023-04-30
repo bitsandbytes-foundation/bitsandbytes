@@ -191,6 +191,7 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rowsA, int colsA, int colsB);
 
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits);
+template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize);
 
 
 void pipeline_test(float *A, float *B, size_t n, size_t batch_size);

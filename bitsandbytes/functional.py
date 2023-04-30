@@ -1380,10 +1380,15 @@ def cutlass3_gemm(
     out: Tensor = None,
     transposed_A=False,
     transposed_B=False,
+    state=None
 ):
-    sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
+    #sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
+    if state is None:
+        Bshape = B.shape
+    else:
+        Bshape = state[1]
     if out is None:
-        out = torch.zeros(size=sout, dtype=A.dtype, device=A.device)
+        out = torch.zeros(size=(A.shape[0], Bshape[1]), dtype=A.dtype, device=A.device)
 
     sA = A.shape
     sB = B.shape
@@ -1456,7 +1461,13 @@ def cutlass3_gemm(
     # [km, nk -> mn]
     #lda = ldb = ldc = 1
     #lda = 1
-    #print(m, n, k, lda, ldb, ldc)
+    if state is not None:
+        m = Bshape[0]
+        k = Bshape[1]
+        lda = Bshape[1]
+        ldc = Bshape[0]
+        ldb = (ldb+1)//2
+    print(m, n, k, lda, ldb, ldc)
     is_on_gpu([B, A, out])
     m = ct.c_int32(m)
     n = ct.c_int32(n)
@@ -1464,7 +1475,10 @@ def cutlass3_gemm(
     lda = ct.c_int32(lda)
     ldb = ct.c_int32(ldb)
     ldc = ct.c_int32(ldc)
-    if A.dtype == torch.float32:
+
+    if B.dtype == torch.uint8:
+        lib.cgemm_4bit_inference(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
+    elif A.dtype == torch.float32:
         lib.cgemm_host_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
     elif A.dtype == torch.float16:
         lib.cgemm_host_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
