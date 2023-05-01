@@ -3041,7 +3041,7 @@ template <typename T, typename TCAST, int ITEMS> __device__ inline void vector_l
     }
 }
 
-#define WARPS 2
+#define WARPS 4
 template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc)
 {
 
@@ -3056,17 +3056,18 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
   const int warp_id = threadIdx.x / 32;
   const int half_warp_id = threadIdx.x / 16;
   const int half_warp_lane = threadIdx.x % 16;
+  const int batch_size_warps = (WARPS-1)*2;
 
   T local_A[1];
   T local_B[8];
 
-  const int a_tile_offset = 32*16 + 16;
-  const int b_tile_offset = 16*8 + 16;
+  const int a_tile_offset = (32*16 + 16);
+  const int b_tile_offset = (16*8 + 16);
   const int c_tile_offset = 32*8 + 24;
 
-  __shared__ T smem_A[WARPS*32*16 + (16*(WARPS-1))];
-  __shared__ T smem_B[WARPS*16*8 + (16*(WARPS-1))];
-  __shared__ T smem_C[WARPS*32*8 + (24*(WARPS-1))];
+  __shared__ T smem_A[2*batch_size_warps*32*16 + (2*16*(batch_size_warps-1))];
+  __shared__ T smem_B[2*batch_size_warps*16*8 + (2*16*(batch_size_warps-1))];
+  __shared__ T smem_C[32*8];
 
    wmma::fragment<wmma::matrix_a, 32, 8, 16, half, wmma::row_major> a_frag;
    wmma::fragment<wmma::matrix_b, 32, 8, 16, half, wmma::col_major> b_frag;
@@ -3091,63 +3092,68 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
 
   //int block_idx = 0;
   //for(int base_idx = 0; base_idx < K; base_idx+=blockDim.x)
-  for(int base_idx = 0; base_idx < K; base_idx+=blockDim.x)
+  int ticktock = 0;
+  int idx = 0 + threadIdx.x;
+  // prefetch
+  if(idx < K && warp_id < (WARPS-1))
   {
-    int idx = base_idx + threadIdx.x;
+    local_A[0] = A[idx];
 
-    for(int k = 0; k < 2; k++)
+    #pragma unroll 8
+    for(int col = 0; col < 8; col++)
+      local_B[col] = B[(col_offset+col)*ldb+idx];
+
+    smem_A[half_warp_lane + (half_warp_id*a_tile_offset)] = local_A[0];
+
+    #pragma unroll 8
+    for(int col = 0; col < 8; col++)
+        smem_B[half_warp_lane + (half_warp_id*b_tile_offset) + (col*16)] = local_B[col];
+  }
+  ticktock = ticktock == 0 ? 1 : 0;
+
+  for(int base_idx = 0; base_idx < K; base_idx+=blockDim.x-32)
+  {
+    idx = base_idx + threadIdx.x;
+
+    __syncthreads();
+    if(idx < K && warp_id < (WARPS-1))
     {
-      if(k == 0)
-      {
-        if(idx < K)
-        {
-          local_A[0] = A[idx];
+      local_A[0] = A[idx];
 
-          #pragma unroll 8
-          for(int col = 0; col < 8; col++)
-            local_B[col] = B[(col_offset+col)*ldb+idx];
-        }
+      #pragma unroll 8
+      for(int col = 0; col < 8; col++)
+        local_B[col] = B[(col_offset+col)*ldb+idx];
 
-      }
-        
-      if(idx >= K)
-      {
-          smem_A[threadIdx.x] = 0.0f;
-          //smem_B[threadIdx.x] = 0.0f;
-      }
-      else
-      {
-        if((k == 0 && half_warp_id % 2 == 0) ||
-           (k == 1 && half_warp_id % 2 == 1))
-        {
-          smem_A[half_warp_lane + (warp_id*a_tile_offset)] = local_A[0];
+      smem_A[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*a_tile_offset)] = local_A[0];
 
-          #pragma unroll 8
-          for(int col = 0; col < 8; col++)
-              smem_B[half_warp_lane + (warp_id*b_tile_offset) + (col*16)] = local_B[col];
-        }
-      }
-
-      __syncthreads();
-
-      wmma::load_matrix_sync(a_frag, &(smem_A[warp_id*a_tile_offset]), 16); //  111 mu
-      wmma::load_matrix_sync(b_frag, &(smem_B[warp_id*b_tile_offset]), 16); // 35 mu
-      wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+      #pragma unroll 8
+      for(int col = 0; col < 8; col++)
+          smem_B[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*b_tile_offset) + (col*16)] = local_B[col];
     }
+    ticktock = ticktock == 0 ? 1 : 0;
+
+    if(warp_id == (WARPS-1))
+      for(int k = 0; k < batch_size_warps; k++)
+      {
+        wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+        wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
+        wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+      }
   }
 
   // 129 mu
-  wmma::store_matrix_sync(&(smem_C[half_warp_id*c_tile_offset]), c_frag, 8, wmma::mem_row_major);
+  if(warp_id == (WARPS-1))
+    wmma::store_matrix_sync(&(smem_C[0]), c_frag, 8, wmma::mem_row_major);
   __syncthreads();
 
   //if(threadIdx.x >= 16){ return; }
   //printf("%i %f\n", threadIdx.x, (float)smem_C[threadIdx.x]);
 
   //if(threadIdx.x < 32)
-  if(half_warp_lane < 8 && half_warp_id > 0)
-    //local_C[warp_lane] = smem_C[warp_lane + (warp_id*32*8)];
-    atomicAdd(&(smem_C[half_warp_lane]), smem_C[half_warp_lane + (half_warp_id*c_tile_offset)]);
-  __syncthreads();
+  //if(half_warp_lane < 8 && half_warp_id > 0)
+  //  //local_C[warp_lane] = smem_C[warp_lane + (warp_id*32*8)];
+  //  atomicAdd(&(smem_C[half_warp_lane]), smem_C[half_warp_lane + (half_warp_id*c_tile_offset)]);
+  //__syncthreads();
 
     //local_accC[row] = BlockReduce(temp_storage.reduce).Reduce(local_accC[row], cub::Sum());
   //if(threadIdx.x == 0)
@@ -3463,6 +3469,7 @@ __global__ void with_staging_unified(float const* global_in, float * global_out,
 
 // these are not used and make no sense, but the compiler needs them
 //template __global__ void gemm_device<float, 16, 128>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
+template __global__ void gemm_device<half, 32, 256>(int M, int N, int K, half * __restrict__ const A,  half* B,  half * out,  int lda, int ldb, int ldc);
 template __global__ void gemm_device<half, 32, 128>(int M, int N, int K, half * __restrict__ const A,  half* B,  half * out,  int lda, int ldb, int ldc);
 //template __global__ void gemm_device<float, 16, 32>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
 template __global__ void gemm_device<half, 32, 32>(int M, int N, int K, half * __restrict__ const A,  half* B,  half * out,  int lda, int ldb, int ldc);
@@ -3470,6 +3477,7 @@ template __global__ void gemm_device<half, 32, 64>(int M, int N, int K, half * _
 // these are not used and make no sense, but the compiler needs them
 
 //template __global__ void gemm_device<float, 32, 128>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
+template __global__ void gemm_device<half, 16, 256>(int M, int N, int K, half * __restrict__ const A,  half* B,  half * out,  int lda, int ldb, int ldc);
 template __global__ void gemm_device<half, 16, 128>(int M, int N, int K, half * __restrict__ const A,  half* B,  half * out,  int lda, int ldb, int ldc);
 //template __global__ void gemm_device<float, 32, 32>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
 template __global__ void gemm_device<half, 16, 32>(int M, int N, int K, half * __restrict__ const A,  half* B,  half * out,  int lda, int ldb, int ldc);

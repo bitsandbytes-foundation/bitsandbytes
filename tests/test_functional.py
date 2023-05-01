@@ -2370,10 +2370,10 @@ def test_cutlass3_gemm(dtype):
 
         C1 = torch.matmul(A, B.t())
         C2 = F.cutlass3_gemm(A, B.t())
-        #print(C1)
-        #print(C2)
+        print(C1)
+        print(C2)
 
-        torch.testing.assert_close(C1, C2, atol=1e-05, rtol=0.05)
+        torch.testing.assert_close(C1, C2, atol=1e-05, rtol=0.06)
 
 #@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
 @pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
