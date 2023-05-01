@@ -678,7 +678,7 @@ void pipeline_test(float *A, float *B, size_t n, size_t batch_size)
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
 {
 
-	int num_blocks = (m+7)/8;
+	int num_blocks = (m+15)/16;
 
 	cout << num_blocks << endl;
 	cout << lda << endl;
