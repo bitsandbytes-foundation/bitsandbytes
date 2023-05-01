@@ -20,8 +20,8 @@ void estimateQuantiles_fp32(float *A, float *code, float offset, int n){ estimat
 void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles<half>(A, code, offset, n); }
 
 
-void gemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
-{ gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc, 32); }
+//void gemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
+//{ gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc, 32); }
 void gemm_host_fp16(int M, int N, int K, half * A,  half* B,  half * out,  int lda, int ldb, int ldc)
 { gemm_host<half>(M, N, K, A, B, out, lda, ldb, ldc, 16); }
 
@@ -316,8 +316,8 @@ extern "C"
 	void cextractOutliers_ampere(char * A, int *idx, char *out, int idx_size, int rows, int cols){ extractOutliers_ampere(A, idx, out, idx_size, rows, cols); }
 	void cpipeline_test(float *A, float *B, size_t n, size_t batch_size){ pipeline_test(A, B, n, batch_size); }
 
-	void cgemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
-	{ gemm_host_fp32(M, N, K, A, B, out, lda, ldb, ldc); }
+	//void cgemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
+	//{ gemm_host_fp32(M, N, K, A, B, out, lda, ldb, ldc); }
 
 	void cgemm_host_fp16(int M, int N, int K, half * A,  half* B,  half * out,  int lda, int ldb, int ldc)
 	{ gemm_host_fp16(M, N, K, A, B, out, lda, ldb, ldc); }

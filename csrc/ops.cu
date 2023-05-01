@@ -678,7 +678,6 @@ void pipeline_test(float *A, float *B, size_t n, size_t batch_size)
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
 {
 
-  dim3 dimBlock(128);
 	int num_blocks = (m+7)/8;
 
 	cout << num_blocks << endl;
@@ -689,16 +688,17 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
 	cout << m << endl;
 	cout << n << endl;
 	cout << k << endl;
-  if(bits == 32)
-    gemm_device<T, 32, 128><<< num_blocks, dimBlock, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-  else if(bits == 16)
-    gemm_device<T, 16, 128><<< num_blocks, dimBlock, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
+  //if(bits == 32)
+    //gemm_device<T, 32, 128><<< num_blocks, 128, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
+    //gemm_device<T, 32, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
+  if(bits == 16)
+    gemm_device<T, 16, 128><<< num_blocks, 128, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
+    //gemm_device<T, 16, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
 }
 
 template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
-  dim3 dimBlock(128);
 	int num_blocks = (m+7)/8;
 
 	cout << num_blocks << endl;
@@ -709,7 +709,8 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
 	cout << m << endl;
 	cout << n << endl;
 	cout << k << endl;
-  kgemm_4bit_inference<T, 128><<< num_blocks, dimBlock, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
+  kgemm_4bit_inference<T, 128><<< num_blocks, 128, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
+  //kgemm_4bit_inference<T, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
 }
 
 //==============================================================
@@ -717,7 +718,7 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
 //==============================================================
 
 template void gemm_4bit_inference<half>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
-template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc, int bits);
+//template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc, int bits);
 template void gemm_host<half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc, int bits);
 template void extractOutliers<COL_TURING>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx_size, int rows, int cols);

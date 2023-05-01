@@ -2358,6 +2358,8 @@ def test_cutlass3_gemm(dtype):
     for i in range(1):
         #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
         #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
+        #A = torch.rand(1, 4096, dtype=dtype, device='cuda')
+        #B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
         A = torch.rand(1, 4096, dtype=dtype, device='cuda')
         B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
 
