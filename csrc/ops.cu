@@ -703,17 +703,17 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
 template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
-	int num_blocks = (m+7)/8;
+	int num_blocks = (m+31)/32;
 
-	cout << num_blocks << endl;
-	cout << lda << endl;
-	cout << ldb << endl;
-	cout << ldc << endl;
+	//cout << num_blocks << endl;
+	//cout << lda << endl;
+	//cout << ldb << endl;
+	//cout << ldc << endl;
 
-	cout << m << endl;
-	cout << n << endl;
-	cout << k << endl;
-  kgemm_4bit_inference<T, 128><<< num_blocks, 128, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
+	//cout << m << endl;
+	//cout << n << endl;
+	//cout << k << endl;
+  kgemm_4bit_inference<T, 160><<< num_blocks, 160, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
   //kgemm_4bit_inference<T, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
 }
 

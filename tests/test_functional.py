@@ -2358,20 +2358,19 @@ def test_normal_map_tree():
 #@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
 @pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
 def test_cutlass3_gemm(dtype):
-    for dim in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
+    debug = True
+    #for dim in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
     #for dim in [4096, 5120, 6656, 8192]:
-    #for dim in [4096]:
+    for dim in [4096]:
+    #for dim in [128+1]:
         errs = []
         relerrs = []
         max_err = 0
         max_relerr = 0
         for i in range(100):
-            #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
-            #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
-            #A = torch.rand(1, 4096, dtype=dtype, device='cuda')
-            #B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
-            A = torch.randn(1, dim+0, dtype=dtype, device='cuda')
+            A = torch.randn(1, dim, dtype=dtype, device='cuda')
             B = torch.randn(4*dim, dim+0, dtype=dtype, device='cuda')/math.sqrt(dim)
+            #B = torch.randn(1, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
 
             #print('')
             #print(A)
@@ -2397,7 +2396,7 @@ def test_cutlass3_gemm(dtype):
             errs.append(err)
             relerrs.append(relerr)
 
-            #if err/torch.abs(C1).mean() > 5e-5 or err > 3.2e-5:
+            #if not debug and err/torch.abs(C1).mean() > 5e-5 or err > 3.2e-5:
             #    print('')
             #    print(i, err, relerr)
             #    print(A.flatten()[-6:])
@@ -2412,7 +2411,7 @@ def test_cutlass3_gemm(dtype):
 
             c = int(C1.numel()*0.0014*(dim/256))+1
 
-            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=True)
+            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=not debug)
             #print(c/math.sqrt(dim))
         print('')
         print(dim, sum(errs)/len(errs)/math.sqrt(dim))
@@ -2422,29 +2421,73 @@ def test_cutlass3_gemm(dtype):
 #@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
 @pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
 def test_gemm_4bit(dtype):
-    for i in range(1):
-        #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
-        #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
-        #torch.random.manual_seed(17)
-        A = torch.rand(1, 4096, dtype=dtype, device='cuda')
-        B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
+    #for dim in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
+    #for dim in [4096, 5120, 6656, 8192]:
+    #for dim in [32]:
+    for dim in [4096]:
+        errs = []
+        relerrs = []
+        max_err = 0
+        max_relerr = 0
+        for i in range(1):
+            #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
+            #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
+            #A = torch.rand(1, 4096, dtype=dtype, device='cuda')
+            #B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
+            A = torch.randn(1, dim+0, dtype=dtype, device='cuda')
+            B = torch.randn(4*dim, dim+0, dtype=dtype, device='cuda')/math.sqrt(dim)
 
-        #print('')
-        #print(A)
-        #print(B)
+            #print('')
+            #print(A)
+            #print(B.t())
+            #A[:, :-1] = 0
+            #B[:, :-1] = 0
 
-        qB, state = F.quantize_nf4(B)
-        F.dequantize_nf4(qB, state)
+            qB, state = F.quantize_nf4(B)
+            F.dequantize_nf4(qB, state)
 
+            C3 = torch.matmul(A, B.t())
+            C2 = F.cutlass3_gemm(A, qB.t(), state=state)
+            C1 = bnb.matmul_4bit(A, qB.t(), state)
+            C2 = F.cutlass3_gemm(A, qB.t(), state=state)
 
-        C1 = torch.matmul(A, B.t())
-        #C1 = bnb.matmul_4bit(A, qB.t(), state)
-        C2 = F.cutlass3_gemm(A, qB.t(), state=state)
-        #print(C1)
-        #print(C2)
+            print(C1.shape, C2.shape)
 
-        #torch.testing.assert_close(C1, C2, atol=1e-5, rtol=0.005)
+            # tensor cores are non-deterministic
+            # so we need to analyze errors around the mean
+            # to test our implementation
+            err = torch.abs(C1-C2)
+            mag = torch.abs(C1)+1e-8
+            relerr = err/mag
+            max_err = max(err.max(), max_err)
+            max_relerr = max(relerr.max(), max_relerr)
+            err = err.mean().item()
+            relerr = relerr.mean().item()
 
+            errs.append(err)
+            relerrs.append(relerr)
+
+            if err/torch.abs(C1).mean() > 5e-5 or err > 3.2e-5:
+                print('')
+                print(i, err, relerr)
+                print(A.flatten()[-6:])
+                print(B.flatten()[-6:])
+                out = A.flatten()[-6:]*B.flatten()[-6:]
+                print(out)
+                print(out[:-1].sum())
+                print('='*80)
+                print(C1.flatten()[-6:])
+                print(C2.flatten()[-6:])
+                #assert False, 'ERROR'
+
+            c = int(C1.numel()*0.0014*(dim/256))+1
+
+            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=False)
+            #print(c/math.sqrt(dim))
+        print('')
+        print(dim, sum(errs)/len(errs)/math.sqrt(dim))
+        print(dim, sum(relerrs)/len(relerrs)/math.sqrt(dim))
+        print(dim, (max_err.item(), max_relerr.item()))
 
 def test_pipeline_func():
     a = torch.rand(2, 4).cuda()

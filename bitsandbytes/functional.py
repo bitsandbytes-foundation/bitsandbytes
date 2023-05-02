@@ -1385,10 +1385,12 @@ def cutlass3_gemm(
     #sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if state is None:
         Bshape = B.shape
+        bout = Bshape[1]
     else:
         Bshape = state[1]
+        bout = Bshape[0]
     if out is None:
-        out = torch.zeros(size=(A.shape[0], Bshape[1]), dtype=A.dtype, device=A.device)
+        out = torch.zeros(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
 
     sA = A.shape
     sB = B.shape
@@ -1464,7 +1466,7 @@ def cutlass3_gemm(
     if state is not None:
         m = Bshape[0]
         k = Bshape[1]
-        lda = Bshape[1]
+        lda = Bshape[0]
         ldc = Bshape[0]
         ldb = (ldb+1)//2
     #print(m, n, k, lda, ldb, ldc)
