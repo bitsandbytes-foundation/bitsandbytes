@@ -3145,7 +3145,6 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
     }
     ticktock = ticktock == 0 ? 1 : 0;
 
-    __syncthreads();
     if(warp_id == (WARPS-1))
       for(int k = 0; k < batch_size_warps; k++)
       {
