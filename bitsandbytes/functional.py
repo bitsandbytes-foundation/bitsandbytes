@@ -1467,7 +1467,7 @@ def cutlass3_gemm(
         lda = Bshape[1]
         ldc = Bshape[0]
         ldb = (ldb+1)//2
-    print(m, n, k, lda, ldb, ldc)
+    #print(m, n, k, lda, ldb, ldc)
     is_on_gpu([B, A, out])
     m = ct.c_int32(m)
     n = ct.c_int32(n)

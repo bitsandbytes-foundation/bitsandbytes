@@ -680,14 +680,14 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
 
 	int num_blocks = (m+31)/32;
 
-	cout << num_blocks << endl;
-	cout << lda << endl;
-	cout << ldb << endl;
-	cout << ldc << endl;
+	//cout << num_blocks << endl;
+	//cout << lda << endl;
+	//cout << ldb << endl;
+	//cout << ldc << endl;
 
-	cout << m << endl;
-	cout << n << endl;
-	cout << k << endl;
+	//cout << m << endl;
+	//cout << n << endl;
+	//cout << k << endl;
   //if(bits == 32)
     //gemm_device<T, 32, 128><<< num_blocks, 128, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //gemm_device<T, 32, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);

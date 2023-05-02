@@ -3061,9 +3061,8 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
   T local_A[1];
   T local_B[32];
 
-  const int a_tile_offset = (8*16 + 16);
-  const int b_tile_offset = (16*32 + 16);
-  const int c_tile_offset = 8*32 + 24;
+  const int a_tile_offset = (8*16);
+  const int b_tile_offset = (16*32);
 
   __shared__ T smem_A[2*batch_size_warps*8*16 + (2*16*(batch_size_warps-1))];
   __shared__ T smem_B[2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))];
@@ -3109,6 +3108,19 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
     for(int col = 0; col < 32; col++)
         smem_B[half_warp_lane + (half_warp_id*b_tile_offset) + (col*16)] = local_B[col];
   }
+  else if(warp_id < (WARPS-1))
+  {
+    local_A[0] = T(0.0);
+    smem_A[half_warp_lane + (half_warp_id*a_tile_offset)] = T(0.0);
+
+    #pragma unroll 32
+    for(int col = 0; col < 32; col++)
+      local_B[col] = T(0.0f);
+
+    #pragma unroll 32
+    for(int col = 0; col < 32; col++)
+        smem_B[half_warp_lane + (half_warp_id*b_tile_offset) + (col*16)] = T(0.0f);
+  }
   ticktock = ticktock == 0 ? 1 : 0;
 
   for(int base_idx = 0; base_idx < K; base_idx+=blockDim.x-32)
@@ -3129,6 +3141,19 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
       #pragma unroll 32
       for(int col = 0; col < 32; col++)
           smem_B[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*b_tile_offset) + (col*16)] = local_B[col];
+    }
+    else if(warp_id < (WARPS-1))
+    {
+      local_A[0] = T(0.0);
+      smem_A[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*a_tile_offset)] =  0.0f;
+
+      #pragma unroll 32
+      for(int col = 0; col < 32; col++)
+        local_B[col] = 0.0f;
+
+      #pragma unroll 32
+      for(int col = 0; col < 32; col++)
+        smem_B[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*b_tile_offset) + (col*16)] = 0.0f;
     }
     ticktock = ticktock == 0 ? 1 : 0;
 
