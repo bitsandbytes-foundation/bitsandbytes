@@ -3061,8 +3061,8 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
   T local_A[1];
   T local_B[32];
 
-  const int a_tile_offset = (8*16);
-  const int b_tile_offset = (16*32);
+  const int a_tile_offset = (8*16 + 16);
+  const int b_tile_offset = (16*32 + 16);
 
   __shared__ T smem_A[2*batch_size_warps*8*16 + (2*16*(batch_size_warps-1))];
   __shared__ T smem_B[2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))];
@@ -3074,23 +3074,10 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
 
    wmma::fill_fragment(c_frag, 0.0f);
 
-
-  //for(int i = threadIdx.x; i < 16*16*WARPS; i+=blockDim.x)
-  //  smem_A[i] = T(0);
-
-  //for(int i = threadIdx.x; i < 16*16*WARPS; i+=blockDim.x)
-  //  smem_B[i] = T(0);
-
   for(int i = threadIdx.x; i < 8*32; i+=blockDim.x)
     smem_C[i] = T(0);
   __syncthreads();
 
-  //#pragma unroll 8
-  //for(int k = 0; k < 8; k++)
-    //local_C[k] = T(0);
-
-  //int block_idx = 0;
-  //for(int base_idx = 0; base_idx < K; base_idx+=blockDim.x)
   int ticktock = 0;
   int idx = 0 + threadIdx.x;
   // prefetch
@@ -3102,29 +3089,29 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
     for(int col = 0; col < 32; col++)
       local_B[col] = B[(col_offset+col)*ldb+idx];
 
-    smem_A[half_warp_lane + (half_warp_id*a_tile_offset)] = local_A[0];
+    smem_A[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*a_tile_offset)] = local_A[0];
 
     #pragma unroll 32
     for(int col = 0; col < 32; col++)
-        smem_B[half_warp_lane + (half_warp_id*b_tile_offset) + (col*16)] = local_B[col];
+        smem_B[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*b_tile_offset) + (col*16)] = local_B[col];
   }
   else if(warp_id < (WARPS-1))
   {
     local_A[0] = T(0.0);
-    smem_A[half_warp_lane + (half_warp_id*a_tile_offset)] = T(0.0);
+    smem_A[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*a_tile_offset)] =  0.0f;
 
     #pragma unroll 32
     for(int col = 0; col < 32; col++)
-      local_B[col] = T(0.0f);
+      local_B[col] = 0.0f;
 
     #pragma unroll 32
     for(int col = 0; col < 32; col++)
-        smem_B[half_warp_lane + (half_warp_id*b_tile_offset) + (col*16)] = T(0.0f);
+      smem_B[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*b_tile_offset) + (col*16)] = 0.0f;
   }
   ticktock = ticktock == 0 ? 1 : 0;
 
   //for(int base_idx = blockDim.x-32; base_idx < K; base_idx+=blockDim.x-32)
-  for(int base_idx = 0; base_idx < K; base_idx+=blockDim.x-32)
+  for(int base_idx = blockDim.x-32; base_idx < K; base_idx+=blockDim.x-32)
   {
     idx = base_idx + threadIdx.x;
 
@@ -3156,7 +3143,7 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
       for(int col = 0; col < 32; col++)
         smem_B[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*b_tile_offset) + (col*16)] = 0.0f;
     }
-    //ticktock = ticktock == 0 ? 1 : 0;
+    ticktock = ticktock == 0 ? 1 : 0;
 
     __syncthreads();
     if(warp_id == (WARPS-1))
@@ -3168,14 +3155,15 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
       }
   }
 
-  //__syncthreads();
-  //if(warp_id == (WARPS-1))
-  //  for(int k = 0; k < batch_size_warps; k++)
-  //  {
-  //    wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
-  //    wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
-  //    wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-  //  }
+  __syncthreads();
+  ticktock = ticktock == 0 ? 1 : 0;
+  if(warp_id == (WARPS-1))
+    for(int k = 0; k < batch_size_warps; k++)
+    {
+      wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+      wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
+      wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+    }
   __syncthreads();
 
   // 129 mu
