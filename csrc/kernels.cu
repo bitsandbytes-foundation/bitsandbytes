@@ -3061,10 +3061,10 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
   T local_A[1];
   T local_B[32];
 
-  const int a_tile_offset = (8*16 + 16);
+  const int a_tile_offset = (16 + 16);
   const int b_tile_offset = (16*32 + 16);
 
-  __shared__ T smem_A[2*batch_size_warps*8*16 + (2*16*(batch_size_warps-1))];
+  __shared__ T smem_A[8*16 + (4*16*(batch_size_warps-1))];
   __shared__ T smem_B[2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))];
   __shared__ T smem_C[8*32];
 
