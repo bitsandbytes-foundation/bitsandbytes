@@ -2376,8 +2376,8 @@ def test_cutlass3_gemm(dtype):
             #print('')
             #print(A)
             #print(B.t())
-            #A[:, :-3] = 0
-            #B[:, :-3] = 0
+            #A[:, :-1] = 0
+            #B[:, :-1] = 0
 
 
             C1 = torch.matmul(A, B.t())
@@ -2399,7 +2399,7 @@ def test_cutlass3_gemm(dtype):
 
             #if err/torch.abs(C1).mean() > 5e-5 or err > 3.2e-5:
             #    print('')
-            #    print(i, err, mag.item(), relerr.item())
+            #    print(i, err, relerr)
             #    print(A.flatten()[-6:])
             #    print(B.flatten()[-6:])
             #    out = A.flatten()[-6:]*B.flatten()[-6:]
@@ -2412,7 +2412,7 @@ def test_cutlass3_gemm(dtype):
 
             c = int(C1.numel()*0.0014*(dim/256))+1
 
-            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=False)
+            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=True)
             #print(c/math.sqrt(dim))
         print('')
         print(dim, sum(errs)/len(errs)/math.sqrt(dim))

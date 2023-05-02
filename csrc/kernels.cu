@@ -3058,8 +3058,8 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
   const int half_warp_lane = threadIdx.x % 16;
   const int batch_size_warps = (WARPS-1)*2;
 
-  T local_A[1];
-  T local_B[32];
+  T local_A[2];
+  T local_B[64];
 
   const int a_tile_offset = 16;
   const int b_tile_offset = (16*32 + 16);
@@ -3075,14 +3075,32 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
 
   int ticktock = 0;
   int idx = 0 + threadIdx.x;
+  int loaded_values = 0;
   // prefetch
   if(idx < K && warp_id < (WARPS-1))
   {
-    local_A[0] = A[idx];
+    if(loaded_values == 0)
+    {
+      local_A[0] = A[idx];
+      local_A[1] = A[idx+blockDim.x-32];
 
-    #pragma unroll 32
-    for(int col = 0; col < 32; col++)
-      local_B[col] = B[(col_offset+col)*ldb+idx];
+      #pragma unroll 32
+      for(int col = 0; col < 32; col++)
+      {
+        local_B[col] = B[(col_offset+col)*ldb+idx];
+        local_B[col+32] = B[(col_offset+col)*ldb+idx+blockDim.x-32];
+      }
+      loaded_values = 1;
+    }
+    else
+    {
+      local_A[0] = local_A[1];
+      loaded_values--;
+
+      #pragma unroll 32
+      for(int col = 0; col < 32; col++)
+        local_B[col] = local_B[col+32];
+    }
 
     smem_A[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*a_tile_offset)] = local_A[0];
 
@@ -3113,11 +3131,35 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
     __syncthreads();
     if(idx < K && warp_id < (WARPS-1))
     {
-      local_A[0] = A[idx];
+      //local_A[0] = A[idx];
 
-      #pragma unroll 32
-      for(int col = 0; col < 32; col++)
-        local_B[col] = B[(col_offset+col)*ldb+idx];
+      //#pragma unroll 32
+      //for(int col = 0; col < 32; col++)
+      //  local_B[col] = B[(col_offset+col)*ldb+idx];
+      if(loaded_values == 0)
+      {
+        local_A[0] = A[idx];
+        local_A[1] = A[idx+blockDim.x-32];
+
+        #pragma unroll 32
+        for(int col = 0; col < 32; col++)
+        {
+          local_B[col] = B[(col_offset+col)*ldb+idx];
+          local_B[col+32] = B[(col_offset+col)*ldb+idx+blockDim.x-32];
+        }
+        loaded_values = 1;
+      }
+      else
+      {
+        local_A[0] = local_A[1];
+        loaded_values--;
+
+        #pragma unroll 32
+        for(int col = 0; col < 32; col++)
+          local_B[col] = local_B[col+32];
+
+
+      }
 
       smem_A[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*a_tile_offset)] = local_A[0];
 
