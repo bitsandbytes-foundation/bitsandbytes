@@ -2358,9 +2358,9 @@ def test_normal_map_tree():
 #@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
 @pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
 def test_cutlass3_gemm(dtype):
-    #for dim in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
+    for dim in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
     #for dim in [4096, 5120, 6656, 8192]:
-    for dim in [4096]:
+    #for dim in [4096]:
         errs = []
         relerrs = []
         max_err = 0
