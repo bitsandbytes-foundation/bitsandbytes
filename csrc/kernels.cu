@@ -3123,6 +3123,7 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
   }
   ticktock = ticktock == 0 ? 1 : 0;
 
+  //for(int base_idx = blockDim.x-32; base_idx < K; base_idx+=blockDim.x-32)
   for(int base_idx = 0; base_idx < K; base_idx+=blockDim.x-32)
   {
     idx = base_idx + threadIdx.x;
@@ -3155,8 +3156,9 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
       for(int col = 0; col < 32; col++)
         smem_B[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*b_tile_offset) + (col*16)] = 0.0f;
     }
-    ticktock = ticktock == 0 ? 1 : 0;
+    //ticktock = ticktock == 0 ? 1 : 0;
 
+    __syncthreads();
     if(warp_id == (WARPS-1))
       for(int k = 0; k < batch_size_warps; k++)
       {
@@ -3166,10 +3168,21 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
       }
   }
 
+  //__syncthreads();
+  //if(warp_id == (WARPS-1))
+  //  for(int k = 0; k < batch_size_warps; k++)
+  //  {
+  //    wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+  //    wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
+  //    wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+  //  }
+  __syncthreads();
+
   // 129 mu
   if(warp_id == (WARPS-1))
     wmma::store_matrix_sync(&(smem_C[0]), c_frag, 32, wmma::mem_row_major);
   __syncthreads();
+
 
   //if(threadIdx.x >= 16){ return; }
   //printf("%i %f\n", threadIdx.x, (float)smem_C[threadIdx.x]);
