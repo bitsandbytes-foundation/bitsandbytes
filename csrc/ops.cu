@@ -663,16 +663,6 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 }
 
 
-void pipeline_test(float *A, float *B, size_t n, size_t batch_size)
-{
-
-  int threads = 256;
-  int num_blocks = (n+(256*batch_size)+1)/(batch_size*256);
-
-  with_staging_unified<2><<<num_blocks, threads>>>(A, B, n, batch_size);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
 
 
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
@@ -717,9 +707,24 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
   //kgemm_4bit_inference<T, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
 }
 
+template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
+{
+  int threads = 512;
+  int blocks = n/threads;
+  blocks = n % threads == 0 ? blocks : blocks + 1;
+  blocks = blocks > 65535 ? 65535 : blocks;
+  kfunc<T, FUNC><<<blocks, 512>>>(A, B, value, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
+
+template void func<float, FILL>(float *A, float *B, float value, long n);
+template void func<unsigned char, FILL>(unsigned char *A, unsigned char *B, unsigned char value, long n);
+template void func<float, ARANGE>(float *A, float *B, float value, long n);
+template void func<float, _MUL>(float *A, float *B, float value, long n);
 
 template void gemm_4bit_inference<half>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 //template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc, int bits);

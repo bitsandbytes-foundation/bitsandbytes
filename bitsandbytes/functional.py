@@ -130,6 +130,61 @@ class Cusparse_Context:
             cls._instance.initialize()
         return cls._instance
 
+dtype2bytes = {}
+dtype2bytes[torch.float32] = 4
+dtype2bytes[torch.float16] = 2
+dtype2bytes[torch.bfloat16] = 2
+dtype2bytes[torch.uint8] = 1
+dtype2bytes[torch.int8] = 1
+
+def get_paged(*shape, dtype=torch.float32, device=torch.device('cuda', index=0)):
+    num_bytes = dtype2bytes[dtype]*prod(shape)
+    cuda_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
+    c_ptr = ct.cast(cuda_ptr, ct.POINTER(ct.c_int))
+    new_array = np.ctypeslib.as_array(c_ptr, shape=shape)
+    out = torch.frombuffer(new_array, dtype=dtype, count=prod(shape))
+    out.is_paged = True
+    out.page_deviceid = device.index
+    return out
+
+def prefetch_tensor(A, to_cpu=False):
+    assert A.is_paged, 'Only paged tensors can be prefetched!'
+    if to_cpu:
+        deviceid = -1
+    else:
+        deviceid = A.page_deviceid
+
+    num_bytes = dtype2bytes[A.dtype]*A.numel()
+    lib.cprefetch(get_ptr(A), ct.c_size_t(num_bytes), ct.c_int32(deviceid))
+
+def elementwise_func(func_name, A, B, value, prefetch=True):
+    func = None
+    if A.dtype == torch.float32:
+        func = getattr(lib, f'c{func_name}_fp32', None)
+        cvalue = ct.c_float(value)
+    elif A.dtype == torch.uint8:
+        func = getattr(lib, f'c{func_name}_uint8', None)
+        cvalue = ct.c_uint8(value)
+
+    if func is None: raise NotImplementedError(f'Function not implemented: {func_name}')
+
+    is_managed = getattr(A, 'is_managed', False)
+    if is_managed and prefetch:
+        prefetch_tensor(A)
+        if B is not None: prefetch_tensor(B)
+
+    func(get_ptr(A), get_ptr(B), cvalue, ct.c_int64(A.numel()))
+    if A.is_paged or B.is_paged:
+        # paged function are fully asynchronous
+        # if we return from this function, we want to the tensor
+        # to be in the correct state, that is the final state after the
+        # operation occured. So we synchronize.
+        torch.cuda.synchronize()
+
+def fill(A, value, device=None, prefetch=True): elementwise_func('fill', A, None, value)
+def arange(A, device=None): elementwise_func('arange', A, None, 0)
+def _mul(A, B, device=None): elementwise_func('_mul', A, B, 0)
+
 
 def create_linear_map(signed=True, total_bits=8, add_zero=True):
     sign = (-1.0 if signed else 0.0)

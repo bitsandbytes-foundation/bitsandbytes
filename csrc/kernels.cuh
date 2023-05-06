@@ -122,23 +122,9 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 
 template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 
-//template <class MShape, class NShape, class KShape,
-//          class TA, class AStride, class ABlockLayout, class AThreadLayout,
-//          class TB, class BStride, class BBlockLayout, class BThreadLayout,
-//          class TC, class CStride, class CBlockLayout, class CThreadLayout,
-//          class Alpha, class Beta>
-//__global__ static
-//__launch_bounds__(decltype(size(CThreadLayout{}))::value)
-//void
-//gemm_device(MShape M, NShape N, KShape K,
-//            TA const* A, AStride dA, ABlockLayout blockA, AThreadLayout tA,
-//            TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
-//            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
-//            Alpha alpha, Beta beta);
-template <size_t stages_count /* Pipeline with stages_count stages */>
-__global__ void with_staging_unified(float const* global_in, float * global_out, size_t size, size_t batch_sz);
-
 template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc);
 template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize);
+
+template <typename T, int FUNC> __global__ void kfunc(T *A, T *B, T value, long n);
 
 #endif

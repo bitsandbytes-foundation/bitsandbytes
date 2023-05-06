@@ -93,6 +93,13 @@ typedef enum DataType_t
   NF4 = 2,
 } DataType_t;
 
+typedef enum Funcs_t
+{
+	FILL = 0,
+	ARANGE = 1,
+	_MUL = 2,
+} Funcs_t;
+
 class Context
 {
     public:
@@ -193,6 +200,6 @@ void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rows
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits);
 template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize);
 
+template <typename T, int FUNC> void func(T *A, T *B, T value, long n);
 
-void pipeline_test(float *A, float *B, size_t n, size_t batch_size);
 #endif

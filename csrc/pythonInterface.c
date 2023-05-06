@@ -28,6 +28,14 @@ void gemm_host_fp16(int M, int N, int K, half * A,  half* B,  half * out,  int l
 void gemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
 { gemm_4bit_inference<half>(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
 
+#define MAKE_ELEMENTWISE_FUNC(fname, type_name, ctype, FUNC) \
+void fname##_##type_name(ctype *A, ctype *B, ctype value, long n){ func<ctype, FUNC>(A, B, value, n); } \
+
+MAKE_ELEMENTWISE_FUNC(fill, fp32, float, FILL)
+MAKE_ELEMENTWISE_FUNC(fill, uint8, unsigned char, FILL)
+MAKE_ELEMENTWISE_FUNC(arange, fp32, float, ARANGE)
+MAKE_ELEMENTWISE_FUNC(_mul, fp32, float, _MUL)
+
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
 void fname##32bit_g##gbits(gtype *g, gtype *p, \
@@ -314,7 +322,6 @@ extern "C"
 
 	void cextractOutliers_turing(char * A, int *idx, char *out, int idx_size, int rows, int cols){ extractOutliers_turing(A, idx, out, idx_size, rows, cols); }
 	void cextractOutliers_ampere(char * A, int *idx, char *out, int idx_size, int rows, int cols){ extractOutliers_ampere(A, idx, out, idx_size, rows, cols); }
-	void cpipeline_test(float *A, float *B, size_t n, size_t batch_size){ pipeline_test(A, B, n, batch_size); }
 
 	//void cgemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
 	//{ gemm_host_fp32(M, N, K, A, B, out, lda, ldb, ldc); }
@@ -324,6 +331,29 @@ extern "C"
 
 	void cgemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
 	{ gemm_4bit_inference(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize); }
+
+	void *cget_managed_ptr(size_t bytes)
+	{
+		void *ptr;
+		CUDA_CHECK_RETURN(cudaMallocManaged(&ptr, bytes, cudaMemAttachHost));
+		CUDA_CHECK_RETURN(cudaPeekAtLastError());
+
+		return ptr;
+	}
+
+	void cprefetch(void *ptr, size_t bytes, int device)
+	{
+		CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, device, 0));
+		CUDA_CHECK_RETURN(cudaPeekAtLastError());
+	}
+
+  #define CMAKE_ELEMENTWISE_FUNC(fname, type_name, ctype, FUNC) \
+	void c##fname##_##type_name(ctype *A, ctype *B, ctype value, long n){ fname##_##type_name(A, B, value, n); } \
+
+	CMAKE_ELEMENTWISE_FUNC(fill, fp32, float, FILL)
+	CMAKE_ELEMENTWISE_FUNC(fill, uint8, unsigned char, FILL)
+	CMAKE_ELEMENTWISE_FUNC(arange, fp32, float, ARANGE)
+	CMAKE_ELEMENTWISE_FUNC(_mul, fp32, float, _MUL)
 
 #endif
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }

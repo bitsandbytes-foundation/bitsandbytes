@@ -3522,49 +3522,23 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, i
 //}
 
 
-__device__ void compute(float* global_out, float const* shared_in)
+template <typename T, int FUNC> __global__ void kfunc(T *A, T *B, T value, long n)
 {
-
-}
-template <size_t stages_count /* Pipeline with stages_count stages */>
-__global__ void with_staging_unified(float const* global_in, float * global_out, size_t size, size_t batch_sz) {
-    auto grid = cooperative_groups::this_grid();
-    auto block = cooperative_groups::this_thread_block();
-    assert(size == batch_sz * grid.size()); // Assume input size fits batch_sz * grid_size
-
-    extern __shared__ float shared[]; // stages_count * block.size() * sizeof(int) bytes
-    size_t shared_offset[stages_count];
-    for (int s = 0; s < stages_count; ++s) shared_offset[s] = s * block.size();
-
-    __shared__ cuda::pipeline_shared_state<
-        cuda::thread_scope::thread_scope_block,
-        stages_count
-    > shared_state;
-    auto pipeline = cuda::make_pipeline(block, &shared_state);
-
-    auto block_batch = [&](size_t batch) -> int {
-        return block.group_index().x * block.size() + grid.size() * batch;
-    };
-
-    // compute_batch: next batch to process
-    // fetch_batch:  next batch to fetch from global memory
-    for (size_t compute_batch = 0, fetch_batch = 0; compute_batch < batch_sz; ++compute_batch) {
-        // The outer loop iterates over the computation of the batches
-        for (; fetch_batch < batch_sz && fetch_batch < (compute_batch + stages_count); ++fetch_batch) {
-            // This inner loop iterates over the memory transfers, making sure that the pipeline is always full
-            pipeline.producer_acquire();
-            size_t shared_idx = fetch_batch % stages_count;
-            size_t batch_idx = fetch_batch;
-            size_t block_batch_idx = block_batch(batch_idx);
-            cuda::memcpy_async(block, shared + shared_offset[shared_idx], global_in + block_batch_idx, sizeof(float) * block.size(), pipeline);
-            pipeline.producer_commit();
-        }
-        pipeline.consumer_wait();
-        int shared_idx = compute_batch % stages_count;
-        int batch_idx = compute_batch;
-        compute(global_out + block_batch(batch_idx), shared + shared_offset[shared_idx]);
-        pipeline.consumer_release();
+  for(long i = (blockDim.x*blockIdx.x) + threadIdx.x; i < n; i+=(blockDim.x*gridDim.x))
+  {
+    switch(FUNC)
+    {
+      case FILL: 
+        A[i] = (T)value;
+        break;
+      case ARANGE:
+        A[i] = (T)i;
+        break;
+      case _MUL:
+        A[i] = A[i]*B[i];
+        break;
     }
+  }
 }
 
 
@@ -3572,19 +3546,10 @@ __global__ void with_staging_unified(float const* global_in, float * global_out,
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-//template <class MShape, class NShape, class KShape,
-//          class TA, class AStride, class ABlockLayout, class AThreadLayout,
-//          class TB, class BStride, class BBlockLayout, class BThreadLayout,
-//          class TC, class CStride, class CBlockLayout, class CThreadLayout,
-//          class Alpha, class Beta>
-//__global__ static
-//__launch_bounds__(decltype(size(CThreadLayout{}))::value)
-//void
-//gemm_device(MShape M, NShape N, KShape K,
-//            TA const* A, AStride dA, ABlockLayout blockA, AThreadLayout tA,
-//            TB const* B, BStride dB, BBlockLayout blockB, BThreadLayout tB,
-//            TC      * out, CStride dC, CBlockLayout       , CThreadLayout tC,
-//            half alpha, half beta);
+template __global__ void kfunc<float, FILL>(float *A, float *B, float value, long n);
+template __global__ void kfunc<unsigned char, FILL>(unsigned char *A, unsigned char *B, unsigned char value, long n);
+template __global__ void kfunc<float, ARANGE>(float *A, float *B, float value, long n);
+template __global__ void kfunc<float, _MUL>(float *A, float *B, float value, long n);
 
 // these are not used and make no sense, but the compiler needs them
 //template __global__ void gemm_device<float, 16, 128>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
@@ -3611,9 +3576,6 @@ template __global__ void gemm_device<half, 16, 96>(int M, int N, int K, half * _
 template __global__ void kgemm_4bit_inference<half, 128>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 template __global__ void kgemm_4bit_inference<half, 160>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 
-
-//template __global__ void kMatmul_inference_4bit<NF4, half, half, half>(half *A, unsigned char *B, half *out, int lda, int ldb, int rowsA, int colsA, int colsB);
-template __global__ void with_staging_unified<2>(float const* global_in, float * global_out, size_t size, size_t batch_sz);
 template __global__ void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 template __global__ void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 

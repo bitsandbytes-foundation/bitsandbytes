@@ -2489,8 +2489,38 @@ def test_gemm_4bit(dtype):
         print(dim, sum(relerrs)/len(relerrs)/math.sqrt(dim))
         print(dim, (max_err.item(), max_relerr.item()))
 
-def test_pipeline_func():
-    a = torch.rand(2, 4).cuda()
-    out = F.pipeline_test(a, 2)
-    print(a)
-    print(out)
+def test_managed():
+    n = 32*10
+    A = F.get_paged(n, n, dtype=torch.float32)
+    B = F.get_paged(n, n, dtype=torch.uint8)
+    B2 = F.get_paged(n, n, dtype=torch.float32)
+    assert A.is_paged
+    assert B.is_paged
+    assert A.page_deviceid==0
+    assert B.page_deviceid==0
+    F.fill(A, 17.0)
+    F.fill(B, 17)
+    F.fill(B2, 2)
+    assert (A==17).sum().item() == n*n
+    assert (B==17).sum().item() == n*n
+    C = A*B.float()
+    assert (C==289).sum().item() == n*n
+    F._mul(A, B2)
+    F._mul(A, B2)
+    F._mul(A, B2)
+    assert (A==17*(2**3)).sum().item() == n*n
+   # F.prefetch_tensor(A)
+   # F.prefetch_tensor(B)
+
+
+   # F.fill(B2, 17.0)
+   # F._mul(A, B2)
+
+   # F.prefetch_tensor(A, to_cpu=True)
+   # F.prefetch_tensor(B, to_cpu=True)
+   # F.prefetch_tensor(B2, to_cpu=True)
+   # torch.cuda.synchronize()
+
+   # assert (A==17).sum().item() == n*n
+
+   # torch.testing.assert_allclose(A, torch.ones(A.shape)*289)
