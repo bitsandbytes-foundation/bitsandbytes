@@ -172,8 +172,8 @@ def test_dynamic_blockwise_quantization(nested, blocksize):
     relerr = sum(reldiffs)/len(reldiffs)
     assert abserr < 0.011
     assert relerr < 0.018
-    print('nested=', nested, 'randn', blocksize, sum(diffs)/len(diffs))
-    print('nested=', nested, 'randn', blocksize, sum(reldiffs)/len(reldiffs))
+    #print('nested=', nested, 'randn', blocksize, sum(diffs)/len(diffs))
+    #print('nested=', nested, 'randn', blocksize, sum(reldiffs)/len(reldiffs))
 
     diffs = []
     for i in range(100):
@@ -189,8 +189,8 @@ def test_dynamic_blockwise_quantization(nested, blocksize):
     relerr = sum(reldiffs)/len(reldiffs)
     assert abserr < 0.0035
     assert relerr < 0.015
-    print('nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
-    print('nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
+    #print('nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
+    #print('nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 def test_dynamic_blockwise_stochastic_quantization():
@@ -320,7 +320,7 @@ def test_approx_igemm(dim1, dim2, quant_methods, batched):
     dim2 = dim2 - (dim2 % 32)
     errors = []
     relerrors = []
-    print("")
+    #print("")
     for i in range(5):
         if batched:
             A = torch.normal(0, 0.5, size=(32, dim1, dim2 // 32), device="cuda")
@@ -349,8 +349,8 @@ def test_approx_igemm(dim1, dim2, quant_methods, batched):
         relerr = err / torch.abs(out2)
         errors.append(err.mean().item())
         relerrors.append(relerr.mean().item())
-    print(mean(errors))
-    print(mean(relerrors))
+    #print(mean(errors))
+    #print(mean(relerrors))
 
 
 def test_stable_embedding():

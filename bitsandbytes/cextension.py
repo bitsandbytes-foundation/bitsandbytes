@@ -27,7 +27,6 @@ try:
     lib.get_context.restype = ct.c_void_p
     lib.get_cusparse.restype = ct.c_void_p
     lib.cget_managed_ptr.restype = ct.c_void_p
-    lib.cget_stream.restype = ct.c_void_p
     COMPILED_WITH_CUDA = True
 except AttributeError:
     warn("The installed version of bitsandbytes was compiled without GPU support. "

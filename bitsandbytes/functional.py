@@ -83,6 +83,27 @@ if COMPILED_WITH_CUDA:
         lib.cadagrad_8bit_blockwise_fp16,
     )
 
+class GlobalPageManager:
+    _instance = None
+
+    def __init__(self):
+        raise RuntimeError("Call get_instance() instead")
+
+    def initialize(self):
+        self.paged_tensors = []
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls.__new__(cls)
+            cls._instance.initialize()
+        return cls._instance
+
+    def prefetch_all(self, to_cpu=False):
+        for t in self.paged_tensors:
+            prefetch_tensor(t, to_cpu)
+
+
 
 class CUBLAS_Context:
     _instance = None
@@ -142,7 +163,7 @@ def get_paged(*shape, dtype=torch.float32, device=torch.device('cuda', index=0))
     cuda_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
     c_ptr = ct.cast(cuda_ptr, ct.POINTER(ct.c_int))
     new_array = np.ctypeslib.as_array(c_ptr, shape=shape)
-    out = torch.frombuffer(new_array, dtype=dtype, count=prod(shape))
+    out = torch.frombuffer(new_array, dtype=dtype, count=prod(shape)).view(shape)
     out.is_paged = True
     out.page_deviceid = device.index
     return out
@@ -415,10 +436,14 @@ def is_on_gpu(tensors):
     gpu_ids = set()
     for t in tensors:
         if t is None: continue # NULL pointers are fine
-        on_gpu &= t.device.type == 'cuda'
-        gpu_ids.add(t.device.index)
+        is_paged = getattr(t, 'is_paged', False)
+        on_gpu &= (t.device.type == 'cuda' or is_paged)
+        if not is_paged:
+            gpu_ids.add(t.device.index)
+    if not on_gpu:
+        raise TypeError(f'All input tensors need to be on the same GPU, but found some tensors to not be on a GPU:\n {[(t.shape, t.device) for t in tensors]}')
     if len(gpu_ids) > 1:
-        raise TypeError(f'Input tensors need to be on the same GPU, but found the following tensor and device combinations:{[(t.shape, t.device) for t in tensors]}')
+        raise TypeError(f'Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}')
     return on_gpu
 
 def get_ptr(A: Tensor) -> ct.c_void_p:
