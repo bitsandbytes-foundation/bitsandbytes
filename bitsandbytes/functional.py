@@ -100,7 +100,10 @@ class GlobalPageManager:
         return cls._instance
 
     def prefetch_all(self, to_cpu=False):
-        for t in self.paged_tensors:
+        # assume the first added, will be hte
+        # ones that are used first, so swap them in last
+        # in the case they are evicted again
+        for t in self.paged_tensors[::-1]:
             prefetch_tensor(t, to_cpu)
 
 
