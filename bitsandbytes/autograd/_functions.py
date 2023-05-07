@@ -456,7 +456,6 @@ class MatMul8bitLt(torch.autograd.Function):
 
         Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
-            #grad_B = torch.matmul(grad_output.t(), A)
             CxAt, SAt = F.transform(CAt, formatB, transpose=True)
             C32grad, Sgrad = F.transform(Cgradt, "col32", transpose=True)
             gradB32, SgradB32 = F.igemmlt(C32grad, CxAt, Sgrad, SAt)
