@@ -77,7 +77,7 @@ FILE=$(basename $URL)
 if [[ -n "$CUDA_VERSION" ]]; then
   echo $URL
   echo $FILE
-  if [ ! -f `pwd`/$url ]
+  if [ ! -f $FILE ]
     then
     wget $URL
   fi
