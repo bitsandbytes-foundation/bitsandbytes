@@ -9,10 +9,8 @@ from bitsandbytes.cuda_setup.main import CUDASetup
 
 
 setup = CUDASetup.get_instance()
-if not setup.initialized:
+if setup.initialized != True:
     setup.run_cuda_setup()
-    if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
-        setup.print_log_stack()
 
 lib = setup.lib
 try:
@@ -20,15 +18,25 @@ try:
         CUDASetup.get_instance().generate_instructions()
         CUDASetup.get_instance().print_log_stack()
         raise RuntimeError('''
-        CUDA Setup failed despite GPU being available. Inspect the CUDA SETUP outputs above to fix your environment!
-        If you cannot find any issues and suspect a bug, please open an issue with detals about your environment:
-        https://github.com/TimDettmers/bitsandbytes/issues''')
-    lib.cadam_8bit_blockwise_fp32
+        CUDA Setup failed despite GPU being available. Please run the following command to get more information:
+
+        python -m bitsandbytes
+
+        Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
+        to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
+        and open an issue at: https://github.com/TimDettmers/bitsandbytes/issues''')
+    lib.cadam32bit_grad_fp32 # runs on an error if the library could not be found -> COMPILED_WITH_CUDA=False
     lib.get_context.restype = ct.c_void_p
     lib.get_cusparse.restype = ct.c_void_p
     lib.cget_managed_ptr.restype = ct.c_void_p
     COMPILED_WITH_CUDA = True
-except AttributeError:
+except AttributeError as ex:
     warn("The installed version of bitsandbytes was compiled without GPU support. "
-        "8-bit optimizers and GPU quantization are unavailable.")
+        "8-bit optimizers, 8-bit multiplication, and GPU quantization are unavailable.")
     COMPILED_WITH_CUDA = False
+    print(str(ex))
+
+
+# print the setup details after checking for errors so we do not print twice
+if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
+    setup.print_log_stack()

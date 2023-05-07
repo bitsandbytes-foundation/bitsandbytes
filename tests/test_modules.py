@@ -44,7 +44,7 @@ def assert_all_approx_close(a, b, atol=1e-8, rtol=1e-5, count=10):
     sumval = (idx == 0).sum().item()
     if sumval > count:
         print(f"Too many values not close: assert {sumval} < {count}")
-        torch.testing.assert_allclose(a, b, rtol, atol)
+        torch.testing.assert_close(a, b, rtol, atol)
 
 
 class LinearFunction(torch.autograd.Function):
@@ -353,6 +353,7 @@ def test_linear8bitlt_accumulated_gradient():
             assert l1[0].state.CxB is not None
             assert l1[1].state.CxB is not None
 
+        print(i)
         if i > 0 and i % acc_steps == 0:
             opt1.step()
             opt1.zero_grad(True)
@@ -368,8 +369,8 @@ def test_linear8bitlt_accumulated_gradient():
             l1[0].weight.data.copy_(l2[0].weight.data)
             l1[1].weight.data.copy_(l2[1].weight.data)
         else:
-            torch.testing.assert_allclose(l1[0].weight.grad, l2[0].weight.grad)
-            torch.testing.assert_allclose(l1[1].weight.grad, l2[1].weight.grad)
+            torch.testing.assert_close(l1[0].weight.grad, l2[0].weight.grad)
+            torch.testing.assert_close(l1[1].weight.grad, l2[1].weight.grad)
 
 
 @pytest.mark.parametrize("threshold", [0.0, 2.0])
@@ -478,7 +479,7 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         grad_ref = grad_proj.flatten(2) @ w2.half() @ w1.half()
         scale = grad_ref.abs().mean()
 
-        torch.testing.assert_allclose(b1.grad, grad_ref, rtol=0, atol=0.05 * scale)
+        torch.testing.assert_close(b1.grad, grad_ref, rtol=0, atol=0.05 * scale)
         idx = torch.isclose(b1.grad, grad_ref, atol=0.01 * scale, rtol=0.1)
         assert (idx == 0).sum().item() <= b1.numel() * 0.005
 
@@ -559,11 +560,11 @@ def test_kbit_backprop(module):
         relerrs2.append(relerr2.mean().item())
 
         if isinstance(module, bnb.nn.Linear8bitLt):
-            torch.testing.assert_allclose(grad1, grad2, atol=0.008, rtol=0.05)
-            torch.testing.assert_allclose(bgrad1, bgrad2, atol=0.008, rtol=0.05)
+            torch.testing.assert_close(grad1, grad2, atol=0.008, rtol=0.05)
+            torch.testing.assert_close(bgrad1, bgrad2, atol=0.008, rtol=0.05)
         else:
-            torch.testing.assert_allclose(grad1, grad2, atol=0.015, rtol=0.05)
-            torch.testing.assert_allclose(bgrad1, bgrad2, atol=0.02, rtol=0.05)
+            torch.testing.assert_close(grad1, grad2, atol=0.015, rtol=0.05)
+            torch.testing.assert_close(bgrad1, bgrad2, atol=0.02, rtol=0.05)
         ref.zero_grad()
         kbit.zero_grad()
 
@@ -573,5 +574,40 @@ def test_kbit_backprop(module):
     print('grad', sum(errs2)/len(errs2))
     print('rel out', sum(relerrs1)/len(relerrs1))
     print('rel grad', sum(relerrs2)/len(relerrs2))
+
+def test_fp8linear():
+
+    b = 10
+    h = 1024
+    inp = torch.randn(b, h).cuda()
+    fp32 = torch.nn.Linear(h, h*2).cuda()
+    fp8 = bnb.research.nn.LinearFP8Mixed(h, h*2).cuda()
+    fp32b = torch.nn.Linear(h*2, h).cuda()
+    fp8b = bnb.research.nn.LinearFP8Mixed(h*2, h).cuda()
+
+    fp8.weight.data.copy_(fp32.weight.data)
+    fp8.bias.data.copy_(fp32.bias.data)
+    fp8b.weight.data.copy_(fp32b.weight.data)
+    fp8b.bias.data.copy_(fp32b.bias.data)
+
+    a = fp32b(torch.nn.functional.gelu(fp32(inp)))
+    b = fp8b(torch.nn.functional.gelu(fp8(inp)))
+
+    err = (a-b).abs().mean()
+
+    a.mean().backward()
+    b.mean().backward()
+
+    graderr = (fp8.weight.grad-fp32.weight.grad).abs().mean()
+    bgraderr = (fp8.bias.grad-fp32.bias.grad).abs().mean()
+
+    assert err < 0.05
+    assert graderr < 0.00002
+    assert bgraderr < 0.00002
+
+
+
+
+
 
 

@@ -12,10 +12,12 @@ URL116=https://developer.download.nvidia.com/compute/cuda/11.6.2/local_installer
 URL117=https://developer.download.nvidia.com/compute/cuda/11.7.0/local_installers/cuda_11.7.0_515.43.04_linux.run
 URL118=https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
 URL120=https://developer.download.nvidia.com/compute/cuda/12.0.0/local_installers/cuda_12.0.0_525.60.13_linux.run
+URL121=https://developer.download.nvidia.com/compute/cuda/12.1.0/local_installers/cuda_12.1.0_530.30.02_linux.run
 
 
 CUDA_VERSION=$1
 BASE_PATH=$2
+EXPORT_BASHRC=$3
 
 if [[ -n "$CUDA_VERSION" ]]; then
   if   [[ "$CUDA_VERSION" -eq "92" ]]; then
@@ -60,11 +62,14 @@ if [[ -n "$CUDA_VERSION" ]]; then
   elif [[ "$CUDA_VERSION" -eq "120" ]]; then
     URL=$URL120
     FOLDER=cuda-12.0
+  elif [[ "$CUDA_VERSION" -eq "121" ]]; then
+    URL=$URL121
+    FOLDER=cuda-12.1
   else
-    echo "argument error: No cuda version passed as input. Choose among: {111, 115}"
+    echo "argument error: No cuda version passed as input. Choose among versions 92 to 121"
   fi
 else
-    echo "argument error: No cuda version passed as input. Choose among: {111, 115}"
+    echo "argument error: No cuda version passed as input. Choose among versions 92 to 112"
 fi
 
 FILE=$(basename $URL)
@@ -72,11 +77,13 @@ FILE=$(basename $URL)
 if [[ -n "$CUDA_VERSION" ]]; then
   echo $URL
   echo $FILE
-  wget $URL
+  #wget $URL
   bash $FILE --no-drm --no-man-page --override --toolkitpath=$BASE_PATH/$FOLDER/ --toolkit --silent
-  echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$BASE_PATH/$FOLDER/lib64/" >> ~/.bashrc
-  echo "export PATH=$PATH:$BASE_PATH/$FOLDER/bin/" >> ~/.bashrc
-  source ~/.bashrc
+  if [ "$EXPORT_BASHRC" -eq "1" ]; then
+    echo "export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$BASE_PATH/$FOLDER/lib64" >> ~/.bashrc
+    echo "export PATH=\$PATH:$BASE_PATH/$FOLDER/bin" >> ~/.bashrc
+    source ~/.bashrc
+  fi
 else
   echo ""
 fi

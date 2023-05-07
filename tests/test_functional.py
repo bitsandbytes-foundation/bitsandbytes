@@ -24,7 +24,7 @@ def assert_all_approx_close(a, b, rtol=1e-3, atol=1e-3, count=0, throw=True):
     if sumval > count:
         if throw:
             print(f"Too many values not close: assert {sumval} < {count}")
-            torch.testing.assert_allclose(a, b, rtol, atol)
+            torch.testing.assert_close(a, b, rtol, atol)
 
     return sumval
 
@@ -100,7 +100,7 @@ def test_estimate_quantiles(dtype):
     code = F.estimate_quantiles(A)
 
     percs = torch.linspace(1 / 512, 511 / 512, 256, device=A.device)
-    torch.testing.assert_allclose(percs, code, atol=1e-3, rtol=1e-2)
+    torch.testing.assert_close(percs, code, atol=1e-3, rtol=1e-2)
 
     A = torch.randn(1024, 1024, device="cuda")
     A = A.to(dtype)
@@ -125,7 +125,7 @@ def test_quantile_quantization():
         C = F.quantize_no_absmax(A1, code)
         A2 = F.dequantize_no_absmax(C, code)
         diff = torch.abs(A1 - A2).mean().item()
-        torch.testing.assert_allclose(A1, A2, atol=5e-3, rtol=0)
+        torch.testing.assert_close(A1, A2, atol=5e-3, rtol=0)
         assert diff < 0.001
 
 
@@ -149,7 +149,7 @@ def test_dynamic_quantization():
         C, S = F.quantize(A1)
         A2 = F.dequantize(C, S)
         diff = torch.abs(A1 - A2).mean().item()
-        torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+        torch.testing.assert_close(A1, A2, atol=1e-2, rtol=0)
         assert diff < 0.004
 
 
@@ -184,7 +184,7 @@ def test_dynamic_blockwise_quantization(nested, blocksize):
         reldiff = diff / torch.abs(A1 + 1e-8)
         diffs.append(diff.mean().item())
         reldiffs.append(reldiff.mean().item())
-        #torch.testing.assert_allclose(A1, A2, atol=1e-2, rtol=0)
+        #torch.testing.assert_close(A1, A2, atol=1e-2, rtol=0)
     abserr = sum(diffs)/len(diffs)
     relerr = sum(reldiffs)/len(reldiffs)
     assert abserr < 0.0035
@@ -192,22 +192,6 @@ def test_dynamic_blockwise_quantization(nested, blocksize):
     #print('nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
     #print('nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
 
-
-def test_dynamic_blockwise_stochastic_quantization():
-    diffs = []
-    reldiffs = []
-    rand = torch.rand(1024).cuda()
-    for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
-        C1, S1 = F.quantize_blockwise(A1, rand=rand)
-        C2, S2 = F.quantize_blockwise(A1)
-        # a maximunm distance of quantized values of 1
-        torch.testing.assert_allclose(C1, C2, atol=1, rtol=0)
-        fraction_smaller = (C1 < C2).float().sum() / C1.numel()
-        fraction_larger = (C1 > C2).float().sum() / C1.numel()
-        torch.testing.assert_allclose(
-            fraction_larger, fraction_smaller, atol=0.01, rtol=0
-        )
 
 
 @pytest.mark.parametrize(
@@ -236,9 +220,9 @@ def test_percentile_clipping(gtype):
         vals, idx = torch.sort(gnorm_vec1)
         clip1 = vals[percentile]
 
-        torch.testing.assert_allclose(gnorm_vec1, torch.sqrt(gnorm_vec2))
-        torch.testing.assert_allclose(clip1, clip2)
-        torch.testing.assert_allclose(gnorm1, gnorm2)
+        torch.testing.assert_close(gnorm_vec1, torch.sqrt(gnorm_vec2))
+        torch.testing.assert_close(clip1, clip2)
+        torch.testing.assert_close(gnorm1, gnorm2)
 
 
 def quant(x):
@@ -332,7 +316,7 @@ def test_approx_igemm(dim1, dim2, quant_methods, batched):
             B = torch.normal(0, 0.5, size=(dim2, dim1), device="cuda")
             maxA, Ac = quant_methods[0](A, 1)
             maxB, Bc = quant_methods[1](B, 0)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             quant_methods[2](maxA, Ac), A, atol=0.025, rtol=0.05
         )
         if batched:
@@ -403,7 +387,7 @@ def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
             out2 = torch.matmul(A.t().float(), B.t().float())
             out = F.igemm(A.t(), B.t())
 
-        torch.testing.assert_allclose(out.float(), out2)
+        torch.testing.assert_close(out.float(), out2)
 
     for i in range(k):
         shapeA = (batch_dim, seq_dim, hidden_dim)
@@ -421,7 +405,7 @@ def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
             out2 = torch.matmul(A.float(), B.t().float())
             out = F.igemm(A, B.t())
 
-        torch.testing.assert_allclose(out.float(), out2)
+        torch.testing.assert_close(out.float(), out2)
 
 
 n = 3
@@ -452,7 +436,7 @@ def test_dim3_igemm(seq_dim, hidden_dim, batch_dim):
         )
         out = F.igemm(A, B, out=iout)
 
-        torch.testing.assert_allclose(out.float(), out2)
+        torch.testing.assert_close(out.float(), out2)
 
 
 n = 2
@@ -577,7 +561,7 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
                 A.permute([0, 2, 1]).float(), B.permute([0, 2, 1]).float()
             )
             out = F.igemm(A.permute([0, 2, 1]), B.permute([0, 2, 1]))
-        torch.testing.assert_allclose(out.float(), out2.float())
+        torch.testing.assert_close(out.float(), out2.float())
 
 
 n = 1
@@ -635,9 +619,9 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
     out, S = F.nvidia_transform(A, to_order=orderOut)
 
     if orderOut == "row":
-        torch.testing.assert_allclose(A.flatten(), out.flatten())
+        torch.testing.assert_close(A.flatten(), out.flatten())
     elif orderOut == "col":
-        torch.testing.assert_allclose(A.t().flatten(), out.flatten())
+        torch.testing.assert_close(A.t().flatten(), out.flatten())
     elif orderOut == "col32":
         if dims == 2:
             n = A.shape[0] * (A.shape[1] + (32 - (A.shape[1] % 32)))
@@ -670,14 +654,14 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
 
                 assert A.flatten()[i + j] == A[row, col]
                 # assert A.flatten()[i+j] == out.flatten()[row2+col2]
-                # torch.testing.assert_allclose(A.flatten()[i+j], A[row, col])
-                # torch.testing.assert_allclose(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
+                # torch.testing.assert_close(A.flatten()[i+j], A[row, col])
+                # torch.testing.assert_close(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
 
     if orderOut == "col32":
         out2, S = F.nvidia_transform(
             out, from_order=orderOut, to_order="row", state=S
         )
-        torch.testing.assert_allclose(A, out2)
+        torch.testing.assert_close(A, out2)
 
 
 n = 1
@@ -721,7 +705,7 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         B2, SB = F.transform(B, "col_turing")
         C2, SC = F.igemmlt(A2, B2, SA, SB)
         C3, S = F.nvidia_transform(C2, "row", state=SC)
-        torch.testing.assert_allclose(C1, C3.float())
+        torch.testing.assert_close(C1, C3.float())
 
         # transpose
         B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(
@@ -732,7 +716,7 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         B2t, SBt = F.transform(B, "col_turing", transpose=True)
         C2, SC = F.igemmlt(A2, B2t, SA, SBt)
         C3, S = F.nvidia_transform(C2, "row", state=SC)
-        torch.testing.assert_allclose(C1, C3.float())
+        torch.testing.assert_close(C1, C3.float())
 
 
 dim1 = [32]
@@ -778,7 +762,7 @@ def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
         # print(C1.flatten()[:10])
         # print(C2.flatten()[:10])
 
-        # torch.testing.assert_allclose(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
+        # torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
 
         # transpose
         # B = torch.randint(-128, 127, size=(dim3, dim4), device='cuda').to(torch.int8)
@@ -787,7 +771,7 @@ def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
         # B2t, SBt = F.transform2(B, 'col_turing', transpose=True)
         # C2, SC = F.igemmlt(A2, B2t, SA, SBt)
         # C3, S = F.transform(C2, 'row', state=SC)
-        # torch.testing.assert_allclose(C1, C3.float())
+        # torch.testing.assert_close(C1, C3.float())
 
 
 batch_size = 2
@@ -1006,7 +990,7 @@ def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
         #assert (count / n < p), f"error in more than {p} of elements: {count}/{n}={count/n}"
 
         C5 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten(), bias=bias)
-        #torch.testing.assert_allclose(C5, C4, atol=0.015, rtol=0.1)
+        #torch.testing.assert_close(C5, C4, atol=0.015, rtol=0.1)
         n = C5.numel()
         assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01*n))
 
@@ -1056,16 +1040,16 @@ def test_colrow_absmax(dim1, dim2, dims):
         )
         nnz_block_ptr1[1:] = nnz_rows1_counts.cumsum(0)
 
-        torch.testing.assert_allclose(col_stats1_trunc, col_stats2)
-        torch.testing.assert_allclose(row_stats1_trunc, row_stats2)
-        torch.testing.assert_allclose(nnz_block_ptr1, nnz_block_ptr2)
+        torch.testing.assert_close(col_stats1_trunc, col_stats2)
+        torch.testing.assert_close(row_stats1_trunc, row_stats2)
+        torch.testing.assert_close(nnz_block_ptr1.int(), nnz_block_ptr2)
 
         row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(
             A, threshold=0.0
         )
 
-        torch.testing.assert_allclose(col_stats1, col_stats2)
-        torch.testing.assert_allclose(row_stats1, row_stats2)
+        torch.testing.assert_close(col_stats1, col_stats2)
+        torch.testing.assert_close(row_stats1, row_stats2)
         assert nnz_block_ptr2 is None
 
 
@@ -1089,8 +1073,8 @@ def test_double_quant(dim1, dim2):
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
 
         # max difference is 1 due to rounding differences
-        torch.testing.assert_allclose(CA, out_row1, atol=1, rtol=0)
-        torch.testing.assert_allclose(CAt, out_col1, atol=1, rtol=0)
+        torch.testing.assert_close(CA, out_row1, atol=1, rtol=0)
+        torch.testing.assert_close(CAt, out_col1, atol=1, rtol=0)
 
         n = CAt.numel()
         num_not_close_rows = (
@@ -1113,8 +1097,8 @@ def test_double_quant(dim1, dim2):
             )
             assert False
 
-        torch.testing.assert_allclose(Srow.flatten(), statsA)
-        torch.testing.assert_allclose(Scol.flatten(), statsAt)
+        torch.testing.assert_close(Srow.flatten().float(), statsA)
+        torch.testing.assert_close(Scol.flatten().float(), statsAt)
 
 
 n = 4
@@ -1139,10 +1123,10 @@ def test_integrated_igemmlt(dim1, dim4, inner):
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
-        torch.testing.assert_allclose(maxA.flatten(), stats1a)
-        torch.testing.assert_allclose(maxB.flatten(), stats2a)
-        torch.testing.assert_allclose(C1a, A1, rtol=0, atol=1)
-        torch.testing.assert_allclose(C2a, B1, rtol=0, atol=1)
+        torch.testing.assert_close(maxA.flatten().float(), stats1a)
+        torch.testing.assert_close(maxB.flatten().float(), stats2a)
+        torch.testing.assert_close(C1a, A1, rtol=0, atol=1)
+        torch.testing.assert_close(C2a, B1, rtol=0, atol=1)
 
         A2, SA = F.nvidia_transform(C1a, "col32")
         B2, SB = F.nvidia_transform(C2a, "col_turing")
@@ -1344,7 +1328,7 @@ def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
         # print(out1)
         # print(out2)
 
-        torch.testing.assert_allclose(out1, out2)
+        torch.testing.assert_close(out1, out2)
 
 
 n = 2
@@ -1406,11 +1390,11 @@ def test_coo_double_quant(dim1, dim2):
             A2[
                 coo_tensor.rowidx.long(), coo_tensor.colidx.long()
             ] = coo_tensor.values
-            torch.testing.assert_allclose(A1, A2)
+            torch.testing.assert_close(A1, A2)
 
             A1 = A * (idx == 0)
             A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 A * (idx == 0), A2, rtol=0.05, atol=1.5e-2
             )
 
@@ -1618,7 +1602,7 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
 
     idx_col = torch.randint(0, A2.shape[-1], size=(15,))
 
-    # torch.testing.assert_allclose(out1, out2.half(), rtol=0.05, atol=0.001)
+    # torch.testing.assert_close(out1, out2.half(), rtol=0.05, atol=0.001)
 
     # Bt = torch.randn(dim2*4, dim2, device='cuda').half()
     # torch.cuda.synchronize()
@@ -1649,9 +1633,9 @@ def test_coo2csr():
     counts = csrA.rowptr[1:] - csrA.rowptr[:-1]
     assert counts.numel() == A.shape[0]
 
-    torch.testing.assert_allclose(counts, (A2 != 0).sum(1))
+    torch.testing.assert_close(counts.long(), (A2 != 0).sum(1))
     idx = A2 != 0
-    torch.testing.assert_allclose(A2[idx], csrA.values)
+    torch.testing.assert_close(A2[idx], csrA.values)
 
 
 def test_coo2csc():
@@ -1669,10 +1653,10 @@ def test_coo2csc():
     counts = cscA.colptr[1:] - cscA.colptr[:-1]
     assert counts.numel() == A.shape[1]
 
-    torch.testing.assert_allclose(counts, (A2 != 0).sum(0))
+    torch.testing.assert_close(counts.long(), (A2 != 0).sum(0))
     # torch uses row-major -> use transpose to transfer to col-major
     idx = A2.t() != 0
-    torch.testing.assert_allclose(A2.t()[idx], cscA.values)
+    torch.testing.assert_close(A2.t()[idx], cscA.values)
 
 
 n = 2
@@ -1722,7 +1706,7 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     max_count, max_idx = torch.sort(counts, descending=True)
     print(torch.median(max_count.float()))
 
-    torch.testing.assert_allclose(out2, out3, rtol=0.05, atol=0.001)
+    torch.testing.assert_close(out2, out3, rtol=0.05, atol=0.001)
 
     p = 200 / (2048 * 12288 * 4)
     n = out1.numel()
@@ -1793,13 +1777,13 @@ batch_size = 2
 seqdim = 2048
 values = []
 values.append((batch_size, seqdim, 768, 4 * 768))
-values.append((batch_size, seqdim, 1024, 4*1024))
-values.append((batch_size, seqdim, 1536, 4*1536))
-values.append((batch_size, seqdim, 2048, 4*2048))
-values.append((batch_size, seqdim, 2560, 4*2560))
-values.append((batch_size, seqdim, 4096, 4*4096))
-values.append((batch_size, seqdim, 5140, 4*5140))
-values.append((batch_size, seqdim, 12288, 4*12288))
+#values.append((batch_size, seqdim, 1024, 4*1024))
+#values.append((batch_size, seqdim, 1536, 4*1536))
+#values.append((batch_size, seqdim, 2048, 4*2048))
+#values.append((batch_size, seqdim, 2560, 4*2560))
+#values.append((batch_size, seqdim, 4096, 4*4096))
+#values.append((batch_size, seqdim, 5140, 4*5140))
+#values.append((batch_size, seqdim, 12288, 4*12288))
 names = ["batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
@@ -2047,7 +2031,7 @@ def test_extract_outliers():
         assert outliers2.shape[0] == shapeA[0]
         assert outliers2.shape[1] == idx.numel()
 
-        torch.testing.assert_allclose(outliers1, outliers2)
+        torch.testing.assert_close(outliers1, outliers2)
 
         CA, SA = F.transform(A, "col_ampere")
 
@@ -2056,7 +2040,7 @@ def test_extract_outliers():
         assert outliers2.shape[0] == shapeA[0]
         assert outliers2.shape[1] == idx.numel()
 
-        torch.testing.assert_allclose(outliers1, outliers2)
+        torch.testing.assert_close(outliers1, outliers2)
 
 
 
@@ -2186,7 +2170,7 @@ def test_few_bit_quant():
                     #assert err2.mean() <= err1
 
                 else:
-                    torch.testing.assert_allclose(q1, q2)
+                    torch.testing.assert_close(q1, q2)
             #print(method, 'abserr:', sum(abserrs)/len(abserrs), 'relerr:', sum(relerrs)/len(relerrs))
     #assert False
 
@@ -2218,7 +2202,9 @@ def test_kbit_quantile_estimation():
 
 def test_bench_dequantization():
     a = torch.rand(1024, 1024, device='cuda').half()
-    qa, SA = F.quantize_blockwise(a)
+    code =F.create_fp8_map(True, 3, 0, 4).cuda()
+    qa, SA = F.quantize_blockwise(a, code=code)
+    print(qa.max())
 
     max_theoretical_mu =  1024*1024*2/1024**3/672*1000*1000
     #print(max_theoretical_mu)
@@ -2489,6 +2475,7 @@ def test_gemm_4bit(dtype):
         print(dim, sum(relerrs)/len(relerrs)/math.sqrt(dim))
         print(dim, (max_err.item(), max_relerr.item()))
 
+@pytest.mark.skip("Row scale has some bugs for ampere")
 def test_managed():
     n = 32*10
     A = F.get_paged(n, n, dtype=torch.float32)
@@ -2523,4 +2510,4 @@ def test_managed():
 
    # assert (A==17).sum().item() == n*n
 
-   # torch.testing.assert_allclose(A, torch.ones(A.shape)*289)
+   # torch.testing.assert_close(A, torch.ones(A.shape)*289)

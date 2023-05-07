@@ -38,7 +38,7 @@ MAKE_ELEMENTWISE_FUNC(_mul, fp32, float, _MUL)
 
 
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
-void fname##32bit_g##gbits(gtype *g, gtype *p, \
+void fname##32bit_grad_##gbits(gtype *g, gtype *p, \
                float* state1, float* state2, float *unorm, float max_unorm, float param_norm, \
                const float beta1, const float beta2, const float eps, const float weight_decay, \
                const int step, const float lr, float gnorm_scale, bool skip_zeros, const int n) \
@@ -51,11 +51,13 @@ MAKE_FUNC32(adam, ADAM, half, fp16)
 MAKE_FUNC32(adam, ADAM, __nv_bfloat16, bf16)
 MAKE_FUNC32(rmsprop, RMSPROP, float, 32)
 MAKE_FUNC32(rmsprop, RMSPROP, half, 16)
+MAKE_FUNC32(lion, LION, float, 32)
+MAKE_FUNC32(lion, LION, half, 16)
 MAKE_FUNC32(adagrad, ADAGRAD, float, 32)
 MAKE_FUNC32(adagrad, ADAGRAD, half, 16)
 
 #define MAKE_FUNC8(fname, oname, gtype, gbits) \
-void fname##_static_8bit_g##gbits(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
+void fname##_static_8bit_grad_##gbits(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
 								float *unorm, float max_unorm, float param_norm, \
                 float beta1, float beta2, \
                 float eps, int step, float lr,  \
@@ -73,9 +75,11 @@ MAKE_FUNC8(momentum, MOMENTUM, float, 32)
 MAKE_FUNC8(momentum, MOMENTUM, half, 16)
 MAKE_FUNC8(rmsprop, RMSPROP, float, 32)
 MAKE_FUNC8(rmsprop, RMSPROP, half, 16)
+MAKE_FUNC8(lion, LION, float, 32)
+MAKE_FUNC8(lion, LION, half, 16)
 
 #define MAKE_BLOCKWISE8(fname, optim_name, gtype, gbits) \
-void fname##_8bit_blockwise_##gbits(gtype* p, gtype* g, \
+void fname##_8bit_blockwise_grad_##gbits(gtype* p, gtype* g, \
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr, \
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n)\
 {	optimizerStatic8bitBlockwise<gtype, optim_name>(p, g, state1, state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n); }\
@@ -89,6 +93,8 @@ MAKE_BLOCKWISE8(rmsprop, RMSPROP, float, fp32)
 MAKE_BLOCKWISE8(adagrad, ADAGRAD, half, fp16)
 MAKE_BLOCKWISE8(adagrad, ADAGRAD, float, fp32)
 MAKE_BLOCKWISE8(adam, ADAM, __nv_bfloat16, bf16)
+MAKE_BLOCKWISE8(lion, LION, half, fp16)
+MAKE_BLOCKWISE8(lion, LION, float, fp32)
 
 
 void percentileClipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping<float>(g, gnorm_vec, step, n); }
@@ -96,8 +102,6 @@ void percentileClipping_g16(half * g, float *gnorm_vec, int step, const int n){ 
 
 void quantizeBlockwise_fp16(float * code, half *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<half, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_fp32(float * code, float *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<float, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n); }
-void quantizeBlockwise_stochastic_fp16(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n){ quantizeBlockwise<half, 1, General8bit>(code, A, absmax, out, rand, rand_offset, 4096, n); }
-void quantizeBlockwise_stochastic_fp32(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, const int n){ quantizeBlockwise<float, 1, General8bit>(code, A, absmax, out, rand, rand_offset, 4096, n); }
 void quantizeBlockwise_fp16_fp4(float * code, half *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<half, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_fp32_fp4(float * code, float *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<float, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_fp16_nf4(float * code, half *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<half, 0, NF4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
@@ -109,6 +113,7 @@ void dequantizeBlockwise_fp16_fp4(float *code, unsigned char *A, float *absmax, 
 void dequantizeBlockwise_fp32_fp4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float, FP4>(NULL, A, absmax, out, blocksize, n); }
 void dequantizeBlockwise_fp16_nf4(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n){ dequantizeBlockwise<half, NF4>(NULL, A, absmax, out, blocksize, n); } \
 void dequantizeBlockwise_fp32_nf4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float, NF4>(NULL, A, absmax, out, blocksize, n); }
+
 
 #define MAKE_FUNC_TRANSFORM(fbits, fsrc, ftrgt, ftranspose, dtype, src, target, transpose, bits) \
 void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(cublasLtHandle_t ltHandle, dtype *A, dtype *out, int dim1, int dim2) \
@@ -169,8 +174,6 @@ extern "C"
 	void cdequantize(float *code, unsigned char *A, float *out, int n){ dequantize(code, A, out, n); }
   void cquantize_blockwise_fp16(float * code, half *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_fp16(code, A, absmax, out, blocksize, n); }
   void cquantize_blockwise_fp32(float * code, float *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_fp32(code, A, absmax, out, blocksize, n); }
-  void cquantize_blockwise_stochastic_fp16(float * code, half *A, float *absmax, unsigned char *out, float *rand, int rand_offset, const int n){ quantizeBlockwise_stochastic_fp16(code, A, absmax, out, rand, rand_offset, n); }
-  void cquantize_blockwise_stochastic_fp32(float * code, float *A, float *absmax, unsigned char *out, float *rand, int rand_offset, const int n){ quantizeBlockwise_stochastic_fp32(code, A, absmax, out, rand, rand_offset, n); }
 
   void cdequantize_blockwise_fp16(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n){ dequantizeBlockwise_fp16(code, A, absmax, out, blocksize, n); }
   void cdequantize_blockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise_fp32(code, A, absmax, out, blocksize, n); }
@@ -185,11 +188,11 @@ extern "C"
   void cdequantize_blockwise_fp32_nf4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise_fp32_nf4(code, A, absmax, out, blocksize, n); }
 
 	#define MAKE_CFUNC32(name, gtype, gbits) \
-	void c##name##32bit_g##gbits(gtype *g, gtype *p, \
+	void c##name##32bit_grad_##gbits(gtype *g, gtype *p, \
 								 float* state1, float* state2, float *unorm, float max_unorm, float param_norm, \
 								 const float beta1, const float beta2, const float eps, const float weight_decay, \
 								 const int step, const float lr, const float gnorm_scale, bool skip_zeros, const int n) \
-	{ name##32bit_g##gbits(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n); } \
+	{ name##32bit_grad_##gbits(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n); } \
 
 	MAKE_CFUNC32(adam, float, fp32)
 	MAKE_CFUNC32(adam, half, fp16)
@@ -198,11 +201,13 @@ extern "C"
 	MAKE_CFUNC32(momentum, half, 16)
 	MAKE_CFUNC32(rmsprop, float, 32)
 	MAKE_CFUNC32(rmsprop, half, 16)
+	MAKE_CFUNC32(lion, float, 32)
+	MAKE_CFUNC32(lion, half, 16)
 	MAKE_CFUNC32(adagrad, float, 32)
 	MAKE_CFUNC32(adagrad, half, 16)
 
 	#define MAKE_CFUNC8(name, gtype, gbits) \
-	void c##name##_static_8bit_g##gbits(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
+	void c##name##_static_8bit_grad_##gbits(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
                 float *unorm, float max_unorm, float param_norm, \
                 float beta1, float beta2, \
                 float eps, int step, float lr,  \
@@ -210,7 +215,7 @@ extern "C"
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 float weight_decay, float gnorm_scale, int n) \
   {  \
-	    name##_static_8bit_g##gbits(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, \
+	    name##_static_8bit_grad_##gbits(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, \
 			                                 quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n); \
   } \
 
@@ -220,12 +225,14 @@ extern "C"
 	MAKE_CFUNC8(momentum, half, 16)
 	MAKE_CFUNC8(rmsprop, float, 32)
 	MAKE_CFUNC8(rmsprop, half, 16)
+	MAKE_CFUNC8(lion, float, 32)
+	MAKE_CFUNC8(lion, half, 16)
 
   #define MAKE_CBLOCKWISE8(fname, optim_name, gtype, gbits) \
-  void c##fname##_8bit_blockwise_##gbits(gtype* p, gtype* g, \
+  void c##fname##_8bit_blockwise_grad_##gbits(gtype* p, gtype* g, \
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,  \
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n) \
-  {	fname##_8bit_blockwise_##gbits(p, g, state1, state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n); } \
+  {	fname##_8bit_blockwise_grad_##gbits(p, g, state1, state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n); } \
 
 	MAKE_CBLOCKWISE8(adam, ADAM, half, fp16)
 	MAKE_CBLOCKWISE8(adam, ADAM, float, fp32)
@@ -236,6 +243,8 @@ extern "C"
 	MAKE_CBLOCKWISE8(adagrad, ADAGRAD, half, fp16)
 	MAKE_CBLOCKWISE8(adagrad, ADAGRAD, float, fp32)
 	MAKE_CBLOCKWISE8(adam, ADAM, __nv_bfloat16, bf16)
+	MAKE_CBLOCKWISE8(lion, LION, half, fp16)
+	MAKE_CBLOCKWISE8(lion, LION, float, fp32)
 
 	void cpercentile_clipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping_g32(g, gnorm_vec, step, n); }
 	void cpercentile_clipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping_g16(g, gnorm_vec, step, n); }
