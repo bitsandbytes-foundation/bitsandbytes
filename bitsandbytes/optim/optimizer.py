@@ -314,9 +314,12 @@ class Optimizer8bit(torch.optim.Optimizer):
     def prefetch_state(self, p):
         if self.is_paged:
             state = self.state[p]
-            F.prefetch_tensor(state['state1'])
-            if 'state2' in state:
-                F.prefetch_tensor(state['state2'])
+            s1 = state['state1']
+            is_paged = getattr(s1, 'is_paged', False)
+            if is_paged:
+                F.prefetch_tensor(state['state1'])
+                if 'state2' in state:
+                    F.prefetch_tensor(state['state2'])
 
 
 class Optimizer2State(Optimizer8bit):
