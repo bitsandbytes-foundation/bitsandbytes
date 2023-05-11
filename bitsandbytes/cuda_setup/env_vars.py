@@ -63,5 +63,5 @@ def restore_original_system_env_vars(env_vars: Dict[str, str]):
     for env_line in env_lines:
         if '=' in env_line:
             key, value = env_line.split('=', 1)
-            if key in env_vars:
+            if (key == "CONDA_PREFIX" or key == "LD_LIBRARY_PATH") and key not in env_vars:
                 env_vars[key] = value
