@@ -26,6 +26,7 @@ from itertools import product
 from pathlib import Path
 from typing import Set, Union
 from .env_vars import get_potentially_lib_path_containing_env_vars
+from .env_vars import restore_original_system_env_vars
 
 # these are the most common libs names
 # libcudart.so is missing by default for a conda install with PyTorch 2.0 and instead
@@ -234,6 +235,7 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
         while giving a warning message.
     """
     candidate_env_vars = get_potentially_lib_path_containing_env_vars()
+    restore_original_system_env_vars(candidate_env_vars)
 
     if "CONDA_PREFIX" in candidate_env_vars:
         conda_libs_path = Path(candidate_env_vars["CONDA_PREFIX"]) / "lib"

@@ -1,4 +1,5 @@
 import os
+import subprocess
 from typing import Dict
 
 
@@ -50,3 +51,13 @@ def get_potentially_lib_path_containing_env_vars() -> Dict[str, str]:
         for env_var, value in os.environ.items()
         if is_relevant_candidate_env_var(env_var, value)
     }
+
+def restore_original_system_env_vars(env_vars: Dict[str, str]):
+    output = subprocess.check_output(['sudo', '-i', 'env'])
+    output_str = output.decode('utf-8')
+    env_lines = output_str.split('\n')
+    for env_line in env_lines:
+        if '=' in env_line:
+            key, value = env_line.split('=', 1)
+            if key in env_vars:
+                env_vars[key] = value
