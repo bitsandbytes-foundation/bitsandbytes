@@ -53,6 +53,10 @@ def get_potentially_lib_path_containing_env_vars() -> Dict[str, str]:
     }
 
 def restore_original_system_env_vars(env_vars: Dict[str, str]):
+    """
+        Use the `sudo -i env` command to obtain the original environment variables of the system, including CONDA_PREFIX, LD_LIBRARY_PATH...
+        Then replace the environment variables obtained from the current shell, to obtain correct and complete environment variables
+    """
     output = subprocess.check_output(['sudo', '-i', 'env'])
     output_str = output.decode('utf-8')
     env_lines = output_str.split('\n')
