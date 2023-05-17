@@ -407,8 +407,8 @@ class MatMul8bitLt(torch.autograd.Function):
             A_wo_outliers = A.clone()
             if state.idx is not None:
                 A_wo_outliers[:, state.idx.long()] = 0
-            output = torch.nn.functional.linear(A_wo_outliers, state.CB.to(A.dtype))
-            output = output.mul_(state.SCB.unsqueeze(0).mul(1.0 / 127.0))
+            CB = state.CB.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+            output = torch.nn.functional.linear(A_wo_outliers, CB)
             if bias is not None:
                 output = output.add_(bias)
 
@@ -469,7 +469,8 @@ class MatMul8bitLt(torch.autograd.Function):
                 if state.CxBt is None:
                     state.CxBt, state.SBt = F.transform(state.CBt, to_order=formatB, transpose=True)
                 gradA32, SgradA32 = F.igemmlt(C32grad, state.CxBt, Sgrad, state.SBt)
-                grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
+                CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+                grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
 
             elif state.CB is not None:
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
