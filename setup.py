@@ -18,10 +18,10 @@ def read(fname):
 
 setup(
     name=f"bitsandbytes",
-    version=f"0.38.1",
+    version=f"0.39.0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
-    description="8-bit optimizers and matrix multiplication routines.",
+    description="k-bit optimizers and matrix multiplication routines.",
     license="MIT",
     keywords="gpu optimizers optimization 8-bit quantization compression",
     url="https://github.com/TimDettmers/bitsandbytes",
