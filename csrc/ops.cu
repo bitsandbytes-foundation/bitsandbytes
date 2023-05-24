@@ -802,6 +802,7 @@ MAKE_optimizer32bit(RMSPROP, half)
 MAKE_optimizer32bit(RMSPROP, float)
 MAKE_optimizer32bit(LION, half)
 MAKE_optimizer32bit(LION, float)
+MAKE_optimizer32bit(LION, __nv_bfloat16)
 MAKE_optimizer32bit(ADAGRAD, half)
 MAKE_optimizer32bit(ADAGRAD, float)
 
@@ -837,6 +838,7 @@ MAKE_optimizerStatic8bitBlockwise(half, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(float, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(half, LION);
 MAKE_optimizerStatic8bitBlockwise(float, LION);
+MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, LION);
 MAKE_optimizerStatic8bitBlockwise(half, ADAGRAD);
 MAKE_optimizerStatic8bitBlockwise(float, ADAGRAD);
 

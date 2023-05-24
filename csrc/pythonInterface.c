@@ -51,8 +51,9 @@ MAKE_FUNC32(adam, ADAM, half, fp16)
 MAKE_FUNC32(adam, ADAM, __nv_bfloat16, bf16)
 MAKE_FUNC32(rmsprop, RMSPROP, float, 32)
 MAKE_FUNC32(rmsprop, RMSPROP, half, 16)
-MAKE_FUNC32(lion, LION, float, 32)
-MAKE_FUNC32(lion, LION, half, 16)
+MAKE_FUNC32(lion, LION, float, fp32)
+MAKE_FUNC32(lion, LION, half, fp16)
+MAKE_FUNC32(lion, LION, __nv_bfloat16, bf16)
 MAKE_FUNC32(adagrad, ADAGRAD, float, 32)
 MAKE_FUNC32(adagrad, ADAGRAD, half, 16)
 
@@ -95,6 +96,7 @@ MAKE_BLOCKWISE8(adagrad, ADAGRAD, float, fp32)
 MAKE_BLOCKWISE8(adam, ADAM, __nv_bfloat16, bf16)
 MAKE_BLOCKWISE8(lion, LION, half, fp16)
 MAKE_BLOCKWISE8(lion, LION, float, fp32)
+MAKE_BLOCKWISE8(lion, LION, __nv_bfloat16, bf16)
 
 
 void percentileClipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping<float>(g, gnorm_vec, step, n); }
@@ -201,8 +203,9 @@ extern "C"
 	MAKE_CFUNC32(momentum, half, 16)
 	MAKE_CFUNC32(rmsprop, float, 32)
 	MAKE_CFUNC32(rmsprop, half, 16)
-	MAKE_CFUNC32(lion, float, 32)
-	MAKE_CFUNC32(lion, half, 16)
+	MAKE_CFUNC32(lion, float, fp32)
+	MAKE_CFUNC32(lion, half, fp16)
+	MAKE_CFUNC32(lion, __nv_bfloat16, bf16)
 	MAKE_CFUNC32(adagrad, float, 32)
 	MAKE_CFUNC32(adagrad, half, 16)
 
@@ -245,6 +248,7 @@ extern "C"
 	MAKE_CBLOCKWISE8(adam, ADAM, __nv_bfloat16, bf16)
 	MAKE_CBLOCKWISE8(lion, LION, half, fp16)
 	MAKE_CBLOCKWISE8(lion, LION, float, fp32)
+	MAKE_CBLOCKWISE8(lion, LION, __nv_bfloat16, bf16)
 
 	void cpercentile_clipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping_g32(g, gnorm_vec, step, n); }
 	void cpercentile_clipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping_g16(g, gnorm_vec, step, n); }

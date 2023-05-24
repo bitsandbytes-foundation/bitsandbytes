@@ -19,11 +19,11 @@ import bitsandbytes.functional as F
 k = 20
 
 def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
-    idx = torch.isclose(a, b, rtol, atol)
+    idx = torch.isclose(a, b, rtol=rtol, atol=atol)
     error_count = (idx == 0).sum().item()
     if error_count > max_error_count:
         print(f"Too many values not close: assert {error_count} < {max_error_count}")
-        torch.testing.assert_close(a, b, rtol, atol)
+        torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
 
 def get_temp_dir():
@@ -35,13 +35,8 @@ def get_temp_dir():
 def rm_path(path):
     shutil.rmtree(path)
 
-str2bf16support = {}
-str2bf16support['adam8bit_blockwise'] = True
-
 str2optimizers = {}
 str2optimizers["adam_pytorch"] = (None, torch.optim.Adam, bnb.optim.Adam)
-# str2optimizers['adam_apex'] = (None, apex.optimizers.FusedAdam, bnb.optim.Adam)
-# str2optimizers['momentum_apex'] = (None, lambda pxx: apex.optimizers.FusedSGD(pxx, 0.01, 0.9), bnb.optim.Adam)
 str2optimizers["lion_pytorch"] = (None, Lion, bnb.optim.Lion)
 str2optimizers["momentum_pytorch"] = (
     None,
@@ -51,8 +46,8 @@ str2optimizers["momentum_pytorch"] = (
 str2optimizers["adam"] = (torch.optim.Adam, bnb.optim.Adam)
 str2optimizers["paged_adamw"] = (torch.optim.AdamW, bnb.optim.PagedAdamW)
 str2optimizers["paged_adam"] = (torch.optim.Adam, bnb.optim.PagedAdam)
-# str2optimizers['fused_adam'] = (apex.optimizers.FusedAdam, bnb.optim.Adam)
 str2optimizers["lion"] = (Lion, bnb.optim.Lion)
+str2optimizers["paged_lion"] = (Lion, bnb.optim.PagedLion)
 str2optimizers["momentum"] = (
     lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9, block_wise=False),
@@ -76,6 +71,7 @@ str2optimizers["adam8bit_blockwise"] = (torch.optim.Adam, lambda pxx: bnb.optim.
 str2optimizers["paged_adamw8bit_blockwise"] = (torch.optim.AdamW, lambda pxx: bnb.optim.PagedAdamW8bit(pxx, block_wise=True))
 str2optimizers["paged_adam8bit_blockwise"] = (torch.optim.Adam, lambda pxx: bnb.optim.PagedAdam8bit(pxx, block_wise=True))
 str2optimizers["lion8bit_blockwise"] = (Lion, lambda pxx: bnb.optim.Lion8bit(pxx, block_wise=True))
+str2optimizers["paged_lion8bit_blockwise"] = (Lion, lambda pxx: bnb.optim.PagedLion8bit(pxx, block_wise=True))
 str2optimizers["momentum8bit_blockwise"] = (
     lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.SGD8bit(pxx, 0.01, 0.9, block_wise=True),
@@ -90,6 +86,7 @@ str2statenames["adam"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["paged_adamw"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["paged_adam"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["lion"] = [("exp_avg", "state1")]
+str2statenames["paged_lion"] = [("exp_avg", "state1")]
 str2statenames["momentum"] = [("momentum_buffer", "state1")]
 str2statenames["lamb"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["rmsprop"] = [("square_avg", "state1")]
@@ -104,15 +101,17 @@ str2statenames["momentum8bit_blockwise"] = [("momentum_buffer", "state1", "qmap1
 str2statenames["rmsprop8bit"] = [("square_avg", "state1", "qmap1", "max1")]
 str2statenames["rmsprop8bit_blockwise"] = [("square_avg", "state1", "qmap1", "absmax1")]
 str2statenames["lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
+str2statenames["paged_lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 
 dim1 = [1024]
 dim2 = [32, 1024, 4097, 1]
-gtype = [torch.float32, torch.float16]
-optimizer_names = ["adam", "momentum", "rmsprop", 'paged_adamw', 'paged_adam', 'lion']
+gtype = [torch.float32, torch.float16, torch.bfloat16]
+optimizer_names = ["adam", "momentum", "rmsprop", 'paged_adamw', 'paged_adam', 'lion', 'paged_lion']
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = ["dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_optimizer32bit(dim1, dim2, gtype, optim_name):
+    if gtype == torch.bfloat16 and optim_name in ['momentum', 'rmsprop']: pytest.skip()
     if dim1 == 1 and dim2 == 1:
         return
     p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
@@ -254,7 +253,7 @@ names = [
 
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_optimizer8bit(dim1, dim2, gtype, optim_name):
-    if gtype == torch.bfloat16 and optim_name not in str2bf16support: return
+    if gtype == torch.bfloat16 and optim_name not in ['adam8bit_blockwise', 'lion8bit_blockwise']: pytest.skip()
     if dim1 == 1 and dim2 == 1:
         return
     p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
@@ -485,7 +484,7 @@ gtype = [torch.float32, torch.float16]
 # optimizer_names = ['momentum_apex', 'momentum8bit', 'momentum_pytorch']
 # optimizer_names = ['lamb_apex', 'lamb8bit']
 # optimizer_names = ['lars_apex', 'lars8bit']
-optimizer_names = ["adam8bit_blockwise", 'paged_adam8bit_blockwise', 'paged_adamw8bit_blockwise']
+optimizer_names = ["adam8bit_blockwise", 'paged_adam8bit_blockwise', 'paged_adamw8bit_blockwise', 'paged_lion8bit_blockwise']
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = [
     "dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values
