@@ -1773,21 +1773,24 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     print("partial matmul", time.time() - t0)
 
 
-batch_size = 2
-seqdim = 2048
+batch_size = 1
+seqdim = 1
 values = []
-values.append((batch_size, seqdim, 768, 4 * 768))
+#values.append((batch_size, seqdim, 768, 4 * 768))
 #values.append((batch_size, seqdim, 1024, 4*1024))
 #values.append((batch_size, seqdim, 1536, 4*1536))
 #values.append((batch_size, seqdim, 2048, 4*2048))
 #values.append((batch_size, seqdim, 2560, 4*2560))
-#values.append((batch_size, seqdim, 4096, 4*4096))
+values.append((batch_size, seqdim, 4096, 4*4096))
+values.append((batch_size, seqdim, 5120, 4*5120))
+values.append((batch_size, seqdim, 6656, 4*6656))
+values.append((batch_size, seqdim, 8192, 4*8192))
 #values.append((batch_size, seqdim, 5140, 4*5140))
 #values.append((batch_size, seqdim, 12288, 4*12288))
 names = ["batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
-    iters = 1
+    iters = 80
     formatB = F.get_special_format_str()
 
     A = torch.randn(batch, seq, model, device="cuda").half()
@@ -1799,14 +1802,14 @@ def test_bench_matmul(batch, seq, model, hidden):
 
     B_nf4, state_nf4= F.quantize_nf4(B)
 
-    linear8bit = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
+    linear8bit = bnb.nn.Linear8bitLt(model, hidden, False, False).cuda().half()
     linear8bit.eval()
 
     outliers = torch.randint(0, model, size=(5,)).cuda()
     A[:, :, outliers] = 8.0
 
-    linearMixedBit = (bnb.nn.Linear8bitLt(model, hidden, False, threshold=6.0).cuda().half())
-    linearMixedBit.eval()
+    linearMixedBit = (bnb.nn.Linear8bitLt(model, hidden, False, False, threshold=6.0).cuda().half())
+    #linearMixedBit.eval()
 
     linear8bit_train = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
     linear8bit_train_thresh = bnb.nn.Linear8bitLt(model, hidden, False, threshold=6.0).cuda().half()
@@ -1898,21 +1901,21 @@ def test_bench_matmul(batch, seq, model, hidden):
     #torch.cuda.synchronize()
     #print(f"linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    #linear8bit(A)
-    #torch.cuda.synchronize()
-    #t0 = time.time()
-    #for i in range(iters):
-    #    linear8bit(A)
-    #torch.cuda.synchronize()
-    #print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    linear8bit(A)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        linear8bit(A)
+    torch.cuda.synchronize()
+    print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    #linearMixedBit(A)
-    #torch.cuda.synchronize()
-    #t0 = time.time()
-    #for i in range(iters):
-    #    linearMixedBit(A)
-    #torch.cuda.synchronize()
-    #print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    linearMixedBit(A)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        linearMixedBit(A)
+    torch.cuda.synchronize()
+    print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
     #linear8bit_train(A)
     #torch.cuda.synchronize()
