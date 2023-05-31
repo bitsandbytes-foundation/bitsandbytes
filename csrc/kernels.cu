@@ -16,15 +16,12 @@
 #include <thrust/device_vector.h>
 #include <mma.h>
 
-#include <cooperative_groups/memcpy_async.h>
-#include <cuda/pipeline>
 
 #define HLF_MAX 65504
 #define TH 1024
 #define NUM 4
 #define NUM_BLOCK 4096
 
-using namespace nvcuda;
 
 // source: https://stackoverflow.com/questions/17399119/how-do-i-use-atomicmax-on-floating-point-values-in-cuda
 __device__ float atomicMax(float* address, float val) {
@@ -3094,6 +3091,9 @@ template <typename T, typename TCAST, int ITEMS> __device__ inline void vector_l
 #define WARPS 5
 template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc)
 {
+
+#if __CUDA_ARCH__ >= 750
+	using namespace nvcuda;
   int col_offset = blockIdx.x *32;
   const int warp_id = threadIdx.x / 32;
   const int half_warp_id = threadIdx.x / 16;
@@ -3294,11 +3294,14 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
 
   if(col_offset + warp_lane < M)
     out[col_offset + warp_lane] = smem_A[warp_lane];
+#endif
 }
 
 template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
+#if __CUDA_ARCH__ >= 750
+	using namespace nvcuda;
   int col_offset = blockIdx.x *32;
   const int warp_id = threadIdx.x / 32;
   const int half_warp_id = threadIdx.x / 16;
@@ -3459,6 +3462,7 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, i
 
   if(col_offset + warp_lane < M)
     out[col_offset + warp_lane] = smem_A[warp_lane];
+#endif
 }
 
 //#define ROWS 2

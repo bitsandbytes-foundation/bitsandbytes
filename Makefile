@@ -33,7 +33,6 @@ COMPUTE_CAPABILITY += -gencode arch=compute_52,code=sm_52 # Maxwell
 COMPUTE_CAPABILITY += -gencode arch=compute_60,code=sm_60 # Pascal
 COMPUTE_CAPABILITY += -gencode arch=compute_61,code=sm_61 # Pascal
 COMPUTE_CAPABILITY += -gencode arch=compute_70,code=sm_70 # Volta
-COMPUTE_CAPABILITY += -gencode arch=compute_72,code=sm_72 # Volta
 
 CC_KEPLER := -gencode arch=compute_35,code=sm_35 # Kepler
 CC_KEPLER += -gencode arch=compute_37,code=sm_37 # Kepler
