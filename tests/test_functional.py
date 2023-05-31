@@ -2297,7 +2297,8 @@ def test_4bit_compressed_stats(quant_type):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
-@pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
+#@pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
+@pytest.mark.parametrize("quant_type", ['nf4'])
 def test_bench_4bit_dequant(quant_type):
     blocksize = 256
     a = torch.rand(1024*12*4, 1024*12, device='cuda').half()
@@ -2311,7 +2312,7 @@ def test_bench_4bit_dequant(quant_type):
     #print(max_theoretical_s*1e6)
     b = torch.randn(128, 1024*12, device='cuda').half()
 
-    iters = 5
+    iters = 100
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
@@ -2438,9 +2439,11 @@ def test_gemm_4bit(dtype):
             C3 = torch.matmul(A, B.t())
             C2 = F.cutlass3_gemm(A, qB.t(), state=state)
             C1 = bnb.matmul_4bit(A, qB.t(), state)
-            C2 = F.cutlass3_gemm(A, qB.t(), state=state)
 
-            print(C1.shape, C2.shape)
+            print(C1)
+            print(C2)
+
+            #print(C1.shape, C2.shape)
 
             # tensor cores are non-deterministic
             # so we need to analyze errors around the mean
@@ -2452,6 +2455,7 @@ def test_gemm_4bit(dtype):
             max_relerr = max(relerr.max(), max_relerr)
             err = err.mean().item()
             relerr = relerr.mean().item()
+            print(err)
 
             errs.append(err)
             relerrs.append(relerr)

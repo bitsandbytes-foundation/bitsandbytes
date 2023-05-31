@@ -3297,6 +3297,7 @@ template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, 
 #endif
 }
 
+__device__ static float nf4_data[16] = {-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0};
 template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
@@ -3307,6 +3308,12 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, i
   const int half_warp_id = threadIdx.x / 16;
   const int half_warp_lane = threadIdx.x % 16;
   const int batch_size_warps = (WARPS-1)*2;
+
+  T quant_map[16];
+
+  #pragma unroll 16
+  for(int i = 0; i < 16; i++)
+    quant_map[i] = nf4_data[i];
 
   T local_A[2];
   T local_B[64];
@@ -3410,6 +3417,8 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, i
         {
           local_B[col] = dhDequantizeNF4(local_B_4bit[col/2] >> 4)*T(absidx);
           local_B[col+1] = dhDequantizeNF4(local_B_4bit[col/2] & 0x0F)*T(absidx);
+          //local_B[col] = quant_map[(local_B_4bit[col/2] >> 4)]*T(absidx);
+          //local_B[col+1] = quant_map[(local_B_4bit[col/2] & 0x0F)]*T(absidx);
         }
       }
 
