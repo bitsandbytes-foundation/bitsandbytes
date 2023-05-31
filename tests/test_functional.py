@@ -2414,7 +2414,7 @@ def test_gemm_4bit(dtype):
     #for dim in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
     #for dim in [4096, 5120, 6656, 8192]:
     #for dim in [32]:
-    for dim in [4096]:
+    for dim in [32]:
         errs = []
         relerrs = []
         max_err = 0
