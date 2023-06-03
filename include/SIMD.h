@@ -26,12 +26,16 @@ FORCE_INLINE int popcnt32(int x32)
 } // namespace
 #endif
 
+#if defined(USESSE2NEON)
+#include <sse2neon.h>
+#else
 #if defined(USE_AVX) || defined(USE_AVX2)
 #include <immintrin.h>
 #else
 #include <emmintrin.h>
 #ifdef USE_SSE41
 #include <smmintrin.h>
+#endif
 #endif
 #endif
 

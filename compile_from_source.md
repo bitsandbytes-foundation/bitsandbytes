@@ -33,3 +33,6 @@ You can set `CUDA_HOME` to `/usr/local/cuda-11.7`. For example, you might be abl
 
 
 If you have problems compiling the library with these instructions from source, please open an issue.
+
+
+For ARM sse2neon https://github.com/DLTcollab/sse2neon replaces emmintrin, and can be enabled by setting USESEE2NEON=true. You must have the sse2neon package installed.
