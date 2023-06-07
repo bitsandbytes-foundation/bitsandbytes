@@ -599,7 +599,7 @@ def dequantize_blockwise(
         absmax, code = quant_state
 
 
-    if A.device.type != 'cpu':
+    if A.device.type == 'cuda':
         device = pre_call(A.device)
         code = code.to(A.device)
         if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
@@ -611,7 +611,9 @@ def dequantize_blockwise(
             lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
-        post_call(A.device)
+        post_call(device)
+    elif A.device.type == 'mps':
+        raise NotImplementedError("MPS is not implemented")
     else:
         code = code.cpu()
         lib.cdequantize_blockwise_cpu_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))

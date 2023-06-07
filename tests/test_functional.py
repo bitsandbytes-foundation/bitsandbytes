@@ -156,7 +156,6 @@ def test_dynamic_quantization(device):
 
 
 def test_dynamic_blockwise_quantization(device):
-    if device == "mps": pytest.skip("MPS is not yet implmenented")
     for blocksize in [4096, 2048, 1024, 512]:
         diffs = []
         reldiffs = []

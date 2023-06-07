@@ -38,6 +38,14 @@ elseif(ENABLE_MPS)
     set(LIBSUFFIX "mps")
     project(bitsandbytes LANGUAGES CXX OBJCXX)
     add_compile_definitions(BUILD_MPS)
+    set(METAL_SOURCES csrc/mps_kernels.metal)
+    add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"  
+                   COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_SOURCES}
+                   COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
+                   DEPENDS "${METAL_SOURCES}"  
+                   COMMENT "Compiling Metal kernels"  
+                   VERBATIM)
+    add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
     set(GPU_SOURCES csrc/mps_ops.mm)
 else()
     message("Building with CPU only")
@@ -47,6 +55,9 @@ else()
     set(GPU_SOURCES)
 endif()
 
+if(APPLE)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET 13.1)
+endif()
 set(CMAKE_CXX_STANDARD 14)
 set(CXX_STANDARD_REQUIRED C++14)
 
@@ -91,6 +102,10 @@ if(ENABLE_CUDA)
         CUDA_SEPARABLE_COMPILATION ON)
 
     target_link_libraries(bitsandbytes CUDA::cudart CUDA::cublas CUDA::cublasLt CUDA::cusparse)
+endif()
+if(ENABLE_MPS)
+    add_dependencies(bitsandbytes metallib)
+    target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
 endif()
 
 set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME "bitsandbytes_${LIBSUFFIX}")

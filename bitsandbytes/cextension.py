@@ -7,7 +7,7 @@ from warnings import warn
 
 if torch.backends.mps.is_built():
     package_dir = Path(__file__).parent
-    binary_path = package_dir / "libbitsandbytes_cpu.dylib"
+    binary_path = package_dir / "libbitsandbytes_mps.dylib"
     lib = ct.cdll.LoadLibrary(binary_path)
     COMPILED_WITH_CUDA = False
 else:
