@@ -10,6 +10,7 @@ from .autograd._functions import (
     matmul,
     matmul_cublas,
     mm_cublas,
+    matmul_4bit
 )
 from .cextension import COMPILED_WITH_CUDA
 from .nn import modules

@@ -2,7 +2,7 @@ import operator
 import warnings
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 
 import torch
 
@@ -427,10 +427,10 @@ class MatMul8bitLt(torch.autograd.Function):
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
         if any(ctx.needs_input_grad[:2]):
-            ctx.tensors = (CAt, subA)
+            ctx.tensors = (CAt, subA, A)
             ctx.tensor_states = (SCAt, state.idx)
         else:
-            ctx.tensors = [None, None]
+            ctx.tensors = [None, None, A]
             ctx.tensor_states = (None, None)
             ctx.save_for_backward(None, None)
 
@@ -443,7 +443,7 @@ class MatMul8bitLt(torch.autograd.Function):
             bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
-        CAt, subA = ctx.tensors
+        CAt, subA, A = ctx.tensors
         SCAt, idx = ctx.tensor_states
         formatB = ctx.formatB
         state = ctx.state
@@ -489,6 +489,65 @@ class MatMul8bitLt(torch.autograd.Function):
 
         return grad_A, grad_B, None, grad_bias, None
 
+
+class MatMul4Bit(torch.autograd.Function):
+    # forward is the same, but we added the fallback for pre-turing GPUs
+    # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
+
+    @staticmethod
+    def forward(ctx, A, B, out=None, bias=None, state=None):
+        # default of pytorch behavior if inputs are empty
+        ctx.is_empty = False
+        if prod(A.shape) == 0:
+            ctx.is_empty = True
+            ctx.A = A
+            ctx.B = B
+            ctx.bias = bias
+            B_shape = state[1]
+            if A.shape[-1] == B_shape[0]:
+                return torch.empty(A.shape[:-1] + B_shape[1:], dtype=A.dtype, device=A.device)
+            else:
+                return torch.empty(A.shape[:-1] + B_shape[:1], dtype=A.dtype, device=A.device)
+
+
+        # 1. Dequantize
+        # 2. MatmulnN
+        output = torch.nn.functional.linear(A, F.dequantize_fp4(B, state).to(A.dtype).t(), bias)
+
+        # 3. Save state
+        ctx.state = state
+        ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
+
+        if any(ctx.needs_input_grad[:2]):
+            ctx.tensors = (A, B)
+        else:
+            ctx.tensors = (None, None)
+
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.is_empty:
+            bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
+            return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
+
+        req_gradA, _, _, req_gradBias, _= ctx.needs_input_grad
+        A, B = ctx.tensors
+        state = ctx.state
+
+        grad_A, grad_B, grad_bias = None, None, None
+
+        if req_gradBias:
+            # compute grad_bias first before changing grad_output dtype
+            grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
+
+        # not supported by PyTorch. TODO: create work-around
+        #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
+        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_fp4(B, ctx.state).to(grad_output.dtype).t())
+
+        return grad_A, grad_B, None, grad_bias, None
+
+
 def matmul(
     A: tensor,
     B: tensor,
@@ -501,3 +560,8 @@ def matmul(
     if threshold > 0.0:
         state.threshold = threshold
     return MatMul8bitLt.apply(A, B, out, bias, state)
+
+
+def matmul_4bit(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
+    assert quant_state is not None
+    return MatMul4Bit.apply(A, B, out, bias, quant_state)

@@ -136,33 +136,100 @@ class Embedding(torch.nn.Embedding):
 
         return emb
 
-class OutlierAwareLinear(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True):
+class Params4bit(torch.nn.Parameter):
+    def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True, quant_type='fp4'):
+        if data is None:
+            data = torch.empty(0)
+
+        self = torch.Tensor._make_subclass(cls, data, requires_grad)
+        self.blocksize = blocksize
+        self.compress_statistics = compress_statistics
+        self.quant_type = quant_type
+        self.quant_state = quant_state
+        self.data = data
+        return self
+
+    def cuda(self, device):
+        w = self.data.contiguous().half().cuda(device)
+        w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
+        self.data = w_4bit
+        self.quant_state = quant_state
+
+        return self
+
+    @overload
+    def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ..., non_blocking: bool = ...,) -> T:
+        ...
+
+    @overload
+    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T:
+        ...
+
+    @overload
+    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T:
+        ...
+
+    def to(self, *args, **kwargs):
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+
+        if (device is not None and device.type == "cuda" and self.data.device.type == "cpu"):
+            return self.cuda(device)
+        else:
+            s = self.quant_state
+            if s is not None:
+                # make sure the quantization state is on the right device
+                s[0] = s[0].to(device)
+                if self.compress_statistics:
+                    # TODO: refactor this. This is a nightmare
+                    # for 4-bit: 
+                    # state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type]
+                    # state2 = [absmax, input_shape, A.dtype, blocksize, None, quant_type]
+                    #s[-2][0] = s[-2][0].to(device) # offset
+                    #s[-2][1][0] = s[-2][1][0].to(device) # nested absmax
+
+                    # for 8-bit
+                    s[-2][0] = s[-2][0].to(device) # offset
+                    s[-2][1][0] = s[-2][1][0].to(device) # nested quantiation state statitics
+                    s[-2][1][1] = s[-2][1][1].to(device) # nested quantiation codebook
+            new_param = Params4bit(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
+                                  requires_grad=self.requires_grad, quant_state=self.quant_state,
+                                   blocksize=self.blocksize, compress_statistics=self.compress_statistics,
+                                   quant_type=self.quant_type)
+
+            return new_param
+
+class Linear4bit(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4'):
         super().__init__(input_features, output_features, bias)
-        self.outlier_dim = None
-        self.is_quantized = False
+        self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
+        self.compute_dtype = compute_dtype
 
-    def forward_with_outliers(self, x, outlier_idx):
-        raise NotImplementedError('Please override the `forward_with_outliers(self, x, outlier_idx)` function')
+    def forward(self, x: torch.Tensor):
+        # weights are cast automatically as Int8Params, but the bias has to be cast manually
+        if self.bias is not None and self.bias.dtype != x.dtype:
+            self.bias.data = self.bias.data.to(x.dtype)
 
-    def quantize_weight(self, w, outlier_idx):
-        raise NotImplementedError('Please override the `quantize_weights(self, w, outlier_idx)` function')
+        if getattr(self.weight, 'quant_state', None) is None:
+            print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+        inp_dtype = x.dtype
+        if self.compute_dtype is not None:
+            x = x.to(self.compute_dtype)
 
-    def forward(self, x):
-        if self.outlier_dim is None:
-            tracer = OutlierTracer.get_instance()
-            if not tracer.is_initialized():
-                print('Please use OutlierTracer.initialize(model) before using the OutlierAwareLinear layer')
-            outlier_idx = tracer.get_outliers(self.weight)
-            #print(outlier_idx, tracer.get_hvalue(self.weight))
-            self.outlier_dim = outlier_idx
+        bias = None if self.bias is None else self.bias.to(self.compute_dtype)
+        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
 
-        if not self.is_quantized:
-            w = self.quantize_weight(self.weight, self.outlier_dim)
-            self.weight.data.copy_(w)
-            self.is_quantized = True
+        out = out.to(inp_dtype)
 
-        return self.forward_with_outliers(x, self.outlier_dim)
+        return out
+
+class LinearFP4(Linear4bit):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
+        super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'fp4')
+
+class LinearNF4(Linear4bit):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
+        super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'nf4')
+
 
 
 class Int8Params(torch.nn.Parameter):
@@ -237,6 +304,7 @@ class Int8Params(torch.nn.Parameter):
             new_param.SCB = self.SCB
 
             return new_param
+
 
 
 class Linear8bitLt(nn.Linear):
@@ -327,6 +395,32 @@ class Linear8bitLt(nn.Linear):
                 self.weight.data = self.state.CxB
         return out
 
+
+class OutlierAwareLinear(nn.Linear):
+    def __init__(self, input_features, output_features, bias=True):
+        super().__init__(input_features, output_features, bias)
+        self.outlier_dim = None
+        self.is_quantized = False
+
+    def forward_with_outliers(self, x, outlier_idx):
+        raise NotImplementedError('Please override the `forward_with_outliers(self, x, outlier_idx)` function')
+
+    def quantize_weight(self, w, outlier_idx):
+        raise NotImplementedError('Please override the `quantize_weights(self, w, outlier_idx)` function')
+
+    def forward(self, x):
+        if self.outlier_dim is None:
+            tracer = OutlierTracer.get_instance()
+            if not tracer.is_initialized():
+                print('Please use OutlierTracer.initialize(model) before using the OutlierAwareLinear layer')
+            outlier_idx = tracer.get_outliers(self.weight)
+            #print(outlier_idx, tracer.get_hvalue(self.weight))
+            self.outlier_dim = outlier_idx
+
+        if not self.is_quantized:
+            w = self.quantize_weight(self.weight, self.outlier_dim)
+            self.weight.data.copy_(w)
+            self.is_quantized = True
 
 class SwitchBackLinearBnb(nn.Linear):
     def __init__(

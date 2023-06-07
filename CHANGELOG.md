@@ -228,3 +228,14 @@ Deprecated:
 Features:
  - Added Int8 SwitchBack layers
  - Added Fake FP8 layers for research purposes (available under `bnb.research.nn. ...`)
+
+
+### 0.39.0
+
+
+Features:
+ - 4-bit matrix multiplication for Float4 and NormalFloat4 data types.
+ - Added 4-bit quantization routines
+ - Doubled quantization routines for 4-bit quantization
+ - Paged optimizers for Adam and Lion.
+ - bfloat16 gradient / weight support for Adam and Lion with 8 or 32-bit states.
