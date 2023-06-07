@@ -80,7 +80,7 @@ out = linear(x.to(torch.float16))
 Requirements: anaconda, cudatoolkit, pytorch
 
 Hardware requirements:
- - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or older).
+ - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or newer).
  - 8-bit optimizers and quantization: NVIDIA Kepler GPU or newer (>=GTX 78X).
 
 Supported CUDA versions: 10.2 - 12.0
