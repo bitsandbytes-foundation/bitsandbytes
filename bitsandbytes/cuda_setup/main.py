@@ -76,7 +76,7 @@ class CUDASetup:
             make_cmd += ' make cuda110'
         elif self.cuda_version_string[:2] == '11' and int(self.cuda_version_string[2]) > 0:
             make_cmd += ' make cuda11x'
-        elif self.cuda_version_string == '121':
+        elif self.cuda_version_string[:2] == '12' and 1 >= int(self.cuda_version_string[2]) >= 0:
             make_cmd += ' make cuda12x'
         elif self.cuda_version_string == '100':
             self.add_log_entry('CUDA SETUP: CUDA 10.0 not supported. Please use a different CUDA version.')
