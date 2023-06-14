@@ -307,7 +307,10 @@ class Int8Params(torch.nn.Parameter):
 
 
 def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-    weight = state_dict[f"{prefix}weight"]
+    weight = state_dict.get(f"{prefix}weight")
+    if weight is None:
+        # if the state dict has no weights for this layer (e.g., LoRA finetuning), do nothing
+        return
     weight_format = state_dict.pop(f"{prefix}weight_format", "row")
 
     if weight_format != "row":
