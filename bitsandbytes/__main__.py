@@ -33,8 +33,14 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
 def find_file_recursive(folder, filename):
     cmd = f'find {folder} -name {filename}'
     out, err = execute_and_return(cmd)
+
     if len(err) > 0:
-        raise RuntimeError('Something when wrong when trying to find file. Maybe you do not have a linux system?')
+        print("Error information", "*"*80)
+        print(err)
+        if "Permission denied" in err:
+            print("errors are caused by Permission denied, ignore temporarily")
+        else:
+            raise RuntimeError('Something when wrong when trying to find file. Maybe you do not have a linux system?')
 
     return out
 
