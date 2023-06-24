@@ -323,6 +323,8 @@ def get_compute_capabilities():
         cc_major, cc_minor = torch.cuda.get_device_capability(torch.cuda.device(i))
         ccs.append(f"{cc_major}.{cc_minor}")
 
+    ccs.sort(key=lambda v: tuple(map(int, str(v).split("."))))
+
     return ccs
 
 
