@@ -26,7 +26,7 @@ Compilation quickstart:
 git clone https://github.com/timdettmers/bitsandbytes.git
 cd bitsandbytes
 
-# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121}
+# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122}
 # make argument in {cuda110, cuda11x, cuda12x}
 # if you do not know what CUDA you have, try looking at the output of: python -m bitsandbytes
 CUDA_VERSION=117 make cuda11x
@@ -83,7 +83,7 @@ Hardware requirements:
  - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or older).
  - 8-bit optimizers and quantization: NVIDIA Kepler GPU or newer (>=GTX 78X).
 
-Supported CUDA versions: 10.2 - 12.1
+Supported CUDA versions: 10.2 - 12.2
 
 The bitsandbytes library is currently only supported on Linux distributions. Windows is not supported at the moment.
 
@@ -148,7 +148,7 @@ To compile from source, you need an installation of CUDA. If `nvcc` is not insta
 ```bash
 wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
-#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121}
+#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122}
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
 
 # For example, the following installs CUDA 11.8 to ~/local/cuda-11.8 and exports the path to your .bashrc
