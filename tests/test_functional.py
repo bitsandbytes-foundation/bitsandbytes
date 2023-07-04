@@ -2415,21 +2415,21 @@ def test_gemm_4bit(dtype):
     #for dim in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
     #for dim in [4096, 5120, 6656, 8192]:
     #for dim in [32]:
-    for dim in [4096]:
+    for dim in [2*4096]:
     #for dim in [5120]:
     #for dim in [6656]:
-    #for dim in [128]:
+    #for dim in [4]:
         errs = []
         relerrs = []
         max_err = 0
         max_relerr = 0
-        for i in range(1):
+        for i in range(100):
             #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
             #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
             #A = torch.rand(1, 4096, dtype=dtype, device='cuda')
             #B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
-            A = torch.randn(1, dim+2, dtype=dtype, device='cuda')
-            B = torch.randn(4*dim, dim+2, dtype=dtype, device='cuda')/math.sqrt(dim)
+            A = torch.randn(1, dim, dtype=dtype, device='cuda')
+            B = torch.randn(4*dim, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
             #B = torch.randn(1, dim+2, dtype=dtype, device='cuda')/math.sqrt(dim)
 
             #print('')

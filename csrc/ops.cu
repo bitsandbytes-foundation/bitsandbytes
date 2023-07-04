@@ -733,6 +733,7 @@ template <typename T> void gemm_4bit_inference_naive(int m, int n, int k, T * A,
 {
 
 	int num_blocks = (m+3)/4;
+	//int num_blocks = m;
 
 	cout << num_blocks << endl;
 	//cout << lda << endl;
