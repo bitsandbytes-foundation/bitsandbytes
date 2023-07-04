@@ -1503,7 +1503,7 @@ def cutlass3_gemm(
     ldc = ct.c_int32(ldc)
 
     if B.dtype == torch.uint8:
-        lib.cgemm_4bit_inference(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
+        lib.cgemm_4bit_inference_naive(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
     elif A.dtype == torch.float32:
         lib.cgemm_host_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
     elif A.dtype == torch.float16:

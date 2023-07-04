@@ -28,6 +28,9 @@ void gemm_host_fp16(int M, int N, int K, half * A,  half* B,  half * out,  int l
 void gemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
 { gemm_4bit_inference<half>(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
 
+void gemm_4bit_inference_naive(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
+{ gemm_4bit_inference_naive<half>(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
+
 #define MAKE_ELEMENTWISE_FUNC(fname, type_name, ctype, FUNC) \
 void fname##_##type_name(ctype *A, ctype *B, ctype value, long n){ func<ctype, FUNC>(A, B, value, n); } \
 
@@ -344,6 +347,9 @@ extern "C"
 
 	void cgemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
 	{ gemm_4bit_inference(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize); }
+
+	void cgemm_4bit_inference_naive(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
+	{ gemm_4bit_inference_naive(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize); }
 
 	void *cget_managed_ptr(size_t bytes)
 	{

@@ -1773,17 +1773,17 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     print("partial matmul", time.time() - t0)
 
 
-batch_size = 1
-seqdim = 1
+batch_size = 32
+seqdim = 512+256
 values = []
 #values.append((batch_size, seqdim, 768, 4 * 768))
 #values.append((batch_size, seqdim, 1024, 4*1024))
 #values.append((batch_size, seqdim, 1536, 4*1536))
 #values.append((batch_size, seqdim, 2048, 4*2048))
 #values.append((batch_size, seqdim, 2560, 4*2560))
-values.append((batch_size, seqdim, 4096, 4*4096))
-values.append((batch_size, seqdim, 5120, 4*5120))
-values.append((batch_size, seqdim, 6656, 4*6656))
+#values.append((batch_size, seqdim, 4096, 4*4096))
+#values.append((batch_size, seqdim, 5120, 4*5120))
+#values.append((batch_size, seqdim, 6656, 4*6656))
 values.append((batch_size, seqdim, 8192, 4*8192))
 #values.append((batch_size, seqdim, 5140, 4*5140))
 #values.append((batch_size, seqdim, 12288, 4*12288))
@@ -1827,19 +1827,19 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.cuda.synchronize()
     print( f"pytorch fp16: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        bnb.matmul_4bit(A, B_fp4.t(), quant_state=state)
-    torch.cuda.synchronize()
-    print( f"bnb fp4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    bnb.matmul_4bit(A, B_fp4.t(), quant_state=state)
+    #torch.cuda.synchronize()
+    #print( f"bnb fp4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        bnb.matmul_4bit(A, B_fp4.t(), quant_state=state_c)
-    torch.cuda.synchronize()
-    print( f"bnb fp4 + compressed stats: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    bnb.matmul_4bit(A, B_fp4.t(), quant_state=state_c)
+    #torch.cuda.synchronize()
+    #print( f"bnb fp4 + compressed stats: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
 
     torch.cuda.synchronize()
     t0 = time.time()
@@ -1901,21 +1901,21 @@ def test_bench_matmul(batch, seq, model, hidden):
     #torch.cuda.synchronize()
     #print(f"linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    linear8bit(A)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        linear8bit(A)
-    torch.cuda.synchronize()
-    print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #linear8bit(A)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    linear8bit(A)
+    #torch.cuda.synchronize()
+    #print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    linearMixedBit(A)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        linearMixedBit(A)
-    torch.cuda.synchronize()
-    print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    #linearMixedBit(A)
+    #torch.cuda.synchronize()
+    #t0 = time.time()
+    #for i in range(iters):
+    #    linearMixedBit(A)
+    #torch.cuda.synchronize()
+    #print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
     #linear8bit_train(A)
     #torch.cuda.synchronize()
@@ -2411,10 +2411,14 @@ def test_cutlass3_gemm(dtype):
 #@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
 @pytest.mark.parametrize("dtype", [torch.float16], ids=['fp16'])
 def test_gemm_4bit(dtype):
+    print('')
     #for dim in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
     #for dim in [4096, 5120, 6656, 8192]:
     #for dim in [32]:
-    for dim in [32]:
+    for dim in [4096]:
+    #for dim in [5120]:
+    #for dim in [6656]:
+    #for dim in [128]:
         errs = []
         relerrs = []
         max_err = 0
@@ -2424,24 +2428,36 @@ def test_gemm_4bit(dtype):
             #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
             #A = torch.rand(1, 4096, dtype=dtype, device='cuda')
             #B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
-            A = torch.randn(1, dim+0, dtype=dtype, device='cuda')
-            B = torch.randn(4*dim, dim+0, dtype=dtype, device='cuda')/math.sqrt(dim)
+            A = torch.randn(1, dim+2, dtype=dtype, device='cuda')
+            B = torch.randn(4*dim, dim+2, dtype=dtype, device='cuda')/math.sqrt(dim)
+            #B = torch.randn(1, dim+2, dtype=dtype, device='cuda')/math.sqrt(dim)
 
             #print('')
             #print(A)
             #print(B.t())
             #A[:, :-1] = 0
             #B[:, :-1] = 0
+            #A.flatten()[:-1] = 0
+            #B.flatten()[:-1] = 0
 
             qB, state = F.quantize_nf4(B)
             F.dequantize_nf4(qB, state)
 
-            C3 = torch.matmul(A, B.t())
+            #C3 = torch.matmul(A, B.t())
             C2 = F.cutlass3_gemm(A, qB.t(), state=state)
             C1 = bnb.matmul_4bit(A, qB.t(), state)
 
-            print(C1)
-            print(C2)
+            #print(state)
+            #print(qB)
+
+
+            #print('')
+            #print(A)
+            #print(B)
+            #print('='*89)
+            #print(C1)
+            #print(C2)
+            #print(C3)
 
             #print(C1.shape, C2.shape)
 
@@ -2455,7 +2471,7 @@ def test_gemm_4bit(dtype):
             max_relerr = max(relerr.max(), max_relerr)
             err = err.mean().item()
             relerr = relerr.mean().item()
-            print(err)
+            #print(err)
 
             errs.append(err)
             relerrs.append(relerr)
@@ -2463,20 +2479,20 @@ def test_gemm_4bit(dtype):
             if err/torch.abs(C1).mean() > 5e-5 or err > 3.2e-5:
                 print('')
                 print(i, err, relerr)
-                print(A.flatten()[-6:])
-                print(B.flatten()[-6:])
-                out = A.flatten()[-6:]*B.flatten()[-6:]
-                print(out)
-                print(out[:-1].sum())
+                #print(A.flatten()[-6:])
+                #print(B.flatten()[-6:])
+                #out = A.flatten()[-6:]*B.flatten()[-6:]
+                #print(out)
+                #print(out[:-1].sum())
                 print('='*80)
-                print(C1.flatten()[-6:])
-                print(C2.flatten()[-6:])
+                #print(C1.flatten()[-6:])
+                #print(C2.flatten()[-6:])
                 #assert False, 'ERROR'
 
             c = int(C1.numel()*0.0014*(dim/256))+1
 
             c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=False)
-            #print(c/math.sqrt(dim))
+            print(c/math.sqrt(dim))
         print('')
         print(dim, sum(errs)/len(errs)/math.sqrt(dim))
         print(dim, sum(relerrs)/len(relerrs)/math.sqrt(dim))
