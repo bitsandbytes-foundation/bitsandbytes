@@ -617,6 +617,8 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
             lib.cquantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), cblocksize, ct.c_int(A.numel()))
         elif A.dtype == torch.float16:
             lib.cquantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), cblocksize, ct.c_int(A.numel()))
+        elif A.dtype == torch.bfloat16:
+            lib.cquantize_blockwise_bf16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), cblocksize, ct.c_int(A.numel()))
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
         post_call(A.device)
@@ -629,11 +631,9 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
         offset = absmax.mean()
         absmax -= offset
         qabsmax, state2 = quantize_blockwise(absmax, blocksize=blocksize, nested=False)
-        state = [qabsmax, code, blocksize, nested, offset, state2]
+        state = [qabsmax, code, blocksize, nested, A.dtype, offset, state2]
     else:
-        state = [absmax, code, blocksize, nested, None, None]
-
-
+        state = [absmax, code, blocksize, nested, A.dtype, None, None]
 
     return out, state
 
@@ -678,18 +678,16 @@ def dequantize_blockwise(
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
         code = name2qmap["dynamic"]
 
-    if out is None:
-        out = torch.zeros_like(A, dtype=torch.float32)
-
     if quant_state is None:
-       quant_state = (absmax, code, blocksize)
-       assert absmax is not None and out is not None
-    else:
-       absmax, code, blocksize, nested, offset, state2 = quant_state
-       if nested:
-           absmax = dequantize_blockwise(absmax, state2)
-           absmax += offset
+       quant_state = (absmax, code, blocksize, False, torch.float32, None, None)
 
+    absmax, code, blocksize, nested, dtype, offset, state2 = quant_state
+    if nested:
+        absmax = dequantize_blockwise(absmax, state2)
+        absmax += offset
+
+    if out is None:
+        out = torch.empty(A.shape, dtype=dtype, device=A.device)
 
     if A.device.type != 'cpu':
         device = pre_call(A.device)
@@ -701,6 +699,8 @@ def dequantize_blockwise(
             lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
         elif out.dtype == torch.float16:
             lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+        elif out.dtype == torch.bfloat16:
+            lib.cdequantize_blockwise_bf16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
         post_call(A.device)
@@ -774,6 +774,11 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
             lib.cquantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
         else:
             lib.cquantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+    elif A.dtype == torch.bfloat16:
+        if quant_type == 'fp4':
+            lib.cquantize_blockwise_bf16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+        else:
+            lib.cquantize_blockwise_bf16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     post_call(A.device)
@@ -860,6 +865,11 @@ def dequantize_4bit(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax:
             lib.cdequantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
         else:
             lib.cdequantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+    elif out.dtype == torch.bfloat16:
+        if quant_type == 'fp4':
+            lib.cdequantize_blockwise_bf16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+        else:
+            lib.cdequantize_blockwise_bf16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     post_call(A.device)
@@ -1503,7 +1513,12 @@ def cutlass3_gemm(
     ldc = ct.c_int32(ldc)
 
     if B.dtype == torch.uint8:
-        lib.cgemm_4bit_inference_naive(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
+        if A.dtype == torch.float16:
+            lib.cgemm_4bit_inference_naive_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
+        elif A.dtype == torch.bfloat16:
+            lib.cgemm_4bit_inference_naive_bf16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
+        else:
+            raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
     elif A.dtype == torch.float32:
         lib.cgemm_host_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
     elif A.dtype == torch.float16:
@@ -1512,7 +1527,6 @@ def cutlass3_gemm(
         raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
 
     return out
-
 
 
 

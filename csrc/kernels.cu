@@ -3540,7 +3540,7 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(in
   unsigned char local_B_4bit[num_values_8bit];
   T local_B[num_values_4bit];
   T local_A[num_values_4bit];
-  __shared__ half quant_map[16*THREADS];
+  __shared__ T quant_map[16*THREADS];
 
   for(int i = 0; i < 16; i++)
     quant_map[threadIdx.x + (i*blockDim.x)] = nf4_data[i];
@@ -3769,11 +3769,8 @@ template __global__ void kgemm_4bit_inference<half, 128>(int M, int N, int K, ha
 template __global__ void kgemm_4bit_inference<half, 160>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 template __global__ void kgemm_4bit_inference<half, 256>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 
-template __global__ void kgemm_4bit_inference_naive<half, 32>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
-template __global__ void kgemm_4bit_inference_naive<half, 96>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 template __global__ void kgemm_4bit_inference_naive<half, 128>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
-template __global__ void kgemm_4bit_inference_naive<half, 160>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
-template __global__ void kgemm_4bit_inference_naive<half, 256>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
+template __global__ void kgemm_4bit_inference_naive<__nv_bfloat16, 128>(int M, int N, int K, __nv_bfloat16 * __restrict__ const A, unsigned char *B,  float *absmax, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize);
 
 template __global__ void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 template __global__ void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
@@ -3929,6 +3926,20 @@ MAKE_kQuantizeBlockwise(half,   512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,   256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,   128, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,    64, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(half,  4096, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(half,  2048, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(half,  1024, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(half,   512, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(half,   256, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(half,   128, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(half,    64, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(half,  4096, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(half,  2048, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(half,  1024, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(half,   512, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(half,   256, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(half,   128, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(half,    64, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, General8bit)
@@ -3937,13 +3948,6 @@ MAKE_kQuantizeBlockwise(float,  512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float,  256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float,   64, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(half,  4096, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(half,  2048, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(half,  1024, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(half,   512, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(half,   256, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(half,   128, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(half,    64, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 1024, 4, 0, FP4)
@@ -3951,13 +3955,6 @@ MAKE_kQuantizeBlockwise(float,  512, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float,  256, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float,   64, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(half,  4096, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(half,  2048, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(half,  1024, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(half,   512, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(half,   256, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(half,   128, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(half,    64, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 1024, 4, 0, NF4)
@@ -3966,12 +3963,38 @@ MAKE_kQuantizeBlockwise(float,  256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float,   64, 2, 0, NF4)
 
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 4096, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 4096, 4, 1, General8bit)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 2048, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 1024, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  512, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  256, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  128, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,   64, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 4096, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 2048, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 1024, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  512, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  256, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  128, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,   64, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 4096, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 2048, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16, 1024, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  512, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  256, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,  128, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(__nv_bfloat16,   64, 2, 0, NF4)
+
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
-template __global__ void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n);
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
-template __global__ void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n);
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
+template __global__ void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n);
+template __global__ void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n);
 template __global__ void kDequantizeBlockwise<float, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n);
+template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, __nv_bfloat16 *out, const int blocksize, const int n);
+template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, __nv_bfloat16 *out, const int blocksize, const int n);
+template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, __nv_bfloat16 *out, const int blocksize, const int n);
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \
 template __global__ void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_per_thread>(gtype* p, gtype* __restrict__ const g, unsigned char* state1, unsigned char* state2, \
