@@ -44,6 +44,9 @@ class CUDASetup:
         raise RuntimeError("Call get_instance() instead")
 
     def generate_instructions(self):
+        if getattr(self, 'error', False): return
+        print(self.error)
+        self.error = True
         if self.cuda is None:
             self.add_log_entry('CUDA SETUP: Problem: The main issue seems to be that the main CUDA library was not detected.')
             self.add_log_entry('CUDA SETUP: Solution 1): Your paths are probably not up-to-date. You can update them via: sudo ldconfig.')
@@ -93,6 +96,7 @@ class CUDASetup:
             self.has_printed = False
             self.lib = None
             self.initialized = False
+            self.error = False
 
     def run_cuda_setup(self):
         self.initialized = True

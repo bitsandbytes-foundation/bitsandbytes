@@ -20,6 +20,11 @@
 #include <vector>
 #include <functional>
 
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+
+
+
 #define CUDA_CHECK_RETURN(value) {                      \
   cudaError_t _m_cudaStat = value;                    \
   if (_m_cudaStat != cudaSuccess) {                   \
@@ -82,6 +87,20 @@ typedef enum Transform_t
   COL_AMPERE = 4,
 } Transform_t;
 
+typedef enum DataType_t
+{
+	General8bit = 0,
+	FP4 = 1,
+  NF4 = 2,
+} DataType_t;
+
+typedef enum Funcs_t
+{
+	FILL = 0,
+	ARANGE = 1,
+	_MUL = 2,
+} Funcs_t;
+
 class Context
 {
     public:
@@ -129,8 +148,8 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
 
 void quantize(float *code, float *A, unsigned char *out, int n);
 void dequantize(float *code, unsigned char *A, float *out, int n);
-template <typename T, int STOCHASTIC> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template<typename T> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n);
+template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n);
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
@@ -176,5 +195,12 @@ void spmm_coo(cusparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_val
 template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
 template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int idx_size, int rows, int cols);
+
+void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rowsA, int colsA, int colsB);
+
+template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits);
+template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize);
+
+template <typename T, int FUNC> void func(T *A, T *B, T value, long n);
 
 #endif

@@ -92,10 +92,12 @@ class GlobalOptimManager:
 
 
 class Optimizer8bit(torch.optim.Optimizer):
-    def __init__(self, params, defaults, optim_bits=32):
+    def __init__(self, params, defaults, optim_bits=32, is_paged=False):
         super().__init__(params, defaults)
         self.initialized = False
         self.name2qmap = {}
+        self.is_paged = is_paged
+        self.page_mng = F.GlobalPageManager.get_instance()
 
         self.mng = GlobalOptimManager.get_instance()
         self.non_castable_tensor_keys = {
@@ -207,7 +209,9 @@ class Optimizer8bit(torch.optim.Optimizer):
                     values = self.state[p]
                     for k, v in values.items():
                         if isinstance(v, torch.Tensor):
-                            self.state[p][k] = v.to(p.device)
+                            is_paged = getattr(v, 'is_paged', False)
+                            if not is_paged:
+                                self.state[p][k] = v.to(p.device)
 
     def check_overrides(self):
         for module, attr, config in self.mng.module_weight_config_triple:
@@ -252,6 +256,7 @@ class Optimizer8bit(torch.optim.Optimizer):
             self.to_gpu()  # needed for fairseq pure fp16 training
             self.initialized = True
 
+        #if self.is_paged: self.page_mng.prefetch_all()
         for gindex, group in enumerate(self.param_groups):
             for pindex, p in enumerate(group["params"]):
                 if p.grad is None:
@@ -260,7 +265,14 @@ class Optimizer8bit(torch.optim.Optimizer):
                 if len(state) == 0:
                     self.init_state(group, p, gindex, pindex)
 
+                self.prefetch_state(p)
                 self.update_step(group, p, gindex, pindex)
+                torch.cuda.synchronize()
+        if self.is_paged:
+            # all paged operation are asynchronous, we need
+            # to sync to make sure all tensors are in the right state
+            torch.cuda.synchronize()
+
 
         return loss
 
@@ -289,6 +301,26 @@ class Optimizer8bit(torch.optim.Optimizer):
             "The update_step method needs to be overridden"
         )
 
+    def get_state_buffer(self, p, dtype=torch.float32):
+        if not self.is_paged or p.numel() < 1e5:
+            return torch.zeros_like(p, dtype=dtype, device=p.device)
+        else:
+            # > 1 MB
+            buff = F.get_paged(*p.shape, dtype=dtype, device=p.device)
+            F.fill(buff, 0)
+            self.page_mng.paged_tensors.append(buff)
+            return buff
+
+    def prefetch_state(self, p):
+        if self.is_paged:
+            state = self.state[p]
+            s1 = state['state1']
+            is_paged = getattr(s1, 'is_paged', False)
+            if is_paged:
+                F.prefetch_tensor(state['state1'])
+                if 'state2' in state:
+                    F.prefetch_tensor(state['state2'])
+
 
 class Optimizer2State(Optimizer8bit):
     def __init__(
@@ -306,6 +338,7 @@ class Optimizer2State(Optimizer8bit):
         block_wise=True,
         max_unorm=0.0,
         skip_zeros=False,
+        is_paged=False
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -325,7 +358,7 @@ class Optimizer2State(Optimizer8bit):
                 f"Invalid weight_decay value: {weight_decay}"
             )
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        super().__init__(params, defaults, optim_bits)
+        super().__init__(params, defaults, optim_bits, is_paged)
 
         if args is None:
             args = {}
@@ -365,18 +398,8 @@ class Optimizer2State(Optimizer8bit):
         if dtype == torch.float32 or (
             dtype == torch.uint8 and p.numel() < 4096
         ):
-            state["state1"] = torch.zeros_like(
-                p,
-                memory_format=torch.preserve_format,
-                dtype=torch.float32,
-                device=p.device,
-            )
-            state["state2"] = torch.zeros_like(
-                p,
-                memory_format=torch.preserve_format,
-                dtype=torch.float32,
-                device=p.device,
-            )
+            state["state1"] = self.get_state_buffer(p, dtype=torch.float32)
+            state["state2"] = self.get_state_buffer(p, dtype=torch.float32)
         elif dtype == torch.uint8:
             if state["step"] == 0:
                 if "dynamic" not in self.name2qmap:
@@ -388,20 +411,10 @@ class Optimizer2State(Optimizer8bit):
                     p.device
                 )
 
-            state["state1"] = torch.zeros_like(
-                p,
-                memory_format=torch.preserve_format,
-                dtype=torch.uint8,
-                device=p.device,
-            )
+            state["state1"] = self.get_state_buffer(p, dtype=torch.uint8)
             state["qmap1"] = self.name2qmap["dynamic"]
 
-            state["state2"] = torch.zeros_like(
-                p,
-                memory_format=torch.preserve_format,
-                dtype=torch.uint8,
-                device=p.device,
-            )
+            state["state2"] = self.get_state_buffer(p, dtype=torch.uint8)
             state["qmap2"] = self.name2qmap["udynamic"]
 
             if config["block_wise"]:
@@ -538,6 +551,7 @@ class Optimizer1State(Optimizer8bit):
         block_wise=True,
         max_unorm=0.0,
         skip_zeros=False,
+        is_paged=False
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -553,7 +567,7 @@ class Optimizer1State(Optimizer8bit):
                 f"Invalid weight_decay value: {weight_decay}"
             )
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        super().__init__(params, defaults, optim_bits)
+        super().__init__(params, defaults, optim_bits, is_paged)
 
         if args is None:
             args = {}
@@ -593,12 +607,7 @@ class Optimizer1State(Optimizer8bit):
         if dtype == torch.float32 or (
             dtype == torch.uint8 and p.numel() < 4096
         ):
-            state["state1"] = torch.zeros_like(
-                p,
-                memory_format=torch.preserve_format,
-                dtype=torch.float32,
-                device=p.device,
-            )
+            state["state1"] = self.get_state_buffer(p, dtype=torch.float32)
         elif dtype == torch.uint8:
             if state["step"] == 0:
                 if "dynamic" not in self.name2qmap:
@@ -607,12 +616,7 @@ class Optimizer1State(Optimizer8bit):
                     p.device
                 )
 
-            state["state1"] = torch.zeros_like(
-                p,
-                memory_format=torch.preserve_format,
-                dtype=torch.uint8,
-                device=p.device,
-            )
+            state["state1"] = self.get_state_buffer(p, dtype=torch.uint8)
             state["qmap1"] = self.name2qmap["dynamic"]
 
             if config["block_wise"]:
