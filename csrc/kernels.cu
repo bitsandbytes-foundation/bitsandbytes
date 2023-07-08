@@ -3537,14 +3537,20 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(in
   const int num_values_8bit = num_values_4bit/2;
   T local_C = T(0);
 
+  T lane_quant_value = nf4_data[warp_lane % 16];
+
   unsigned char local_B_4bit[num_values_8bit];
   T local_B[num_values_4bit];
   T local_A[num_values_4bit];
   __shared__ T quant_map[16*THREADS];
+  __shared__ T quant_map2[16];
+
+  //for(int i = 0; i < 16; i++)
+  //  quant_map[threadIdx.x + (i*blockDim.x)] = nf4_data[i];
+  //__syncthreads();
 
   for(int i = 0; i < 16; i++)
-    quant_map[threadIdx.x + (i*blockDim.x)] = nf4_data[i];
-  __syncthreads();
+    quant_map2[i] = nf4_data[i];
 
   // A: [1, K]
   // B: [N, K]
@@ -3570,11 +3576,25 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(in
       }
     }
 
-    #pragma unroll
-    for(int k = 0; k < num_values_4bit; k++)
+    if(inner_idx+(num_values_4bit*32) < K)
     {
-      local_B[k*2] = quant_map[(local_B_4bit[k] >> 4)*THREADS+threadIdx.x]*local_absmax;
-      local_B[k*2+ 1] = quant_map[(local_B_4bit[k] & 0x0F)*THREADS+threadIdx.x]*local_absmax;
+      // full warp is running
+      #pragma unroll
+      for(int k = 0; k < num_values_4bit; k++)
+      {
+        local_B[k*2]     = __shfl_sync(0xffffffff, lane_quant_value, local_B_4bit[k] >> 4)*local_absmax;
+        local_B[k*2 + 1] = __shfl_sync(0xffffffff, lane_quant_value, local_B_4bit[k] & 0x0F)*local_absmax;
+      }
+    }
+    else
+    {
+      // part of the warp exited already
+      #pragma unroll
+      for(int k = 0; k < num_values_4bit; k++)
+      {
+        local_B[k*2] = quant_map2[(local_B_4bit[k] >> 4)]*local_absmax;
+        local_B[k*2 + 1] = quant_map2[(local_B_4bit[k] & 0x0F)]*local_absmax;
+      }
     }
 
     if(inner_idx+num_values_4bit)
