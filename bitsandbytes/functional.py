@@ -1459,8 +1459,7 @@ def gemv_4bit(
     out: Tensor = None,
     transposed_A=False,
     transposed_B=False,
-    state=None,
-    storage_type='nf4'
+    state=None
 ):
     #sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if state is None:

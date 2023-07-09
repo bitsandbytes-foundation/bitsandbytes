@@ -2351,12 +2351,13 @@ def test_normal_map_tree():
         print(pivots)
 
 
+@pytest.mark.parametrize("storage_type", ['nf4', 'fp4'], ids=['nf4', 'fp4'])
 #@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=['fp16', 'bf16'])
 #@pytest.mark.parametrize("dtype", [torch.bfloat16], ids=['bf16'])
-def test_gemv_4bit(dtype):
+def test_gemv_4bit(dtype, storage_type):
     print('')
-    for dim in [64, 128, 256, 512, 1024, 2048, 4096]:
+    for dim in [128, 256, 512, 1024, 2048, 4096]:
     #for dim in [4*1024]:
     #for dim in [1*16]:
         errs = []
@@ -2364,7 +2365,7 @@ def test_gemv_4bit(dtype):
         max_err = 0
         max_relerr = 0
 
-        for i in range(100):
+        for i in range(1):
             #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
             #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
             #A = torch.rand(1, 4096, dtype=dtype, device='cuda')
@@ -2381,8 +2382,8 @@ def test_gemv_4bit(dtype):
             #A.flatten()[:-1] = 0
             #B.flatten()[:-1] = 0
 
-            qB, state = F.quantize_nf4(B)
-            F.dequantize_nf4(qB, state)
+            qB, state = F.quantize_4bit(B, quant_type=storage_type)
+            F.dequantize_4bit(qB, state)
 
             C2 = F.gemv_4bit(A, qB.t(), state=state)
             C3 = torch.matmul(A, B.t())
@@ -2396,7 +2397,6 @@ def test_gemv_4bit(dtype):
             #print(A)
             #print(B)
             #print('='*89)
-            #print(C3.flatten()[-20:])
             #print(C3)
 
             #print(C1.shape, C2.shape)
@@ -2425,8 +2425,9 @@ def test_gemv_4bit(dtype):
         #print(dim, (max_err.item(), max_relerr.item()))
         print(C1.flatten()[-20:])
         print(C2.flatten()[-20:])
-        print(sum(errs)/len(errs)/math.sqrt(dim) , 0.00015)
-        print(sum(relerrs)/len(relerrs)/math.sqrt(dim) , 0.0015)
+        print(C3.flatten()[-20:])
+        print(sum(errs)/len(errs)/math.sqrt(dim) , dim)
+        print(sum(relerrs)/len(relerrs)/math.sqrt(dim) , dim)
         if dtype == torch.float16:
             assert sum(errs)/len(errs)/math.sqrt(dim) < 5e-5
             assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 0.0005

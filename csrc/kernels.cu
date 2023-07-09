@@ -3546,7 +3546,8 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(in
 	T local_absmax = T(0.0f);
 
   for(int i = threadIdx.x; i < 16; i++)
-    quant_map[i] = nf4_data[i];
+    quant_map[i] = datatype[i];
+
   __syncthreads();
 
   // A: [1, K]
@@ -3580,9 +3581,6 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(in
     {
       local_B[k*2] = quant_map[local_B_4bit[k] >> 4]*local_absmax;
       local_B[k*2 + 1] = quant_map[local_B_4bit[k] & 0x0F]*local_absmax;
-
-      //if(threadIdx.x == 0)
-      //printf("%f %f %f %f\n", (float)local_B[k*2], (float)dDequantizeNF4(local_B_4bit[k] >> 4)*(float)local_absmax, (float)local_B[k*2]- ((float)dDequantizeNF4(local_B_4bit[k] >> 4)*(float)local_absmax), (float)local_absmax);
     }
 
     if(inner_idx+num_values_4bit)
