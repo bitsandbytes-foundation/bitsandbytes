@@ -1461,15 +1461,24 @@ def gemv_4bit(
     transposed_B=False,
     state=None
 ):
+    prev_device = pre_call(A.device)
     #sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if state is None:
-        Bshape = B.shape
-        bout = Bshape[1]
-    else:
-        Bshape = state[1]
-        bout = Bshape[0]
+        raise ValueError(f'state cannot None. gem_4bit( ) requires the state from quantize_4bit( )')
+
+    Bshape = state[1]
+    bout = Bshape[0]
+    absmax, shape, dtype, blocksize, compressed_stats, quant_type, data_type = state
+    if compressed_stats is not None:
+        offset, state2 = compressed_stats
+        absmax = dequantize_blockwise(absmax, state2)
+        absmax += offset
+
     if out is None:
         out = torch.zeros(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
+
+
+
 
     sA = A.shape
     sB = B.shape
@@ -1557,13 +1566,15 @@ def gemv_4bit(
 
     if B.dtype == torch.uint8:
         if A.dtype == torch.float16:
-            lib.cgemm_4bit_inference_naive_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(state[-1]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
+            lib.cgemm_4bit_inference_naive_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state[-1]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
         elif A.dtype == torch.bfloat16:
-            lib.cgemm_4bit_inference_naive_bf16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(state[-1]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
+            lib.cgemm_4bit_inference_naive_bf16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state[-1]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
         else:
             raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
     else:
         raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
+
+    post_call(prev_device)
 
     return out
 
