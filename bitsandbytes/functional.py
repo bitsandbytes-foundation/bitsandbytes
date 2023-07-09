@@ -150,7 +150,11 @@ class Cusparse_Context:
         raise RuntimeError("Call get_instance() instead")
 
     def initialize(self):
-        self.context = ct.c_void_p(lib.get_cusparse())
+        #self.context = ct.c_void_p(lib.get_cusparse())
+        if torch.version.cuda:
+            self.context = ct.c_void_p(lib.get_cusparse())
+        elif torch.version.hip:
+            self.context = ct.c_void_p(lib.get_hipsparse())
 
     @classmethod
     def get_instance(cls):

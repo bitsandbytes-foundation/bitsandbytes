@@ -223,6 +223,10 @@ matmul_cublas = MatMul8bit.apply
 
 def supports_igemmlt(device: torch.device) -> bool:
     """check if this device supports the optimized int8 kernel"""
+    """Important: Could I use igemmlt on ROCm? """
+    if torch.version.hip:
+        #Well, lets currently disable it
+        return False
     if torch.cuda.get_device_capability(device=device) < (7, 5):
         return False
     device_name = torch.cuda.get_device_name(device=device)
