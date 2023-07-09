@@ -1475,7 +1475,10 @@ def gemv_4bit(
         absmax += offset
 
     if out is None:
-        out = torch.zeros(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
+        if len(A.shape) == 3:
+            out = torch.zeros(size=(A.shape[0], A.shape[1], bout), dtype=A.dtype, device=A.device)
+        else:
+            out = torch.zeros(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
 
 
 
