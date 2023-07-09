@@ -355,6 +355,7 @@ def get_compute_capabilities(cuda):
         # 2. call extern C function to determine CC
         check_cuda_result(cuda, cuda.cuDeviceComputeCapability(ref_major, ref_minor, device))
         ccs.append(f"{cc_major.value}.{cc_minor.value}")
+    ccs.sort(key=lambda v: tuple(map(int, str(v).split("."))))
 
     return ccs
 
