@@ -562,6 +562,6 @@ def matmul(
 def matmul_4bit(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
     assert quant_state is not None
     if A.numel() == A.shape[-1] and A.requires_grad == False:
-        return F.cutlass3_gemm(A, B.t(), out, state=quant_state)
+        return F.gemv_4bit(A, B.t(), out, state=quant_state)
     else:
         return MatMul4Bit.apply(A, B, out, bias, quant_state)

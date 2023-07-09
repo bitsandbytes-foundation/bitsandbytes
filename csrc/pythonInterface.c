@@ -28,11 +28,11 @@ void gemm_host_fp16(int M, int N, int K, half * A,  half* B,  half * out,  int l
 void gemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
 { gemm_4bit_inference<half>(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
 
-void gemm_4bit_inference_naive_fp16(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
-{ gemm_4bit_inference_naive<half>(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
+void gemm_4bit_inference_naive_fp16(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize)
+{ gemm_4bit_inference_naive<half>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
-void gemm_4bit_inference_naive_bf16(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
-{ gemm_4bit_inference_naive<__nv_bfloat16>(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
+void gemm_4bit_inference_naive_bf16(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
+{ gemm_4bit_inference_naive<__nv_bfloat16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
 #define MAKE_ELEMENTWISE_FUNC(fname, type_name, ctype, FUNC) \
 void fname##_##type_name(ctype *A, ctype *B, ctype value, long n){ func<ctype, FUNC>(A, B, value, n); } \
@@ -394,11 +394,11 @@ extern "C"
 	CMAKE_ELEMENTWISE_FUNC(arange, fp32, float, ARANGE)
 	CMAKE_ELEMENTWISE_FUNC(_mul, fp32, float, _MUL)
 
-	void cgemm_4bit_inference_naive_fp16(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize)
-	{ gemm_4bit_inference_naive_fp16(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
+	void cgemm_4bit_inference_naive_fp16(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize)
+	{ gemm_4bit_inference_naive_fp16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
-	void cgemm_4bit_inference_naive_bf16(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
-	{ gemm_4bit_inference_naive_bf16(m, n, k, A, B, absmax,  out, lda, ldb, ldc, blocksize); }
+	void cgemm_4bit_inference_naive_bf16(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
+	{ gemm_4bit_inference_naive_bf16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
 #endif
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }
