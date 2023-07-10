@@ -2378,8 +2378,8 @@ def test_gemv_4bit(dtype, storage_type, double_quant):
             #A = torch.rand(1, 4096, dtype=dtype, device='cuda')
             #B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
             A = torch.randn(1, dim, dtype=dtype, device='cuda')
-            B = torch.randn(4*dim, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
-            #B = torch.randn(1, dim+2, dtype=dtype, device='cuda')/math.sqrt(dim)
+            #B = torch.randn(4, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
+            B = torch.randn(dim*4, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
 
             #print('')
             #print(A)
@@ -2432,13 +2432,18 @@ def test_gemv_4bit(dtype, storage_type, double_quant):
         #print(dim, (max_err.item(), max_relerr.item()))
         print(C1.flatten()[-20:])
         print(C2.flatten()[-20:])
-        print(C3.flatten()[-20:])
+        #print(C1.flatten())
+        #print(C2.flatten())
+        #print(C3.flatten()[-20:])
         print(sum(errs)/len(errs)/math.sqrt(dim) , dim)
         print(sum(relerrs)/len(relerrs)/math.sqrt(dim) , dim)
         if dtype == torch.float16:
             assert sum(errs)/len(errs)/math.sqrt(dim) < 5e-5
             assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 0.0005
-        else:
+        elif dtype == torch.float32:
+            assert sum(errs)/len(errs)/math.sqrt(dim) < 5e-8
+            assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 1e-8
+        elif dtype == torch.bfloat16:
             assert sum(errs)/len(errs)/math.sqrt(dim) < 3e-4
             assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 0.003
 

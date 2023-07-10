@@ -3595,7 +3595,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
       #endif
     }
 
-    if(inner_idx+num_values_4bit)
+    if(inner_idx+num_values_4bit < K)
     {
       if(BITS==16)
       {
@@ -3619,11 +3619,17 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
     }
     else
       for(int k = 0; k < num_values_4bit; k++)
-        local_A[k] = A[inner_idx +k];
+        if(inner_idx + k < K)
+          local_A[k] = A[inner_idx + k];
+        else
+          local_A[k] = T(0.0f);
+
 
     #pragma unroll
     for(int k = 0; k < num_values_4bit; k++)
     {
+      if((float)local_A[k] < -10.0f || (float)local_B[k] < -10.0f || local_C > 10.0f)
+        printf("%f %f = %f\n", (float)local_A[k], (float)local_B[k], local_C);
       #if __CUDA_ARCH__ >= 800
         local_C += (float)(local_A[k]*local_B[k]);
       #else
