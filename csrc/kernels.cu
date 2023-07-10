@@ -3312,6 +3312,7 @@ __device__ static float nf4_data[16] = {-1.0, -0.6961928009986877, -0.5250730514
 template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
+#if __CUDA_ARCH__ >= 750
 	using namespace nvcuda;
   int col_offset = blockIdx.x *32;
   const int warp_id = threadIdx.x / 32;
@@ -3517,6 +3518,7 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, i
 
   if(col_offset + warp_lane < M)
     out[col_offset + warp_lane] = smem_C[warp_lane];
+#endif
 }
 
 #define num_values_4bit 32
@@ -3544,7 +3546,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
 	T local_absmax = T(0.0f);
 
   for(int i = threadIdx.x; i < 16; i++)
-    quant_map[i] = datatype[i];
+    quant_map[i] = T(datatype[i]);
 
   __syncthreads();
 
@@ -3577,8 +3579,14 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
     #pragma unroll
     for(int k = 0; k < num_values_4bit; k++)
     {
-      local_B[k*2] = quant_map[local_B_4bit[k] >> 4]*local_absmax;
-      local_B[k*2 + 1] = quant_map[local_B_4bit[k] & 0x0F]*local_absmax;
+      #if __CUDA_ARCH__ >= 800
+        local_B[k*2] = quant_map[local_B_4bit[k] >> 4]*local_absmax;
+        local_B[k*2 + 1] = quant_map[local_B_4bit[k] & 0x0F]*local_absmax;
+      #else
+        // bf16 multipliation not supported
+        local_B[k*2] = T((float)quant_map[local_B_4bit[k] >> 4]*(float)local_absmax);
+        local_B[k*2 + 1] = T((float)quant_map[local_B_4bit[k] & 0x0F]*(float)local_absmax);
+      #endif
     }
 
     if(inner_idx+num_values_4bit)
@@ -3609,7 +3617,14 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
 
     #pragma unroll
     for(int k = 0; k < num_values_4bit; k++)
-      local_C += (float)(local_A[k]*local_B[k]);
+    {
+      #if __CUDA_ARCH__ >= 800
+        local_C += (float)(local_A[k]*local_B[k]);
+      #else
+        // bf16 multipliation not supported
+        local_C += ((float)local_A[k]*(float)local_B[k]);
+      #endif
+    }
 
   }
 
