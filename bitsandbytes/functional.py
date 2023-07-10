@@ -831,8 +831,6 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
     if compress_statistics:
         offset = absmax.mean()
         absmax -= offset
-        #code = create_custom_map().to(absmax.device)
-        #qabsmax, state2 = quantize_blockwise(absmax, code=code, blocksize=256)
         qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
         del absmax
         state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type, datatype]
