@@ -190,9 +190,9 @@ class Params4bit(torch.nn.Parameter):
                     #s[-2][1][0] = s[-2][1][0].to(device) # nested absmax
 
                     # for 8-bit
-                    s[-2][0] = s[-2][0].to(device) # offset
-                    s[-2][1][0] = s[-2][1][0].to(device) # nested quantiation state statitics
-                    s[-2][1][1] = s[-2][1][1].to(device) # nested quantiation codebook
+                    s[-3][0] = s[-3][0].to(device) # offset
+                    s[-3][1][0] = s[-3][1][0].to(device) # nested quantiation state statitics
+                    s[-3][1][1] = s[-3][1][1].to(device) # nested quantiation codebook
             new_param = Params4bit(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
                                   requires_grad=self.requires_grad, quant_state=self.quant_state,
                                    blocksize=self.blocksize, compress_statistics=self.compress_statistics,

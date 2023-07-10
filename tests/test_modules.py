@@ -535,6 +535,7 @@ def test_kbit_backprop(module):
     kbit[1].bias.detach().copy_(ref[1].bias)
     ref = ref.half().cuda()
     kbit = kbit.half().cuda()
+    kbit = kbit.half().to('cuda')
 
     errs1 = []
     errs2 = []

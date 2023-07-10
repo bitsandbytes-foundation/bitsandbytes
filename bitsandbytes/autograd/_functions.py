@@ -512,7 +512,7 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_fp4(B, state).to(A.dtype).t(), bias)
+        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, state).to(A.dtype).t(), bias)
 
         # 3. Save state
         ctx.state = state
@@ -543,7 +543,7 @@ class MatMul4Bit(torch.autograd.Function):
 
         # not supported by PyTorch. TODO: create work-around
         #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
-        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_fp4(B, ctx.state).to(grad_output.dtype).t())
+        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
 
         return grad_A, grad_B, None, grad_bias, None
 
@@ -564,4 +564,7 @@ def matmul(
 
 def matmul_4bit(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
     assert quant_state is not None
-    return MatMul4Bit.apply(A, B, out, bias, quant_state)
+    if A.numel() == A.shape[-1] and A.requires_grad == False:
+        return F.gemv_4bit(A, B.t(), out, state=quant_state)
+    else:
+        return MatMul4Bit.apply(A, B, out, bias, quant_state)
