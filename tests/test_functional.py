@@ -1776,7 +1776,7 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     print("partial matmul", time.time() - t0)
 
 
-batch_size = 5
+batch_size = 1
 seqdim = 1
 values = []
 #values.append((batch_size, seqdim, 768, 4 * 768))
@@ -1793,7 +1793,7 @@ values.append((batch_size, seqdim, 6656, 4*6656))
 names = ["batch_{}_seq_{}_model_{}_hidden_{}".format(*vals) for vals in values]
 @pytest.mark.parametrize("batch, seq, model, hidden", values, ids=names)
 def test_bench_matmul(batch, seq, model, hidden):
-    iters = 80
+    iters = 1000
     formatB = F.get_special_format_str()
 
     A = torch.randn(batch, seq, model, device="cuda").half()
@@ -2361,9 +2361,7 @@ def test_normal_map_tree():
 
 @pytest.mark.parametrize("double_quant", [True, False], ids=['DQ_True', 'DQ_False'])
 @pytest.mark.parametrize("storage_type", ['nf4', 'fp4'], ids=['nf4', 'fp4'])
-#@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=['fp32', 'fp16'])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=['fp16', 'bf16'])
-#@pytest.mark.parametrize("dtype", [torch.bfloat16], ids=['bf16'])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
 def test_gemv_4bit(dtype, storage_type, double_quant):
     print('')
     for dim in [128, 256, 512, 1024, 2048, 4096]:

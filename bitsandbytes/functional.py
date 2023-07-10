@@ -1464,6 +1464,9 @@ def gemv_4bit(
     if state is None:
         raise ValueError(f'state cannot None. gem_4bit( ) requires the state from quantize_4bit( )')
 
+    if A.numel() != A.shape[-1]:
+        raise ValueError(f'Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]')
+
     Bshape = state[1]
     bout = Bshape[0]
     absmax, shape, dtype, blocksize, compressed_stats, quant_type, data_type = state
@@ -1474,90 +1477,17 @@ def gemv_4bit(
 
     if out is None:
         if len(A.shape) == 3:
-            out = torch.zeros(size=(A.shape[0], A.shape[1], bout), dtype=A.dtype, device=A.device)
+            out = torch.empty(size=(A.shape[0], A.shape[1], bout), dtype=A.dtype, device=A.device)
         else:
-            out = torch.zeros(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
+            out = torch.empty(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
 
-
-
-
-    sA = A.shape
-    sB = B.shape
-    if transposed_A and len(sA) == 2:
-        sA = (sA[1], sA[0])
-    elif transposed_A and len(sA) == 3:
-        sA = (sA[0], sA[2], sA[0])
-    if transposed_B and len(sB) == 2:
-        sB = (sB[1], sB[0])
-    elif transposed_B and len(sB) == 3:
-        sB = (sB[0], sB[2], sB[0])
-    # this is a mess: cuBLAS expect column major, but PyTorch is row major.
-    # So to perform the matrix multiplication, we have to treat A, B, and C matrices
-    # (transpose of row major is column major)
-    # This means we compute B^T A^T = C^T and we explicitly switch the dimensions of each of these
-
-    # matrices in the input arguments for cuBLAS
-    # column major: A @ B = C: [m, k] @ [k, n] = [m, n]
-    # row major: B^T @ A^T = C^T: [m, k] @ [k, n] = [m, n]
-    # column major with row major layout: B^T @ A^T = C^T: [k, m] @ [n, k] = [n, m]
-    if len(sB) == 2:
-        if B.stride()[0] == B.shape[1]:
-            transposed_B = False
-        elif B.stride()[1] == B.shape[0]:
-            transposed_B = True
-        if len(A.shape) == 2:
-            if A.stride()[0] == A.shape[1]:
-                transposed_A = False
-            elif A.stride()[1] == A.shape[0]:
-                transposed_A = True
-        else:
-            if A.stride()[1] == A.shape[2]:
-                transposed_A = False
-            elif A.stride()[2] == A.shape[1]:
-                transposed_A = True
-
-        if len(sA) == 2:
-            n = sA[0]
-            ldb = A.stride()[1 if transposed_A else 0]
-        elif len(sA) == 3 and len(sB) == 2:
-            n = sA[0] * sA[1]
-            ldb = sA[2]
-
-        m = sB[1]
-        k = sB[0]
-        lda = B.stride()[0]
-        ldc = sB[1]
-    elif len(sB) == 3:
-        # special case
-        assert len(sA) == 3
-        if not (sA[0] == sB[0] and sA[1] == sB[1]):
-            raise ValueError(
-                f"Only bsi,bso->io supported for tensor contractions, but dims for A x B were: {sA} x {sB}"
-            )
-
-        transposed_A = True
-        transposed_B = False
-
-        m = sB[2]
-        n = sA[2]
-        k = sB[0] * sB[1]
-
-        lda = n
-        ldb = sA[2]
-        ldc = m
-
-    # B^T @ A^T = C^T
-    # [km, nk -> mn]
-    #lda = ldb = ldc = 1
-    #lda = 1
-    if state is not None:
-        m = Bshape[0]
-        k = Bshape[1]
-        lda = Bshape[0]
-        ldc = Bshape[0]
-        ldb = (ldb+1)//2
-    #print(m, n, k, lda, ldb, ldc)
-    is_on_gpu([B, A, out])
+    n = 1
+    m = Bshape[0]
+    k = Bshape[1]
+    lda = Bshape[0]
+    ldc = Bshape[0]
+    ldb = (A.shape[-1]+1)//2
+    is_on_gpu([B, A, out, absmax, state[-1]])
     m = ct.c_int32(m)
     n = ct.c_int32(n)
     k = ct.c_int32(k)
@@ -1570,6 +1500,8 @@ def gemv_4bit(
             lib.cgemm_4bit_inference_naive_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state[-1]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
         elif A.dtype == torch.bfloat16:
             lib.cgemm_4bit_inference_naive_bf16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state[-1]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
+        elif A.dtype == torch.float32:
+            lib.cgemm_4bit_inference_naive_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state[-1]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
         else:
             raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
     else:

@@ -3520,7 +3520,7 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, i
 }
 
 #define num_values_4bit 32
-template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize)
+template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
   // per threadblock: 
@@ -3528,7 +3528,6 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(in
   // 64 packed 8bit values per warp AND each warp loads one output for B -> 1x128 * 128x1
   // 4 warps -> 4 loads per iter
   // 1x128 * 128x4 -> 1x4 outputs
-  //typedef cub::WarpReduce<T> WarpReduce;
   typedef cub::WarpReduce<float> WarpReduce;
   __shared__ typename WarpReduce::TempStorage temp_storage[THREADS/32];
 
@@ -3536,7 +3535,6 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(in
   const int warp_lane = threadIdx.x % 32;
   const int row_B = (THREADS/32)*blockIdx.x + warp_idx;
   const int num_values_8bit = num_values_4bit/2;
-  //T local_C = T(0.0f);
   float local_C = 0.0f;
 
   unsigned char local_B_4bit[num_values_8bit];
@@ -3585,10 +3583,24 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference_naive(in
 
     if(inner_idx+num_values_4bit)
     {
-      reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_8bit/2) + 0];
-      reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[1] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_8bit/2) + 1];
-      reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[2] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_8bit/2) + 2];
-      reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[3] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_8bit/2) + 3];
+      if(BITS==16)
+      {
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + 0];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[1] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + 1];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[2] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + 2];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[3] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + 3];
+      }
+      else
+      {
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 0];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[1] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 1];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[2] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 2];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[3] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 3];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[4] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 4];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[5] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 5];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[6] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 6];
+        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[7] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 7];
+      }
 
     }
     else
@@ -3776,8 +3788,9 @@ template __global__ void kgemm_4bit_inference<half, 128>(int M, int N, int K, ha
 template __global__ void kgemm_4bit_inference<half, 160>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 template __global__ void kgemm_4bit_inference<half, 256>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 
-template __global__ void kgemm_4bit_inference_naive<half, 128>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize);
-template __global__ void kgemm_4bit_inference_naive<__nv_bfloat16, 128>(int M, int N, int K, __nv_bfloat16 * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize);
+template __global__ void kgemm_4bit_inference_naive<half, 128, 16>(int M, int N, int K, half * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize);
+template __global__ void kgemm_4bit_inference_naive<__nv_bfloat16, 128, 16>(int M, int N, int K, __nv_bfloat16 * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize);
+template __global__ void kgemm_4bit_inference_naive<float, 128, 32>(int M, int N, int K, float * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize);
 
 template __global__ void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 template __global__ void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
