@@ -7,14 +7,17 @@ ifeq ($(CUDA_HOME),)
 	CUDA_HOME:= $(shell which nvcc | rev | cut -d'/' -f3- | rev)
 endif
 
-ifndef CUDA_VERSION
-$(warning WARNING: CUDA_VERSION not set. Call make with CUDA string, for example: make cuda11x CUDA_VERSION=115 or make cpuonly CUDA_VERSION=CPU)
-CUDA_VERSION:=
-endif
+ROCM_HOME := /opt/rocm
+
+#ifndef CUDA_VERSION
+#$(warning WARNING: CUDA_VERSION not set. Call make with CUDA string, for example: make cuda11x CUDA_VERSION=115 or make cpuonly CUDA_VERSION=CPU)
+#CUDA_VERSION:=
+#endif
 
 
 
 NVCC := $(CUDA_HOME)/bin/nvcc
+HIPCC := $(ROCM_HOME)/bin/hipcc
 
 ###########################################
 
@@ -26,6 +29,9 @@ FILES_CPP := $(CSRC)/common.cpp $(CSRC)/cpu_ops.cpp $(CSRC)/pythonInterface.c
 
 INCLUDE :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/csrc -I $(CONDA_PREFIX)/include -I $(ROOT_DIR)/include
 LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcublas -lcublasLt -lcusparse -L $(CONDA_PREFIX)/lib
+
+INCLUDE_ROCM := -I $(ROCM_HOME)/include -I $(ROOT_DIR)/csrc -I $(CONDA_PREFIX)/include -I $(ROOT_DIR)/include
+LIB_ROCM := -L $(ROCM_HOME)/lib -lhipblas -lhiprand -lhipsparse -L $(CONDA_PREFIX)/lib
 
 # NVIDIA NVCC compilation flags
 COMPUTE_CAPABILITY += -gencode arch=compute_50,code=sm_50 # Maxwell
@@ -100,6 +106,11 @@ cuda12x: $(BUILD_DIR) env
 	$(NVCC) $(CC_cublasLt111) $(CC_ADA_HOPPER) -Xcompiler '-fPIC' -dlink $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o -o $(BUILD_DIR)/link.o
 	$(GPP) -std=c++14 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
 
+hip: $(BUILD_DIR) env
+	$(HIPCC) -std=c++14 -fPIC -c -DNO_HIPBLASLT $(INCLUDE_ROCM) $(LIB_ROCM) $(CSRC)/ops.hip -o $(BUILD_DIR)/ops.o
+	$(HIPCC) -std=c++14 -fPIC -c -DNO_HIPBLASLT $(INCLUDE_ROCM) $(LIB_ROCM) $(CSRC)/kernels.hip -o $(BUILD_DIR)/kernels.o
+	$(GPP) -std=c++14 -D__HIP_PLATFORM_AMD__ -DBUILD_HIP -DNO_HIPBLASLT -shared -fPIC $(INCLUDE_ROCM) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_hip_nohipblaslt.so $(LIB_ROCM)
+
 cpuonly: $(BUILD_DIR) env
 	$(GPP) -std=c++14 -shared -fPIC -I $(ROOT_DIR)/csrc -I $(ROOT_DIR)/include $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cpu.so
 
@@ -109,8 +120,10 @@ env:
 	@echo "CUDA_VERSION: $(CUDA_VERSION)"
 	@echo "============================"
 	@echo "NVCC path: $(NVCC)"
+	@echo "HIPCC path: $(HIPCC)"
 	@echo "GPP path: $(GPP) VERSION: `$(GPP) --version | head -n 1`"
 	@echo "CUDA_HOME: $(CUDA_HOME)"
+	@echo "HIP_HOME: $(HIP_HOME)"
 	@echo "CONDA_PREFIX: $(CONDA_PREFIX)"
 	@echo "PATH: $(PATH)"
 	@echo "LD_LIBRARY_PATH: $(LD_LIBRARY_PATH)"

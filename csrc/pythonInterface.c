@@ -51,12 +51,12 @@ MAKE_FUNC32(momentum, MOMENTUM, float, 32)
 MAKE_FUNC32(momentum, MOMENTUM, half, 16)
 MAKE_FUNC32(adam, ADAM, float, fp32)
 MAKE_FUNC32(adam, ADAM, half, fp16)
-MAKE_FUNC32(adam, ADAM, __nv_bfloat16, bf16)
+//MAKE_FUNC32(adam, ADAM, hip_bfloat16, bf16)
 MAKE_FUNC32(rmsprop, RMSPROP, float, 32)
 MAKE_FUNC32(rmsprop, RMSPROP, half, 16)
 MAKE_FUNC32(lion, LION, float, fp32)
 MAKE_FUNC32(lion, LION, half, fp16)
-MAKE_FUNC32(lion, LION, __nv_bfloat16, bf16)
+//MAKE_FUNC32(lion, LION, hip_bfloat16, bf16)
 MAKE_FUNC32(adagrad, ADAGRAD, float, 32)
 MAKE_FUNC32(adagrad, ADAGRAD, half, 16)
 
@@ -96,10 +96,10 @@ MAKE_BLOCKWISE8(rmsprop, RMSPROP, half, fp16)
 MAKE_BLOCKWISE8(rmsprop, RMSPROP, float, fp32)
 MAKE_BLOCKWISE8(adagrad, ADAGRAD, half, fp16)
 MAKE_BLOCKWISE8(adagrad, ADAGRAD, float, fp32)
-MAKE_BLOCKWISE8(adam, ADAM, __nv_bfloat16, bf16)
+//MAKE_BLOCKWISE8(adam, ADAM, hip_bfloat16, bf16)
 MAKE_BLOCKWISE8(lion, LION, half, fp16)
 MAKE_BLOCKWISE8(lion, LION, float, fp32)
-MAKE_BLOCKWISE8(lion, LION, __nv_bfloat16, bf16)
+//MAKE_BLOCKWISE8(lion, LION, hip_bfloat16, bf16)
 
 
 void percentileClipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping<float>(g, gnorm_vec, step, n); }
@@ -120,21 +120,21 @@ void dequantizeBlockwise_fp16_nf4(float *code, unsigned char *A, float *absmax, 
 void dequantizeBlockwise_fp32_nf4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float, NF4>(NULL, A, absmax, out, blocksize, n); }
 
 #ifndef NO_HIPBLASLT
-
 #if BUILD_CUDA
 #define MAKE_FUNC_TRANSFORM(fbits, fsrc, ftrgt, ftranspose, dtype, src, target, transpose, bits) \
 void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(cublasLtHandle_t ltHandle, dtype *A, dtype *out, int dim1, int dim2) \
 { \
 	transform<dtype, src, target, transpose, bits>(ltHandle, A, out, dim1, dim2); \
 } \
-#endif
 
+#endif
 #if BUILD_HIP
 #define MAKE_FUNC_TRANSFORM(fbits, fsrc, ftrgt, ftranspose, dtype, src, target, transpose, bits) \
 void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(hipblasLtHandle_t ltHandle, dtype *A, dtype *out, int dim1, int dim2) \
 { \
 	transform<dtype, src, target, transpose, bits>(ltHandle, A, out, dim1, dim2); \
 } \
+
 #endif
 
 MAKE_FUNC_TRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8);
@@ -206,6 +206,7 @@ void spmm_coo_very_sparse_naive_fp16(int *max_count, int *max_idx, int *offset_r
 
 void spmm_coo_very_sparse_naive_int8(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
 { spmm_coo_very_sparse_naive<signed char, 8>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz_rows, nnz, rowsA, rowsB, colsB); }
+
 #endif
 
 extern "C"
@@ -239,14 +240,14 @@ extern "C"
 
 	MAKE_CFUNC32(adam, float, fp32)
 	MAKE_CFUNC32(adam, half, fp16)
-	MAKE_CFUNC32(adam, __nv_bfloat16, bf16)
+	//MAKE_CFUNC32(adam, hip_bfloat16, bf16)
 	MAKE_CFUNC32(momentum, float, 32)
 	MAKE_CFUNC32(momentum, half, 16)
 	MAKE_CFUNC32(rmsprop, float, 32)
 	MAKE_CFUNC32(rmsprop, half, 16)
 	MAKE_CFUNC32(lion, float, fp32)
 	MAKE_CFUNC32(lion, half, fp16)
-	MAKE_CFUNC32(lion, __nv_bfloat16, bf16)
+	//MAKE_CFUNC32(lion, hip_bfloat16, bf16)
 	MAKE_CFUNC32(adagrad, float, 32)
 	MAKE_CFUNC32(adagrad, half, 16)
 
@@ -286,10 +287,10 @@ extern "C"
 	MAKE_CBLOCKWISE8(rmsprop, RMSPROP, float, fp32)
 	MAKE_CBLOCKWISE8(adagrad, ADAGRAD, half, fp16)
 	MAKE_CBLOCKWISE8(adagrad, ADAGRAD, float, fp32)
-	MAKE_CBLOCKWISE8(adam, ADAM, __nv_bfloat16, bf16)
+	//MAKE_CBLOCKWISE8(adam, ADAM, hip_bfloat16, bf16)
 	MAKE_CBLOCKWISE8(lion, LION, half, fp16)
 	MAKE_CBLOCKWISE8(lion, LION, float, fp32)
-	MAKE_CBLOCKWISE8(lion, LION, __nv_bfloat16, bf16)
+	//MAKE_CBLOCKWISE8(lion, LION, hip_bfloat16, bf16)
 
 	void cpercentile_clipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping_g32(g, gnorm_vec, step, n); }
 	void cpercentile_clipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping_g16(g, gnorm_vec, step, n); }
@@ -312,7 +313,6 @@ extern "C"
 
 
 #ifndef NO_HIPBLASLT
-
 #if BUILD_CUDA
 	int cigemmlt_turing_32(Context *context, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
 	{ return igemmlt_turing_32((cublasLtHandle_t) context->m_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc); }
@@ -339,9 +339,10 @@ extern "C"
 	{ \
 		transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose((cublasLtHandle_t) context->m_handle, A, out, dim1, dim2); \
 	} \
+	
 #endif
 
-#if BUILD_CUDA
+#if BUILD_HIP
 	int cigemmlt_turing_32(Context *context, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
 	{ return igemmlt_turing_32((hipblasLtHandle_t) context->m_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc); }
 	//{ (hipblasLtHandle_t)context->m_handle; return 0; }
@@ -367,7 +368,7 @@ extern "C"
 	{ \
 		transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose((hipblasLtHandle_t) context->m_handle, A, out, dim1, dim2); \
 	} \
-#endif
+
 
 #endif
 
@@ -380,7 +381,7 @@ extern "C"
 	MAKE_FUNC_CTRANSFORM(8, row, col_ampere, n, int8_t, ROW, COL_AMPERE, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, col32, row, n, int8_t, COL32, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(32, col32, row, n, int32_t, COL32, ROW, false, 32)
-
+#endif
 	void cdequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, half* bias, int numRows, int numCols)
 	{ dequant_mm_int32_fp16(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols); }
 	void cget_col_row_stats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)

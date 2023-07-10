@@ -14,7 +14,7 @@ if setup.initialized != True:
 
 lib = setup.lib
 try:
-    if lib is None and torch.cuda.is_available():
+    if lib is None and torch.cuda.is_available() :
         CUDASetup.get_instance().generate_instructions()
         CUDASetup.get_instance().print_log_stack()
         raise RuntimeError('''

@@ -6,7 +6,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <float.h>
-#include <ops.cuh>
+#include <ops.hiph>
 
 #ifndef kernels
 #define kernels

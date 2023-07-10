@@ -227,8 +227,8 @@ private:
 
 #endif
 
-        IVec<AVX, float> vlem = vz < vxm;
-        IVec<AVX, float> vlep = vz < vxp;
+        IVec<SSE, float> vlem = operator< (vz, vxm);
+        IVec<SSE, float> vlep = operator< (vz, vxp);
         ip = ip + vlem + vlep;
 
         ip.store(pr);
@@ -277,8 +277,8 @@ private:
 //        FVec<AVX, double> vxp = _mm256_insertf128_pd(_mm256_castpd128_pd256(h01p), h23p, 1);
 
         IVec<AVX, double> i(u.vec);
-        IVec<AVX, double> vlem = vz < vxm;
-        IVec<AVX, double> vlep = vz < vxp;
+        IVec<SSE, float> vlem = operator< (vz, vxm);
+        IVec<SSE, float> vlep = operator< (vz, vxp);
         i = i + vlem + vlep;
         i.extractLo32s().store(pr);
     }
