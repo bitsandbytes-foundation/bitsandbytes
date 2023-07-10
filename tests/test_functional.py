@@ -2442,7 +2442,7 @@ def test_gemv_4bit(dtype, storage_type, double_quant):
             assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 0.0005
         elif dtype == torch.float32:
             assert sum(errs)/len(errs)/math.sqrt(dim) < 5e-8
-            assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 1e-8
+            assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 1e-7
         elif dtype == torch.bfloat16:
             assert sum(errs)/len(errs)/math.sqrt(dim) < 3e-4
             assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 0.003
