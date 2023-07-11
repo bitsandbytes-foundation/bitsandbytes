@@ -111,7 +111,16 @@ class CUDASetup:
         package_dir = Path(__file__).parent.parent
         binary_path = package_dir / binary_name
 
-        print('bin', binary_path)
+        if not binary_path.exists():
+            # If binary file does not exist, check LD_LIBRARY_PATH
+            library_paths = os.getenv("LD_LIBRARY_PATH", "").split(":")
+        for path in library_paths:
+            potential_binary_path = Path(path) / binary_name
+            if potential_binary_path.exists():
+                binary_path = potential_binary_path
+                break
+
+        print("bin", binary_path)
 
         try:
             if not binary_path.exists():
