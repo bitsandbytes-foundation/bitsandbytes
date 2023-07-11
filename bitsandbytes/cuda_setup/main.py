@@ -114,10 +114,13 @@ class CUDASetup:
         if not binary_path.exists():
             # If binary file does not exist, check LD_LIBRARY_PATH
             library_paths = os.getenv("LD_LIBRARY_PATH", "").split(":")
+            print("library_paths ", library_paths)
         for path in library_paths:
             potential_binary_path = Path(path) / binary_name
+            print("potential_binary_path", potential_binary_path)
             if potential_binary_path.exists():
                 binary_path = potential_binary_path
+                print("binary_path", binary_path)
                 break
 
         print("bin", binary_path)
