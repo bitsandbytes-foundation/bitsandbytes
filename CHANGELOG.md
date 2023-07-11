@@ -257,4 +257,4 @@ Bug fixes:
  - Added `device` variable for bitsandbytes layers to be compatible with PyTorch layers.
 
 Deprecated:
- - Binaries for CUDA 11.2, 11.3, 11.6 no longer ship with `pip install bitsandbytes` and need to be compiled from source.
+ - Binaries for CUDA 11.2, 11.6 no longer ship with `pip install bitsandbytes` and need to be compiled from source.
