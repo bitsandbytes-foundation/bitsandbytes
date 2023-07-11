@@ -3,6 +3,7 @@ import warnings
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
 from typing import Tuple, Optional, List
+from warnings import warn
 
 import torch
 
@@ -565,6 +566,11 @@ def matmul(
 def matmul_4bit(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
     assert quant_state is not None
     if A.numel() == A.shape[-1] and A.requires_grad == False:
-        return F.gemv_4bit(A, B.t(), out, state=quant_state)
+        absmax, shape, dtype, blocksize, compressed_stats, quant_type, data_type = quant_state
+        if A.shape[-1] % blocksize != 0:
+            warn(f'Some matrices hidden dimension is not a multiple of {blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
+        else:
+            return F.gemv_4bit(A, B.t(), out, state=quant_state)
     else:
         return MatMul4Bit.apply(A, B, out, bias, quant_state)

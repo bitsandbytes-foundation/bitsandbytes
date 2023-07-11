@@ -1504,6 +1504,7 @@ def gemv_4bit(
             lib.cgemm_4bit_inference_naive_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state[-1]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
         else:
             raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
+
     else:
         raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
 

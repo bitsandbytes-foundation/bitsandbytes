@@ -2262,7 +2262,7 @@ def test_fp4_quant(dtype):
     A2 = F.dequantize_fp4(qa, SA)
 
     err = (A1 - A2).abs().float()
-    relerr = (err/A1.abs().float()).mean()
+    relerr = (err/(A1.abs().float()+1e-8)).mean()
     idx = err > 1.0
     err = err.mean()
 
@@ -2361,91 +2361,133 @@ def test_normal_map_tree():
 
 @pytest.mark.parametrize("double_quant", [True, False], ids=['DQ_True', 'DQ_False'])
 @pytest.mark.parametrize("storage_type", ['nf4', 'fp4'], ids=['nf4', 'fp4'])
+@pytest.mark.parametrize("kind", ['fc1', 'fc2', 'attn', 'attn_packed'], ids=['fc1', 'fc2', 'attn', 'attn_packed'])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
-def test_gemv_4bit(dtype, storage_type, double_quant):
-    print('')
-    for dim in [128, 256, 512, 1024, 2048, 4096]:
+def test_gemv_4bit(dtype, storage_type, double_quant, kind):
+    for dim in [128, 256, 512, 1024, 2048, 4096, 6144]:
     #for dim in [4*1024]:
-    #for dim in [1*16]:
-        errs = []
-        relerrs = []
-        max_err = 0
-        max_relerr = 0
+    #for dim in [1*128]:
+        errs1 = []
+        errs2 = []
+        errs3 = []
+        relerrs1 = []
+        relerrs2 = []
+        relerrs3 = []
+        max_errs1 = []
+        max_errs2 = []
+        max_errs3 = []
+
 
         for i in range(100):
-            #A = torch.rand(2, 4092, dtype=dtype, device='cuda')
-            #B = torch.rand(4*4092, 4092, dtype=dtype, device='cuda')
-            #A = torch.rand(1, 4096, dtype=dtype, device='cuda')
-            #B = torch.rand(4*4096, 4096, dtype=dtype, device='cuda')
-            A = torch.randn(1, dim, dtype=dtype, device='cuda')
-            #B = torch.randn(4, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
-            B = torch.randn(dim*4, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
-
-            #print('')
-            #print(A)
-            #print(B.t())
-            #A[:, :-1] = 0
-            #B[:, :-1] = 0
-            #A.flatten()[:-1] = 0
-            #B.flatten()[:-1] = 0
+            if kind == 'fc1':
+                A = torch.randn(1, dim, dtype=dtype, device='cuda')
+                B = torch.randn(dim*4, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
+            elif kind == 'fc2':
+                A = torch.randn(1, 4*dim, dtype=dtype, device='cuda')
+                B = torch.randn(dim, 4*dim, dtype=dtype, device='cuda')/math.sqrt(dim)
+            elif kind == 'attn':
+                A = torch.randn(1, dim, dtype=dtype, device='cuda')
+                B = torch.randn(dim, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
+            elif kind == 'attn_packed':
+                A = torch.randn(1, dim, dtype=dtype, device='cuda')
+                B = torch.randn(dim*3, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
 
             qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant)
-            #F.dequantize_4bit(qB, state)
-
             C3 = torch.matmul(A, B.t())
             C2 = F.gemv_4bit(A, qB.t(), state=state)
             A.requires_grad = True
             C1 = bnb.matmul_4bit(A, qB.t(), state)
 
-            #print(state)
-            #print(qB)
+            err1 = (C1-C2).abs().float()
+            err2 = (C3-C2).abs().float()
+            err3 = (C3-C1).abs().float()
 
-            #print('')
-            #print(A)
-            #print(B)
-            #print('='*89)
-            #print(C3)
+            mag1 = torch.abs(C1).float()+1e-5
+            mag2 = torch.abs(C3).float()+1e-5
+            mag3 = torch.abs(C3).float()+1e-5
 
-            #print(C1.shape, C2.shape)
+            relerr1 = err1/mag1
+            relerr2 = err2/mag2
+            relerr3 = err3/mag3
 
-            # tensor cores are non-deterministic
-            # so we need to analyze errors around the mean
-            # to test our implementation
-            err = torch.abs(C1-C2).float()
-            mag = torch.abs(C1).float()+1e-5
-            relerr = err/mag
-            max_err = max(err.max(), max_err)
-            max_relerr = max(relerr.max(), max_relerr)
-            err = err.mean().item()
-            relerr = relerr.mean().item()
-            #print(err)
+            max_err1 = err1.max()
+            max_err2 = err2.max()
+            max_err3 = err3.max()
 
-            errs.append(err)
-            relerrs.append(relerr)
+            errs1.append(err1.mean().item())
+            errs2.append(err2.mean().item())
+            errs3.append(err3.mean().item())
+
+            relerrs1.append(relerr1.mean().item())
+            relerrs2.append(relerr2.mean().item())
+            relerrs3.append(relerr3.mean().item())
+
+            max_errs1.append(max_err1.item())
+            max_errs2.append(max_err2.item())
+            max_errs3.append(max_err3.item())
 
             c = int(C1.numel()*0.0014*(dim/256))+1
 
             c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=False)
-        #print('')
-        #print(dim, sum(errs)/len(errs)/math.sqrt(dim))
-        #print(dim, sum(relerrs)/len(relerrs)/math.sqrt(dim))
-        #print(dim, (max_err.item(), max_relerr.item()))
-        print(C1.flatten()[-20:])
-        print(C2.flatten()[-20:])
-        #print(C1.flatten())
-        #print(C2.flatten())
-        #print(C3.flatten()[-20:])
-        print(sum(errs)/len(errs)/math.sqrt(dim) , dim)
-        print(sum(relerrs)/len(relerrs)/math.sqrt(dim) , dim)
+        err1 = sum(errs1)/len(errs1)/math.sqrt(dim)
+        err2 = sum(errs2)/len(errs2)/math.sqrt(dim)
+        err3 = sum(errs3)/len(errs3)/math.sqrt(dim)
+        relerr1 = sum(relerrs1)/len(relerrs1)/math.sqrt(dim)
+        relerr2 = sum(relerrs2)/len(relerrs2)/math.sqrt(dim)
+        relerr3 = sum(relerrs3)/len(relerrs3)/math.sqrt(dim)
+        maxerr1 = sum(max_errs1)/len(max_errs1)/math.sqrt(dim)
+        maxerr2 = sum(max_errs2)/len(max_errs2)/math.sqrt(dim)
+        maxerr3 = sum(max_errs3)/len(max_errs3)/math.sqrt(dim)
+        absratio = err2/err3
+        relratio = relerr2/relerr3
+        maxratio = relerr2/relerr3
+
+        # for debugging if the tests fails
+        #
+        #print('='*80)
+        #print(f'For matmul: {A.shape}, {B.shape}, {kind}, {dtype}, {storage_type}, double_quant={double_quant}:')
+        #print(C1.flatten()[-20:])
+        #print(C2.flatten()[-20:])
+        #print(f'inference vs training abs: {err1}')
+        #print(f'inference vs training rel: {relerr1}')
+        #print(f'inference vs training max: {maxerr1}')
+        #print(f'inference vs training vs torch err ratio abs: {absratio}')
+        #print(f'inference vs training vs torch err ratio rel: {relratio}')
+        #print(f'inference vs training vs torch err ratio max: {maxratio}')
         if dtype == torch.float16:
-            assert sum(errs)/len(errs)/math.sqrt(dim) < 5e-5
-            assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 0.0005
+            if dim <= 512:
+                assert err1 < 7e-5
+                assert relerr1 < 0.0008
+            else:
+                assert err1 < 6e-5
+                assert relerr1 < 2e-4
+            assert absratio < 1.005 and absratio > 0.995
+            assert relratio < 1.005 and relratio > 0.995
+            assert maxratio < 1.005 and maxratio > 0.995
         elif dtype == torch.float32:
-            assert sum(errs)/len(errs)/math.sqrt(dim) < 5e-8
-            assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 1e-7
+            if dim <= 512:
+                assert err1 < 5e-8
+                assert relerr1 < 1e-6
+                assert maxerr1 < 1e-7
+            else:
+                assert err1 < 5e-8
+                assert relerr1 < 8e-6
+                assert maxerr1 < 1e-7
+            assert absratio < 1.005 and absratio > 0.995
+            assert relratio < 1.005 and relratio > 0.995
+            assert maxratio < 1.005 and maxratio > 0.995
         elif dtype == torch.bfloat16:
-            assert sum(errs)/len(errs)/math.sqrt(dim) < 3e-4
-            assert sum(relerrs)/len(relerrs)/math.sqrt(dim) < 0.003
+            if dim <= 512:
+                assert err1 < 5e-4
+                assert relerr1 < 0.007
+                assert maxerr1 < 0.015
+            else:
+                assert err1 < 2e-4
+                assert relerr1 < 0.002
+                assert maxerr1 < 0.0012
+            assert absratio < 1.005 and absratio > 0.995
+            assert relratio < 1.04 and relratio > 0.96
+            assert maxratio < 1.02 and maxratio > 0.98
 
 @pytest.mark.skip("Row scale has some bugs for ampere")
 def test_managed():

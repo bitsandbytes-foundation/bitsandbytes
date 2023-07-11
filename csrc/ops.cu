@@ -735,6 +735,7 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
 	int num_blocks = (m+3)/4;
 
   kgemm_4bit_inference_naive<T, 128, BITS><<< num_blocks, 128, 0, 0 >>>(m,  n,  k, A,  B, absmax, datatype, out, lda, ldb, ldc, blocksize);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
