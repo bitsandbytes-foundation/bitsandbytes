@@ -387,7 +387,6 @@ def evaluate_cuda_setup():
     if torch.version.hip: 
         return 'libbitsandbytes_hip_nohipblaslt.so', None, None, None, None
 
-    print("WHAT THE FUCK IS THIS")
 
     cuda_setup = CUDASetup.get_instance()
     cudart_path = determine_cuda_runtime_lib_path()

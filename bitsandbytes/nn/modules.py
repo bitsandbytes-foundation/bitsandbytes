@@ -137,7 +137,8 @@ class Embedding(torch.nn.Embedding):
         return emb
 
 class Params4bit(torch.nn.Parameter):
-    def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True, quant_type='fp4'):
+    # Remark: change blocksize to 128 for AMD gpu
+    def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=128, compress_statistics=True, quant_type='fp4'):
         if data is None:
             data = torch.empty(0)
 

@@ -18,8 +18,6 @@ from torch import Tensor
 
 from .cextension import COMPILED_WITH_CUDA, lib
 
-# Remark: for AMD GPU we need to disable blocksize == 64
-
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
@@ -614,7 +612,7 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
         out = torch.zeros_like(A, dtype=torch.uint8)
 
     if A.device.type != 'cpu':
-        assert blocksize in [4096, 2048, 1024, 512, 256, 128]
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
         cblocksize = ct.c_int32(blocksize)
         prev_device = pre_call(A.device)
         code = code.to(A.device)
@@ -700,8 +698,8 @@ def dequantize_blockwise(
     if A.device.type != 'cpu':
         device = pre_call(A.device)
         code = code.to(A.device)
-        if blocksize not in [2048, 4096, 1024, 512, 256, 128]:
-            raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128]")
+        if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
+            raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
         is_on_gpu([A, absmax, out])
         if out.dtype == torch.float32:
             lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
@@ -716,13 +714,13 @@ def dequantize_blockwise(
 
     return out
 
-def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=128, compress_statistics=False):
+def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4')
 
-def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=128, compress_statistics=False):
+def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4')
 
-def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=128, compress_statistics=False, quant_type='fp4') -> Tensor:
+def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
     """
     Quantize tensor A in blocks of 4-bit values.
 
@@ -765,7 +763,7 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
     if out is None:
         out = torch.zeros(((n+1)//2, 1), dtype=torch.uint8, device=A.device)
 
-    assert blocksize in [4096, 2048, 1024, 512, 256, 128]
+    assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
 
     prev_device = pre_call(A.device)
     is_on_gpu([A, out, absmax])
@@ -797,13 +795,13 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
 
     return out, state
 
-def dequantize_fp4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 128) -> Tensor:
+def dequantize_fp4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'fp4')
 
-def dequantize_nf4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 128) -> Tensor:
+def dequantize_nf4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'nf4')
 
-def dequantize_4bit(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 128, quant_type='fp4') -> Tensor:
+def dequantize_4bit(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
 
@@ -830,8 +828,8 @@ def dequantize_4bit(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax:
     torch.Tensor:
         Dequantized tensor.
     """
-    if blocksize not in [2048, 4096, 1024, 512, 256, 128]:
-        raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128]")
+    if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
+        raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
     if quant_type not in ['fp4', 'nf4']:
         raise NotImplementedError(f'4-bit quantization data type {quant_type} is not implemented.')
 
