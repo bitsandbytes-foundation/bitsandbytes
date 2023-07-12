@@ -8,6 +8,8 @@ p1 = p.data.sum().item()
 
 adam = bnb.optim.Adam([p])
 
+
+
 out = a*p
 loss = out.sum()
 loss.backward()

@@ -3758,63 +3758,55 @@ MAKE_kQuantizeBlockwise(half,  4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,  4096, 4, 1, General8bit)
 MAKE_kQuantizeBlockwise(half,  2048, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,  1024, 4, 0, General8bit)
-/*
 MAKE_kQuantizeBlockwise(half,   512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,   256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,   128, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(half,    64, 2, 0, General8bit)
-*/
+//MAKE_kQuantizeBlockwise(half,    64, 2, 0, General8bit)
 
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 1024, 4, 0, General8bit)
-/*
 MAKE_kQuantizeBlockwise(float,  512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float,  256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(float,   64, 2, 0, General8bit)
-*/
+//MAKE_kQuantizeBlockwise(float,   64, 2, 0, General8bit)
 
 MAKE_kQuantizeBlockwise(half,  4096, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(half,  2048, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(half,  1024, 4, 0, FP4)
-/*
 MAKE_kQuantizeBlockwise(half,   512, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(half,   256, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(half,   128, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(half,    64, 2, 0, FP4)
-*/
+//MAKE_kQuantizeBlockwise(half,    64, 2, 0, FP4)
+
 
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 1024, 4, 0, FP4)
-/*
 MAKE_kQuantizeBlockwise(float,  512, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float,  256, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(float,   64, 2, 0, FP4)
-*/
+//MAKE_kQuantizeBlockwise(float,   64, 2, 0, FP4)
+
 
 MAKE_kQuantizeBlockwise(half,  4096, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(half,  2048, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(half,  1024, 4, 0, NF4)
-/*
 MAKE_kQuantizeBlockwise(half,   512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half,   256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half,   128, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(half,    64, 2, 0, NF4)
-*/
+//MAKE_kQuantizeBlockwise(half,    64, 2, 0, NF4)
+
 
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 1024, 4, 0, NF4)
-/*
 MAKE_kQuantizeBlockwise(float,  512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float,  256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(float,   64, 2, 0, NF4)
-*/
+//MAKE_kQuantizeBlockwise(float,   64, 2, 0, NF4)
+
 
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
 template __global__ void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n);
