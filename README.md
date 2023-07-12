@@ -1,6 +1,7 @@
-# bitsandbytes
+# bitsandbytes-rocm
 
 The bitsandbytes is a lightweight wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions.
+This fork is the ROCm adaptation of bitsandbytes 0.39.1. The repo is inspired by [agrocylo/bitsandbytes-rocm](https://github.com/agrocylo/bitsandbytes-rocm/tree/main/bitsandbytes), which is a ROCm version of bitsandbytes 0.37. While this fork incorporating the majority of features from bitsandbytes 0.39.1, including the crucial 4 bit quantization feature, certain features such as hipblaslt and hip_bfloat16 have been disabled. Enabling these features is listed as a task for the future.
 
 
 
@@ -11,26 +12,37 @@ Resources:
 
 ## TL;DR
 **Requirements**
-Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + CUDA > 10.0.
+Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + ROCm >= 5.4.2 or CUDA > 10.0
 
-(Deprecated: CUDA 10.0 is deprecated and only CUDA >= 11.0) will be supported with release 0.39.0)
 
 **Installation**:
 
-``pip install bitsandbytes``
 
-In some cases it can happen that you need to compile from source. If this happens please consider submitting a bug report with `python -m bitsandbytes` information. What now follows is some short instructions which might work out of the box if `nvcc` is installed. If these do not work see further below.
+You need to compile from source. 
 
 Compilation quickstart:
 ```bash
-git clone https://github.com/timdettmers/bitsandbytes.git
-cd bitsandbytes
+git clone [https://github.com/timdettmers/bitsandbytes.git](https://github.com/Lzy17/bitsandbytes-rocm)
+cd bitsandbytes-rocm
 
-# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 120}
-# make argument in {cuda110, cuda11x, cuda12x}
-# if you do not know what CUDA you have, try looking at the output of: python -m bitsandbytes
-CUDA_VERSION=117 make cuda11x
+make hip
 python setup.py install
+
+#to test if you have successfully installed
+python -m bitsandbytes
+
+#To be benchmarks accuray benchmark from https://github.com/TimDettmers/bitsandbytes/issues/565
+cd benchmarking/accuracy
+python bnb_accuracy.py
+
+#Accurate results should looks like
+#tensor(526.7872, device='cuda:0')
+#tensor(551.2297, device='cuda:0')
+#tensor(574.9075, device='cuda:0')
+#tensor(3435.1819, device='cuda:0')
+#tensor(3480.1541, device='cuda:0')
+
+#
 ```
 
 **Using Int8 inference with HuggingFace Transformers**
@@ -75,23 +87,6 @@ out = linear(x.to(torch.float16))
 - 8-bit quantization: Quantile, Linear, and Dynamic quantization
 - Fast quantile estimation: Up to 100x faster than other algorithms
 
-## Requirements & Installation
-
-Requirements: anaconda, cudatoolkit, pytorch
-
-Hardware requirements:
- - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or older).
- - 8-bit optimizers and quantization: NVIDIA Kepler GPU or newer (>=GTX 78X).
-
-Supported CUDA versions: 10.2 - 12.0
-
-The bitsandbytes library is currently only supported on Linux distributions. Windows is not supported at the moment.
-
-The requirements can best be fulfilled by installing pytorch via anaconda. You can install PyTorch by following the ["Get Started"](https://pytorch.org/get-started/locally/) instructions on the official website.
-
-To install run:
-
-``pip install bitsandbytes``
 
 ## Using bitsandbytes
 
@@ -141,25 +136,6 @@ For upcoming features and changes and full history see [Patch Notes](CHANGELOG.m
 
 1. RuntimeError: CUDA error: no kernel image is available for execution on the device. [Solution](errors_and_solutions.md#No-kernel-image-available)
 2. __fatbinwrap_.. [Solution](errors_and_solutions.md#fatbinwrap_)
-
-## Compile from source
-To compile from source, you need an installation of CUDA. If `nvcc` is not installed, you can install the CUDA Toolkit with nvcc through the following commands.
-
-```bash
-wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh
-# Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
-#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121}
-#   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
-
-# For example, the following installs CUDA 11.8 to ~/local/cuda-11.8 and exports the path to your .bashrc
-bash cuda install 118 ~/local 1 
-```
-
-To use a specific CUDA version just for a single compile run, you can set the variable `CUDA_HOME`, for example the following command compiles `libbitsandbytes_cuda117.so` using compiler flags for cuda11x with the cuda version at `~/local/cuda-11.7`:
-
-``CUDA_HOME=~/local/cuda-11.7 CUDA_VERSION=117 make cuda11x``
-
-For more detailed instruction, please follow the [compile_from_source.md](compile_from_source.md) instructions.
 
 ## License
 
