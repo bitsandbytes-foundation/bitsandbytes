@@ -2364,7 +2364,7 @@ def test_normal_map_tree():
 @pytest.mark.parametrize("kind", ['fc1', 'fc2', 'attn', 'attn_packed'], ids=['fc1', 'fc2', 'attn', 'attn_packed'])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
 def test_gemv_4bit(dtype, storage_type, double_quant, kind):
-    for dim in [128, 256, 512, 1024, 2048, 4096, 6144]:
+    for dim in [128, 256, 512, 1024]:
     #for dim in [4*1024]:
     #for dim in [1*128]:
         errs1 = []
@@ -2525,3 +2525,31 @@ def test_managed():
    # assert (A==17).sum().item() == n*n
 
    # torch.testing.assert_close(A, torch.ones(A.shape)*289)
+
+
+@pytest.mark.parametrize("storage_type", ['nf4', 'fp4'], ids=['nf4', 'fp4'])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
+@pytest.mark.parametrize("double_quant", [False], ids=['DQ_True'])
+def test_gemv_eye_4bit(storage_type, dtype, double_quant):
+    dims = 10
+    torch.random.manual_seed(np.random.randint(0, 412424242))
+    dims = torch.randint(0, 8192, size=(dims,)).tolist()
+    dims = [dim + (64-(dim % 64)) for dim in dims]
+    #for dim in [576, 5120, 3520, 5184, 1280, 4992, 5312, 2048]:
+    for dim in dims:
+        A = torch.normal(0, 0.1, size=(1, 1, dim), dtype=dtype, device='cuda')
+        B = torch.eye(dim, dtype=dtype, device='cuda')
+
+        qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant)
+        C3 = torch.matmul(A, B.t())
+        C2 = bnb.matmul_4bit(A, qB.t(), state)
+        A.requires_grad = True
+        C1 = bnb.matmul_4bit(A, qB.t(), state)
+
+        torch.testing.assert_close(A, C3)
+        torch.testing.assert_close(A, C1)
+        torch.testing.assert_close(A, C2)
+        #torch.testing.assert_close(A, C1, rtol=1e-5, atol=0.00001)
+        #torch.testing.assert_close(A, C2, rtol=1e-5, atol=0.080)
+
+

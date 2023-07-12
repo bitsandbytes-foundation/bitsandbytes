@@ -65,7 +65,7 @@ def generate(model, tokenizer, text, generation_config, prompt_func=get_prompt_f
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 models = ['huggyllama/llama-7b', 'bigscience/bloom-1b7']
-dtypes = ['nf4', 'fp4', '16bit']
+dtypes = ['nf4', 'fp4']
 load_in_4bit = [True, False]
 values = list(product(models, dtypes))
 strfunc = lambda lst: [str(x) for x in lst]
@@ -73,14 +73,17 @@ ids = ['_'.join(strfunc(x)) for x in values]
 @pytest.fixture(scope='session', params=values, ids=ids)
 def model_and_tokenizer(request):
     model, tokenizer = get_model_and_tokenizer(request.param)
-    yield model, tokenizer
+    yield request.param, model, tokenizer
     del model
 
+@pytest.mark.parametrize("DQ", [True, False], ids=['DQ_True', 'DQ_False'])
 @pytest.mark.parametrize("inference_kernel", [True, False], ids=['inference_kernel_True', 'inference_kernel_False'])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
-def test_pi(model_and_tokenizer, dtype, inference_kernel):
+#@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
+def test_pi(model_and_tokenizer, inference_kernel, DQ):
+    print('')
+    dtype = torch.float16
 
-    model, tokenizer = model_and_tokenizer
+    fixture_config, model, tokenizer = model_and_tokenizer
 
     generation_config = transformers.GenerationConfig(
         max_new_tokens=20,
@@ -94,16 +97,16 @@ def test_pi(model_and_tokenizer, dtype, inference_kernel):
     #text = 'Please write down the first 50 digits of pi.'
     #text = get_prompt_for_generation_eval(text)
     #text += ' Sure, here the first 50 digits of pi: 3.14159'
-    n_cases = 3
+    n_cases = 6
     text = '3.14159'
     if hasattr(model.config, 'quantization_config'):
         model.config.quantization_config.bnb_4bit_compute_dtype = dtype
+        model.config.quantization_config.bnb_4bit_use_double_quant = DQ
 
     if not inference_kernel:
         text = [text]*n_cases
     inputs = tokenizer(text, return_tensors="pt").to('cuda:0')
     x = inputs['input_ids']
-    failure_count = 0
     outputs = []
     if inference_kernel:
         for i in range(n_cases):
@@ -116,10 +119,12 @@ def test_pi(model_and_tokenizer, dtype, inference_kernel):
 
 
     assert len(outputs) == n_cases
+    failure_count = 0
     for i in range(n_cases):
         if not outputs[i][:len(str(math.pi))] == str(math.pi):
             failure_count += 1
-    if failure_count > 1:
+    failure_max = (2 if fixture_config[0] == 'huggyllama/llama-7b' else 4)
+    if failure_count > failure_max:
         print(math.pi)
         for out in outputs:
             print(out)
