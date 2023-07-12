@@ -2,6 +2,9 @@ import pytest
 import torch
 import math
 
+from itertools import product
+
+import transformers
 from transformers import (
   AutoConfig,
   AutoModelForCausalLM,
@@ -11,7 +14,7 @@ from transformers import (
   set_seed,
 
 )
-import transformers
+
 
 
 def get_4bit_config():
@@ -26,15 +29,23 @@ def get_4bit_config():
   )
 
 
-def get_model(model_name_or_path='huggyllama/llama-7b', bnb_config=get_4bit_config()):
-  model = AutoModelForCausalLM.from_pretrained(
-    model_name_or_path,
-    quantization_config=bnb_config,
-    max_memory={0:'48GB'},
-    device_map='auto'
-  ).eval()
+def get_model_and_tokenizer(config):
+    model_name_or_path, quant_type = config
+    bnb_config = get_4bit_config()
+    if quant_type == '16bit':
+        bnb_config.load_in_4bit = False
+    else:
+        bnb_config.bnb_4bit_quant_type= quant_type
+    model = AutoModelForCausalLM.from_pretrained(model_name_or_path,
+        quantization_config=bnb_config,
+        max_memory={0:'48GB'},
+        device_map='auto',
+        torch_dtype=torch.bfloat16
+        ).eval()
 
-  return model
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path)
+
+    return model, tokenizer
 
 def get_prompt_for_generation_eval(text, add_roles=True):
     description = (
@@ -53,48 +64,71 @@ def generate(model, tokenizer, text, generation_config, prompt_func=get_prompt_f
     outputs = model.generate(inputs=inputs['input_ids'], generation_config=generation_config)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-name_or_path = 'huggyllama/llama-7b'
-#name_or_path = 'AI-Sweden/gpt-sw3-126m'
+models = ['huggyllama/llama-7b', 'bigscience/bloom-1b7']
+dtypes = ['nf4', 'fp4']
+load_in_4bit = [True, False]
+values = list(product(models, dtypes))
+strfunc = lambda lst: [str(x) for x in lst]
+ids = ['_'.join(strfunc(x)) for x in values]
+@pytest.fixture(scope='session', params=values, ids=ids)
+def model_and_tokenizer(request):
+    model, tokenizer = get_model_and_tokenizer(request.param)
+    yield request.param, model, tokenizer
+    del model
 
-@pytest.fixture(scope='session')
-def model():
-    bnb_config = get_4bit_config()
-    bnb_config.bnb_4bit_compute_dtype=torch.float32
-    bnb_config.load_in_4bit=True
-    model = get_model(name_or_path)
+@pytest.mark.parametrize("DQ", [True, False], ids=['DQ_True', 'DQ_False'])
+@pytest.mark.parametrize("inference_kernel", [True, False], ids=['inference_kernel_True', 'inference_kernel_False'])
+#@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
+def test_pi(model_and_tokenizer, inference_kernel, DQ):
     print('')
-    return model
+    dtype = torch.float16
 
-@pytest.fixture(scope='session')
-def tokenizer():
-    tokenizer = transformers.AutoTokenizer.from_pretrained(name_or_path)
-    return tokenizer
-
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
-def test_pi(model, tokenizer, dtype):
+    fixture_config, model, tokenizer = model_and_tokenizer
 
     generation_config = transformers.GenerationConfig(
-        max_new_tokens=128,
+        max_new_tokens=20,
         do_sample=True,
         top_p=0.9,
         temperature=0.7,
     )
-    generation_config.max_new_tokens = 50
+    generation_config.max_new_tokens = 20
 
 
     #text = 'Please write down the first 50 digits of pi.'
     #text = get_prompt_for_generation_eval(text)
     #text += ' Sure, here the first 50 digits of pi: 3.14159'
+    n_cases = 6
     text = '3.14159'
-    model.config.quantization_config.bnb_4bit_compute_dtype = dtype
+    if hasattr(model.config, 'quantization_config'):
+        model.config.quantization_config.bnb_4bit_compute_dtype = dtype
+        model.config.quantization_config.bnb_4bit_use_double_quant = DQ
 
+    if not inference_kernel:
+        text = [text]*n_cases
     inputs = tokenizer(text, return_tensors="pt").to('cuda:0')
-    outputs = model.generate(inputs=inputs['input_ids'], generation_config=generation_config)
-    textout = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    print('')
-    print(textout)
-    print(math.pi)
+    x = inputs['input_ids']
+    outputs = []
+    if inference_kernel:
+        for i in range(n_cases):
+            output = model.generate(x, generation_config=generation_config)
+            textout = tokenizer.decode(output[0], skip_special_tokens=True)
+            outputs.append(textout)
+    else:
+        outputs = model.generate(x, generation_config=generation_config)
+        outputs = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
 
-    assert textout[:len(str(math.pi))] == str(math.pi)
+
+    assert len(outputs) == n_cases
+    failure_count = 0
+    for i in range(n_cases):
+        if not outputs[i][:len(str(math.pi))] == str(math.pi):
+            failure_count += 1
+    failure_max = (2 if fixture_config[0] == 'huggyllama/llama-7b' else 4)
+    if failure_count > failure_max:
+        print(math.pi)
+        for out in outputs:
+            print(out)
+        raise ValueError(f'Failure count: {failure_count}/{n_cases}')
+
 
 

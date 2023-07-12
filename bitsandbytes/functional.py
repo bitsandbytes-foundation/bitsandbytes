@@ -1512,8 +1512,6 @@ def gemv_4bit(
 
     return out
 
-
-
 def igemm(
     A: Tensor,
     B: Tensor,
