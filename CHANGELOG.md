@@ -258,3 +258,9 @@ Bug fixes:
 
 Deprecated:
  - Binaries for CUDA 11.2, 11.6 no longer ship with `pip install bitsandbytes` and need to be compiled from source.
+
+
+### 0.40.1
+
+Features:
+ - Added precompiled CUDA 11.8 binaries to support H100 GPUs without compilation #571

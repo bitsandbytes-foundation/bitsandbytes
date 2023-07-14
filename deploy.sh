@@ -10,77 +10,77 @@ if [[ ! -z "${LD_LIBRARY_PATH}" ]]; then
 fi
 
 
-#module unload cuda && echo "no module function available. Probably not on a slurm cluster."
-#module unload gcc && echo "no module function available. Probably not on a slurm cluster."
-#
-#rm -rf dist build
-#make cleaneggs
-#make cleanlibs
-#
-#make clean
-#export CUDA_HOME=
-#export CUDA_VERSION=
-#make cpuonly CUDA_VERSION="CPU"
-#
-#if [ ! -f "./bitsandbytes/libbitsandbytes_cpu.so" ]; then
-#  # Control will enter here if $DIRECTORY doesn't exist.
-#  echo "Compilation unsuccessul!" 1>&2
-#  exit 64
-#fi
-#
-#make clean
-#export CUDA_HOME=$BASE_PATH/cuda-11.0
-#make cuda110 CUDA_VERSION=110
-#
-#if [ ! -f "./bitsandbytes/libbitsandbytes_cuda110.so" ]; then
-#  # Control will enter here if $DIRECTORY doesn't exist.
-#  echo "Compilation unsuccessul!" 1>&2
-#  exit 64
-#fi
-#
-#make clean
-#export CUDA_HOME=$BASE_PATH/cuda-11.1
-#make cuda11x CUDA_VERSION=111
-#
-#if [ ! -f "./bitsandbytes/libbitsandbytes_cuda111.so" ]; then
-#  # Control will enter here if $DIRECTORY doesn't exist.
-#  echo "Compilation unsuccessul!" 1>&2
-#  exit 64
-#fi
-#
-#make clean
-#export CUDA_HOME=$BASE_PATH/cuda-11.4
-#make cuda11x CUDA_VERSION=114
-#
-#if [ ! -f "./bitsandbytes/libbitsandbytes_cuda114.so" ]; then
-#  # Control will enter here if $DIRECTORY doesn't exist.
-#  echo "Compilation unsuccessul!" 1>&2
-#  exit 64
-#fi
-#
-#make clean
-#export CUDA_HOME=$BASE_PATH/cuda-11.5
-#make cuda11x CUDA_VERSION=115
-#
-#if [ ! -f "./bitsandbytes/libbitsandbytes_cuda115.so" ]; then
-#  # Control will enter here if $DIRECTORY doesn't exist.
-#  echo "Compilation unsuccessul!" 1>&2
-#  exit 64
-#fi
-#
-#make clean
-#export CUDA_HOME=$BASE_PATH/cuda-11.7
-#make cuda11x CUDA_VERSION=117
-#
-#if [ ! -f "./bitsandbytes/libbitsandbytes_cuda117.so" ]; then
-#  # Control will enter here if $DIRECTORY doesn't exist.
-#  echo "Compilation unsuccessul!" 1>&2
-#  exit 64
-#fi
+module unload cuda && echo "no module function available. Probably not on a slurm cluster."
+module unload gcc && echo "no module function available. Probably not on a slurm cluster."
+
+rm -rf dist build
+make cleaneggs
+make cleanlibs
+
+make clean
+export CUDA_HOME=
+export CUDA_VERSION=
+make cpuonly CUDA_VERSION="CPU"
+
+if [ ! -f "./bitsandbytes/libbitsandbytes_cpu.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+
+make clean
+export CUDA_HOME=$BASE_PATH/cuda-11.0
+make cuda110 CUDA_VERSION=110
+
+if [ ! -f "./bitsandbytes/libbitsandbytes_cuda110.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+
+make clean
+export CUDA_HOME=$BASE_PATH/cuda-11.1
+make cuda11x CUDA_VERSION=111
+
+if [ ! -f "./bitsandbytes/libbitsandbytes_cuda111.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+
+make clean
+export CUDA_HOME=$BASE_PATH/cuda-11.4
+make cuda11x CUDA_VERSION=114
+
+if [ ! -f "./bitsandbytes/libbitsandbytes_cuda114.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+
+make clean
+export CUDA_HOME=$BASE_PATH/cuda-11.5
+make cuda11x CUDA_VERSION=115
+
+if [ ! -f "./bitsandbytes/libbitsandbytes_cuda115.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
+
+make clean
+export CUDA_HOME=$BASE_PATH/cuda-11.7
+make cuda11x CUDA_VERSION=117
+
+if [ ! -f "./bitsandbytes/libbitsandbytes_cuda117.so" ]; then
+  # Control will enter here if $DIRECTORY doesn't exist.
+  echo "Compilation unsuccessul!" 1>&2
+  exit 64
+fi
 
 make clean
 export CUDA_HOME=$BASE_PATH/cuda-11.8
-make cuda12x CUDA_VERSION=118
+make cuda118 CUDA_VERSION=118
 
 if [ ! -f "./bitsandbytes/libbitsandbytes_cuda118.so" ]; then
   # Control will enter here if $DIRECTORY doesn't exist.
@@ -172,7 +172,7 @@ fi
 
 make clean
 export CUDA_HOME=$BASE_PATH/cuda-11.8
-make cuda12x_nomatmul CUDA_VERSION=118
+make cuda118_nomatmul CUDA_VERSION=118
 
 if [ ! -f "./bitsandbytes/libbitsandbytes_cuda118_nocublaslt.so" ]; then
   # Control will enter here if $DIRECTORY doesn't exist.
