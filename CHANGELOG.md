@@ -264,3 +264,6 @@ Deprecated:
 
 Features:
  - Added precompiled CUDA 11.8 binaries to support H100 GPUs without compilation #571
+
+Bug fixes:
+ - Fixed a bug where the default type of absmax was undefined which leads to errors if the default type is different than torch.float32. # 553
