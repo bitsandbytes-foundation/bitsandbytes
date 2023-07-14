@@ -685,10 +685,10 @@ def dequantize_blockwise(
 
     absmax, code, blocksize, nested, dtype, offset, state2 = quant_state
 
-    if absmax.dtype != torch.float32: absmax = absmax.float()
     if nested:
         absmax = dequantize_blockwise(absmax, state2)
         absmax += offset
+        if absmax.dtype != torch.float32: absmax = absmax.float()
 
     if out is None:
         out = torch.empty(A.shape, dtype=dtype, device=A.device)

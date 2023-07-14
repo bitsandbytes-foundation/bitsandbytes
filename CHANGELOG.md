@@ -268,6 +268,7 @@ Features:
 Bug fixes:
  - Fixed a bug where the default type of absmax was undefined which leads to errors if the default type is different than torch.float32. # 553
  - Fixed a missing scipy dependency in requirements.txt. #544
+ - Fixed a bug, where a view operation could cause an error in 8-bit layers.
 
 Documentation:
  - Improved documentation for GPUs that do not support 8-bit matmul. #529
