@@ -229,6 +229,16 @@ class LinearFP4(Linear4bit):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'fp4', device)
 
 class LinearNF4(Linear4bit):
+    ''' Implements the NF4 data type.
+
+        Constructs a quantization data type where each bin has equal area under a standard normal distribution N(0, 1) that
+        is normalized into the range [-1, 1].
+
+        For more information read the paper: QLoRA: Efficient Finetuning of Quantized LLMs (https://arxiv.org/abs/2305.14314)
+
+        Implementation of the NF4 data type in bitsandbytes can be found in the `create_normal_map` function in
+        the `functional.py` file: https://github.com/TimDettmers/bitsandbytes/blob/main/bitsandbytes/functional.py#L236.
+    '''
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True,device=None):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'nf4', device)
 
