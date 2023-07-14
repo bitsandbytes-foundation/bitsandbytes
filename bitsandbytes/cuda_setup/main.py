@@ -279,37 +279,11 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
     return next(iter(cuda_runtime_libs)) if cuda_runtime_libs else None
 
 
-def check_cuda_result(cuda, result_val):
-    # 3. Check for CUDA errors
-    if result_val != 0:
-        error_str = ct.c_char_p()
-        cuda.cuGetErrorString(result_val, ct.byref(error_str))
-        if error_str.value is not None:
-            CUDASetup.get_instance().add_log_entry(f"CUDA exception! Error code: {error_str.value.decode()}")
-        else:
-            CUDASetup.get_instance().add_log_entry(f"Unknown CUDA exception! Please check your CUDA install. It might also be that your GPU is too old.")
-
-
 # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
 def get_cuda_version(cuda, cudart_path):
     if cuda is None: return None
 
-    try:
-        cudart = ct.CDLL(cudart_path)
-    except OSError:
-        CUDASetup.get_instance().add_log_entry(f'ERROR: libcudart.so could not be read from path: {cudart_path}!')
-        return None
-
-    version = ct.c_int()
-    try:
-        check_cuda_result(cuda, cudart.cudaRuntimeGetVersion(ct.byref(version)))
-    except AttributeError as e:
-        CUDASetup.get_instance().add_log_entry(f'ERROR: {str(e)}')
-        CUDASetup.get_instance().add_log_entry(f'CUDA SETUP: libcudart.so path is {cudart_path}')
-        CUDASetup.get_instance().add_log_entry(f'CUDA SETUP: Is seems that your cuda installation is not in your path. See https://github.com/TimDettmers/bitsandbytes/issues/85 for more information.')
-    version = int(version.value)
-    major = version//1000
-    minor = (version-(major*1000))//10
+    major, minor = map(int, torch.version.cuda.split("."))
 
     if major < 11:
         CUDASetup.get_instance().add_log_entry('CUDA SETUP: CUDA version lower than 11 are currently not supported for LLM.int8(). You will be only to use 8-bit optimizers and quantization routines!!')
@@ -324,37 +298,15 @@ def get_cuda_lib_handle():
     except OSError:
         CUDASetup.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
         return None
-    check_cuda_result(cuda, cuda.cuInit(0))
 
     return cuda
 
 
 def get_compute_capabilities(cuda):
-    """
-    1. find libcuda.so library (GPU driver) (/usr/lib)
-       init_device -> init variables -> call function by reference
-    2. call extern C function to determine CC
-       (https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__DEVICE__DEPRECATED.html)
-    3. Check for CUDA errors
-       https://stackoverflow.com/questions/14038589/what-is-the-canonical-way-to-check-for-errors-using-the-cuda-runtime-api
-    # bits taken from https://gist.github.com/f0k/63a664160d016a491b2cbea15913d549
-    """
-
-    nGpus = ct.c_int()
-    cc_major = ct.c_int()
-    cc_minor = ct.c_int()
-
-    device = ct.c_int()
-
-    check_cuda_result(cuda, cuda.cuDeviceGetCount(ct.byref(nGpus)))
     ccs = []
-    for i in range(nGpus.value):
-        check_cuda_result(cuda, cuda.cuDeviceGet(ct.byref(device), i))
-        ref_major = ct.byref(cc_major)
-        ref_minor = ct.byref(cc_minor)
-        # 2. call extern C function to determine CC
-        check_cuda_result(cuda, cuda.cuDeviceComputeCapability(ref_major, ref_minor, device))
-        ccs.append(f"{cc_major.value}.{cc_minor.value}")
+    for i in range(torch.cuda.device_count()):
+        cc_major, cc_minor = torch.cuda.get_device_capability(torch.cuda.device(i))
+        ccs.append(f"{cc_major}.{cc_minor}")
 
     return ccs
 
