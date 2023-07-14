@@ -101,8 +101,16 @@ class CUDASetup:
 
     def manual_override(self):
         if torch.cuda.is_available():
-            if 'CUDA_HOME' in os.environ and 'CUDA_VERSION' in os.environ:
-                if len(os.environ['CUDA_HOME']) > 0 and len(os.environ['CUDA_VERSION']) > 0:
+            if 'CUDA_VERSION' in os.environ:
+                if len(os.environ['CUDA_VERSION']) > 0:
+                    warn((f'\n\n{"="*80}\n'
+                          'WARNING: Manual override via CUDA_VERSION env variable detected!\n'
+                          'CUDA_VERSION=XXX can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n'
+                          'If this was unintended set the CUDA_VERSION variable to an empty string: export CUDA_VERSION=\n'
+                          'If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n'
+                          'For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n'
+                          f'Loading CUDA version: CUDA_VERSION={os.environ["CUDA_VERSION"]}'
+                          f'\n{"="*80}\n\n'))
                     self.binary_name = self.binary_name[:-6] + f'{os.environ["CUDA_VERSION"]}.so'
 
     def run_cuda_setup(self):
@@ -194,8 +202,8 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
 
     non_existent_directories: Set[Path] = candidate_paths - existent_directories
     if non_existent_directories:
-        CUDASetup.get_instance().add_log_entry("WARNING: The following directories listed in your path were found to "
-            f"be non-existent: {non_existent_directories}", is_warning=True)
+        CUDASetup.get_instance().add_log_entry("The following directories listed in your path were found to "
+            f"be non-existent: {non_existent_directories}", is_warning=False)
 
     return existent_directories
 
@@ -229,11 +237,12 @@ def warn_in_case_of_duplicates(results_paths: Set[Path]) -> None:
             f"Found duplicate {CUDA_RUNTIME_LIBS} files: {results_paths}.. "
             "We select the PyTorch default libcudart.so, which is {torch.version.cuda},"
             "but this might missmatch with the CUDA version that is needed for bitsandbytes."
-            "To override this behavior set the CUDA_HOME environmental variable"
-            "For example, if you want to use the CUDA version wht the path"
-            "/usr/local/cuda-11.2/lib/libcudart.so as the default,"
-            "then add the following to your .bashrc:"
-            "export CUDA_HOME=/usr/local/cuda-11.2")
+            "To override this behavior set the CUDA_VERSION=<version string, e.g. 122> environmental variable"
+            "For example, if you want to use the CUDA version 122"
+            "CUDA_VERSION=122 python ..."
+            "OR set the environmental variable in your .bashrc: export CUDA_VERSION=122"
+            "In the case of a manual override, make sure you set the LD_LIBRARY_PATH, e.g."
+            "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-11.2")
         CUDASetup.get_instance().add_log_entry(warning_msg, is_warning=True)
 
 
@@ -289,7 +298,8 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
 
     warn_in_case_of_duplicates(cuda_runtime_libs)
 
-    print(cuda_runtime_libs, flush=True)
+    cuda_setup = CUDASetup.get_instance()
+    cuda_setup.add_log_entry(f'DEBUG: Possible options found for libcudart.so: {cuda_runtime_libs}')
 
     return next(iter(cuda_runtime_libs)) if cuda_runtime_libs else None
 
@@ -313,15 +323,15 @@ def get_compute_capabilities():
 
 
 def evaluate_cuda_setup():
+    cuda_setup = CUDASetup.get_instance()
     if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
-        print('')
-        print('='*35 + 'BUG REPORT' + '='*35)
-        print(('Welcome to bitsandbytes. For bug reports, please run\n\npython -m bitsandbytes\n\n'),
+        cuda_setup.add_log_entry('')
+        cuda_setup.add_log_entry('='*35 + 'BUG REPORT' + '='*35)
+        cuda_setup.add_log_entry(('Welcome to bitsandbytes. For bug reports, please run\n\npython -m bitsandbytes\n\n'),
               ('and submit this information together with your error trace to: https://github.com/TimDettmers/bitsandbytes/issues'))
-        print('='*80)
+        cuda_setup.add_log_entry('='*80)
     if not torch.cuda.is_available(): return 'libbitsandbytes_cpu.so', None, None, None, None
 
-    cuda_setup = CUDASetup.get_instance()
     cudart_path = determine_cuda_runtime_lib_path()
     ccs = get_compute_capabilities()
     ccs.sort()
