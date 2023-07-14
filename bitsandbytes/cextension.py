@@ -38,5 +38,5 @@ except AttributeError as ex:
 
 
 # print the setup details after checking for errors so we do not print twice
-if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
-    setup.print_log_stack()
+#if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
+    #setup.print_log_stack()
