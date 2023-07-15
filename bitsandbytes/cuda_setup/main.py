@@ -87,7 +87,7 @@ class CUDASetup:
             make_cmd += '_nomatmul'
 
         self.add_log_entry('CUDA SETUP: Something unexpected happened. Please compile from source:')
-        self.add_log_entry('git clone git@github.com:TimDettmers/bitsandbytes.git')
+        self.add_log_entry('git clone https://github.com/TimDettmers/bitsandbytes.git')
         self.add_log_entry('cd bitsandbytes')
         self.add_log_entry(make_cmd)
         self.add_log_entry('python setup.py install')
