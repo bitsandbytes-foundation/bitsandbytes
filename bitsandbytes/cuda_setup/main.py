@@ -101,17 +101,17 @@ class CUDASetup:
 
     def manual_override(self):
         if torch.cuda.is_available():
-            if 'CUDA_VERSION' in os.environ:
-                if len(os.environ['CUDA_VERSION']) > 0:
+            if 'BNB_CUDA_VERSION' in os.environ:
+                if len(os.environ['BNB_CUDA_VERSION']) > 0:
                     warn((f'\n\n{"="*80}\n'
-                          'WARNING: Manual override via CUDA_VERSION env variable detected!\n'
-                          'CUDA_VERSION=XXX can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n'
-                          'If this was unintended set the CUDA_VERSION variable to an empty string: export CUDA_VERSION=\n'
+                          'WARNING: Manual override via BNB_CUDA_VERSION env variable detected!\n'
+                          'BNB_CUDA_VERSION=XXX can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n'
+                          'If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n'
                           'If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n'
                           'For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n'
-                          f'Loading CUDA version: CUDA_VERSION={os.environ["CUDA_VERSION"]}'
+                          f'Loading CUDA version: BNB_CUDA_VERSION={os.environ["BNB_CUDA_VERSION"]}'
                           f'\n{"="*80}\n\n'))
-                    self.binary_name = self.binary_name[:-6] + f'{os.environ["CUDA_VERSION"]}.so'
+                    self.binary_name = self.binary_name[:-6] + f'{os.environ["BNB_CUDA_VERSION"]}.so'
 
     def run_cuda_setup(self):
         self.initialized = True
@@ -237,10 +237,10 @@ def warn_in_case_of_duplicates(results_paths: Set[Path]) -> None:
             f"Found duplicate {CUDA_RUNTIME_LIBS} files: {results_paths}.. "
             "We select the PyTorch default libcudart.so, which is {torch.version.cuda},"
             "but this might missmatch with the CUDA version that is needed for bitsandbytes."
-            "To override this behavior set the CUDA_VERSION=<version string, e.g. 122> environmental variable"
+            "To override this behavior set the BNB_CUDA_VERSION=<version string, e.g. 122> environmental variable"
             "For example, if you want to use the CUDA version 122"
-            "CUDA_VERSION=122 python ..."
-            "OR set the environmental variable in your .bashrc: export CUDA_VERSION=122"
+            "BNB_CUDA_VERSION=122 python ..."
+            "OR set the environmental variable in your .bashrc: export BNB_CUDA_VERSION=122"
             "In the case of a manual override, make sure you set the LD_LIBRARY_PATH, e.g."
             "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-11.2")
         CUDASetup.get_instance().add_log_entry(warning_msg, is_warning=True)

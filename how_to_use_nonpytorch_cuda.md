@@ -24,21 +24,19 @@ wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_instal
 bash cuda install 117 ~/local 1 
 ```
 
-## Setting the environmental variables CUDA_HOME, CUDA_VERSION, and LD_LIBRARY_PATH
+## Setting the environmental variables BNB_CUDA_VERSION, and LD_LIBRARY_PATH
 
 To manually override the PyTorch installed CUDA version you need to set to variable, like so:
 
 ```bash
-export CUDA_HOME=<PATH>
-export CUDA_VERSION=<VERSION>
+export BNB_CUDA_VERSION=<VERSION>
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<PATH>
 ```
 
 For example, to use the local install path from above:
 
 ```bash
-export CUDA_HOME=/home/tim/local/cuda-11.7
-export CUDA_VERSION=117
+export BNB_CUDA_VERSION=117
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/tim/local/cuda-11.7
 ```
 

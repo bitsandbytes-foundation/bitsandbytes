@@ -264,12 +264,13 @@ Deprecated:
 
 Features:
  - Added precompiled CUDA 11.8 binaries to support H100 GPUs without compilation #571
- - CUDA SETUP now no longer looks for libcuda and libcudart and relies PyTorch CUDA libraries. To manually override this behavior see: how_to_use_nonpytorch_cuda.md.
+ - CUDA SETUP now no longer looks for libcuda and libcudart and relies PyTorch CUDA libraries. To manually override this behavior see: how_to_use_nonpytorch_cuda.md. Thank you @rapsealk
 
 Bug fixes:
  - Fixed a bug where the default type of absmax was undefined which leads to errors if the default type is different than torch.float32. # 553
  - Fixed a missing scipy dependency in requirements.txt. #544
  - Fixed a bug, where a view operation could cause an error in 8-bit layers.
+ - Fixed a bug where CPU bitsandbytes would during the import. #593 Thank you @bilelomrani
 
 Documentation:
  - Improved documentation for GPUs that do not support 8-bit matmul. #529
