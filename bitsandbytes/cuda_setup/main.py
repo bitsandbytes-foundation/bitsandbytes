@@ -360,13 +360,3 @@ def evaluate_cuda_setup():
         binary_name = f"libbitsandbytes_cuda{cuda_version_string}_nocublaslt.so"
 
     return binary_name, cudart_path, cc, cuda_version_string
-
-def get_cuda_lib_handle():
-    # 1. find libcuda.so library (GPU driver) (/usr/lib)
-    try:
-        cuda = ct.CDLL("libcuda.so")
-    except OSError:
-        CUDASetup.get_instance().add_log_entry('CUDA SETUP: WARNING! libcuda.so not found! Do you have a CUDA driver installed? If you are on a cluster, make sure you are on a CUDA machine!')
-        return None
-
-    return cuda
