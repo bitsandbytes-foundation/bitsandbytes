@@ -199,6 +199,8 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
         except OSError as exc:
             if exc.errno != errno.ENAMETOOLONG:
                 raise exc
+        except PermissionError as pex:
+            pass
 
     non_existent_directories: Set[Path] = candidate_paths - existent_directories
     if non_existent_directories:

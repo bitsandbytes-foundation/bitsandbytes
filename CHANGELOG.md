@@ -275,3 +275,10 @@ Bug fixes:
 Documentation:
  - Improved documentation for GPUs that do not support 8-bit matmul. #529
  - Added description and pointers for the NF4 data type. #543
+
+### 0.40.2
+
+Bug fixes:
+ - Fixed a but where a non-existent LD_LIBRARY_PATH variable led to a failure in python -m bitsandbytes #588
+ - Removed outdated get_cuda_lib_handle calls that lead to errors. #595 Thank you @ihsanturk
+ - Fixed bug where read-permission was assumed for a file. #497
