@@ -282,3 +282,4 @@ Bug fixes:
  - Fixed a but where a non-existent LD_LIBRARY_PATH variable led to a failure in python -m bitsandbytes #588
  - Removed outdated get_cuda_lib_handle calls that lead to errors. #595 Thank you @ihsanturk
  - Fixed bug where read-permission was assumed for a file. #497
+ - Fixed a bug where prefetchAsync lead to errors on GPUs that do not support unified memory but not prefetching (Maxwell, SM52). #470 #451 #453 #477 Thank you @jllllll and @stoperro
