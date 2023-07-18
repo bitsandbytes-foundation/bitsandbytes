@@ -22,7 +22,7 @@ You need to compile from source.
 
 Compilation quickstart:
 ```bash
-git clone [https://github.com/timdettmers/bitsandbytes.git](https://github.com/Lzy17/bitsandbytes-rocm)
+git clone https://github.com/Lzy17/bitsandbytes-rocm
 cd bitsandbytes-rocm
 
 make hip
