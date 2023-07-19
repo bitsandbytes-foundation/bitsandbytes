@@ -3540,8 +3540,8 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
   float local_C = 0.0f;
 
   unsigned char local_B_4bit[num_values_8bit];
-  T local_B[num_values_4bit];
-  T local_A[num_values_4bit];
+  T local_B[num_values_4bit/4];
+  T local_A[num_values_4bit/4];
   __shared__ T quant_map[16];
 	T local_absmax = T(0.0f);
 
@@ -3582,61 +3582,55 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
           local_B_4bit[j] = 0b01110111;
     }
 
-    #pragma unroll
-    for(int k = 0; k < num_values_8bit; k++)
+    for(int i = 0; i < 4; i++)
     {
-      #if __CUDA_ARCH__ >= 800
-        local_B[k*2] = quant_map[local_B_4bit[k] >> 4]*local_absmax;
-        local_B[k*2 + 1] = quant_map[local_B_4bit[k] & 0x0F]*local_absmax;
-      #else
-        // bf16 multipliation not supported
-        local_B[k*2] = T((float)quant_map[local_B_4bit[k] >> 4]*(float)local_absmax);
-        local_B[k*2 + 1] = T((float)quant_map[local_B_4bit[k] & 0x0F]*(float)local_absmax);
-      #endif
-    }
-
-    if(inner_idx+num_values_4bit < K)
-    {
-      // this is also relatively important for performance
-      if(BITS==16)
+      #pragma unroll
+      for(int k = 0; k < num_values_8bit/4; k++)
       {
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + 0];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[1] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + 1];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[2] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + 2];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[3] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + 3];
+        #if __CUDA_ARCH__ >= 800
+          local_B[k*2] = quant_map[local_B_4bit[(i*num_values_8bit/4) + k] >> 4]*local_absmax;
+          local_B[k*2 + 1] = quant_map[local_B_4bit[(i*num_values_8bit/4) + k] & 0x0F]*local_absmax;
+        #else
+          // bf16 multipliation not supported
+          local_B[k*2] = T((float)quant_map[local_B_4bit[(i*num_values_8bit/4) + k] >> 4]*(float)local_absmax);
+          local_B[k*2 + 1] = T((float)quant_map[local_B_4bit[(i*num_values_8bit/4) + k] & 0x0F]*(float)local_absmax);
+        #endif
+      }
+
+      if(inner_idx+(num_values_4bit/4) + (i*num_values_4bit/4) < K)
+      {
+        // this is also relatively important for performance
+        if(BITS==16)
+        {
+          reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/4) + i];
+        }
+        else
+        {
+          reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + (2*i) + 0];
+          reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[1] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + (2*i) + 1];
+        }
+
       }
       else
-      {
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 0];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[1] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 1];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[2] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 2];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[3] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 3];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[4] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 4];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[5] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 5];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[6] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 6];
-        reinterpret_cast<int4(&)[num_values_4bit]>(local_A)[7] = reinterpret_cast<int4*>(A)[inner_idx/(num_values_4bit/8) + 7];
-      }
+        #pragma unroll
+        for(int k = 0; k < num_values_4bit/4; k++)
+          if(inner_idx + (i*num_values_4bit/4) + k < K)
+            local_A[k] = A[inner_idx + k + (i*num_values_4bit/4)];
+          else
+            local_A[k] = T(0.0f);
 
-    }
-    else
+
+      // accumulate in float; small performance hit for Ampere, but lower error for outputs
       #pragma unroll
-      for(int k = 0; k < num_values_4bit; k++)
-        if(inner_idx + k < K)
-          local_A[k] = A[inner_idx + k];
-        else
-          local_A[k] = T(0.0f);
-
-
-    // accumulate in float; small performance hit for Ampere, but lower error for outputs
-    #pragma unroll
-    for(int k = 0; k < num_values_4bit; k++)
-    {
-      #if __CUDA_ARCH__ >= 800
-        local_C += (float)(local_A[k]*local_B[k]);
-      #else
-        // bf16 multipliation not supported
-        local_C += ((float)local_A[k]*(float)local_B[k]);
-      #endif
+      for(int k = 0; k < num_values_4bit/4; k++)
+      {
+        #if __CUDA_ARCH__ >= 800
+          local_C += (float)(local_A[k]*local_B[k]);
+        #else
+          // bf16 multipliation not supported
+          local_C += ((float)local_A[k]*(float)local_B[k]);
+        #endif
+      }
     }
   }
 
