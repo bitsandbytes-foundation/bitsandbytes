@@ -21,7 +21,7 @@ wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_instal
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
 
 # For example, the following installs CUDA 11.7 to ~/local/cuda-11.7 and exports the path to your .bashrc
-bash cuda install 117 ~/local 1 
+bash cuda_install.sh 117 ~/local 1 
 ```
 
 ## Setting the environmental variables BNB_CUDA_VERSION, and LD_LIBRARY_PATH
