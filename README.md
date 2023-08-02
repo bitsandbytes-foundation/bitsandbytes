@@ -38,7 +38,7 @@ python setup.py install
 ```python
 from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained(
-  'decapoda-research/llama-7b-hf,
+  'decapoda-research/llama-7b-hf',
   device_map='auto',
   load_in_8bit=True,
   max_memory=f'{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB')
