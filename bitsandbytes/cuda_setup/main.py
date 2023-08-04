@@ -214,8 +214,11 @@ def get_cuda_runtime_lib_paths(candidate_paths: Set[Path]) -> Set[Path]:
     paths = set()
     for libname in CUDA_RUNTIME_LIBS:
         for path in candidate_paths:
-            if (path / libname).is_file():
-                paths.add(path / libname)
+            try:
+                if (path / libname).is_file():
+                    paths.add(path / libname)
+            except PermissionError:
+                pass
     return paths
 
 
