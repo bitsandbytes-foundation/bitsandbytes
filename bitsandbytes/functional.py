@@ -322,10 +322,8 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     # these are additional items that come from the case
     # where all the exponent bits are zero and no
     # indicator bit is present
-    non_sign_bits = total_bits - (1 if signed else 0)
+    non_sign_bits = total_bits - (1 if signed else 1)
     additional_items = 2 ** (non_sign_bits - max_exponent_bits) - 1
-    if not signed:
-        additional_items = 2 * additional_items
     for i in range(max_exponent_bits):
         fraction_items = int((2 ** (i + non_sign_bits - max_exponent_bits) + 1 if signed else 2 ** (i + non_sign_bits - max_exponent_bits + 1) + 1))
         boundaries = torch.linspace(0.1, 1, fraction_items)
@@ -334,15 +332,17 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
         if signed:
             data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
 
-        if additional_items > 0:
-            boundaries = torch.linspace(0.1, 1, additional_items + 1)
-            means = (boundaries[:-1] + boundaries[1:]) / 2.0
-            data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
-            if signed:
-                data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
+    if additional_items > 0:
+        boundaries = torch.linspace(0.1, 1, additional_items + 1)
+        means = (boundaries[:-1] + boundaries[1:]) / 2.0
+        data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
+        if signed:
+            data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
 
     data.append(0)
     data.append(1.0)
+
+    assert len(data) == 2**total_bits
 
     gap = 256 - len(data)
     for i in range(gap):

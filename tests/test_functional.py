@@ -129,6 +129,7 @@ def test_quantile_quantization():
         assert diff < 0.001
 
 
+
 def test_dynamic_quantization():
     diffs = []
     reldiffs = []
@@ -141,8 +142,8 @@ def test_dynamic_quantization():
         diffs.append(diff.mean().item())
         reldiffs.append(reldiff.mean().item())
         assert diff.mean().item() < 0.0135
-    # print(sum(diffs)/len(diffs))
-    # print(sum(reldiffs)/len(reldiffs))
+    print(sum(diffs)/len(diffs))
+    print(sum(reldiffs)/len(reldiffs))
 
     for i in range(100):
         A1 = torch.rand(1024, 1024, device="cuda")
@@ -157,7 +158,8 @@ def test_dynamic_quantization():
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=["fp32", "fp16", "bf16"])
 @pytest.mark.parametrize("nested", [False, True], ids=["False", "True"])
 @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
-def test_dynamic_blockwise_quantization(dtype, nested, blocksize):
+@pytest.mark.parametrize("signed", [True, False], ids=['signed_True', 'signed_False'])
+def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
     #print('')
     diffs = []
     reldiffs = []
@@ -178,9 +180,10 @@ def test_dynamic_blockwise_quantization(dtype, nested, blocksize):
     assert A2.dtype == dtype
 
     diffs = []
+    code = F.create_dynamic_map(signed=signed)
     for i in range(100):
         A1 = torch.rand(1024, 1024, device="cuda", dtype=dtype)
-        C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested)
+        C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested, code=code)
         A2 = F.dequantize_blockwise(C, S)
         diff = torch.abs(A1 - A2).float()
         reldiff = diff / torch.abs(A1.float() + 1e-8)
@@ -189,11 +192,15 @@ def test_dynamic_blockwise_quantization(dtype, nested, blocksize):
         #torch.testing.assert_close(A1, A2, atol=1e-2, rtol=0)
     abserr = sum(diffs)/len(diffs)
     relerr = sum(reldiffs)/len(reldiffs)
-    assert abserr < 0.0035
-    assert relerr < 0.015
+    if signed:
+        assert abserr < 0.0035
+        assert relerr < 0.015
+    else:
+        assert abserr < 0.00175
+        assert relerr < 0.012
     assert A2.dtype == dtype
-    #print('nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
-    #print('nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
+    #print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
+    #print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 
