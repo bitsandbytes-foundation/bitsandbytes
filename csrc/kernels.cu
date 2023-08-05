@@ -4046,9 +4046,9 @@ template __global__ void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block
                 float weight_decay, \
                 const float gnorm_scale, const bool skip_zeros, const int n); \
 
-MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
-MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 2048, 8)
-MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, __nv_bfloat16, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 256, 1)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 256, 1)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, __nv_bfloat16, 256, 1)
 
 
 #define MAKE_OptimizerStatic8bit1StateBlockwise(oname, gtype, block_size, num_per_thread) \
@@ -4061,12 +4061,12 @@ template __global__ void kOptimizerStatic8bit1StateBlockwise<gtype, oname, block
                 float weight_decay, \
                 const float gnorm_scale, const bool skip_zeros, const int n); \
 
-MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, half, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, half, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(LION, float, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(LION, half, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(LION, __nv_bfloat16, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, half, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, half, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, half, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, float, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, half, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, __nv_bfloat16, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, half, 256, 1)

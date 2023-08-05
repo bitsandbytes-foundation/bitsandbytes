@@ -195,10 +195,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 	}
 }
 
-#define BLOCKSIZE_2STATE 2048
-#define NUM_2STATE 8
-#define BLOCKSIZE_1STATE 2048
-#define NUM_1STATE 8
+#define BLOCKSIZE_2STATE 256
+#define NUM_2STATE 1
+#define BLOCKSIZE_1STATE 256
+#define NUM_1STATE 1
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,

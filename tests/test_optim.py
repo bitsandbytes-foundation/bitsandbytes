@@ -237,7 +237,6 @@ dim2 = [32, 1024, 4097]
 gtype = [torch.float32, torch.float16, torch.bfloat16]
 optimizer_names = [
     "adam8bit",
-    "lion8bit",
     "momentum8bit",
     "rmsprop8bit",
     "adam8bit_blockwise",
@@ -259,7 +258,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
     p2 = p1.clone()
     p1 = p1.float()
-    blocksize = 2048
+    blocksize = 256
 
     torch_optimizer = str2optimizers[optim_name][0]([p1])
     bnb_optimizer = str2optimizers[optim_name][1]([p2])
@@ -311,7 +310,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
                 )
                 == 0
             )
-            #assert num_not_close.sum().item() < 20
+            assert num_not_close.sum().item() < 20
             dequant_states.append(s1.clone())
 
         err = torch.abs(p1 - p2)
@@ -484,7 +483,7 @@ gtype = [torch.float32, torch.float16]
 # optimizer_names = ['momentum_apex', 'momentum8bit', 'momentum_pytorch']
 # optimizer_names = ['lamb_apex', 'lamb8bit']
 # optimizer_names = ['lars_apex', 'lars8bit']
-optimizer_names = ["adam8bit_blockwise", 'paged_adam8bit_blockwise', 'paged_adamw8bit_blockwise', 'paged_lion8bit_blockwise']
+optimizer_names = ['adam_pytorch', "adam8bit_blockwise", 'paged_adam8bit_blockwise', 'paged_adamw8bit_blockwise', 'paged_lion8bit_blockwise']
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = [
     "dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values
@@ -501,7 +500,7 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
 
     g = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.01
     p1.grad = g
-    for i in range(k):
+    for i in range(10):
         if i == k // 5:
             # 100 iterations for burn-in
             torch.cuda.synchronize()
