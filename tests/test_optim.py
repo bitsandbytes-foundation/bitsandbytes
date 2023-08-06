@@ -50,21 +50,11 @@ str2optimizers["lion"] = (Lion, bnb.optim.Lion)
 str2optimizers["paged_lion"] = (Lion, bnb.optim.PagedLion)
 str2optimizers["momentum"] = (
     lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9, block_wise=False),
+    lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9, block_wise=True),
 )
 str2optimizers["rmsprop"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=False),
-)
-str2optimizers["adam8bit"] = (torch.optim.Adam, lambda pxx: bnb.optim.Adam8bit(pxx, block_wise=False))
-str2optimizers["lion8bit"] = (Lion, lambda pxx: bnb.optim.Lion8bit(pxx, block_wise=False))
-str2optimizers["momentum8bit"] = (
-    lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.SGD8bit(pxx, 0.01, 0.9, block_wise=False),
-)
-str2optimizers["rmsprop8bit"] = (
-    lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.RMSprop8bit(pxx, 0.01, 0.9, block_wise=False),
+    lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=True),
 )
 
 str2optimizers["adam8bit_blockwise"] = (torch.optim.Adam, lambda pxx: bnb.optim.Adam8bit(pxx, block_wise=True))
@@ -90,15 +80,10 @@ str2statenames["paged_lion"] = [("exp_avg", "state1")]
 str2statenames["momentum"] = [("momentum_buffer", "state1")]
 str2statenames["lamb"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["rmsprop"] = [("square_avg", "state1")]
-str2statenames["adam8bit"] = [("exp_avg", "state1", "qmap1", "max1"), ("exp_avg_sq", "state2", "qmap2", "max2")]
-str2statenames["lamb8bit"] = [("exp_avg", "state1", "qmap1", "max1"), ("exp_avg_sq", "state2", "qmap2", "max2")]
 str2statenames["adam8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1"), ("exp_avg_sq", "state2", "qmap2", "absmax2")]
 str2statenames["paged_adam8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1"), ("exp_avg_sq", "state2", "qmap2", "absmax2")]
 str2statenames["paged_adamw8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1"), ("exp_avg_sq", "state2", "qmap2", "absmax2")]
-str2statenames["momentum8bit"] = [("momentum_buffer", "state1", "qmap1", "max1")]
-str2statenames["lion8bit"] = [("exp_avg", "state1", "qmap1", "max1")]
 str2statenames["momentum8bit_blockwise"] = [("momentum_buffer", "state1", "qmap1", "absmax1")]
-str2statenames["rmsprop8bit"] = [("square_avg", "state1", "qmap1", "max1")]
 str2statenames["rmsprop8bit_blockwise"] = [("square_avg", "state1", "qmap1", "absmax1")]
 str2statenames["lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 str2statenames["paged_lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
@@ -236,9 +221,6 @@ dim1 = [1024]
 dim2 = [32, 1024, 4097]
 gtype = [torch.float32, torch.float16, torch.bfloat16]
 optimizer_names = [
-    "adam8bit",
-    "momentum8bit",
-    "rmsprop8bit",
     "adam8bit_blockwise",
     "lion8bit_blockwise",
     "momentum8bit_blockwise",
@@ -481,8 +463,6 @@ gtype = [torch.float32, torch.float16]
 # optimizer_names = ['adam8bit_blockwise', 'adam8bit', 'lamb8bit']
 # optimizer_names = ['adam8bit_blockwise', 'adam_apex', 'adam8bit', 'adam', 'adam_pytorch']
 # optimizer_names = ['momentum_apex', 'momentum8bit', 'momentum_pytorch']
-# optimizer_names = ['lamb_apex', 'lamb8bit']
-# optimizer_names = ['lars_apex', 'lars8bit']
 optimizer_names = ['adam_pytorch', "adam8bit_blockwise", 'paged_adam8bit_blockwise', 'paged_adamw8bit_blockwise', 'paged_lion8bit_blockwise']
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = [

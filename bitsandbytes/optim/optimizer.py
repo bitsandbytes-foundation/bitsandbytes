@@ -340,6 +340,8 @@ class Optimizer2State(Optimizer8bit):
         skip_zeros=False,
         is_paged=False
     ):
+        if not block_wise:
+            raise NotImplementedError('Support for non-blockwise 8-bit optimizers was dropped in 0.42.0. These optimizer are unstable and not recommended. Use `block_wise=True`.')
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -484,35 +486,6 @@ class Optimizer2State(Optimizer8bit):
                 skip_zeros=config["skip_zeros"],
             )
 
-        elif state["state1"].dtype == torch.uint8 and not config["block_wise"]:
-            F.optimizer_update_8bit(
-                self.optimizer_name,
-                grad,
-                p,
-                state["state1"],
-                state["state2"],
-                config["betas"][0],
-                config["betas"][1],
-                config["eps"],
-                step,
-                config["lr"],
-                state["qmap1"],
-                state["qmap2"],
-                state["max1"],
-                state["max2"],
-                state["new_max1"],
-                state["new_max2"],
-                config["weight_decay"],
-                gnorm_scale=gnorm_scale,
-                unorm_vec=state["unorm_vec"]
-                if config["max_unorm"] > 0.0
-                else None,
-                max_unorm=config["max_unorm"],
-            )
-
-            # swap maxes
-            state["max1"], state["new_max1"] = state["new_max1"], state["max1"]
-            state["max2"], state["new_max2"] = state["new_max2"], state["max2"]
         elif state["state1"].dtype == torch.uint8 and config["block_wise"]:
             F.optimizer_update_8bit_blockwise(
                 self.optimizer_name,
@@ -553,6 +526,8 @@ class Optimizer1State(Optimizer8bit):
         skip_zeros=False,
         is_paged=False
     ):
+        if not block_wise:
+            raise NotImplementedError('Support for non-blockwise 8-bit optimizers was dropped in 0.42.0. These optimizer are unstable and not recommended. Use `block_wise=True`.')
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -677,31 +652,6 @@ class Optimizer1State(Optimizer8bit):
                 skip_zeros=config["skip_zeros"],
             )
 
-        elif state["state1"].dtype == torch.uint8 and not config["block_wise"]:
-            F.optimizer_update_8bit(
-                self.optimizer_name,
-                grad,
-                p,
-                state["state1"],
-                None,
-                config["betas"][0],
-                config["betas"][1],
-                config["eps"],
-                step,
-                config["lr"],
-                state["qmap1"],
-                None,
-                state["max1"],
-                None,
-                state["new_max1"],
-                None,
-                config["weight_decay"],
-                gnorm_scale,
-                state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
-                max_unorm=config["max_unorm"],
-            )
-
-            state["max1"], state["new_max1"] = state["new_max1"], state["max1"]
         elif state["state1"].dtype == torch.uint8 and config["block_wise"]:
             F.optimizer_update_8bit_blockwise(
                 self.optimizer_name,
