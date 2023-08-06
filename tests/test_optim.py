@@ -14,6 +14,10 @@ import torch
 import bitsandbytes as bnb
 import bitsandbytes.functional as F
 
+
+import torch.distributed as dist
+import torch.multiprocessing as mp
+
 # import apex
 
 k = 20
@@ -538,3 +542,84 @@ def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
         optim.step()
     torch.cuda.synchronize()
     print(mode, time.time() - t0)
+
+
+#def setup(rank, world_size):
+
+#def cleanup():
+
+def fsdp_main(rank, world_size):
+    import torch
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+    dim = 128
+    layers = 10
+    num_batches = 100
+    num_iter = 10000
+    batch_size = 10
+
+    net = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
+    net2 = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
+
+    with torch.no_grad():
+        for i in range(layers):
+            net[i].weight.copy_(net2[i].weight.data)
+            net[i].bias.copy_(net2[i].bias.data)
+
+    torch.cuda.set_device(rank)
+    model = FSDP(net, device_id=rank)
+    model2 = FSDP(net2, device_id=rank)
+
+    model = model.to(rank)
+    model2 = model2.to(rank)
+    optim = torch.optim.Adam(model.parameters(), lr=0.001)
+    optim8bit = bnb.optim.Adam8bit(model2.parameters(), lr=0.001)
+
+    batches = torch.randn(num_batches, dim, requires_grad=True)
+    lbls = torch.randint(0, dim, size=(num_batches,))
+    for i in range(num_batches):
+        with torch.no_grad():
+            batches[i][lbls[i]] += 0.5
+
+
+    ddp_loss = torch.zeros(2).to(rank)
+    for i in range(num_iter):
+        idx = torch.randint(0, num_batches, size=(batch_size,))
+        data, lbl = batches[idx].to(rank), lbls[idx].to(rank)
+        data2 = data.detach().clone()
+        lbl2 = lbl.detach().clone()
+        optim.zero_grad()
+        optim8bit.zero_grad()
+
+        output = model(data)
+        loss = torch.nn.functional.cross_entropy(output, lbl).mean()
+        loss.backward()
+        optim.step()
+
+        output2 = model2(data2)
+        loss2 = torch.nn.functional.cross_entropy(output2, lbl2).mean()
+        loss2.backward()
+        optim8bit.step()
+        ddp_loss[0] = loss.item()
+        ddp_loss[1] = loss2.item()
+
+        if i % 100 == 0:
+            dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
+            if rank == 0:
+                print(ddp_loss/world_size)
+    dist.destroy_process_group()
+
+def test_fsdp_8bitoptim():
+    torch.manual_seed(43434484747)
+    WORLD_SIZE = torch.cuda.device_count()
+    mp.spawn(fsdp_main,
+        args=(WORLD_SIZE,),
+        nprocs=WORLD_SIZE,
+        join=True)
+
