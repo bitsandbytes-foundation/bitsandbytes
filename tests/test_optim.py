@@ -548,7 +548,7 @@ def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
 
 #def cleanup():
 
-def fsdp_main(rank, world_size):
+def fsdp_main(rank, world_size, linear_type):
     import torch
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
@@ -560,12 +560,20 @@ def fsdp_main(rank, world_size):
 
     dim = 128
     layers = 10
-    num_batches = 100
-    num_iter = 10000
+    num_batches = 10
+    num_iter = 100
     batch_size = 10
 
-    net = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
-    net2 = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
+    if linear_type == '16bit':
+        net2 = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
+        net = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
+    elif linear_type == '4bit':
+        modules2 = [torch.nn.Linear(dim, dim) if i % 2 == 1 else bnb.nn.Linear4bit(dim, dim) for i in range(layers)]
+        net2 = torch.nn.Sequential(*modules2)
+        net = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
+        for i in range(layers):
+            if i % 2 == 0:
+                net2[i].weight.requires_grad=False
 
     with torch.no_grad():
         for i in range(layers):
@@ -573,8 +581,8 @@ def fsdp_main(rank, world_size):
             net[i].bias.copy_(net2[i].bias.data)
 
     torch.cuda.set_device(rank)
-    model = FSDP(net, device_id=rank)
-    model2 = FSDP(net2, device_id=rank)
+    model = FSDP(net, device_id=rank, use_orig_params=True)
+    model2 = FSDP(net2, device_id=rank, use_orig_params=True)
 
     model = model.to(rank)
     model2 = model2.to(rank)
@@ -609,17 +617,17 @@ def fsdp_main(rank, world_size):
         ddp_loss[0] = loss.item()
         ddp_loss[1] = loss2.item()
 
-        if i % 100 == 0:
-            dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
-            if rank == 0:
-                print(ddp_loss/world_size)
+        dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
+        if rank == 0:
+            print(ddp_loss/world_size)
     dist.destroy_process_group()
 
-def test_fsdp_8bitoptim():
+@pytest.mark.parametrize("linear_type", ['16bit', '4bit'], ids=['16bit', '4bit'])
+def test_fsdp_8bitoptim(linear_type):
     torch.manual_seed(43434484747)
     WORLD_SIZE = torch.cuda.device_count()
     mp.spawn(fsdp_main,
-        args=(WORLD_SIZE,),
+        args=(WORLD_SIZE,linear_type),
         nprocs=WORLD_SIZE,
         join=True)
 
