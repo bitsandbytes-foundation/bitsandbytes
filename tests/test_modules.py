@@ -647,20 +647,24 @@ def test_swapping():
     layer = bnb.nn.Linear4bit(32, 32)
     layer = layer.cuda()
     outputs.append(layer(a))
-    layer.create_pinned_memory()
+    layer.weight.create_pinned_memory()
+    assert layer.weight.is_pinned == True
     outputs.append(layer(a))
-    layer.swapout_async()
+    layer.weight.swapout_async()
+    assert layer.weight.state == 'swapping_out'
     outputs.append(layer(a))
-    layer.sync()
+    print(layer.weight.state)
+    layer.weight.sync()
+    print(layer.weight.state)
     assert layer.weight.data is None
 
     with pytest.raises(Exception):
         layer(a)
-    layer.swapin_async()
+    layer.weight.swapin_async()
 
     with pytest.raises(Exception):
         layer(a)
-    layer.sync()
+    layer.weight.sync()
     outputs.append(layer(a))
     ref = outputs.pop(0)
     for t in outputs:
