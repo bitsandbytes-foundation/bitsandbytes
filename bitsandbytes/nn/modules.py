@@ -150,6 +150,11 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.data = data
+        self.is_pinned = False
+        self.pinned_param = None
+        self.pre_swap_device = None
+        self.state = 'idle'
+        self.stream = None
         return self
 
     def cuda(self, device):
@@ -159,6 +164,34 @@ class Params4bit(torch.nn.Parameter):
         self.quant_state = quant_state
 
         return self
+
+    def create_pinned_memory()
+        if self.pinned_param is None and self.data.type == 'cuda':
+            self.pinned_param = self.data.pin_memory()
+            self.is_pinned = True
+            # TODO: register for swap order
+
+    def swapout_async(self):
+        if self.is_pinned:
+            self.pre_swap_device = self.data.device
+            self.pinned_param.copy_(self.data, non_blocking=True)
+            self.stream = torch.cuda.current_stream()
+            self.state = 'swapping_out'
+
+    def swapin_async(self):
+        if self.is_pinned:
+            self.data = torch.empty_like(self.pinned_param, device=self.pre_swap_device)
+            self.data.copy_(self.pinned_param, non_blocking=True)
+            self.stream = torch.cuda.current_stream()
+            self.state = 'swapping_in'
+
+    def sync(self):
+        if self.is_pinned and self.state != 'idle':
+            if self.state == 'swapping_out':
+                self.stream.synchronize()
+                del self.data
+            elif self.state == 'swapping_in':
+                self.stream.synchronize()
 
     @overload
     def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ..., non_blocking: bool = ...,) -> T:

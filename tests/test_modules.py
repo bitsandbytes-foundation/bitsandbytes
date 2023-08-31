@@ -640,4 +640,32 @@ def test_4bit_warnings():
     assert len(record) == 2
 
 
+def test_swapping():
+
+    a = torch.randn(4, 32).cuda()
+    outputs = []
+    layer = bnb.nn.Linear4bit(32, 32)
+    layer = layer.cuda()
+    outputs.append(layer(a))
+    layer.create_pinned_memory()
+    outputs.append(layer(a))
+    layer.swapout_async()
+    outputs.append(layer(a))
+    layer.sync()
+    assert layer.weight.data is None
+
+    with pytest.raises(Exception):
+        layer(a)
+    layer.swapin_async()
+
+    with pytest.raises(Exception):
+        layer(a)
+    layer.sync()
+    outputs.append(layer(a))
+    ref = outputs.pop(0)
+    for t in outputs:
+        torch.testing.assert_close(ref, t)
+
+
+
 
