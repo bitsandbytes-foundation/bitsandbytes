@@ -653,18 +653,18 @@ def test_swapping():
     layer.swapout_async()
     assert layer.state == 'swapping_out'
     outputs.append(layer(a))
-    print(layer.state)
     layer.sync()
-    print(layer.state)
     assert layer.weight is None
 
     with pytest.raises(Exception):
         layer(a)
     layer.swapin_async()
 
-    with pytest.raises(Exception):
-        layer(a)
+    # does not raise if the async copy completed too quickly
+    #with pytest.raises(Exception):
+    #    layer(a)
     layer.sync()
+    assert getattr(layer.weight, 'quant_state', None) is not None
     outputs.append(layer(a))
     ref = outputs.pop(0)
     for t in outputs:

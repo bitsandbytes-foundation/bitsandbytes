@@ -230,8 +230,10 @@ class Linear4bit(nn.Linear):
 
     def swapin_async(self):
         if self.is_pinned:
-            self.weight = Params4bit(*self.swap_state)
+            data = torch.empty_like(self.pinned_param, device=self.pre_swap_device)
+            self.weight = Params4bit(data, *self.swap_state)
             self.weight.data.copy_(self.pinned_param, non_blocking=True)
+            self.weight.quant_state = self.swap_state[1]
             self.stream = torch.cuda.current_stream()
             self.state = 'swapping_in'
 
@@ -242,6 +244,7 @@ class Linear4bit(nn.Linear):
                 w = self.weight
                 self.swap_state = [w.requires_grad, w.quant_state, w.blocksize, w.compress_statistics, w.quant_type]
                 del self.weight
+                self.weight = None
                 self.state = 'idle'
             elif self.state == 'swapping_in':
                 self.stream.synchronize()
