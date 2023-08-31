@@ -666,6 +666,9 @@ def test_swapping():
     for t in outputs:
         torch.testing.assert_close(ref, t)
 
+def test_bench_swapping():
+    pass
+
 
 
 
