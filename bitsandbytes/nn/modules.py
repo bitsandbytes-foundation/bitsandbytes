@@ -150,15 +150,6 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.data = data
-        self.is_pinned = False
-        self.pinned_param = None
-        self.pre_swap_device = None
-        self.state = 'idle'
-        self.stream = None
-        #self.create_pinned_memory = cls.create_pinned_memory
-        #self.swapout_async = cls.swapout_async
-        #self.swapin_async = cls.swapin_async
-        #self.sync = cls.sync
         return self
 
     def cuda(self, device):
@@ -169,36 +160,6 @@ class Params4bit(torch.nn.Parameter):
 
         return self
 
-    def create_pinned_memory(self):
-        if self.pinned_param is None and self.data.device.type == 'cuda':
-            self.pinned_param = self.data.cpu().pin_memory()
-            self.is_pinned = True
-            # TODO: register for swap order
-
-    def swapout_async(self):
-        if self.is_pinned:
-            self.pre_swap_device = self.data.device
-            self.pinned_param.copy_(self.data, non_blocking=True)
-            self.stream = torch.cuda.current_stream()
-            self.state = 'swapping_out'
-
-    def swapin_async(self):
-        if self.is_pinned:
-            self.data = torch.empty_like(self.pinned_param, device=self.pre_swap_device)
-            self.data.copy_(self.pinned_param, non_blocking=True)
-            self.stream = torch.cuda.current_stream()
-            self.state = 'swapping_in'
-
-    def sync(self):
-        if self.is_pinned and self.state != 'idle':
-            if self.state == 'swapping_out':
-                self.stream.synchronize()
-                del self.data
-                self.state = 'idle'
-                print('deleting data')
-            elif self.state == 'swapping_in':
-                self.stream.synchronize()
-                self.state = 'idle'
 
     @overload
     def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ..., non_blocking: bool = ...,) -> T:
@@ -247,6 +208,44 @@ class Linear4bit(nn.Linear):
         self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
+        self.is_pinned = False
+        self.pinned_param = None
+        self.pre_swap_device = None
+        self.state = 'idle'
+        self.stream = None
+        self.swap_state = None
+
+    def create_pinned_memory(self):
+        if self.pinned_param is None and self.weight.data.device.type == 'cuda':
+            self.pinned_param = self.weight.data.cpu().pin_memory()
+            self.is_pinned = True
+            # TODO: register for swap order
+
+    def swapout_async(self):
+        if self.is_pinned:
+            self.pre_swap_device = self.weight.data.device
+            self.pinned_param.copy_(self.weight.data, non_blocking=True)
+            self.stream = torch.cuda.current_stream()
+            self.state = 'swapping_out'
+
+    def swapin_async(self):
+        if self.is_pinned:
+            self.weight = Params4bit(*self.swap_state)
+            self.weight.data.copy_(self.pinned_param, non_blocking=True)
+            self.stream = torch.cuda.current_stream()
+            self.state = 'swapping_in'
+
+    def sync(self):
+        if self.is_pinned and self.state != 'idle':
+            if self.state == 'swapping_out':
+                self.stream.synchronize()
+                w = self.weight
+                self.swap_state = [w.requires_grad, w.quant_state, w.blocksize, w.compress_statistics, w.quant_type]
+                del self.weight
+                self.state = 'idle'
+            elif self.state == 'swapping_in':
+                self.stream.synchronize()
+                self.state = 'idle'
 
     def set_compute_type(self, x):
         if x.dtype in [torch.float32, torch.bfloat16]:
@@ -263,11 +262,6 @@ class Linear4bit(nn.Linear):
             if self.compute_dtype == torch.float32 and (x.numel() != x.shape[-1]):
                 warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference or training speed.')
                 warnings.filterwarnings('ignore', message='.*inference or training')
-
-
-
-
-
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
