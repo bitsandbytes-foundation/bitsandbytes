@@ -1,3 +1,4 @@
+import time
 from itertools import product
 
 import pytest
@@ -671,8 +672,32 @@ def test_swapping():
         torch.testing.assert_close(ref, t)
 
 def test_bench_swapping():
-    pass
+    nlayers = 1
+    dim = 24*1024
+    net = torch.nn.Sequential(*[bnb.nn.Linear4bit(dim, dim) for i in range(nlayers)])
+    net = net.cuda()
+    for linear in net:
+        linear.create_pinned_memory()
 
+    torch.cuda.synchronize()
+    t0 = time.time()
+    iters = 1
+    for i in range(iters):
+        for linear in net:
+            linear.swapout_async()
+        for linear in net:
+            linear.sync()
+        for linear in net:
+            linear.swapin_async()
+        for linear in net:
+            linear.sync()
+
+    torch.cuda.synchronize()
+    t = time.time() - t0
+
+    # 2 transfers of nlayers with dim*dim in 4-bit
+    GB = 2*iters*nlayers*dim*dim*0.5/(1024**3)
+    print(GB/t)
 
 
 
