@@ -204,4 +204,7 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
 
 template <typename T, int FUNC> void func(T *A, T *B, T value, long n);
 
+void groupWiseQuantize3bit(half *weights, half *scales, half * zerop, long long *out, int groupsize, int rows, int cols);
+void pack3Bits(half *A, long long *out, const int rows, const int cols);
+
 #endif

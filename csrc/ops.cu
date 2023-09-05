@@ -659,6 +659,30 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+void groupWiseQuantize3bit(half *weights, half *scales, half * zerop, long long *out, int groupsize, int rows, int cols)
+{
+  // each thread reads k groups -> defaults to 2 per warp for 128 bytes read for a group size of 16
+  int num_groups = rows*((cols+groupsize-1)/groupsize);
+  int threads = 256;
+  int groups_per_block = threads/32*2;
+  int blocks = (num_groups+groups_per_block-1)/groups_per_block;
+
+  kGroupWiseQuantize3bit<<< blocks, threads, 0, 0 >>>(weights, scales, zerop, out, groupsize, rows, cols);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+void pack3Bits(half *A, long long *out, const int rows, const int cols)
+{
+  // each thread packs 31 numbers -> 1024 per warp (well low occupancy, but does not need to be efficient)
+  int num_packs = rows*((cols+31-1)/31);
+  int threads = 256;
+  int packs_per_block = threads/32*31;
+  int blocks = (num_packs+packs_per_block-1)/packs_per_block;
+
+  kPack3Bits<<< blocks, threads, 0, 0 >>>(A, out, rows, cols);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
 {
   int threads = 512;

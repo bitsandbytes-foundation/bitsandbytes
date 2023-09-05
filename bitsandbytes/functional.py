@@ -1689,6 +1689,24 @@ def mm_dequant(
 
     return out
 
+def pack_3bits(A, out=None):
+    is_on_gpu([A])
+    prev_device = pre_call(A.device)
+    rows, cols = A.view(-1, A.shape[-1]).shape
+    packed_cols = (cols+31-1)//31
+    if out is None:
+        out = torch.empty(rows, packed_cols, dtype=torch.int64, device=A.device)
+
+    ptrA = get_ptr(A)
+    ptrOut = get_ptr(out)
+    crows = ct.c_int32(rows)
+    ccols = ct.c_int32(cols)
+
+    lib.cpack3Bits(ptrA, ptrOut, crows, ccols)
+    post_call(prev_device)
+
+    return out
+
 
 def get_colrow_absmax(
     A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0

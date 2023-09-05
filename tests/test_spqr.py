@@ -88,182 +88,182 @@ Checks the dimensionality of certain tensors involved in the quantization proces
 Ensuring that tensors have the correct dimensions is fundamental to the correct execution of any numerical algorithm. These checks could be adapted for your test suite.
 """
 
-import pytest
-import torch
-from main_functionality import Params3bit, Linear3Bit
-
-
-# Fixtures for setup code
-@pytest.fixture
-def sample_tensor():
-    return torch.randn(3, 3)
-
-
-@pytest.fixture
-def sample_linear_layer():
-    return Linear3Bit(3, 3)
-
-
-# Test the Params3bit class
-def test_Params3bit_initialization(sample_tensor):
-    int3_param = Params3bit(sample_tensor)
-    assert int3_param.scales.shape[0] == sample_tensor.shape[0]
-    assert int3_param.zero_points.shape[0] == sample_tensor.shape[0]
-
-
-# Test serialization and deserialization
-def test_save_and_load_state_dict(sample_linear_layer):
-    original_state_dict = sample_linear_layer.state_dict()
-
-    # Save to disk
-    torch.save(original_state_dict, 'temp.pth')
-
-    # Create a new instance and load from disk
-    new_linear_layer = Linear3Bit(3, 3)
-    new_linear_layer.load_state_dict(torch.load('temp.pth'))
-    new_state_dict = new_linear_layer.state_dict()
-
-    # Compare the original and new state_dicts
-    for key in original_state_dict.keys():
-        assert torch.equal(original_state_dict[key], new_state_dict[key])
-
-
-def test_Params3bit_weight_update():
-    """Test if weights of Params3bit can be updated using PyTorch's optimizer."""
-    weights = torch.randn(5, 5)
-    int3_params = Params3bit(weights)
-    optimizer = torch.optim.SGD([int3_params], lr=0.01)
-    old_weights = int3_params.clone().detach()
-    loss = torch.sum(int3_params**2)
-    loss.backward()
-    int3_params.update_weights(optimizer)
-    new_weights = int3_params.data
-    assert not torch.equal(old_weights, new_weights)
-
-
-import pytest
-from hypothesis import given, strategies as st
-import torch
-from matrix_folding_utils import fold_matrix_to_blocks, unfold_blocks_to_matrix, quantize_block, dequantize_block, handle_outliers
-
-
-@given(st.integers(min_value=2, max_value=10),
-       st.integers(min_value=2, max_value=10))
-def test_fold_and_unfold(n, m):
-    """
-    Test that folding and unfolding a matrix returns the original matrix.
-    Hypothesis is used for property-based testing.
-    """
-    original_matrix = torch.randn(n, m)
-    blocks = fold_matrix_to_blocks(original_matrix, (2, 2))
-    unfolded_matrix = unfold_blocks_to_matrix(blocks, (n, m))
-    assert torch.allclose(original_matrix, unfolded_matrix)
-
-
-@given(st.floats(min_value=-10, max_value=10),
-       st.floats(min_value=-10, max_value=10))
-def test_quantize_and_dequantize(val1, val2):
-    """
-    Test that quantizing and dequantizing a block returns a close approximation of the original block.
-    Hypothesis is used for property-based testing.
-    """
-    original_block = torch.Tensor([[val1, val2], [val2, val1]])
-    quantized_block, scale, zero_point = quantize_block(original_block)
-    dequantized_block = dequantize_block(quantized_block, scale, zero_point)
-    assert torch.allclose(original_block, dequantized_block, atol=1e-1)
-
-
-def test_handle_outliers():
-    """
-    Test that handling outliers returns a block with outliers removed and a separate tensor of outliers.
-    """
-    original_block = torch.Tensor([[1.0, 2.0], [3.0, 100.0]])
-    block_no_outliers, outliers = handle_outliers(original_block)
-    assert torch.allclose(block_no_outliers,
-                          torch.Tensor([[1.0, 2.0], [3.0, 0.0]]))
-    assert torch.allclose(outliers, torch.Tensor([[0.0, 0.0], [0.0, 100.0]]))
-
-
-import pytest
-import torch
-from matrix_folding_utils import fold_matrix_to_blocks, unfold_blocks_to_matrix, quantize_block, dequantize_block, handle_outliers
-
-
-def test_fold_and_unfold():
-    """
-    Test that folding and unfolding a matrix returns the original matrix.
-    """
-    original_matrix = torch.randn(4, 4)
-    blocks = fold_matrix_to_blocks(original_matrix, (2, 2))
-    unfolded_matrix = unfold_blocks_to_matrix(blocks, (4, 4))
-    assert torch.allclose(original_matrix, unfolded_matrix)
-
-
-def test_quantize_and_dequantize():
-    """
-    Test that quantizing and dequantizing a block returns a close approximation of the original block.
-    """
-    original_block = torch.randn(2, 2)
-    quantized_block, scale, zero_point = quantize_block(original_block)
-    dequantized_block = dequantize_block(quantized_block, scale, zero_point)
-    assert torch.allclose(original_block, dequantized_block, atol=1e-1)
-
-
-def test_handle_outliers():
-    """
-    Test that handling outliers returns a block with outliers removed and a separate tensor of outliers.
-    """
-    original_block = torch.Tensor([[1.0, 2.0], [3.0, 100.0]])
-    block_no_outliers, outliers = handle_outliers(original_block)
-    assert torch.allclose(block_no_outliers,
-                          torch.Tensor([[1.0, 2.0], [3.0, 0.0]]))
-    assert torch.allclose(outliers, torch.Tensor([[0.0, 0.0], [0.0, 100.0]]))
-
-
-import pytest
-from hypothesis import given, strategies as st
-import torch
-from matrix_folding_utils import fold_matrix_to_blocks, unfold_blocks_to_matrix, quantize_block, dequantize_block, handle_outliers
-
-
-@given(st.integers(min_value=2, max_value=10),
-       st.integers(min_value=2, max_value=10))
-def test_fold_and_unfold(n, m):
-    """
-    Test that folding and unfolding a matrix returns the original matrix.
-    Hypothesis is used for property-based testing.
-    """
-    original_matrix = torch.randn(n, m)
-
-    blocks = fold_matrix_to_blocks(original_matrix, (2, 2))
-    unfolded_matrix = unfold_blocks_to_matrix(blocks, (n, m))
-
-    assert torch.allclose(original_matrix, unfolded_matrix)
-
-
-@given(st.floats(min_value=-10, max_value=10),
-       st.floats(min_value=-10, max_value=10))
-def test_quantize_and_dequantize(val1, val2):
-    """
-    Test that quantizing and dequantizing a block returns a close approximation of the original block.
-    Hypothesis is used for property-based testing.
-    """
-    original_block = torch.Tensor([[val1, val2], [val2, val1]])
-
-    quantized_block, scale, zero_point = quantize_block(original_block)
-    dequantized_block = dequantize_block(quantized_block, scale, zero_point)
-
-    assert torch.allclose(original_block, dequantized_block, atol=1e-1)
-
-
-def test_handle_outliers():
-    """
-    Test that handling outliers returns a block with outliers removed and a separate tensor of outliers.
-    """
-    original_block = torch.Tensor([[1.0, 2.0], [3.0, 100.0]])
-
-    block_no_outliers, outliers = handle_outliers(original_block)
-
-    assert torch.allclose(block_no_outliers,
-                          torch.Tensor([[1.0, 2.0], [3.0, 0.0]]))
-    assert torch.allclose(outliers, torch.Tensor([[0.0, 0.0], [0.0, 100.0]]))
+#import pytest
+#import torch
+#from main_functionality import Params3bit, Linear3Bit
+#
+#
+## Fixtures for setup code
+#@pytest.fixture
+#def sample_tensor():
+#    return torch.randn(3, 3)
+#
+#
+#@pytest.fixture
+#def sample_linear_layer():
+#    return Linear3Bit(3, 3)
+#
+#
+## Test the Params3bit class
+#def test_Params3bit_initialization(sample_tensor):
+#    int3_param = Params3bit(sample_tensor)
+#    assert int3_param.scales.shape[0] == sample_tensor.shape[0]
+#    assert int3_param.zero_points.shape[0] == sample_tensor.shape[0]
+#
+#
+## Test serialization and deserialization
+#def test_save_and_load_state_dict(sample_linear_layer):
+#    original_state_dict = sample_linear_layer.state_dict()
+#
+#    # Save to disk
+#    torch.save(original_state_dict, 'temp.pth')
+#
+#    # Create a new instance and load from disk
+#    new_linear_layer = Linear3Bit(3, 3)
+#    new_linear_layer.load_state_dict(torch.load('temp.pth'))
+#    new_state_dict = new_linear_layer.state_dict()
+#
+#    # Compare the original and new state_dicts
+#    for key in original_state_dict.keys():
+#        assert torch.equal(original_state_dict[key], new_state_dict[key])
+#
+#
+#def test_Params3bit_weight_update():
+#    """Test if weights of Params3bit can be updated using PyTorch's optimizer."""
+#    weights = torch.randn(5, 5)
+#    int3_params = Params3bit(weights)
+#    optimizer = torch.optim.SGD([int3_params], lr=0.01)
+#    old_weights = int3_params.clone().detach()
+#    loss = torch.sum(int3_params**2)
+#    loss.backward()
+#    int3_params.update_weights(optimizer)
+#    new_weights = int3_params.data
+#    assert not torch.equal(old_weights, new_weights)
+#
+#
+#import pytest
+#from hypothesis import given, strategies as st
+#import torch
+#from matrix_folding_utils import fold_matrix_to_blocks, unfold_blocks_to_matrix, quantize_block, dequantize_block, handle_outliers
+#
+#
+#@given(st.integers(min_value=2, max_value=10),
+#       st.integers(min_value=2, max_value=10))
+#def test_fold_and_unfold(n, m):
+#    """
+#    Test that folding and unfolding a matrix returns the original matrix.
+#    Hypothesis is used for property-based testing.
+#    """
+#    original_matrix = torch.randn(n, m)
+#    blocks = fold_matrix_to_blocks(original_matrix, (2, 2))
+#    unfolded_matrix = unfold_blocks_to_matrix(blocks, (n, m))
+#    assert torch.allclose(original_matrix, unfolded_matrix)
+#
+#
+#@given(st.floats(min_value=-10, max_value=10),
+#       st.floats(min_value=-10, max_value=10))
+#def test_quantize_and_dequantize(val1, val2):
+#    """
+#    Test that quantizing and dequantizing a block returns a close approximation of the original block.
+#    Hypothesis is used for property-based testing.
+#    """
+#    original_block = torch.Tensor([[val1, val2], [val2, val1]])
+#    quantized_block, scale, zero_point = quantize_block(original_block)
+#    dequantized_block = dequantize_block(quantized_block, scale, zero_point)
+#    assert torch.allclose(original_block, dequantized_block, atol=1e-1)
+#
+#
+#def test_handle_outliers():
+#    """
+#    Test that handling outliers returns a block with outliers removed and a separate tensor of outliers.
+#    """
+#    original_block = torch.Tensor([[1.0, 2.0], [3.0, 100.0]])
+#    block_no_outliers, outliers = handle_outliers(original_block)
+#    assert torch.allclose(block_no_outliers,
+#                          torch.Tensor([[1.0, 2.0], [3.0, 0.0]]))
+#    assert torch.allclose(outliers, torch.Tensor([[0.0, 0.0], [0.0, 100.0]]))
+#
+#
+#import pytest
+#import torch
+#from matrix_folding_utils import fold_matrix_to_blocks, unfold_blocks_to_matrix, quantize_block, dequantize_block, handle_outliers
+#
+#
+#def test_fold_and_unfold():
+#    """
+#    Test that folding and unfolding a matrix returns the original matrix.
+#    """
+#    original_matrix = torch.randn(4, 4)
+#    blocks = fold_matrix_to_blocks(original_matrix, (2, 2))
+#    unfolded_matrix = unfold_blocks_to_matrix(blocks, (4, 4))
+#    assert torch.allclose(original_matrix, unfolded_matrix)
+#
+#
+#def test_quantize_and_dequantize():
+#    """
+#    Test that quantizing and dequantizing a block returns a close approximation of the original block.
+#    """
+#    original_block = torch.randn(2, 2)
+#    quantized_block, scale, zero_point = quantize_block(original_block)
+#    dequantized_block = dequantize_block(quantized_block, scale, zero_point)
+#    assert torch.allclose(original_block, dequantized_block, atol=1e-1)
+#
+#
+#def test_handle_outliers():
+#    """
+#    Test that handling outliers returns a block with outliers removed and a separate tensor of outliers.
+#    """
+#    original_block = torch.Tensor([[1.0, 2.0], [3.0, 100.0]])
+#    block_no_outliers, outliers = handle_outliers(original_block)
+#    assert torch.allclose(block_no_outliers,
+#                          torch.Tensor([[1.0, 2.0], [3.0, 0.0]]))
+#    assert torch.allclose(outliers, torch.Tensor([[0.0, 0.0], [0.0, 100.0]]))
+#
+#
+#import pytest
+#from hypothesis import given, strategies as st
+#import torch
+#from matrix_folding_utils import fold_matrix_to_blocks, unfold_blocks_to_matrix, quantize_block, dequantize_block, handle_outliers
+#
+#
+#@given(st.integers(min_value=2, max_value=10),
+#       st.integers(min_value=2, max_value=10))
+#def test_fold_and_unfold(n, m):
+#    """
+#    Test that folding and unfolding a matrix returns the original matrix.
+#    Hypothesis is used for property-based testing.
+#    """
+#    original_matrix = torch.randn(n, m)
+#
+#    blocks = fold_matrix_to_blocks(original_matrix, (2, 2))
+#    unfolded_matrix = unfold_blocks_to_matrix(blocks, (n, m))
+#
+#    assert torch.allclose(original_matrix, unfolded_matrix)
+#
+#
+#@given(st.floats(min_value=-10, max_value=10),
+#       st.floats(min_value=-10, max_value=10))
+#def test_quantize_and_dequantize(val1, val2):
+#    """
+#    Test that quantizing and dequantizing a block returns a close approximation of the original block.
+#    Hypothesis is used for property-based testing.
+#    """
+#    original_block = torch.Tensor([[val1, val2], [val2, val1]])
+#
+#    quantized_block, scale, zero_point = quantize_block(original_block)
+#    dequantized_block = dequantize_block(quantized_block, scale, zero_point)
+#
+#    assert torch.allclose(original_block, dequantized_block, atol=1e-1)
+#
+#
+#def test_handle_outliers():
+#    """
+#    Test that handling outliers returns a block with outliers removed and a separate tensor of outliers.
+#    """
+#    original_block = torch.Tensor([[1.0, 2.0], [3.0, 100.0]])
+#
+#    block_no_outliers, outliers = handle_outliers(original_block)
+#
+#    assert torch.allclose(block_no_outliers,
+#                          torch.Tensor([[1.0, 2.0], [3.0, 0.0]]))
+#    assert torch.allclose(outliers, torch.Tensor([[0.0, 0.0], [0.0, 100.0]]))

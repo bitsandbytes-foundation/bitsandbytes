@@ -1,3 +1,4 @@
+import sys
 import math
 import random
 import time
@@ -2558,5 +2559,31 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
         torch.testing.assert_close(A, C2)
         #torch.testing.assert_close(A, C1, rtol=1e-5, atol=0.00001)
         #torch.testing.assert_close(A, C2, rtol=1e-5, atol=0.080)
+
+
+
+def test_pack3bits():
+    a = torch.randint(-3, 3, (32, 32)).cuda()
+    out = F.pack_3bits(a)
+    assert out.shape[0]==32
+    assert out.shape[1]==2
+
+    out = torch.randint(0, 2**31, size=(32, 2))
+
+    for row in range(a.shape[0]):
+        for val in out[row]:
+            bits = bin(val)
+            if len(bits) < 66:
+                # 64 bits + 0b prefix
+                bits += '0'*(66-len(bits))
+            for start in range(0, 63, 3):
+                i = start//3
+                val2 = a[row, i]
+                val1 = int('0b' + bits[2+start+1:2+start+3], 2)
+                val1 *= -1 if bits[2+start] == '1' else 1
+                assert val1 == val2
+
+
+
 
 

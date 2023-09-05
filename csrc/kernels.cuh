@@ -72,4 +72,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
 
 template <typename T, int FUNC> __global__ void kfunc(T *A, T *B, T value, long n);
 
+__global__ void kGroupWiseQuantize3bit(half *weights, half *scales, half * zerop, long long *out, const int groupsize, const int rows, const int cols);
+__global__ void kPack3Bits(half *A, long long *out, const int rows, const int cols);
+
 #endif
