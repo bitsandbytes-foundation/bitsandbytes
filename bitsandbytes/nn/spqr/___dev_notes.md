@@ -1,3 +1,39 @@
+# Development Notes
+
+## Open Questions
+
+- [ ] `model = get_model(args.model_path, args.load, args.dtype).train(False)`: what is the .train(False) part good for and is it needed? line 557 in spqr/main.py
+
+## Implementation
+
+load similar to load_quantized_model
+
+tensor by tensor:
+    load from disk to CPU, dequantize layer, to GPU, then pack
+
+def pack():
+   """create a mock function that takes 16-bit and outputs buffer <- integration point for CUDA kernel""
+    return 
+
+save to state dict
+
+
+class Linear8bitLt(nn.Linear) as reference implementation
+
+---
+
+https://github.com/conda/conda/issues/7757
+you can just install CUDA directly from conda now
+
+- `mamba search -c nvidia cuda`
+- `mamba install pytorch pytorch-cuda=11.8 cuda=11.8 -c pytorch -c nvidia`
+- `conda install -c nvidia cuda` # was added to above command, but missing in official command from pytorch website
+
+easier than installing it globally, which had the side effect of breaking my Nvidia drivers
+Additionally, if you want to set CUDA_HOME and you're using conda simply export export CUDA_HOME=$CONDA_PREFIX in your bash rc etc.
+
+---
+
 ### Decoding the Code: An Educated Walkthrough
 
 #### 1. `quant_groups.py`: The Quantization Utility Belt
