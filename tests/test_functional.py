@@ -2562,28 +2562,24 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
 
 
 
-def test_pack3bits():
-    a = torch.randint(-3, 3, (32, 32)).cuda()
+@pytest.mark.parametrize("dim1", [17, 83])
+@pytest.mark.parametrize("dim2", [17, 83, 4096])
+#@pytest.mark.parametrize("dim1", [1, 4, 8, 9])
+#@pytest.mark.parametrize("dim2", [21])
+def test_pack3bits(dim1, dim2):
+    rows = dim1
+    cols = dim2
+    a = torch.randint(-3, 3, (rows, cols)).cuda().half()
     out = F.pack_3bits(a)
-    assert out.shape[0]==32
-    assert out.shape[1]==2
+    assert out.shape[0]==rows
+    assert out.shape[1]==(cols+21-1)//21;
 
-    out = torch.randint(0, 2**31, size=(32, 2))
-
+    # to test, we shift all values by the right number
+    # of bits and test the sum of these shifted values
     for row in range(a.shape[0]):
-        for val in out[row]:
-            bits = bin(val)
-            if len(bits) < 66:
-                # 64 bits + 0b prefix
-                bits += '0'*(66-len(bits))
-            for start in range(0, 63, 3):
-                i = start//3
-                val2 = a[row, i]
-                val1 = int('0b' + bits[2+start+1:2+start+3], 2)
-                val1 *= -1 if bits[2+start] == '1' else 1
-                assert val1 == val2
-
-
-
-
-
+        for start in range(0, a.shape[1], 21):
+            val1 = a[row, start:start+21].tolist()
+            full_val = 0
+            for i, v in enumerate(val1):
+                full_val += int(v) << (3*i)
+            assert full_val == out[row, start//21]

@@ -673,11 +673,9 @@ void groupWiseQuantize3bit(half *weights, half *scales, half * zerop, long long 
 
 void pack3Bits(half *A, long long *out, const int rows, const int cols)
 {
-  // each thread packs 31 numbers -> 1024 per warp (well low occupancy, but does not need to be efficient)
-  int num_packs = rows*((cols+31-1)/31);
+  // each thread packs 21 numbers -> 1024 per warp (well low occupancy, but does not need to be efficient)
+  int blocks = rows*((cols+21-1)/21);
   int threads = 256;
-  int packs_per_block = threads/32*31;
-  int blocks = (num_packs+packs_per_block-1)/packs_per_block;
 
   kPack3Bits<<< blocks, threads, 0, 0 >>>(A, out, rows, cols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());

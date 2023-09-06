@@ -1693,7 +1693,7 @@ def pack_3bits(A, out=None):
     is_on_gpu([A])
     prev_device = pre_call(A.device)
     rows, cols = A.view(-1, A.shape[-1]).shape
-    packed_cols = (cols+31-1)//31
+    packed_cols = (cols+21-1)//21
     if out is None:
         out = torch.empty(rows, packed_cols, dtype=torch.int64, device=A.device)
 

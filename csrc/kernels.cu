@@ -3166,6 +3166,34 @@ __global__ void kGroupWiseQuantize3bit(half *weights, half *scales, half * zerop
 
 __global__ void kPack3Bits(half *A, long long *out, const int rows, const int cols)
 {
+  const int warp_id = threadIdx.x / 32;
+  const int warp_lane = threadIdx.x % 32;
+  const int num_warps = blockDim.x / 32;
+  const int my_block_id = (blockIdx.x*num_warps) + warp_id;
+  const int llcols_per_cols = (cols+21-1)/21;
+  const int my_row = my_block_id/llcols_per_cols;
+  const int out_cols = (cols+21-1)/21;
+
+  int col_idx = (my_block_id%llcols_per_cols)*21 + warp_lane;
+  int idx = col_idx+(my_row*cols);
+  __shared__ long long smem_outvalue[256/32];
+
+  if(warp_lane == 0)
+    smem_outvalue[warp_id] = 0;
+  __syncwarp();
+
+  if(warp_lane < 21 && (col_idx < cols) && (my_row < rows))
+  {
+    long long subvalue = (int)A[idx];
+    subvalue = subvalue << (3*warp_lane);
+    atomicAdd((unsigned long long*)&(smem_outvalue[warp_id]), (unsigned long long)subvalue);
+  }
+
+  __syncwarp();
+  if(warp_lane == 0)
+    out[out_cols*my_row + (col_idx/21)] = smem_outvalue[warp_id];
+
+
 }
 
 
