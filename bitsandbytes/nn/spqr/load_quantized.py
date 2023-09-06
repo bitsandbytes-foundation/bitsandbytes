@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 
+import bitsandbytes as bnb
 import torch
 import torch.nn as nn
 from transformers import AutoConfig, AutoModelForCausalLM
@@ -116,7 +117,16 @@ def layer_weight_dequantization(quantized_params_dict):
         (quantized_params_dict["outliers_matrix"].to_dense().cpu() == 0) +
         quantized_params_dict["outliers_matrix"].to_dense().cpu())
 
+    #[0 ...
+    #[1 ...
+    #[2 ...
     invperm = torch.argsort(quantized_params_dict["perm"]).cpu()
+    # A[:, invperm]
+    # A[:, [17, 3 5, 16]]
+    #[2 ...
+    #[0 ...
+    #[1 ...
+    # invperm (index to transfer wrong into right order)
     reconstructed_weight = reconstructed_weight[:, invperm]
     return reconstructed_weight
 
@@ -131,9 +141,42 @@ def dequantize_layer(load_path, layer, layer_idx):
     for name_of_sub_layer in sub_layers:
         quantized_params_dict = read_state_dict_from_file(
             load_path, layer_idx, name_of_sub_layer)
-        sub_layers[name_of_sub_layer].weight = nn.Parameter(
-            layer_weight_dequantization(quantized_params_dict).to(
-                sub_layers[name_of_sub_layer].weight.data.dtype))
+        # init
+        sublayer_new = bnb.nn.spqr.Linear3BitSpQR(sub_layers.in_features, out_features)
+        # Solution A:
+        # 1. dequantize weight (to get right permutation order)
+        # 2. quantize weight again
+        # (2b write test to test if 2 == 1)
+        #   (a) we want to have the quantized data, but we cannot because its permuted
+        #   (b) so we need to unpermute, because its complicated, we dequantize first (which unpermutes the data)
+        #   (c) now to use this, we need to requantized the dequantized (and unpermuted) data
+        #   (d) to test if (c) is correct, we need to ensure its the same as permuted (d)
+        #       this means, we take (d), permute it with the permutation order of (a) and then quantize it again
+        #       now if (d)[perm] is equal to (a) we know our implementation is correct
+        #   quantized_data == quantize(dequantize(data)[perm])
+        # 3. now pack the weight+scales+zeros from (2) into class Linear3bitSpqr
+
+        # SpQR
+        # weights [17, 83].T -> [cols, row]
+        # H -> torch.argsort(H) -> idx   argsort([5, 7, 3]) -> index(sort([5, 7, 3])) -> index([3, 5, 7] -> [2, 0, 1]
+        # weights_perm = A[:, idx]
+        # quant(A_perm) -> quant_weight, quant_zeros, quant_scales ...
+        # checkpoint = torch.save(quant_state)
+
+        # weight_row_indicies_partial_3_first_values = [5, 7, 3]
+        # perm_3_first_values = [2, 0, 1]
+        # weight_row_inicidies_partial_3_first_values = weight[:, perm] = [3, 5, 7]
+        # inverted_perm_3_first_values = torch.argsort(perm) = [1, 2, 0]
+        # weight_row_inicides_partcial_3_first_value_of_permuted[inv_perm] -> [5, 7, 3]
+
+        # bitsandbytes
+        # state_dict = torch.load(quant_path)
+        # weights = dequantize(weights_perm, weights_scales, weight_zeros ...) 
+        # quantize(weight) -> quant_weight, quant_zeros, quant_scales
+        # quantize: q = torch.clamp(torch.round(x / scale.clamp_min(eps) + zero), 0, maxq) (in bitsandbytes x is not permuted)
+        sublayer_new.weight = bnb.nn.spqr.Params3bit(pack((quantized_params_dict["quant_weights"][:, 'perm']).half))
+        sublayer_new.scales = bnb.nn.spqr.Params3bit(pack((quantized_params_dict["quant_layer_zeros"]).half))
+        sublayer_new.scales = bnb.nn.spqr.Params3bit(pack((quantized_params_dict["quant_layer_scales"]).half))
 
     return layer
 
