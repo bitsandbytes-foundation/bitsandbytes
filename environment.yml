@@ -1,15 +1,271 @@
-name: 8-bit
+name: bnb
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
-  - pytorch
+
 dependencies:
-  - python=3.9
-  - pytest
-  - pytorch
-  - torchaudio
-  - torchvision
-  - cudatoolkit=11.1
-  - typer
-  - ca-certificates
-  - certifi
-  - openssl
+  # Base
+  - conda-forge::python=3.8
+  - pytorch::pytorch
+  - pytorch::pytorch-cuda=11.8
+  # - nvidia::cudatoolkit=11.8
+  - nvidia::cuda=11.8
+  # Libraries
+  - conda-forge::accelerate
+  - conda-forge::einops
+  - conda-forge::scipy
+  # Development
+  - conda-forge::pytest
+  - conda-forge::ipython
+  - conda-forge::ruff
+  - conda-forge::yapf
+
+
+# steps to reproduce:
+# mamba env remove -n bnb
+# mamba create -y -n bnb python=3.8 # creating an empty env bypasses conda
+# # and leads to much faster env resolution in the next step https://github.com/mamba-org/mamba/issues/633#issuecomment-812272143
+# mamba env update -n bnb -f environment.yml
+# mamba activate bnb
+# pip install --no-cache-dir --no-deps lion_pytorch triton
+# cd ~/src; pip install -e bitsandbytes/ transformers/; cd -
+
+# # conda
+#     _libgcc_mutex=0.1=conda_forge
+#     _openmp_mutex=4.5=2_kmp_llvm
+#     accelerate=0.22.0=pyhd8ed1ab_0
+#     asttokens=2.2.1=pyhd8ed1ab_0
+#     backcall=0.2.0=pyh9f0ad1d_0
+#     backports=1.0=pyhd8ed1ab_3
+#     backports.functools_lru_cache=1.6.5=pyhd8ed1ab_0
+#     bitsandbytes=0.41.1=pypi_0
+#     brotli-python=1.1.0=py38h17151c0_0
+#     bzip2=1.0.8=h7f98852_4
+#     ca-certificates=2023.7.22=hbcca054_0
+#     certifi=2023.7.22=pypi_0
+#     charset-normalizer=3.2.0=pyhd8ed1ab_0
+#     colorama=0.4.6=pyhd8ed1ab_0
+#     cuda=11.8.0=0
+#     cuda-cccl=12.2.140=0
+#     cuda-command-line-tools=11.8.0=0
+#     cuda-compiler=12.2.2=0
+#     cuda-cudart=11.8.89=0
+#     cuda-cudart-dev=11.8.89=0
+#     cuda-cuobjdump=12.2.140=0
+#     cuda-cupti=11.8.87=0
+#     cuda-cuxxfilt=12.2.140=0
+#     cuda-demo-suite=12.2.140=0
+#     cuda-documentation=12.2.140=0
+#     cuda-driver-dev=12.2.140=0
+#     cuda-gdb=12.2.140=0
+#     cuda-libraries=11.8.0=0
+#     cuda-libraries-dev=11.8.0=0
+#     cuda-memcheck=11.8.86=0
+#     cuda-nsight=12.2.144=0
+#     cuda-nsight-compute=12.2.2=0
+#     cuda-nvcc=12.2.140=0
+#     cuda-nvdisasm=12.2.140=0
+#     cuda-nvml-dev=12.2.140=0
+#     cuda-nvprof=12.2.142=0
+#     cuda-nvprune=12.2.140=0
+#     cuda-nvrtc=11.8.89=0
+#     cuda-nvrtc-dev=11.8.89=0
+#     cuda-nvtx=11.8.86=0
+#     cuda-nvvp=12.2.142=0
+#     cuda-profiler-api=12.2.140=0
+#     cuda-runtime=11.8.0=0
+#     cuda-sanitizer-api=12.2.140=0
+#     cuda-toolkit=11.8.0=0
+#     cuda-tools=11.8.0=0
+#     cuda-version=11.8=h70ddcb2_2
+#     cuda-visual-tools=11.8.0=0
+#     cudatoolkit=11.8.0=h4ba93d1_12
+#     cudnn=8.8.0.121=h838ba91_3
+#     decorator=5.1.1=pyhd8ed1ab_0
+#     einops=0.6.1=pyhd8ed1ab_0
+#     exceptiongroup=1.1.3=pyhd8ed1ab_0
+#     executing=1.2.0=pyhd8ed1ab_0
+#     filelock=3.12.3=pyhd8ed1ab_0
+#     fsspec=2023.9.0=pypi_0
+#     gds-tools=1.7.2.10=0
+#     gmp=6.2.1=h58526e2_0
+#     gmpy2=2.1.2=py38h793c122_1
+#     huggingface-hub=0.16.4=pypi_0
+#     icu=73.2=h59595ed_0
+#     idna=3.4=pyhd8ed1ab_0
+#     importlib-metadata=6.8.0=pyha770c72_0
+#     iniconfig=2.0.0=pyhd8ed1ab_0
+#     ipython=8.12.2=pyh41d4057_0
+#     jedi=0.19.0=pyhd8ed1ab_0
+#     jinja2=3.1.2=pyhd8ed1ab_1
+#     ld_impl_linux-64=2.40=h41732ed_0
+#     libabseil=20230125.3=cxx17_h59595ed_0
+#     libblas=3.9.0=17_linux64_openblas
+#     libcblas=3.9.0=17_linux64_openblas
+#     libcublas=11.11.3.6=0
+#     libcublas-dev=11.11.3.6=0
+#     libcufft=10.9.0.58=0
+#     libcufft-dev=10.9.0.58=0
+#     libcufile=1.7.2.10=0
+#     libcufile-dev=1.7.2.10=0
+#     libcurand=10.3.3.141=0
+#     libcurand-dev=10.3.3.141=0
+#     libcusolver=11.4.1.48=0
+#     libcusolver-dev=11.4.1.48=0
+#     libcusparse=11.7.5.86=0
+#     libcusparse-dev=11.7.5.86=0
+#     libffi=3.4.2=h7f98852_5
+#     libgcc-ng=13.1.0=he5830b7_0
+#     libgfortran-ng=13.1.0=h69a702a_0
+#     libgfortran5=13.1.0=h15d22d2_0
+#     libhwloc=2.9.2=default_h554bfaf_1009
+#     libiconv=1.17=h166bdaf_0
+#     liblapack=3.9.0=17_linux64_openblas
+#     libmagma=2.7.1=h09159a4_4
+#     libmagma_sparse=2.7.1=hc72dce7_4
+#     libnpp=11.8.0.86=0
+#     libnpp-dev=11.8.0.86=0
+#     libnsl=2.0.0=h7f98852_0
+#     libnvjpeg=11.9.0.86=0
+#     libnvjpeg-dev=11.9.0.86=0
+#     libopenblas=0.3.23=pthreads_h80387f5_0
+#     libprotobuf=4.23.3=hd1fb520_1
+#     libsqlite=3.43.0=h2797004_0
+#     libstdcxx-ng=13.1.0=hfd8a6a1_0
+#     libuuid=2.38.1=h0b41bf4_0
+#     libuv=1.46.0=hd590300_0
+#     libxml2=2.11.5=h232c23b_1
+#     libzlib=1.2.13=hd590300_5
+#     lion-pytorch=0.1.2=pypi_0
+#     llvm-openmp=16.0.6=h4dfa4b3_0
+#     magma=2.7.1=ha770c72_4
+#     markupsafe=2.1.3=py38h01eb140_0
+#     matplotlib-inline=0.1.6=pyhd8ed1ab_0
+#     mkl=2022.2.1=h84fe81f_16997
+#     mpc=1.3.1=hfe3b2da_0
+#     mpfr=4.2.0=hb012696_0
+#     mpmath=1.3.0=pyhd8ed1ab_0
+#     nccl=2.18.5.1=h6103f9b_1
+#     ncurses=6.4=hcb278e6_0
+#     networkx=3.1=pyhd8ed1ab_0
+#     nsight-compute=2023.2.2.3=0
+#     numpy=1.24.4=py38h59b608b_0
+#     openssl=3.1.2=hd590300_0
+#     packaging=23.1=pyhd8ed1ab_0
+#     parso=0.8.3=pyhd8ed1ab_0
+#     pexpect=4.8.0=pyh1a96a4e_2
+#     pickleshare=0.7.5=py_1003
+#     pip=23.2.1=pyhd8ed1ab_0
+#     platformdirs=3.10.0=pyhd8ed1ab_0
+#     pluggy=1.3.0=pyhd8ed1ab_0
+#     pooch=1.7.0=pyha770c72_3
+#     prompt-toolkit=3.0.39=pyha770c72_0
+#     prompt_toolkit=3.0.39=hd8ed1ab_0
+#     psutil=5.9.5=py38h1de0b5d_0
+#     ptyprocess=0.7.0=pyhd3deb0d_0
+#     pure_eval=0.2.2=pyhd8ed1ab_0
+#     pygments=2.16.1=pyhd8ed1ab_0
+#     pysocks=1.7.1=pyha2e5f31_6
+#     pytest=7.4.0=pyhd8ed1ab_0
+#     python=3.8.17=he550d4f_0_cpython
+#     python_abi=3.8=3_cp38
+#     pytorch=2.0.0=cuda112py38haa925fe_301
+#     pytorch-cuda=11.8=h7e8668a_5
+#     pyyaml=6.0.1=py38h01eb140_0
+#     readline=8.2=h8228510_1
+#     regex=2023.8.8=pypi_0
+#     requests=2.31.0=pyhd8ed1ab_0
+#     ruff=0.0.287=py38h18b4745_0
+#     safetensors=0.3.3=pypi_0
+#     scipy=1.10.1=py38h59b608b_3
+#     setuptools=68.1.2=pyhd8ed1ab_0
+#     six=1.16.0=pyh6c4a22f_0
+#     sleef=3.5.1=h9b69904_2
+#     stack_data=0.6.2=pyhd8ed1ab_0
+#     sympy=1.12=pypyh9d50eac_103
+#     tbb=2021.10.0=h00ab1b0_0
+#     tk=8.6.12=h27826a3_0
+#     tokenizers=0.13.3=pypi_0
+#     tomli=2.0.1=pyhd8ed1ab_0
+#     tqdm=4.66.1=pypi_0
+#     traitlets=5.9.0=pyhd8ed1ab_0
+#     transformers=4.33.0.dev0=pypi_0
+#     typing-extensions=4.7.1=hd8ed1ab_0
+#     typing_extensions=4.7.1=pyha770c72_0
+#     urllib3=2.0.4=pyhd8ed1ab_0
+#     wcwidth=0.2.6=pyhd8ed1ab_0
+#     wheel=0.41.2=pyhd8ed1ab_0
+#     xz=5.2.6=h166bdaf_0
+#     yaml=0.2.5=h7f98852_2
+#     yapf=0.40.1=pyhd8ed1ab_0
+#     zipp=3.16.2=pyhd8ed1ab_0
+#     zstd=1.5.5=hfc55251_0
+
+# # pip
+# accelerate                    0.22.0
+# asttokens                     2.2.1
+# backcall                      0.2.0
+# backports.functools-lru-cache 1.6.5
+# bitsandbytes                  0.41.1        /mnt/D/titus/src/bitsandbytes
+# Brotli                        1.1.0
+# certifi                       2023.7.22
+# charset-normalizer            3.2.0
+# colorama                      0.4.6
+# decorator                     5.1.1
+# einops                        0.6.1
+# exceptiongroup                1.1.3
+# executing                     1.2.0
+# filelock                      3.12.3
+# fsspec                        2023.9.0
+# gmpy2                         2.1.2
+# huggingface-hub               0.16.4
+# idna                          3.4
+# importlib-metadata            6.8.0
+# iniconfig                     2.0.0
+# ipython                       8.12.2
+# jedi                          0.19.0
+# Jinja2                        3.1.2
+# lion-pytorch                  0.1.2
+# MarkupSafe                    2.1.3
+# matplotlib-inline             0.1.6
+# mpmath                        1.3.0
+# networkx                      3.1
+# numpy                         1.24.4
+# packaging                     23.1
+# parso                         0.8.3
+# pexpect                       4.8.0
+# pickleshare                   0.7.5
+# pip                           23.2.1
+# platformdirs                  3.10.0
+# pluggy                        1.3.0
+# pooch                         1.7.0
+# prompt-toolkit                3.0.39
+# psutil                        5.9.5
+# ptyprocess                    0.7.0
+# pure-eval                     0.2.2
+# Pygments                      2.16.1
+# PySocks                       1.7.1
+# pytest                        7.4.0
+# PyYAML                        6.0.1
+# regex                         2023.8.8
+# requests                      2.31.0
+# ruff                          0.0.287
+# safetensors                   0.3.3
+# scipy                         1.10.1
+# setuptools                    68.1.2
+# six                           1.16.0
+# stack-data                    0.6.2
+# sympy                         1.12
+# tokenizers                    0.13.3
+# tomli                         2.0.1
+# torch                         2.0.0.post301
+# tqdm                          4.66.1
+# traitlets                     5.9.0
+# transformers                  4.33.0.dev0   /mnt/D/titus/src/transformers
+# typing_extensions             4.7.1
+# urllib3                       2.0.4
+# wcwidth                       0.2.6
+# wheel                         0.41.2
+# yapf                          0.40.1
+# zipp                          3.16.2
