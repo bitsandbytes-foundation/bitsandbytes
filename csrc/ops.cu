@@ -659,15 +659,14 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-void groupWiseQuantize3bit(half *weights, half *scales, half * zerop, long long *out, int groupsize, int rows, int cols)
+void groupWiseDequantize3bit(long long *weights, half *scales, half * zerop, half *out, int groupsize, int rows, int cols)
 {
-  // each thread reads k groups -> defaults to 2 per warp for 128 bytes read for a group size of 16
-  int num_groups = rows*((cols+groupsize-1)/groupsize);
-  int threads = 256;
-  int groups_per_block = threads/32*2;
-  int blocks = (num_groups+groups_per_block-1)/groups_per_block;
+  // each thread processes 21 values
+  // each block processes one row
+  int threads = 128;
+  int blocks = rows;
 
-  kGroupWiseQuantize3bit<<< blocks, threads, 0, 0 >>>(weights, scales, zerop, out, groupsize, rows, cols);
+  kGroupWiseDequantize3bit<<< blocks, threads, 0, 0 >>>(weights, scales, zerop, out, groupsize, rows, cols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

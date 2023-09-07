@@ -1690,19 +1690,42 @@ def mm_dequant(
     return out
 
 def pack_3bits(A, out=None):
-    is_on_gpu([A])
     prev_device = pre_call(A.device)
     rows, cols = A.view(-1, A.shape[-1]).shape
     packed_cols = (cols+21-1)//21
     if out is None:
         out = torch.empty(rows, packed_cols, dtype=torch.int64, device=A.device)
 
+    is_on_gpu([A, out])
     ptrA = get_ptr(A)
     ptrOut = get_ptr(out)
     crows = ct.c_int32(rows)
     ccols = ct.c_int32(cols)
 
     lib.cpack3Bits(ptrA, ptrOut, crows, ccols)
+    post_call(prev_device)
+
+    return out
+
+def dequantize_groupwise_3bit(A, quant_state, out=None):
+    scales, zeros, group_size, shape, dtype = quant_state
+    assert A.dtype == torch.int64
+    assert dtype == torch.float16
+    prev_device = pre_call(A.device)
+
+    if out is None:
+        out = torch.empty(shape, dtype=dtype, device=A.device)
+
+    is_on_gpu([A, scales, zeros, out])
+    ptrA = get_ptr(A)
+    ptrOut = get_ptr(out)
+    ptrScales = get_ptr(scales)
+    ptrZeros = get_ptr(zeros)
+    cgroup_size = ct.c_int32(group_size)
+    crows = ct.c_int32(shape[0])
+    ccols = ct.c_int32(shape[-1])
+
+    lib.cgroupWiseDequantize3bit(ptrA, ptrScales, ptrZeros, ptrOut, cgroup_size, crows, ccols)
     post_call(prev_device)
 
     return out

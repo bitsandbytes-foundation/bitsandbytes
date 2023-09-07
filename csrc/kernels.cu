@@ -3160,8 +3160,36 @@ template <typename T, int FUNC> __global__ void kfunc(T *A, T *B, T value, long 
 }
 
 
-__global__ void kGroupWiseQuantize3bit(half *weights, half *scales, half * zerop, long long *out, const int groupsize, const int rows, const int cols)
+__global__ void kGroupWiseDequantize3bit(long long *weights, half *scales, half * zerop, half *out, const int groupsize, const int rows, const int out_cols)
 {
+  const int cols = (out_cols+21-1)/21;
+  const int row_offset = blockIdx.x*cols;
+  const int max_col_group_idx = (out_cols+16-1)/16;
+  const int row_group_offset = max_col_group_idx*blockIdx.x;
+
+  half out_values[21];
+
+  for(int col_idx = threadIdx.x; col_idx < cols; col_idx+=blockDim.x)
+  {
+    long long val = weights[row_offset+col_idx];
+    #pragma unroll 21
+    for(int k = 0; k < 21; k++)
+    {
+      if(col_idx + k < out_cols)
+      {
+        int group_idx = ((col_idx*21) + k)/ 16;
+        out_values[k] = (half)((val & (((1ull << 3) - 1) << 3*k)) >> (3*k));
+        out_values[k] = (out_values[k]-zerop[row_group_offset+group_idx])*(scales[row_group_offset+group_idx]);
+      }
+    }
+
+    #pragma unroll 21
+    for(int k = 0; k < 21; k++)
+      if(col_idx + k < out_cols)
+        out[(out_cols*blockIdx.x) + (col_idx*21) + k] = out_values[k];
+  }
+
+
 }
 
 __global__ void kPack3Bits(half *A, long long *out, const int rows, const int cols)

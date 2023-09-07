@@ -2564,15 +2564,11 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
 
 @pytest.mark.parametrize("dim1", [17, 83])
 @pytest.mark.parametrize("dim2", [17, 83, 4096])
-#@pytest.mark.parametrize("dim1", [1, 4, 8, 9])
-#@pytest.mark.parametrize("dim2", [21])
 def test_pack3bits(dim1, dim2):
-    rows = dim1
-    cols = dim2
-    a = torch.randint(-3, 3, (rows, cols)).cuda().half()
+    a = torch.randint(-3, 3, (dim1, dim2)).cuda().half()
     out = F.pack_3bits(a)
-    assert out.shape[0]==rows
-    assert out.shape[1]==(cols+21-1)//21;
+    assert out.shape[0]==dim1
+    assert out.shape[1]==(dim2+21-1)//21;
 
     # to test, we shift all values by the right number
     # of bits and test the sum of these shifted values
@@ -2583,3 +2579,42 @@ def test_pack3bits(dim1, dim2):
             for i, v in enumerate(val1):
                 full_val += int(v) << (3*i)
             assert full_val == out[row, start//21]
+
+
+@pytest.mark.parametrize("dim1", [8, 9, 32, 128])
+@pytest.mark.parametrize("dim2", [16])
+@pytest.mark.parametrize("group_size", [16])
+def test_dequantize_groupwise_3bit(dim1, dim2, group_size):
+    def quantize(x, eps=1e-9):
+        maxq = 3
+        xmin = x.min(1).values.view(-1, 1)
+        xmax = x.max(1).values.view(-1, 1)
+        scale = (xmax - xmin) / maxq
+        scale[scale == 0] = 1
+        zero = torch.round(-xmin / scale)
+
+        q = torch.clamp(torch.round(x / scale.clamp_min(eps) + zero), 0, maxq)
+        return q, scale, zero
+
+
+    a1 = torch.randn((dim1, dim2)).cuda().half()
+    #dummy = torch.zeros((dim1, dim2+(16-(dim2%16))), dtype=a1.dtype, device=a1.device)
+    q, scales, zeros = quantize(a1)
+    a2 = (scales.float() * (q.float() - zeros.float())).half()
+
+    #print(zeros)
+    #print(scales)
+
+    dtype = q.dtype
+    shape = q.shape
+
+    pq = F.pack_3bits(q)
+
+    quant_state = [scales, zeros, group_size, shape, dtype]
+
+    out = F.dequantize_groupwise_3bit(pq, quant_state)
+    assert out.shape == shape
+    assert out.dtype == a1.dtype
+    idx = torch.isclose(out, a2)
+    idx = idx == 0
+    torch.testing.assert_allclose(out, a2)

@@ -367,8 +367,8 @@ extern "C"
 	void cgemm_4bit_inference_naive_fp32(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize)
 	{ gemm_4bit_inference_naive_fp32(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
-	void cgroupWiseQuantize3bit(half *weights, half *scales, half * zerop, long long *out, int groupsize, int rows, int cols)
-  { groupWiseQuantize3bit(weights, scales, zerop, out, groupsize, rows, cols); }
+	void cgroupWiseDequantize3bit(long long *weights, half *scales, half * zerop, half *out, int groupsize, int rows, int cols)
+  { groupWiseDequantize3bit(weights, scales, zerop, out, groupsize, rows, cols); }
 
   void cpack3Bits(half *A, long long *out, const int rows, const int cols)
   { pack3Bits(A, out, rows, cols); }
