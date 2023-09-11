@@ -578,6 +578,36 @@ class QuantState:
         self.state2 = state2
         self.nested = state2 is not None
 
+    @classmethod
+    def from_kwargs(cls, kwargs, device):
+
+        tensor2str = lambda xx: ''.join([chr(x) for x in xx]).strip('.')
+
+        kwargs = {k.split('.')[-1] :v for k, v in kwargs.items()}
+        
+        if 'nested_absmax' in kwargs:
+            offset = kwargs['nested_offset']
+            state2 = cls(
+                absmax=kwargs['nested_absmax'].to(device),
+                code=kwargs['nested_code'].to(device),
+                blocksize=kwargs['nested_blocksize'].item(),
+                dtype=getattr(torch, tensor2str(kwargs['nested_dtype'])),
+            )
+        else:
+            offset, state2 = None, None
+
+        quant_state = cls(
+            absmax=kwargs['absmax'].to(device), 
+            shape=torch.Size(kwargs['shape']),
+            dtype=getattr(torch, tensor2str(kwargs['dtype'])),
+            blocksize=kwargs['blocksize'].item(),
+            offset=offset,
+            state2=state2,
+            quant_type=tensor2str(kwargs['quant_type']),
+            code=kwargs['code'].to(device),
+        )
+        return quant_state
+
     def to(self, device):
         # make sure the quantization state is on the right device
         self.absmax = self.absmax.to(device)

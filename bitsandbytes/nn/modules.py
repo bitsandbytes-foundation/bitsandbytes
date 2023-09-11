@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
 
 import bitsandbytes as bnb
-import bitsandbytes.functional
+from bitsandbytes.functional import QuantState
 from bitsandbytes.autograd._functions import undo_layout, get_tile_inds
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import OutlierTracer, find_outlier_dims
@@ -140,6 +140,7 @@ class Embedding(torch.nn.Embedding):
         return emb
 
 class Params4bit(torch.nn.Parameter):
+
     def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True, quant_type='fp4'):
         if data is None:
             data = torch.empty(0)
@@ -150,6 +151,18 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.data = data
+        return self
+    
+    @classmethod
+    def from_prequantized(cls, quantized_stats, data=None, requires_grad=False, device='cuda', **kwargs):
+        if data is None:
+            data = quantized_stats.pop('weight')
+        self = torch.Tensor._make_subclass(cls, data.to(device))
+        self.requires_grad = requires_grad
+        self.quant_state = QuantState.from_kwargs(kwargs=quantized_stats, device=device)
+        self.blocksize = self.quant_state.blocksize
+        self.compress_statistics = self.quant_state.nested
+        self.quant_type = self.quant_state.quant_type
         return self
 
     def cuda(self, device):
@@ -210,6 +223,38 @@ class Linear4bit(nn.Linear):
             if self.compute_dtype == torch.float32 and (x.numel() != x.shape[-1]):
                 warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference or training speed.')
                 warnings.filterwarnings('ignore', message='.*inference or training')
+
+
+    def _update_buffers(self):
+        
+        def string_to_tensor(s):
+            """stores string as ints for serialization. assumes codes fit int16"""
+            return torch.tensor([ord(x) for x in s], dtype=torch.int16)
+        
+        if getattr(self.weight, 'quant_state', None) is not None:
+            weight_quant_state = self.weight.quant_state
+            self.register_buffer('absmax', weight_quant_state.absmax)
+            self.register_buffer('shape', torch.tensor(weight_quant_state.shape))
+            self.register_buffer('dtype', string_to_tensor(str(weight_quant_state.dtype).strip('torch')))
+            self.register_buffer('blocksize', torch.tensor(weight_quant_state.blocksize))
+            self.register_buffer('quant_type', string_to_tensor(weight_quant_state.quant_type))
+            self.register_buffer('code', weight_quant_state.code)
+                        
+            if weight_quant_state.nested:
+                self.register_buffer('nested_offset', weight_quant_state.offset)
+                self.register_buffer('nested_absmax', weight_quant_state.state2.absmax)
+                self.register_buffer('nested_code', weight_quant_state.state2.code)
+                self.register_buffer('nested_blocksize', torch.tensor(weight_quant_state.state2.blocksize))
+                self.register_buffer('nested_dtype', string_to_tensor(str(weight_quant_state.state2.dtype).strip('torch')))
+
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        """
+        fill state_dict with components of nf4 
+        TODO: test with other 4-bit Q-types
+        """
+        self._update_buffers()  # link the quant_state items with _buffers
+        super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
