@@ -297,6 +297,7 @@ class Int8Params(torch.nn.Parameter):
             CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
             del CBt
             del SCBt
+            self.requires_grad = False
             self.data = CB
             setattr(self, "CB", CB)
             setattr(self, "SCB", SCB)
