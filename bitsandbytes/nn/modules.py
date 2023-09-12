@@ -159,7 +159,7 @@ class Params4bit(torch.nn.Parameter):
             data = quantized_stats.pop('weight')
         self = torch.Tensor._make_subclass(cls, data.to(device))
         self.requires_grad = requires_grad
-        self.quant_state = QuantState.from_kwargs(kwargs=quantized_stats, device=device)
+        self.quant_state = QuantState.from_dict(quant_state_dict=quantized_stats, device=device)
         self.blocksize = self.quant_state.blocksize
         self.compress_statistics = self.quant_state.nested
         self.quant_type = self.quant_state.quant_type
