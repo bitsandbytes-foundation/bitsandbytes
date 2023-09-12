@@ -224,36 +224,18 @@ class Linear4bit(nn.Linear):
                 warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference or training speed.')
                 warnings.filterwarnings('ignore', message='.*inference or training')
 
-
-    def _update_buffers(self):
-        
-        def string_to_tensor(s):
-            """stores string as ints for serialization. assumes codes fit int16"""
-            return torch.tensor([ord(x) for x in s], dtype=torch.int16)
-        
-        if getattr(self.weight, 'quant_state', None) is not None:
-            weight_quant_state = self.weight.quant_state
-            self.register_buffer('absmax', weight_quant_state.absmax)
-            self.register_buffer('shape', torch.tensor(weight_quant_state.shape))
-            self.register_buffer('dtype', string_to_tensor(str(weight_quant_state.dtype).strip('torch')))
-            self.register_buffer('blocksize', torch.tensor(weight_quant_state.blocksize))
-            self.register_buffer('quant_type', string_to_tensor(weight_quant_state.quant_type))
-            self.register_buffer('code', weight_quant_state.code)
-                        
-            if weight_quant_state.nested:
-                self.register_buffer('nested_offset', weight_quant_state.offset)
-                self.register_buffer('nested_absmax', weight_quant_state.state2.absmax)
-                self.register_buffer('nested_code', weight_quant_state.state2.code)
-                self.register_buffer('nested_blocksize', torch.tensor(weight_quant_state.state2.blocksize))
-                self.register_buffer('nested_dtype', string_to_tensor(str(weight_quant_state.state2.dtype).strip('torch')))
-
-
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         """
-        fill state_dict with components of nf4 
-        TODO: test with other 4-bit Q-types
+        besides weight and bias,
+        fill state_dict with components of quant_state
         """
-        self._update_buffers()  # link the quant_state items with _buffers
+        if getattr(self.weight, "quant_state", None) is not None:
+            quant_state_dict = self.weight.quant_state.as_dict()
+            tensor_keys = [k for k, v in quant_state_dict.items() if isinstance(v, torch.Tensor)]
+            for k in tensor_keys:
+                destination[prefix + "weight." + k] = quant_state_dict.pop(k) if keep_vars else quant_state_dict.pop(k).detach()
+            destination[prefix + "weight." + "quant_state_dict"] = quant_state_dict
+            destination[prefix + "weight." + "quantization_method"] = "bitsandbytes." + quant_state_dict["quant_type"]
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
     def forward(self, x: torch.Tensor):

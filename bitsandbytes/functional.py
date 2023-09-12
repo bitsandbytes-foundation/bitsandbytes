@@ -585,33 +585,54 @@ class QuantState:
         unpacks dict of tensors into QuantState
         where necessary, convert into strings, torch.dtype, ints, etc.
         """
-        tensor2str = lambda xx: ''.join([chr(x) for x in xx]).strip('.')
 
-        quant_state_dict = {k.split('.')[-1] :v for k, v in quant_state_dict.items()}
-        
+        quant_state_dict = {k.split('.')[-1]:v for k, v in quant_state_dict.items()}
+        if 'quant_state_dict' in quant_state_dict:
+            quant_state_dict|= quant_state_dict.pop('quant_state_dict')
+
         if 'nested_absmax' in quant_state_dict:
-            offset = quant_state_dict['nested_offset']
+            offset = torch.tensor(float(quant_state_dict['nested_offset'])).to(device)
             state2 = cls(
                 absmax=quant_state_dict['nested_absmax'].to(device),
                 code=quant_state_dict['nested_code'].to(device),
-                blocksize=quant_state_dict['nested_blocksize'].item(),
-                dtype=getattr(torch, tensor2str(quant_state_dict['nested_dtype'])),
+                blocksize=int(quant_state_dict['nested_blocksize']),
+                dtype=getattr(torch, quant_state_dict['nested_dtype']),
             )
         else:
             offset, state2 = None, None
 
         quant_state = cls(
-            absmax=quant_state_dict['absmax'].to(device), 
-            shape=torch.Size(quant_state_dict['shape']),
-            dtype=getattr(torch, tensor2str(quant_state_dict['dtype'])),
-            blocksize=quant_state_dict['blocksize'].item(),
+            absmax=quant_state_dict['absmax'].to(device),
+            shape=torch.Size(map(int, quant_state_dict['shape'].split('.'))),
+            dtype=getattr(torch, quant_state_dict['dtype']),
+            blocksize=int(quant_state_dict['blocksize']),
             offset=offset,
             state2=state2,
-            quant_type=tensor2str(quant_state_dict['quant_type']),
+            quant_type=quant_state_dict['quant_type'],
             code=quant_state_dict['code'].to(device),
         )
         return quant_state
 
+    def as_dict(self):
+        """dict of tensors and strings to use in serialization via _save_to_state_dict()"""
+        qs_dict = {
+            'absmax': self.absmax,
+            'code': self.code,                      
+            'shape': ','.join(map(str, self.shape)),
+            'dtype': str(self.dtype).strip('torch'),
+            'blocksize': str(self.blocksize),
+            'quant_type': self.quant_type,
+        }
+        if self.nested:
+            qs_dict.update({
+                'nested_absmax': self.state2.absmax,
+                'nested_code': self.state2.code,
+                'nested_offset': f"{self.offset.item()}",
+                'nested_blocksize': str(self.state2.blocksize),
+                'nested_dtype': str(self.state2.dtype).strip('torch'),
+            })
+        return qs_dict
+                    
     def to(self, device):
         # make sure the quantization state is on the right device
         self.absmax = self.absmax.to(device)
