@@ -159,7 +159,7 @@ class Params4bit(torch.nn.Parameter):
             data = quantized_stats.pop('weight')
         self = torch.Tensor._make_subclass(cls, data.to(device))
         self.requires_grad = requires_grad
-        self.quant_state = QuantState.from_dict(quant_state_dict=quantized_stats, device=device)
+        self.quant_state = QuantState.from_dict(qs_dict=quantized_stats, device=device)
         self.blocksize = self.quant_state.blocksize
         self.compress_statistics = self.quant_state.nested
         self.quant_type = self.quant_state.quant_type
@@ -226,18 +226,14 @@ class Linear4bit(nn.Linear):
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         """
-        besides weight and bias,
-        fill state_dict with components of quant_state
+        save weight and bias,
+        then fill state_dict with components of quant_state
         """
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
         if getattr(self.weight, "quant_state", None) is not None:
-            quant_state_dict = self.weight.quant_state.as_dict()
-            tensor_keys = [k for k, v in quant_state_dict.items() if isinstance(v, torch.Tensor)]
-            for k in tensor_keys:
-                destination[prefix + "weight." + k] = quant_state_dict.pop(k) if keep_vars else quant_state_dict.pop(k).detach()
-            destination[prefix + "weight." + "quant_state_dict"] = quant_state_dict
-            destination[prefix + "weight." + "quantization_method"] = "bitsandbytes." + quant_state_dict["quant_type"]
+            for k, v in self.weight.quant_state.as_dict(packed=True).items():
+                destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually

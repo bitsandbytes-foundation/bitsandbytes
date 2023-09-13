@@ -1,3 +1,4 @@
+import json
 import shlex
 import subprocess
 import torch
@@ -158,3 +159,36 @@ def replace_linear(model, linear_replacement, skip_modules=["lm_head"], copy_wei
                if func is not None: func(module)
     return model
 
+
+def pack_dict_to_tensor(source_dict):
+    """
+    Pack a dictionary into a torch tensor for storing quant_state items in state_dict.
+
+    Parameters:
+    - source_dict: The dictionary to be packed.
+
+    Returns:
+    A torch tensor containing the packed data.
+    """
+    json_str = json.dumps(source_dict)
+    json_bytes = json_str.encode('utf-8')
+    tensor_data = torch.tensor(list(json_bytes), dtype=torch.uint8)
+
+    return tensor_data
+
+
+def unpack_tensor_to_dict(tensor_data):
+    """
+    Unpack a torch tensor into a Python dictionary.
+
+    Parameters:
+    - tensor_data: The torch tensor containing the packed data.
+
+    Returns:
+    A Python dictionary containing the unpacked data.
+    """
+    json_bytes = bytes(tensor_data.numpy())
+    json_str = json_bytes.decode('utf-8')
+    unpacked_dict = json.loads(json_str)
+
+    return unpacked_dict
