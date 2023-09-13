@@ -154,10 +154,7 @@ class Params4bit(torch.nn.Parameter):
         return self
     
     @classmethod
-    def from_prequantized(cls, quantized_stats, data=None, requires_grad=False, device='cuda', **kwargs):
-        if data is None:
-            weight_key = [k for k in quantized_stats if k.endswith(".weight")][0]
-            data = quantized_stats.pop(weight_key)
+    def from_prequantized(cls, data, quantized_stats, requires_grad=False, device='cuda', **kwargs):
         self = torch.Tensor._make_subclass(cls, data.to(device))
         self.requires_grad = requires_grad
         self.quant_state = QuantState.from_dict(qs_dict=quantized_stats, device=device)
