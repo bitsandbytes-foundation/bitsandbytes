@@ -224,11 +224,6 @@ class Linear4bit(nn.Linear):
                 warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference or training speed.')
                 warnings.filterwarnings('ignore', message='.*inference or training')
 
-
-
-
-
-
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:

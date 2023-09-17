@@ -825,6 +825,73 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
     StoreChar(storec).Store(&(out[(DATA_TYPE > 0) ? i/2 : i]), qvals, (DATA_TYPE > 0) ? (valid_items+1)/2 : valid_items);
   }
 }
+template __global__ void kDequantizeBlockwise<int8_t, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, int8_t *out, const int blocksize, const int n);
+template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
+__global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n)
+{
+
+  const int n_load = (gridDim.x * TILE_SIZE);
+  int valid_items_load = 0;
+  int valid_items_store = 0;
+  const int base_idx = (blockIdx.x * TILE_SIZE);
+
+  T vals[NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1)];
+  unsigned char qvals[NUM_PER_TH];
+  float local_abs_max = -FLT_MAX;
+
+  typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+  typedef cub::BlockStore<T, THREADS, NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1), cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+
+  __shared__ typename LoadChar::TempStorage loadchar;
+  __shared__ typename StoreT::TempStorage storet;
+
+  for (unsigned int i = base_idx; i < n_load; i += gridDim.x*TILE_SIZE)
+  {
+    if(DATA_TYPE > 0)
+    {
+      valid_items_load = (n+1)/2 - i > TILE_SIZE ? TILE_SIZE : (n+1)/2 - i;
+      valid_items_store = n - i*2 > TILE_SIZE*2 ? TILE_SIZE*2 : n - i*2;
+    }
+    else
+    {
+      valid_items_load = n - i > TILE_SIZE ? TILE_SIZE : n - i;
+      valid_items_store = n - i > TILE_SIZE ? TILE_SIZE : n - i;
+    }
+    local_abs_max = __ldg(&absmax[(i+threadIdx.x*NUM_PER_TH)/(blocksize)]);
+
+    __syncthreads();
+    LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
+
+    switch(DATA_TYPE)
+    {
+        case General8bit:
+          #pragma unroll NUM_PER_TH
+          for(int j = 0; j < NUM_PER_TH; j++)
+            vals[j] = static_cast<T>(__ldg(&code[qvals[j]])*local_abs_max);
+          break;
+        case FP4:
+          #pragma unroll NUM_PER_TH
+          for(int j = 0; j < NUM_PER_TH; j++)
+          {
+            vals[j*2] = static_cast<T>(dDequantizeFP4Tree(qvals[j] >> 4, local_abs_max));
+            vals[j*2 + 1] = static_cast<T>(dDequantizeFP4Tree(qvals[j] & 0x0F, local_abs_max));
+          }
+          break;
+        case NF4:
+          #pragma unroll NUM_PER_TH
+          for(int j = 0; j < NUM_PER_TH; j++)
+          {
+            vals[j*2] = static_cast<T>(dDequantizeNF4(qvals[j] >> 4)* local_abs_max);
+            vals[j*2 + 1] = static_cast<T>(dDequantizeNF4(qvals[j] & 0x0F)* local_abs_max);
+          }
+          break;
+    }
+
+    __syncthreads();
+    StoreT(storet).Store(&(out[(DATA_TYPE > 0) ? i*2 : i]), vals, valid_items_store);
+  }
+}
+
 
 template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
 __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n)
@@ -3313,7 +3380,7 @@ __device__ static float nf4_data[16] = {-1.0, -0.6961928009986877, -0.5250730514
 template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
-#if __CUDA_ARCH__ >= 750
+
 	using namespace nvcuda;
   int col_offset = blockIdx.x *32;
   const int warp_id = threadIdx.x / 32;
