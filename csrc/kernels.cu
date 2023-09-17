@@ -3380,7 +3380,7 @@ __device__ static float nf4_data[16] = {-1.0, -0.6961928009986877, -0.5250730514
 template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
-
+#if __CUDA_ARCH__ >= 750
 	using namespace nvcuda;
   int col_offset = blockIdx.x *32;
   const int warp_id = threadIdx.x / 32;
