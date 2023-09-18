@@ -548,21 +548,23 @@ def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
 
 #def cleanup():
 
-def fsdp_main(rank, world_size, linear_type):
+def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires_grads):
     import torch
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
 
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.manual_seed(88181178817)
 
     dim = 128
     layers = 10
     num_batches = 10
     num_iter = 100
-    batch_size = 10
+    batch_size = 32
 
     if linear_type == '16bit':
         net2 = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
@@ -571,8 +573,11 @@ def fsdp_main(rank, world_size, linear_type):
         modules2 = [torch.nn.Linear(dim, dim) if i % 2 == 1 else bnb.nn.Linear4bit(dim, dim) for i in range(layers)]
         net2 = torch.nn.Sequential(*modules2)
         net = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
+
+    if not requires_grads:
         for i in range(layers):
             if i % 2 == 0:
+                net[i].weight.requires_grad=False
                 net2[i].weight.requires_grad=False
 
     with torch.no_grad():
@@ -580,14 +585,25 @@ def fsdp_main(rank, world_size, linear_type):
             net[i].weight.copy_(net2[i].weight.data)
             net[i].bias.copy_(net2[i].bias.data)
 
+
+
     torch.cuda.set_device(rank)
-    model = FSDP(net, device_id=rank, use_orig_params=True)
-    model2 = FSDP(net2, device_id=rank, use_orig_params=True)
+    if baseline_type == 'fsdp':
+        model = FSDP(net, device_id=rank)
+    elif baseline_type == 'single':
+        model = net
+    model2 = FSDP(net2, device_id=rank)
 
     model = model.to(rank)
     model2 = model2.to(rank)
-    optim = torch.optim.Adam(model.parameters(), lr=0.001)
-    optim8bit = bnb.optim.Adam8bit(model2.parameters(), lr=0.001)
+    betas = (0.99, 0.95) # we have random labels, so this is unstable
+    eps = 1e-7
+    optim = torch.optim.Adam(model.parameters(), lr=0.0003, betas=betas, eps=eps)
+    if optim_bits == 8:
+        optim8bit = bnb.optim.Adam8bit(model2.parameters(), lr=0.0003, betas=betas, eps=eps)
+    elif optim_bits == 32:
+        optim8bit = torch.optim.Adam(model2.parameters(), lr=0.0003, betas=betas, eps=eps)
+
 
     batches = torch.randn(num_batches, dim, requires_grad=True)
     lbls = torch.randint(0, dim, size=(num_batches,))
@@ -595,8 +611,9 @@ def fsdp_main(rank, world_size, linear_type):
         with torch.no_grad():
             batches[i][lbls[i]] += 0.5
 
-
     ddp_loss = torch.zeros(2).to(rank)
+
+    failures = 0
     for i in range(num_iter):
         idx = torch.randint(0, num_batches, size=(batch_size,))
         data, lbl = batches[idx].to(rank), lbls[idx].to(rank)
@@ -610,24 +627,39 @@ def fsdp_main(rank, world_size, linear_type):
         loss.backward()
         optim.step()
 
+
         output2 = model2(data2)
         loss2 = torch.nn.functional.cross_entropy(output2, lbl2).mean()
         loss2.backward()
+
+        outputs = torch.zeros(2).to(rank)
+        outputs[0] = output.sum().item()
+        outputs[1] = output2.sum().item()
+        dist.all_reduce(outputs, op=dist.ReduceOp.SUM)
+
         optim8bit.step()
         ddp_loss[0] = loss.item()
         ddp_loss[1] = loss2.item()
 
         dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
         if rank == 0:
-            print(ddp_loss/world_size)
+            if optim_bits == 32:
+                torch.testing.assert_close(ddp_loss[0], ddp_loss[1], atol=1e-4, rtol=0.1)
+            elif optim_bits == 8:
+                failures += torch.allclose(ddp_loss[0], ddp_loss[1], atol=1e-4, rtol=0.1) == 0
+    assert failures < 15
     dist.destroy_process_group()
 
-@pytest.mark.parametrize("linear_type", ['16bit', '4bit'], ids=['16bit', '4bit'])
-def test_fsdp_8bitoptim(linear_type):
+@pytest.mark.parametrize("linear_type", ['16bit'], ids=['16bit'])
+@pytest.mark.parametrize("baseline_type", ['fsdp', 'single'], ids=['baseline=fsdp', 'baseline=single_process'])
+@pytest.mark.parametrize("optim_bits", [8, 32], ids=['optim=8bit', 'optim=32bit'])
+@pytest.mark.parametrize("requires_grads", [True, False], ids=['grads=True', 'grads=False'])
+#@pytest.mark.parametrize("optim_bits", ['32bit'], ids=['optim=32bit'])
+def test_fsdp_8bitoptim(linear_type, baseline_type, optim_bits, requires_grads):
     torch.manual_seed(43434484747)
     WORLD_SIZE = torch.cuda.device_count()
     mp.spawn(fsdp_main,
-        args=(WORLD_SIZE,linear_type),
+        args=(WORLD_SIZE,linear_type, baseline_type, optim_bits, requires_grads),
         nprocs=WORLD_SIZE,
         join=True)
 
