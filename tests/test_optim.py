@@ -17,6 +17,8 @@ import bitsandbytes.functional as F
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import enable_wrap, wrap
 
 # import apex
 
@@ -549,10 +551,6 @@ def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
 #def cleanup():
 
 def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires_grads):
-    import torch
-    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
-
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
 
@@ -579,6 +577,8 @@ def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires
             if i % 2 == 0:
                 net[i].weight.requires_grad=False
                 net2[i].weight.requires_grad=False
+                net[i].bias.requires_grad=False
+                net2[i].bias.requires_grad=False
 
     with torch.no_grad():
         for i in range(layers):
@@ -586,17 +586,23 @@ def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires
             net[i].bias.copy_(net2[i].bias.data)
 
 
-
     torch.cuda.set_device(rank)
     if baseline_type == 'fsdp':
         model = FSDP(net, device_id=rank)
     elif baseline_type == 'single':
         model = net
-    model2 = FSDP(net2, device_id=rank)
+    if not requires_grads:
+        with enable_wrap(wrapper_cls=FSDP, **{'device_id' : rank}):
+            for i in range(len(net2)):
+                if not net2[i].weight.requires_grad:
+                    net2[i] = wrap(net2[i])
+            model2 = wrap(net2)
+    else:
+        model2 = FSDP(net2, device_id=rank)
 
     model = model.to(rank)
     model2 = model2.to(rank)
-    betas = (0.99, 0.95) # we have random labels, so this is unstable
+    betas = (0.99, 0.95) # we have random labels, so the default is unstable
     eps = 1e-7
     optim = torch.optim.Adam(model.parameters(), lr=0.0003, betas=betas, eps=eps)
     if optim_bits == 8:
@@ -650,10 +656,10 @@ def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires
     assert failures < 15
     dist.destroy_process_group()
 
-@pytest.mark.parametrize("linear_type", ['16bit'], ids=['16bit'])
+@pytest.mark.parametrize("linear_type", ['16bit', '4bit'], ids=['16bit', '4bit'])
 @pytest.mark.parametrize("baseline_type", ['fsdp', 'single'], ids=['baseline=fsdp', 'baseline=single_process'])
-@pytest.mark.parametrize("optim_bits", [8, 32], ids=['optim=8bit', 'optim=32bit'])
-@pytest.mark.parametrize("requires_grads", [True, False], ids=['grads=True', 'grads=False'])
+@pytest.mark.parametrize("optim_bits", [8, 32], ids=['optim_8bit', 'optim_32bit'])
+@pytest.mark.parametrize("requires_grads", [True, False], ids=['grads_True', 'grads_False'])
 #@pytest.mark.parametrize("optim_bits", ['32bit'], ids=['optim=32bit'])
 def test_fsdp_8bitoptim(linear_type, baseline_type, optim_bits, requires_grads):
     torch.manual_seed(43434484747)
