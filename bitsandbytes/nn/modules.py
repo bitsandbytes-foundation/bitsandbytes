@@ -2,7 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Optional, TypeVar, Union, overload
+from typing import Optional, TypeVar, Union, overload, Dict, Any, List
 
 import warnings
 import torch
@@ -10,10 +10,11 @@ import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
 
 import bitsandbytes as bnb
-import bitsandbytes.functional
 from bitsandbytes.autograd._functions import undo_layout, get_tile_inds
+from bitsandbytes.functional import pack_3bits
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import OutlierTracer
+from .helpers import suspend_nn_inits, detach_tensors_or_pass_value
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -659,3 +660,88 @@ class SwitchBackLinearBnb(nn.Linear):
 
         bnb.matmul_mixed(
             x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
+
+
+class Linear3BitSpQR(nn.Linear):
+    """
+    A custom nn.Linear subclass for 3.5-bit SpQR quantized weights.
+    
+    Implements a specialized 3.5-bit weight quantization for neural networks, based on the SpQR (Sparse Quantized Representation) method. The goal is to achieve significant model compression with minimal performance degradation. Special focus is on the custom data format, which contains packed 3-bit weights inside of 64-bit integer "container" to hold the models quantized weights and additional quantizable state information (scales, zero-points). Other zeros and scales retain their 16-bit precision. Outliers are stored in a sparse format of 32-bit (16-bit index + 16-bit value) as sparse tensor in COO(rdinate) format, i.e. `torch.sparse_coo_tensor`, with specified values at the given indices.
+
+    For more information, read the paper: SpQR A Sparse-Quantized Representation for Near-Lossless LLM Weight Compression (https://arxiv.org/abs/2306.03078).
+    """
+    version = '1.0.0'
+
+    not_3bit_quantized_custom_attrs = (
+        # Scales + Zero-points (3-bit)
+        'quant_layer_scale',
+        'quant_layer_zeros',
+        # Scales + Zero-points (16-bit)
+        'quant_layer_scale_qq_scale',
+        'quant_layer_scale_qq_zero',
+        'quant_layer_zero_qq_scale',
+        'quant_layer_zero_qq_zero',
+        # Outliers (32-bit = 16-bit + 16-bit (index): torch.sparse_coo_tensor)
+        'outliers_matrix',
+        # Shape + type information
+        'keep_last_columns',
+        'blocksize',
+        'weight_shape',
+        'groupsize',
+        'perm',
+        'sublayer_name'
+        # TODO-Tim: save_float_dtype: torch.bfloat16 # I think this is not needed, right?
+    )
+
+    def __init__(self, in_features: int, out_features: int, bias: bool = False):
+        with suspend_nn_inits():  # don't initialize weight, will instead be `None`
+            super().__init__(in_features, out_features, bias)
+
+        # Additional attributes for our custom layer
+        self.quant_layer_scale = None
+        self.quant_layer_zeros = None
+        self.quant_layer_scale_qq_scale = None
+        self.quant_layer_scale_qq_zero = None
+        self.quant_layer_zero_qq_scale = None
+        self.quant_layer_zero_qq_zero = None
+        self.outliers_matrix = None
+        self.keep_last_columns = None
+        self.blocksize = None
+        self.weight_shape = None
+        self.groupsize = None
+        self.perm = None
+        self.sublayer_name = None
+
+    def _load_from_state_dict(
+            self, state_dict: dict, prefix, local_metadata, strict, missing_keys,
+            unexpected_keys, error_msgs):
+
+        self.weight = state_dict[prefix + 'quant_weights']
+        self.quant_layer_scale = state_dict[prefix + 'quant_layer_scale']
+        self.quant_layer_zeros = state_dict[prefix + 'quant_layer_zeros']
+
+        for attr in self.not_3bit_quantized_custom_attrs:
+            setattr(self, attr, state_dict[prefix + attr])
+
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+            error_msgs)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        destination[prefix + 'weight'] = detach_tensors_or_pass_value(self.weight)
+
+        for attr in ("quant_layer_scale", "quant_layer_zeros",
+                     *self.not_3bit_quantized_custom_attrs):
+            value = getattr(self, attr, None)
+            if value is not None:
+                destination[prefix + attr] = detach_tensors_or_pass_value(value)
+
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+
+    def forward(self, x):
+        # Implement custom forward logic here, using custom CUDA kernels
+        pass
+
+    def backward(self, x):
+        # Implement custom backward logic here, using custom CUDA kernels
+        pass
