@@ -2401,7 +2401,7 @@ def test_gemv_4bit(dtype, storage_type, double_quant, kind):
 
             qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant)
             C3 = torch.matmul(A, B.t())
-            C2 = F.gemv_4bit(A, qB.t(), quant_state=state)
+            C2 = F.gemv_4bit(A, qB.t(), state=state)
             A.requires_grad = True
             C1 = bnb.matmul_4bit(A, qB.t(), state)
 
