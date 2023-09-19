@@ -550,7 +550,7 @@ def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
 
 #def cleanup():
 
-def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires_grads):
+def fsdp_main(rank, world_size, linear_type, optim_bits, requires_grads):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
 
@@ -563,6 +563,7 @@ def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires
     num_batches = 10
     num_iter = 100
     batch_size = 32
+
 
     if linear_type == '16bit':
         net2 = torch.nn.Sequential(*[torch.nn.Linear(dim, dim) for i in range(layers)])
@@ -587,15 +588,14 @@ def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires
 
 
     torch.cuda.set_device(rank)
-    if baseline_type == 'fsdp':
-        model = FSDP(net, device_id=rank)
-    elif baseline_type == 'single':
-        model = net
+    model = net
+
     if not requires_grads:
-        with enable_wrap(wrapper_cls=FSDP, **{'device_id' : rank}):
-            for i in range(len(net2)):
-                if not net2[i].weight.requires_grad:
-                    net2[i] = wrap(net2[i])
+        with enable_wrap(wrapper_cls=FSDP, **{'device_id' : rank, 'use_orig_params' : True, 'sync_module_states' : True}):
+            if not requires_grads:
+                for i in range(len(net2)):
+                    if not net2[i].weight.requires_grad:
+                        net2[i] = wrap(net2[i])
             model2 = wrap(net2)
     else:
         model2 = FSDP(net2, device_id=rank)
@@ -656,16 +656,16 @@ def fsdp_main(rank, world_size, linear_type, baseline_type, optim_bits, requires
     assert failures < 15
     dist.destroy_process_group()
 
-@pytest.mark.parametrize("linear_type", ['16bit', '4bit'], ids=['16bit', '4bit'])
-@pytest.mark.parametrize("baseline_type", ['fsdp', 'single'], ids=['baseline=fsdp', 'baseline=single_process'])
+@pytest.mark.parametrize("linear_type", ['16bit', '4bit'], ids=['Linear16bit', 'Linear4bit'])
 @pytest.mark.parametrize("optim_bits", [8, 32], ids=['optim_8bit', 'optim_32bit'])
-@pytest.mark.parametrize("requires_grads", [True, False], ids=['grads_True', 'grads_False'])
+@pytest.mark.parametrize("requires_grads", [True, False], ids=['mixedgrads_False', 'mixedgrads_True'])
 #@pytest.mark.parametrize("optim_bits", ['32bit'], ids=['optim=32bit'])
-def test_fsdp_8bitoptim(linear_type, baseline_type, optim_bits, requires_grads):
+def test_fsdp_bnb(linear_type, optim_bits, requires_grads):
+    if linear_type == '4bit' and requires_grads == True: pytest.skip('invalid configuration')
     torch.manual_seed(43434484747)
     WORLD_SIZE = torch.cuda.device_count()
     mp.spawn(fsdp_main,
-        args=(WORLD_SIZE,linear_type, baseline_type, optim_bits, requires_grads),
+        args=(WORLD_SIZE,linear_type, optim_bits, requires_grads),
         nprocs=WORLD_SIZE,
         join=True)
 

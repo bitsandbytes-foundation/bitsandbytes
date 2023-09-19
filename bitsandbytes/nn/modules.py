@@ -148,7 +148,8 @@ class Params4bit(torch.nn.Parameter):
             quant_state=None,
             blocksize=64,
             compress_statistics=True,
-            quant_type='fp4'):
+            quant_type='fp4',
+            module=None):
         if data is None:
             data = torch.empty(0)
 
@@ -158,6 +159,7 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.data = data
+        self.module = module
         return self
 
     def cuda(self, device):
@@ -169,6 +171,8 @@ class Params4bit(torch.nn.Parameter):
             quant_type=self.quant_type)
         self.data = w_4bit
         self.quant_state = quant_state
+        if self.module is not None:
+            self.module.quant_state = quant_state
 
         return self
 
@@ -234,14 +238,14 @@ class Linear4bit(nn.Linear):
             bias=True,
             compute_dtype=None,
             compress_statistics=True,
-            quant_type='fp4',
+            quant_type='nf4',
             device=None):
         super().__init__(input_features, output_features, bias, device)
         self.weight = Params4bit(
             self.weight.data,
             requires_grad=False,
             compress_statistics=compress_statistics,
-            quant_type=quant_type)
+            quant_type=quant_type, module=self)
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
         self.is_pinned = False
@@ -250,6 +254,8 @@ class Linear4bit(nn.Linear):
         self.state = 'idle'
         self.stream = None
         self.swap_state = None
+        self.is_fsdp = False
+        self.quant_state = None
 
     def create_pinned_memory(self):
         if self.pinned_param is None and self.weight.data.device.type == 'cuda':
@@ -314,10 +320,18 @@ class Linear4bit(nn.Linear):
         if self.bias is not None and self.bias.dtype != x.dtype:
             self.bias.data = self.bias.data.to(x.dtype)
 
+
         if getattr(self.weight, 'quant_state', None) is None:
-            print(
-                'FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.'
-            )
+            if  getattr(self, 'quant_state', None) is not None:
+                # the quant state got lost when the parameter got converted. This happens for example for fsdp
+                # since we registered the module, we can recover the state here
+                assert self.weight.shape[1] == 1
+                if not isinstance(self.weight, Params4bit):
+                    self.weight = Params4bit(self.weight)
+                self.weight.quant_state = self.quant_state
+            else:
+                print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+
         if not self.compute_type_is_set:
             self.set_compute_type(x)
             self.compute_type_is_set = True
@@ -327,8 +341,7 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        out = bnb.matmul_4bit(
-            x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
+        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
 
         out = out.to(inp_dtype)
 
