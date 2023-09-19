@@ -6,6 +6,12 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.ruff]
+src = [
+    "bitsandbytes",
+    "tests",
+    "benchmarking"
+]
+fix = true
 select = [
     "A",  # prevent using keywords that clobber python builtins
     "B",  # bugbear: security warnings
@@ -19,4 +25,6 @@ target-version = "py38"
 ignore = [
     "E712",  # Allow using if x == False, as it's not always equivalent to if x.
     "E501",  # Supress line-too-long warnings: trust yapf's judgement on this one.
+    "F401", 
 ]
+ignore-init-module-imports = true  # allow to expose in __init__.py via imports
