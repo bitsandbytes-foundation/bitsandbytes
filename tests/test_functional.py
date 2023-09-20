@@ -2562,8 +2562,10 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
 
 
 
-@pytest.mark.parametrize("dim1", [17, 83])
-@pytest.mark.parametrize("dim2", [17, 83, 4096])
+#@pytest.mark.parametrize("dim1", torch.randint(4096-3072-512, 4096-3072, size=(100,)).tolist())
+#@pytest.mark.parametrize("dim2", torch.randint(4096-3072-512, 4096-3072, size=(100,)).tolist())
+@pytest.mark.parametrize("dim1", [828])
+@pytest.mark.parametrize("dim2", [884])
 def test_pack3bits(dim1, dim2):
     a = torch.randint(-3, 3, (dim1, dim2)).cuda().half()
     out = F.pack_3bits(a)

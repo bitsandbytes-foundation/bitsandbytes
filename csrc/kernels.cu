@@ -3202,6 +3202,8 @@ __global__ void kPack3Bits(half *A, long long *out, const int rows, const int co
   const int my_row = my_block_id/llcols_per_cols;
   const int out_cols = (cols+21-1)/21;
 
+  if(my_row >= rows){ return; } // early exit for useless warps
+
   int col_idx = (my_block_id%llcols_per_cols)*21 + warp_lane;
   int idx = col_idx+(my_row*cols);
   __shared__ long long smem_outvalue[256/32];
@@ -3218,7 +3220,7 @@ __global__ void kPack3Bits(half *A, long long *out, const int rows, const int co
   }
 
   __syncwarp();
-  if(warp_lane == 0)
+  if(warp_lane == 0 && (col_idx/21) < out_cols)
     out[out_cols*my_row + (col_idx/21)] = smem_outvalue[warp_id];
 
 
