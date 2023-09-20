@@ -569,7 +569,7 @@ def matmul_4bit(A: tensor, B: tensor, quant_state: F.QuantState, out: tensor = N
             warn(f'Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
         else:
-            out = F.gemv_4bit(A, B.t(), out, quant_state=quant_state)
+            out = F.gemv_4bit(A, B.t(), out, state=quant_state)
             if bias is not None:
                 out += bias
             return out
