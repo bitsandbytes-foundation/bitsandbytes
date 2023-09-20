@@ -579,7 +579,20 @@ class QuantState:
         self.offset = offset
         self.state2 = state2
         self.nested = state2 is not None
-
+        
+    def __get_item__(self, idx):
+        """
+        ensures compatibility with older quant state scheme with nested lists.
+        assumes the following layout:
+        state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type]
+        state2 = [absmax, input_shape, A.dtype, blocksize, None, quant_type]
+        """
+        if self.nested:
+            list_repr = [self.absmax, self.shape, self.dtype, self.blocksize, [self.offset, self.state2], self.quant_type]
+        else:
+            list_repr = [self.absmax, self.shape, self.dtype, self.blocksize, None, self.quant_type]
+        return list_repr[idx]
+    
     @classmethod
     def from_dict(cls, qs_dict: dict[str, Any], device: torch.device) -> 'QuantState':
         """
