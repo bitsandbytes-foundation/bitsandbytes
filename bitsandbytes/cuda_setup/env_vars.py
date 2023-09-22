@@ -8,6 +8,7 @@ def to_be_ignored(env_var: str, value: str) -> bool:
         "OLDPWD",
         "SSH_AUTH_SOCK",  # SSH stuff, therefore unrelated
         "SSH_TTY",
+        "GOOGLE_VM_CONFIG_LOCK_FILE", #avoids issues with Permissions on GCP, covered in- https://github.com/TimDettmers/bitsandbytes/issues/620#issuecomment-1666014197
         "HOME",  # Linux shell default
         "TMUX",  # Terminal Multiplexer
         "XDG_DATA_DIRS",  # XDG: Desktop environment stuff
