@@ -201,13 +201,30 @@ struct CondData<T,false>
     FORCE_INLINE operator const T() const { return 0;}
 };
 
+#ifdef _WIN32
+// The `IsComplete` buildtime check doesn't work on Windows
+// Given the usage of the BinAlgoBase class, `I != Scalar` should be equivalent to the unix
+// equivalent below of `Details::IsComplete<Details::AlgoVecBase<I, T, A>>::value`
+template <InstrSet I, typename T, Algos A>
+struct WouldAlgoVecBaseBeComplete
+{
+    static constexpr bool value{I != Scalar};
+};
+#else
+template <InstrSet I, typename T, Algos A>
+struct WouldAlgoVecBaseBeComplete : public Details::IsComplete<Details::AlgoVecBase<I, T, A>>
+{
+    
+};
+#endif
+
 template <InstrSet I, typename T, Algos A, bool L=false>
-struct BinAlgoBase : Details::conditional< Details::IsComplete<Details::AlgoVecBase<I, T, A>>::value
+struct BinAlgoBase : Details::conditional< WouldAlgoVecBaseBeComplete<I, T, A>::value
                                  , Details::AlgoVecBase<I, T, A>
                                  , Details::AlgoScalarToVec<T,A>
                                  >::type
 {
-    typedef typename Details::conditional< Details::IsComplete<Details::AlgoVecBase<I, T, A>>::value
+    typedef typename Details::conditional< WouldAlgoVecBaseBeComplete<I, T, A>::value
                                  , Details::AlgoVecBase<I, T, A>
                                  , Details::AlgoScalarToVec<T,A>
                                  >::type base_t;

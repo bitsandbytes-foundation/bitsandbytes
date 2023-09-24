@@ -45,7 +45,6 @@ MAKE_ELEMENTWISE_FUNC(fill, uint8, unsigned char, FILL)
 MAKE_ELEMENTWISE_FUNC(arange, fp32, float, ARANGE)
 MAKE_ELEMENTWISE_FUNC(_mul, fp32, float, _MUL)
 
-
 #define MAKE_FUNC32(fname, oname, gtype, gbits) \
 void fname##32bit_grad_##gbits(gtype *g, gtype *p, \
                float* state1, float* state2, float *unorm, float max_unorm, float param_norm, \
