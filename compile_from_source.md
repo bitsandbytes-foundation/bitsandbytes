@@ -1,6 +1,6 @@
 # Compiling from source
 
-Basic steps.
+Basic steps for Unix (see Windows steps below):
 1. `CUDA_VERSION=XXX make [target]` where `[target]` is among `cuda92, cuda10x, cuda110, cuda11x, cuda12x, cpuonly`
 2. `python setup.py install`
 
@@ -38,3 +38,21 @@ If you have problems compiling the library with these instructions from source, 
 
 Since 0.39.1 bitsandbytes installed via pip no longer provides Kepler binaries and these need to be compiled from source. Follow the steps above and instead of `cuda11x_nomatmul` etc use `cuda11x_nomatmul_kepler`
 
+# Compilation on Windows
+
+We'll use CMake to do all the heavy lifting for us here. CUDA and the MSVC compiler can be finicky.
+
+- Install [Microsoft Visual Studio](https://visualstudio.microsoft.com/)
+- Install the CUDA Toolkit to match your pytorch CUDA version
+  - This will install `CUDA xx.y.props` to `BuildCustomizations` (see some documentation [here](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html#sample-projects))
+    - i.e. for Visual Studio 2022 and CUDA 11.7, there should be some files `CUDA 11.7...` in here: `C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\VC\v170\BuildCustomizations`
+- Install CMake, at least 3.18 (the latest version is usually fine)
+- [Optional] Lookup your GPU's [CUDA Compute Capability](https://developer.nvidia.com/cuda-gpus)
+  - If you don't do this, it will compile optimized code for all possible compute capabilities, which takes much longer...
+  - Insert it into the command below (i.e. `8.6` -> `86`)
+- Configure the CMake Project:
+  - `cmake -B build . "-DCOMPUTE_CAPABILITY=86"`
+- Build the project
+  - `cmake --build build --config Release`
+- Install bitsandbytes
+  - `pip install .`

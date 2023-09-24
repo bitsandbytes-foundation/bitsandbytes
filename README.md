@@ -33,6 +33,8 @@ CUDA_VERSION=117 make cuda11x
 python setup.py install
 ```
 
+On Windows you *must* compile it from source. See [compile_from_source](./compile_from_source.md).
+
 **Using Int8 inference with HuggingFace Transformers**
 
 ```python

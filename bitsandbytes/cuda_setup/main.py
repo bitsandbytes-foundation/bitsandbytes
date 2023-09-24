@@ -116,8 +116,16 @@ class CUDASetup:
     def run_cuda_setup(self):
         self.initialized = True
         self.cuda_setup_log = []
-
+        
+        package_dir = Path(__file__).parent.parent
         binary_name, cudart_path, cc, cuda_version_string = evaluate_cuda_setup()
+        # Find the correct suffix based on what we can see
+        for suffix in (".so", ".dll"):
+            binary_path = package_dir / f"{binary_name}{suffix}"
+            if binary_path.exists():
+                binary_name = f"{binary_name}{suffix}"
+                break
+
         self.cudart_path = cudart_path
         self.cuda_available = torch.cuda.is_available()
         self.cc = cc
@@ -125,7 +133,6 @@ class CUDASetup:
         self.binary_name = binary_name
         self.manual_override()
 
-        package_dir = Path(__file__).parent.parent
         binary_path = package_dir / self.binary_name
 
         try:
@@ -150,10 +157,10 @@ class CUDASetup:
                     self.add_log_entry('')
                     self.generate_instructions()
                     raise Exception('CUDA SETUP: Setup Failed!')
-                self.lib = ct.cdll.LoadLibrary(binary_path)
+                self.lib = ct.cdll.LoadLibrary(str(binary_path))
             else:
-                self.add_log_entry(f"CUDA SETUP: Loading binary {binary_path}...")
-                self.lib = ct.cdll.LoadLibrary(binary_path)
+                self.add_log_entry(f"CUDA SETUP: Loading binary {binary_path!s}...")
+                self.lib = ct.cdll.LoadLibrary(str(binary_path))
         except Exception as ex:
             self.add_log_entry(str(ex))
 
@@ -332,7 +339,7 @@ def evaluate_cuda_setup():
         cuda_setup.add_log_entry(('Welcome to bitsandbytes. For bug reports, please run\n\npython -m bitsandbytes\n\n'),
               ('and submit this information together with your error trace to: https://github.com/TimDettmers/bitsandbytes/issues'))
         cuda_setup.add_log_entry('='*80)
-    if not torch.cuda.is_available(): return 'libbitsandbytes_cpu.so', None, None, None
+    if not torch.cuda.is_available(): return 'libbitsandbytes_cpu', None, None, None
 
     cudart_path = determine_cuda_runtime_lib_path()
     ccs = get_compute_capabilities()
@@ -356,9 +363,9 @@ def evaluate_cuda_setup():
     # since most installations will have the libcudart.so installed, but not the compiler
 
     if has_cublaslt:
-        binary_name = f"libbitsandbytes_cuda{cuda_version_string}.so"
+        binary_name = f"libbitsandbytes_cuda{cuda_version_string}"
     else:
-        "if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt.so"
-        binary_name = f"libbitsandbytes_cuda{cuda_version_string}_nocublaslt.so"
+        "if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt"
+        binary_name = f"libbitsandbytes_cuda{cuda_version_string}_nocublaslt"
 
     return binary_name, cudart_path, cc, cuda_version_string

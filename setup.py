@@ -7,8 +7,9 @@ import os
 
 from setuptools import find_packages, setup
 
-libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.so"))
-libs = [os.path.basename(p) for p in libs]
+libs_so = list(glob.glob("./bitsandbytes/libbitsandbytes*.so"))
+libs_dll = list(glob.glob("./bitsandbytes/libbitsandbytes*.dll"))
+libs = [os.path.basename(p) for p in (*libs_so, *libs_dll)]
 print("libs:", libs)
 
 
