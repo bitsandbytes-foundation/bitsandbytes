@@ -125,3 +125,36 @@ def display_quantization(start: float, stop: float, increment: float, maxq: int)
 
     print(f'{scale = }\n{zero = }\n{to_quantize = }\n{quantized = }')
     return list(zip(to_quantize, scaled, quantized))
+
+
+def list_layers(model, indent=0):
+    """Recursively list all layer types in a PyTorch model."""
+    for name, module in model.named_children():
+        # Check if the module has any parameters that require gradients
+        requires_grad = any(param.requires_grad for param in module.parameters())
+
+        print(
+            "    " * indent, name, ":",
+            type(module).__name__, f"- {requires_grad = }")
+
+        # Recursively list the layers for child modules
+        if isinstance(module, torch.nn.Module):
+            list_layers(module, indent + 1)
+
+
+def list_layers_and_parameters(model, indent=0):
+    """Recursively list all layer types and their parameters in a PyTorch model."""
+    for name, module in model.named_children():
+        print("    " * indent, name, ":", type(module).__name__)
+
+        is_leaf_module = len(list(module.children())) == 0
+
+        if is_leaf_module:
+            for param_name, param in module.named_parameters():
+                print(
+                    "    " * (indent + 1), param_name,
+                    f"- {param.requires_grad=}, {param.dtype=}")
+
+        # Recursively list the layers and parameters for child modules
+        if isinstance(module, torch.nn.Module):
+            list_layers_and_parameters(module, indent + 1)
