@@ -13,6 +13,7 @@ URL117=https://developer.download.nvidia.com/compute/cuda/11.7.0/local_installer
 URL118=https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
 URL120=https://developer.download.nvidia.com/compute/cuda/12.0.0/local_installers/cuda_12.0.0_525.60.13_linux.run
 URL121=https://developer.download.nvidia.com/compute/cuda/12.1.0/local_installers/cuda_12.1.0_530.30.02_linux.run
+URL122=https://developer.download.nvidia.com/compute/cuda/12.2.0/local_installers/cuda_12.2.0_535.54.03_linux.run
 
 
 CUDA_VERSION=$1
@@ -65,6 +66,9 @@ if [[ -n "$CUDA_VERSION" ]]; then
   elif [[ "$CUDA_VERSION" -eq "121" ]]; then
     URL=$URL121
     FOLDER=cuda-12.1
+  elif [[ "$CUDA_VERSION" -eq "122" ]]; then
+    URL=$URL122
+    FOLDER=cuda-12.2
   else
     echo "argument error: No cuda version passed as input. Choose among versions 92 to 121"
   fi
@@ -77,7 +81,7 @@ FILE=$(basename $URL)
 if [[ -n "$CUDA_VERSION" ]]; then
   echo $URL
   echo $FILE
-  #wget $URL
+  wget $URL
   bash $FILE --no-drm --no-man-page --override --toolkitpath=$BASE_PATH/$FOLDER/ --toolkit --silent
   if [ "$EXPORT_BASHRC" -eq "1" ]; then
     echo "export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$BASE_PATH/$FOLDER/lib64" >> ~/.bashrc
