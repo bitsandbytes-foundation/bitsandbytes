@@ -18,6 +18,7 @@ evaluation:
 
 import ctypes as ct
 import os
+import pdb
 import errno
 import torch
 from warnings import warn
@@ -196,11 +197,11 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
         try:
             if path.exists():
                 existent_directories.add(path)
+        except PermissionError as pex:
+            pass
         except OSError as exc:
             if exc.errno != errno.ENAMETOOLONG:
                 raise exc
-        except PermissionError as pex:
-            pass
 
     non_existent_directories: Set[Path] = candidate_paths - existent_directories
     if non_existent_directories:
@@ -214,8 +215,12 @@ def get_cuda_runtime_lib_paths(candidate_paths: Set[Path]) -> Set[Path]:
     paths = set()
     for libname in CUDA_RUNTIME_LIBS:
         for path in candidate_paths:
-            if (path / libname).is_file():
+            if os.access(path/libname, os.R_OK) and (path / libname).is_file():
+                # Checking access because calling .is_file will throw Permission Error
+                # in the case when usr have no permission to path
                 paths.add(path / libname)
+
+                
     return paths
 
 
