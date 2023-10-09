@@ -12,9 +12,9 @@ import torch.multiprocessing as mp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 
-def fsdp_main(rank, world_size, linear_type, optim_bits, requires_grads):
+def fsdp_main(rank, world_size, linear_type, optim_bits, requires_grads, port):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ['MASTER_PORT'] = port
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -123,11 +123,12 @@ def fsdp_main(rank, world_size, linear_type, optim_bits, requires_grads):
 @pytest.mark.parametrize("requires_grads", [True, False], ids=['mixedgrads_False', 'mixedgrads_True'])
 #@pytest.mark.parametrize("optim_bits", ['32bit'], ids=['optim=32bit'])
 def test_fsdp_bnb(linear_type, optim_bits, requires_grads):
+    port = str(torch.randint(12355, 15000, size=(1,)).item())
     if linear_type == '4bit' and requires_grads == True: pytest.skip('invalid configuration')
     torch.manual_seed(43434484747)
     WORLD_SIZE = torch.cuda.device_count()
     mp.spawn(fsdp_main,
-        args=(WORLD_SIZE,linear_type, optim_bits, requires_grads),
+        args=(WORLD_SIZE,linear_type, optim_bits, requires_grads, port),
         nprocs=WORLD_SIZE,
         join=True)
 
