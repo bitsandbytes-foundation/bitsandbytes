@@ -16,11 +16,14 @@ dependencies:
   - conda-forge::scipy
   # Development
   - conda-forge::pytest
-  - conda-forge::ipython     # better interactive shell
-  - conda-forge::ruff        # linting
-  - conda-forge::yapf        # code formatting
-  - conda-forge::monkeytype  # infer type annotations
-  - conda-forge::rich        # better, colored tracebacks, etc
+  - conda-forge::pytest-cases # more readable and composable parametrized tests
+  - conda-forge::ipython      # better interactive shell
+  - conda-forge::debugpy      # debugger-support for VSCode
+  - conda-forge::ruff         # linting
+  - conda-forge::yapf         # code formatting
+  - conda-forge::monkeytype   # infer type annotations
+  - conda-forge::rich         # better, colored tracebacks, etc
+  - conda-forge::pytest-sugar # better pytest output
 
 ## ENV CREATION - steps to reproduce:
 # mamba env remove -n bnb
@@ -28,11 +31,12 @@ dependencies:
 # # and leads to much faster env resolution in the next step https://github.com/mamba-org/mamba/issues/633#issuecomment-812272143
 # mamba env update -n bnb -f environment.yml
 # mamba activate bnb
-#
-## PIP:
-# pip install --no-cache-dir --no-deps lion_pytorch triton
+
+## PIP dependencies (install *after* ENV CREATION):
+# pip install --no-cache-dir --no-deps lion_pytorch triton peft
+## NOTE: conda peft is not up to date, so we install from pip
 # cd ~/src; pip install -e bitsandbytes/ transformers/; cd -
-#
+
 ## ENV UPDATE:
 # # add new packages to environment.yml, then:
 # mamba env update -n bnb -f environment.yml
