@@ -246,7 +246,8 @@ class Linear4bit(nn.Linear):
             self.weight.data,
             requires_grad=False,
             compress_statistics=compress_statistics,
-            quant_type=quant_type, module=self)
+            quant_type=quant_type,
+            module=self)
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
         self.is_pinned = False
@@ -321,9 +322,8 @@ class Linear4bit(nn.Linear):
         if self.bias is not None and self.bias.dtype != x.dtype:
             self.bias.data = self.bias.data.to(x.dtype)
 
-
         if getattr(self.weight, 'quant_state', None) is None:
-            if  getattr(self, 'quant_state', None) is not None:
+            if getattr(self, 'quant_state', None) is not None:
                 # the quant state got lost when the parameter got converted. This happens for example for fsdp
                 # since we registered the module, we can recover the state here
                 assert self.weight.shape[1] == 1
@@ -331,7 +331,9 @@ class Linear4bit(nn.Linear):
                     self.weight = Params4bit(self.weight)
                 self.weight.quant_state = self.quant_state
             else:
-                print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+                print(
+                    'FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.'
+                )
 
         if not self.compute_type_is_set:
             self.set_compute_type(x)
@@ -342,7 +344,8 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
+        out = bnb.matmul_4bit(
+            x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
 
         out = out.to(inp_dtype)
 
