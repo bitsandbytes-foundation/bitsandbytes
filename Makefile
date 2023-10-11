@@ -31,7 +31,7 @@ INCLUDE :=  -I $(CUDA_HOME)/include -I $(ROOT_DIR)/csrc -I $(CONDA_PREFIX)/inclu
 LIB := -L $(CUDA_HOME)/lib64 -lcudart -lcublas -lcublasLt -lcusparse -L $(CONDA_PREFIX)/lib
 
 INCLUDE_ROCM := -I $(ROCM_HOME)/include -I $(ROOT_DIR)/csrc -I $(CONDA_PREFIX)/include -I $(ROOT_DIR)/include
-LIB_ROCM := -L $(ROCM_HOME)/lib -lhipblas -lhiprand -lhipsparse -L $(CONDA_PREFIX)/lib
+LIB_ROCM := -L $(ROCM_HOME)/lib -lhipblas -lhipblaslt -lhiprand -lhipsparse -L $(CONDA_PREFIX)/lib
 
 # NVIDIA NVCC compilation flags
 COMPUTE_CAPABILITY += -gencode arch=compute_50,code=sm_50 # Maxwell
@@ -107,9 +107,9 @@ cuda12x: $(BUILD_DIR) env
 	$(GPP) -std=c++14 -DBUILD_CUDA -shared -fPIC $(INCLUDE) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(BUILD_DIR)/link.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cuda$(CUDA_VERSION).so $(LIB)
 
 hip: $(BUILD_DIR) env
-	$(HIPCC) -std=c++14 -fPIC -c -DNO_HIPBLASLT $(INCLUDE_ROCM) $(LIB_ROCM) $(CSRC)/ops.hip -o $(BUILD_DIR)/ops.o
-	$(HIPCC) -std=c++14 -fPIC -c -DNO_HIPBLASLT $(INCLUDE_ROCM) $(LIB_ROCM) $(CSRC)/kernels.hip -o $(BUILD_DIR)/kernels.o
-	$(GPP) -std=c++14 -D__HIP_PLATFORM_AMD__ -DBUILD_HIP -DNO_HIPBLASLT -shared -fPIC $(INCLUDE_ROCM) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_hip_nohipblaslt.so $(LIB_ROCM)
+	$(HIPCC) -std=c++14 -fPIC -c $(INCLUDE_ROCM) $(LIB_ROCM) $(CSRC)/ops.hip -o $(BUILD_DIR)/ops.o
+	$(HIPCC) -std=c++14 -fPIC -c $(INCLUDE_ROCM) $(LIB_ROCM) $(CSRC)/kernels.hip -o $(BUILD_DIR)/kernels.o
+	$(GPP) -std=c++14 -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__ -DBUILD_HIP -shared -fPIC $(INCLUDE_ROCM) $(BUILD_DIR)/ops.o $(BUILD_DIR)/kernels.o $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_hip_nohipblaslt.so $(LIB_ROCM)
 
 cpuonly: $(BUILD_DIR) env
 	$(GPP) -std=c++14 -shared -fPIC -I $(ROOT_DIR)/csrc -I $(ROOT_DIR)/include $(FILES_CPP) -o ./bitsandbytes/libbitsandbytes_cpu.so

@@ -159,7 +159,7 @@ void extractOutliers_ampere(char * A, int *idx, char *out, int idx_size, int row
 
 #ifndef NO_HIPBLASLT
 
-#if BUILD_CUDA
+#if defined(BUILD_CUDA)
  int igemmlt_turing_32(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
 	{ return igemmlt<COL_TURING, 32, 0>(ltHandle, m, n, k, A, B, C, row_scale, lda, ldb, ldc); }
 

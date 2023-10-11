@@ -16,9 +16,9 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_fp16.h>
 #include <rocblas/rocblas.h>
-#ifndef NO_HIPBLASLT
+//#ifndef NO_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
-#endif
+//#endif
 #include <hipsparse/hipsparse.h>
 #include <vector>
 #include <functional>
@@ -59,8 +59,8 @@ inline void v(hipError_t status) {
     }
 }
 
-inline int checkHiblasStatus(rocblas_status status) {
-    if (status != rocblas_status_success) {
+inline int checkHipblasStatus(hipblasStatus_t status) {
+    if (status != HIPBLAS_STATUS_SUCCESS) {
         printf("hipBLAS API failed with status %d\n", status);
         //throw std::logic_error("cuBLAS API failed");
         return 1;
@@ -129,7 +129,7 @@ class ContextLt
 				ContextLt()
 				{
 					hipblasLtHandle_t handle;
-					rocblasLtCreate(&handle);
+					hipblasLtCreate(&handle);
 					m_handle = handle;
 				}
 };
