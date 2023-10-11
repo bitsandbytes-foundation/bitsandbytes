@@ -550,9 +550,9 @@ def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
 
 #def cleanup():
 
-def fsdp_main(rank, world_size, linear_type, optim_bits, requires_grads, port):
+def fsdp_main(rank, world_size, linear_type, optim_bits, requires_grads):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = port
+    os.environ['MASTER_PORT'] = '12355'
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -654,19 +654,22 @@ def fsdp_main(rank, world_size, linear_type, optim_bits, requires_grads, port):
             elif optim_bits == 8:
                 failures += torch.allclose(ddp_loss[0], ddp_loss[1], atol=1e-4, rtol=0.1) == 0
     assert failures < 15
+    
+    dist.barrier()
+    time.sleep(1)
     dist.destroy_process_group()
+    time.sleep(1)
 
 @pytest.mark.parametrize("linear_type", ['16bit', '4bit'], ids=['Linear16bit', 'Linear4bit'])
 @pytest.mark.parametrize("optim_bits", [8, 32], ids=['optim_8bit', 'optim_32bit'])
 @pytest.mark.parametrize("requires_grads", [True, False], ids=['mixedgrads_False', 'mixedgrads_True'])
 #@pytest.mark.parametrize("optim_bits", ['32bit'], ids=['optim=32bit'])
 def test_fsdp_bnb(linear_type, optim_bits, requires_grads):
-    port = str(torch.randint(12355, 15000, size=(1,)).item())
     if linear_type == '4bit' and requires_grads == True: pytest.skip('invalid configuration')
     torch.manual_seed(43434484747)
     WORLD_SIZE = torch.cuda.device_count()
     mp.spawn(fsdp_main,
-        args=(WORLD_SIZE,linear_type, optim_bits, requires_grads, port),
+        args=(WORLD_SIZE,linear_type, optim_bits, requires_grads),
         nprocs=WORLD_SIZE,
         join=True)
 
