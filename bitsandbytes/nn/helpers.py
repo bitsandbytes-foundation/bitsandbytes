@@ -1,7 +1,8 @@
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, Optional
+
 import torch
 from torch.nn import Module
-from contextlib import contextmanager
-from typing import Any, Iterator, Dict, Optional
 
 
 def detach_tensors_or_pass_value(value: Any) -> Any:
@@ -191,3 +192,30 @@ def list_cuda_devices():
             print(f"CUDA Device {i}: {torch.cuda.get_device_name(i)}")
     else:
         print("No CUDA devices available.")
+
+
+import functools
+
+
+def debug(func):
+    """Print the function signature and return value."""
+
+    def format_arg(arg):
+        if isinstance(arg, bool):
+            return str(arg)
+        elif isinstance(arg, int):
+            return f"{arg:,}"
+        else:
+            return repr(arg)
+
+    @functools.wraps(func)
+    def wrapper_debug(*args, **kwargs):
+        args_repr = [format_arg(a) for a in args]
+        kwargs_repr = [f"{k}={format_arg(v)}" for k, v in kwargs.items()]
+        signature = ",\n".join(args_repr + kwargs_repr)
+        print(f"{func.__name__}({signature})")
+        value = func(*args, **kwargs)
+        print(f"returned {format_arg(value)}\n\n")
+        return value
+
+    return wrapper_debug

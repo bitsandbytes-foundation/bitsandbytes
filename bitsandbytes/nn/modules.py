@@ -2,19 +2,20 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Optional, TypeVar, Union, overload, Dict, Any, List
-
+from typing import Any, Dict, List, Optional, TypeVar, Union, overload
 import warnings
+
 import torch
-import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
+import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.autograd._functions import undo_layout, get_tile_inds
+from bitsandbytes.autograd._functions import get_tile_inds, undo_layout
 from bitsandbytes.functional import pack_3bits
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import OutlierTracer
-from .helpers import suspend_nn_inits, detach_tensors_or_pass_value
+
+from .helpers import detach_tensors_or_pass_value, suspend_nn_inits
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -248,6 +249,8 @@ class Linear4bit(nn.Linear):
             compress_statistics=compress_statistics,
             quant_type=quant_type,
             module=self)
+        if self.bias is not None:
+            self.bias.requires_grad = False
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
         self.is_pinned = False

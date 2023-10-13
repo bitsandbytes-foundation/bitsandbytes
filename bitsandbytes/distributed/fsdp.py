@@ -54,17 +54,20 @@ each module in the tree, allowing selective wrapping of the modules. Therefore, 
 leaves are wrapped first, and the wrapping propagates up the tree.
 """
 
-from typing import Union, OrderedDict, Iterable, Optional, Set, Type, Dict, Tuple
 from collections import deque
+import functools
+from typing import Dict, Iterable, Optional, OrderedDict, Set, Tuple, Type, Union
+
 import torch
+from torch.distributed.fsdp.wrap import (
+    _or_policy,
+    lambda_auto_wrap_policy,
+    transformer_auto_wrap_policy,
+)
 import torch.nn as nn
 import torch.nn.functional as F
 
 from bitsandbytes.nn import Linear4bit
-
-import functools
-
-from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
 
 def parameters_all_consistent(params: Iterable[torch.nn.Parameter]) -> bool:
@@ -89,9 +92,13 @@ def parameters_all_consistent(params: Iterable[torch.nn.Parameter]) -> bool:
         and param.requires_grad == first_param.requires_grad for param in params_iter)
 
 
+from bitsandbytes.nn.helpers import debug
+
+
 # TODO: still getting "ValueError: Must flatten tensors with uniform `requires_grad`
 # when `use_orig_params=False`" when running `pytest tests/test_fsdp.py::test_fsdp_bnb`
 # something must still be off with the custom auto wrap policy...
+@debug
 def bnb_fsdp_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,
@@ -101,14 +108,8 @@ def bnb_fsdp_auto_wrap_policy(
     **kwargs,
 ) -> bool:
     """See the module doc string, section "Custom Auto Wrap Policy" for details..."""
-    if debug:  # TODO: remove this and the extraneous comments once this is working
-        module_type = type(module).__name__
-        print(f"{module_type = }")
-        if args: print(f'{args = }')  #noqa: E701
-        if kwargs: print(f'{kwargs = }')  #noqa: E701
-        print(f'{recurse = }')
-        print(f'{nonwrapped_numel = }')
-        print(f'{parameters_all_consistent(module.parameters()) = }')
+    def debug():  # TODO: remove this and the extraneous comments once this is working
+        print([(n, p.dtype, p.requires_grad) for n, p in module.named_parameters()])
 
     if recurse:
         # return True to recurse: we recurse until we hit a module w/ consistent params
@@ -117,6 +118,12 @@ def bnb_fsdp_auto_wrap_policy(
     # therefore return True if the module has consistent params, as we're trying to
     # wrap the largest possible module graph sub-trees based on this criterium
     return parameters_all_consistent(module.parameters())
+
+"""
+Things to still integrate:
+- min_num_params
+- ignored_modules
+"""
 
 
 # TODO: this example policy will be removed later, we still need to integrate the

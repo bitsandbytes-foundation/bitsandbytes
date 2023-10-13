@@ -1,19 +1,20 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from bitsandbytes.nn import Linear4bit
 
 
 class CustomBlock(nn.Module):
 
-    def __init__(self, in_dim, out_dim, four_bit=False):
+    def __init__(self, in_dim, out_dim, bias=False, four_bit=False):
         super().__init__()
-        self.layer1 = Linear4bit(in_dim, out_dim) if four_bit else nn.Linear(
-            in_dim, out_dim)
-        self.layer2 = nn.Linear(out_dim, out_dim)
+        self.layer1 = Linear4bit(in_dim, out_dim, bias) if four_bit else nn.Linear(
+            in_dim, out_dim, bias)
+        self.layer2 = nn.Linear(out_dim, out_dim, bias)
 
         # Custom parameter at a non-leaf location
-        self.custom_param = nn.Parameter(torch.randn(out_dim))
+        # self.custom_param = nn.Parameter(torch.randn(out_dim))
 
     def forward(self, x):
         x = F.relu(self.layer1(x))
@@ -40,3 +41,12 @@ class HierarchicalModel(nn.Module):
 
         x += self.global_custom_param  # Using the custom parameter in some way
         return x
+
+
+class SimpleModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.block = CustomBlock(128, 256, four_bit=True)
+        
+    def forward(self, x):
+        return self.block(x)
