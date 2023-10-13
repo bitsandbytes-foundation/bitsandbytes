@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from transformers import AutoConfig, AutoModelForCausalLM
 from tqdm import trange
+from transformers import AutoConfig, AutoModelForCausalLM
 
 from .helpers import suspend_nn_inits
 from .quantization import dequantize_layer
