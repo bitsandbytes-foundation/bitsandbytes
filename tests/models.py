@@ -46,7 +46,68 @@ class HierarchicalModel(nn.Module):
 class SimpleModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.block = CustomBlock(128, 256, four_bit=True)
+        self.block1 = CustomBlock(128, 256, four_bit=True)
         
     def forward(self, x):
-        return self.block(x)
+        return self.block1(x)
+
+
+class MoreComplexModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.block1 = CustomBlock(128, 256, four_bit=True)
+        self.block2 = CustomBlock(128, 256, four_bit=True)
+        
+    def forward(self, x):
+        x = self.block1(x)
+        x = self.block2(x)
+        return x
+
+class LoraModel(nn.Module):
+    """This is a toy LoRA decoder model."""
+
+    def __init__(self):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(100, 32)
+        self.layers = nn.ModuleList([LoraDecoder() for _ in range(4)])
+        self.norm = nn.LayerNorm(32)
+        self.embed_tokens.weight.requires_grad_(False)
+        self.norm.weight.requires_grad_(False)
+        self.norm.bias.requires_grad_(False)
+
+
+class LoraDecoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.attn = LoraAttention()
+        self.mlp = LoraMLP()
+        self.inp_layernorm = nn.LayerNorm(32)
+        self.post_attn_layernorm = nn.LayerNorm(32)
+        self.inp_layernorm.weight.requires_grad_(False)
+        self.inp_layernorm.bias.requires_grad_(False)
+        self.post_attn_layernorm.weight.requires_grad_(False)
+        self.post_attn_layernorm.bias.requires_grad_(False)
+
+
+class LoraAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.q_proj = nn.Linear(32, 32, bias=False)
+        self.lora_A = nn.Linear(32, 8, bias=False)
+        self.lora_B = nn.Linear(8, 32, bias=False)
+        self.k_proj = nn.Linear(32, 32, bias=False)
+        self.v_proj = nn.Linear(32, 32, bias=False)
+        self.o_proj = nn.Linear(32, 32, bias=False)
+        self.q_proj.weight.requires_grad_(False)
+        self.k_proj.weight.requires_grad_(False)
+        self.v_proj.weight.requires_grad_(False)
+        self.o_proj.weight.requires_grad_(False)
+
+
+class LoraMLP(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.proj1 = nn.Linear(32, 128, bias=False)
+        self.proj2 = nn.Linear(128, 32, bias=False)
+        self.proj1.weight.requires_grad_(False)
+        self.proj2.weight.requires_grad_(False)

@@ -21,12 +21,12 @@ from bitsandbytes.distributed.fsdp import (
 from bitsandbytes.nn import Linear4bit
 from bitsandbytes.utils import replace_linear
 
-from .models import HierarchicalModel, SimpleModel
+from .models import HierarchicalModel, SimpleModel, MoreComplexModel, LoraDecoder
 
 
 def fsdp_main(rank, world_size, optim_bits):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ['MASTER_PORT'] = '12345'
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -46,22 +46,39 @@ def fsdp_main(rank, world_size, optim_bits):
 
     # model_fsdp = FSDP(SimpleModel(), # HierarchicalModel(), 
     #     auto_wrap_policy=bnb_fsdp_auto_wrap_policy)
-    
-    model_fsdp = SimpleModel()
+      
+    # model_fsdp = SimpleModel()
+    low_cpu_fsdp = False
+    if low_cpu_fsdp:
+        if rank == 0:
+            model_fsdp = MoreComplexModel()
+        else:
+            with torch.device("meta"):
+                model_fsdp = MoreComplexModel()
+    else:
+        model_fsdp = MoreComplexModel()
+          
     from torch.distributed.fsdp.wrap import enable_wrap, wrap
     with enable_wrap(
         wrapper_cls=FSDP,
         **{
             'device_id' : rank,
-            # 'use_orig_params' : True,
-            'sync_module_states' : True
+            'sync_module_states' : True,
+            'ignored_states': [model_fsdp.block1.layer2, model_fsdp.block2.layer2],
         }):
-        model_fsdp.block.layer1 = wrap(model_fsdp.block.layer1)
-        model_fsdp.block.layer2 = wrap(model_fsdp.block.layer2)
+        model_fsdp.block1.layer1 = wrap(model_fsdp.block1.layer1)
+        # model_fsdp.block1.layer2 = wrap(model_fsdp.block1.layer2)
+        model_fsdp.block2.layer1 = wrap(model_fsdp.block2.layer1)
+        # model_fsdp.block2.layer2 = wrap(model_fsdp.block2.layer2)
         model_fsdp = wrap(model_fsdp)
 
     model_fsdp = model_fsdp.to(rank)
-    print(model_fsdp)
+    
+    if rank == 0:
+        print(model_fsdp)
+        print(f'{rank=}, {model_fsdp.block2.layer2.weight=}')
+    if rank == 1:
+        print(f'{rank=}, {model_fsdp.block2.layer2.weight=}')
 
     # model_plain = HierarchicalModel()
     # model_fsdp = FSDP(HierarchicalModel(), auto_wrap_policy=bnb_fsdp_auto_wrap_policy)
