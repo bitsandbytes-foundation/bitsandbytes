@@ -7,13 +7,14 @@ channels:
 dependencies:
   # Base
   - conda-forge::python=3.8
-  - pytorch::pytorch
+  - pytorch::pytorch=>2.1
   - pytorch::pytorch-cuda=11.8
   - nvidia::cuda=11.8
   # Libraries
   - conda-forge::accelerate
   - conda-forge::einops
   - conda-forge::scipy
+  - conda-forge::transformers
   # Development
   - conda-forge::pytest
   - conda-forge::pytest-cases # more readable and composable parametrized tests
@@ -35,7 +36,7 @@ dependencies:
 ## PIP dependencies (install *after* ENV CREATION):
 # pip install --no-cache-dir --no-deps lion_pytorch triton peft
 ## NOTE: conda peft is not up to date, so we install from pip
-# cd ~/src; pip install -e bitsandbytes/ transformers/; cd -
+# cd pip install -e .  ## installs bitsandbytes as editable development install from within repo root dir
 
 ## ENV UPDATE:
 # # add new packages to environment.yml, then:
