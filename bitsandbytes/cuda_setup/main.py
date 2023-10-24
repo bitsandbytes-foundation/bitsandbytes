@@ -237,7 +237,7 @@ def warn_in_case_of_duplicates(results_paths: Set[Path]) -> None:
     if len(results_paths) > 1:
         warning_msg = (
             f"Found duplicate {CUDA_RUNTIME_LIBS} files: {results_paths}.. "
-            "We select the PyTorch default libcudart.so, which is {torch.version.cuda},"
+            f"We select the PyTorch default libcudart.so, which is {torch.version.cuda},"
             "but this might missmatch with the CUDA version that is needed for bitsandbytes."
             "To override this behavior set the BNB_CUDA_VERSION=<version string, e.g. 122> environmental variable"
             "For example, if you want to use the CUDA version 122"
