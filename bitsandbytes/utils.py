@@ -1,10 +1,11 @@
 import shlex
 import subprocess
 import torch
-from typing import Tuple
+from typing import List, Optional, Callable, Union, Tuple
+from torch.nn import Module, Linear
 
 def outlier_hook(module, input):
-    assert isinstance(module, torch.nn.Linear)
+    assert isinstance(module, Linear)
     tracer = OutlierTracer.get_instance()
     hvalue = tracer.get_hvalue(module.weight)
     if hvalue not in tracer.hvalue2outlier_idx:
@@ -52,7 +53,7 @@ class OutlierTracer(object):
         self.hooks = []
 
         for n, m in model.named_modules():
-            if isinstance(m, torch.nn.Linear):
+            if isinstance(m, Linear):
                 self.hooks.append(m.register_forward_pre_hook(outlier_hook))
 
     def is_initialized(self):
@@ -121,16 +122,17 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
 
 
 def replace_linear(
-    model: nn.Module, 
-    linear_replacement: Callable[..., nn.Module], 
-    skip_modules: Union[List[str], Tuple[str]] = ("lm_head",), 
+    model: Module, 
+    linear_replacement: Callable[..., Module], 
+    skip_modules: Union[List[str], Tuple[str, ...]] = ("lm_head",), 
     copy_weights: bool = False, 
     post_processing_function: Optional[str] = None
-) -> nn.Module:
+) -> Module:
     """
     Replace linear modules with a new Linear module.
 
-    Parameters:
+    Parameters
+    ----------
         model (torch.nn.Module):
             Input model. The function is run recursively.
         linear_replacement (Callable[..., torch.nn.Module]):
@@ -144,14 +146,24 @@ def replace_linear(
             after processing.
 
     Returns:
+    --------
         torch.nn.Module: The modified model.
+
+    NOTE: In respect to usage to replace with `Linear4bit`:
+    Given that the `Linear4bit` class uses `Params4bit`, and `Params4bit` in turn calls
+    the `bnb.functional.quantize_4bit` function when moved to a CUDA device, it's clear
+    that the `Linear4bit` layer performs 4-bit quantization on its weights. 
+
+    Regarding the `copy_weights` flag in your `replace_linear` function, if you set it
+    to True, the full-precision weights will be copied first. When the `Linear4bit`
+    layer gets moved to a CUDA device, these weights would be quantized to 4-bit, making
+    the flag meaningful.
     """
     for name, module in model.named_children():
-
-        if any(isinstance(child, nn.Module) for child in module.children()):
+        if any(isinstance(child, Module) for child in module.children()):
             replace_linear(module, linear_replacement, skip_modules, copy_weights, post_processing_function)
 
-        if isinstance(module, nn.Linear) and name not in skip_modules:
+        if isinstance(module, Linear) and name not in skip_modules:
             old_module = model._modules[name]
             new_module = linear_replacement(
                 old_module.in_features,
@@ -161,9 +173,9 @@ def replace_linear(
             model._modules[name] = new_module
 
             if copy_weights:
-                new_module.weight.data = old_module.weight.data
+                new_module.weight.data.copy_(old_module.weight.data)
                 if old_module.bias is not None:
-                    new_module.bias.data = old_module.bias.data
+                    new_module.bias.data.copy_(old_module.bias.data)
 
             if post_processing_function:
                 func = getattr(new_module, post_processing_function, None)
