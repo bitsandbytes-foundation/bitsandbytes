@@ -161,6 +161,8 @@ def replace_linear(
     layer gets moved to a CUDA device, these weights would be quantized to 4-bit, making
     the flag meaningful.
     """
+    skip_modules = skip_modules or []  # Set to empty list if None
+    
     for name, module in model.named_children():
         if any(isinstance(child, Module) for child in module.children()):
             replace_linear(
