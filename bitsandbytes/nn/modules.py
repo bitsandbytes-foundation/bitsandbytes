@@ -154,14 +154,25 @@ class Params4bit(torch.nn.Parameter):
         return self
     
     @classmethod
-    def from_prequantized(cls, data, quantized_stats, requires_grad=False, device='cuda', **kwargs):
-        self = torch.Tensor._make_subclass(cls, data.to(device))
-        self.requires_grad = requires_grad
-        self.quant_state = QuantState.from_dict(qs_dict=quantized_stats, device=device)
-        self.blocksize = self.quant_state.blocksize
-        self.compress_statistics = self.quant_state.nested
-        self.quant_type = self.quant_state.quant_type
-        return self
+    def from_state_dict(cls, state_dict, prefix="", requires_grad=False):
+        data = state_dict.pop(prefix.rstrip('.'))
+        
+        # extracting components for QuantState from state_dict
+        qs_dict = {}
+        for k, v in state_dict.items():
+            if k.replace(prefix, '').split('.')[0] in QuantState.valid_qs_keys:
+                qs_dict[k] = v        
+        state_dict = {k: v for k, v in state_dict.items() if k not in qs_dict}
+        qs_dict = {k.replace(prefix, ''): v for k, v in qs_dict.items()}
+        
+        if data.device.type != "cuda":
+            raise ValueError(f"`data.device.type` must be 'cuda', detected {data.device.type}")
+
+        cls.requires_grad = requires_grad,
+        cls.quant_state = QuantState.from_dict(qs_dict=qs_dict, device=data.device)
+
+        self = torch.Tensor._make_subclass(cls, data=data.to(data.device))
+        return self, state_dict
 
     def cuda(self, device):
         w = self.data.contiguous().half().cuda(device)
@@ -200,9 +211,11 @@ class Params4bit(torch.nn.Parameter):
             return new_param
 
 class Linear4bit(nn.Linear):
+    
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4',device=None):
         super().__init__(input_features, output_features, bias, device)
         self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
+        # self.persistent_buffers = []  # TODO consider as way to save quant state
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
 
@@ -232,6 +245,18 @@ class Linear4bit(nn.Linear):
         if getattr(self.weight, "quant_state", None) is not None:
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        # Note: super()._load_from_state_dict() is not called here intentionally.
+        if self.bias is not None:
+            bias_data = state_dict.pop(prefix + "bias", None)
+            self.bias.data = bias_data.to(self.bias.data.device)
+
+        self.weight, state_dict = bnb.nn.Params4bit.from_state_dict(
+                        state_dict, prefix=prefix + "weight" + ".", requires_grad=False
+                    )
+        unexpected_keys.extend(state_dict.keys())
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually

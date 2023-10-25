@@ -16,7 +16,7 @@ from bitsandbytes.nn.modules import Linear4bit
     "quant_type, compress_statistics, bias",
     list(product(["nf4", "fp4"], [False, True], [False, True])),
 )
-def test_linear4_state_dict(quant_type, compress_statistics, bias):
+def test_linear_serialization(quant_type, compress_statistics, bias):
     original_dtype = torch.float16
     compute_dtype = None
     device = "cuda"
@@ -39,16 +39,10 @@ def test_linear4_state_dict(quant_type, compress_statistics, bias):
     if bias:
         linear_q.bias.data = linear.bias.data.to(device)
 
+    # saving to state_dict:
     sd = linear_q.state_dict()
 
-    # restoring from state_dict:
-
-    sd = linear_q.state_dict()
-    bias_data2 = sd.pop("bias", None)
-    weight_data2 = sd.pop("weight")
-
-    weight2 = bnb.nn.Params4bit.from_prequantized(quantized_stats=sd, data=weight_data2)
-
+    # creating new layer with same params:
     linear_q2 = bnb.nn.Linear4bit(
         linear.in_features,
         linear.out_features,
@@ -56,13 +50,12 @@ def test_linear4_state_dict(quant_type, compress_statistics, bias):
         compute_dtype=compute_dtype,
         compress_statistics=compress_statistics,
         quant_type=quant_type,
-        device='meta',
+        device=device,                  # TODO create on meta device to save loading time
     )
-    linear_q2.weight = weight2.to(device)
-    if bias:
-        linear_q2.bias = torch.nn.Parameter(bias_data2)
+    # loading weights from state_dict:
+    linear_q2.load_state_dict(sd)    
 
-    # matching
+    # MATCHING
     a, b = linear_q.weight, linear_q2.weight
 
     assert a.device == b.device

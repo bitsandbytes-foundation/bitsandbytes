@@ -568,11 +568,17 @@ def estimate_quantiles(A: Tensor, out: Tensor = None, offset: float = 1 / 512, n
     return out
 
 class QuantState:
-    """container for quantizationstate components to work with Params4bit and similar clases"""
+    """container for quantization state components to work with Params4bit and similar clases"""
+    valid_quant_types = ('fp4', 'nf4')
+    valid_qs_type_keys = [f"quant_state.bitsandbytes__{x}" for x in valid_quant_types]
+    valid_qs_keys = ['absmax', 'code', 'nested_absmax', 'nested_code', 'quant_state', 
+                     'quant_type', 'blocksize', 'dtype', 'shape', 'nested_blocksize', 'nested_dtype', 'nested_offset']
+
+    
     def __init__(self, absmax, shape=None, code=None, blocksize=None, quant_type=None, dtype=None, offset=None, state2=None):
         self.absmax = absmax
         self.shape = shape
-        self.code = code
+        self.code = code  # TODO consider renaming to `buckets / centroids / scale`
         self.dtype = dtype
         self.blocksize = blocksize
         self.quant_type = quant_type
@@ -596,25 +602,25 @@ class QuantState:
     @classmethod
     def from_dict(cls, qs_dict: dict[str, Any], device: torch.device) -> 'QuantState':
         """
-        unpacks dict of tensors into QuantState
+        unpacks components of state_dict into QuantState
         where necessary, convert into strings, torch.dtype, ints, etc.
 
-        quant_state_dict may contain item with non-tensor components with key like
-        `...weight.quant_state.bitsandbytes__[nf4/fp4]` 
-        it is detected with key strored in qs_key, and then unpacked
+        qs_dict: based on state_dict, with only relevant keys, striped of prefixes.
+         
+        item with key `quant_state.bitsandbytes__[nf4/fp4]` may contain minor and non-tensor quant state items.        
         """
 
         # unpacking tensor with non-tensor components
-        qs_key = [k for k, v in qs_dict.items() if "quant_state" in k and isinstance(v, torch.Tensor)]
-        assert len(qs_key) == 1 or not qs_key and 'quant_type' in qs_dict, \
-            f"`qs_dict` must contain packed quant_state items, or be unpacked. Found keys: {tuple(qs_dict.keys())}"
+        qs_key = [k for k, v in qs_dict.items() if k in cls.valid_qs_type_keys and isinstance(v, torch.Tensor)]
+        if not len(qs_key) and 'quant_type' not in qs_dict:
+            raise ValueError("Expected packed or unpacked quant_state items, found neither") 
+        elif len(qs_key) != 1:
+            raise ValueError(f"There should be exaclly one quant_state item with key from {self.valid_qs_type_keys}. Detected {len(qs_ley)} such items")
+        
+        # unpacking minor and non-tensor quant state items if necessary
         if len(qs_key) == 1:
             qs_key = qs_key[0]
-            assert 'bitsandbytes__nf4' in qs_key or 'bitsandbytes__fp4' in qs_key, \
-                f"invalid qs_key value {qs_key}"
             qs_dict |= unpack_tensor_to_dict(qs_dict.pop(qs_key))
-
-        qs_dict = {k.split('.')[-1]:v for k, v in qs_dict.items()}  # strip prefixes
 
         if 'nested_absmax' in qs_dict:
             offset = torch.tensor(float(qs_dict['nested_offset'])).to(device)
@@ -871,7 +877,6 @@ def get_4bit_type(typename, device=None, blocksize=64):
     assert data.numel() == 16
 
     return data.to(device)
-
 
 
 def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
