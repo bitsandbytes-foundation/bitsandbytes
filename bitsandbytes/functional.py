@@ -13,7 +13,7 @@ from scipy.stats import norm
 import numpy as np
 
 from functools import reduce  # Required in Python 3
-from typing import Tuple, Any
+from typing import Tuple, Any, Dict
 from torch import Tensor
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
@@ -600,7 +600,7 @@ class QuantState:
         return list_repr[idx]
     
     @classmethod
-    def from_dict(cls, qs_dict: dict[str, Any], device: torch.device) -> 'QuantState':
+    def from_dict(cls, qs_dict: Dict[str, Any], device: torch.device) -> 'QuantState':
         """
         unpacks components of state_dict into QuantState
         where necessary, convert into strings, torch.dtype, ints, etc.
