@@ -139,6 +139,7 @@ class Embedding(torch.nn.Embedding):
 
         return emb
 
+
 class Params4bit(torch.nn.Parameter):
 
     def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True, quant_type='fp4'):
@@ -152,11 +153,11 @@ class Params4bit(torch.nn.Parameter):
         self.quant_state = quant_state
         self.data = data
         return self
-    
+
     @classmethod
     def from_state_dict(cls, state_dict, prefix="", requires_grad=False):
         data = state_dict.pop(prefix.rstrip('.'))
-        
+
         # extracting components for QuantState from state_dict
         qs_dict = {}
         for k, v in state_dict.items():
@@ -164,15 +165,15 @@ class Params4bit(torch.nn.Parameter):
                 qs_dict[k] = v        
         state_dict = {k: v for k, v in state_dict.items() if k not in qs_dict}
         qs_dict = {k.replace(prefix, ''): v for k, v in qs_dict.items()}
-        
+
         if data.device.type != "cuda":
             raise ValueError(f"`data.device.type` must be 'cuda', detected {data.device.type}")
 
         cls.requires_grad = requires_grad
         cls.quant_state = QuantState.from_dict(qs_dict=qs_dict, device=data.device)
-        cls.blocksize = cls.quant_state.blocksize
-        cls.compress_statistics = cls.quant_state.nested
-        cls.quant_type = cls.quant_state.quant_type
+        cls.blocksize = cls.quant_state.blocksize             # this attribute can be deprecated - it duplicates same one in quant_state
+        cls.compress_statistics = cls.quant_state.nested      # this attribute can be deprecated - it duplicates quant_state.nested
+        cls.quant_type = cls.quant_state.quant_type           # this attribute can be deprecated - it duplicates same one in quant_state
 
         self = torch.Tensor._make_subclass(cls, data=data.to(data.device))
         return self, state_dict
@@ -207,14 +208,15 @@ class Params4bit(torch.nn.Parameter):
                 self.quant_state.to(device)
 
             new_param = Params4bit(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
-                                  requires_grad=self.requires_grad, quant_state=self.quant_state,
+                                   requires_grad=self.requires_grad, quant_state=self.quant_state,
                                    blocksize=self.blocksize, compress_statistics=self.compress_statistics,
                                    quant_type=self.quant_type)
 
             return new_param
 
+
 class Linear4bit(nn.Linear):
-    
+
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4',device=None):
         super().__init__(input_features, output_features, bias, device)
         self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
