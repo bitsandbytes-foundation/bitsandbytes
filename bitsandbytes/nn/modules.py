@@ -156,7 +156,6 @@ class Params4bit(torch.nn.Parameter):
     @classmethod
     def from_state_dict(cls, state_dict, prefix="", requires_grad=False):
         data = state_dict.pop(prefix.rstrip('.'))
-        
         # extracting components for QuantState from state_dict
         qs_dict = {}
         for k, v in state_dict.items():
@@ -251,12 +250,18 @@ class Linear4bit(nn.Linear):
         # Note: super()._load_from_state_dict() is not called here intentionally.
         if self.bias is not None:
             bias_data = state_dict.pop(prefix + "bias", None)
-            self.bias.data = bias_data.to(self.bias.data.device)
+            if bias_data is not None:
+                self.bias.data = bias_data.to(self.bias.data.device)
 
-        self.weight, state_dict = bnb.nn.Params4bit.from_state_dict(
-                        state_dict, prefix=prefix + "weight" + ".", requires_grad=False
-                    )
-        unexpected_keys.extend(state_dict.keys())
+        # Simply check if the weight is present in the state_dict
+        # If not, we assume that the state_dict does contain some keys 
+        # that are not present in the model
+        prefix = prefix + "weight" + "."
+        if prefix in set(state_dict.keys()):
+            self.weight, state_dict = bnb.nn.Params4bit.from_state_dict(
+                state_dict, prefix=prefix, requires_grad=False
+            )
+            unexpected_keys.extend(state_dict.keys())
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
