@@ -261,7 +261,7 @@ class Linear4bit(nn.Linear):
             self.weight, state_dict = bnb.nn.Params4bit.from_state_dict(
                 state_dict, prefix=prefix, requires_grad=False
             )
-            unexpected_keys.extend(state_dict.keys())
+        unexpected_keys.extend(state_dict.keys())
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
