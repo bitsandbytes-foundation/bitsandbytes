@@ -253,9 +253,11 @@ class Linear4bit(nn.Linear):
             bias_data = state_dict.pop(prefix + "bias", None)
             self.bias.data = bias_data.to(self.bias.data.device)
 
-        self.weight, state_dict = bnb.nn.Params4bit.from_state_dict(
-                        state_dict, prefix=prefix + "weight" + ".", requires_grad=False
-                    )
+        weight_prefix = prefix + "weight" + "."
+        if weight_prefix.rstrip('.') in state_dict:
+            self.weight, state_dict = bnb.nn.Params4bit.from_state_dict(
+                            state_dict, prefix=weight_prefix, requires_grad=False
+                        )
         unexpected_keys.extend(state_dict.keys())
 
     def forward(self, x: torch.Tensor):
