@@ -7,8 +7,6 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
-from bitsandbytes import functional as F
-from bitsandbytes.nn.modules import Linear4bit
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
@@ -41,7 +39,10 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
 
     # saving to state_dict:
     sd = linear_q.state_dict()
-
+    # restoring from state_dict:
+    bias_data2 = sd.pop("bias", None)
+    weight_data2 = sd.pop("weight")
+    weight2 = bnb.nn.Params4bit.from_prequantized(quantized_stats=sd, data=weight_data2)
     # creating new layer with same params:
     linear_q2 = bnb.nn.Linear4bit(
         linear.in_features,
@@ -53,7 +54,9 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
         device=device,                  # TODO create on meta device to save loading time
     )
     # loading weights from state_dict:
-    linear_q2.load_state_dict(sd)    
+    linear_q2.weight = weight2.to(device)
+    if bias:
+        linear_q2.bias = torch.nn.Parameter(bias_data2)
 
     # MATCHING
     a, b = linear_q.weight, linear_q2.weight
@@ -61,7 +64,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
     assert a.device == b.device
     assert a.dtype == b.dtype
     assert torch.equal(a, b)
-    
+
     q0 = a.quant_state
     q1 = b.quant_state
     for attr in ('code', 'dtype', 'blocksize', 'absmax'):
