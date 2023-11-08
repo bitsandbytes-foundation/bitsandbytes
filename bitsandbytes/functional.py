@@ -680,7 +680,6 @@ class QuantState:
     def to(self, device):
         # make sure the quantization state is on the right device
         self.absmax = self.absmax.to(device)
-        self.offset = self.offset.to(device)
         if self.nested:
             self.offset = self.offset.to(device)
             self.state2.absmax = self.state2.absmax.to(device)
