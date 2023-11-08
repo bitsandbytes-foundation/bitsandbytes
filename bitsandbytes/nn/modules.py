@@ -257,7 +257,7 @@ class Linear4bit(nn.Linear):
         # If not, we assume that the state_dict does contain some keys 
         # that are not present in the model
         prefix = prefix + "weight" + "."
-        if prefix.rstrip('.') in set(state_dict.keys()):
+        if prefix.rstrip('.') in state_dict:
             self.weight, state_dict = bnb.nn.Params4bit.from_state_dict(
                 state_dict, prefix=prefix, requires_grad=False
             )
