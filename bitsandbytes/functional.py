@@ -659,7 +659,7 @@ class QuantState:
             'blocksize': self.blocksize,
             'quant_map': self.code,
             'dtype': str(self.dtype).strip('torch.'),
-            'shape': tuple(self.shape) if self.nested else None,
+            'shape': tuple(self.shape),
         }
         if self.nested:
             qs_dict.update({
