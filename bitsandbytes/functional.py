@@ -642,7 +642,7 @@ class QuantState:
             blocksize=qs_dict['blocksize'],
             code=qs_dict['quant_map'].to(device),
             dtype=getattr(torch, qs_dict['dtype']),
-            shape=torch.Size(qs_dict['shape']),
+            shape=torch.Size(qs_dict['shape']) if qs_dict['shape'] is not None else None,
             offset=offset,
             state2=state2,
         )
