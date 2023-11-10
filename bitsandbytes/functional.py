@@ -772,7 +772,7 @@ def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize
 def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4')
 
-def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
+def cuda_quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
     """
     Quantize tensor A in blocks of 4-bit values.
 
@@ -1699,7 +1699,7 @@ def batched_igemm(
     return out
 
 
-def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
+def cuda_igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     shapeA = SA[0]
     shapeB = SB[0]
     dimsA = len(shapeA)
@@ -1796,7 +1796,7 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     return out, Sout
 
 
-def mm_dequant(
+def cuda_mm_dequant(
     A,
     quant_state,
     row_stats,
@@ -1980,7 +1980,7 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
 
 
-def double_quant(
+def cuda_double_quant(
     A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
 ):
     device = A.device
@@ -2076,7 +2076,7 @@ def double_quant(
     return out_row, out_col, row_stats, col_stats, coo_tensor
 
 
-def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+def cuda_transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
     prev_device = pre_call(A.device)
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
@@ -2372,7 +2372,7 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
     return x.to(dtype)
 
 
-def extract_outliers(A, SA, idx):
+def cuda_extract_outliers(A, SA, idx):
     shapeA = SA[0]
     formatA = SA[1]
     assert formatA in ["col_turing", "col_ampere"]
@@ -2402,3 +2402,85 @@ def pipeline_test(A, batch_size):
     out = torch.zeros_like(A)
     lib.cpipeline_test(get_ptr(A), get_ptr(out), ct.c_size_t(A.numel()), ct.c_size_t(batch_size))
     return out
+
+
+# 8 bits
+def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
+        if A.device is "cuda":
+            return cuda_double_quant(A=A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
+        elif A.device is "cpu":
+            pass
+        elif A.device is "xpu":
+            pass
+        else:
+            pass
+
+def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+        if A.device is "cuda":
+            cuda_transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
+        elif A.device is "cpu":
+            pass
+        elif A.device is "xpu":
+            pass
+        else:
+            pass
+
+def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
+        if A.device is "cuda":
+            cuda_igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
+        elif A.device is "cpu":
+            pass
+        elif A.device is "xpu":
+            pass
+        else:
+            pass
+
+def mm_dequant(
+    A,
+    quant_state,
+    row_stats,
+    col_stats,
+    out=None,
+    new_row_stats=None,
+    new_col_stats=None,
+    bias=None
+):
+        if A.device is "cuda":
+            cuda_mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
+        elif A.device is "cpu":
+            pass
+        elif A.device is "xpu":
+            pass
+        else:
+            pass
+
+# 4 bits
+def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
+        if A.device is "cuda":
+            cuda_quantize_4bit(A, absmax = absmax, out = out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type)
+        elif A.device is "cpu":
+            pass
+        elif A.device is "xpu":
+            pass
+        else:
+            pass
+
+def dequantize_4bit(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
+        if A.device is "cuda":
+            cuda_dequantize_4bit(A, quant_state = quant_state, absmax = absmax, out = out, blocksize = blocksize, quant_type=quant_type)
+        elif A.device is "cpu":
+            pass
+        elif A.device is "xpu":
+            pass
+        else:
+            pass
+
+def extract_outliers(A, SA, idx):
+        if A.device is "cuda":
+            cuda_extract_outliers(A, SA, idx)
+        elif A.device is "cpu":
+            pass
+        elif A.device is "xpu":
+            pass
+        else:
+            pass

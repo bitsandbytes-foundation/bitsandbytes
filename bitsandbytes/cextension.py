@@ -7,13 +7,13 @@ from warnings import warn
 
 from bitsandbytes.cuda_setup.main import CUDASetup
 
+if torch.cuda.is_available():
+    setup = CUDASetup.get_instance()
+    if setup.initialized != True:
+        setup.run_cuda_setup()
 
-setup = CUDASetup.get_instance()
-if setup.initialized != True:
-    setup.run_cuda_setup()
-
-lib = setup.lib
-try:
+    lib = setup.lib
+ 
     if lib is None and torch.cuda.is_available():
         CUDASetup.get_instance().generate_instructions()
         CUDASetup.get_instance().print_log_stack()
@@ -30,12 +30,10 @@ try:
     lib.get_cusparse.restype = ct.c_void_p
     lib.cget_managed_ptr.restype = ct.c_void_p
     COMPILED_WITH_CUDA = True
-except AttributeError as ex:
-    warn("The installed version of bitsandbytes was compiled without GPU support. "
-        "8-bit optimizers, 8-bit multiplication, and GPU quantization are unavailable.")
-    COMPILED_WITH_CUDA = False
-    print(str(ex))
 
+else:
+    warn("The installed version of bitsandbytes was compiled without GPU support. Will"
+        "run with CPU support")
 
 # print the setup details after checking for errors so we do not print twice
 #if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
