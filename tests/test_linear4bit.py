@@ -30,7 +30,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
         compute_dtype=compute_dtype,
         compress_statistics=compress_statistics,
         quant_type=quant_type,
-        device="meta",  # TODO: consider both CPU, meta and CUDA creation
+        device="meta",
     )
     new_weight = bnb.nn.Params4bit(data=linear.weight, requires_grad=False)
     linear_q.weight = new_weight
