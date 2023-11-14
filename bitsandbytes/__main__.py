@@ -67,7 +67,7 @@ def generate_bug_report_information():
     print_header("LD_LIBRARY CUDA PATHS")
     if 'LD_LIBRARY_PATH' in os.environ:
         lib_path = os.environ['LD_LIBRARY_PATH'].strip()
-        for path in set(lib_path.split(':')):
+        for path in set(lib_path.split(os.pathsep)):
             try:
                 if isdir(path):
                     print_header(f"{path} CUDA PATHS")

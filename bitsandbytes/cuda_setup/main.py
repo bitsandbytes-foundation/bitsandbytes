@@ -19,6 +19,7 @@ evaluation:
 import ctypes as ct
 import os
 import errno
+import platform
 import torch
 from warnings import warn
 from itertools import product
@@ -31,7 +32,11 @@ from .env_vars import get_potentially_lib_path_containing_env_vars
 # libcudart.so is missing by default for a conda install with PyTorch 2.0 and instead
 # we have libcudart.so.11.0 which causes a lot of errors before
 # not sure if libcudart.so.12.0 exists in pytorch installs, but it does not hurt
-CUDA_RUNTIME_LIBS: list = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0', 'libcudart.so.12.1', 'libcudart.so.12.2']
+system = platform.system()
+if system == 'Windows':
+    CUDA_RUNTIME_LIBS: list = ["nvcuda.dll"]
+else: # Linux or other
+    CUDA_RUNTIME_LIBS: list = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0', 'libcudart.so.12.1', 'libcudart.so.12.2']
 
 # this is a order list of backup paths to search CUDA in, if it cannot be found in the main environmental paths
 backup_paths = []
@@ -193,7 +198,7 @@ def is_cublasLt_compatible(cc):
     return has_cublaslt
 
 def extract_candidate_paths(paths_list_candidate: str) -> Set[Path]:
-    return {Path(ld_path) for ld_path in paths_list_candidate.split(":") if ld_path}
+    return {Path(ld_path) for ld_path in paths_list_candidate.split(os.pathsep) if ld_path}
 
 
 def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
