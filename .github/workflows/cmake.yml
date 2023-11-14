@@ -1,0 +1,165 @@
+name: CMake on multiple platforms
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
+      fail-fast: false
+
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.10', '3.11']
+        cuda-version: ['11.8', '12.1']
+        build_type: [Release]
+        c_compiler: [gcc]
+        include:
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Set up MSVC
+      if: matrix.os == 'windows-latest'
+      uses: ilammy/msvc-dev-cmd@v1.12.1
+      with:
+        arch: amd64
+
+    - name: Setup Mambaforge
+      uses: conda-incubator/setup-miniconda@v3.0.1
+      with:
+        miniforge-variant: Mambaforge
+        miniforge-version: latest
+        activate-environment: bnb-env
+        use-mamba: true
+
+    - uses: conda-incubator/setup-miniconda@v3.0.1
+      with:
+        auto-update-conda: true
+        activate-environment: bnb-env
+        environment-file: environment-bnb.yml
+        use-only-tar-bz2: false
+        auto-activate-base: true
+        python-version: ${{ matrix.python-version }}
+        mamba-version: "*"
+
+    - name: Set reusable strings
+      # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+    - name: CUDA Toolkit
+      shell: bash -el {0}
+      run: |
+        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            # to prepare space
+            sudo rm -rf /usr/share/dotnet
+            sudo rm -rf /opt/ghc
+            sudo rm -rf /usr/local/share/boost
+        fi
+        addon=""
+        cuda_version=${{ matrix.cuda-version }}
+        [ "$cuda_version" = "12.1" ] && [ "${{ matrix.os }}" = "ubuntu-latest" ] && addon="cuda-cudart-static cuda-nvrtc"
+        [ "$cuda_version" = "12.1" ] && [ "${{ matrix.os }}" = "windows-latest" ] && addon="cuda-nvrtc"
+        [ "$cuda_version" = "11.8" ] && cuda_version="11.8.0"
+        [ "$cuda_version" = "12.1" ] && cuda_version="12.1.1"
+
+        conda install pytorch-cuda=${{ matrix.cuda-version }} -c pytorch # it's dependency not correctly resolved sometime
+        conda install cuda-python=${{ matrix.cuda-version }} cuda-libraries-dev cuda-nvcc cuda-nvtx cuda-cupti cuda-cudart cuda-cudart-dev cuda-runtime cuda-libraries $addon -c "nvidia/label/cuda-$cuda_version"
+
+        [ "${{ matrix.os }}" = "windows-latest" ] && conda install "clang>=17.0.6" "clangxx>=17.0.6" -c conda-forge
+
+        CUDA_HOME="${{ env.CONDA }}/envs/bnb-env"
+        echo CUDA_HOME=$CUDA_HOME >> "$GITHUB_ENV"
+        echo CUDA_PATH=$CUDA_HOME >> "$GITHUB_ENV"
+
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            # without -DCMAKE_CUDA_COMPILER=nvcc, cmake config always fail for cuda-11.8
+            echo DCMAKE_CUDA_COMPILER=-DCMAKE_CUDA_COMPILER=nvcc >> "$GITHUB_ENV"
+        fi
+
+        nvcc --version
+
+    - name: Update environment
+      run: mamba env update -n bnb-env -f environment-bnb.yml
+
+    - name: Prep build
+      run: python -m pip install cmake==3.27.9 ninja setuptools wheel
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -G Ninja ${{ env.DCMAKE_CUDA_COMPILER }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DCOMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90"
+        -S ${{ github.workspace }}
+
+    - name: Build
+      # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+    - name: Configure NOBLASLT
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -G Ninja ${{ env.DCMAKE_CUDA_COMPILER }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DCOMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90"
+        -DNO_CUBLASLT=ON
+        -S ${{ github.workspace }}
+
+    - name: Build NOBLASLT
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+    - name: Configure CPU
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -G Ninja ${{ env.DCMAKE_CUDA_COMPILER }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DNO_CUBLASLT=ON
+        -DBUILD_CUDA=OFF
+        -S ${{ github.workspace }}
+
+    - name: Build CPU
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+    - name: Test
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      # Execute tests defined by the CMake configuration. Note that --build-config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      run: ctest --build-config ${{ matrix.build_type }}
+
+    - name: Build dist
+      shell: bash -el {0}
+      run: |
+        python -m pip install build
+        python -m build --wheel
+        mkdir dist/cu${{ matrix.cuda-version }}
+        mv dist/bitsandbytes*.* dist/cu${{ matrix.cuda-version }}/
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4.3.0
+      with:
+        name: bitsandbytes-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cuda-version }}
+        path: |
+          ${{ github.workspace }}/dist/
