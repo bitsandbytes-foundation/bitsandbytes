@@ -271,26 +271,25 @@ def determine_cuda_runtime_lib_path() -> Union[Path, None]:
 
         if conda_cuda_libs:
             cuda_runtime_libs.update(conda_cuda_libs)
-
-        CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["CONDA_PREFIX"]} did not contain '
-            f'{CUDA_RUNTIME_LIBS} as expected! Searching further paths...', is_warning=True)
+        else:
+            CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["CONDA_PREFIX"]} did not contain '
+                f'{CUDA_RUNTIME_LIBS} as expected! Searching further paths...', is_warning=True)
 
     if "LD_LIBRARY_PATH" in candidate_env_vars:
         lib_ld_cuda_libs = find_cuda_lib_in(candidate_env_vars["LD_LIBRARY_PATH"])
+        warn_in_case_of_duplicates(lib_ld_cuda_libs)
 
         if lib_ld_cuda_libs:
             cuda_runtime_libs.update(lib_ld_cuda_libs)
-        warn_in_case_of_duplicates(lib_ld_cuda_libs)
-
-        CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["LD_LIBRARY_PATH"]} did not contain '
-            f'{CUDA_RUNTIME_LIBS} as expected! Searching further paths...', is_warning=True)
+        else:
+            CUDASetup.get_instance().add_log_entry(f'{candidate_env_vars["LD_LIBRARY_PATH"]} did not contain '
+                f'{CUDA_RUNTIME_LIBS} as expected! Searching further paths...', is_warning=True)
 
     remaining_candidate_env_vars = {
         env_var: value for env_var, value in candidate_env_vars.items()
         if env_var not in {"CONDA_PREFIX", "LD_LIBRARY_PATH"}
     }
 
-    cuda_runtime_libs = set()
     for env_var, value in remaining_candidate_env_vars.items():
         cuda_runtime_libs.update(find_cuda_lib_in(value))
 
