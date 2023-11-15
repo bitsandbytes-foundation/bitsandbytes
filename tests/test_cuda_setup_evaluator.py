@@ -9,8 +9,9 @@ from bitsandbytes.cuda_setup.main import (
     evaluate_cuda_setup,
     extract_candidate_paths,
 )
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_cuda_full_system():
     ## this only tests the cuda version and not compute capability
 
