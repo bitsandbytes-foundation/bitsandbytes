@@ -32,6 +32,7 @@ try:
     if torch.version.cuda:
         lib.get_cusparse.restype = ct.c_void_p
     elif torch.version.hip:
+        HIP_ENVIRONMENT = True
         lib.get_hipsparse.restype = ct.c_void_p
 
     lib.cget_managed_ptr.restype = ct.c_void_p
