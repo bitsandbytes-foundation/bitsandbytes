@@ -11,34 +11,18 @@ import torch
 
 HEADER_WIDTH = 60
 
-def execute_and_return(command_string: str) -> Tuple[str, str]:
-    def _decode(subprocess_err_out_tuple):
-        return tuple(
-            to_decode.decode("UTF-8").strip()
-            for to_decode in subprocess_err_out_tuple
-        )
-
-    def execute_and_return_decoded_std_streams(command_string):
-        return _decode(
-            subprocess.Popen(
-                shlex.split(command_string),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            ).communicate()
-        )
-
-    std_out, std_err = execute_and_return_decoded_std_streams(command_string)
-    return std_out, std_err
 
 def find_file_recursive(folder, filename):
-    folder = shlex.quote(folder)
-    filename = shlex.quote(filename)
-    cmd = f'find {folder} -name {filename}'
-    out, err = execute_and_return(cmd)
-    if len(err) > 0:
-        raise RuntimeError('Something when wrong when trying to find file. Maybe you do not have a linux system?')
+    import glob
+    outs = []
+    try:
+        for ext in ["so", "dll", "dylib"]:
+            out = glob.glob(os.path.join(folder, "**", filename + ext))
+            outs.extend(out)
+    except Exception as e:
+        raise RuntimeError('Error: Something when wrong when trying to find file. {e}')
 
-    return out
+    return outs
 
 
 def generate_bug_report_information():
@@ -48,18 +32,23 @@ def generate_bug_report_information():
     print('')
 
     if 'CONDA_PREFIX' in os.environ:
-        paths = find_file_recursive(os.environ['CONDA_PREFIX'], '*cuda*so')
+        paths = find_file_recursive(os.environ['CONDA_PREFIX'], '*cuda*')
         print_header("ANACONDA CUDA PATHS")
         print(paths)
         print('')
     if isdir('/usr/local/'):
-        paths = find_file_recursive('/usr/local', '*cuda*so')
+        paths = find_file_recursive('/usr/local', '*cuda*')
         print_header("/usr/local CUDA PATHS")
+        print(paths)
+        print('')
+    if 'CUDA_PATH' in os.environ and isdir(os.environ['CUDA_PATH']):
+        paths = find_file_recursive(os.environ['CUDA_PATH'], '*cuda*')
+        print_header("CUDA PATHS")
         print(paths)
         print('')
 
     if isdir(os.getcwd()):
-        paths = find_file_recursive(os.getcwd(), '*cuda*so')
+        paths = find_file_recursive(os.getcwd(), '*cuda*')
         print_header("WORKING DIRECTORY CUDA PATHS")
         print(paths)
         print('')
