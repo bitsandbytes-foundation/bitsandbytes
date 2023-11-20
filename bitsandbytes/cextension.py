@@ -29,6 +29,7 @@ try:
     lib.cadam32bit_grad_fp32 # runs on an error if the library could not be found -> COMPILED_WITH_CUDA=False
     lib.get_context.restype = ct.c_void_p
     
+    HIP_ENVIRONMENT = False
     if torch.version.cuda:
         lib.get_cusparse.restype = ct.c_void_p
     elif torch.version.hip:
