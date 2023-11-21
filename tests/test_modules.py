@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 import bitsandbytes as bnb
-
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 
 class MockArgs:
     def __init__(self, initial_data):
@@ -315,6 +315,7 @@ values = threshold
 names = [f"threshold_{vals}" for vals in values]
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("threshold", values, ids=names)
 def test_linear8bitlt_inference(threshold):
     l1 = bnb.nn.Linear8bitLt(32, 64, threshold=threshold).cuda().half()
@@ -329,6 +330,7 @@ def test_linear8bitlt_inference(threshold):
             assert l1.state.CxB is not None
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_linear8bitlt_accumulated_gradient():
     l1 = torch.nn.Sequential(*[bnb.nn.Linear8bitLt(32, 32).cuda().half() for i in range(2)])
     l2 = torch.nn.Sequential(*[torch.nn.Linear(32, 32).cuda().half() for i in range(2)])
@@ -518,6 +520,7 @@ modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True)
 modules.append(lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compress_statistics=True))
 names = ['Int8Lt', '4bit', 'FP4', 'NF4', 'FP4+C', 'NF4+C']
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("module", modules, ids=names)
 def test_kbit_backprop(module):
     b = 17

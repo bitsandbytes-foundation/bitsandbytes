@@ -10,7 +10,7 @@ import bitsandbytes as bnb
 from bitsandbytes import functional as F
 from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
 from bitsandbytes.nn.modules import Linear8bitLt
-
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
@@ -69,6 +69,7 @@ def test_linear_no_igemmlt():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt",
                          list(product([False, True], [False, True], [False, True], [False, True])))
 def test_linear_serialization(has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt):

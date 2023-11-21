@@ -10,6 +10,7 @@ import numpy as np
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 from scipy.stats import norm
 
 torch.set_printoptions(
@@ -90,7 +91,7 @@ def setup():
 def teardown():
     pass
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize(
     "dtype", [torch.float32, torch.float16], ids=["float", "half"]
 )
@@ -110,7 +111,7 @@ def test_estimate_quantiles(dtype):
     diff = torch.abs(code - quantiles)
     assert (diff > 5e-02).sum().item() == 0
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_quantile_quantization():
     for i in range(100):
         A1 = torch.randn(1024, 1024, device="cuda")
@@ -153,7 +154,7 @@ def test_dynamic_quantization():
         assert diff < 0.004
 
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("nested", [False, True], ids=["False", "True"])
 @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
 def test_dynamic_blockwise_quantization(nested, blocksize):
@@ -601,6 +602,7 @@ values = list(product(dim1, dim2, dim3, dims, dtype, a_order, out_order, transpo
 names = ["dim1_{}_dim2_{}_dim3_{}_dims_{}_dtype_{}_orderA_{}_orderOut_{}_transpose_{}".format(*vals)for vals in values]
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",values,ids=names)
 def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     if dims == 3 and out_order != "col32":
@@ -684,7 +686,7 @@ names = [
     for vals in values
 ]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
 def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
     for i in range(k):
@@ -732,7 +734,7 @@ names = [
     for vals in values
 ]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims", values, ids=names)
 def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
     formatB = F.get_special_format_str()
@@ -956,7 +958,7 @@ has_bias = [True, False]
 values = list(product(dim1, dim4, dims, formatB, has_bias))
 names = ["dim1_{}_dim4_{}_dims_{}_formatB_{}_has_bias_{}".format(*vals) for vals in values]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim4, dims, formatB, has_bias", values, ids=names)
 def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
     inner = torch.randint(1, 128, size=(1,)).item()
@@ -1109,7 +1111,7 @@ inner = torch.randint(1, 4 * 1024, size=(n,)).tolist()
 values = list(zip(dim1, dim4, inner))
 names = ["dim1_{}_dim4_{}_inner_{}".format(*vals) for vals in values]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim4, inner", values, ids=names)
 def test_integrated_igemmlt(dim1, dim4, inner):
     for i in range(k):
@@ -1298,7 +1300,7 @@ names = [
     for vals in values
 ]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize(
     "dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",
     values,
@@ -1347,7 +1349,7 @@ names = [
     for vals in values
 ]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_overflow():
     formatB = F.get_special_format_str()
     print(formatB)
@@ -1408,7 +1410,7 @@ transposed_B = [False, True]
 values = list(product(dim1, dim2, transposed_B))
 names = ["dim1_{}_dim2_{}_transposed_B_{}".format(*vals) for vals in values]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, transposed_B", values, ids=names)
 def test_spmm_coo(dim1, dim2, transposed_B):
     threshold = 1.5
@@ -1440,6 +1442,7 @@ def test_spmm_coo(dim1, dim2, transposed_B):
         assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=30)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_spmm_bench():
     batch = 2
     model = 1024 * 1
@@ -1489,7 +1492,7 @@ dim2 = torch.randint(256, 1 * 1024, size=(n,)).tolist()
 values = list(product(dim1, dim2))
 names = ["dim1_{}_dim2_{}".format(*vals) for vals in values]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2", values, ids=names)
 def test_integrated_sparse_decomp(dim1, dim2):
     threshold = 3.0
@@ -1672,6 +1675,7 @@ values = list(product(dim1, dim2, dtype))
 names = ["dim1_{}_dim2_{}_dtype_{}".format(*vals) for vals in values]
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, dtype", values, ids=names)
 def test_spmm_coo_dequant(dim1, dim2, dtype):
     threshold = 6.0
@@ -2178,6 +2182,7 @@ def test_few_bit_quant():
     #assert False
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_kbit_quantile_estimation():
     for i in range(100):
         data = torch.randn(1024, 1024, device='cuda')
@@ -2220,7 +2225,7 @@ def test_bench_dequantization():
     #print((time.time()-t0)/1e6)
 
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_fp4_quant():
     vals = list(product([0, 1], repeat=4))
 
@@ -2258,6 +2263,7 @@ def test_fp4_quant():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
 def test_4bit_compressed_stats(quant_type):
     for blocksize in [128, 64]:

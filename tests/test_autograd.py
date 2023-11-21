@@ -4,6 +4,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 
 n = 1
 k = 25
@@ -288,7 +289,7 @@ str_values = list(
 )
 names = ["dim1_{}_dim2_{}_dim3_{}_dim4_{}_func_{}_dtype_{}_requires_grad_{}_transpose_{}_decomp_{}_has_fp16_weights_{}_has_bias_{}".format(*vals) for vals in str_values]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize(
     "dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights, has_bias",
     values,
@@ -552,6 +553,7 @@ values = list(product(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose)
 str_values = list(product(dim1, dim2, dim3, dim4, str_funcs, dtype, req_grad_str, str_transpose))
 names = ["dim1_{}_dim2_{}_dim3_{}_dim4_{}_func_{}_dtype_{}_requires_grad_{}_transpose_{}".format(*vals) for vals in str_values]
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize( "dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose", values, ids=names)
 def test_matmul_fp8( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
