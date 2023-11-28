@@ -322,10 +322,10 @@ class MatMul8bitLt(torch.autograd.Function):
         if state.outlier_pool is None:
             state.outlier_pool = GlobalOutlierPooler.get_instance()
 
-        # Cast A to fp16
+        # Cast A to fp16 if not on CPU
         ctx.cast_dtype = torch.bfloat16 if device is "cpu" else torch.float16
         if A.dtype != ctx.cast_dtype:
-            warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
+            warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to {ctx.cast_dtype} during quantization")
 
         # 1. Quantize A
         if len(A.shape) == 3:
@@ -460,7 +460,7 @@ class MatMul8bitLt(torch.autograd.Function):
             # compute grad_bias first before changing grad_output dtype
             grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
 
-        # Cast grad_output to fp16
+        # Cast grad_output
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 

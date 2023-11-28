@@ -2371,7 +2371,6 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
     x += offset
     return x.to(dtype)
 
-
 def cuda_extract_outliers(A, SA, idx):
     shapeA = SA[0]
     formatA = SA[1]
@@ -2408,20 +2407,12 @@ def pipeline_test(A, batch_size):
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
         if A.device is "cuda":
             return cuda_double_quant(A=A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
-        elif A.device is "cpu":
-            pass
-        elif A.device is "xpu":
-            pass
         else:
             pass
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
         if A.device is "cuda":
             cuda_transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
-        elif A.device is "cpu":
-            pass
-        elif A.device is "xpu":
-            pass
         else:
             pass
 
@@ -2447,10 +2438,6 @@ def mm_dequant(
 ):
         if A.device is "cuda":
             cuda_mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
-        elif A.device is "cpu":
-            pass
-        elif A.device is "xpu":
-            pass
         else:
             pass
 
@@ -2458,29 +2445,17 @@ def mm_dequant(
 def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
         if A.device is "cuda":
             cuda_quantize_4bit(A, absmax = absmax, out = out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type)
-        elif A.device is "cpu":
-            pass
-        elif A.device is "xpu":
-            pass
         else:
             pass
 
 def dequantize_4bit(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
         if A.device is "cuda":
             cuda_dequantize_4bit(A, quant_state = quant_state, absmax = absmax, out = out, blocksize = blocksize, quant_type=quant_type)
-        elif A.device is "cpu":
-            pass
-        elif A.device is "xpu":
-            pass
         else:
             pass
 
 def extract_outliers(A, SA, idx):
         if A.device is "cuda":
             cuda_extract_outliers(A, SA, idx)
-        elif A.device is "cpu":
-            pass
-        elif A.device is "xpu":
-            pass
         else:
             pass

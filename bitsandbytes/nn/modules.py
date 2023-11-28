@@ -153,23 +153,17 @@ class Params4bit(torch.nn.Parameter):
         return self
 
     def cpu(self, device):
-        w = self.data.contiguous().half()
-        w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
-        self.data = w_4bit
-        self.quant_state = quant_state
+        warnings.warn("CPU Params4bit will be soon supported, return raw Params4bit for now")
+
+        return self
+
+    def xpu(self, device):
+        warnings.warn("XPU Params4bit will be soon supported, return raw Params4bit for now")
 
         return self
 
     def cuda(self, device):
         w = self.data.contiguous().half().cuda(device)
-        w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
-        self.data = w_4bit
-        self.quant_state = quant_state
-
-        return self
-
-    def xpu(self, device):
-        w = self.data.contiguous().half().to("xpu")
         w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
         self.data = w_4bit
         self.quant_state = quant_state
@@ -311,34 +305,13 @@ class Int8Params(torch.nn.Parameter):
 
 
     def cpu(self, device):
-        if self.has_fp16_weights:
-            return super()
-        else:
-            # we store the 8-bit rows-major weight
-            # we convert this weight to the turning/ampere weight during the first inference pass
-            B = self.data.contiguous().half()
-            CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-            del CBt
-            del SCBt
-            self.data = CB
-            setattr(self, "CB", CB)
-            setattr(self, "SCB", SCB)
+        warnings.warn("XPU Int8Params will be soon supported, return raw Int8Params for now")
 
         return self
 
-    def cpu(self, device):
-        if self.has_fp16_weights:
-            return super().to("xpu")
-        else:
-            # we store the 8-bit rows-major weight
-            # we convert this weight to the turning/ampere weight during the first inference pass
-            B = self.data.contiguous().half().to("xpu")
-            CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-            del CBt
-            del SCBt
-            self.data = CB
-            setattr(self, "CB", CB)
-            setattr(self, "SCB", SCB)
+
+    def xpu(self, device):
+        warnings.warn("XPU Int8Params will be soon supported, return raw Int8Params for now")
 
         return self
 
@@ -423,7 +396,8 @@ class Linear8bitLt(nn.Linear):
         self.index = index
 
         self.state.threshold = threshold
-        self.state.has_fp16_weights = has_fp16_weights
+        # fp16 not supports on CPU yet
+        self.state.has_fp16_weights = has_fp16_weights if device is not "cpu" else False
         self.state.memory_efficient_backward = memory_efficient_backward
         if threshold > 0.0 and not has_fp16_weights:
             self.state.use_pool = True
