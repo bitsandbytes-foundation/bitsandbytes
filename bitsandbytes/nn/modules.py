@@ -161,8 +161,7 @@ class Params4bit(torch.nn.Parameter):
         self.quant_state = QuantState.from_dict(qs_dict=quantized_stats, device=device)
         self.blocksize = self.quant_state.blocksize
         self.compress_statistics = self.quant_state.nested
-
-        return self
+        self.quant_type = self.quant_state.quant_type
 
     def cpu(self, device):
         warnings.warn("CPU Params4bit will be soon supported, return raw Params4bit for now")
