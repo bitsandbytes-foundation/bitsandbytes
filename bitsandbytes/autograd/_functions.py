@@ -223,8 +223,6 @@ matmul_cublas = MatMul8bit.apply
 
 
 def supports_igemmlt(device: torch.device) -> bool:
-    if device is "cpu":
-        return True
 
     """check if this device supports the optimized int8 kernel"""
     if torch.cuda.get_device_capability(device=device) < (7, 5):
@@ -233,6 +231,10 @@ def supports_igemmlt(device: torch.device) -> bool:
     nvidia16_models = ('GTX 1630', 'GTX 1650', 'GTX 1660')  # https://en.wikipedia.org/wiki/GeForce_16_series
     if any(model_name in device_name for model_name in nvidia16_models):
         return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
+
+    if device == "cpu":
+        return False
+
     return True
 
 
@@ -291,7 +293,6 @@ class MatmulLtState:
             self._tile_indices = get_tile_inds(self.formatB, self.CxB.device)
         return self._tile_indices
 
-
 class MatMul8bitLt(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
@@ -322,8 +323,8 @@ class MatMul8bitLt(torch.autograd.Function):
         if state.outlier_pool is None:
             state.outlier_pool = GlobalOutlierPooler.get_instance()
 
-        # Cast A to fp16 if not on CPU
-        ctx.cast_dtype = torch.bfloat16 if device is "cpu" else torch.float16
+        # Cast A to fp16
+        ctx.cast_dtype = torch.float16
         if A.dtype != ctx.cast_dtype:
             warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to {ctx.cast_dtype} during quantization")
 
@@ -571,7 +572,7 @@ def matmul(
 
 def matmul_4bit(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
     assert quant_state is not None
-    if A.numel() == A.shape[-1] and A.requires_grad == False and A.device is "cuda":
+    if A.numel() == A.shape[-1] and A.requires_grad == False and A.device == "cuda":
         absmax, shape, dtype, blocksize, compressed_stats, quant_type, data_type = quant_state
         if A.shape[-1] % blocksize != 0:
             warn(f'Some matrices hidden dimension is not a multiple of {blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')

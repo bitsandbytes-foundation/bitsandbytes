@@ -15,7 +15,7 @@ def test_manual_override():
     os.environ['CUDA_VERSION']='122'
     assert str(manual_cuda_path) in os.environ['LD_LIBRARY_PATH']
     import bitsandbytes as bnb
-    loaded_lib = bnb.cuda_setup.main.CUDASetup.get_instance().binary_name
+    loaded_lib = bnb.device_setup.cuda.main.CUDASetup.get_instance().binary_name
     assert loaded_lib == 'libbitsandbytes_cuda122.so'
 
 

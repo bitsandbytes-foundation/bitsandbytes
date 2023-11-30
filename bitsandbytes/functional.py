@@ -15,9 +15,26 @@ import numpy as np
 from functools import reduce  # Required in Python 3
 from typing import Tuple
 from torch import Tensor
+from warnings import warn
+from .cextension import COMPILED_WITH_CUDA
 
-from .cextension import COMPILED_WITH_CUDA, lib
+# CUDA specific lib
+if COMPILED_WITH_CUDA:
+    from .cextension import lib
 
+from bitsandbytes.device_setup.cpu.main import is_ipex_cpu_available
+from bitsandbytes.device_setup.xpu.main import is_ipex_xpu_available
+if not is_ipex_cpu_available():
+    warn(
+        "Intel Extension for PyTorch CPU/XPU supports are not available."
+        "Please refer to https://intel.github.io/intel-extension-for-pytorch/ for installation."
+        )
+else:
+    if not is_ipex_xpu_available():
+        warn(
+            "Intel Extension for PyTorch CPU support is available, while XPU is not."
+            )
+    import intel_extension_for_pytorch as ipex
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
@@ -2403,28 +2420,24 @@ def pipeline_test(A, batch_size):
     return out
 
 
-# 8 bits
+# 8 bits functions
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
-        if A.device is "cuda":
+        if A.device == "cuda":
             return cuda_double_quant(A=A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
         else:
-            pass
+            raise RuntimeError("double_quant on non-CUDA devices (CPU, XPU...) will be soon supported but not yet, aborting...")
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
-        if A.device is "cuda":
-            cuda_transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
+        if A.device == "cuda":
+            return cuda_transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
         else:
-            pass
+            raise RuntimeError("transform on non-CUDA devices (CPU, XPU...) will be soon supported but not yet, aborting...")
 
 def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
-        if A.device is "cuda":
-            cuda_igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
-        elif A.device is "cpu":
-            pass
-        elif A.device is "xpu":
-            pass
+        if A.device == "cuda":
+            return cuda_igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
         else:
-            pass
+            raise RuntimeError("igemmlt on non-CUDA devices (CPU, XPU...) will be soon supported but not yet, aborting...")
 
 def mm_dequant(
     A,
@@ -2436,26 +2449,26 @@ def mm_dequant(
     new_col_stats=None,
     bias=None
 ):
-        if A.device is "cuda":
+        if A.device == "cuda":
             cuda_mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
         else:
-            pass
-
-# 4 bits
-def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
-        if A.device is "cuda":
-            cuda_quantize_4bit(A, absmax = absmax, out = out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type)
-        else:
-            pass
-
-def dequantize_4bit(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
-        if A.device is "cuda":
-            cuda_dequantize_4bit(A, quant_state = quant_state, absmax = absmax, out = out, blocksize = blocksize, quant_type=quant_type)
-        else:
-            pass
+            raise RuntimeError("mm_dequant on non-CUDA devices (CPU, XPU...) will be soon supported but not yet, aborting...")
 
 def extract_outliers(A, SA, idx):
-        if A.device is "cuda":
-            cuda_extract_outliers(A, SA, idx)
+        if A.device == "cuda":
+            return cuda_extract_outliers(A, SA, idx)
         else:
-            pass
+            raise RuntimeError("extract_outliers on non-CUDA devices (CPU, XPU...) will be soon supported but not yet, aborting...")
+
+# 4 bits functions
+def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
+        if A.device == "cuda":
+            return cuda_quantize_4bit(A, absmax = absmax, out = out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type)
+        else:
+            raise RuntimeError("quantize_4bit on non-CUDA devices (CPU, XPU...) will be soon supported but not yet, aborting...")
+
+def dequantize_4bit(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
+        if A.device == "cuda":
+            return cuda_dequantize_4bit(A, quant_state = quant_state, absmax = absmax, out = out, blocksize = blocksize, quant_type=quant_type)
+        else:
+            raise RuntimeError("dequantize_4bit on non-CUDA devices (CPU, XPU...) will be soon supported but not yet, aborting...")

@@ -305,7 +305,7 @@ class Int8Params(torch.nn.Parameter):
 
 
     def cpu(self, device):
-        warnings.warn("XPU Int8Params will be soon supported, return raw Int8Params for now")
+        warnings.warn("CPU Int8Params will be soon supported, return raw Int8Params for now")
 
         return self
 
@@ -396,8 +396,7 @@ class Linear8bitLt(nn.Linear):
         self.index = index
 
         self.state.threshold = threshold
-        # fp16 not supports on CPU yet
-        self.state.has_fp16_weights = has_fp16_weights if device is not "cpu" else False
+        self.state.has_fp16_weights = has_fp16_weights
         self.state.memory_efficient_backward = memory_efficient_backward
         if threshold > 0.0 and not has_fp16_weights:
             self.state.use_pool = True

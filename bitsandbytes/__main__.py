@@ -97,8 +97,8 @@ generate_bug_report_information()
 
 
 from . import COMPILED_WITH_CUDA, PACKAGE_GITHUB_URL
-from .cuda_setup.env_vars import to_be_ignored
-from .cuda_setup.main import get_compute_capabilities
+from .device_setup.cuda.env_vars import to_be_ignored
+from .device_setup.cuda.main import get_compute_capabilities
 
 
 print_header("OTHER")
