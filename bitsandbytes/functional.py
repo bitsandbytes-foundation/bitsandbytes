@@ -2542,7 +2542,7 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, 
         if A.device == "cuda":
             return cuda_double_quant(A=A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
         else:
-            raise RuntimeError("double_quant on non-CUDA devices (CPU, XPU...) will be soon supported but not yet, aborting...")
+            raise RuntimeError("double_quant is not supported on non-CUDA devices")
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
         if A.device == "cuda":
