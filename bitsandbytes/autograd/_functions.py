@@ -223,7 +223,6 @@ matmul_cublas = MatMul8bit.apply
 
 
 def supports_igemmlt(device: torch.device) -> bool:
-
     """check if this device supports the optimized int8 kernel"""
     if torch.cuda.get_device_capability(device=device) < (7, 5):
         return False
@@ -231,8 +230,8 @@ def supports_igemmlt(device: torch.device) -> bool:
     nvidia16_models = ('GTX 1630', 'GTX 1650', 'GTX 1660')  # https://en.wikipedia.org/wiki/GeForce_16_series
     if any(model_name in device_name for model_name in nvidia16_models):
         return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
-
     if device == "cpu":
+        #TODO: will return True once CPU backend upstream the supports
         return False
 
     return True
@@ -272,7 +271,6 @@ class MatmulLtState:
     idx = None
     is_training = True
     has_fp16_weights = True
-
     memory_efficient_backward = False
     use_pool = False
     formatB = F.get_special_format_str()
@@ -324,14 +322,13 @@ class MatMul8bitLt(torch.autograd.Function):
             state.outlier_pool = GlobalOutlierPooler.get_instance()
 
         # Cast A to fp16
-        ctx.cast_dtype = torch.float16
-        if A.dtype != ctx.cast_dtype:
-            warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to {ctx.cast_dtype} during quantization")
+        if A.dtype != torch.float16:
+            warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
 
         # 1. Quantize A
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
-        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(ctx.cast_dtype), threshold=state.threshold)
+        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
 
         if state.threshold > 0.0 and coo_tensorA is not None:
             if state.has_fp16_weights:
@@ -366,7 +363,7 @@ class MatMul8bitLt(torch.autograd.Function):
                     state.SCB,
                     state.SCBt,
                     coo_tensorB,
-                ) = F.double_quant(B.to(ctx.cast_dtype))
+                ) = F.double_quant(B.to(torch.float16))
                 if using_igemmlt:
                     state.CxB, state.SB = F.transform(CB, to_order=formatB)
                 else:
@@ -461,11 +458,11 @@ class MatMul8bitLt(torch.autograd.Function):
             # compute grad_bias first before changing grad_output dtype
             grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
 
-        # Cast grad_output
+        # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(ctx.cast_dtype))
+        Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
             CxAt, SAt = F.transform(CAt, formatB, transpose=True)
             C32grad, Sgrad = F.transform(Cgradt, "col32", transpose=True)
