@@ -15,14 +15,10 @@ import numpy as np
 from functools import reduce  # Required in Python 3
 from typing import Tuple, Any, Dict
 from torch import Tensor
-
-from warnings import warn
-from .cextension import COMPILED_WITH_CUDA
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-# CUDA specific lib
-if COMPILED_WITH_CUDA:
-    from .cextension import lib
+from .cextension import COMPILED_WITH_CUDA, lib
+
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):

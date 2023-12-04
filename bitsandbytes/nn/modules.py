@@ -185,7 +185,7 @@ class Params4bit(torch.nn.Parameter):
 
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
-    
+
         if (device is not None and self.data.device.type == "cpu"):
             return self.quantize_to_device(device)
         else:
