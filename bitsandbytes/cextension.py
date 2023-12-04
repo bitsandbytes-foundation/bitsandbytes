@@ -13,7 +13,6 @@ if setup.initialized != True:
     setup.run_cuda_setup()
 
 lib = setup.lib
-
 try:
     if lib is None and torch.cuda.is_available():
         CUDASetup.get_instance().generate_instructions()
