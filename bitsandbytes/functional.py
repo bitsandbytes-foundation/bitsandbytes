@@ -2037,16 +2037,16 @@ from bitsandbytes.backends import Backends
 
 # 8 bits common functions
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
-    assert A.device in Backends.device, f"Device backend for {A.device} is not supported"
-    return Backends.device[A.device].double_quant(A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
+    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
+    return Backends.devices[A.device.type].double_quant(A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
-    assert A.device in Backends.device, f"Device backend for {A.device} is not supported"
-    return Backends.device[A.device].transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
+    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
+    return Backends.devices[A.device.type].transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
 
 def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
-    assert A.device in Backends.device, f"Device backend for {A.device} is not supported"
-    return Backends.device[A.device].igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
+    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
+    return Backends.devices[A.device.type].igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
 
 def mm_dequant(
     A,
@@ -2058,21 +2058,21 @@ def mm_dequant(
     new_col_stats=None,
     bias=None
 ):
-    assert A.device in Backends.device, f"Device backend for {A.device} is not supported"
-    return Backends.device[A.device].mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
+    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
+    return Backends.devices[A.device.type].mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
 
 def extract_outliers(A, SA, idx):
-    assert A.device in Backends.device, f"Device backend for {A.device} is not supported"
-    return Backends.device[A.device].extract_outliers(A, SA, idx)
+    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
+    return Backends.devices[A.device.type].extract_outliers(A, SA, idx)
 
 # 4 bits common functions
 def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4'):
-    assert A.device in Backends.device, f"Device backend for {A.device} is not supported"
-    return Backends.device[A.device].quantize_4bit(A, absmax = absmax, out = out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type)
+    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
+    return Backends.devices[A.device.type].quantize_4bit(A, absmax = absmax, out = out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type)
 
 def dequantize_4bit(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4'):
-    assert A.device in Backends.device, f"Device backend for {A.device} is not supported"
-    return Backends.device[A.device].dequantize_4bit(A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type)
+    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
+    return Backends.devices[A.device.type].dequantize_4bit(A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type)
 
 def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4')

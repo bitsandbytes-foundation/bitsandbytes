@@ -162,6 +162,7 @@ class Params4bit(torch.nn.Parameter):
         self.blocksize = self.quant_state.blocksize
         self.compress_statistics = self.quant_state.nested
         self.quant_type = self.quant_state.quant_type
+        return self
 
     def quantize_to_device(self, device):
         w = self.data.contiguous().half().to(device)
