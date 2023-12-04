@@ -230,7 +230,7 @@ def supports_igemmlt(device: torch.device) -> bool:
     nvidia16_models = ('GTX 1630', 'GTX 1650', 'GTX 1660')  # https://en.wikipedia.org/wiki/GeForce_16_series
     if any(model_name in device_name for model_name in nvidia16_models):
         return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
-    if device == "cpu":
+    if device.type == "cpu":
         #TODO: will return True once CPU backend upstream the supports
         return False
 
