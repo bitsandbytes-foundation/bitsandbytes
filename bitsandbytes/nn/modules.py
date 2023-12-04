@@ -163,16 +163,8 @@ class Params4bit(torch.nn.Parameter):
         self.compress_statistics = self.quant_state.nested
         self.quant_type = self.quant_state.quant_type
 
-    def cpu(self, device):
-        warnings.warn("CPU Params4bit will be soon supported, return raw Params4bit for now")
-        return self
-
-    def xpu(self, device):
-        warnings.warn("XPU Params4bit will be soon supported, return raw Params4bit for now")
-        return self
-
-    def cuda(self, device):
-        w = self.data.contiguous().half().cuda(device)
+    def quantize_to_device(self, device):
+        w = self.data.contiguous().half().to(device)
         w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
         self.data = w_4bit
         self.quant_state = quant_state
@@ -194,14 +186,8 @@ class Params4bit(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
     
-        if device is not None and device.type == "cpu":
-            return self.cpu(device)
-
-        if (device is not None and device.type != "cpu" and self.data.device.type == "cpu"):
-            if device.type == "cuda":
-                return self.cuda(device)
-            elif device.type == "xpu":
-                return self.xpu(device)
+        if (device is not None and self.data.device.type == "cpu"):
+            return self.quantize_to_device(device)
         else:
             if self.quant_state is not None:
                 self.quant_state.to(device)
@@ -309,25 +295,13 @@ class Int8Params(torch.nn.Parameter):
             data = torch.empty(0)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
-
-    def cpu(self, device):
-        warnings.warn("CPU Int8Params will be soon supported, return raw Int8Params for now")
-
-        return self
-
-
-    def xpu(self, device):
-        warnings.warn("XPU Int8Params will be soon supported, return raw Int8Params for now")
-
-        return self
-
-    def cuda(self, device):
+    def quantize_to_device(self, device):
         if self.has_fp16_weights:
-            return super().cuda(device)
+            return super().to(device)
         else:
             # we store the 8-bit rows-major weight
             # we convert this weight to the turning/ampere weight during the first inference pass
-            B = self.data.contiguous().half().cuda(device)
+            B = self.data.contiguous().half().to(device)
             CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
             del CBt
             del SCBt
@@ -359,14 +333,8 @@ class Int8Params(torch.nn.Parameter):
             *args, **kwargs
         )
 
-        if device is not None and device.type == "cpu":
-            return self.cpu(device)
-
-        if (device is not None and device.type != "cpu" and self.data.device.type == "cpu"):
-            if device.type == "cuda":
-                return self.cuda(device)
-            elif device.type == "xpu":
-                return self.xpu(device)
+        if (device is not None and self.data.device.type == "cpu"):
+            return self.quantize_to_device(device)
         else:
             new_param = Int8Params(
                 super().to(

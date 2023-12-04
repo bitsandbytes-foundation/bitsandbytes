@@ -18,21 +18,18 @@ class Backends:
             "xpu",
         }, "register device backend choices in [cpu, cuda, xpu]"
 
-        # check 8bits or 4bits functionality, at least one is compelete
+        # check 8bits and 4bits interfaces
         if (
             hasattr(backend_class, "double_quant")
             and hasattr(backend_class, "transform")
             and hasattr(backend_class, "igemmlt")
             and hasattr(backend_class, "mm_dequant")
             and hasattr(backend_class, "extract_outliers")
+            and hasattr(backend_class, "quantize_4bit")
+            and hasattr(backend_class, "dequantize_4bit")
         ):
             self.devices[backend_name.lower()] = backend_class
-
-        elif hasattr(backend_class, "quantize_4bit") and hasattr(
-            backend_class, "dequantize_4bit"
-        ):
-            self.devices[backend_name.lower()] = backend_classq
         else:
             assert (
                 False
-            ), f"register device backend {backend_name.lower()} but its functionality is not compelete"
+            ), f"register device backend {backend_name.lower()} but its interfaces are not compelete"
