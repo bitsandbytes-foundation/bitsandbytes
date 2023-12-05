@@ -13,7 +13,7 @@ class Backends:
     devices = {}
 
     @classmethod
-    def register_backend(self, backend_name: str, backend_class):
+    def register_backend(cls, backend_name: str, backend_class):
         assert backend_name.lower() in {
             "cpu",
             "cuda",
@@ -30,12 +30,11 @@ class Backends:
             and hasattr(backend_class, "quantize_4bit")
             and hasattr(backend_class, "dequantize_4bit")
         ):
-            Backends.devices[backend_name.lower()] = backend_class
+            cls.devices[backend_name.lower()] = backend_class
         else:
             assert (
                 False
             ), f"register device backend {backend_name.lower()} but its interfaces are not compelete"
-
 
 
 Backends.register_backend("cuda", CUDABackend)
