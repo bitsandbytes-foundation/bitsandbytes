@@ -291,14 +291,14 @@ class MatmulLtState:
             self._tile_indices = get_tile_inds(self.formatB, self.CxB.device)
         return self._tile_indices
 
+
 class MatMul8bitLt(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
 
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
-        device = A.device
-        using_igemmlt = supports_igemmlt(device) and not state.force_no_igemmlt
+        using_igemmlt = supports_igemmlt(A.device) and not state.force_no_igemmlt
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
@@ -307,9 +307,9 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.B = B
             ctx.bias = bias
             if A.shape[-1] == B.shape[0]:
-                return torch.empty(A.shape[:-1] + B.shape[1:], dtype=A.dtype, device=device)
+                return torch.empty(A.shape[:-1] + B.shape[1:], dtype=A.dtype, device=A.device)
             else:
-                return torch.empty(A.shape[:-1] + B.shape[:1], dtype=A.dtype, device=device)
+                return torch.empty(A.shape[:-1] + B.shape[:1], dtype=A.dtype, device=A.device)
 
         # 1. Quantize A
         # 2. Quantize B
@@ -341,7 +341,7 @@ class MatMul8bitLt(torch.autograd.Function):
             else:
                 if state.CxB is None and using_igemmlt:
                     # B in in 8-bit row-major, we can transform it back to 16-bit to extract outlier dimensions
-                    # we also need to convert it to the turing/ampere format if using cuda
+                    # we also need to convert it to the turing/ampere format
                     state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
         else:
             if not state.has_fp16_weights and state.CxB is None and using_igemmlt:
@@ -403,7 +403,7 @@ class MatMul8bitLt(torch.autograd.Function):
         if using_igemmlt:
             C32A, SA = F.transform(CA, "col32")
             out32, Sout32 = F.igemmlt(C32A, state.CxB, SA, state.SB)
-            if bias is None or bias.dtype in [torch.float16, torch.bfloat16]:
+            if bias is None or bias.dtype == torch.float16:
                 # we apply the fused bias here
                 output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=bias)
                 output = output.to(A.dtype)
@@ -568,7 +568,7 @@ def matmul(
 
 def matmul_4bit(A: tensor, B: tensor, quant_state: F.QuantState, out: tensor = None, bias=None):
     assert quant_state is not None
-    if A.numel() == A.shape[-1] and A.requires_grad == False and A.device == "cuda":
+    if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type == "cuda":
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(f'Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')
             return MatMul4Bit.apply(A, B, out, bias, quant_state)

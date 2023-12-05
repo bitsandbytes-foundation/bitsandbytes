@@ -1,5 +1,6 @@
 import torch
 from torch import Tensor
+import ctypes as ct
 from bitsandbytes.functional import (
     pre_call,
     post_call,
@@ -14,11 +15,19 @@ from bitsandbytes.functional import (
     dequantize_blockwise,
 )
 from bitsandbytes.functional import CUBLAS_Context, QuantState
+from bitsandbytes.cextension import lib
+
 
 class CUDABackend:
     @classmethod
     def double_quant(
-        A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
+        cls,
+        A,
+        col_stats=None,
+        row_stats=None,
+        out_col=None,
+        out_row=None,
+        threshold=0.0,
     ):
         device = A.device
         assert A.dtype == torch.half
@@ -114,7 +123,14 @@ class CUDABackend:
 
     @classmethod
     def transform(
-        A, to_order, from_order="row", out=None, transpose=False, state=None, ld=None
+        cls,
+        A,
+        to_order,
+        from_order="row",
+        out=None,
+        transpose=False,
+        state=None,
+        ld=None,
     ):
         prev_device = pre_call(A.device)
         if state is None:
@@ -167,7 +183,7 @@ class CUDABackend:
         return out, new_state
 
     @classmethod
-    def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
+    def igemmlt(cls, A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
         shapeA = SA[0]
         shapeB = SB[0]
         dimsA = len(shapeA)
@@ -271,6 +287,7 @@ class CUDABackend:
 
     @classmethod
     def mm_dequant(
+        cls,
         A,
         quant_state,
         row_stats,
@@ -332,7 +349,7 @@ class CUDABackend:
         return out
 
     @classmethod
-    def extract_outliers(A, SA, idx):
+    def extract_outliers(cls, A, SA, idx):
         shapeA = SA[0]
         formatA = SA[1]
         assert formatA in ["col_turing", "col_ampere"]
@@ -358,6 +375,7 @@ class CUDABackend:
 
     @classmethod
     def quantize_4bit(
+        cls,
         A: Tensor,
         absmax: Tensor = None,
         out: Tensor = None,
@@ -509,6 +527,7 @@ class CUDABackend:
 
     @classmethod
     def dequantize_4bit(
+        cls,
         A: Tensor,
         quant_state: QuantState = None,
         absmax: Tensor = None,
@@ -648,4 +667,3 @@ class CUDABackend:
             return out.t()
         else:
             return out
-

@@ -125,7 +125,7 @@ class CUDASetup:
         self.binary_name = binary_name
         self.manual_override()
 
-        package_dir = Path(__file__).parent.parent
+        package_dir = Path(__file__).parent.parent.parent
         binary_path = package_dir / self.binary_name
 
         try:

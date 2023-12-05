@@ -2068,7 +2068,7 @@ def extract_outliers(A, SA, idx):
 # 4 bits common functions
 def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4'):
     assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
-    return Backends.devices[A.device.type].quantize_4bit(A, absmax = absmax, out = out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type)
+    return Backends.devices[A.device.type].quantize_4bit(A, absmax=absmax, out=out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type)
 
 def dequantize_4bit(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4'):
     assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
