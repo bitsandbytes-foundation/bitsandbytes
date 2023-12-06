@@ -320,3 +320,10 @@ Bug fixes:
 
 Feature:
  - 4-bit serialization now supported. This enables 4-bit load/store. Thank you @poedator #753
+
+### 0.41.3
+
+Bug fixes:
+ - Fixed an issue where 4-bit serialization would fail for layers without double quantization #868. Thank you, @poedator
+ - Fixed an issue where calling .to() or .cuda() on a 4-bit layer twice would result in an error #867. Thank you, @jph00
+
