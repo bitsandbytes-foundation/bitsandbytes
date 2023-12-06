@@ -642,7 +642,7 @@ class QuantState:
             blocksize=qs_dict['blocksize'],
             code=qs_dict['quant_map'].to(device),
             dtype=getattr(torch, qs_dict['dtype']),
-            shape=torch.Size(qs_dict['shape']),
+            shape=torch.Size(qs_dict['shape']) if qs_dict['shape'] is not None else None,
             offset=offset,
             state2=state2,
         )
@@ -651,7 +651,7 @@ class QuantState:
     def as_dict(self, packed=False):
         """
         returns dict of tensors and strings to use in serialization via _save_to_state_dict()
-        param: packed -- returns dict[str, torch.Tensor] for state_dict
+        param: packed -- returns dict[str, torch.Tensor] for state_dict fit for safetensors saving
         """
         qs_dict = {
             'quant_type': self.quant_type,
@@ -659,19 +659,20 @@ class QuantState:
             'blocksize': self.blocksize,
             'quant_map': self.code,
             'dtype': str(self.dtype).strip('torch.'),
-            'shape': tuple(self.shape) if self.nested else None,
+            'shape': tuple(self.shape),
         }
         if self.nested:
             qs_dict.update({
                 'nested_absmax': self.state2.absmax,
                 'nested_blocksize': self.state2.blocksize,
-                'nested_quant_map': self.state2.code,
+                'nested_quant_map': self.state2.code.clone(),  # un-shared to avoid restoring it after shared tensors are removed by safetensors
                 'nested_dtype': str(self.state2.dtype).strip('torch.'),
                 'nested_offset': self.offset.item(),
             })
         if not packed:
             return qs_dict
 
+        # packed format allows serialization of non-tensor components, critical for saving in safetensors format
         qs_packed_dict = {k: v for k, v in qs_dict.items() if isinstance(v, torch.Tensor)}
         non_tensor_dict = {k: v for k, v in qs_dict.items() if not isinstance(v, torch.Tensor)}
         qs_packed_dict["quant_state." + "bitsandbytes__" + self.quant_type] = pack_dict_to_tensor(non_tensor_dict)
