@@ -44,7 +44,7 @@ def assert_all_approx_close(a, b, atol=1e-8, rtol=1e-5, count=10):
     sumval = (idx == 0).sum().item()
     if sumval > count:
         print(f"Too many values not close: assert {sumval} < {count}")
-        torch.testing.assert_close(a, b, rtol, atol)
+        torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
 
 class LinearFunction(torch.autograd.Function):
@@ -538,7 +538,6 @@ def test_kbit_backprop(module):
     kbit[1].bias.detach().copy_(ref[1].bias)
     ref = ref.half().cuda()
     kbit = kbit.half().cuda()
-    kbit = kbit.half().to('cuda')
 
     errs1 = []
     errs2 = []
@@ -568,6 +567,8 @@ def test_kbit_backprop(module):
         if isinstance(module, bnb.nn.Linear8bitLt):
             assert_all_approx_close(grad1, grad2, atol=0.008, rtol=0.05, count=1)
             torch.testing.assert_close(bgrad1, bgrad2, atol=0.008, rtol=0.05)
+        elif isinstance(module, bnb.nn.LinearSparse):
+            assert_all_approx_close(grad1, grad2, atol=0.02, rtol=0.05, count=1)
         else:
             assert_all_approx_close(grad1, grad2, atol=0.015, rtol=0.05, count=1)
             torch.testing.assert_close(bgrad1, bgrad2, atol=0.02, rtol=0.05)
@@ -640,4 +641,13 @@ def test_4bit_warnings():
     assert len(record) == 2
 
 
+
+def test_linear_sparse_inference():
+    dim1 = 64
+
+    net = nn.Sequential(*[bnb.nn.LinearSparse(dim1, dim1) for i in range(10)])
+    net = net.cuda()
+    assert net[2].weight.numel() == 1
+    inp = torch.rand(10, dim1).cuda().half()
+    out = net(inp)
 

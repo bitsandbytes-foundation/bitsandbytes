@@ -2042,6 +2042,11 @@ class CSRSparseTensor:
         self.colidx = colidx
         self.values = values
 
+    def to(device):
+        self.rowptr = self.rowptr.to(device)
+        self.colidx = self.colidx.to(device)
+        self.values = self.values.to(device)
+
 
 class CSCSparseTensor:
     def __init__(self, rows, cols, nnz, colptr, rowidx, values):
@@ -2059,6 +2064,39 @@ class CSCSparseTensor:
         self.rowidx = rowidx
         self.values = values
 
+def dense2coo(A, threshold=None, percentile=None):
+    if len(A.shape) != 2:
+        raise ValueError('Currently only tensors with two dimensions are supported for sparsification!')
+
+    if threshold is None and percentile is None:
+        raise ValueError('Either threshold or percentile must be set to estimate a sparsification threshold!')
+    if percentile is not None and threshold is not None:
+        raise ValueError('Either threshold or percentile must be set to estimate a sparsification threshold, but both are set!')
+
+    if percentile is not None:
+        assert percentile > 0 and percentile < 1
+        # q = estimate_quantiles(A.abs(), offset=0) fast, but too imprecise :(
+        # lets estimate the quantile via the eCDF instead
+        idx = round(A.numel()*percentile)
+        values_sorted, _ = torch.sort(A.abs().flatten())
+        threshold = values_sorted[idx].item()
+
+    if threshold is not None:
+        assert threshold > 0
+        mask = (A.abs() > threshold)
+        rowidx, colidx = torch.where(mask == 1)
+        values = A[rowidx, colidx]
+
+    return COOSparseTensor(A.shape[0], A.shape[1], mask.sum().item(), rowidx.int(), colidx.int(), values.half())
+
+
+def coo2dense(A):
+    out = torch.zeros(A.rows, A.cols, device=A.values.device, dtype=A.values.dtype)
+    out[A.rowidx, A.colidx] = A.values
+    return out
+
+def csr2dense(A):
+    out = torch.zeros(A.rows, A.cols, device=A.values.device, dtype=A.values.dtype)
 
 def coo2csr(cooA):
     values, counts = torch.unique(cooA.rowidx, return_counts=True)

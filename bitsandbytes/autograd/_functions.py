@@ -548,6 +548,62 @@ class MatMul4Bit(torch.autograd.Function):
         return grad_A, grad_B, None, grad_bias, None
 
 
+class MatMulSparse(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, A, B, out=None, bias=None, sparse_state: F.COOSparseTensor = None):
+        # default of pytorch behavior if inputs are empty
+        ctx.is_empty = False
+        if prod(A.shape) == 0:
+            ctx.is_empty = True
+            ctx.A = A
+            ctx.B = B
+            ctx.bias = bias
+            B_shape = quant_state.shape
+            if A.shape[-1] == B_shape[0]:
+                return torch.empty(A.shape[:-1] + B_shape[1:], dtype=A.dtype, device=A.device)
+            else:
+                return torch.empty(A.shape[:-1] + B_shape[:1], dtype=A.dtype, device=A.device)
+
+        output = torch.nn.functional.linear(A, coo2dense(sparse_state).t(), bias)
+
+        ctx.state = sparse_state
+
+        if any(ctx.needs_input_grad[:2]):
+            ctx.tensors = (A, sparse_state)
+        else:
+            ctx.tensors = (None, None)
+
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.is_empty:
+            bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
+            return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
+
+        req_gradA, req_gradB, _, req_gradBias, _= ctx.needs_input_grad
+        A, sparse_state = ctx.tensors
+
+        grad_A, grad_B, grad_bias = None, None, None
+
+        if req_gradBias:
+            # compute grad_bias first before changing grad_output dtype
+            grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
+
+        # not supported by PyTorch. TODO: create work-around
+        #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
+        if req_gradA:
+            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
+
+        if req_gradB:
+            grad_B = torch.matmul(A.t(), grad_output)
+            nonzero_values = grad_B[sparse_state.rowidx, sparse_state.colidx]
+            grad_B *= 0
+            grad_B[sparse_state.rowidx, sparse_state.colidx] = nonzero_values
+
+        return grad_A, grad_B, None, grad_bias, None
+
+
 def matmul(
     A: tensor,
     B: tensor,
@@ -560,7 +616,6 @@ def matmul(
     if threshold > 0.0:
         state.threshold = threshold
     return MatMul8bitLt.apply(A, B, out, bias, state)
-
 
 def matmul_4bit(A: tensor, B: tensor, quant_state: F.QuantState, out: tensor = None, bias=None):
     assert quant_state is not None

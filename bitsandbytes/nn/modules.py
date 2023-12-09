@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
 
 import bitsandbytes as bnb
-from bitsandbytes.functional import QuantState
+from bitsandbytes.functional import QuantState, CSRSparseTensor
 from bitsandbytes.autograd._functions import undo_layout, get_tile_inds
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import OutlierTracer, find_outlier_dims
@@ -259,7 +259,6 @@ class Linear4bit(nn.Linear):
 
         return out
 
-
 class LinearFP4(Linear4bit):
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, device=None):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'fp4', device)
@@ -279,6 +278,83 @@ class LinearNF4(Linear4bit):
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, device=None):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'nf4', device)
 
+
+class ParamsSparse(torch.nn.Parameter):
+    def __new__(cls, data: Optional[torch.Tensor] = None, requires_grad=False, sparsity_level=0.98, sparse_state: CSRSparseTensor = None) -> "ParamsSparse":
+        if data is None:
+            data = torch.empty(0)
+
+        if requires_grad:
+            raise ValueError('requires_grad=True currently not supported. This will be supported in a future version of bitsandbytes')
+        self = torch.Tensor._make_subclass(cls, data, requires_grad)
+        self.sparse_state = sparse_state
+        self.sparsity_level = sparsity_level
+        self.data = data
+        return self
+
+    # TODO: implement state for sparse saving
+    #@classmethod
+    #def from_prequantized(cls, data: torch.Tensor, sparse_state: CSRSparseTensorq, requires_grad: bool = False, device='cuda', **kwargs) -> "ParamsSparse":
+    #    self = torch.Tensor._make_subclass(cls, data.to(device))
+    #    self.requires_grad = requires_grad
+    #    self.sparse_state = QuantState.from_dict(qs_dict=quantized_stats, device=device)
+    #    return self
+
+    def cuda(self, device):
+        w = self.data.contiguous().half().cuda(device)
+        coo_tensor = bnb.functional.dense2coo(w, percentile=self.sparsity_level)
+        # compress to CSR representation
+        # TODO: this is much more efficient, but does need a specialized CUDA kernel for desparsification to be fast
+        #csr_tensor = bnb.functional.coo2csr(coo_tensor)
+        self.data = torch.empty(1, 1)
+        self.sparse_state = coo_tensor
+
+        return self
+
+    @overload
+    def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ..., non_blocking: bool = ...,) -> T:
+        ...
+
+    @overload
+    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T:
+        ...
+
+    @overload
+    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T:
+        ...
+
+    def to(self, *args, **kwargs):
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+
+        if (device is not None and device.type == "cuda" and self.data.device.type == "cpu"):
+            return self.cuda(device)
+        else:
+            if self.sparse_state is not None:
+                self.sparse_state.to(device)
+
+            new_param = ParamsSparse(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
+                                   requires_grad=self.requires_grad, sparsity_level=self.sparsity_level,
+                                   sparse_state=self.sparse_state)
+
+            return new_param
+
+class LinearSparse(nn.Linear):
+
+    def __init__(self, input_features, output_features, bias=True, device=None, dtype=None, sparsity_level=0.98):
+        super().__init__(input_features, output_features, bias, device, dtype)
+        self.weight = ParamsSparse(self.weight.data, requires_grad=False, sparsity_level=sparsity_level)
+
+    def forward(self, x: torch.Tensor):
+        if self.bias is not None and self.bias.dtype != x.dtype:
+            self.bias.data = self.bias.data.to(x.dtype)
+
+        if getattr(self.weight, 'sparse_state', None) is None:
+            print('Sparse state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+
+        # naive implementation, currently does not support finetuning
+        w = bnb.functional.coo2dense(self.weight.sparse_state)
+
+        return torch.nn.functional.linear(x, w, bias=self.bias)
 
 class Int8Params(torch.nn.Parameter):
     def __new__(

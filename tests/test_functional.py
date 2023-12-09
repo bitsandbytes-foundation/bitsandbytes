@@ -2560,3 +2560,25 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
         #torch.testing.assert_close(A, C2, rtol=1e-5, atol=0.080)
 
 
+def test_dense2coo():
+    threshold = 0.1
+    A1 = torch.randn(10, 10).cuda()
+    mask = A1.abs()<= threshold
+    A1[mask] = 0
+
+    coo_tensor = F.dense2coo(A1, threshold=threshold)
+    A2 = F.coo2dense(coo_tensor)
+
+    torch.testing.assert_allclose(A1, A2)
+
+    percentile = 0.9
+    A1 = torch.arange(10000, device='cuda').reshape(100, 100).float() + 1
+    coo_tensor = F.dense2coo(A1, percentile=percentile)
+    A2 = F.coo2dense(coo_tensor)
+
+    # 0.9 percentile is "9000" which should leave ~1000 values are not sparsified
+    # (it is actually 999, some rounding thing I guess)
+    assert (A2 > 0).sum() == 999
+
+
+
