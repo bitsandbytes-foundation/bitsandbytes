@@ -17,6 +17,8 @@ dependencies:
   - conda-forge::transformers
   # Development
   - conda-forge::pytest
+  - conda-forge::build        # build Python packages
+  - conda-forge::twine        # upload Python packages
   - conda-forge::pytest-cases # more readable and composable parametrized tests
   - conda-forge::ipython      # better interactive shell
   - conda-forge::debugpy      # debugger-support for VSCode
