@@ -146,13 +146,13 @@ For upcoming features and changes and full history see [Patch Notes](CHANGELOG.m
 To compile from source, you need an installation of CUDA. If `nvcc` is not installed, you can install the CUDA Toolkit with nvcc through the following commands.
 
 ```bash
-wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh
+wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cuda.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
-#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121}
+#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122}
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
 
-# For example, the following installs CUDA 11.8 to ~/local/cuda-11.8 and exports the path to your .bashrc
-bash cuda install 118 ~/local 1 
+# For example, the following installs CUDA 11.7 to ~/local/cuda-11.7 and exports the path to your .bashrc
+bash install_cuda.sh 117 ~/local 1 
 ```
 
 To use a specific CUDA version just for a single compile run, you can set the variable `CUDA_HOME`, for example the following command compiles `libbitsandbytes_cuda117.so` using compiler flags for cuda11x with the cuda version at `~/local/cuda-11.7`:
