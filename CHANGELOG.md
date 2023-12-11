@@ -311,7 +311,19 @@ User experience:
 Performance:
  - improved 4-bit inference performance for A100 GPUs. This degraded performance for A40/RTX3090 and RTX 4090 GPUs slightly.
 
-### 0.41.0
+### 0.41.1
 
 Bug fixes:
  - Fixed bugs in dynamic exponent data type creation. Thank you @RossM, @KohakuBlueleaf, @ArrowM #659 #227 #262 #152
+
+### 0.41.2
+
+Feature:
+ - 4-bit serialization now supported. This enables 4-bit load/store. Thank you @poedator #753
+
+### 0.41.3
+
+Bug fixes:
+ - Fixed an issue where 4-bit serialization would fail for layers without double quantization #868. Thank you, @poedator
+ - Fixed an issue where calling .to() or .cuda() on a 4-bit layer twice would result in an error #867. Thank you, @jph00
+
