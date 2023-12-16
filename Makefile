@@ -23,6 +23,9 @@ ifndef ROCM_TARGET
 $(error ERROR: ROCM_TARGET not set. Call make with ROCM string (see https://www.llvm.org/docs/AMDGPUUsage.html#processors), for example: make hip ROCM_TARGET=gfx1030)
 ROCM_TARGET:=
 endif
+else
+$(warning WARNING: Unable to find hipcc in path, fallback to ROCM_HOME /opt/rocm)
+ROCM_HOME:=/opt/rocm
 endif
 
 
