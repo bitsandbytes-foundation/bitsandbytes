@@ -7,7 +7,7 @@ ifeq ($(CUDA_HOME),)
 	CUDA_HOME:= $(shell which nvcc | rev | cut -d'/' -f3- | rev)
 endif
 ifeq ($(ROCM_HOME),)
-	ROCM_HOME:= $(shell which hipcc | rev | cut -d'/' -f4- | rev)
+	ROCM_HOME:= $(shell which hipcc | rev | cut -d'/' -f3- | rev)
 endif
 
 ifneq ($(CUDA_HOME),)
