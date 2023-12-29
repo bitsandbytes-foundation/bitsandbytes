@@ -41,7 +41,11 @@ model = AutoModelForCausalLM.from_pretrained(
   'decapoda-research/llama-7b-hf,
   device_map='auto',
   load_in_8bit=True,
-  max_memory=f'{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB')
+  max_memory={
+    i: f'{int(torch.cuda.mem_get_info(i)[0]/1024**3)-2}GB'
+    for i in range(torch.cuda.device_count())
+  }
+)
 ```
 
 A more detailed example, can be found in [examples/int8_inference_huggingface.py](examples/int8_inference_huggingface.py).
