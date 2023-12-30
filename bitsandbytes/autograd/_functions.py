@@ -3,6 +3,7 @@ import warnings
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
 from typing import Tuple, Optional, List
+from warnings import warn
 
 import torch
 
@@ -235,6 +236,19 @@ def supports_igemmlt(device: torch.device) -> bool:
     return True
 
 
+def _get_tile_size(format):
+    assert format in (
+        "col_turing",
+        "col_ampere",
+    ), f"please find this assert and manually enter tile size for {format}"
+    return (8, 32) if format == "col_turing" else (32, 32)
+
+
+def get_tile_inds(format, device):
+    transform = lambda x: F.transform(x.to(device), from_order="row", to_order=format)[0].to(x.device)
+    with torch.no_grad():
+        return get_inverse_transform_indices(transform, _get_tile_size(format)).to(device)
+
 @dataclass
 class MatmulLtState:
     _tile_indices: Optional[torch.Tensor] = None
@@ -270,20 +284,10 @@ class MatmulLtState:
         self.SBt = None
         self.CBt = None
 
-    def get_tile_size(self):
-        assert self.formatB in (
-            "col_turing",
-            "col_ampere",
-        ), f"please find this assert and manually enter tile size for {self.formatB}"
-        return (8, 32) if self.formatB == "col_turing" else (32, 32)
-
     @property
     def tile_indices(self):
         if self._tile_indices is None:
-            device = self.CxB.device
-            transform = lambda x: F.transform(x.to(device), from_order="row", to_order=self.formatB)[0].to(x.device)
-            with torch.no_grad():
-                self._tile_indices = get_inverse_transform_indices(transform, self.get_tile_size()).to(device)
+            self._tile_indices = get_tile_inds(self.formatB, self.CxB.device)
         return self._tile_indices
 
 
@@ -322,7 +326,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # 1. Quantize A
         if len(A.shape) == 3:
-            A = A.view(-1, A.shape[-1]).contiguous()
+            A = A.reshape(-1, A.shape[-1])
         CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
 
         if state.threshold > 0.0 and coo_tensorA is not None:
@@ -495,7 +499,7 @@ class MatMul4Bit(torch.autograd.Function):
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
 
     @staticmethod
-    def forward(ctx, A, B, out=None, bias=None, state=None):
+    def forward(ctx, A, B, out=None, bias=None, quant_state: F.QuantState = None):
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
@@ -503,7 +507,7 @@ class MatMul4Bit(torch.autograd.Function):
             ctx.A = A
             ctx.B = B
             ctx.bias = bias
-            B_shape = state[1]
+            B_shape = quant_state.shape
             if A.shape[-1] == B_shape[0]:
                 return torch.empty(A.shape[:-1] + B_shape[1:], dtype=A.dtype, device=A.device)
             else:
@@ -512,10 +516,10 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_fp4(B, state).to(A.dtype).t(), bias)
+        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
 
         # 3. Save state
-        ctx.state = state
+        ctx.state = quant_state
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
         if any(ctx.needs_input_grad[:2]):
@@ -533,7 +537,6 @@ class MatMul4Bit(torch.autograd.Function):
 
         req_gradA, _, _, req_gradBias, _= ctx.needs_input_grad
         A, B = ctx.tensors
-        state = ctx.state
 
         grad_A, grad_B, grad_bias = None, None, None
 
@@ -543,7 +546,7 @@ class MatMul4Bit(torch.autograd.Function):
 
         # not supported by PyTorch. TODO: create work-around
         #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
-        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_fp4(B, ctx.state).to(grad_output.dtype).t())
+        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
 
         return grad_A, grad_B, None, grad_bias, None
 
@@ -562,6 +565,16 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_4bit(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
+def matmul_4bit(A: tensor, B: tensor, quant_state: F.QuantState, out: tensor = None, bias=None):
     assert quant_state is not None
-    return MatMul4Bit.apply(A, B, out, bias, quant_state)
+    if A.numel() == A.shape[-1] and A.requires_grad == False:
+        if A.shape[-1] % quant_state.blocksize != 0:
+            warn(f'Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
+        else:
+            out = F.gemv_4bit(A, B.t(), out, state=quant_state)
+            if bias is not None:
+                out += bias
+            return out
+    else:
+        return MatMul4Bit.apply(A, B, out, bias, quant_state)

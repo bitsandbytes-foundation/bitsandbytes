@@ -13,8 +13,9 @@ from scipy.stats import norm
 import numpy as np
 
 from functools import reduce  # Required in Python 3
-from typing import Tuple
+from typing import Tuple, Any, Dict
 from torch import Tensor
+from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
 from .cextension import COMPILED_WITH_CUDA, lib
 
@@ -242,17 +243,19 @@ def create_normal_map(offset=0.9677083, use_extra_value=True):
         v1 = norm.ppf(torch.linspace(offset, 0.5, 9)[:-1]).tolist()
         v2 = [0]*(256-15) ## we have 15 non-zero values in this data type
         v3 = (-norm.ppf(torch.linspace(offset, 0.5, 8)[:-1])).tolist()
-        v = v1 + v2 + v3
     else:
         v1 = norm.ppf(torch.linspace(offset, 0.5, 8)[:-1]).tolist()
         v2 = [0]*(256-14) ## we have 14 non-zero values in this data type
         v3 = (-norm.ppf(torch.linspace(offset, 0.5, 8)[:-1])).tolist()
-        v = v1 + v2 + v3
+
+    v = v1 + v2 + v3
 
     values = torch.Tensor(v)
     values = values.sort().values
     values /= values.max()
+
     assert values.numel() == 256
+
     return values
 
 def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8):
@@ -322,10 +325,8 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     # these are additional items that come from the case
     # where all the exponent bits are zero and no
     # indicator bit is present
-    non_sign_bits = total_bits - (1 if signed else 0)
+    non_sign_bits = total_bits - (1 if signed else 1)
     additional_items = 2 ** (non_sign_bits - max_exponent_bits) - 1
-    if not signed:
-        additional_items = 2 * additional_items
     for i in range(max_exponent_bits):
         fraction_items = int((2 ** (i + non_sign_bits - max_exponent_bits) + 1 if signed else 2 ** (i + non_sign_bits - max_exponent_bits + 1) + 1))
         boundaries = torch.linspace(0.1, 1, fraction_items)
@@ -334,15 +335,17 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
         if signed:
             data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
 
-        if additional_items > 0:
-            boundaries = torch.linspace(0.1, 1, additional_items + 1)
-            means = (boundaries[:-1] + boundaries[1:]) / 2.0
-            data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
-            if signed:
-                data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
+    if additional_items > 0:
+        boundaries = torch.linspace(0.1, 1, additional_items + 1)
+        means = (boundaries[:-1] + boundaries[1:]) / 2.0
+        data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
+        if signed:
+            data += (-(10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
 
     data.append(0)
     data.append(1.0)
+
+    assert len(data) == 2**total_bits
 
     gap = 256 - len(data)
     for i in range(gap):
@@ -571,6 +574,125 @@ def estimate_quantiles(A: Tensor, out: Tensor = None, offset: float = 1 / 512, n
     return out
 
 
+class QuantState:
+    """container for quantization state components to work with Params4bit and similar clases"""
+    valid_quant_types = ('fp4', 'nf4')
+    valid_qs_type_keys = [f"bitsandbytes__{x}" for x in valid_quant_types]
+    valid_qs_keys = ['absmax', 'quant_map', 'nested_absmax', 'nested_quant_map', 'quant_state', 'quant_type',
+                     'blocksize', 'dtype', 'shape', 'nested_blocksize', 'nested_dtype', 'nested_offset']
+
+    def __init__(self, absmax, shape=None, code=None, blocksize=None, quant_type=None, dtype=None, offset=None, state2=None):
+        self.absmax = absmax
+        self.shape = shape
+        self.code = code
+        self.dtype = dtype
+        self.blocksize = blocksize
+        self.quant_type = quant_type
+        self.offset = offset
+        self.state2 = state2
+        self.nested = state2 is not None
+
+    def __get_item__(self, idx):
+        """
+        ensures compatibility with older quant state scheme with nested lists.
+        assumes the following layout:
+        state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type]
+        state2 = [absmax, input_shape, A.dtype, blocksize, None, quant_type]
+        """
+        if self.nested:
+            list_repr = [self.absmax, self.shape, self.dtype, self.blocksize, [self.offset, self.state2], self.quant_type]
+        else:
+            list_repr = [self.absmax, self.shape, self.dtype, self.blocksize, None, self.quant_type]
+        return list_repr[idx]
+
+    @classmethod
+    def from_dict(cls, qs_dict: Dict[str, Any], device: torch.device) -> 'QuantState':
+        """
+        unpacks components of state_dict into QuantState
+        where necessary, convert into strings, torch.dtype, ints, etc.
+
+        qs_dict: based on state_dict, with only relevant keys, striped of prefixes.
+
+        item with key `quant_state.bitsandbytes__[nf4/fp4]` may contain minor and non-tensor quant state items.        
+        """
+
+        # unpacking tensor with non-tensor components
+        qs_key = [k for k, v in qs_dict.items() if "quant_state" in k and isinstance(v, torch.Tensor)]
+        if not len(qs_key) and 'quant_type' not in qs_dict:
+            raise ValueError("Expected packed or unpacked quant_state items, found neither")
+        elif len(qs_key) != 1 or qs_key[0].split(".")[-1] not in cls.valid_qs_type_keys:
+            raise ValueError(f"There should be exactly one `quant_state` item with ending from {cls.valid_qs_type_keys}.\nDetected {qs_key}.")
+
+        # unpacking minor and non-tensor quant state items if necessary
+        if len(qs_key) == 1:
+            qs_key = qs_key[0]
+            qs_dict.update(unpack_tensor_to_dict(qs_dict.pop(qs_key)))
+
+        qs_dict = {k.split('.')[-1]: v for k, v in qs_dict.items()}  # strip prefixes
+        assert set(qs_dict.keys()).issubset(cls.valid_qs_keys)
+
+        if 'nested_absmax' in qs_dict:
+            offset = torch.tensor(float(qs_dict['nested_offset'])).to(device)
+            state2 = cls(
+                absmax=qs_dict['nested_absmax'].to(device),
+                blocksize=qs_dict['nested_blocksize'],
+                code=qs_dict['nested_quant_map'].to(device),
+                dtype=getattr(torch, qs_dict['nested_dtype']),
+            )
+        else:
+            offset, state2 = None, None
+
+        quant_state = cls(
+            quant_type=qs_dict['quant_type'],
+            absmax=qs_dict['absmax'].to(device),
+            blocksize=qs_dict['blocksize'],
+            code=qs_dict['quant_map'].to(device),
+            dtype=getattr(torch, qs_dict['dtype']),
+            shape=torch.Size(qs_dict['shape']) if qs_dict['shape'] is not None else None,
+            offset=offset,
+            state2=state2,
+        )
+        return quant_state
+
+    def as_dict(self, packed=False):
+        """
+        returns dict of tensors and strings to use in serialization via _save_to_state_dict()
+        param: packed -- returns dict[str, torch.Tensor] for state_dict fit for safetensors saving
+        """
+        qs_dict = {
+            'quant_type': self.quant_type,
+            'absmax': self.absmax,
+            'blocksize': self.blocksize,
+            'quant_map': self.code,
+            'dtype': str(self.dtype).strip('torch.'),
+            'shape': tuple(self.shape),
+        }
+        if self.nested:
+            qs_dict.update({
+                'nested_absmax': self.state2.absmax,
+                'nested_blocksize': self.state2.blocksize,
+                'nested_quant_map': self.state2.code.clone(),  # un-shared to avoid restoring it after shared tensors are removed by safetensors
+                'nested_dtype': str(self.state2.dtype).strip('torch.'),
+                'nested_offset': self.offset.item(),
+            })
+        if not packed:
+            return qs_dict
+
+        # packed format allows serialization of non-tensor components, critical for saving in safetensors format
+        qs_packed_dict = {k: v for k, v in qs_dict.items() if isinstance(v, torch.Tensor)}
+        non_tensor_dict = {k: v for k, v in qs_dict.items() if not isinstance(v, torch.Tensor)}
+        qs_packed_dict["quant_state." + "bitsandbytes__" + self.quant_type] = pack_dict_to_tensor(non_tensor_dict)
+        return qs_packed_dict
+
+    def to(self, device):
+        # make sure the quantization state is on the right device
+        self.absmax = self.absmax.to(device)
+        if self.nested:
+            self.offset = self.offset.to(device)
+            self.state2.absmax = self.state2.absmax.to(device)
+            self.state2.code = self.state2.code.to(device)
+
+
 def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, out: Tensor = None, blocksize=4096, nested=False) -> Tensor:
     """
     Quantize tensor A in blocks of size 4096 values.
@@ -608,7 +730,7 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
         n = A.numel()
         blocks = n // blocksize
         blocks += 1 if n % blocksize > 0 else 0
-        absmax = torch.zeros((blocks,), device=A.device)
+        absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
 
     if out is None:
         out = torch.zeros_like(A, dtype=torch.uint8)
@@ -623,6 +745,8 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
             lib.cquantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), cblocksize, ct.c_int(A.numel()))
         elif A.dtype == torch.float16:
             lib.cquantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), cblocksize, ct.c_int(A.numel()))
+        elif A.dtype == torch.bfloat16:
+            lib.cquantize_blockwise_bf16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), cblocksize, ct.c_int(A.numel()))
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
         post_call(A.device)
@@ -635,18 +759,16 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
         offset = absmax.mean()
         absmax -= offset
         qabsmax, state2 = quantize_blockwise(absmax, blocksize=blocksize, nested=False)
-        state = [qabsmax, code, blocksize, nested, offset, state2]
+        quant_state = QuantState(absmax=qabsmax, code=code, blocksize=blocksize, dtype=A.dtype, offset=offset, state2=state2)
     else:
-        state = [absmax, code, blocksize, nested, None, None]
+        quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=A.dtype)
 
-
-
-    return out, state
+    return out, quant_state
 
 
 def dequantize_blockwise(
     A: Tensor,
-    quant_state: Tuple[Tensor, Tensor] = None,
+    quant_state: QuantState = None,
     absmax: Tensor = None,
     code: Tensor = None,
     out: Tensor = None,
@@ -663,8 +785,8 @@ def dequantize_blockwise(
     ----------
     A : torch.Tensor
         The input 8-bit tensor.
-    quant_state : tuple(torch.Tensor, torch.Tensor)
-        Tuple of code and absmax values.
+    quant_state : QuantState
+        Object with code, absmax and other quantization state components.
     absmax : torch.Tensor
         The absmax values.
     code : torch.Tensor
@@ -684,39 +806,91 @@ def dequantize_blockwise(
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
         code = name2qmap["dynamic"]
 
-    if out is None:
-        out = torch.zeros_like(A, dtype=torch.float32)
-
     if quant_state is None:
-       quant_state = (absmax, code, blocksize)
-       assert absmax is not None and out is not None
-    else:
-       absmax, code, blocksize, nested, offset, state2 = quant_state
-       if nested:
-           absmax = dequantize_blockwise(absmax, state2)
-           absmax += offset
+       quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=torch.float32)
+    
+    absmax = quant_state.absmax
+    if quant_state.nested:
+        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+        absmax += quant_state.offset
+        if absmax.dtype != torch.float32: absmax = absmax.float()
 
+    if out is None:
+        out = torch.empty(A.shape, dtype=quant_state.dtype, device=A.device)
 
     if A.device.type == 'cuda':
         device = pre_call(A.device)
-        code = code.to(A.device)
-        if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
-            raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
+        code = quant_state.code.to(A.device)
+        if quant_state.blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
+            raise ValueError(f"The blockwise of {quant_state.blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
         is_on_gpu([A, absmax, out])
         if out.dtype == torch.float32:
-            lib.cdequantize_blockwise_fp32(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+            lib.cdequantize_blockwise_fp32(get_ptr(quant_state.code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(A.numel()))
         elif out.dtype == torch.float16:
-            lib.cdequantize_blockwise_fp16(get_ptr(code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(A.numel()))
+            lib.cdequantize_blockwise_fp16(get_ptr(quant_state.code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(A.numel()))
+        elif out.dtype == torch.bfloat16:
+            lib.cdequantize_blockwise_bf16(get_ptr(quant_state.code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(A.numel()))
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
         post_call(device)
     elif A.device.type == 'mps':
         raise NotImplementedError("MPS is not implemented")
     else:
-        code = code.cpu()
-        lib.cdequantize_blockwise_cpu_fp32(get_ptr(quant_state[1]), get_ptr(A), get_ptr(quant_state[0]), get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(A.numel()))
+        code = quant_state.code.cpu()
+        lib.cdequantize_blockwise_cpu_fp32(get_ptr(code), get_ptr(A), get_ptr(quant_state.absmax), get_ptr(out), ct.c_longlong(quant_state.blocksize), ct.c_longlong(A.numel()))
 
     return out
+
+def get_4bit_type(typename, device=None, blocksize=64):
+    if device is None: device = 'cuda'
+    data = None
+    if typename == 'nf4':
+        ''' Implements the NF4 data type.
+
+            Constructs a quantization data type where each bin has equal area under a standard normal distribution N(0, 1) that
+            is normalized into the range [-1, 1].
+
+            For more information read the paper: QLoRA: Efficient Finetuning of Quantized LLMs (https://arxiv.org/abs/2305.14314)
+
+            Implementation of the NF4 data type in bitsandbytes can be found in the `create_normal_map` function in
+            the `functional.py` file: https://github.com/TimDettmers/bitsandbytes/blob/main/bitsandbytes/functional.py#L236.
+        '''
+        data = [-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635,
+                -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725,
+                0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941,
+                0.7229568362236023, 1.0]
+    elif typename == 'fp4':
+        # 0b000 = 0
+        # 0b001 = 0.0625
+        # 0b010 = 8
+        # 0b011 = 12
+        # 0b100 = 4
+        # 0b101 = 6
+        # 0b110 = 2
+        # 0b111 = 3
+        # can also be created with bnb.functional.create_fp8_map(signed=True, exponent_bits=2, precision_bits=1, total_bits=4)
+        data = [0, 0.0625, 8.0, 12.0, 4.0, 6.0, 2.0, 3.0, -0, -0.0625, -8.0, -12.0, -4.0, -6.0, -2.0, -3.0]
+    elif typename == 'int4':
+        data = [7, 6, 5, 4, 3, 2, 1, 0, -0, -1, -2, -3, -4, -5, -6, -7]
+    elif typename == 'af4':
+        # Taken from: NF4 Isn't Information Theoretically Optimal (and that's Good)
+        # https://arxiv.org/abs/2306.06965
+        if blocksize == 64:
+            data = [-1., -0.69441008, -0.51243739, -0.3736951, -0.25607552, -0.14982478,
+                    -0.04934812,  0., 0.04273164, 0.12934483, 0.21961274, 0.31675666,
+                    0.42563882,  0.55496234,  0.72424863,  1.][::-1]
+        else:
+            raise NotImplementedError(f'4-bit AbnormalFloats currently only support blocksize 64.')
+
+    if data is None:
+        raise NotImplementedError(f'Typename {typename} not supported')
+
+    data = Tensor(data)
+    data /= data.abs().max()
+    assert data.numel() == 16
+
+    return data.to(device)
+
 
 def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4')
@@ -761,7 +935,7 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
     if absmax is None:
         blocks = n // blocksize
         blocks += 1 if n % blocksize > 0 else 0
-        absmax = torch.zeros((blocks,), device=A.device)
+        absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
 
 
     if out is None:
@@ -782,30 +956,35 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
             lib.cquantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
         else:
             lib.cquantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+    elif A.dtype == torch.bfloat16:
+        if quant_type == 'fp4':
+            lib.cquantize_blockwise_bf16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+        else:
+            lib.cquantize_blockwise_bf16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     post_call(A.device)
 
+    code = get_4bit_type(quant_type, device=A.device)
+
     if compress_statistics:
         offset = absmax.mean()
         absmax -= offset
-        #code = create_custom_map().to(absmax.device)
-        #qabsmax, state2 = quantize_blockwise(absmax, code=code, blocksize=256)
         qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
         del absmax
-        state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type]
+        state = QuantState(absmax=qabsmax, shape=input_shape, dtype=A.dtype, blocksize=blocksize, code=code, quant_type=quant_type, offset=offset, state2=state2)
     else:
-        state = [absmax, input_shape, A.dtype, blocksize, None, quant_type]
+        state = QuantState(absmax=absmax, shape=input_shape, dtype=A.dtype, blocksize=blocksize, code=code, quant_type=quant_type, )
 
     return out, state
 
-def dequantize_fp4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+def dequantize_fp4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'fp4')
 
-def dequantize_nf4(A: Tensor, quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+def dequantize_nf4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'nf4')
 
-def dequantize_4bit(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
+def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
 
@@ -815,8 +994,8 @@ def dequantize_4bit(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax:
     ----------
     A : torch.Tensor
         The input 8-bit tensor (packed 4-bit values).
-    quant_state : tuple(torch.Tensor, torch.Size, torch.dtype)
-        Tuple of absmax values, original tensor shape and original dtype.
+    quant_state : QuantState
+        object with quantisation stats, incl. absmax values, original tensor shape and original dtype.
     absmax : torch.Tensor
         The absmax values.
     out : torch.Tensor
@@ -839,35 +1018,40 @@ def dequantize_4bit(A: Tensor,quant_state: Tuple[Tensor, Tensor] = None, absmax:
 
     if quant_state is None:
         assert absmax is not None and out is not None
-        shape = out.shape
-        dtype = out.dtype
+
+        quant_state = QuantState(absmax=absmax, shape=out.shape, dtype=out.dtype, blocksize=blocksize, quant_type=quant_type)
+
     else:
-        absmax, shape, dtype, blocksize, compressed_stats, quant_type = quant_state
+        absmax = quant_state.absmax
 
 
-    if compressed_stats is not None:
-        offset, state2 = compressed_stats
-        absmax = dequantize_blockwise(absmax, state2)
-        absmax += offset
+    if quant_state.nested:
+        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+        absmax += quant_state.offset
+        if absmax.dtype != torch.float32: absmax = absmax.float()
 
     if out is None:
-        out = torch.empty(shape, dtype=dtype, device=A.device)
+        out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
 
     n = out.numel()
-
 
     device = pre_call(A.device)
     is_on_gpu([A, absmax, out])
     if out.dtype == torch.float32:
-        if quant_type == 'fp4':
-            lib.cdequantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+        if quant_state.quant_type == 'fp4':
+            lib.cdequantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
         else:
-            lib.cdequantize_blockwise_fp32_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+            lib.cdequantize_blockwise_fp32_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
     elif out.dtype == torch.float16:
-        if quant_type == 'fp4':
-            lib.cdequantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+        if quant_state.quant_type == 'fp4':
+            lib.cdequantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
         else:
-            lib.cdequantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(blocksize), ct.c_int(n))
+            lib.cdequantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
+    elif out.dtype == torch.bfloat16:
+        if quant_state.quant_type == 'fp4':
+            lib.cdequantize_blockwise_bf16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
+        else:
+            lib.cdequantize_blockwise_bf16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
     post_call(A.device)
@@ -885,6 +1069,7 @@ def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
         code = code.to(A.device)
 
     absmax = torch.abs(A).max()
+    if absmax.dtype != torch.float32: absmax = absmax.float()
     inp = A / absmax
     out = quantize_no_absmax(inp, code, out)
     return out, (absmax, code)
@@ -892,22 +1077,22 @@ def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
 
 def dequantize(
     A: Tensor,
-    quant_state: Tuple[Tensor, Tensor] = None,
+    state: Tuple[Tensor, Tensor] = None,
     absmax: Tensor = None,
     code: Tensor = None,
     out: Tensor = None,
 ) -> Tensor:
-    assert quant_state is not None or absmax is not None
-    if code is None and quant_state is None:
+    assert state is not None or absmax is not None
+    if code is None and state is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
         code = name2qmap["dynamic"]
         code = code.to(A.device)
 
-    if quant_state is None:
-        quant_state = (absmax, code)
-    out = dequantize_no_absmax(A, quant_state[1], out)
-    return out * quant_state[0]
+    if state is None:
+        state = (absmax, code)
+    out = dequantize_no_absmax(A, state[1], out)
+    return out * state[0]
 
 
 def quantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
@@ -1406,7 +1591,7 @@ def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8
 
     return sout
 
-def cutlass3_gemm(
+def gemv_4bit(
     A: Tensor,
     B: Tensor,
     out: Tensor = None,
@@ -1414,95 +1599,34 @@ def cutlass3_gemm(
     transposed_B=False,
     state=None
 ):
+    prev_device = pre_call(A.device)
     #sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if state is None:
-        Bshape = B.shape
-        bout = Bshape[1]
-    else:
-        Bshape = state[1]
-        bout = Bshape[0]
+        raise ValueError(f'state cannot None. gem_4bit( ) requires the state from quantize_4bit( )')
+
+    if A.numel() != A.shape[-1]:
+        raise ValueError(f'Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]')
+
+    Bshape = state.shape
+    bout = Bshape[0]
+    absmax = state.absmax
+    if state.nested:
+        absmax = dequantize_blockwise(state.absmax, state.state2)
+        absmax += state.offset
+
     if out is None:
-        out = torch.zeros(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
-
-    sA = A.shape
-    sB = B.shape
-    if transposed_A and len(sA) == 2:
-        sA = (sA[1], sA[0])
-    elif transposed_A and len(sA) == 3:
-        sA = (sA[0], sA[2], sA[0])
-    if transposed_B and len(sB) == 2:
-        sB = (sB[1], sB[0])
-    elif transposed_B and len(sB) == 3:
-        sB = (sB[0], sB[2], sB[0])
-    # this is a mess: cuBLAS expect column major, but PyTorch is row major.
-    # So to perform the matrix multiplication, we have to treat A, B, and C matrices
-    # (transpose of row major is column major)
-    # This means we compute B^T A^T = C^T and we explicitly switch the dimensions of each of these
-
-    # matrices in the input arguments for cuBLAS
-    # column major: A @ B = C: [m, k] @ [k, n] = [m, n]
-    # row major: B^T @ A^T = C^T: [m, k] @ [k, n] = [m, n]
-    # column major with row major layout: B^T @ A^T = C^T: [k, m] @ [n, k] = [n, m]
-    if len(sB) == 2:
-        if B.stride()[0] == B.shape[1]:
-            transposed_B = False
-        elif B.stride()[1] == B.shape[0]:
-            transposed_B = True
-        if len(A.shape) == 2:
-            if A.stride()[0] == A.shape[1]:
-                transposed_A = False
-            elif A.stride()[1] == A.shape[0]:
-                transposed_A = True
+        if len(A.shape) == 3:
+            out = torch.empty(size=(A.shape[0], A.shape[1], bout), dtype=A.dtype, device=A.device)
         else:
-            if A.stride()[1] == A.shape[2]:
-                transposed_A = False
-            elif A.stride()[2] == A.shape[1]:
-                transposed_A = True
+            out = torch.empty(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
 
-        if len(sA) == 2:
-            n = sA[0]
-            ldb = A.stride()[1 if transposed_A else 0]
-        elif len(sA) == 3 and len(sB) == 2:
-            n = sA[0] * sA[1]
-            ldb = sA[2]
-
-        m = sB[1]
-        k = sB[0]
-        lda = B.stride()[0]
-        ldc = sB[1]
-    elif len(sB) == 3:
-        # special case
-        assert len(sA) == 3
-        if not (sA[0] == sB[0] and sA[1] == sB[1]):
-            raise ValueError(
-                f"Only bsi,bso->io supported for tensor contractions, but dims for A x B were: {sA} x {sB}"
-            )
-
-        transposed_A = True
-        transposed_B = False
-
-        m = sB[2]
-        n = sA[2]
-        k = sB[0] * sB[1]
-
-        lda = n
-        ldb = sA[2]
-        ldc = m
-
-    ptr = CUBLAS_Context.get_instance().get_context(A.device)
-
-    # B^T @ A^T = C^T
-    # [km, nk -> mn]
-    #lda = ldb = ldc = 1
-    #lda = 1
-    if state is not None:
-        m = Bshape[0]
-        k = Bshape[1]
-        lda = Bshape[0]
-        ldc = Bshape[0]
-        ldb = (ldb+1)//2
-    #print(m, n, k, lda, ldb, ldc)
-    is_on_gpu([B, A, out])
+    n = 1
+    m = Bshape[0]
+    k = Bshape[1]
+    lda = Bshape[0]
+    ldc = Bshape[0]
+    ldb = (A.shape[-1]+1)//2
+    is_on_gpu([B, A, out, absmax, state.code])
     m = ct.c_int32(m)
     n = ct.c_int32(n)
     k = ct.c_int32(k)
@@ -1511,18 +1635,21 @@ def cutlass3_gemm(
     ldc = ct.c_int32(ldc)
 
     if B.dtype == torch.uint8:
-        lib.cgemm_4bit_inference(m, n, k, get_ptr(A), get_ptr(B), get_ptr(state[0]), get_ptr(out), lda, ldb, ldc, ct.c_int32(state[3]))
-    elif A.dtype == torch.float32:
-        lib.cgemm_host_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
-    elif A.dtype == torch.float16:
-        lib.cgemm_host_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(out), lda, ldb, ldc)
+        if A.dtype == torch.float16:
+            lib.cgemm_4bit_inference_naive_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state.code), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
+        elif A.dtype == torch.bfloat16:
+            lib.cgemm_4bit_inference_naive_bf16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state.code), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
+        elif A.dtype == torch.float32:
+            lib.cgemm_4bit_inference_naive_fp32(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state.code), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
+        else:
+            raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
+
     else:
         raise NotImplementedError(f'Matmul not implemented for data type {A.dtype}')
 
+    post_call(prev_device)
+
     return out
-
-
-
 
 def igemm(
     A: Tensor,

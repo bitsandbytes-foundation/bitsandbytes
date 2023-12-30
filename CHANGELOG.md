@@ -239,3 +239,91 @@ Features:
  - Doubled quantization routines for 4-bit quantization
  - Paged optimizers for Adam and Lion.
  - bfloat16 gradient / weight support for Adam and Lion with 8 or 32-bit states.
+
+Bug fixes:
+ - Fixed a bug where 8-bit models consumed twice the memory as expected after serialization
+
+Deprecated:
+ - Kepler binaries (GTX 700s and Tesla K40/K80) are not longer provided via pip and need to be compiled from source. Kepler support might be fully removed in the future.
+
+
+### 0.40.0
+
+Features:
+ - Added 4-bit inference kernels for batch size=1. Currently support are the NF4, FP4 data types.
+ - Added support for quantizations of bfloat16 input data.
+
+Bug fixes:
+ - Added `device` variable for bitsandbytes layers to be compatible with PyTorch layers.
+
+Deprecated:
+ - Binaries for CUDA 11.2, 11.6 no longer ship with `pip install bitsandbytes` and need to be compiled from source.
+
+
+### 0.40.1
+
+Features:
+ - Added precompiled CUDA 11.8 binaries to support H100 GPUs without compilation #571
+ - CUDA SETUP now no longer looks for libcuda and libcudart and relies PyTorch CUDA libraries. To manually override this behavior see: how_to_use_nonpytorch_cuda.md. Thank you @rapsealk
+
+Bug fixes:
+ - Fixed a bug where the default type of absmax was undefined which leads to errors if the default type is different than torch.float32. # 553
+ - Fixed a missing scipy dependency in requirements.txt. #544
+ - Fixed a bug, where a view operation could cause an error in 8-bit layers.
+ - Fixed a bug where CPU bitsandbytes would during the import. #593 Thank you @bilelomrani
+
+Documentation:
+ - Improved documentation for GPUs that do not support 8-bit matmul. #529
+ - Added description and pointers for the NF4 data type. #543
+
+### 0.40.2
+
+Bug fixes:
+ - Fixed a but where a non-existent LD_LIBRARY_PATH variable led to a failure in python -m bitsandbytes #588
+ - Removed outdated get_cuda_lib_handle calls that lead to errors. #595 Thank you @ihsanturk
+ - Fixed bug where read-permission was assumed for a file. #497
+ - Fixed a bug where prefetchAsync lead to errors on GPUs that do not support unified memory but not prefetching (Maxwell, SM52). #470 #451 #453 #477 Thank you @jllllll and @stoperro
+
+
+### 0.41.0
+
+Features:
+ - Added precompiled CUDA 11.8 binaries to support H100 GPUs without compilation #571
+ - CUDA SETUP now no longer looks for libcuda and libcudart and relies PyTorch CUDA libraries. To manually override this behavior see: how_to_use_nonpytorch_cuda.md. Thank you @rapsealk
+
+Bug fixes:
+ - Fixed a bug where the default type of absmax was undefined which leads to errors if the default type is different than torch.float32. # 553
+ - Fixed a missing scipy dependency in requirements.txt. #544
+ - Fixed a bug, where a view operation could cause an error in 8-bit layers.
+ - Fixed a bug where CPU bitsandbytes would during the import. #593 Thank you @bilelomrani
+ - Fixed a but where a non-existent LD_LIBRARY_PATH variable led to a failure in python -m bitsandbytes #588
+ - Removed outdated get_cuda_lib_handle calls that lead to errors. #595 Thank you @ihsanturk
+ - Fixed bug where read-permission was assumed for a file. #497
+ - Fixed a bug where prefetchAsync lead to errors on GPUs that do not support unified memory but not prefetching (Maxwell, SM52). #470 #451 #453 #477 Thank you @jllllll and @stoperro
+
+Documentation:
+ - Improved documentation for GPUs that do not support 8-bit matmul. #529
+ - Added description and pointers for the NF4 data type. #543
+
+User experience:
+ - Improved handling of default compute_dtype for Linear4bit Layers, so that compute_dtype = input_dtype if the input data type is stable enough (float32, bfloat16, but not float16).
+
+Performance:
+ - improved 4-bit inference performance for A100 GPUs. This degraded performance for A40/RTX3090 and RTX 4090 GPUs slightly.
+
+### 0.41.1
+
+Bug fixes:
+ - Fixed bugs in dynamic exponent data type creation. Thank you @RossM, @KohakuBlueleaf, @ArrowM #659 #227 #262 #152
+
+### 0.41.2
+
+Feature:
+ - 4-bit serialization now supported. This enables 4-bit load/store. Thank you @poedator #753
+
+### 0.41.3
+
+Bug fixes:
+ - Fixed an issue where 4-bit serialization would fail for layers without double quantization #868. Thank you, @poedator
+ - Fixed an issue where calling .to() or .cuda() on a 4-bit layer twice would result in an error #867. Thank you, @jph00
+

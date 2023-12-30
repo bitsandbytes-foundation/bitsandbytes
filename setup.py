@@ -23,7 +23,7 @@ class BinaryDistribution(Distribution):
 
 setup(
     name=f"bitsandbytes",
-    version=f"0.39.0",
+    version=f"0.41.3.post1",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="k-bit optimizers and matrix multiplication routines.",
