@@ -102,7 +102,7 @@ For straight Int8 matrix multiplication with mixed precision decomposition you c
 bnb.matmul(..., threshold=6.0)
 ```
 
-For instructions how to use LLM.int8() inference layers in your own code, see the TL;DR above or for extended instruction see [this blog post](https://github.com/huggingface/transformers).
+For instructions how to use LLM.int8() inference layers in your own code, see the TL;DR above or for extended instruction see [this blog post](https://huggingface.co/blog/hf-bitsandbytes-integration).
 
 ### Using the 8-bit Optimizers
 
