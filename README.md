@@ -38,7 +38,7 @@ python setup.py install
 ```python
 from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained(
-  'decapoda-research/llama-7b-hf,
+  'decapoda-research/llama-7b-hf',
   device_map='auto',
   load_in_8bit=True,
   max_memory=f'{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB')
@@ -80,7 +80,7 @@ out = linear(x.to(torch.float16))
 Requirements: anaconda, cudatoolkit, pytorch
 
 Hardware requirements:
- - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or older).
+ - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or newer).
  - 8-bit optimizers and quantization: NVIDIA Kepler GPU or newer (>=GTX 78X).
 
 Supported CUDA versions: 10.2 - 12.2
@@ -102,7 +102,7 @@ For straight Int8 matrix multiplication with mixed precision decomposition you c
 bnb.matmul(..., threshold=6.0)
 ```
 
-For instructions how to use LLM.int8() inference layers in your own code, see the TL;DR above or for extended instruction see [this blog post](https://github.com/huggingface/transformers).
+For instructions how to use LLM.int8() inference layers in your own code, see the TL;DR above or for extended instruction see [this blog post](https://huggingface.co/blog/hf-bitsandbytes-integration).
 
 ### Using the 8-bit Optimizers
 
@@ -119,7 +119,7 @@ torch.nn.Embedding(...) ->  bnb.nn.StableEmbedding(...) # recommended for NLP mo
 ```
 
 Note that by default all parameter tensors with less than 4096 elements are kept at 32-bit even if you initialize those parameters with 8-bit optimizers. This is done since such small tensors do not save much memory and often contain highly variable parameters (biases) or parameters that require high precision (batch norm, layer norm). You can change this behavior like so:
-```
+```python
 # parameter tensors with less than 16384 values are optimized in 32-bit
 # it is recommended to use multiplies of 4096
 adam = bnb.optim.Adam8bit(model.parameters(), min_8bit_size=16384)
@@ -146,13 +146,13 @@ For upcoming features and changes and full history see [Patch Notes](CHANGELOG.m
 To compile from source, you need an installation of CUDA. If `nvcc` is not installed, you can install the CUDA Toolkit with nvcc through the following commands.
 
 ```bash
-wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh
+wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cuda.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
 #   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122}
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
 
-# For example, the following installs CUDA 11.8 to ~/local/cuda-11.8 and exports the path to your .bashrc
-bash cuda install 118 ~/local 1 
+# For example, the following installs CUDA 11.7 to ~/local/cuda-11.7 and exports the path to your .bashrc
+bash install_cuda.sh 117 ~/local 1 
 ```
 
 To use a specific CUDA version just for a single compile run, you can set the variable `CUDA_HOME`, for example the following command compiles `libbitsandbytes_cuda117.so` using compiler flags for cuda11x with the cuda version at `~/local/cuda-11.7`:

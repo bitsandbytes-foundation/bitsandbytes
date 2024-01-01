@@ -15,13 +15,14 @@ where XX.X is the CUDA version number.
 You can also install CUDA version that you need locally with a script provided by bitsandbytes as follows:
 
 ```bash
-wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh
+wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cuda.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
 #   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122}
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
 
 # For example, the following installs CUDA 11.7 to ~/local/cuda-11.7 and exports the path to your .bashrc
-bash cuda install 117 ~/local 1 
+
+bash cuda_install.sh 117 ~/local 1
 ```
 
 ## Setting the environmental variables BNB_CUDA_VERSION, and LD_LIBRARY_PATH
