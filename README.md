@@ -119,7 +119,7 @@ torch.nn.Embedding(...) ->  bnb.nn.StableEmbedding(...) # recommended for NLP mo
 ```
 
 Note that by default all parameter tensors with less than 4096 elements are kept at 32-bit even if you initialize those parameters with 8-bit optimizers. This is done since such small tensors do not save much memory and often contain highly variable parameters (biases) or parameters that require high precision (batch norm, layer norm). You can change this behavior like so:
-```
+```python
 # parameter tensors with less than 16384 values are optimized in 32-bit
 # it is recommended to use multiplies of 4096
 adam = bnb.optim.Adam8bit(model.parameters(), min_8bit_size=16384)
