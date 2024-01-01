@@ -2,7 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Optional, TypeVar, Union, overload
+from typing import Any, Dict, Optional, TypeVar, Union, overload
 
 import warnings
 import torch
@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
 
 import bitsandbytes as bnb
-import bitsandbytes.functional
+from bitsandbytes.functional import QuantState
 from bitsandbytes.autograd._functions import undo_layout, get_tile_inds
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import OutlierTracer, find_outlier_dims
@@ -139,8 +139,10 @@ class Embedding(torch.nn.Embedding):
 
         return emb
 
+
 class Params4bit(torch.nn.Parameter):
-    def __new__(cls, data=None, requires_grad=True, quant_state=None, blocksize=64, compress_statistics=True, quant_type='fp4'):
+
+    def __new__(cls, data: Optional[torch.Tensor] = None, requires_grad=True, quant_state: QuantState = None, blocksize: int = 64, compress_statistics: bool = True, quant_type: str = 'fp4') -> "Params4bit":
         if data is None:
             data = torch.empty(0)
 
@@ -150,6 +152,16 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.data = data
+        return self
+
+    @classmethod
+    def from_prequantized(cls, data: torch.Tensor, quantized_stats: Dict[str, Any], requires_grad: bool = False, device='cuda', **kwargs) -> "Params4bit":
+        self = torch.Tensor._make_subclass(cls, data.to(device))
+        self.requires_grad = requires_grad
+        self.quant_state = QuantState.from_dict(qs_dict=quantized_stats, device=device)
+        self.blocksize = self.quant_state.blocksize
+        self.compress_statistics = self.quant_state.nested
+        self.quant_type = self.quant_state.quant_type
         return self
 
     def cuda(self, device):
@@ -178,33 +190,23 @@ class Params4bit(torch.nn.Parameter):
         if (device is not None and device.type == "cuda" and self.data.device.type == "cpu"):
             return self.cuda(device)
         else:
-            s = self.quant_state
-            if s is not None:
-                # make sure the quantization state is on the right device
-                s[0] = s[0].to(device)
-                if self.compress_statistics:
-                    # TODO: refactor this. This is a nightmare
-                    # for 4-bit: 
-                    # state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type]
-                    # state2 = [absmax, input_shape, A.dtype, blocksize, None, quant_type]
-                    #s[-2][0] = s[-2][0].to(device) # offset
-                    #s[-2][1][0] = s[-2][1][0].to(device) # nested absmax
+            if self.quant_state is not None:
+                self.quant_state.to(device)
 
-                    # for 8-bit
-                    s[-3][0] = s[-3][0].to(device) # offset
-                    s[-3][1][0] = s[-3][1][0].to(device) # nested quantiation state statitics
-                    s[-3][1][1] = s[-3][1][1].to(device) # nested quantiation codebook
             new_param = Params4bit(super().to(device=device, dtype=dtype, non_blocking=non_blocking),
-                                  requires_grad=self.requires_grad, quant_state=self.quant_state,
+                                   requires_grad=self.requires_grad, quant_state=self.quant_state,
                                    blocksize=self.blocksize, compress_statistics=self.compress_statistics,
                                    quant_type=self.quant_type)
 
             return new_param
 
+
 class Linear4bit(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4',device=None):
+
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4', device=None):
         super().__init__(input_features, output_features, bias, device)
         self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
+        # self.persistent_buffers = []  # TODO consider as way to save quant state
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
 
@@ -224,10 +226,16 @@ class Linear4bit(nn.Linear):
                 warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference or training speed.')
                 warnings.filterwarnings('ignore', message='.*inference or training')
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        """
+        save weight and bias,
+        then fill state_dict with components of quant_state
+        """
+        super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
-
-
-
+        if getattr(self.weight, "quant_state", None) is not None:
+            for k, v in self.weight.quant_state.as_dict(packed=True).items():
+                destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
@@ -251,9 +259,11 @@ class Linear4bit(nn.Linear):
 
         return out
 
+
 class LinearFP4(Linear4bit):
-    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True,device=None):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, device=None):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'fp4', device)
+
 
 class LinearNF4(Linear4bit):
     ''' Implements the NF4 data type.
@@ -266,9 +276,8 @@ class LinearNF4(Linear4bit):
         Implementation of the NF4 data type in bitsandbytes can be found in the `create_normal_map` function in
         the `functional.py` file: https://github.com/TimDettmers/bitsandbytes/blob/main/bitsandbytes/functional.py#L236.
     '''
-    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True,device=None):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, device=None):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'nf4', device)
-
 
 
 class Int8Params(torch.nn.Parameter):
