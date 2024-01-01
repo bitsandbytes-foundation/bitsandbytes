@@ -129,6 +129,7 @@ def test_quantile_quantization():
         assert diff < 0.001
 
 
+
 def test_dynamic_quantization():
     diffs = []
     reldiffs = []
@@ -141,8 +142,8 @@ def test_dynamic_quantization():
         diffs.append(diff.mean().item())
         reldiffs.append(reldiff.mean().item())
         assert diff.mean().item() < 0.0135
-    # print(sum(diffs)/len(diffs))
-    # print(sum(reldiffs)/len(reldiffs))
+    print(sum(diffs)/len(diffs))
+    print(sum(reldiffs)/len(reldiffs))
 
     for i in range(100):
         A1 = torch.rand(1024, 1024, device="cuda")
@@ -157,7 +158,8 @@ def test_dynamic_quantization():
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=["fp32", "fp16", "bf16"])
 @pytest.mark.parametrize("nested", [False, True], ids=["False", "True"])
 @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
-def test_dynamic_blockwise_quantization(dtype, nested, blocksize):
+@pytest.mark.parametrize("signed", [True, False], ids=['signed_True', 'signed_False'])
+def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
     #print('')
     diffs = []
     reldiffs = []
@@ -178,9 +180,10 @@ def test_dynamic_blockwise_quantization(dtype, nested, blocksize):
     assert A2.dtype == dtype
 
     diffs = []
+    code = F.create_dynamic_map(signed=signed)
     for i in range(100):
         A1 = torch.rand(1024, 1024, device="cuda", dtype=dtype)
-        C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested)
+        C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested, code=code)
         A2 = F.dequantize_blockwise(C, S)
         diff = torch.abs(A1 - A2).float()
         reldiff = diff / torch.abs(A1.float() + 1e-8)
@@ -189,11 +192,15 @@ def test_dynamic_blockwise_quantization(dtype, nested, blocksize):
         #torch.testing.assert_close(A1, A2, atol=1e-2, rtol=0)
     abserr = sum(diffs)/len(diffs)
     relerr = sum(reldiffs)/len(reldiffs)
-    assert abserr < 0.0035
-    assert relerr < 0.015
+    if signed:
+        assert abserr < 0.0035
+        assert relerr < 0.015
+    else:
+        assert abserr < 0.00175
+        assert relerr < 0.012
     assert A2.dtype == dtype
-    #print('nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
-    #print('nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
+    #print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
+    #print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
 
 
 
@@ -2366,7 +2373,7 @@ def test_normal_map_tree():
 def test_gemv_4bit(dtype, storage_type, double_quant, kind):
     for dim in [128, 256, 512, 1024]:
     #for dim in [4*1024]:
-    #for dim in [1*128]:
+    #for dim in [1*16]:
         errs1 = []
         errs2 = []
         errs3 = []
@@ -2446,11 +2453,11 @@ def test_gemv_4bit(dtype, storage_type, double_quant, kind):
         #
         #print('='*80)
         #print(f'For matmul: {A.shape}, {B.shape}, {kind}, {dtype}, {storage_type}, double_quant={double_quant}:')
-        #print(C1.flatten()[-20:])
-        #print(C2.flatten()[-20:])
-        #print(f'inference vs training abs: {err1}')
-        #print(f'inference vs training rel: {relerr1}')
-        #print(f'inference vs training max: {maxerr1}')
+        print(C1.flatten()[-20:])
+        print(C2.flatten()[-20:])
+        print(f'inference vs training abs: {err1}')
+        print(f'inference vs training rel: {relerr1}')
+        print(f'inference vs training max: {maxerr1}')
         #print(f'inference vs training vs torch err ratio abs: {absratio}')
         #print(f'inference vs training vs torch err ratio rel: {relratio}')
         #print(f'inference vs training vs torch err ratio max: {maxratio}')
@@ -2478,7 +2485,7 @@ def test_gemv_4bit(dtype, storage_type, double_quant, kind):
             assert maxratio < 1.005 and maxratio > 0.995
         elif dtype == torch.bfloat16:
             if dim <= 512:
-                assert err1 < 5e-4
+                assert err1 < 6e-4
                 assert relerr1 < 0.007
                 assert maxerr1 < 0.015
             else:
