@@ -8,8 +8,10 @@ ifeq ($(CUDA_HOME),)
 endif
 
 ifndef CUDA_VERSION
+ifneq ($(MAKECMDGOALS),clean)
 $(warning WARNING: CUDA_VERSION not set. Call make with CUDA string, for example: make cuda11x CUDA_VERSION=115 or make cpuonly CUDA_VERSION=CPU)
 CUDA_VERSION:=
+endif
 endif
 
 
@@ -135,10 +137,5 @@ $(ROOT_DIR)/dependencies/cub:
 	cd dependencies/cub; git checkout 1.11.0
 
 clean:
-	rm build/*
-
-cleaneggs:
-	rm -rf *.egg*
-
-cleanlibs:
-	rm ./bitsandbytes/libbitsandbytes*.so
+	rm -rf build/* *.egg*
+	rm -f bitsandbytes/libbitsandbytes*.so
