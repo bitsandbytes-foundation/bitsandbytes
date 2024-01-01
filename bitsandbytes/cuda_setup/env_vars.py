@@ -20,6 +20,7 @@ def to_be_ignored(env_var: str, value: str) -> bool:
         "PATH",  # this is for finding binaries, not libraries
         "LESSOPEN",  # related to the `less` command
         "LESSCLOSE",
+        "GOOGLE_VM_CONFIG_LOCK_FILE", # Google Cloud stuff, contains root only paths
         "_",  # current Python interpreter
     }
     return env_var in ignorable
