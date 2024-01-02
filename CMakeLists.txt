@@ -39,6 +39,7 @@ elseif(ENABLE_MPS)
     project(bitsandbytes LANGUAGES CXX OBJCXX)
     add_compile_definitions(BUILD_MPS)
     set(METAL_SOURCES csrc/mps_kernels.metal)
+    file(MAKE_DIRECTORY "build")
     add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"  
                    COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_SOURCES}
                    COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
@@ -105,7 +106,7 @@ if(ENABLE_CUDA)
 endif()
 if(ENABLE_MPS)
     add_dependencies(bitsandbytes metallib)
-    target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
+    target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
 endif()
 
 set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME "bitsandbytes_${LIBSUFFIX}")

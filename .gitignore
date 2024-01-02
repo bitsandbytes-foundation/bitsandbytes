@@ -12,11 +12,13 @@ __pycache__/
 
 # CMake generated files
 CMakeCache.txt
+CMakeScripts/
 cmake_install.cmake
 Makefile
 CMakeFiles/
 *.sln
 *.vcxproj*
+*.xcodeproj/
 bitsandbytes.dir/
 Debug/
 Release/
