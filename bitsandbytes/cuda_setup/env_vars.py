@@ -1,6 +1,7 @@
 import os
 import subprocess
 from typing import Dict
+from distutils.spawn import find_executable
 
 
 def to_be_ignored(env_var: str, value: str) -> bool:
@@ -54,10 +55,12 @@ def get_potentially_lib_path_containing_env_vars() -> Dict[str, str]:
 
 def restore_original_system_env_vars(env_vars: Dict[str, str]):
     """
-        If the python program was started with `sudo`,
+        If the system supports `sudo` command, and the python program was started with `sudo`,
         Use the `sudo -i env` command to obtain the original environment variables of the system, including CONDA_PREFIX, LD_LIBRARY_PATH...
         Then replace the environment variables obtained from the current shell, to obtain correct and complete environment variables
     """
+    if find_executable('sudo') is None:
+        return
     if not os.geteuid() == 0:
         return
 
