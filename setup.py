@@ -7,6 +7,9 @@ import os
 
 from setuptools import find_packages, setup
 from setuptools.dist import Distribution
+import bitsandbytes as bnb
+
+VERSION = bnb.__version__
 
 libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.*"))
 libs = [os.path.basename(p) for p in libs]
@@ -23,13 +26,14 @@ class BinaryDistribution(Distribution):
 
 setup(
     name=f"bitsandbytes",
-    version=f"0.41.3.post1",
+    version=VERSION,
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="k-bit optimizers and matrix multiplication routines.",
     license="MIT",
     keywords="gpu optimizers optimization 8-bit quantization compression",
     url="https://github.com/TimDettmers/bitsandbytes",
+    install_requires=['scipy'],
     packages=find_packages(),
     package_data={"": libs},
     long_description=read("README.md"),

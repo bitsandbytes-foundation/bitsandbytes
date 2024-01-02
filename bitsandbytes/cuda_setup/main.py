@@ -64,9 +64,10 @@ class CUDASetup:
             self.add_log_entry('CUDA SETUP: Solution 1b): Once the library is found add it to the LD_LIBRARY_PATH: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:FOUND_PATH_FROM_1a')
             self.add_log_entry('CUDA SETUP: Solution 1c): For a permanent solution add the export from 1b into your .bashrc file, located at ~/.bashrc')
             self.add_log_entry('CUDA SETUP: Solution 2: If no library was found in step 1a) you need to install CUDA.')
-            self.add_log_entry('CUDA SETUP: Solution 2a): Download CUDA install script: wget https://github.com/TimDettmers/bitsandbytes/blob/main/install_cuda.sh')
-            self.add_log_entry('CUDA SETUP: Solution 2b): Install desired CUDA version to desired location. The syntax is bash install_cuda.sh CUDA_VERSION PATH_TO_INSTALL_INTO.')
-            self.add_log_entry('CUDA SETUP: Solution 2b): For example, "bash install_cuda.sh 113 ~/local/" will download CUDA 11.3 and install into the folder ~/local')
+            self.add_log_entry('CUDA SETUP: Solution 2a): Download CUDA install script: wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh')
+            self.add_log_entry('CUDA SETUP: Solution 2b): Install desired CUDA version to desired location. The syntax is bash cuda_install.sh CUDA_VERSION PATH_TO_INSTALL_INTO.')
+            self.add_log_entry('CUDA SETUP: Solution 2b): For example, "bash cuda_install.sh 113 ~/local/" will download CUDA 11.3 and install into the folder ~/local')
+
             return
 
         make_cmd = f'CUDA_VERSION={self.cuda_version_string}'
@@ -196,11 +197,13 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
         try:
             if path.exists():
                 existent_directories.add(path)
+        except PermissionError as pex:
+            # Handle the PermissionError first as it is a subtype of OSError 
+            # https://docs.python.org/3/library/exceptions.html#exception-hierarchy
+            pass
         except OSError as exc:
             if exc.errno != errno.ENAMETOOLONG:
                 raise exc
-        except PermissionError as pex:
-            pass
 
     non_existent_directories: Set[Path] = candidate_paths - existent_directories
     if non_existent_directories:
@@ -214,8 +217,11 @@ def get_cuda_runtime_lib_paths(candidate_paths: Set[Path]) -> Set[Path]:
     paths = set()
     for libname in CUDA_RUNTIME_LIBS:
         for path in candidate_paths:
-            if (path / libname).is_file():
-                paths.add(path / libname)
+            try:
+                if (path / libname).is_file():
+                    paths.add(path / libname)
+            except PermissionError:
+                pass
     return paths
 
 

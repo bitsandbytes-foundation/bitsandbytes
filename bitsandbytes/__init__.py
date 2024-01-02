@@ -24,4 +24,6 @@ __pdoc__ = {
     "optim.optimizer.MockArgs": False,
 }
 
+__version__ = "0.41.3.post1"
+
 PACKAGE_GITHUB_URL = "https://github.com/TimDettmers/bitsandbytes"
