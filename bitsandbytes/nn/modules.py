@@ -220,10 +220,10 @@ class Linear4bit(nn.Linear):
             if self.compute_dtype == torch.float32 and (x.numel() == x.shape[-1]):
                 # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference when it could be fast
                 # warn the user about this
-                warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference.')
+                warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference.')
                 warnings.filterwarnings('ignore', message='.*inference.')
             if self.compute_dtype == torch.float32 and (x.numel() != x.shape[-1]):
-                warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference or training speed.')
+                warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference or training speed.')
                 warnings.filterwarnings('ignore', message='.*inference or training')
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
