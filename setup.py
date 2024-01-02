@@ -18,7 +18,7 @@ def read(fname):
 
 
 setup(
-    name=f"bitsandbytes",
+    name="bitsandbytes",
     version="0.42.0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",

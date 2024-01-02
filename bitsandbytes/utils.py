@@ -39,7 +39,7 @@ def outlier_hook(module, input):
             hook.remove()
 
 
-class OutlierTracer(object):
+class OutlierTracer:
     _instance = None
 
     def __init__(self):

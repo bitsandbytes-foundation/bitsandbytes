@@ -25,7 +25,7 @@ def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
 
 
 def get_temp_dir():
-    path = f"/tmp/autoswap/{str(uuid.uuid4())}"
+    path = f"/tmp/autoswap/{uuid.uuid4()}"
     os.makedirs(path, exist_ok=True)
     return path
 
