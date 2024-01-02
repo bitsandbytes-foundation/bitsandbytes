@@ -28,7 +28,6 @@ ignore = [
     "E701",  # Multiple statements on one line (TODO: enable)
     "E712",  # Allow using if x == False, as it's not always equivalent to if x.
     "E731",  # Do not use lambda
-    "F401",
     "F841",  # Local assigned but not used (TODO: enable, these are likely bugs)
     "RUF012",  # Mutable class attribute annotations
 ]

@@ -17,15 +17,15 @@ evaluation:
 """
 
 import ctypes as ct
-import os
 import errno
-import platform
-import torch
-from warnings import warn
-from itertools import product
-
+import os
 from pathlib import Path
+import platform
 from typing import Set, Union
+from warnings import warn
+
+import torch
+
 from .env_vars import get_potentially_lib_path_containing_env_vars
 
 # these are the most common libs names

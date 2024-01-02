@@ -1,20 +1,13 @@
-import pytest
-import torch
+from itertools import product
 import math
 
-from itertools import product
-
+import pytest
+import torch
 import transformers
 from transformers import (
-  AutoConfig,
   AutoModelForCausalLM,
-  AutoTokenizer,
   BitsAndBytesConfig,
-  GenerationConfig,
-  set_seed,
-
 )
-
 
 
 def get_4bit_config():

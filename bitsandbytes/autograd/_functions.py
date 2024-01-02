@@ -1,8 +1,8 @@
-import operator
-import warnings
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
-from typing import Tuple, Optional, List
+import operator
+from typing import Optional, Tuple
+import warnings
 from warnings import warn
 
 import torch

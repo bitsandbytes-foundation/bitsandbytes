@@ -1,9 +1,7 @@
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-import os
 
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
+import pandas as pd
 
 cmap=plt.get_cmap('cool')
 

@@ -1,6 +1,6 @@
 import os
-import sys
 import subprocess
+import sys
 from urllib.request import urlretrieve
 
 cuda_versions = {

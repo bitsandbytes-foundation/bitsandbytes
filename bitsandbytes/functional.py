@@ -3,17 +3,15 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import ctypes as ct
+from functools import reduce  # Required in Python 3
 import itertools
 import operator
-import random
-import torch
-import itertools
-import math
-import numpy as np
+from typing import Any, Dict, Tuple
 
-from functools import reduce  # Required in Python 3
-from typing import Tuple, Any, Dict
+import numpy as np
+import torch
 from torch import Tensor
+
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
 from .cextension import COMPILED_WITH_CUDA, lib

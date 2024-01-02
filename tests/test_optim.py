@@ -1,14 +1,12 @@
-import ctypes
+from itertools import product
 import os
+from os.path import join
 import shutil
 import time
 import uuid
-from itertools import product
-from os.path import join
 
-import pytest
 from lion_pytorch import Lion
-
+import pytest
 import torch
 
 import bitsandbytes as bnb

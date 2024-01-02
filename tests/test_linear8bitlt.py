@@ -1,6 +1,6 @@
-import os
 from contextlib import nullcontext
 from itertools import product
+import os
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -10,7 +10,6 @@ import bitsandbytes as bnb
 from bitsandbytes import functional as F
 from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
 from bitsandbytes.nn.modules import Linear8bitLt
-
 
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py

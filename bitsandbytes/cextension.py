@@ -1,12 +1,9 @@
 import ctypes as ct
-import os
-import torch
-
-from pathlib import Path
 from warnings import warn
 
-from bitsandbytes.cuda_setup.main import CUDASetup
+import torch
 
+from bitsandbytes.cuda_setup.main import CUDASetup
 
 setup = CUDASetup.get_instance()
 if setup.initialized != True:

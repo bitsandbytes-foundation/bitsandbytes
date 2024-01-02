@@ -3,17 +3,17 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 from typing import Any, Dict, Optional, TypeVar, Union, overload
-
 import warnings
+
 import torch
-import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
+import torch.nn.functional as F
 
 import bitsandbytes as bnb
+from bitsandbytes.autograd._functions import get_tile_inds, undo_layout
 from bitsandbytes.functional import QuantState
-from bitsandbytes.autograd._functions import undo_layout, get_tile_inds
 from bitsandbytes.optim import GlobalOptimManager
-from bitsandbytes.utils import OutlierTracer, find_outlier_dims
+from bitsandbytes.utils import OutlierTracer
 
 T = TypeVar("T", bound="torch.nn.Module")
 

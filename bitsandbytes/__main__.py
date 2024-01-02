@@ -1,11 +1,10 @@
 import os
-import sys
+from os.path import isdir
 import shlex
 import subprocess
-
-from warnings import warn
+import sys
 from typing import Tuple
-from os.path import isdir
+from warnings import warn
 
 import torch
 
@@ -88,9 +87,7 @@ generate_bug_report_information()
 
 
 from . import COMPILED_WITH_CUDA, PACKAGE_GITHUB_URL
-from .cuda_setup.env_vars import to_be_ignored
 from .cuda_setup.main import get_compute_capabilities
-
 
 print_header("OTHER")
 print(f"COMPILED_WITH_CUDA = {COMPILED_WITH_CUDA}")

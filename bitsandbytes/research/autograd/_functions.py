@@ -1,13 +1,11 @@
+from functools import reduce  # Required in Python 3
 import operator
 import warnings
-from dataclasses import dataclass
-from functools import reduce  # Required in Python 3
 
 import torch
 
+from bitsandbytes.autograd._functions import GlobalOutlierPooler, MatmulLtState
 import bitsandbytes.functional as F
-
-from bitsandbytes.autograd._functions import MatmulLtState, GlobalOutlierPooler
 
 
 # math.prod not compatible with python < 3.8

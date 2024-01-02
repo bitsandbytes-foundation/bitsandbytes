@@ -1,16 +1,16 @@
+from itertools import product
 import math
 import random
 import time
-from itertools import product
 
 import einops
-import pytest
-import torch
 import numpy as np
+import pytest
+from scipy.stats import norm
+import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
-from scipy.stats import norm
 
 torch.set_printoptions(
     precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000
