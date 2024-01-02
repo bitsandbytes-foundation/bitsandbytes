@@ -60,7 +60,7 @@ def generate_bug_report_information():
             try:
                 if isdir(path):
                     print_header(f"{path} CUDA PATHS")
-                    paths = find_file_recursive(path, '*cuda*so')
+                    paths = find_file_recursive(path, '*cuda*')
                     print(paths)
             except:
                 print(f'Could not read LD_LIBRARY_PATH: {path}')
