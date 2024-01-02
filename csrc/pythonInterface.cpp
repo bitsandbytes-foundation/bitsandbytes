@@ -6,6 +6,9 @@
 #if BUILD_CUDA
 #include <ops.cuh>
 #endif
+#if BUILD_MPS
+// #include <mps_ops.h>
+#endif
 #include <cpu_ops.h>
 
 // We cannot call templated code from C, so we wrap the template in a C compatible call here if necessary.
@@ -412,6 +415,7 @@ extern "C"
 	{ gemm_4bit_inference_naive_fp32(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
 #endif
+
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }
 	void cdequantize_blockwise_cpu_fp32(float *code, unsigned char *A, float *absmax, float *out, long long blocksize, long long n){ dequantize_cpu(code, A, absmax, out, blocksize, n); }
 }

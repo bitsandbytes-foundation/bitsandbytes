@@ -9,7 +9,9 @@
 
 #include <stdio.h>
 #include <iostream>
+#ifndef _MSC_VER
 #include <unistd.h>
+#endif
 #include <assert.h>
 
 #include <cuda_runtime_api.h>

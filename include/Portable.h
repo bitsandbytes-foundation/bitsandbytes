@@ -4,10 +4,40 @@
 #include <stdexcept>
 #include <sstream>
 
+#if defined(__aarch64__)
+#ifdef __CUDACC__
+#undef USE_NEON // Doesn't work with nvcc, undefined symbols
+#else
+#include <arm_neon.h>
+#undef USE_NEON // Not yet implemented
+#endif
+#undef USE_AVX // x86_64 only
+#undef USE_AVX2 // x86_64 only
+#undef USE_SSE2 // x86_64 only
+#undef USE_SSE41 // x86_64 only
+#undef USE_SSE42 // x86_64 only
+#undef USE_FMA // x86_64 only
+#ifdef USE_NEON
+typedef float32x4_t __m128;
+typedef int32x4_t __m128i;
+typedef float64x2_t __m128d;
+#else
+typedef struct {float a; float b; float c; float d;} __m128;
+typedef struct {int a; int b; int c; int d;} __m128i;
+typedef struct {double a; double b;} __m128d;
+#endif
+#else
+#undef USE_NEON // ARM64 only
 #ifdef __FMA__
 #define USE_FMA
 #endif
+#if !defined(__SSE2__) && !defined(_MSC_VER)
+#error Compiler must support SSE2
+#endif
+#define USE_SSE2
 
+#if defined(__aarch64__)
+#else
 #ifdef __AVX2__
 #define USE_AVX2
 #endif
@@ -24,7 +54,8 @@
 #ifdef __SSE4_2__
 #define USE_SSE42
 #endif
-
+#endif
+#endif
 
 #ifndef _MSC_VER
 #include <stdint.h>
@@ -50,7 +81,7 @@ typedef unsigned __int64  uint64;
 
 namespace Details {
 
-#define myassert(cond, msg) if (!cond){ std::ostringstream os; os << "\nassertion failed: " << #cond << ", " << msg << "\n"; throw std::invalid_argument(os.str()); }
+#define myassert(cond, msg) if (!(cond)){ std::ostringstream os; os << "\nassertion failed: " << #cond << ", " << msg << "\n"; throw std::invalid_argument(os.str()); }
 
 // log2 is not defined in VS2008
 #if defined(_MSC_VER)
