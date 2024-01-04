@@ -142,7 +142,7 @@ class Embedding(torch.nn.Embedding):
 
 class Params4bit(torch.nn.Parameter):
 
-    def __new__(cls, data: Optional[torch.Tensor] = None, requires_grad=True, quant_state: QuantState = None, blocksize: int = 64, compress_statistics: bool = True, quant_type: str = 'fp4') -> "Params4bit":
+    def __new__(cls, data: Optional[torch.Tensor] = None, requires_grad=True, quant_state: QuantState = None, blocksize: int = 64, compress_statistics: bool = True, quant_type: str = 'fp4', module: Optional["Linear4bit"] = None) -> "Params4bit":
         if data is None:
             data = torch.empty(0)
 
@@ -152,6 +152,7 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.data = data
+        self.module = module
         return self
 
     @classmethod
@@ -169,6 +170,8 @@ class Params4bit(torch.nn.Parameter):
         w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type)
         self.data = w_4bit
         self.quant_state = quant_state
+        if self.module is not None:
+            self.module.quant_state = quant_state
 
         return self
 
@@ -205,10 +208,11 @@ class Linear4bit(nn.Linear):
 
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4', device=None):
         super().__init__(input_features, output_features, bias, device)
-        self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
+        self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type, module=self)
         # self.persistent_buffers = []  # TODO consider as way to save quant state
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
+        self.quant_state = None
 
     def set_compute_type(self, x):
         if x.dtype in [torch.float32, torch.bfloat16]:
@@ -243,7 +247,15 @@ class Linear4bit(nn.Linear):
             self.bias.data = self.bias.data.to(x.dtype)
 
         if getattr(self.weight, 'quant_state', None) is None:
-            print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+            if getattr(self, 'quant_state', None) is not None:
+                # the quant state got lost when the parameter got converted. This happens for example for fsdp
+                # since we registered the module, we can recover the state here
+                assert self.weight.shape[1] == 1
+                if not isinstance(self.weight, Params4bit):
+                    self.weight = Params4bit(self.weight)
+                self.weight.quant_state = self.quant_state
+            else:
+                print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
         if not self.compute_type_is_set:
             self.set_compute_type(x)
             self.compute_type_is_set = True
