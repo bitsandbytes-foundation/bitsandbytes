@@ -884,13 +884,13 @@ def get_4bit_type(typename, device=None, blocksize=64):
     return data.to(device)
 
 
-def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
-    return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4')
+def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
+    return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4', quant_storage)
 
-def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False):
-    return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4')
+def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
+    return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4', quant_storage)
 
-def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4') -> Tensor:
+def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4', quant_storage=torch.uint8) -> Tensor:
     """
     Quantize tensor A in blocks of 4-bit values.
 
@@ -903,7 +903,7 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
     absmax : torch.Tensor
         The absmax values.
     out : torch.Tensor
-        The output tensor (8-bit).
+        The output tensor.
     blocksize : int
         The blocksize used in quantization.
     quant_type : str
@@ -912,7 +912,7 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
     Returns
     -------
     torch.Tensor:
-        The 8-bit tensor with packed 4-bit values.
+        Tensor with packed 4-bit values.
     tuple(torch.Tensor, torch.Size, torch.dtype, int):
         The quantization state to undo the quantization.
     """
@@ -931,7 +931,8 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
 
 
     if out is None:
-        out = torch.zeros(((n+1)//8, 1), dtype=torch.float32, device=A.device)
+        mod = dtype2bytes[quant_storage] * 2
+        out = torch.zeros(((n+1)//mod, 1), dtype=quant_storage, device=A.device)
 
     assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
 
@@ -985,7 +986,7 @@ def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = 
     Parameters
     ----------
     A : torch.Tensor
-        The input 8-bit tensor (packed 4-bit values).
+        The input tensor (packed 4-bit values).
     quant_state : QuantState
         object with quantisation stats, incl. absmax values, original tensor shape and original dtype.
     absmax : torch.Tensor
