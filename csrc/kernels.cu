@@ -2178,7 +2178,12 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   {
     //smem_col_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
     smem_row_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
-    smem_row_nnz_values[threadIdx.x + (j*THREADS)] = 0;
+    // smem_row_nnz_values[threadIdx.x + (j*THREADS)] = 0;
+  }
+
+  #pragma unroll TILE_ROWS
+  for (int j = 0; j < TILE_ROWS; j++) {
+    smem_row_nnz_values[j] = 0;
   }
 
   #pragma unroll ITEMS_PER_THREAD
