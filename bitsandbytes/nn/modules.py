@@ -162,6 +162,7 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.quant_storage = quant_storage
+        self.bnb_quantized = False
         self.data = data
         self.module = module
         return self
@@ -174,17 +175,21 @@ class Params4bit(torch.nn.Parameter):
         self.blocksize = self.quant_state.blocksize
         self.compress_statistics = self.quant_state.nested
         self.quant_type = self.quant_state.quant_type
+        self.bnb_quantized = True
         return self
 
-    def cuda(self, device):
+    def _quantize(self, device):
         w = self.data.contiguous().half().cuda(device)
         w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type, quant_storage=self.quant_storage)
         self.data = w_4bit
         self.quant_state = quant_state
         if self.module is not None:
             self.module.quant_state = quant_state
-
+        self.bnb_quantized = True
         return self
+
+    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+        return self.to(device='cuda' if device is None else device, non_blocking=non_blocking)
 
     @overload
     def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ..., non_blocking: bool = ...,) -> T:
@@ -201,8 +206,8 @@ class Params4bit(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if (device is not None and device.type == "cuda" and self.data.device.type == "cpu"):
-            return self.cuda(device)
+        if (device is not None and device.type == "cuda" and not self.bnb_quantized):
+            return self._quantize(device)
         else:
             if self.quant_state is not None:
                 self.quant_state.to(device)

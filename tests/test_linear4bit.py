@@ -126,6 +126,14 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
     assert torch.equal(a, b)
     assert torch.equal(a, c)
 
+    # Test moving to CPU and back to GPU
+    linear_q2.to('cpu')
+    linear_q2.to(device)
+    d = linear_qs(x)
+    assert c.dtype == d.dtype
+    assert c.device == d.device
+    assert torch.equal(c, d)
+
     # Saved size ratio test. Target set for layer_shape == (300, 400) w/ bias
     with TemporaryDirectory() as tmpdir:
         state_path_4bit = os.path.join(tmpdir, "state_4bit.pth")
