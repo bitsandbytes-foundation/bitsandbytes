@@ -151,7 +151,8 @@ class Params4bit(torch.nn.Parameter):
             compress_statistics: bool = True,
             quant_type: str = 'fp4',
             quant_storage: torch.dtype = torch.uint8,
-            module: Optional["Linear4bit"] = None
+            module: Optional["Linear4bit"] = None,
+            bnb_quantized: bool = False
     ) -> "Params4bit":
         if data is None:
             data = torch.empty(0)
@@ -162,7 +163,7 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.quant_storage = quant_storage
-        self.bnb_quantized = False
+        self.bnb_quantized = bnb_quantized
         self.data = data
         self.module = module
         return self
