@@ -151,7 +151,8 @@ class Params4bit(torch.nn.Parameter):
             compress_statistics: bool = True,
             quant_type: str = 'fp4',
             quant_storage: torch.dtype = torch.uint8,
-            module: Optional["Linear4bit"] = None
+            module: Optional["Linear4bit"] = None,
+            bnb_quantized: bool = False
     ) -> "Params4bit":
         if data is None:
             data = torch.empty(0)
@@ -162,7 +163,7 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = quant_type
         self.quant_state = quant_state
         self.quant_storage = quant_storage
-        self.bnb_quantized = False
+        self.bnb_quantized = bnb_quantized
         self.data = data
         self.module = module
         return self
@@ -224,7 +225,7 @@ class Linear4bit(nn.Linear):
 
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4', quant_storage=torch.uint8, device=None):
         super().__init__(input_features, output_features, bias, device)
-        self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type, quant_storage=quant_storage, module=self)
+        self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type, quant_storage=quant_storage, module=self, bnb_quantized=False)
         # self.persistent_buffers = []  # TODO consider as way to save quant state
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
