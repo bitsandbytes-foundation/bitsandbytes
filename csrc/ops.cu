@@ -10,7 +10,7 @@
 #include <cassert>
 #include <common.h>
 
-#ifdef BITS_AND_BYTES_USE_ROCM
+#ifdef BNB_USE_HIP
 #include <hipcub/device/device_scan.hpp>
 #else
 #include <cub/device/device_scan.cuh>

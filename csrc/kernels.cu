@@ -5,7 +5,7 @@
 
 #include <kernels.cuh>
 
-#ifdef BITS_AND_BYTES_USE_ROCM
+#ifdef BNB_USE_HIP
 #include <hip/hip_runtime.h>
 #include <hipcub/hipcub.hpp>
 #include <hipcub/block/block_radix_sort.hpp>
@@ -38,7 +38,7 @@
 #define NUM 4
 #define NUM_BLOCK 4096
 
-#ifndef BITS_AND_BYTES_USE_ROCM
+#ifndef BNB_USE_HIP
 // source: https://stackoverflow.com/questions/17399119/how-do-i-use-atomicmax-on-floating-point-values-in-cuda
 __device__ float atomicMax(float* address, float val) {
   int* address_as_i = reinterpret_cast<int*>(address);

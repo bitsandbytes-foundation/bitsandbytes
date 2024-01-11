@@ -13,7 +13,7 @@
 #include <assert.h>
 
 
-#ifdef BITS_AND_BYTES_USE_ROCM
+#ifdef BNB_USE_HIP
 // check rocminfo | grep "Wavefront Size". Should be supported on all new GPU's
 // dirty hack to force wavefront_size 32 so this compiles
 // RDNA 2 defaults to 64 which conflicts with kQuantizeBlockwise
