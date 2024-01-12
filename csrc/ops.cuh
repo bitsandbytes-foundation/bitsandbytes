@@ -14,10 +14,6 @@
 
 
 #ifdef BNB_USE_HIP
-// check rocminfo | grep "Wavefront Size". Should be supported on all new GPU's
-// dirty hack to force wavefront_size 32 so this compiles
-// RDNA 2 defaults to 64 which conflicts with kQuantizeBlockwise
-#define __AMDGCN_WAVEFRONT_SIZE 32 
 
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_fp16.h>
@@ -58,7 +54,7 @@
 #define cublasLtHandle_t hipblasLtHandle_t
 #define cublasLtCreate hipblasLtCreate
 #define CUBLAS_GEMM_DEFAULT HIPBLAS_GEMM_DEFAULT
-#define CUBLAS_GEMM_DEFAULT_TENSOR_OP HIPBLAS_GEMM_DEFAULT //TODO: HIP didn't have the right one, might cause issues 
+#define CUBLAS_GEMM_DEFAULT_TENSOR_OP HIPBLAS_GEMM_DEFAULT
 
 #else
 #include <cuda_runtime_api.h>
