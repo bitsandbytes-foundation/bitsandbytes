@@ -2370,7 +2370,8 @@ def test_normal_map_tree():
 @pytest.mark.parametrize("storage_type", ['nf4', 'fp4'], ids=['nf4', 'fp4'])
 @pytest.mark.parametrize("kind", ['fc1', 'fc2', 'attn', 'attn_packed'], ids=['fc1', 'fc2', 'attn', 'attn_packed'])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
-def test_gemv_4bit(dtype, storage_type, double_quant, kind):
+@pytest.mark.parametrize("quant_storage", [torch.uint8, torch.float16, torch.bfloat16, torch.float32], ids=['uint8', 'fp16', 'bf16', 'fp32'])
+def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
     for dim in [128, 256, 512, 1024]:
     #for dim in [4*1024]:
     #for dim in [1*16]:
@@ -2399,7 +2400,7 @@ def test_gemv_4bit(dtype, storage_type, double_quant, kind):
                 A = torch.randn(1, dim, dtype=dtype, device='cuda')
                 B = torch.randn(dim*3, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
 
-            qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant)
+            qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant, quant_storage=quant_storage)
             C3 = torch.matmul(A, B.t())
             C2 = F.gemv_4bit(A, qB.t(), state=state)
             A.requires_grad = True
