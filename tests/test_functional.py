@@ -1992,8 +1992,8 @@ def test_zeropoint():
     C2 -= A.sum(1).view(-1, 1) * zp
 
     ca, cqa, cza = quant_zp(A)
-    print(ca.min(), ca.max())
-    print((ca - cza).min(), (ca - cza).max())
+    #print(ca.min(), ca.max())
+    #print((ca - cza).min(), (ca - cza).max())
 
     zp = 1
     scale = 2.0
@@ -2022,14 +2022,14 @@ def test_zeropoint():
     C7 -= zpa * zpb * A.shape[1]
     C7 /= qa * qb
 
-    print("")
+    #print("")
     # print(C0.flatten()[:10])
-    print(C1.flatten()[:10])
-    print(C2.flatten()[:10])
-    print(C3.flatten()[:10])
-    print(C5.flatten()[:10])
-    print(C6.flatten()[:10])
-    print(C7.flatten()[:10])
+    #print(C1.flatten()[:10])
+    #print(C2.flatten()[:10])
+    #print(C3.flatten()[:10])
+    #print(C5.flatten()[:10])
+    #print(C6.flatten()[:10])
+    #print(C7.flatten()[:10])
     err1 = torch.abs(C1 - C2).mean().item()
     err2 = torch.abs(C1 - C3).mean().item()
     err3 = torch.abs(C1 - C4).mean().item()
@@ -2355,15 +2355,15 @@ def test_normal_map_tree():
     code = F.create_normal_map()
     values =code[:8].tolist() + code[-8:].tolist()
     num_pivots = 1
-    print(values)
+    #print(values)
     while num_pivots <16:
         idx = list(range(16//num_pivots//2, 16, 16//num_pivots))
-        print(idx)
+        #print(idx)
         num_pivots *= 2
         pivots = []
         for i in idx:
             pivots.append((values[i-1]+values[i])/2)
-        print(pivots)
+        #print(pivots)
 
 
 @pytest.mark.parametrize("double_quant", [True, False], ids=['DQ_True', 'DQ_False'])
@@ -2453,11 +2453,11 @@ def test_gemv_4bit(dtype, storage_type, double_quant, kind):
         #
         #print('='*80)
         #print(f'For matmul: {A.shape}, {B.shape}, {kind}, {dtype}, {storage_type}, double_quant={double_quant}:')
-        print(C1.flatten()[-20:])
-        print(C2.flatten()[-20:])
-        print(f'inference vs training abs: {err1}')
-        print(f'inference vs training rel: {relerr1}')
-        print(f'inference vs training max: {maxerr1}')
+        #print(C1.flatten()[-20:])
+        #print(C2.flatten()[-20:])
+        #print(f'inference vs training abs: {err1}')
+        #print(f'inference vs training rel: {relerr1}')
+        #print(f'inference vs training max: {maxerr1}')
         #print(f'inference vs training vs torch err ratio abs: {absratio}')
         #print(f'inference vs training vs torch err ratio rel: {relratio}')
         #print(f'inference vs training vs torch err ratio max: {maxratio}')

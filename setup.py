@@ -6,9 +6,7 @@ import glob
 import os
 
 from setuptools import find_packages, setup
-import bitsandbytes as bnb
 
-VERSION = bnb.__version__
 
 libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.so"))
 libs = [os.path.basename(p) for p in libs]
@@ -21,7 +19,7 @@ def read(fname):
 
 setup(
     name=f"bitsandbytes",
-    version=VERSION,
+    version="0.42.0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="k-bit optimizers and matrix multiplication routines.",

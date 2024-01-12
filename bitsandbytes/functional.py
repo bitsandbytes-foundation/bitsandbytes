@@ -9,7 +9,6 @@ import random
 import torch
 import itertools
 import math
-from scipy.stats import norm
 import numpy as np
 
 from functools import reduce  # Required in Python 3
@@ -235,6 +234,7 @@ def create_linear_map(signed=True, total_bits=8, add_zero=True):
         return torch.Tensor(values[:l].tolist() + [0]*gap + values[l:].tolist())
 
 def create_normal_map(offset=0.9677083, use_extra_value=True):
+    from scipy.stats import norm
 
     if use_extra_value:
         # one more positive value, this is an asymmetric type
