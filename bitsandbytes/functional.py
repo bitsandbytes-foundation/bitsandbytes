@@ -1718,13 +1718,23 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
         return torch.empty(tuple(shapeA[:2] + [shapeB[0]]), device=A.device, dtype=torch.float16)
 
     if dimsA == 2 and out is None:
-        out, Sout = get_transform_buffer(
-            (shapeA[0], shapeB[0]), dtype, A.device, "col32", "row"
-        )
+        if HIP_ENVIRONMENT:
+            out, Sout = get_transform_buffer(
+                (shapeA[0], shapeB[0]), dtype, A.device, "col", "row"
+            )
+        else:
+            out, Sout = get_transform_buffer(
+                (shapeA[0], shapeB[0]), dtype, A.device, "col32", "row"
+            )
     elif dimsA == 3 and out is None:
-        out, Sout = get_transform_buffer(
-            (shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row"
-        )
+        if HIP_ENVIRONMENT:
+            out, Sout = get_transform_buffer(
+                (shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col", "row"
+            )
+        else:
+            out, Sout = get_transform_buffer(
+                (shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row"
+            )
 
     assert dimsB != 3, "len(B.shape)==3 not supported"
     assert A.device.type == "cuda"
@@ -1732,9 +1742,14 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
     assert out.dtype == dtype
-    assert SA[1] == "col32"
-    assert SB[1] in ["col_turing", "col_ampere"]
-    assert Sout[1] == "col32"
+    if HIP_ENVIRONMENT:
+        assert SA[1] == "col"
+        assert SB[1] == "col"
+        assert Sout[1] == "col"
+    else:
+        assert SA[1] == "col32"
+        assert SB[1] in ["col_turing", "col_ampere"]
+        assert Sout[1] == "col32"
     assert (
         shapeA[-1] == shapeB[-1]
     ), f"Matmullt only supports A @ B^T. Inner matrix dimensions do not match: A @ B = {shapeA} @ {shapeB}"
@@ -1748,17 +1763,21 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     ptrC = get_ptr(out)
 
     k = shapeA[-1]
-    lda = ct.c_int32(m * 32)
-    if formatB == "col_turing":
-        # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
-        # n = rows
-        ldb = ct.c_int32(((rows + 7) // 8) * 8 * 32)
+    if HIP_ENVIRONMENT:
+        lda = ct.c_int32(m)
+        ldb = ct.c_int32(shapeB[0])
+        ldc = ct.c_int32(m)
     else:
-        # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
-        # n = rows
-        ldb = ct.c_int32(((rows + 31) // 32) * 32 * 32)
-
-    ldc = ct.c_int32(m * 32)
+        lda = ct.c_int32(m * 32)
+        if formatB == "col_turing":
+            # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
+            # n = rows
+            ldb = ct.c_int32(((rows + 7) // 8) * 8 * 32)
+        else:
+            # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
+            # n = rows
+            ldb = ct.c_int32(((rows + 31) // 32) * 32 * 32)
+        ldc = ct.c_int32(m * 32)
     m = ct.c_int32(m)
     n = ct.c_int32(n)
     k = ct.c_int32(k)
@@ -1766,7 +1785,7 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     has_error = 0
     ptrRowScale = get_ptr(None)
     is_on_gpu([A, B, out])
-    if formatB == 'col_turing':
+    if formatB == 'col_turing' or HIP_ENVIRONMENT:
         if dtype == torch.int32:
             has_error = lib.cigemmlt_turing_32(
                 ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc
