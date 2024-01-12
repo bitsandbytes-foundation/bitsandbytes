@@ -490,8 +490,8 @@ def nvidia_transform(
     ld=None,
 ):
     if HIP_ENVIRONMENT:
-        to_order = "col" if to_order in ["col32","col_turing","col_ampere"]
-        from_order = "col" if from_order in ["col32","col_turing","col_ampere"]
+        to_order = "col" if to_order in ["col32","col_turing","col_ampere"] else to_order
+        from_order = "col" if from_order in ["col32","col_turing","col_ampere"] else from_order
 
     if state is None:
         state = (A.shape, from_order)
