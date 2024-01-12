@@ -489,6 +489,10 @@ def nvidia_transform(
     state=None,
     ld=None,
 ):
+    if HIP_ENVIRONMENT:
+        to_order = "col" if to_order in ["col32","col_turing","col_ampere"]
+        from_order = "col" if from_order in ["col32","col_turing","col_ampere"]
+
     if state is None:
         state = (A.shape, from_order)
     else:
@@ -2094,6 +2098,9 @@ def double_quant(
 
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+    if HIP_ENVIRONMENT:
+        return nvidia_transform(A,to_order,from_order,out,transpose,state,ld)
+
     prev_device = pre_call(A.device)
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]
