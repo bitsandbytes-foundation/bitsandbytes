@@ -702,8 +702,14 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         )
         C1 = torch.matmul(A.float(), B.t().float())
 
-        A2, SA = F.transform(A, "col32")
-        B2, SB = F.transform(B, "col_turing")
+        # col32, col_turing and col_ampere are HW specific and are not applicable to ROCm
+        # using col format instead
+        if HIP_ENVIRONMENT:
+            A2, SA = F.nvidia_transform(A, "col", state=(A.shape,"row"))
+            B2, SB = F.nvidia_transform(B, "col", state=(B.shape,"row"))
+        else:
+            A2, SA = F.transform(A, "col32")
+            B2, SB = F.transform(B, "col_turing")
         C2, SC = F.igemmlt(A2, B2, SA, SB)
         C3, S = F.nvidia_transform(C2, "row", state=SC)
         torch.testing.assert_close(C1, C3.float())
