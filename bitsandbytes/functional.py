@@ -16,7 +16,7 @@ from functools import reduce  # Required in Python 3
 from typing import Tuple
 from torch import Tensor
 
-from .cextension import COMPILED_WITH_CUDA, lib
+from .cextension import COMPILED_WITH_CUDA, lib, HIP_ENVIRONMENT
 
 # Remark: for AMD GPU we need to disable blocksize == 64
 
@@ -458,7 +458,10 @@ def get_transform_buffer(
         state = (shape[::-1], to_order)
 
     if to_order == "row" or to_order == "col":
-        return init_func(shape, dtype=dtype, device=device), state
+        if HIP_ENVIRONMENT and to_order == "col":
+            return init_func(shape[::-1], dtype=dtype, device=device), state
+        else:
+            return init_func(shape, dtype=dtype, device=device), state
     elif to_order == "col32":
         # blocks of 32 columns (padded)
         cols = 32 * ((cols + 31) // 32)
