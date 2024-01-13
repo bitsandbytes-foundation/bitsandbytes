@@ -36,7 +36,7 @@ dependencies:
 # mamba activate bnb
 
 ## PIP dependencies (install *after* ENV CREATION):
-# pip install --no-cache-dir --no-deps lion_pytorch triton peft
+# pip install --no-cache-dir --no-deps lion_pytorch triton hf-doc-builder watchdog
 ## NOTE: conda peft is not up to date, so we install from pip
 # cd pip install -e .  ## installs bitsandbytes as editable development install from within repo root dir
 

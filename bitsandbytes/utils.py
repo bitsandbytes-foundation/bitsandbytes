@@ -187,7 +187,7 @@ def unpack_tensor_to_dict(tensor_data):
     Returns:
     A Python dictionary containing the unpacked data.
     """
-    json_bytes = bytes(tensor_data.numpy())
+    json_bytes = bytes(tensor_data.cpu().numpy())
     json_str = json_bytes.decode('utf-8')
     unpacked_dict = json.loads(json_str)
 

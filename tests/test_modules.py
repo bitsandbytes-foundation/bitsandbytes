@@ -576,10 +576,10 @@ def test_kbit_backprop(module):
 
         assert kbit[0].weight.grad is None or kbit[0].weight.grad.sum().item() == 0
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
-    print('out', sum(errs1)/len(errs1))
-    print('grad', sum(errs2)/len(errs2))
-    print('rel out', sum(relerrs1)/len(relerrs1))
-    print('rel grad', sum(relerrs2)/len(relerrs2))
+    #print('out', sum(errs1)/len(errs1))
+    #print('grad', sum(errs2)/len(errs2))
+    #print('rel out', sum(relerrs1)/len(relerrs1))
+    #print('rel grad', sum(relerrs2)/len(relerrs2))
 
 def test_fp8linear():
 

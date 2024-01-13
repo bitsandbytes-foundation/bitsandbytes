@@ -7,9 +7,7 @@ import os
 
 from setuptools import find_packages, setup
 from setuptools.dist import Distribution
-import bitsandbytes as bnb
 
-VERSION = bnb.__version__
 
 libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.*"))
 libs = [os.path.basename(p) for p in libs]
@@ -26,7 +24,7 @@ class BinaryDistribution(Distribution):
 
 setup(
     name=f"bitsandbytes",
-    version=VERSION,
+    version="0.42.0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="k-bit optimizers and matrix multiplication routines.",
