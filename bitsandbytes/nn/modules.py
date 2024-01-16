@@ -141,7 +141,6 @@ class Embedding(torch.nn.Embedding):
 
 
 class Params4bit(torch.nn.Parameter):
-
     def __new__(
             cls,
             data: Optional[torch.Tensor] = None,
@@ -180,8 +179,9 @@ class Params4bit(torch.nn.Parameter):
         return self
 
     def _quantize(self, device):
-        w = self.data.contiguous().half().cuda(device)
-        w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics, quant_type=self.quant_type, quant_storage=self.quant_storage)
+        w = self.data.contiguous().cuda(device)
+        w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics,
+                                                           quant_type=self.quant_type, quant_storage=self.quant_storage)
         self.data = w_4bit
         self.quant_state = quant_state
         if self.module is not None:
