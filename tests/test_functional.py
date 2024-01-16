@@ -621,7 +621,7 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
 
     if orderOut == "row":
         torch.testing.assert_close(A.flatten(), out.flatten())
-    elif orderOut == "col" or (HIP_ENVIRONMENT and orderOut == "col32"):
+    elif orderOut == "col":
         torch.testing.assert_close(A.t().flatten(), out.flatten())
     elif orderOut == "col32":
         if dims == 2:
