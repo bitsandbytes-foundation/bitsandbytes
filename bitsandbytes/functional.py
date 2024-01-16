@@ -459,6 +459,7 @@ def get_transform_buffer(
 
     if to_order == "row" or to_order == "col":
         if HIP_ENVIRONMENT and to_order == "col":
+            # row to col transformation transposes output shape, so change buffer allocation accordingly
             return init_func(shape[::-1], dtype=dtype, device=device), state
         else:
             return init_func(shape, dtype=dtype, device=device), state
