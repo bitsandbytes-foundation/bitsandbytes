@@ -16,7 +16,7 @@ from functools import reduce  # Required in Python 3
 from typing import Tuple
 from torch import Tensor
 
-from .cextension import COMPILED_WITH_CUDA, lib
+from .cextension import COMPILED_WITH_CUDA, lib, HIP_ENVIRONMENT
 
 # Remark: for AMD GPU we need to disable blocksize == 64
 
@@ -458,7 +458,11 @@ def get_transform_buffer(
         state = (shape[::-1], to_order)
 
     if to_order == "row" or to_order == "col":
-        return init_func(shape, dtype=dtype, device=device), state
+        if HIP_ENVIRONMENT and to_order == "col":
+            # row to col transformation transposes output shape, so change buffer allocation accordingly
+            return init_func(shape[::-1], dtype=dtype, device=device), state
+        else:
+            return init_func(shape, dtype=dtype, device=device), state
     elif to_order == "col32":
         # blocks of 32 columns (padded)
         cols = 32 * ((cols + 31) // 32)
@@ -486,6 +490,10 @@ def nvidia_transform(
     state=None,
     ld=None,
 ):
+    if HIP_ENVIRONMENT:
+        to_order = "col" if to_order in ["col32","col_turing","col_ampere"] else to_order
+        from_order = "col" if from_order in ["col32","col_turing","col_ampere"] else from_order
+
     if state is None:
         state = (A.shape, from_order)
     else:
@@ -1715,13 +1723,23 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
         return torch.empty(tuple(shapeA[:2] + [shapeB[0]]), device=A.device, dtype=torch.float16)
 
     if dimsA == 2 and out is None:
-        out, Sout = get_transform_buffer(
-            (shapeA[0], shapeB[0]), dtype, A.device, "col32", "row"
-        )
+        if HIP_ENVIRONMENT:
+            out, Sout = get_transform_buffer(
+                (shapeA[0], shapeB[0]), dtype, A.device, "col", "row"
+            )
+        else:
+            out, Sout = get_transform_buffer(
+                (shapeA[0], shapeB[0]), dtype, A.device, "col32", "row"
+            )
     elif dimsA == 3 and out is None:
-        out, Sout = get_transform_buffer(
-            (shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row"
-        )
+        if HIP_ENVIRONMENT:
+            out, Sout = get_transform_buffer(
+                (shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col", "row"
+            )
+        else:
+            out, Sout = get_transform_buffer(
+                (shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row"
+            )
 
     assert dimsB != 3, "len(B.shape)==3 not supported"
     assert A.device.type == "cuda"
@@ -1729,9 +1747,14 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
     assert out.dtype == dtype
-    assert SA[1] == "col32"
-    assert SB[1] in ["col_turing", "col_ampere"]
-    assert Sout[1] == "col32"
+    if HIP_ENVIRONMENT:
+        assert SA[1] == "col"
+        assert SB[1] == "col"
+        assert Sout[1] == "col"
+    else:
+        assert SA[1] == "col32"
+        assert SB[1] in ["col_turing", "col_ampere"]
+        assert Sout[1] == "col32"
     assert (
         shapeA[-1] == shapeB[-1]
     ), f"Matmullt only supports A @ B^T. Inner matrix dimensions do not match: A @ B = {shapeA} @ {shapeB}"
@@ -1745,17 +1768,21 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     ptrC = get_ptr(out)
 
     k = shapeA[-1]
-    lda = ct.c_int32(m * 32)
-    if formatB == "col_turing":
-        # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
-        # n = rows
-        ldb = ct.c_int32(((rows + 7) // 8) * 8 * 32)
+    if HIP_ENVIRONMENT:
+        lda = ct.c_int32(m)
+        ldb = ct.c_int32(shapeB[0])
+        ldc = ct.c_int32(m)
     else:
-        # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
-        # n = rows
-        ldb = ct.c_int32(((rows + 31) // 32) * 32 * 32)
-
-    ldc = ct.c_int32(m * 32)
+        lda = ct.c_int32(m * 32)
+        if formatB == "col_turing":
+            # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
+            # n = rows
+            ldb = ct.c_int32(((rows + 7) // 8) * 8 * 32)
+        else:
+            # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
+            # n = rows
+            ldb = ct.c_int32(((rows + 31) // 32) * 32 * 32)
+        ldc = ct.c_int32(m * 32)
     m = ct.c_int32(m)
     n = ct.c_int32(n)
     k = ct.c_int32(k)
@@ -1763,7 +1790,7 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     has_error = 0
     ptrRowScale = get_ptr(None)
     is_on_gpu([A, B, out])
-    if formatB == 'col_turing':
+    if formatB == 'col_turing' or HIP_ENVIRONMENT:
         if dtype == torch.int32:
             has_error = lib.cigemmlt_turing_32(
                 ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc
@@ -2072,6 +2099,9 @@ def double_quant(
 
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+    if HIP_ENVIRONMENT:
+        return nvidia_transform(A,to_order,from_order,out,transpose,state,ld)
+
     prev_device = pre_call(A.device)
     if state is None: state = (A.shape, from_order)
     else: from_order = state[1]

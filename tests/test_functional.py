@@ -594,7 +594,7 @@ dim3 = torch.randint(2, 256, size=(n,)).tolist()
 # dim1, dim2 = (256,), (256,)
 dtype = [torch.int8, torch.int32]
 a_order = ["row"]
-out_order = ["col", "row", "col32"]
+out_order = ["col", "row"] if HIP_ENVIRONMENT else ["col", "row", "col32"]
 transpose = [False]
 dims = [2, 3]
 values = list(product(dim1, dim2, dim3, dims, dtype, a_order, out_order, transpose))
@@ -602,7 +602,6 @@ values = list(product(dim1, dim2, dim3, dims, dtype, a_order, out_order, transpo
 names = ["dim1_{}_dim2_{}_dim3_{}_dims_{}_dtype_{}_orderA_{}_orderOut_{}_transpose_{}".format(*vals)for vals in values]
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",values,ids=names)
 def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     if dims == 3 and out_order != "col32":
@@ -686,7 +685,6 @@ names = [
     for vals in values
 ]
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims, ldb", values, ids=names)
 def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
     for i in range(k):
@@ -709,16 +707,19 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         C3, S = F.nvidia_transform(C2, "row", state=SC)
         torch.testing.assert_close(C1, C3.float())
 
-        # transpose
-        B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(
-            torch.int8
-        )
-        C1 = torch.matmul(A.float(), B.float())
+        # Since ROCm supports row to col transformation only which is same as transpose,
+        # skipping this for HIP environment
+        if not HIP_ENVIRONMENT:
+            ## transpose
+            B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(
+                torch.int8
+            )
+            C1 = torch.matmul(A.float(), B.float())
 
-        B2t, SBt = F.transform(B, "col_turing", transpose=True)
-        C2, SC = F.igemmlt(A2, B2t, SA, SBt)
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
-        torch.testing.assert_close(C1, C3.float())
+            B2t, SBt = F.transform(B, "col_turing", transpose=True)
+            C2, SC = F.igemmlt(A2, B2t, SA, SBt)
+            C3, S = F.nvidia_transform(C2, "row", state=SC)
+            torch.testing.assert_close(C1, C3.float())
 
 
 dim1 = [32]
@@ -734,7 +735,6 @@ names = [
     for vals in values
 ]
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, dim3, dim4, dims", values, ids=names)
 def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
     formatB = F.get_special_format_str()
