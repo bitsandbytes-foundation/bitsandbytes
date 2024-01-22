@@ -745,7 +745,7 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
   #else
   const int CUB_NUM_PER_TH=NUM_PER_TH;
   #endif
-  const int DATA_NUM_PER_TH=(DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH;
+  const int DATA_NUM_PER_TH=(DATA_TYPE > 0) ? NUM_PER_TH/2 : CUB_NUM_PER_TH;
 
   const int n_full = gridDim.x * BLOCK_SIZE;
   int valid_items = 0;
