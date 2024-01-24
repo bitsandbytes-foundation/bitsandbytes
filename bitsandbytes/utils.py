@@ -124,7 +124,13 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
 
 
 
-def replace_linear(model, linear_replacement, skip_modules=["lm_head"], copy_weights=False, post_processing_function=None):
+def replace_linear(
+    model,
+    linear_replacement,
+    skip_modules=("lm_head",),
+    copy_weights=False,
+    post_processing_function=None,
+):
     """
     Replace linear modules with a new Linear module.
     Parameters:
