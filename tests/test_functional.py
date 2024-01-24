@@ -617,7 +617,10 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
         return
     if dtype == torch.int32 and out_order != "col32":
         return
-    func = F.get_transform_func(dtype, orderA, orderOut, transpose)
+    try:
+        func = F.get_transform_func(dtype, orderA, orderOut, transpose)
+    except ValueError as ve:
+        pytest.skip(str(ve))  # skip if not supported
 
     if dims == 2:
         A = torch.randint(-128, 127, size=(dim1, dim2), device="cuda").to(dtype)
@@ -2278,7 +2281,6 @@ def test_fp4_quant(dtype):
     assert relerr.item() < 0.28
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
 def test_4bit_compressed_stats(quant_type):
     for blocksize in [128, 64]:
@@ -2317,7 +2319,6 @@ def test_4bit_compressed_stats(quant_type):
 
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 #@pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
 @pytest.mark.parametrize("quant_type", ['nf4'])
 def test_bench_4bit_dequant(quant_type):
