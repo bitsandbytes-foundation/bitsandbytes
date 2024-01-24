@@ -184,7 +184,9 @@ class MatMulFP8Global(torch.autograd.Function):
 
 class SwitchBackBnb(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState()):
+    # TODO: the B008 on the line below is a likely bug; the current implementation will
+    #       have each SwitchBackBnb instance share a single MatmulLtState instance!!!
+    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState()):  # noqa: B008
         # default to pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:

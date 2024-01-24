@@ -230,7 +230,7 @@ def create_linear_map(signed=True, total_bits=8, add_zero=True):
     if gap == 0:
         return values
     else:
-        l = values.numel()//2
+        l = values.numel()//2  # noqa: E741
         return torch.Tensor(values[:l].tolist() + [0]*gap + values[l:].tolist())
 
 def create_normal_map(offset=0.9677083, use_extra_value=True):
