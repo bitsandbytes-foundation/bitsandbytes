@@ -1,9 +1,6 @@
 import os
 from os.path import isdir
-import shlex
-import subprocess
 import sys
-from typing import Tuple
 from warnings import warn
 
 import torch
@@ -66,9 +63,6 @@ def generate_bug_report_information():
     print('')
 
 
-
-
-
 def print_header(
     txt: str, width: int = HEADER_WIDTH, filler: str = "+"
 ) -> None:
@@ -77,65 +71,61 @@ def print_header(
 
 
 def print_debug_info() -> None:
+    from . import PACKAGE_GITHUB_URL
     print(
         "\nAbove we output some debug information. Please provide this info when "
         f"creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose ...\n"
     )
 
 
-generate_bug_report_information()
+def main():
+    generate_bug_report_information()
+
+    from . import COMPILED_WITH_CUDA
+    from .cuda_setup.main import get_compute_capabilities
+
+    print_header("OTHER")
+    print(f"COMPILED_WITH_CUDA = {COMPILED_WITH_CUDA}")
+    print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities()}")
+    print_header("")
+    print_header("DEBUG INFO END")
+    print_header("")
+    print("Checking that the library is importable and CUDA is callable...")
+    print("\nWARNING: Please be sure to sanitize sensitive info from any such env vars!\n")
+
+    try:
+        from bitsandbytes.optim import Adam
+
+        p = torch.nn.Parameter(torch.rand(10, 10).cuda())
+        a = torch.rand(10, 10).cuda()
+
+        p1 = p.data.sum().item()
+
+        adam = Adam([p])
+
+        out = a * p
+        loss = out.sum()
+        loss.backward()
+        adam.step()
+
+        p2 = p.data.sum().item()
+
+        assert p1 != p2
+        print("SUCCESS!")
+        print("Installation was successful!")
+    except ImportError:
+        print()
+        warn(
+            f"WARNING: {__package__} is currently running as CPU-only!\n"
+            "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
+            f"If you think that this is so erroneously,\nplease report an issue!"
+        )
+        print_debug_info()
+    except Exception as e:
+        print(e)
+        print_debug_info()
+        sys.exit(1)
 
 
-from . import COMPILED_WITH_CUDA, PACKAGE_GITHUB_URL
-from .cuda_setup.main import get_compute_capabilities
-
-print_header("OTHER")
-print(f"COMPILED_WITH_CUDA = {COMPILED_WITH_CUDA}")
-print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities()}")
-print_header("")
-print_header("DEBUG INFO END")
-print_header("")
-print(
-    """
-Running a quick check that:
-    + library is importable
-    + CUDA function is callable
-"""
-)
-print("\nWARNING: Please be sure to sanitize sensible info from any such env vars!\n")
-
-try:
-    from bitsandbytes.optim import Adam
-
-    p = torch.nn.Parameter(torch.rand(10, 10).cuda())
-    a = torch.rand(10, 10).cuda()
-
-    p1 = p.data.sum().item()
-
-    adam = Adam([p])
-
-    out = a * p
-    loss = out.sum()
-    loss.backward()
-    adam.step()
-
-    p2 = p.data.sum().item()
-
-    assert p1 != p2
-    print("SUCCESS!")
-    print("Installation was successful!")
-    sys.exit(0)
-
-except ImportError:
-    print()
-    warn(
-        f"WARNING: {__package__} is currently running as CPU-only!\n"
-        "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
-        f"If you think that this is so erroneously,\nplease report an issue!"
-    )
-    print_debug_info()
-    sys.exit(0)
-except Exception as e:
-    print(e)
-    print_debug_info()
-    sys.exit(1)
+if __name__ == "__main__":
+    main()
