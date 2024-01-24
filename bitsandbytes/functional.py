@@ -6,7 +6,7 @@ import ctypes as ct
 from functools import reduce  # Required in Python 3
 import itertools
 import operator
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -1068,7 +1068,7 @@ def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
 
 def dequantize(
     A: Tensor,
-    state: Tuple[Tensor, Tensor] = None,
+    state: Optional[Tuple[Tensor, Tensor]] = None,
     absmax: Tensor = None,
     code: Tensor = None,
     out: Tensor = None,
