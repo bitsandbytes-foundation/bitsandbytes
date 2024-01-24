@@ -61,8 +61,8 @@ def generate_bug_report_information():
                     print_header(f"{path} CUDA PATHS")
                     paths = find_file_recursive(path, '*cuda*')
                     print(paths)
-            except:
-                print(f'Could not read LD_LIBRARY_PATH: {path}')
+            except Exception as e:
+                print(f'Could not read LD_LIBRARY_PATH: {path} ({e})')
     print('')
 
 
