@@ -15,7 +15,6 @@ storage = {
     'float32': torch.float32
 }
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 @pytest.mark.parametrize(
     "quant_type, compress_statistics, bias, quant_storage",
     list(product(["nf4", "fp4"], [False, True], [False, True], ['uint8', 'float16', 'bfloat16', 'float32'])),
