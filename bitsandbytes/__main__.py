@@ -31,6 +31,8 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
     return std_out, std_err
 
 def find_file_recursive(folder, filename):
+    folder = shlex.quote(folder)
+    filename = shlex.quote(filename)
     cmd = f'find {folder} -name {filename}'
     out, err = execute_and_return(cmd)
     if len(err) > 0:
@@ -151,4 +153,3 @@ except Exception as e:
     print(e)
     print_debug_info()
     sys.exit(1)
-

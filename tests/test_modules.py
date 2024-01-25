@@ -520,7 +520,6 @@ modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float
 modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float16))
 modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.bfloat16))
 names = ['Int8Lt', '4bit', 'FP4', 'NF4', 'FP4+C', 'NF4+C', 'NF4+fp32', 'NF4+fp16', 'NF4+bf16']
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 @pytest.mark.parametrize("module", modules, ids=names)
 def test_kbit_backprop(module):
     b = 17
@@ -576,10 +575,10 @@ def test_kbit_backprop(module):
 
         assert kbit[0].weight.grad is None or kbit[0].weight.grad.sum().item() == 0
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
-    print('out', sum(errs1)/len(errs1))
-    print('grad', sum(errs2)/len(errs2))
-    print('rel out', sum(relerrs1)/len(relerrs1))
-    print('rel grad', sum(relerrs2)/len(relerrs2))
+    #print('out', sum(errs1)/len(errs1))
+    #print('grad', sum(errs2)/len(errs2))
+    #print('rel out', sum(relerrs1)/len(relerrs1))
+    #print('rel grad', sum(relerrs2)/len(relerrs2))
 
 def test_fp8linear():
 

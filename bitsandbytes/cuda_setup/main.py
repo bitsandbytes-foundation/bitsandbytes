@@ -18,7 +18,6 @@ evaluation:
 
 import ctypes as ct
 import os
-import pdb
 import errno
 import torch
 from warnings import warn
@@ -32,7 +31,7 @@ from .env_vars import get_potentially_lib_path_containing_env_vars
 # libcudart.so is missing by default for a conda install with PyTorch 2.0 and instead
 # we have libcudart.so.11.0 which causes a lot of errors before
 # not sure if libcudart.so.12.0 exists in pytorch installs, but it does not hurt
-CUDA_RUNTIME_LIBS: list = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0']
+CUDA_RUNTIME_LIBS: list = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0', 'libcudart.so.12.1', 'libcudart.so.12.2']
 
 # this is a order list of backup paths to search CUDA in, if it cannot be found in the main environmental paths
 backup_paths = []
@@ -65,9 +64,10 @@ class CUDASetup:
             self.add_log_entry('CUDA SETUP: Solution 1b): Once the library is found add it to the LD_LIBRARY_PATH: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:FOUND_PATH_FROM_1a')
             self.add_log_entry('CUDA SETUP: Solution 1c): For a permanent solution add the export from 1b into your .bashrc file, located at ~/.bashrc')
             self.add_log_entry('CUDA SETUP: Solution 2: If no library was found in step 1a) you need to install CUDA.')
-            self.add_log_entry('CUDA SETUP: Solution 2a): Download CUDA install script: wget https://github.com/TimDettmers/bitsandbytes/blob/main/cuda_install.sh')
+            self.add_log_entry('CUDA SETUP: Solution 2a): Download CUDA install script: wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/cuda_install.sh')
             self.add_log_entry('CUDA SETUP: Solution 2b): Install desired CUDA version to desired location. The syntax is bash cuda_install.sh CUDA_VERSION PATH_TO_INSTALL_INTO.')
             self.add_log_entry('CUDA SETUP: Solution 2b): For example, "bash cuda_install.sh 113 ~/local/" will download CUDA 11.3 and install into the folder ~/local')
+
             return
 
         make_cmd = f'CUDA_VERSION={self.cuda_version_string}'
@@ -77,6 +77,8 @@ class CUDASetup:
             make_cmd += ' make cuda110'
         elif self.cuda_version_string[:2] == '11' and int(self.cuda_version_string[2]) > 0:
             make_cmd += ' make cuda11x'
+        elif self.cuda_version_string[:2] == '12' and 1 >= int(self.cuda_version_string[2]) >= 0:
+            make_cmd += ' make cuda12x'
         elif self.cuda_version_string == '100':
             self.add_log_entry('CUDA SETUP: CUDA 10.0 not supported. Please use a different CUDA version.')
             self.add_log_entry('CUDA SETUP: Before you try again running bitsandbytes, make sure old CUDA 10.0 versions are uninstalled and removed from $LD_LIBRARY_PATH variables.')
@@ -198,6 +200,8 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
             if path.exists():
                 existent_directories.add(path)
         except PermissionError as pex:
+            # Handle the PermissionError first as it is a subtype of OSError 
+            # https://docs.python.org/3/library/exceptions.html#exception-hierarchy
             pass
         except OSError as exc:
             if exc.errno != errno.ENAMETOOLONG:
@@ -215,12 +219,11 @@ def get_cuda_runtime_lib_paths(candidate_paths: Set[Path]) -> Set[Path]:
     paths = set()
     for libname in CUDA_RUNTIME_LIBS:
         for path in candidate_paths:
-            if os.access(path/libname, os.R_OK) and (path / libname).is_file():
-                # Checking access because calling .is_file will throw Permission Error
-                # in the case when usr have no permission to path
-                paths.add(path / libname)
-
-                
+            try:
+                if (path / libname).is_file():
+                    paths.add(path / libname)
+            except PermissionError:
+                pass
     return paths
 
 
@@ -325,6 +328,8 @@ def get_compute_capabilities():
     for i in range(torch.cuda.device_count()):
         cc_major, cc_minor = torch.cuda.get_device_capability(torch.cuda.device(i))
         ccs.append(f"{cc_major}.{cc_minor}")
+
+    ccs.sort(key=lambda v: tuple(map(int, str(v).split("."))))
 
     return ccs
 

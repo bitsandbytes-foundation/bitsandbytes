@@ -169,7 +169,7 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
 
         if gtype != torch.float32:
             # the adam buffers should also be close because they are 32-bit
-            # but the paramters can diverge because they are 16-bit
+            # but the parameters can diverge because they are 16-bit
             # the difference grow larger and larger with each update
             # --> copy the state to keep weights close
             p1.data = p1.data.to(p2.dtype).float()

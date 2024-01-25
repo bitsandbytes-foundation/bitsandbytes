@@ -617,7 +617,10 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
         return
     if dtype == torch.int32 and out_order != "col32":
         return
-    func = F.get_transform_func(dtype, orderA, orderOut, transpose)
+    try:
+        func = F.get_transform_func(dtype, orderA, orderOut, transpose)
+    except ValueError as ve:
+        pytest.skip(str(ve))  # skip if not supported
 
     if dims == 2:
         A = torch.randint(-128, 127, size=(dim1, dim2), device="cuda").to(dtype)
@@ -1992,8 +1995,8 @@ def test_zeropoint():
     C2 -= A.sum(1).view(-1, 1) * zp
 
     ca, cqa, cza = quant_zp(A)
-    print(ca.min(), ca.max())
-    print((ca - cza).min(), (ca - cza).max())
+    #print(ca.min(), ca.max())
+    #print((ca - cza).min(), (ca - cza).max())
 
     zp = 1
     scale = 2.0
@@ -2022,14 +2025,14 @@ def test_zeropoint():
     C7 -= zpa * zpb * A.shape[1]
     C7 /= qa * qb
 
-    print("")
+    #print("")
     # print(C0.flatten()[:10])
-    print(C1.flatten()[:10])
-    print(C2.flatten()[:10])
-    print(C3.flatten()[:10])
-    print(C5.flatten()[:10])
-    print(C6.flatten()[:10])
-    print(C7.flatten()[:10])
+    #print(C1.flatten()[:10])
+    #print(C2.flatten()[:10])
+    #print(C3.flatten()[:10])
+    #print(C5.flatten()[:10])
+    #print(C6.flatten()[:10])
+    #print(C7.flatten()[:10])
     err1 = torch.abs(C1 - C2).mean().item()
     err2 = torch.abs(C1 - C3).mean().item()
     err3 = torch.abs(C1 - C4).mean().item()
@@ -2278,7 +2281,6 @@ def test_fp4_quant(dtype):
     assert relerr.item() < 0.28
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
 def test_4bit_compressed_stats(quant_type):
     for blocksize in [128, 64]:
@@ -2317,7 +2319,6 @@ def test_4bit_compressed_stats(quant_type):
 
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 #@pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
 @pytest.mark.parametrize("quant_type", ['nf4'])
 def test_bench_4bit_dequant(quant_type):
@@ -2355,22 +2356,23 @@ def test_normal_map_tree():
     code = F.create_normal_map()
     values =code[:8].tolist() + code[-8:].tolist()
     num_pivots = 1
-    print(values)
+    #print(values)
     while num_pivots <16:
         idx = list(range(16//num_pivots//2, 16, 16//num_pivots))
-        print(idx)
+        #print(idx)
         num_pivots *= 2
         pivots = []
         for i in idx:
             pivots.append((values[i-1]+values[i])/2)
-        print(pivots)
+        #print(pivots)
 
 
 @pytest.mark.parametrize("double_quant", [True, False], ids=['DQ_True', 'DQ_False'])
 @pytest.mark.parametrize("storage_type", ['nf4', 'fp4'], ids=['nf4', 'fp4'])
 @pytest.mark.parametrize("kind", ['fc1', 'fc2', 'attn', 'attn_packed'], ids=['fc1', 'fc2', 'attn', 'attn_packed'])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
-def test_gemv_4bit(dtype, storage_type, double_quant, kind):
+@pytest.mark.parametrize("quant_storage", [torch.uint8, torch.float16, torch.bfloat16, torch.float32], ids=['uint8', 'fp16', 'bf16', 'fp32'])
+def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
     for dim in [128, 256, 512, 1024]:
     #for dim in [4*1024]:
     #for dim in [1*16]:
@@ -2399,7 +2401,7 @@ def test_gemv_4bit(dtype, storage_type, double_quant, kind):
                 A = torch.randn(1, dim, dtype=dtype, device='cuda')
                 B = torch.randn(dim*3, dim, dtype=dtype, device='cuda')/math.sqrt(dim)
 
-            qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant)
+            qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant, quant_storage=quant_storage)
             C3 = torch.matmul(A, B.t())
             C2 = F.gemv_4bit(A, qB.t(), state=state)
             A.requires_grad = True
@@ -2453,11 +2455,11 @@ def test_gemv_4bit(dtype, storage_type, double_quant, kind):
         #
         #print('='*80)
         #print(f'For matmul: {A.shape}, {B.shape}, {kind}, {dtype}, {storage_type}, double_quant={double_quant}:')
-        print(C1.flatten()[-20:])
-        print(C2.flatten()[-20:])
-        print(f'inference vs training abs: {err1}')
-        print(f'inference vs training rel: {relerr1}')
-        print(f'inference vs training max: {maxerr1}')
+        #print(C1.flatten()[-20:])
+        #print(C2.flatten()[-20:])
+        #print(f'inference vs training abs: {err1}')
+        #print(f'inference vs training rel: {relerr1}')
+        #print(f'inference vs training max: {maxerr1}')
         #print(f'inference vs training vs torch err ratio abs: {absratio}')
         #print(f'inference vs training vs torch err ratio rel: {relratio}')
         #print(f'inference vs training vs torch err ratio max: {maxratio}')
