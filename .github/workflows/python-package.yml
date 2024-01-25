@@ -1,10 +1,9 @@
 name: Python package
 
 on:
-  push:
-    branches: [ "*" ]
+  push: {}
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
   release:
     types: [ published ]
 
