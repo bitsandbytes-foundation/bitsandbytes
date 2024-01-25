@@ -143,7 +143,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       # Check out code
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       # Download shared libraries
     - name: Download build artifact
       uses: actions/download-artifact@v3
