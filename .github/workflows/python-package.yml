@@ -172,7 +172,8 @@ jobs:
     - name: Build wheel
       shell: bash
       run: |
-        python setup.py bdist_wheel
+        pip install build
+        python -m build .
     - name: Upload build artifact
       uses: actions/upload-artifact@v3
       with:
