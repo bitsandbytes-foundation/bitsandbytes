@@ -24,7 +24,7 @@ jobs:
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
       # Check out code
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       # On Linux we use CMake within Docker
     - name: Setup cmake
       uses: jwlawson/actions-setup-cmake@v1.13
