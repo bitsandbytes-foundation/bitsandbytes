@@ -2,7 +2,7 @@ import torch
 from transformers import LlamaForCausalLM, LlamaTokenizer
 
 MAX_NEW_TOKENS = 128
-model_name = 'decapoda-research/llama-7b-hf'
+model_name = 'meta-llama/Llama-2-7b-hf'
 
 text = 'Hamburg is in which country?\n'
 tokenizer = LlamaTokenizer.from_pretrained(model_name)
