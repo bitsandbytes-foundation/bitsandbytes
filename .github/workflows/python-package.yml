@@ -78,7 +78,7 @@ jobs:
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
       # Check out code
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
     - name: Set up Docker multiarch
       if: startsWith(matrix.os, 'ubuntu')
