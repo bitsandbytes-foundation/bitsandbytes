@@ -46,7 +46,6 @@ jobs:
         set -ex
         build_os=${{ matrix.os }}
         build_arch=${{ matrix.arch }}
-        ( git clone https://github.com/NVlabs/cub ./dependencies/cub; cd dependencies/cub; git checkout 1.11.0 )
         if [ ${build_os:0:6} == ubuntu -a ${build_arch} == aarch64 ]; then
           # Allow cross-compile om aarch64
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
