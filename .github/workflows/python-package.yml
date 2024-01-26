@@ -32,7 +32,7 @@ jobs:
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v1.1
       if: ${{ startsWith(matrix.os, 'windows') }}
-      # Check out code
+      # Check out dependencies code
     - uses: actions/checkout@v4
       name: Check out NVidia cub
       with:
@@ -105,6 +105,13 @@ jobs:
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v1.1
       if: ${{ startsWith(matrix.os, 'windows') }}
+      # Check out dependencies code
+    - uses: actions/checkout@v4
+      name: Check out NVidia cub
+      with:
+        repository: nvidia/cub
+        ref: 1.11.0
+        path: dependencies/cub
       # Compile C++ code
     - name: Build C++
       shell: bash
@@ -112,7 +119,6 @@ jobs:
         set -ex
         build_os=${{ matrix.os }}
         build_arch=${{ matrix.arch }}
-        ( git clone https://github.com/NVlabs/cub ./dependencies/cub; cd dependencies/cub; git checkout 1.11.0 )
         if [ ${build_os:0:6} == ubuntu ]; then 
           image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
           echo "Using image $image"
