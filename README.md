@@ -18,31 +18,35 @@ Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + ROCm >= 5.4.2 or CUDA >
 **Installation**:
 
 
-You need to compile from source. 
+You need to compile from source for ROCm. 
 
 Compilation quickstart:
 ```bash
-git clone https://github.com/Lzy17/bitsandbytes-rocm
-cd bitsandbytes-rocm
+# Run Docker
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --name=bnb_test --shm-size=8g --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --group-add video rocm/pytorch:rocm5.7_ubuntu22.04_py3.10_pytorch_2.0.1
 
+
+# Install Dependencies
+cd <workspace>
+git clone --recurse https://github.com/ROCmSoftwarePlatform/hipBLASLt
+cd hipBLASLt
+git checkout 4b3b34405e7e25cff404f69bfd0a832644430477
+./install.sh -idc
+ 
+cd ..
+pip install einops lion_pytorch
+
+
+# Install BitsandBytes
+git clone --recurse https://github.com/ROCmSoftwarePlatform/bitsandbytes
+cd bitsandbytes
+git checkout rocm_enabled
 make hip
 python setup.py install
 
-#to test if you have successfully installed
-python -m bitsandbytes
 
-#To be benchmarks accuray benchmark from https://github.com/TimDettmers/bitsandbytes/issues/565
-cd benchmarking/accuracy
-python bnb_accuracy.py
-
-#Accurate results should looks like
-#tensor(526.7872, device='cuda:0')
-#tensor(551.2297, device='cuda:0')
-#tensor(574.9075, device='cuda:0')
-#tensor(3435.1819, device='cuda:0')
-#tensor(3480.1541, device='cuda:0')
-
-#
+# Run the unit test. If it runs successfully, the library has been installed successfully.
+pytest -vvv ./tests/ 2>&1 | tee BitsAndBytes_UT_summary.log
 ```
 
 **Using Int8 inference with HuggingFace Transformers**
