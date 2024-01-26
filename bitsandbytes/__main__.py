@@ -31,6 +31,8 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
     return std_out, std_err
 
 def find_file_recursive(folder, filename):
+    folder = shlex.quote(folder)
+    filename = shlex.quote(filename)
     cmd = f'find {folder} -name {filename}'
     out, err = execute_and_return(cmd)
     if len(err) > 0:
@@ -63,15 +65,16 @@ def generate_bug_report_information():
         print('')
 
     print_header("LD_LIBRARY CUDA PATHS")
-    lib_path = os.environ['LD_LIBRARY_PATH'].strip()
-    for path in set(lib_path.split(':')):
-        try:
-            if isdir(path):
-                print_header(f"{path} CUDA PATHS")
-                paths = find_file_recursive(path, '*cuda*so')
-                print(paths)
-        except:
-            print(f'Could not read LD_LIBRARY_PATH: {path}')
+    if 'LD_LIBRARY_PATH' in os.environ:
+        lib_path = os.environ['LD_LIBRARY_PATH'].strip()
+        for path in set(lib_path.split(':')):
+            try:
+                if isdir(path):
+                    print_header(f"{path} CUDA PATHS")
+                    paths = find_file_recursive(path, '*cuda*so')
+                    print(paths)
+            except:
+                print(f'Could not read LD_LIBRARY_PATH: {path}')
     print('')
 
 
@@ -97,13 +100,12 @@ generate_bug_report_information()
 
 from . import COMPILED_WITH_CUDA, PACKAGE_GITHUB_URL
 from .cuda_setup.env_vars import to_be_ignored
-from .cuda_setup.main import get_compute_capabilities, get_cuda_lib_handle
+from .cuda_setup.main import get_compute_capabilities
 
 
 print_header("OTHER")
 print(f"COMPILED_WITH_CUDA = {COMPILED_WITH_CUDA}")
-cuda = get_cuda_lib_handle()
-#print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities(cuda)}")
+print(f"COMPUTE_CAPABILITIES_PER_GPU = {get_compute_capabilities()}")
 print_header("")
 print_header("DEBUG INFO END")
 print_header("")
@@ -151,4 +153,3 @@ except Exception as e:
     print(e)
     print_debug_info()
     sys.exit(1)
-

@@ -33,7 +33,6 @@ def test_layout_exact_match():
         assert torch.all(torch.eq(restored_x, x))
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 def test_linear_no_igemmlt():
     linear = torch.nn.Linear(1024, 3072)
     x = torch.randn(3, 1024, dtype=torch.half)
@@ -68,7 +67,6 @@ def test_linear_no_igemmlt():
     assert linear_custom.state.CxB is None
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt",
                          list(product([False, True], [False, True], [False, True], [False, True])))

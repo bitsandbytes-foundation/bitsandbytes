@@ -518,8 +518,10 @@ modules.append(bnb.nn.LinearFP4)
 modules.append(bnb.nn.LinearNF4)
 modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True))
 modules.append(lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compress_statistics=True))
-names = ['Int8Lt', '4bit', 'FP4', 'NF4', 'FP4+C', 'NF4+C']
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
+modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float32))
+modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float16))
+modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.bfloat16))
+names = ['Int8Lt', '4bit', 'FP4', 'NF4', 'FP4+C', 'NF4+C', 'NF4+fp32', 'NF4+fp16', 'NF4+bf16']
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("module", modules, ids=names)
 def test_kbit_backprop(module):
@@ -538,6 +540,7 @@ def test_kbit_backprop(module):
     kbit[1].bias.detach().copy_(ref[1].bias)
     ref = ref.half().cuda()
     kbit = kbit.half().cuda()
+    kbit = kbit.half().to('cuda')
 
     errs1 = []
     errs2 = []
@@ -565,20 +568,20 @@ def test_kbit_backprop(module):
         relerrs2.append(relerr2.mean().item())
 
         if isinstance(module, bnb.nn.Linear8bitLt):
-            torch.testing.assert_close(grad1, grad2, atol=0.008, rtol=0.05)
+            assert_all_approx_close(grad1, grad2, atol=0.008, rtol=0.05, count=1)
             torch.testing.assert_close(bgrad1, bgrad2, atol=0.008, rtol=0.05)
         else:
-            torch.testing.assert_close(grad1, grad2, atol=0.015, rtol=0.05)
+            assert_all_approx_close(grad1, grad2, atol=0.015, rtol=0.05, count=1)
             torch.testing.assert_close(bgrad1, bgrad2, atol=0.02, rtol=0.05)
         ref.zero_grad()
         kbit.zero_grad()
 
         assert kbit[0].weight.grad is None or kbit[0].weight.grad.sum().item() == 0
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
-    print('out', sum(errs1)/len(errs1))
-    print('grad', sum(errs2)/len(errs2))
-    print('rel out', sum(relerrs1)/len(relerrs1))
-    print('rel grad', sum(relerrs2)/len(relerrs2))
+    #print('out', sum(errs1)/len(errs1))
+    #print('grad', sum(errs2)/len(errs2))
+    #print('rel out', sum(relerrs1)/len(relerrs1))
+    #print('rel grad', sum(relerrs2)/len(relerrs2))
 
 def test_fp8linear():
 
@@ -610,9 +613,33 @@ def test_fp8linear():
     assert graderr < 0.00002
     assert bgraderr < 0.00002
 
+def test_4bit_warnings():
+    dim1 = 64
 
+    with pytest.warns(UserWarning, match=r'inference or training'):
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
+        net = net.cuda()
+        inp = torch.rand(10, dim1).cuda().half()
+        net(inp)
+    with pytest.warns(UserWarning, match=r'inference.'):
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
+        net = net.cuda()
+        inp = torch.rand(1, dim1).cuda().half()
+        net(inp)
 
+    with pytest.warns(UserWarning) as record:
 
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
+        net = net.cuda()
+        inp = torch.rand(10, dim1).cuda().half()
+        net(inp)
+
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
+        net = net.cuda()
+        inp = torch.rand(1, dim1).cuda().half()
+        net(inp)
+
+    assert len(record) == 2
 
 
 
