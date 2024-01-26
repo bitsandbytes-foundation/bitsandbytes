@@ -26,7 +26,7 @@ def to_be_ignored(env_var: str, value: str) -> bool:
 
 
 def might_contain_a_path(candidate: str) -> bool:
-    return "/" in candidate
+    return os.sep in candidate
 
 
 def is_active_conda_env(env_var: str) -> bool:
