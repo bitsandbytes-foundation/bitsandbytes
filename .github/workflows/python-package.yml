@@ -26,7 +26,7 @@ jobs:
     - uses: actions/checkout@v4
       # On Linux we use CMake within Docker
     - name: Setup cmake
-      uses: jwlawson/actions-setup-cmake@v1.13
+      uses: jwlawson/actions-setup-cmake@v1.14
       with:
         cmake-version: '3.26.x'
     - name: Add msbuild to PATH
@@ -91,7 +91,7 @@ jobs:
       # On Linux we use CMake within Docker
     - name: Setup cmake
       if: ${{ !startsWith(matrix.os, 'linux') }}
-      uses: jwlawson/actions-setup-cmake@v1.13
+      uses: jwlawson/actions-setup-cmake@v1.14
       with:
         cmake-version: '3.26.x'
       # Windows: We install Cuda on the agent (slow)
@@ -134,7 +134,7 @@ jobs:
         mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
         ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
     - name: Upload build artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: shared_library
         path: output/*
@@ -186,7 +186,7 @@ jobs:
         pip install build
         python -m build .
     - name: Upload build artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: bdist_wheel
         path: dist/bitsandbytes-*.whl
@@ -201,7 +201,7 @@ jobs:
         pip install build
         python -m build -s .
     - name: Download build artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: bdist_wheel
         path: dist/
