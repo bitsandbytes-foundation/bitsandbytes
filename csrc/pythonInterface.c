@@ -34,8 +34,8 @@ void gemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  floa
 void gemm_4bit_inference_naive_fp16(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize)
 { gemm_4bit_inference_naive<half, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
-void gemm_4bit_inference_naive_bf16(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
-{ gemm_4bit_inference_naive<__nv_bfloat16, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
+void gemm_4bit_inference_naive_bf16(int m, int n, int k, hip_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, hip_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
+{ gemm_4bit_inference_naive<hip_bfloat16, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
 void gemm_4bit_inference_naive_fp32(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize)
 { gemm_4bit_inference_naive<float, 32>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
@@ -118,9 +118,9 @@ void quantizeBlockwise_fp16(float * code, half *A, float *absmax, unsigned char 
 void quantizeBlockwise_fp16_fp4(float * code, half *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<half, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_fp16_nf4(float * code, half *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<half, 0, NF4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
 
-void quantizeBlockwise_bf16(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<__nv_bfloat16, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n); }
-void quantizeBlockwise_bf16_fp4(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<__nv_bfloat16, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
-void quantizeBlockwise_bf16_nf4(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<__nv_bfloat16, 0, NF4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
+void quantizeBlockwise_bf16(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<hip_bfloat16, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n); }
+void quantizeBlockwise_bf16_fp4(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<hip_bfloat16, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
+void quantizeBlockwise_bf16_nf4(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<hip_bfloat16, 0, NF4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
 
 void quantizeBlockwise_fp32(float * code, float *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<float, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_fp32_fp4(float * code, float *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<float, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
@@ -134,9 +134,9 @@ void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, floa
 void dequantizeBlockwise_fp32_fp4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float, FP4>(NULL, A, absmax, out, blocksize, n); }
 void dequantizeBlockwise_fp32_nf4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float, NF4>(NULL, A, absmax, out, blocksize, n); }
 
-void dequantizeBlockwise_bf16(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<__nv_bfloat16, General8bit>(code, A, absmax, out, blocksize, n); }
-void dequantizeBlockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<__nv_bfloat16, FP4>(NULL, A, absmax, out, blocksize, n); }
-void dequantizeBlockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<__nv_bfloat16, NF4>(NULL, A, absmax, out, blocksize, n); }
+void dequantizeBlockwise_bf16(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<hip_bfloat16, General8bit>(code, A, absmax, out, blocksize, n); }
+void dequantizeBlockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<hip_bfloat16, FP4>(NULL, A, absmax, out, blocksize, n); }
+void dequantizeBlockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<hip_bfloat16, NF4>(NULL, A, absmax, out, blocksize, n); }
 
 
 #ifndef NO_HIPBLASLT
@@ -255,13 +255,13 @@ extern "C"
   void cdequantize_blockwise_fp32_fp4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise_fp32_fp4(code, A, absmax, out, blocksize, n); }
   void cdequantize_blockwise_fp32_nf4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise_fp32_nf4(code, A, absmax, out, blocksize, n); }
 
-  void cquantize_blockwise_bf16(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16(code, A, absmax, out, blocksize, n); }
-  void cquantize_blockwise_bf16_fp4(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n); }
-  void cquantize_blockwise_bf16_nf4(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n); }
+  void cquantize_blockwise_bf16(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16(code, A, absmax, out, blocksize, n); }
+  void cquantize_blockwise_bf16_fp4(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n); }
+  void cquantize_blockwise_bf16_nf4(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n); }
 
-  void cdequantize_blockwise_bf16(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16(code, A, absmax, out, blocksize, n); }
-  void cdequantize_blockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n); }
-  void cdequantize_blockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n); }
+  void cdequantize_blockwise_bf16(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16(code, A, absmax, out, blocksize, n); }
+  void cdequantize_blockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n); }
+  void cdequantize_blockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n); }
 
 	#define MAKE_CFUNC32(name, gtype, gbits) \
 	void c##name##32bit_grad_##gbits(gtype *g, gtype *p, \
@@ -504,6 +504,11 @@ extern "C"
 
 	void cprefetch(void *ptr, size_t bytes, int device)
 	{
+
+		int hasPrefetch = 0;
+		CUDA_CHECK_RETURN(hipDeviceGetAttribute(&hasPrefetch, hipDeviceAttributeConcurrentManagedAccess, device)); // 40ns overhead
+		if (hasPrefetch == 0) return;
+ 
 		CUDA_CHECK_RETURN(hipMemPrefetchAsync(ptr, bytes, device, 0));
 		CUDA_CHECK_RETURN(hipPeekAtLastError());
 	}
@@ -520,7 +525,7 @@ extern "C"
 	void cgemm_4bit_inference_naive_fp16(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize)
 	{ gemm_4bit_inference_naive_fp16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
-	void cgemm_4bit_inference_naive_bf16(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
+	void cgemm_4bit_inference_naive_bf16(int m, int n, int k, hip_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, hip_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
 	{ gemm_4bit_inference_naive_bf16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
 	void cgemm_4bit_inference_naive_fp32(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize)
