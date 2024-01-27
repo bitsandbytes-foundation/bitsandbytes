@@ -583,7 +583,7 @@ dim3 = torch.randint(32, 256, size=(n,)).tolist()
 values = list(product(dim1, dim2, dim3))
 names = ["dim1_{}_dim2_{}_dim3_{}".format(*vals) for vals in values]
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, dim3", values, ids=names)
 def test_vector_quant(dim1, dim2, dim3):
     dim2 = dim2 - (dim2 % 16)
@@ -2047,6 +2047,7 @@ def test_zeropoint():
     print(err1, err2, err3, err4, err5, err6)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_extract_outliers():
     for i in range(k):
         shapeA = (4096, 4096 * 4)
@@ -2380,6 +2381,7 @@ def test_normal_map_tree():
 @pytest.mark.parametrize("kind", ['fc1', 'fc2', 'attn', 'attn_packed'], ids=['fc1', 'fc2', 'attn', 'attn_packed'])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
 @pytest.mark.parametrize("quant_storage", [torch.uint8, torch.float16, torch.bfloat16, torch.float32], ids=['uint8', 'fp16', 'bf16', 'fp32'])
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
     for dim in [128, 256, 512, 1024]:
     #for dim in [4*1024]:
@@ -2547,6 +2549,7 @@ def test_managed():
 @pytest.mark.parametrize("storage_type", ['nf4', 'fp4'], ids=['nf4', 'fp4'])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
 @pytest.mark.parametrize("double_quant", [False], ids=['DQ_True'])
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_gemv_eye_4bit(storage_type, dtype, double_quant):
     dims = 10
     torch.random.manual_seed(np.random.randint(0, 412424242))
