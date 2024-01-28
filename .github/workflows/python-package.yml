@@ -136,7 +136,7 @@ jobs:
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: shared_library
+        name: shared_library_cuda
         path: output/*
         retention-days: 7
   build-wheels:
@@ -157,24 +157,25 @@ jobs:
     - uses: actions/checkout@v4
       # Download shared libraries
     - name: Download build artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
-        name: shared_library
         path: output/
     - name: Copy correct platform shared library
       shell: bash
       run: |
         cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
-      # Compile C++ code
+      # Set up the Python version needed
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-      # 
-    - name: Install Python dependencies
+        cache: pip
+    - name: Install build package
       shell: bash
-      run: |
-        pip install -r requirements.txt
+      run: pip install build
+    - name: Install Python test dependencies
+      shell: bash
+      run: pip install -r requirements.ci.txt
     # TODO: How to run CUDA tests on GitHub actions?
     #- name: Run unit tests
     #  if: ${{ matrix.arch == 'x86_64' }} # Tests are too slow to run in emulation. Wait for real aarch64 agents
@@ -182,9 +183,7 @@ jobs:
     #    PYTHONPATH=. pytest --log-cli-level=DEBUG tests
     - name: Build wheel
       shell: bash
-      run: |
-        pip install build
-        python -m build .
+      run: python -m build .
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
@@ -196,10 +195,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Build dist
-      run: |
-        pip install build
-        python -m build -s .
     - name: Download build artifact
       uses: actions/download-artifact@v4
       with:
