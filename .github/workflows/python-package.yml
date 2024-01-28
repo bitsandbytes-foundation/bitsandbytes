@@ -65,7 +65,7 @@ jobs:
     - name: Upload build artifact
       uses: actions/upload-artifact@v3
       with:
-        name: shared_library
+        name: shared_library/${{ matrix.os }}/${{ matrix.arch }}
         path: output/*
         retention-days: 7
   ##
@@ -136,7 +136,7 @@ jobs:
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: shared_library_cuda
+        name: shared_library_cuda/${{ matrix.os }}/${{ matrix.arch }}
         path: output/*
         retention-days: 7
   build-wheels:
@@ -187,7 +187,7 @@ jobs:
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: bdist_wheel
+        name: bdist_wheel/${{ matrix.os }}/${{ matrix.arch }}
         path: dist/bitsandbytes-*.whl
         retention-days: 7
   publish:
@@ -198,7 +198,6 @@ jobs:
     - name: Download build artifact
       uses: actions/download-artifact@v4
       with:
-        name: bdist_wheel
         path: dist/
     - run: |
         ls -lR dist/
