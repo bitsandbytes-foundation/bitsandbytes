@@ -101,7 +101,7 @@ jobs:
       with:
         cuda: ${{ matrix.cuda_version }}
         method: 'local'
-        sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","cusparse_dev"]'
+        sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","cusparse_dev","visual_studio_integration"]'
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v1.1
       if: ${{ startsWith(matrix.os, 'windows') }}
@@ -175,7 +175,7 @@ jobs:
       run: pip install build
     - name: Install Python test dependencies
       shell: bash
-      run: pip install -r requirements-ci.txt
+      run: pip install -r requirements.ci.txt
     # TODO: How to run CUDA tests on GitHub actions?
     #- name: Run unit tests
     #  if: ${{ matrix.arch == 'x86_64' }} # Tests are too slow to run in emulation. Wait for real aarch64 agents
