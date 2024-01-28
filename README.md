@@ -26,7 +26,7 @@ Compilation quickstart:
 git clone https://github.com/timdettmers/bitsandbytes.git
 cd bitsandbytes
 
-# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 120}
+# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122}
 # make argument in {cuda110, cuda11x, cuda12x}
 # if you do not know what CUDA you have, try looking at the output of: python -m bitsandbytes
 CUDA_VERSION=117 make cuda11x
@@ -41,7 +41,11 @@ model = AutoModelForCausalLM.from_pretrained(
   'decapoda-research/llama-7b-hf',
   device_map='auto',
   load_in_8bit=True,
-  max_memory=f'{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB')
+  max_memory={
+    i: f'{int(torch.cuda.mem_get_info(i)[0]/1024**3)-2}GB'
+    for i in range(torch.cuda.device_count())
+  }
+)
 ```
 
 A more detailed example, can be found in [examples/int8_inference_huggingface.py](examples/int8_inference_huggingface.py).
@@ -83,7 +87,7 @@ Hardware requirements:
  - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or newer).
  - 8-bit optimizers and quantization: NVIDIA Kepler GPU or newer (>=GTX 78X).
 
-Supported CUDA versions: 10.2 - 12.0
+Supported CUDA versions: 10.2 - 12.2
 
 The bitsandbytes library is currently only supported on Linux distributions. Windows is not supported at the moment.
 

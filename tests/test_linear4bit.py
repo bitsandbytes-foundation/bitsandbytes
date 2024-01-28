@@ -8,13 +8,18 @@ import torch
 
 import bitsandbytes as bnb
 
+storage = {
+    'uint8': torch.uint8,
+    'float16': torch.float16,
+    'bfloat16': torch.bfloat16,
+    'float32': torch.float32
+}
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 @pytest.mark.parametrize(
-    "quant_type, compress_statistics, bias",
-    list(product(["nf4", "fp4"], [False, True], [False, True])),
+    "quant_type, compress_statistics, bias, quant_storage",
+    list(product(["nf4", "fp4"], [False, True], [False, True], ['uint8', 'float16', 'bfloat16', 'float32'])),
 )
-def test_linear_serialization(quant_type, compress_statistics, bias):
+def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage):
     original_dtype = torch.float16
     compute_dtype = None
     device = "cuda"
@@ -32,7 +37,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
         quant_type=quant_type,
         device="meta",
     )
-    new_weight = bnb.nn.Params4bit(data=linear.weight, requires_grad=False)
+    new_weight = bnb.nn.Params4bit(data=linear.weight, quant_type=quant_type, requires_grad=False)
     linear_q.weight = new_weight
     if bias:
         linear_q.bias = torch.nn.Parameter(linear.bias)
@@ -65,6 +70,22 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
     # MATCHING
     a, b = linear_q.weight, linear_q2.weight
 
+    # Quantizing original layer with specified quant_storage type
+    linear_qs = bnb.nn.Linear4bit(
+        linear.in_features,
+        linear.out_features,
+        bias=bias,
+        compute_dtype=compute_dtype,
+        compress_statistics=compress_statistics,
+        quant_type=quant_type,
+        quant_storage=storage[quant_storage],
+        device="meta",
+    )
+    linear_qs.weight = bnb.nn.Params4bit(data=linear.weight, requires_grad=False, quant_type=quant_type, quant_storage=storage[quant_storage])
+    if bias:
+        linear_qs.bias = torch.nn.Parameter(linear.bias)
+    linear_qs = linear_qs.to(device)
+
     assert a.device == b.device
     assert a.dtype == b.dtype
     assert torch.equal(a, b)
@@ -96,9 +117,21 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
     x = torch.rand(42, layer_shape[0], device=device)
     a = linear_q(x)
     b = linear_q2(x)
+    c = linear_qs(x)
     assert a.device == b.device
     assert a.dtype == b.dtype
+    assert a.device == c.device
+    assert a.dtype == c.dtype
     assert torch.equal(a, b)
+    assert torch.equal(a, c)
+
+    # Test moving to CPU and back to GPU
+    linear_q2.to('cpu')
+    linear_q2.to(device)
+    d = linear_qs(x)
+    assert c.dtype == d.dtype
+    assert c.device == d.device
+    assert torch.equal(c, d)
 
     # Saved size ratio test. Target set for layer_shape == (300, 400) w/ bias
     with TemporaryDirectory() as tmpdir:

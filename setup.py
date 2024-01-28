@@ -31,9 +31,10 @@ setup(
     license="MIT",
     keywords="gpu optimizers optimization 8-bit quantization compression",
     url="https://github.com/TimDettmers/bitsandbytes",
-    install_requires=['scipy'],
     packages=find_packages(),
     package_data={"": libs},
+    install_requires=['torch', 'numpy', 'scipy'],
+    extras_require={'benchmark': ['pandas', 'matplotlib']},
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
     classifiers=[
