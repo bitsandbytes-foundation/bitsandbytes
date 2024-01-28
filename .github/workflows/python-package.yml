@@ -101,7 +101,7 @@ jobs:
       with:
         cuda: ${{ matrix.cuda_version }}
         method: 'local'
-        sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","cusparse_dev","visual_studio_integration"]'
+        # sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","cusparse_dev","visual_studio_integration"]'
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v1.1
       if: ${{ startsWith(matrix.os, 'windows') }}
