@@ -38,9 +38,6 @@ if system == 'Windows':
 else: # Linux or other
     CUDA_RUNTIME_LIBS = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0', 'libcudart.so.12.1', 'libcudart.so.12.2']
 
-# this is a order list of backup paths to search CUDA in, if it cannot be found in the main environmental paths
-backup_paths = []
-backup_paths.append('$CONDA_PREFIX/lib/libcudart.so.11.0')
 
 class CUDASetup:
     _instance = None
