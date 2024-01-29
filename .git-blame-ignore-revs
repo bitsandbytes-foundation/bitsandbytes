@@ -1,0 +1,8 @@
+# ran black and isort for coherent code formatting
+bfa0e33294f2b1dc25e65a33be2397f989824298
+
+# reran black with linelength 80 for greater readability
+ea7c14f8ef64924f2d0ff80df3cdabf2c7299848
+
+# Remove f-prefix from strings that don't use formatting
+7727fa4c8c6c1ef2b109120aff4196a0a6bf3ed6

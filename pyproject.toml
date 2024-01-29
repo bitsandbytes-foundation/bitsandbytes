@@ -50,3 +50,11 @@ combine-as-imports = true
 detect-same-package = true
 force-sort-within-sections = true
 known-first-party = ["bitsandbytes"]
+
+[[tool.mypy.overrides]]
+module = "triton.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "scipy.stats"
+ignore_missing_imports = true
