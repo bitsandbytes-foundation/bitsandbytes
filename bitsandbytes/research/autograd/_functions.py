@@ -14,7 +14,6 @@ from bitsandbytes.autograd._functions import MatmulLtState, GlobalOutlierPooler
 def prod(iterable):
     return reduce(operator.mul, iterable, 1)
 
-tensor = torch.Tensor
 
 class MatMulFP8Mixed(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
@@ -389,18 +388,37 @@ def get_block_sizes(input_matrix, weight_matrix):
 
     return bsz, bsz2
 
-def matmul_fp8_global(A: tensor, B: tensor, fw_code: tensor, bw_code: tensor, out: tensor = None, bsz : int = -1, bsz2 : int = -1):
+
+def matmul_fp8_global(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    fw_code: torch.Tensor,
+    bw_code: torch.Tensor,
+    out: torch.Tensor = None,
+    bsz: int = -1,
+    bsz2: int = -1,
+):
     if bsz == -1 or bsz2 == -1: bsz, bsz2 = get_block_sizes(A, B)
     return MatMulFP8Global.apply(A, B, out, fw_code, bw_code, bsz, bsz2)
 
-def matmul_fp8_mixed(A: tensor, B: tensor, fw_code: tensor, bw_code: tensor, out: tensor = None, bsz : int = -1, bsz2 : int = -1):
+
+def matmul_fp8_mixed(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    fw_code: torch.Tensor,
+    bw_code: torch.Tensor,
+    out: torch.Tensor = None,
+    bsz: int = -1,
+    bsz2: int = -1,
+):
     if bsz == -1 or bsz2 == -1: bsz, bsz2 = get_block_sizes(A, B)
     return MatMulFP8Mixed.apply(A, B, out, fw_code, bw_code, bsz, bsz2)
 
+
 def switchback_bnb(
-    A: tensor,
-    B: tensor,
-    out: tensor = None,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    out: torch.Tensor = None,
     state: MatmulLtState = None,
     threshold=0.0,
     bias=None

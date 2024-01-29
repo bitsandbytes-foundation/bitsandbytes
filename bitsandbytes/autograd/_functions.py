@@ -14,9 +14,6 @@ import bitsandbytes.functional as F
 def prod(iterable):
     return reduce(operator.mul, iterable, 1)
 
-tensor = torch.Tensor
-
-
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
 
@@ -549,9 +546,9 @@ class MatMul4Bit(torch.autograd.Function):
 
 
 def matmul(
-    A: tensor,
-    B: tensor,
-    out: tensor = None,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    out: torch.Tensor = None,
     state: MatmulLtState = None,
     threshold=0.0,
     bias=None
@@ -562,7 +559,7 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_4bit(A: tensor, B: tensor, quant_state: F.QuantState, out: tensor = None, bias=None):
+def matmul_4bit(A: torch.Tensor, B: torch.Tensor, quant_state: F.QuantState, out: torch.Tensor = None, bias=None):
     assert quant_state is not None
     if A.numel() == A.shape[-1] and A.requires_grad == False:
         if A.shape[-1] % quant_state.blocksize != 0:
