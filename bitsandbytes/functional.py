@@ -412,7 +412,8 @@ def is_on_gpu(tensors):
         raise TypeError(f'Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}')
     return on_gpu
 
-def get_ptr(A: Tensor) -> ct.c_void_p:
+
+def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
     """
     Get the ctypes pointer from a PyTorch Tensor.
 
