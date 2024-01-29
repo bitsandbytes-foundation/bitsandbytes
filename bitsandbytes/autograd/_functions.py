@@ -493,7 +493,7 @@ class MatMul4Bit(torch.autograd.Function):
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
 
     @staticmethod
-    def forward(ctx, A, B, out=None, bias=None, quant_state: F.QuantState = None):
+    def forward(ctx, A, B, out=None, bias=None, quant_state: Optional[F.QuantState] = None):
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
@@ -548,8 +548,8 @@ class MatMul4Bit(torch.autograd.Function):
 def matmul(
     A: torch.Tensor,
     B: torch.Tensor,
-    out: torch.Tensor = None,
-    state: MatmulLtState = None,
+    out: Optional[torch.Tensor] = None,
+    state: Optional[MatmulLtState] = None,
     threshold=0.0,
     bias=None
 ):
@@ -559,7 +559,7 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_4bit(A: torch.Tensor, B: torch.Tensor, quant_state: F.QuantState, out: torch.Tensor = None, bias=None):
+def matmul_4bit(A: torch.Tensor, B: torch.Tensor, quant_state: F.QuantState, out: Optional[torch.Tensor] = None, bias=None):
     assert quant_state is not None
     if A.numel() == A.shape[-1] and A.requires_grad == False:
         if A.shape[-1] % quant_state.blocksize != 0:

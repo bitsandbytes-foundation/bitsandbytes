@@ -12,7 +12,7 @@ import math
 import numpy as np
 
 from functools import reduce  # Required in Python 3
-from typing import Tuple, Any, Dict
+from typing import Tuple, Any, Dict, Optional
 from torch import Tensor
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
@@ -521,7 +521,7 @@ def nvidia_transform(
     return out, new_state
 
 
-def estimate_quantiles(A: Tensor, out: Tensor = None, offset: float = 1 / 512, num_quantiles=256) -> Tensor:
+def estimate_quantiles(A: Tensor, out: Optional[torch.Tensor] = None, offset: float = 1 / 512, num_quantiles=256) -> Tensor:
     '''
     Estimates 256 equidistant quantiles on the input tensor eCDF.
 
@@ -694,7 +694,7 @@ class QuantState:
             self.state2.code = self.state2.code.to(device)
 
 
-def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, out: Tensor = None, blocksize=4096, nested=False) -> Tensor:
+def quantize_blockwise(A: Tensor, code: Optional[torch.Tensor] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize=4096, nested=False) -> Tensor:
     """
     Quantize tensor A in blocks of size 4096 values.
 
@@ -769,10 +769,10 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
 
 def dequantize_blockwise(
     A: Tensor,
-    quant_state: QuantState = None,
-    absmax: Tensor = None,
-    code: Tensor = None,
-    out: Tensor = None,
+    quant_state: Optional[QuantState] = None,
+    absmax: Optional[torch.Tensor] = None,
+    code: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
     blocksize: int = 4096,
     nested=False
 ) -> Tensor:
@@ -891,17 +891,17 @@ def get_4bit_type(typename, device=None, blocksize=64):
     return data.to(device)
 
 
-def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
+def quantize_fp4(A: Tensor, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4', quant_storage)
 
-def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
+def quantize_nf4(A: Tensor, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4', quant_storage)
 
 
 def quantize_4bit(
     A: Tensor,
-    absmax: Tensor = None,
-    out: Tensor = None,
+    absmax: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
     blocksize=64,
     compress_statistics=False,
     quant_type='fp4',
@@ -987,13 +987,13 @@ def quantize_4bit(
 
     return out, state
 
-def dequantize_fp4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+def dequantize_fp4(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'fp4')
 
-def dequantize_nf4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+def dequantize_nf4(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'nf4')
 
-def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
+def dequantize_4bit(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
 
@@ -1070,7 +1070,7 @@ def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = 
     else: return out
 
 
-def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
+def quantize(A: Tensor, code: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None) -> Tensor:
     if code is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
@@ -1086,10 +1086,10 @@ def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
 
 def dequantize(
     A: Tensor,
-    state: Tuple[Tensor, Tensor] = None,
-    absmax: Tensor = None,
-    code: Tensor = None,
-    out: Tensor = None,
+    state: Optional[Tuple[Tensor, Tensor]] = None,
+    absmax: Optional[torch.Tensor] = None,
+    code: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
 ) -> Tensor:
     assert state is not None or absmax is not None
     if code is None and state is None:
@@ -1104,7 +1104,7 @@ def dequantize(
     return out * state[0]
 
 
-def quantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
+def quantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = None) -> Tensor:
     '''
     Quantizes input tensor to 8-bit.
 
@@ -1133,7 +1133,7 @@ def quantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
     return out
 
 
-def dequantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
+def dequantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = None) -> Tensor:
     '''
     Dequantizes the 8-bit tensor to 32-bit.
 
@@ -1171,11 +1171,11 @@ def optimizer_update_32bit(
     eps: float,
     step: int,
     lr: float,
-    state2: Tensor = None,
+    state2: Optional[torch.Tensor] = None,
     beta2: float = 0.0,
     weight_decay: float = 0.0,
     gnorm_scale: float = 1.0,
-    unorm_vec: Tensor = None,
+    unorm_vec: Optional[torch.Tensor] = None,
     max_unorm: float = 0.0,
     skip_zeros=False,
 ) -> None:
@@ -1274,7 +1274,7 @@ def optimizer_update_8bit(
     new_max2: Tensor,
     weight_decay: float = 0.0,
     gnorm_scale: float = 1.0,
-    unorm_vec: Tensor = None,
+    unorm_vec: Optional[torch.Tensor] = None,
     max_unorm: float = 0.0,
 ) -> None:
     """
@@ -1603,7 +1603,7 @@ def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8
 def gemv_4bit(
     A: Tensor,
     B: Tensor,
-    out: Tensor = None,
+    out: Optional[torch.Tensor] = None,
     transposed_A=False,
     transposed_B=False,
     state=None
@@ -1663,7 +1663,7 @@ def gemv_4bit(
 def igemm(
     A: Tensor,
     B: Tensor,
-    out: Tensor = None,
+    out: Optional[torch.Tensor] = None,
     transposed_A=False,
     transposed_B=False,
 ):
@@ -1752,7 +1752,7 @@ def igemm(
 def batched_igemm(
     A: Tensor,
     B: Tensor,
-    out: Tensor = None,
+    out: Optional[torch.Tensor] = None,
     transposed_A=False,
     transposed_B=False,
 ):

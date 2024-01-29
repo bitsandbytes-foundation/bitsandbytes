@@ -2,6 +2,7 @@ import operator
 import warnings
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
+from typing import Optional
 
 import torch
 
@@ -394,7 +395,7 @@ def matmul_fp8_global(
     B: torch.Tensor,
     fw_code: torch.Tensor,
     bw_code: torch.Tensor,
-    out: torch.Tensor = None,
+    out: Optional[torch.Tensor] = None,
     bsz: int = -1,
     bsz2: int = -1,
 ):
@@ -407,7 +408,7 @@ def matmul_fp8_mixed(
     B: torch.Tensor,
     fw_code: torch.Tensor,
     bw_code: torch.Tensor,
-    out: torch.Tensor = None,
+    out: Optional[torch.Tensor] = None,
     bsz: int = -1,
     bsz2: int = -1,
 ):
@@ -418,8 +419,8 @@ def matmul_fp8_mixed(
 def switchback_bnb(
     A: torch.Tensor,
     B: torch.Tensor,
-    out: torch.Tensor = None,
-    state: MatmulLtState = None,
+    out: Optional[torch.Tensor] = None,
+    state: Optional[MatmulLtState] = None,
     threshold=0.0,
     bias=None
 ):
