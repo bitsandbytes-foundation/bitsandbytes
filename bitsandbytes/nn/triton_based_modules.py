@@ -162,7 +162,7 @@ class SwitchBackLinear(nn.Linear):
         ):
         super().__init__(in_features, out_features, bias, device, dtype)
 
-        if not is_triton_available:
+        if not is_triton_available():
             raise ImportError('''Could not import triton. Please install triton to use SwitchBackLinear.
                                Alternatively, you can use bnb.nn.SwitchBackLinearBnb, but it will be slower''')
 

@@ -145,7 +145,7 @@ class Params4bit(torch.nn.Parameter):
             cls,
             data: Optional[torch.Tensor] = None,
             requires_grad=True,
-            quant_state: QuantState = None,
+            quant_state: Optional[QuantState] = None,
             blocksize: int = 64,
             compress_statistics: bool = True,
             quant_type: str = 'fp4',
