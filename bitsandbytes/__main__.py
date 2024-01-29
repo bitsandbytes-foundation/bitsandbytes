@@ -16,7 +16,7 @@ def find_file_recursive(folder, filename):
             out = glob.glob(os.path.join(folder, "**", filename + ext))
             outs.extend(out)
     except Exception as e:
-        raise RuntimeError('Error: Something when wrong when trying to find file. {e}')
+        raise RuntimeError('Error: Something when wrong when trying to find file.') from e
 
     return outs
 
