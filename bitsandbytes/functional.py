@@ -27,71 +27,83 @@ name2qmap = {}
 
 if COMPILED_WITH_CUDA:
     """C FUNCTIONS FOR OPTIMIZERS"""
-    str2optimizer32bit = {}
-    str2optimizer32bit["adam"] = (lib.cadam32bit_grad_fp32, lib.cadam32bit_grad_fp16, lib.cadam32bit_grad_bf16)
-    str2optimizer32bit["momentum"] = (
-        lib.cmomentum32bit_grad_32,
-        lib.cmomentum32bit_grad_16,
-    )
-    str2optimizer32bit["rmsprop"] = (
-        lib.crmsprop32bit_grad_32,
-        lib.crmsprop32bit_grad_16,
-    )
-    str2optimizer32bit["lion"] = (lib.clion32bit_grad_fp32, lib.clion32bit_grad_fp16, lib.clion32bit_grad_bf16)
-    str2optimizer32bit["adagrad"] = (
-        lib.cadagrad32bit_grad_32,
-        lib.cadagrad32bit_grad_16,
-    )
+    str2optimizer32bit = {
+        "adam": (
+            lib.cadam32bit_grad_fp32,
+            lib.cadam32bit_grad_fp16,
+            lib.cadam32bit_grad_bf16,
+        ),
+        "momentum": (
+            lib.cmomentum32bit_grad_32,
+            lib.cmomentum32bit_grad_16,
+        ),
+        "rmsprop": (
+            lib.crmsprop32bit_grad_32,
+            lib.crmsprop32bit_grad_16,
+        ),
+        "lion": (
+            lib.clion32bit_grad_fp32,
+            lib.clion32bit_grad_fp16,
+            lib.clion32bit_grad_bf16,
+        ),
+        "adagrad": (
+            lib.cadagrad32bit_grad_32,
+            lib.cadagrad32bit_grad_16,
+        ),
+    }
 
-    str2optimizer8bit = {}
-    str2optimizer8bit["adam"] = (
-        lib.cadam_static_8bit_grad_32,
-        lib.cadam_static_8bit_grad_16,
-    )
-    str2optimizer8bit["momentum"] = (
-        lib.cmomentum_static_8bit_grad_32,
-        lib.cmomentum_static_8bit_grad_16,
-    )
-    str2optimizer8bit["rmsprop"] = (
-        lib.crmsprop_static_8bit_grad_32,
-        lib.crmsprop_static_8bit_grad_16,
-    )
-    str2optimizer8bit["lion"] = (
-        lib.clion_static_8bit_grad_32,
-        lib.clion_static_8bit_grad_16,
-    )
-    str2optimizer8bit["lamb"] = (
-        lib.cadam_static_8bit_grad_32,
-        lib.cadam_static_8bit_grad_16,
-    )
-    str2optimizer8bit["lars"] = (
-        lib.cmomentum_static_8bit_grad_32,
-        lib.cmomentum_static_8bit_grad_16,
-    )
+    str2optimizer8bit = {
+        "adam": (
+            lib.cadam_static_8bit_grad_32,
+            lib.cadam_static_8bit_grad_16,
+        ),
+        "momentum": (
+            lib.cmomentum_static_8bit_grad_32,
+            lib.cmomentum_static_8bit_grad_16,
+        ),
+        "rmsprop": (
+            lib.crmsprop_static_8bit_grad_32,
+            lib.crmsprop_static_8bit_grad_16,
+        ),
+        "lion": (
+            lib.clion_static_8bit_grad_32,
+            lib.clion_static_8bit_grad_16,
+        ),
+        "lamb": (
+            lib.cadam_static_8bit_grad_32,
+            lib.cadam_static_8bit_grad_16,
+        ),
+        "lars": (
+            lib.cmomentum_static_8bit_grad_32,
+            lib.cmomentum_static_8bit_grad_16,
+        ),
+    }
 
-    str2optimizer8bit_blockwise = {}
-    str2optimizer8bit_blockwise["adam"] = (
-        lib.cadam_8bit_blockwise_grad_fp32,
-        lib.cadam_8bit_blockwise_grad_fp16,
-        lib.cadam_8bit_blockwise_grad_bf16,
-    )
-    str2optimizer8bit_blockwise["momentum"] = (
-        lib.cmomentum_8bit_blockwise_grad_fp32,
-        lib.cmomentum_8bit_blockwise_grad_fp16,
-    )
-    str2optimizer8bit_blockwise["rmsprop"] = (
-        lib.crmsprop_8bit_blockwise_grad_fp32,
-        lib.crmsprop_8bit_blockwise_grad_fp16,
-    )
-    str2optimizer8bit_blockwise["lion"] = (
-        lib.clion_8bit_blockwise_grad_fp32,
-        lib.clion_8bit_blockwise_grad_fp16,
-        lib.clion_8bit_blockwise_grad_bf16,
-    )
-    str2optimizer8bit_blockwise["adagrad"] = (
-        lib.cadagrad_8bit_blockwise_grad_fp32,
-        lib.cadagrad_8bit_blockwise_grad_fp16,
-    )
+    str2optimizer8bit_blockwise = {
+        "adam": (
+            lib.cadam_8bit_blockwise_grad_fp32,
+            lib.cadam_8bit_blockwise_grad_fp16,
+            lib.cadam_8bit_blockwise_grad_bf16,
+        ),
+        "momentum": (
+            lib.cmomentum_8bit_blockwise_grad_fp32,
+            lib.cmomentum_8bit_blockwise_grad_fp16,
+        ),
+        "rmsprop": (
+            lib.crmsprop_8bit_blockwise_grad_fp32,
+            lib.crmsprop_8bit_blockwise_grad_fp16,
+        ),
+        "lion": (
+            lib.clion_8bit_blockwise_grad_fp32,
+            lib.clion_8bit_blockwise_grad_fp16,
+            lib.clion_8bit_blockwise_grad_bf16,
+        ),
+        "adagrad": (
+            lib.cadagrad_8bit_blockwise_grad_fp32,
+            lib.cadagrad_8bit_blockwise_grad_fp16,
+        ),
+    }
+
 
 class GlobalPageManager:
     _instance = None
