@@ -34,9 +34,9 @@ from .env_vars import get_potentially_lib_path_containing_env_vars
 # not sure if libcudart.so.12.0 exists in pytorch installs, but it does not hurt
 system = platform.system()
 if system == 'Windows':
-    CUDA_RUNTIME_LIBS: list = ["nvcuda.dll"]
+    CUDA_RUNTIME_LIBS = ["nvcuda.dll"]
 else: # Linux or other
-    CUDA_RUNTIME_LIBS: list = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0', 'libcudart.so.12.1', 'libcudart.so.12.2']
+    CUDA_RUNTIME_LIBS = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0', 'libcudart.so.12.1', 'libcudart.so.12.2']
 
 # this is a order list of backup paths to search CUDA in, if it cannot be found in the main environmental paths
 backup_paths = []

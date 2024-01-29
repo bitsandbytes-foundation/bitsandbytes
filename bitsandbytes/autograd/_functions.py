@@ -2,7 +2,7 @@ import operator
 import warnings
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, Callable
 from warnings import warn
 
 import torch
@@ -53,7 +53,10 @@ class GlobalOutlierPooler:
         return torch.Tensor(list(self.outliers)).to(torch.int64)
 
 
-def get_inverse_transform_indices(transform_tile: callable, tile_size: Tuple[int, int]):
+def get_inverse_transform_indices(
+    transform_tile: Callable[[torch.Tensor], torch.Tensor],
+    tile_size: Tuple[int, int],
+):
     """
     Compute a permutation of indices that invert the specified (tiled) matrix transformation
 

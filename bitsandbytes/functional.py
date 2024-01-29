@@ -639,8 +639,8 @@ class QuantState:
 
         # unpacking minor and non-tensor quant state items if necessary
         if len(qs_key) == 1:
-            qs_key = qs_key[0]
-            qs_dict.update(unpack_tensor_to_dict(qs_dict.pop(qs_key)))
+            first_qs_key = qs_key[0]
+            qs_dict.update(unpack_tensor_to_dict(qs_dict.pop(first_qs_key)))
 
         qs_dict = {k.split('.')[-1]: v for k, v in qs_dict.items()}  # strip prefixes
         assert set(qs_dict.keys()).issubset(cls.valid_qs_keys)
@@ -707,7 +707,14 @@ class QuantState:
             self.state2.code = self.state2.code.to(device)
 
 
-def quantize_blockwise(A: Tensor, code: Optional[torch.Tensor] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize=4096, nested=False) -> Tensor:
+def quantize_blockwise(
+    A: Tensor,
+    code: Optional[torch.Tensor] = None,
+    absmax: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    blocksize=4096,
+    nested=False,
+) -> Tuple[Tensor, QuantState]:
     """
     Quantize tensor A in blocks of size 4096 values.
 
@@ -1083,7 +1090,11 @@ def dequantize_4bit(A: Tensor, quant_state: Optional[QuantState] = None, absmax:
     else: return out
 
 
-def quantize(A: Tensor, code: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None) -> Tensor:
+def quantize(
+    A: Tensor,
+    code: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
     if code is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
