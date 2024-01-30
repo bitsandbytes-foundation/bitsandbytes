@@ -360,9 +360,7 @@ def evaluate_cuda_setup():
         return f'libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}', None, None, None
 
     cudart_path = determine_cuda_runtime_lib_path()
-    ccs = get_compute_capabilities()
-    ccs.sort()
-    cc = ccs[-1] # we take the highest capability
+    cc = get_compute_capabilities()[-1]  # we take the highest capability
     cuda_version_string = get_cuda_version()
 
     cuda_setup.add_log_entry(f"CUDA SETUP: PyTorch settings found: CUDA_VERSION={cuda_version_string}, Highest Compute Capability: {cc}.")
@@ -384,7 +382,7 @@ def evaluate_cuda_setup():
 
     binary_name = f"libbitsandbytes_cuda{cuda_version_string}"
     if not has_cublaslt:
-        # if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt
+        # if not has_cublaslt (CC < 7.5), then we have to choose _nocublaslt
         binary_name += "_nocublaslt"
 
     binary_name = f"{binary_name}{DYNAMIC_LIBRARY_SUFFIX}"
