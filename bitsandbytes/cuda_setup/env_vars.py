@@ -61,7 +61,7 @@ def restore_original_system_env_vars(env_vars: Dict[str, str]):
     """
     if find_executable('sudo') is None:
         return
-    if not os.geteuid() == 0:
+    if os.geteuid() != 0:
         return
 
     output = subprocess.check_output(['sudo', '-i', 'env'])
