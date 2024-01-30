@@ -64,10 +64,7 @@ def restore_original_system_env_vars(env_vars: Dict[str, str]):
     if os.geteuid() != 0:
         return
 
-    output = subprocess.check_output(['sudo', '-i', 'env'])
-    output_str = output.decode('utf-8')
-    env_lines = output_str.split('\n')
-    for env_line in env_lines:
+    for env_line in subprocess.check_output(['sudo', '-i', 'env'], encoding="utf-8").splitlines():
         if '=' in env_line:
             key, value = env_line.split('=', 1)
             if (key == "CONDA_PREFIX" or key == "LD_LIBRARY_PATH") and key not in env_vars:
