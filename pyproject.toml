@@ -11,9 +11,7 @@ src = [
     "tests",
     "benchmarking"
 ]
-fix = true
 select = [
-    "A",    # prevent using keywords that clobber python builtins
     "B",    # bugbear: security warnings
     "E",    # pycodestyle
     "F",    # pyflakes
@@ -24,11 +22,28 @@ select = [
 ]
 target-version = "py38"
 ignore = [
-    "E712",  # Allow using if x == False, as it's not always equivalent to if x.
+    "B007",  # Loop control variable not used within the loop body (TODO: enable)
+    "B028",  # Warning without stacklevel (TODO: enable)
     "E501",  # Supress line-too-long warnings: trust yapf's judgement on this one.
-    "F401", 
+    "E701",  # Multiple statements on one line (TODO: enable)
+    "E712",  # Allow using if x == False, as it's not always equivalent to if x.
+    "E731",  # Do not use lambda
+    "F841",  # Local assigned but not used (TODO: enable, these are likely bugs)
+    "RUF012",  # Mutable class attribute annotations
 ]
 ignore-init-module-imports = true  # allow to expose in __init__.py via imports
+
+[tool.ruff.extend-per-file-ignores]
+"**/__init__.py" = ["F401"]  # allow unused imports in __init__.py
+"{benchmarking,tests}/**/*.py" = [
+    "B007",
+    "B011",
+    "B023",
+    "E701",
+    "E731",
+    "F841",
+    "UP030",
+]
 
 [tool.ruff.isort]
 combine-as-imports = true

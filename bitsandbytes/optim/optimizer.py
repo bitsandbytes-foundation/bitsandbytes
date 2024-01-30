@@ -2,8 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from collections import abc as container_abcs
-from collections import defaultdict
+from collections import abc as container_abcs, defaultdict
 from copy import deepcopy
 from itertools import chain
 

@@ -1,7 +1,8 @@
 import os
-import pytest
-import torch
 from pathlib import Path
+
+import torch
+
 
 # hardcoded test. Not good, but a sanity check for now
 # TODO: improve this

@@ -7,7 +7,6 @@ import os
 
 from setuptools import find_packages, setup
 
-
 libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.so"))
 libs += list(glob.glob("./bitsandbytes/libbitsandbytes*.dll"))
 libs = [os.path.basename(p) for p in libs]
@@ -19,7 +18,7 @@ def read(fname):
 
 
 setup(
-    name=f"bitsandbytes",
+    name="bitsandbytes",
     version="0.42.0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",

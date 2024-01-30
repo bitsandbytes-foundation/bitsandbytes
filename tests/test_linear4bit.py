@@ -1,6 +1,5 @@
-import os
-from contextlib import nullcontext
 from itertools import product
+import os
 from tempfile import TemporaryDirectory
 
 import pytest

@@ -3,17 +3,15 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import ctypes as ct
+from functools import reduce  # Required in Python 3
 import itertools
 import operator
-import random
-import torch
-import itertools
-import math
-import numpy as np
+from typing import Any, Dict, Optional, Tuple
 
-from functools import reduce  # Required in Python 3
-from typing import Tuple, Any, Dict, Optional
+import numpy as np
+import torch
 from torch import Tensor
+
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
 from .cextension import COMPILED_WITH_CUDA, lib
@@ -178,7 +176,9 @@ dtype2bytes[torch.bfloat16] = 2
 dtype2bytes[torch.uint8] = 1
 dtype2bytes[torch.int8] = 1
 
-def get_paged(*shape, dtype=torch.float32, device=torch.device('cuda', index=0)):
+FIRST_CUDA_DEVICE = torch.device('cuda', index=0)
+
+def get_paged(*shape, dtype=torch.float32, device=FIRST_CUDA_DEVICE):
     num_bytes = dtype2bytes[dtype]*prod(shape)
     cuda_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
     c_ptr = ct.cast(cuda_ptr, ct.POINTER(ct.c_int))
@@ -242,7 +242,7 @@ def create_linear_map(signed=True, total_bits=8, add_zero=True):
     if gap == 0:
         return values
     else:
-        l = values.numel()//2
+        l = values.numel()//2  # noqa: E741
         return torch.Tensor(values[:l].tolist() + [0]*gap + values[l:].tolist())
 
 
@@ -283,7 +283,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     # the exponent is biased to 2^(e-1) -1 == 0
     evalues = []
     pvalues = []
-    for i, val in enumerate(range(-((2**(exponent_bits-has_sign))), 2**(exponent_bits-has_sign), 1)):
+    for i, val in enumerate(range(-(2**(exponent_bits-has_sign)), 2**(exponent_bits-has_sign), 1)):
         evalues.append(2**val)
 
 
@@ -345,7 +345,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     non_sign_bits = total_bits - (1 if signed else 1)
     additional_items = 2 ** (non_sign_bits - max_exponent_bits) - 1
     for i in range(max_exponent_bits):
-        fraction_items = int((2 ** (i + non_sign_bits - max_exponent_bits) + 1 if signed else 2 ** (i + non_sign_bits - max_exponent_bits + 1) + 1))
+        fraction_items = int(2 ** (i + non_sign_bits - max_exponent_bits) + 1 if signed else 2 ** (i + non_sign_bits - max_exponent_bits + 1) + 1)
         boundaries = torch.linspace(0.1, 1, fraction_items)
         means = (boundaries[:-1] + boundaries[1:]) / 2.0
         data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
@@ -899,7 +899,7 @@ def get_4bit_type(typename, device=None, blocksize=64):
                     -0.04934812,  0., 0.04273164, 0.12934483, 0.21961274, 0.31675666,
                     0.42563882,  0.55496234,  0.72424863,  1.][::-1]
         else:
-            raise NotImplementedError(f'4-bit AbnormalFloats currently only support blocksize 64.')
+            raise NotImplementedError('4-bit AbnormalFloats currently only support blocksize 64.')
 
     if data is None:
         raise NotImplementedError(f'Typename {typename} not supported')
@@ -1635,10 +1635,10 @@ def gemv_4bit(
     prev_device = pre_call(A.device)
     #sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if state is None:
-        raise ValueError(f'state cannot None. gem_4bit( ) requires the state from quantize_4bit( )')
+        raise ValueError('state cannot None. gem_4bit( ) requires the state from quantize_4bit( )')
 
     if A.numel() != A.shape[-1]:
-        raise ValueError(f'Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]')
+        raise ValueError('Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]')
 
     Bshape = state.shape
     bout = Bshape[0]
