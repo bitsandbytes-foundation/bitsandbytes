@@ -1,6 +1,7 @@
 import os
 import subprocess
 from typing import Dict
+import shutil
 
 
 def to_be_ignored(env_var: str, value: str) -> bool:
