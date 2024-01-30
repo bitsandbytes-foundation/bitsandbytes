@@ -106,21 +106,26 @@ class CUDASetup:
             self.error = False
 
     def manual_override(self):
-        if torch.cuda.is_available():
-            if 'BNB_CUDA_VERSION' in os.environ:
-                if len(os.environ['BNB_CUDA_VERSION']) > 0:
-                    warn(
-                        f'\n\n{"=" * 80}\n'
-                        'WARNING: Manual override via BNB_CUDA_VERSION env variable detected!\n'
-                        'BNB_CUDA_VERSION=XXX can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n'
-                        'If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n'
-                        'If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n'
-                        'For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n'
-                        f'Loading CUDA version: BNB_CUDA_VERSION={os.environ["BNB_CUDA_VERSION"]}'
-                        f'\n{"=" * 80}\n\n'
-                    )
-                    binary_name = self.binary_name.rsplit(".", 1)[0]
-                    self.binary_name = binary_name[:-3] + f'{os.environ["BNB_CUDA_VERSION"]}{DYNAMIC_LIBRARY_SUFFIX}'
+        if not torch.cuda.is_available():
+            return
+        override_value = os.environ.get('BNB_CUDA_VERSION')
+        if not override_value:
+            return
+
+        binary_name = self.binary_name.rsplit(".", 1)[0]
+        # TODO: what's the magic value `-3` here?
+        self.binary_name = binary_name[:-3] + f'{override_value}{DYNAMIC_LIBRARY_SUFFIX}'
+
+        warn(
+            f'\n\n{"=" * 80}\n'
+            'WARNING: Manual override via BNB_CUDA_VERSION env variable detected!\n'
+            'BNB_CUDA_VERSION=XXX can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n'
+            'If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n'
+            'If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n'
+            'For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n'
+            f'Loading: {self.binary_name}'
+            f'\n{"=" * 80}\n\n'
+        )
 
     def run_cuda_setup(self):
         self.initialized = True
