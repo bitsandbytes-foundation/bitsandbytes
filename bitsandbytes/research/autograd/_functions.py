@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
 import operator
 from typing import Optional
