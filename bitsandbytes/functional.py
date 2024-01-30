@@ -1944,7 +1944,10 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
                 ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc
             )
 
-    if has_error == 1:
+    if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
+        raise NotImplementedError("igemmlt not available (probably built with NO_CUBLASLT)")
+
+    if has_error:
         print(f'A: {shapeA}, B: {shapeB}, C: {Sout[0]}; (lda, ldb, ldc): {(lda, ldb, ldc)}; (m, n, k): {(m, n, k)}')
         raise Exception('cublasLt ran into an error!')
 
