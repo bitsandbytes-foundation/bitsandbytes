@@ -2,7 +2,7 @@ import torch
 from bitsandbytes.triton.triton_utils import is_triton_available
 
 if not is_triton_available():
-    def int8_matmul_mixed_dequanitze(a, b, state_x, state_w, bias): return None
+    def int8_matmul_mixed_dequantize(a, b, state_x, state_w, bias): return None
 else:
 
     import triton
@@ -136,7 +136,7 @@ else:
             tl.atomic_add(C, acc, mask=mask)
 
 
-    def int8_matmul_mixed_dequanitze(a, b, state_x, state_w, bias):
+    def int8_matmul_mixed_dequantize(a, b, state_x, state_w, bias):
         device = a.device
         divfactor = 1. / (127. * 127.)
         has_bias = 0 if bias is None else 1
