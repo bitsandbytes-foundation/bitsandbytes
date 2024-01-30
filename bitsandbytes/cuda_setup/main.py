@@ -382,11 +382,10 @@ def evaluate_cuda_setup():
     # we use ls -l instead of nvcc to determine the cuda version
     # since most installations will have the libcudart.so installed, but not the compiler
 
-    if has_cublaslt:
-        binary_name = f"libbitsandbytes_cuda{cuda_version_string}"
-    else:
-        "if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt"
-        binary_name = f"libbitsandbytes_cuda{cuda_version_string}_nocublaslt"
+    binary_name = f"libbitsandbytes_cuda{cuda_version_string}"
+    if not has_cublaslt:
+        # if not has_cublaslt (CC < 7.5), then we have to choose  _nocublaslt
+        binary_name += "_nocublaslt"
 
     binary_name = f"{binary_name}{DYNAMIC_LIBRARY_SUFFIX}"
 
