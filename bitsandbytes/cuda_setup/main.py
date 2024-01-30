@@ -112,9 +112,13 @@ class CUDASetup:
         if not override_value:
             return
 
-        binary_name = self.binary_name.rsplit(".", 1)[0]
-        # TODO: what's the magic value `-3` here?
-        self.binary_name = binary_name[:-3] + f'{override_value}{DYNAMIC_LIBRARY_SUFFIX}'
+        binary_name_stem, _, binary_name_ext = self.binary_name.rpartition(".")
+        # `binary_name_stem` will now be e.g. `/foo/bar/libbitsandbytes_cuda118`;
+        # let's remove any trailing numbers:
+        binary_name_stem = binary_name_stem.rstrip("0123456789")
+        # `binary_name_stem` will now be e.g. `/foo/bar/libbitsandbytes_cuda`;
+        # let's tack the new version number and the original extension back on.
+        self.binary_name = f"{binary_name_stem}{override_value}.{binary_name_ext}"
 
         warn(
             f'\n\n{"=" * 80}\n'
