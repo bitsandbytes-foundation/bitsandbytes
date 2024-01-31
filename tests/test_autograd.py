@@ -1,4 +1,3 @@
-import random
 from typing import Tuple
 
 import pytest
@@ -10,16 +9,17 @@ from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,
     describe_dtype,
+    get_test_dims,
     id_formatter,
 )
 
 TRANSPOSE_VALS = [(False, True), (False, False)]
 
 
-@pytest.mark.parametrize("dim1", torch.randint(16, 64, size=(1,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", get_test_dims(16, 64, n=1), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(32, 96, n=1), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(32, 96, n=1), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", get_test_dims(32, 96, n=1), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("funcs", [(torch.bmm, bnb.bmm_cublas), (torch.matmul, bnb.matmul_cublas)], ids=["func=bmm", "func=matmul"])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=describe_dtype)
 @pytest.mark.parametrize("req_grad", BOOLEAN_TUPLES, ids=id_formatter("req_grad"))
@@ -213,10 +213,10 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad: Tuple[bool, bool
                 assert (idx == 0).sum().item() < n * 0.02
 
 
-@pytest.mark.parametrize("dim1", torch.randint(16, 64, size=(1,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", [random.randint(32, 96), 0], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", get_test_dims(16, 64, n=1), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [*get_test_dims(32, 96, n=1), 0], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(32, 96, n=1), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", get_test_dims(32, 96, n=1), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("decomp", [0.0, 6.0], ids=id_formatter("decomp"))
 @pytest.mark.parametrize("funcs", [(torch.matmul, bnb.matmul), (torch.matmul, bnb.research.switchback_bnb)], ids=["func=matmul", "func=switchback_bnb"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
@@ -360,10 +360,10 @@ def test_matmullt(
                     torch.testing.assert_close(gradBias1, gradBias2)
 
 
-@pytest.mark.parametrize("dim1", torch.randint(16, 64, size=(1,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", [random.randint(32, 96), 0], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", get_test_dims(16, 64, n=1), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [*get_test_dims(32, 96, n=1), 0], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(32, 96, n=1), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", get_test_dims(32, 96, n=1), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("funcs", [(torch.matmul, bnb.matmul_4bit)], ids=["func=matmul"])
 @pytest.mark.parametrize("req_grad", BOOLEAN_TRIPLES, ids=id_formatter("req_grad"))
 @pytest.mark.parametrize("transpose", TRANSPOSE_VALS, ids=id_formatter("transpose"))
@@ -441,10 +441,10 @@ def test_matmul_4bit(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, 
                     torch.testing.assert_close(gradBias1, gradBias2)
 
 
-@pytest.mark.parametrize("dim1", torch.randint(16, 64, size=(1,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", [random.randint(32, 96), 0], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", torch.randint(32, 96, size=(1,)).tolist(), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", get_test_dims(16, 64, n=1), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [*get_test_dims(32, 96, n=1), 0], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(32, 96, n=1), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", get_test_dims(32, 96, n=1), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("req_grad", BOOLEAN_TRIPLES, ids=id_formatter("req_grad"))
 @pytest.mark.parametrize("transpose", TRANSPOSE_VALS, ids=id_formatter("transpose"))
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=describe_dtype)

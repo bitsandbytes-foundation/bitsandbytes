@@ -15,6 +15,7 @@ from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,
     describe_dtype,
+    get_test_dims,
     id_formatter,
 )
 
@@ -346,9 +347,9 @@ def test_stable_embedding():
     layer.reset_parameters()
 
 
-@pytest.mark.parametrize("hidden_dim", torch.randint(32, 256, size=(2,)).tolist(), ids=id_formatter("hidden_dim"))
-@pytest.mark.parametrize("batch_dim", torch.randint(16, 256, size=(2,)).tolist(), ids=id_formatter("batch_dim"))
-@pytest.mark.parametrize("seq_dim", torch.randint(16, 256, size=(2,)).tolist(), ids=id_formatter("seq_dim"))
+@pytest.mark.parametrize("hidden_dim", get_test_dims(32, 256, n=2), ids=id_formatter("hidden_dim"))
+@pytest.mark.parametrize("batch_dim", get_test_dims(16, 256, n=2), ids=id_formatter("batch_dim"))
+@pytest.mark.parametrize("seq_dim", get_test_dims(16, 256, n=2), ids=id_formatter("seq_dim"))
 @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
 def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
     hidden_dim = hidden_dim - (hidden_dim % 32)
@@ -401,9 +402,9 @@ def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
         torch.testing.assert_close(out.float(), out2)
 
 
-@pytest.mark.parametrize("seq_dim", torch.randint(32, 512, size=(3,)).tolist(), ids=id_formatter("seq_dim"))
-@pytest.mark.parametrize("hidden_dim", torch.randint(32, 1024 * 4, size=(3,)).tolist(), ids=id_formatter("hidden_dim"))
-@pytest.mark.parametrize("batch_dim", torch.randint(2, 16, size=(3,)).tolist(), ids=id_formatter("batch_dim"))
+@pytest.mark.parametrize("seq_dim", get_test_dims(32, 512, n=3), ids=id_formatter("seq_dim"))
+@pytest.mark.parametrize("hidden_dim", get_test_dims(32, 1024 * 4, n=3), ids=id_formatter("hidden_dim"))
+@pytest.mark.parametrize("batch_dim", get_test_dims(2, 16, n=3), ids=id_formatter("batch_dim"))
 def test_dim3_igemm(seq_dim, hidden_dim, batch_dim):
     seq_dim = seq_dim - (seq_dim % 32)
     hidden_dim = hidden_dim - (hidden_dim % 32)
@@ -424,9 +425,9 @@ def test_dim3_igemm(seq_dim, hidden_dim, batch_dim):
         torch.testing.assert_close(out.float(), out2)
 
 
-@pytest.mark.parametrize("seq_dim", torch.randint(32, 512, size=(2,)).tolist(), ids=id_formatter("seq_dim"))
-@pytest.mark.parametrize("hidden_dim", torch.randint(32, 1024 * 4, size=(2,)).tolist(), ids=id_formatter("hidden_dim"))
-@pytest.mark.parametrize("batch_dim", torch.randint(2, 16, size=(2,)).tolist(), ids=id_formatter("batch_dim"))
+@pytest.mark.parametrize("seq_dim", get_test_dims(32, 512, n=2), ids=id_formatter("seq_dim"))
+@pytest.mark.parametrize("hidden_dim", get_test_dims(32, 1024 * 4, n=2), ids=id_formatter("hidden_dim"))
+@pytest.mark.parametrize("batch_dim", get_test_dims(2, 16, n=2), ids=id_formatter("batch_dim"))
 @pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
 def test_minmax_igemm(seq_dim, hidden_dim, batch_dim, transpose):
     def min_max(x):
@@ -497,10 +498,10 @@ def test_minmax_igemm(seq_dim, hidden_dim, batch_dim, transpose):
     assert mean(relerrs) < 0.3
 
 
-@pytest.mark.parametrize("dim1", torch.randint(1, 64, size=(2,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(32, 128, size=(2,)).tolist(), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", torch.randint(32, 256, size=(2,)).tolist(), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", torch.randint(32, 256, size=(2,)).tolist(), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=2), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", get_test_dims(32, 256, n=2), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
 def test_ibmm(dim1, dim2, dim3, dim4, transpose):
     dim2 = dim2 - (dim2 % 16)
@@ -529,9 +530,9 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
         torch.testing.assert_close(out.float(), out2.float())
 
 
-@pytest.mark.parametrize("dim1", torch.randint(1, 64, size=(1,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(32, 128, size=(1,)).tolist(), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", torch.randint(32, 256, size=(1,)).tolist(), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=1), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=1), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=1), ids=id_formatter("dim3"))
 def test_vector_quant(dim1, dim2, dim3):
     dim2 = dim2 - (dim2 % 16)
     dim3 = dim3 - (dim3 % 16)
@@ -543,9 +544,9 @@ def test_vector_quant(dim1, dim2, dim3):
         assert_all_approx_close(A1, A, atol=0.01, rtol=0.1, count=int(n*0.002))
 
 
-@pytest.mark.parametrize("dim1", torch.randint(2, 256, size=(2,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(2, 256, size=(2,)).tolist(), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", torch.randint(2, 256, size=(2,)).tolist(), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim1", get_test_dims(2, 256, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(2, 256, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(2, 256, n=2), ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dtype", [torch.int8, torch.int32], ids=describe_dtype)
 @pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
 @pytest.mark.parametrize("orderOut", ["col", "row", "col32"], ids=id_formatter("orderOut"))
@@ -616,10 +617,10 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
         torch.testing.assert_close(A, out2)
 
 
-@pytest.mark.parametrize("dim1", torch.randint(1, 256, size=(1,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(32, 512, size=(1,)).tolist(), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", torch.randint(32, 1024, size=(1,)).tolist(), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", torch.randint(32, 1024, size=(1,)).tolist(), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", get_test_dims(1, 256, n=1), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(32, 512, n=1), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(32, 1024, n=1), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", get_test_dims(32, 1024, n=1), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2, 3), ids=id_formatter("dims"))
 @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
 def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
@@ -856,8 +857,8 @@ def test_bench_8bit_training(batch, seq, model, hidden):
     # print(t8)
 
 
-@pytest.mark.parametrize("dim1", torch.randint(64, 256, size=(2,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim4", torch.randint(64, 1024, size=(2,)).tolist(), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", get_test_dims(64, 256, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim4", get_test_dims(64, 1024, n=2), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
 @pytest.mark.parametrize("formatB", ["col_turing", "col_ampere"], ids=id_formatter("formatB"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
@@ -946,8 +947,8 @@ def test_colrow_absmax(dim1, dim2, dims):
         assert nnz_block_ptr2 is None
 
 
-@pytest.mark.parametrize("dim1", torch.randint(1, 4 * 1024, size=(2,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(1, 4 * 1024, size=(2,)).tolist(), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
 def test_double_quant(dim1, dim2):
     for i in range(k):
         A = torch.randn(dim1, dim2, device="cuda").half()
@@ -991,9 +992,9 @@ def test_double_quant(dim1, dim2):
         pytest.param(dim1, dim4, inner, id=f"{dim1=},{dim4=},{inner=}")
         for (dim1, dim4, inner)
         in zip(
-            torch.randint(1, 4 * 1024, size=(4,)).tolist(),
-            torch.randint(1, 4 * 1024, size=(4,)).tolist(),
-            torch.randint(1, 4 * 1024, size=(4,)).tolist(),
+            get_test_dims(1, 4 * 1024, n=4),
+            get_test_dims(1, 4 * 1024, n=4),
+            get_test_dims(1, 4 * 1024, n=4),
         )
     )
 )
@@ -1037,9 +1038,9 @@ def test_integrated_igemmlt(dim1, dim4, inner):
         pytest.param(dim1, dim4, inner, id=f"{dim1=},{dim4=},{inner=}")
         for (dim1, dim4, inner)
         in zip(
-            torch.randint(1, 4 * 1024, size=(6,)).tolist(),
-            torch.randint(1, 4 * 1024, size=(6,)).tolist(),
-            torch.randint(1, 4 * 1024, size=(6,)).tolist(),
+            get_test_dims(1, 4 * 1024, n=6),
+            get_test_dims(1, 4 * 1024, n=6),
+            get_test_dims(1, 4 * 1024, n=6),
         )
     )
 )
@@ -1163,8 +1164,8 @@ def test_row_scale_bench(dim1, dim4, inner):
     print("vector-wise", time.time() - t0)
 
 
-@pytest.mark.parametrize("dim1", torch.randint(2, 1024, size=(2,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(2, 1024, size=(2,)).tolist(), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dims", [2], ids=id_formatter("dims"))
 @pytest.mark.parametrize("dtype", [torch.int8], ids=describe_dtype)
@@ -1212,8 +1213,8 @@ def test_overflow():
         c2 = torch.matmul(a.float(), b.float().t())
 
 
-@pytest.mark.parametrize("dim1", torch.randint(1, 4 * 1024, size=(2,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(1, 4 * 1024, size=(2,)).tolist(), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
 def test_coo_double_quant(dim1, dim2):
     threshold = 3.00
     for i in range(k):
@@ -1240,8 +1241,8 @@ def test_coo_double_quant(dim1, dim2):
             )
 
 
-@pytest.mark.parametrize("dim1", torch.randint(1, 1 * 1024, size=(2,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(1, 1 * 1024, size=(2,)).tolist(), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("transposed_B", TRUE_FALSE, ids=id_formatter("transposed_B"))
 def test_spmm_coo(dim1, dim2, transposed_B):
     threshold = 1.5
@@ -1316,8 +1317,8 @@ def test_spmm_bench():
     print(tsp / t8)
 
 
-@pytest.mark.parametrize("dim1", torch.randint(256, 1024, size=(2,)).tolist(), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", torch.randint(256, 1024, size=(2,)).tolist(), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", get_test_dims(256, 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(256, 1024, n=2), ids=id_formatter("dim2"))
 def test_integrated_sparse_decomp(dim1, dim2):
     threshold = 3.0
     formatB = "col_turing"
@@ -2320,7 +2321,7 @@ def test_managed():
 def test_gemv_eye_4bit(storage_type, dtype, double_quant):
     dims = 10
     torch.random.manual_seed(np.random.randint(0, 412424242))
-    dims = torch.randint(0, 8192, size=(dims,)).tolist()
+    dims = get_test_dims(0, 8192, n=dims)
     dims = [dim + (64-(dim % 64)) for dim in dims]
     #for dim in [576, 5120, 3520, 5184, 1280, 4992, 5312, 2048]:
     for dim in dims:

@@ -1,7 +1,14 @@
 from itertools import product
+import random
 from typing import Any
 
 import torch
+
+test_dims_rng = random.Random(42)
+
+
+def get_test_dims(min: int, max: int, *, n: int) -> list[int]:
+    return [test_dims_rng.randint(min, max) for _ in range(n)]
 
 
 def format_with_label(label: str, value: Any) -> str:
