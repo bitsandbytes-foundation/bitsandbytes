@@ -469,6 +469,7 @@ optimizer_names_benchmark = [
 @pytest.mark.parametrize("dim2", [4096], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
 @pytest.mark.parametrize("optim_name", optimizer_names_benchmark, ids=id_formatter("opt"))
+@pytest.mark.benchmark
 def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1:
         return
@@ -498,6 +499,7 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
 @pytest.mark.parametrize("gtype", [torch.float16], ids=describe_dtype)
 @pytest.mark.parametrize("optim_name", ['paged_adamw'], ids=id_formatter("optim_name"))
 @pytest.mark.parametrize("mode", ['bnb'], ids=id_formatter("mode"))
+@pytest.mark.benchmark
 def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
     layers1 = torch.nn.Sequential(*torch.nn.ModuleList([torch.nn.Linear(dim1, dim1) for i in range(10)]))
     layers1 = layers1.to(gtype)

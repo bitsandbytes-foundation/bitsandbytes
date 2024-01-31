@@ -72,6 +72,7 @@ def model_and_tokenizer(request):
 @pytest.mark.parametrize("DQ", TRUE_FALSE, ids=id_formatter("dq"))
 @pytest.mark.parametrize("inference_kernel", TRUE_FALSE, ids=id_formatter("inference_kernel"))
 @pytest.mark.parametrize("dtype", [torch.float16], ids=describe_dtype)
+@pytest.mark.slow
 def test_pi(requires_cuda, model_and_tokenizer, inference_kernel, DQ, dtype):
     fixture_config, model, tokenizer = model_and_tokenizer
 

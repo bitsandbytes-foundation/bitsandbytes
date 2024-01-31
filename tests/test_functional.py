@@ -708,6 +708,7 @@ def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
         pytest.param(2, 512, 12 * 1024, 4 * 12 * 1024, id="batch=2, seq=512, model=12k, hidden=48k"),
     ],
 )
+@pytest.mark.benchmark
 def test_bench_8bit_training(batch, seq, model, hidden):
     formatB = F.get_special_format_str()
     A = torch.randn(batch, seq, model, device="cuda").half()
@@ -1118,6 +1119,7 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
     ],
 )
 @pytest.mark.skip("Row scale has some bugs for ampere")
+@pytest.mark.benchmark
 def test_row_scale_bench(dim1, dim4, inner):
     formatB = F.get_special_format_str()
     err1, err2, err3 = [], [], []
@@ -1274,6 +1276,7 @@ def test_spmm_coo(dim1, dim2, transposed_B):
         assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=30)
 
 
+@pytest.mark.benchmark
 def test_spmm_bench():
     batch = 2
     model = 1024 * 1
@@ -1581,6 +1584,7 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     ("batch", "seq", "model", "hidden"),
     [pytest.param(1, 1, 6656, 4*6656, id="batch=1, seq=1, model=6656, hidden=26k")],
 )
+@pytest.mark.benchmark
 def test_bench_matmul(batch, seq, model, hidden):
     iters = 1000
     formatB = F.get_special_format_str()
@@ -2005,6 +2009,7 @@ def test_kbit_quantile_estimation():
             assert err < 0.035
 
 
+@pytest.mark.benchmark
 def test_bench_dequantization():
     a = torch.rand(1024, 1024, device='cuda').half()
     code =F.create_fp8_map(True, 3, 0, 4).cuda()
@@ -2100,6 +2105,7 @@ def test_4bit_compressed_stats(quant_type):
 
 #@pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
 @pytest.mark.parametrize("quant_type", ['nf4'])
+@pytest.mark.benchmark
 def test_bench_4bit_dequant(quant_type):
     blocksize = 256
     a = torch.rand(1024*12*4, 1024*12, device='cuda').half()
