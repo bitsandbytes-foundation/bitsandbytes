@@ -1,4 +1,3 @@
-from itertools import product
 import os
 from os.path import join
 import shutil
@@ -11,6 +10,7 @@ import torch
 
 import bitsandbytes as bnb
 import bitsandbytes.functional as F
+from tests.helpers import describe_dtype, id_formatter
 
 # import apex
 
@@ -101,15 +101,16 @@ str2statenames["rmsprop8bit_blockwise"] = [("square_avg", "state1", "qmap1", "ab
 str2statenames["lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 str2statenames["paged_lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 
-dim1 = [1024]
-dim2 = [32, 1024, 4097, 1]
-gtype = [torch.float32, torch.float16, torch.bfloat16]
-optimizer_names = ["adam", "momentum", "rmsprop", 'paged_adamw', 'paged_adam', 'lion', 'paged_lion']
-values = list(product(dim1, dim2, gtype, optimizer_names))
-names = ["dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
+optimizer_names_32bit = ["adam", "momentum", "rmsprop", 'paged_adamw', 'paged_adam', 'lion', 'paged_lion']
+
+
+@pytest.mark.parametrize("optim_name", optimizer_names_32bit, ids=id_formatter("opt"))
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [32, 1024, 4097, 1], ids=id_formatter("dim2"))
 def test_optimizer32bit(dim1, dim2, gtype, optim_name):
-    if gtype == torch.bfloat16 and optim_name in ['momentum', 'rmsprop']: pytest.skip()
+    if gtype == torch.bfloat16 and optim_name in ['momentum', 'rmsprop']:
+        pytest.skip()
     if dim1 == 1 and dim2 == 1:
         return
     p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
@@ -133,7 +134,6 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
 
         bnb_optimizer.step()
         torch_optimizer.step()
-
 
         for name1, name2 in str2statenames[optim_name]:
             torch.testing.assert_close(
@@ -177,14 +177,9 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
             assert bnb_optimizer.state[p2]["unorm_vec"] > 0.0
 
 
-dim1 = [1024]
-dim2 = [32, 1024, 4097]
-gtype = [torch.float32, torch.float16]
-values = list(product(dim1, dim2, gtype))
-names = ["dim1_{}_dim2_{}_gtype_{}".format(*vals) for vals in values]
-
-
-@pytest.mark.parametrize("dim1, dim2, gtype", values, ids=names)
+@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
 def test_global_config(dim1, dim2, gtype):
     if dim1 == 1 and dim2 == 1:
         return
@@ -230,10 +225,7 @@ def test_global_config(dim1, dim2, gtype):
         assert adam2.state[p3]["state2"].dtype == torch.uint8
 
 
-dim1 = [1024]
-dim2 = [32, 1024, 4097]
-gtype = [torch.float32, torch.float16, torch.bfloat16]
-optimizer_names = [
+optimizer_names_8bit = [
     "adam8bit",
     "lion8bit",
     "momentum8bit",
@@ -243,13 +235,12 @@ optimizer_names = [
     "momentum8bit_blockwise",
     "rmsprop8bit_blockwise",
 ]
-values = list(product(dim1, dim2, gtype, optimizer_names))
-names = [
-    "dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values
-]
 
 
-@pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
+@pytest.mark.parametrize("optim_name", optimizer_names_8bit, ids=id_formatter("opt"))
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+@pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     if gtype == torch.bfloat16 and optim_name not in ['adam8bit_blockwise', 'lion8bit_blockwise']: pytest.skip()
     if dim1 == 1 and dim2 == 1:
@@ -375,18 +366,10 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     # print(sum(relerrors)/len(relerrors))
 
 
-dim1 = [1024]
-dim2 = [32, 1024, 4097]
-gtype = [torch.float32]
-optim_bits = [32, 8]
-values = list(product(dim1, dim2, gtype, optim_bits))
-names = [
-    "dim1_{}_dim2_{}_gtype_{}_optim_bits_{}".format(*vals)
-    for vals in values
-]
-
-
-@pytest.mark.parametrize("dim1, dim2, gtype, optim_bits", values, ids=names)
+@pytest.mark.parametrize("optim_bits", [32, 8], ids=id_formatter("optim_bits"))
+@pytest.mark.parametrize("gtype", [torch.float32], ids=describe_dtype)
+@pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 def test_adam_percentile_clipping(dim1, dim2, gtype, optim_bits):
     if dim1 == 1 and dim2 == 1:
         return
@@ -474,22 +457,18 @@ def test_adam_percentile_clipping(dim1, dim2, gtype, optim_bits):
             adam2.load_state_dict(torch.load(join(path, "opt.pt")))
 
 
-dim1 = [4096]
-dim2 = [4096]
-gtype = [torch.float32, torch.float16]
-# optimizer_names = ['adam8bit_blockwise', 'adam8bit', 'lamb8bit']
-# optimizer_names = ['adam8bit_blockwise', 'adam_apex', 'adam8bit', 'adam', 'adam_pytorch']
-# optimizer_names = ['momentum_apex', 'momentum8bit', 'momentum_pytorch']
-# optimizer_names = ['lamb_apex', 'lamb8bit']
-# optimizer_names = ['lars_apex', 'lars8bit']
-optimizer_names = ["adam8bit_blockwise", 'paged_adam8bit_blockwise', 'paged_adamw8bit_blockwise', 'paged_lion8bit_blockwise']
-values = list(product(dim1, dim2, gtype, optimizer_names))
-names = [
-    "dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values
+optimizer_names_benchmark = [
+    "adam8bit_blockwise",
+    "paged_adam8bit_blockwise",
+    "paged_adamw8bit_blockwise",
+    "paged_lion8bit_blockwise",
 ]
 
 
-@pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
+@pytest.mark.parametrize("dim1", [4096], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [4096], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
+@pytest.mark.parametrize("optim_name", optimizer_names_benchmark, ids=id_formatter("opt"))
 def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     if dim1 == 1 and dim2 == 1:
         return
@@ -514,15 +493,11 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     print(optim_name, gtype, s / params)
     # assert s < 3.9
 
-dim1 = [2*1024]
-gtype = [torch.float16]
-#mode = ['torch', 'bnb']
-mode = ['bnb']
-optimizer_names = ['paged_adamw']
-#optimizer_names = ['paged_adamw8bit_blockwise']
-values = list(product(dim1,gtype, optimizer_names, mode))
-names = ['dim1_{0}_gtype_{1}_optim_{2}_mode_{3}'.format(*vals) for vals in values]
-@pytest.mark.parametrize("dim1, gtype, optim_name, mode", values, ids=names)
+
+@pytest.mark.parametrize("dim1", [2 * 1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("gtype", [torch.float16], ids=describe_dtype)
+@pytest.mark.parametrize("optim_name", ['paged_adamw'], ids=id_formatter("optim_name"))
+@pytest.mark.parametrize("mode", ['bnb'], ids=id_formatter("mode"))
 def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
     layers1 = torch.nn.Sequential(*torch.nn.ModuleList([torch.nn.Linear(dim1, dim1) for i in range(10)]))
     layers1 = layers1.to(gtype)
