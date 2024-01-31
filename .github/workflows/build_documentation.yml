@@ -15,4 +15,4 @@ jobs:
       package: bitsandbytes
       repo_owner: TimDettmers
     secrets:
-      token: ${{ secrets.HUGGINGFACE_PUSH }}
+      hf_token: ${{ secrets.HUGGINGFACE_PUSH }}
