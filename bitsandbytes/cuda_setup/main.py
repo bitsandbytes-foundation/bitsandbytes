@@ -17,15 +17,15 @@ evaluation:
 """
 
 import ctypes as ct
-import os
 import errno
-import platform
-import torch
-from warnings import warn
-from itertools import product
-
+import os
 from pathlib import Path
+import platform
 from typing import Set, Union
+from warnings import warn
+
+import torch
+
 from .env_vars import get_potentially_lib_path_containing_env_vars
 
 # these are the most common libs names
@@ -34,9 +34,9 @@ from .env_vars import get_potentially_lib_path_containing_env_vars
 # not sure if libcudart.so.12.0 exists in pytorch installs, but it does not hurt
 system = platform.system()
 if system == 'Windows':
-    CUDA_RUNTIME_LIBS: list = ["nvcuda.dll"]
+    CUDA_RUNTIME_LIBS = ["nvcuda.dll"]
 else: # Linux or other
-    CUDA_RUNTIME_LIBS: list = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0', 'libcudart.so.12.1', 'libcudart.so.12.2']
+    CUDA_RUNTIME_LIBS = ["libcudart.so", 'libcudart.so.11.0', 'libcudart.so.12.0', 'libcudart.so.12.1', 'libcudart.so.12.2']
 
 # this is a order list of backup paths to search CUDA in, if it cannot be found in the main environmental paths
 backup_paths = []
@@ -111,14 +111,16 @@ class CUDASetup:
         if torch.cuda.is_available():
             if 'BNB_CUDA_VERSION' in os.environ:
                 if len(os.environ['BNB_CUDA_VERSION']) > 0:
-                    warn((f'\n\n{"="*80}\n'
-                          'WARNING: Manual override via BNB_CUDA_VERSION env variable detected!\n'
-                          'BNB_CUDA_VERSION=XXX can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n'
-                          'If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n'
-                          'If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n'
-                          'For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n'
-                          f'Loading CUDA version: BNB_CUDA_VERSION={os.environ["BNB_CUDA_VERSION"]}'
-                          f'\n{"="*80}\n\n'))
+                    warn(
+                        f'\n\n{"=" * 80}\n'
+                        'WARNING: Manual override via BNB_CUDA_VERSION env variable detected!\n'
+                        'BNB_CUDA_VERSION=XXX can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n'
+                        'If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n'
+                        'If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n'
+                        'For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n'
+                        f'Loading CUDA version: BNB_CUDA_VERSION={os.environ["BNB_CUDA_VERSION"]}'
+                        f'\n{"=" * 80}\n\n'
+                    )
                     binary_name = self.binary_name.rsplit(".", 1)[0]
                     suffix = ".so" if os.name != "nt" else ".dll"
                     self.binary_name = binary_name[:-3] + f'{os.environ["BNB_CUDA_VERSION"]}.{suffix}'
@@ -207,7 +209,7 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
         try:
             if path.exists():
                 existent_directories.add(path)
-        except PermissionError as pex:
+        except PermissionError:
             # Handle the PermissionError first as it is a subtype of OSError 
             # https://docs.python.org/3/library/exceptions.html#exception-hierarchy
             pass
@@ -217,8 +219,10 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
 
     non_existent_directories: Set[Path] = candidate_paths - existent_directories
     if non_existent_directories:
-        CUDASetup.get_instance().add_log_entry("The following directories listed in your path were found to "
-            f"be non-existent: {non_existent_directories}", is_warning=False)
+        CUDASetup.get_instance().add_log_entry(
+            f"The following directories listed in your path were found to be non-existent: {non_existent_directories}",
+            is_warning=False,
+        )
 
     return existent_directories
 
@@ -360,8 +364,10 @@ def evaluate_cuda_setup():
     cuda_version_string = get_cuda_version()
 
     cuda_setup.add_log_entry(f"CUDA SETUP: PyTorch settings found: CUDA_VERSION={cuda_version_string}, Highest Compute Capability: {cc}.")
-    cuda_setup.add_log_entry(f"CUDA SETUP: To manually override the PyTorch CUDA version please see:"
-                             "https://github.com/TimDettmers/bitsandbytes/blob/main/how_to_use_nonpytorch_cuda.md")
+    cuda_setup.add_log_entry(
+        "CUDA SETUP: To manually override the PyTorch CUDA version please see:"
+        "https://github.com/TimDettmers/bitsandbytes/blob/main/how_to_use_nonpytorch_cuda.md"
+    )
 
 
     # 7.5 is the minimum CC vor cublaslt

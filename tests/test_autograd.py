@@ -1,4 +1,4 @@
-from itertools import permutations, product
+from itertools import product
 
 import pytest
 import torch

@@ -1,14 +1,22 @@
 import json
-
 import time
-import torch
-import torch.nn as nn
 
+import torch
+
+from bitsandbytes.triton.int8_matmul_mixed_dequantize import (
+    int8_matmul_mixed_dequantize,
+)
+from bitsandbytes.triton.int8_matmul_rowwise_dequantize import (
+    int8_matmul_rowwise_dequantize,
+)
+from bitsandbytes.triton.quantize_columnwise_and_transpose import (
+    quantize_columnwise_and_transpose,
+)
+from bitsandbytes.triton.quantize_global import (
+    quantize_global,
+    quantize_global_transpose,
+)
 from bitsandbytes.triton.quantize_rowwise import quantize_rowwise
-from bitsandbytes.triton.quantize_columnwise_and_transpose import quantize_columnwise_and_transpose
-from bitsandbytes.triton.int8_matmul_rowwise_dequantize import int8_matmul_rowwise_dequantize
-from bitsandbytes.triton.quantize_global import quantize_global, quantize_global_transpose
-from bitsandbytes.triton.int8_matmul_mixed_dequantize import int8_matmul_mixed_dequantize
 
 # KNOW ISSUE: need to optimize "w_quantize_colwise_transpose" when embeddim is too large.
 

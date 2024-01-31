@@ -3,17 +3,15 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import ctypes as ct
+from functools import reduce  # Required in Python 3
 import itertools
 import operator
-import random
-import torch
-import itertools
-import math
-import numpy as np
+from typing import Any, Dict, Optional, Tuple
 
-from functools import reduce  # Required in Python 3
-from typing import Tuple, Any, Dict
+import numpy as np
+import torch
 from torch import Tensor
+
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
 from .cextension import COMPILED_WITH_CUDA, lib
@@ -27,71 +25,83 @@ name2qmap = {}
 
 if COMPILED_WITH_CUDA:
     """C FUNCTIONS FOR OPTIMIZERS"""
-    str2optimizer32bit = {}
-    str2optimizer32bit["adam"] = (lib.cadam32bit_grad_fp32, lib.cadam32bit_grad_fp16, lib.cadam32bit_grad_bf16)
-    str2optimizer32bit["momentum"] = (
-        lib.cmomentum32bit_grad_32,
-        lib.cmomentum32bit_grad_16,
-    )
-    str2optimizer32bit["rmsprop"] = (
-        lib.crmsprop32bit_grad_32,
-        lib.crmsprop32bit_grad_16,
-    )
-    str2optimizer32bit["lion"] = (lib.clion32bit_grad_fp32, lib.clion32bit_grad_fp16, lib.clion32bit_grad_bf16)
-    str2optimizer32bit["adagrad"] = (
-        lib.cadagrad32bit_grad_32,
-        lib.cadagrad32bit_grad_16,
-    )
+    str2optimizer32bit = {
+        "adam": (
+            lib.cadam32bit_grad_fp32,
+            lib.cadam32bit_grad_fp16,
+            lib.cadam32bit_grad_bf16,
+        ),
+        "momentum": (
+            lib.cmomentum32bit_grad_32,
+            lib.cmomentum32bit_grad_16,
+        ),
+        "rmsprop": (
+            lib.crmsprop32bit_grad_32,
+            lib.crmsprop32bit_grad_16,
+        ),
+        "lion": (
+            lib.clion32bit_grad_fp32,
+            lib.clion32bit_grad_fp16,
+            lib.clion32bit_grad_bf16,
+        ),
+        "adagrad": (
+            lib.cadagrad32bit_grad_32,
+            lib.cadagrad32bit_grad_16,
+        ),
+    }
 
-    str2optimizer8bit = {}
-    str2optimizer8bit["adam"] = (
-        lib.cadam_static_8bit_grad_32,
-        lib.cadam_static_8bit_grad_16,
-    )
-    str2optimizer8bit["momentum"] = (
-        lib.cmomentum_static_8bit_grad_32,
-        lib.cmomentum_static_8bit_grad_16,
-    )
-    str2optimizer8bit["rmsprop"] = (
-        lib.crmsprop_static_8bit_grad_32,
-        lib.crmsprop_static_8bit_grad_16,
-    )
-    str2optimizer8bit["lion"] = (
-        lib.clion_static_8bit_grad_32,
-        lib.clion_static_8bit_grad_16,
-    )
-    str2optimizer8bit["lamb"] = (
-        lib.cadam_static_8bit_grad_32,
-        lib.cadam_static_8bit_grad_16,
-    )
-    str2optimizer8bit["lars"] = (
-        lib.cmomentum_static_8bit_grad_32,
-        lib.cmomentum_static_8bit_grad_16,
-    )
+    str2optimizer8bit = {
+        "adam": (
+            lib.cadam_static_8bit_grad_32,
+            lib.cadam_static_8bit_grad_16,
+        ),
+        "momentum": (
+            lib.cmomentum_static_8bit_grad_32,
+            lib.cmomentum_static_8bit_grad_16,
+        ),
+        "rmsprop": (
+            lib.crmsprop_static_8bit_grad_32,
+            lib.crmsprop_static_8bit_grad_16,
+        ),
+        "lion": (
+            lib.clion_static_8bit_grad_32,
+            lib.clion_static_8bit_grad_16,
+        ),
+        "lamb": (
+            lib.cadam_static_8bit_grad_32,
+            lib.cadam_static_8bit_grad_16,
+        ),
+        "lars": (
+            lib.cmomentum_static_8bit_grad_32,
+            lib.cmomentum_static_8bit_grad_16,
+        ),
+    }
 
-    str2optimizer8bit_blockwise = {}
-    str2optimizer8bit_blockwise["adam"] = (
-        lib.cadam_8bit_blockwise_grad_fp32,
-        lib.cadam_8bit_blockwise_grad_fp16,
-        lib.cadam_8bit_blockwise_grad_bf16,
-    )
-    str2optimizer8bit_blockwise["momentum"] = (
-        lib.cmomentum_8bit_blockwise_grad_fp32,
-        lib.cmomentum_8bit_blockwise_grad_fp16,
-    )
-    str2optimizer8bit_blockwise["rmsprop"] = (
-        lib.crmsprop_8bit_blockwise_grad_fp32,
-        lib.crmsprop_8bit_blockwise_grad_fp16,
-    )
-    str2optimizer8bit_blockwise["lion"] = (
-        lib.clion_8bit_blockwise_grad_fp32,
-        lib.clion_8bit_blockwise_grad_fp16,
-        lib.clion_8bit_blockwise_grad_bf16,
-    )
-    str2optimizer8bit_blockwise["adagrad"] = (
-        lib.cadagrad_8bit_blockwise_grad_fp32,
-        lib.cadagrad_8bit_blockwise_grad_fp16,
-    )
+    str2optimizer8bit_blockwise = {
+        "adam": (
+            lib.cadam_8bit_blockwise_grad_fp32,
+            lib.cadam_8bit_blockwise_grad_fp16,
+            lib.cadam_8bit_blockwise_grad_bf16,
+        ),
+        "momentum": (
+            lib.cmomentum_8bit_blockwise_grad_fp32,
+            lib.cmomentum_8bit_blockwise_grad_fp16,
+        ),
+        "rmsprop": (
+            lib.crmsprop_8bit_blockwise_grad_fp32,
+            lib.crmsprop_8bit_blockwise_grad_fp16,
+        ),
+        "lion": (
+            lib.clion_8bit_blockwise_grad_fp32,
+            lib.clion_8bit_blockwise_grad_fp16,
+            lib.clion_8bit_blockwise_grad_bf16,
+        ),
+        "adagrad": (
+            lib.cadagrad_8bit_blockwise_grad_fp32,
+            lib.cadagrad_8bit_blockwise_grad_fp16,
+        ),
+    }
+
 
 class GlobalPageManager:
     _instance = None
@@ -166,7 +176,9 @@ dtype2bytes[torch.bfloat16] = 2
 dtype2bytes[torch.uint8] = 1
 dtype2bytes[torch.int8] = 1
 
-def get_paged(*shape, dtype=torch.float32, device=torch.device('cuda', index=0)):
+FIRST_CUDA_DEVICE = torch.device('cuda', index=0)
+
+def get_paged(*shape, dtype=torch.float32, device=FIRST_CUDA_DEVICE):
     num_bytes = dtype2bytes[dtype]*prod(shape)
     cuda_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
     c_ptr = ct.cast(cuda_ptr, ct.POINTER(ct.c_int))
@@ -230,11 +242,18 @@ def create_linear_map(signed=True, total_bits=8, add_zero=True):
     if gap == 0:
         return values
     else:
-        l = values.numel()//2
+        l = values.numel()//2  # noqa: E741
         return torch.Tensor(values[:l].tolist() + [0]*gap + values[l:].tolist())
 
+
 def create_normal_map(offset=0.9677083, use_extra_value=True):
-    from scipy.stats import norm
+    try:
+        from scipy.stats import norm
+    except ImportError as ie:
+        raise ImportError(
+            "Scipy is required for `create_normal_map`. "
+            "Install `bitsandbytes` with the `[test]` extra."
+        ) from ie
 
     if use_extra_value:
         # one more positive value, this is an asymmetric type
@@ -264,7 +283,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     # the exponent is biased to 2^(e-1) -1 == 0
     evalues = []
     pvalues = []
-    for i, val in enumerate(range(-((2**(exponent_bits-has_sign))), 2**(exponent_bits-has_sign), 1)):
+    for i, val in enumerate(range(-(2**(exponent_bits-has_sign)), 2**(exponent_bits-has_sign), 1)):
         evalues.append(2**val)
 
 
@@ -326,7 +345,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     non_sign_bits = total_bits - (1 if signed else 1)
     additional_items = 2 ** (non_sign_bits - max_exponent_bits) - 1
     for i in range(max_exponent_bits):
-        fraction_items = int((2 ** (i + non_sign_bits - max_exponent_bits) + 1 if signed else 2 ** (i + non_sign_bits - max_exponent_bits + 1) + 1))
+        fraction_items = int(2 ** (i + non_sign_bits - max_exponent_bits) + 1 if signed else 2 ** (i + non_sign_bits - max_exponent_bits + 1) + 1)
         boundaries = torch.linspace(0.1, 1, fraction_items)
         means = (boundaries[:-1] + boundaries[1:]) / 2.0
         data += ((10 ** (-(max_exponent_bits - 1) + i)) * means).tolist()
@@ -393,7 +412,8 @@ def is_on_gpu(tensors):
         raise TypeError(f'Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}')
     return on_gpu
 
-def get_ptr(A: Tensor) -> ct.c_void_p:
+
+def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
     """
     Get the ctypes pointer from a PyTorch Tensor.
 
@@ -514,7 +534,7 @@ def nvidia_transform(
     return out, new_state
 
 
-def estimate_quantiles(A: Tensor, out: Tensor = None, offset: float = 1 / 512, num_quantiles=256) -> Tensor:
+def estimate_quantiles(A: Tensor, out: Optional[torch.Tensor] = None, offset: float = 1 / 512, num_quantiles=256) -> Tensor:
     '''
     Estimates 256 equidistant quantiles on the input tensor eCDF.
 
@@ -619,8 +639,8 @@ class QuantState:
 
         # unpacking minor and non-tensor quant state items if necessary
         if len(qs_key) == 1:
-            qs_key = qs_key[0]
-            qs_dict.update(unpack_tensor_to_dict(qs_dict.pop(qs_key)))
+            first_qs_key = qs_key[0]
+            qs_dict.update(unpack_tensor_to_dict(qs_dict.pop(first_qs_key)))
 
         qs_dict = {k.split('.')[-1]: v for k, v in qs_dict.items()}  # strip prefixes
         assert set(qs_dict.keys()).issubset(cls.valid_qs_keys)
@@ -687,7 +707,14 @@ class QuantState:
             self.state2.code = self.state2.code.to(device)
 
 
-def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, out: Tensor = None, blocksize=4096, nested=False) -> Tensor:
+def quantize_blockwise(
+    A: Tensor,
+    code: Optional[torch.Tensor] = None,
+    absmax: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    blocksize=4096,
+    nested=False,
+) -> Tuple[Tensor, QuantState]:
     """
     Quantize tensor A in blocks of size 4096 values.
 
@@ -762,10 +789,10 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
 
 def dequantize_blockwise(
     A: Tensor,
-    quant_state: QuantState = None,
-    absmax: Tensor = None,
-    code: Tensor = None,
-    out: Tensor = None,
+    quant_state: Optional[QuantState] = None,
+    absmax: Optional[torch.Tensor] = None,
+    code: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
     blocksize: int = 4096,
     nested=False
 ) -> Tensor:
@@ -872,7 +899,7 @@ def get_4bit_type(typename, device=None, blocksize=64):
                     -0.04934812,  0., 0.04273164, 0.12934483, 0.21961274, 0.31675666,
                     0.42563882,  0.55496234,  0.72424863,  1.][::-1]
         else:
-            raise NotImplementedError(f'4-bit AbnormalFloats currently only support blocksize 64.')
+            raise NotImplementedError('4-bit AbnormalFloats currently only support blocksize 64.')
 
     if data is None:
         raise NotImplementedError(f'Typename {typename} not supported')
@@ -884,13 +911,22 @@ def get_4bit_type(typename, device=None, blocksize=64):
     return data.to(device)
 
 
-def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
+def quantize_fp4(A: Tensor, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4', quant_storage)
 
-def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
+def quantize_nf4(A: Tensor, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4', quant_storage)
 
-def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=64, compress_statistics=False, quant_type='fp4', quant_storage=torch.uint8) -> Tensor:
+
+def quantize_4bit(
+    A: Tensor,
+    absmax: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    blocksize=64,
+    compress_statistics=False,
+    quant_type='fp4',
+    quant_storage=torch.uint8,
+) -> Tuple[Tensor, QuantState]:
     """
     Quantize tensor A in blocks of 4-bit values.
 
@@ -971,13 +1007,13 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
 
     return out, state
 
-def dequantize_fp4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+def dequantize_fp4(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'fp4')
 
-def dequantize_nf4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64) -> Tensor:
+def dequantize_nf4(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'nf4')
 
-def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
+def dequantize_4bit(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
 
@@ -1054,7 +1090,11 @@ def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = 
     else: return out
 
 
-def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
+def quantize(
+    A: Tensor,
+    code: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
     if code is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
@@ -1070,10 +1110,10 @@ def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
 
 def dequantize(
     A: Tensor,
-    state: Tuple[Tensor, Tensor] = None,
-    absmax: Tensor = None,
-    code: Tensor = None,
-    out: Tensor = None,
+    state: Optional[Tuple[Tensor, Tensor]] = None,
+    absmax: Optional[torch.Tensor] = None,
+    code: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
 ) -> Tensor:
     assert state is not None or absmax is not None
     if code is None and state is None:
@@ -1088,7 +1128,7 @@ def dequantize(
     return out * state[0]
 
 
-def quantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
+def quantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = None) -> Tensor:
     '''
     Quantizes input tensor to 8-bit.
 
@@ -1117,7 +1157,7 @@ def quantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
     return out
 
 
-def dequantize_no_absmax(A: Tensor, code: Tensor, out: Tensor = None) -> Tensor:
+def dequantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = None) -> Tensor:
     '''
     Dequantizes the 8-bit tensor to 32-bit.
 
@@ -1155,11 +1195,11 @@ def optimizer_update_32bit(
     eps: float,
     step: int,
     lr: float,
-    state2: Tensor = None,
+    state2: Optional[torch.Tensor] = None,
     beta2: float = 0.0,
     weight_decay: float = 0.0,
     gnorm_scale: float = 1.0,
-    unorm_vec: Tensor = None,
+    unorm_vec: Optional[torch.Tensor] = None,
     max_unorm: float = 0.0,
     skip_zeros=False,
 ) -> None:
@@ -1258,7 +1298,7 @@ def optimizer_update_8bit(
     new_max2: Tensor,
     weight_decay: float = 0.0,
     gnorm_scale: float = 1.0,
-    unorm_vec: Tensor = None,
+    unorm_vec: Optional[torch.Tensor] = None,
     max_unorm: float = 0.0,
 ) -> None:
     """
@@ -1587,7 +1627,7 @@ def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8
 def gemv_4bit(
     A: Tensor,
     B: Tensor,
-    out: Tensor = None,
+    out: Optional[torch.Tensor] = None,
     transposed_A=False,
     transposed_B=False,
     state=None
@@ -1595,10 +1635,10 @@ def gemv_4bit(
     prev_device = pre_call(A.device)
     #sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if state is None:
-        raise ValueError(f'state cannot None. gem_4bit( ) requires the state from quantize_4bit( )')
+        raise ValueError('state cannot None. gem_4bit( ) requires the state from quantize_4bit( )')
 
     if A.numel() != A.shape[-1]:
-        raise ValueError(f'Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]')
+        raise ValueError('Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]')
 
     Bshape = state.shape
     bout = Bshape[0]
@@ -1647,7 +1687,7 @@ def gemv_4bit(
 def igemm(
     A: Tensor,
     B: Tensor,
-    out: Tensor = None,
+    out: Optional[torch.Tensor] = None,
     transposed_A=False,
     transposed_B=False,
 ):
@@ -1736,7 +1776,7 @@ def igemm(
 def batched_igemm(
     A: Tensor,
     B: Tensor,
-    out: Tensor = None,
+    out: Optional[torch.Tensor] = None,
     transposed_A=False,
     transposed_B=False,
 ):
@@ -1904,7 +1944,10 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
                 ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc
             )
 
-    if has_error == 1:
+    if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
+        raise NotImplementedError("igemmlt not available (probably built with NO_CUBLASLT)")
+
+    if has_error:
         print(f'A: {shapeA}, B: {shapeB}, C: {Sout[0]}; (lda, ldb, ldc): {(lda, ldb, ldc)}; (m, n, k): {(m, n, k)}')
         raise Exception('cublasLt ran into an error!')
 

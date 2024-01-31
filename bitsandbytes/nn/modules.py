@@ -3,17 +3,17 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 from typing import Any, Dict, Optional, TypeVar, Union, overload
-
 import warnings
+
 import torch
-import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
+import torch.nn.functional as F
 
 import bitsandbytes as bnb
+from bitsandbytes.autograd._functions import get_tile_inds, undo_layout
 from bitsandbytes.functional import QuantState
-from bitsandbytes.autograd._functions import undo_layout, get_tile_inds
 from bitsandbytes.optim import GlobalOptimManager
-from bitsandbytes.utils import OutlierTracer, find_outlier_dims
+from bitsandbytes.utils import OutlierTracer
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -145,7 +145,7 @@ class Params4bit(torch.nn.Parameter):
             cls,
             data: Optional[torch.Tensor] = None,
             requires_grad=True,
-            quant_state: QuantState = None,
+            quant_state: Optional[QuantState] = None,
             blocksize: int = 64,
             compress_statistics: bool = True,
             quant_type: str = 'fp4',
@@ -242,10 +242,10 @@ class Linear4bit(nn.Linear):
             if self.compute_dtype == torch.float32 and (x.numel() == x.shape[-1]):
                 # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference when it could be fast
                 # warn the user about this
-                warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference.')
+                warnings.warn('Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference.')
                 warnings.filterwarnings('ignore', message='.*inference.')
             if self.compute_dtype == torch.float32 and (x.numel() != x.shape[-1]):
-                warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference or training speed.')
+                warnings.warn('Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference or training speed.')
                 warnings.filterwarnings('ignore', message='.*inference or training')
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
@@ -337,8 +337,8 @@ class Int8Params(torch.nn.Parameter):
             del CBt
             del SCBt
             self.data = CB
-            setattr(self, "CB", CB)
-            setattr(self, "SCB", SCB)
+            self.CB = CB
+            self.SCB = SCB
 
         return self
 
