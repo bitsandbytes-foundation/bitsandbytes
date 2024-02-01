@@ -613,9 +613,9 @@ names = ["dim1_{}_dim2_{}_dim3_{}_dims_{}_dtype_{}_orderA_{}_orderOut_{}_transpo
 
 @pytest.mark.parametrize("dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",values,ids=names)
 def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
-    if dims == 3 and out_order != "col32":
+    if dims == 3 and orderOut != "col32":
         return
-    if dtype == torch.int32 and out_order != "col32":
+    if dtype == torch.int32 and orderOut != "col32":
         return
     try:
         func = F.get_transform_func(dtype, orderA, orderOut, transpose)
