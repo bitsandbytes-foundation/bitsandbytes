@@ -136,7 +136,7 @@ jobs:
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}
+        name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
         path: output/*
         retention-days: 7
   build-wheels:
@@ -190,7 +190,7 @@ jobs:
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
+        name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}}_${{ matrix.python-version }}
         path: dist/bitsandbytes-*.whl
         retention-days: 7
   publish:
