@@ -1,8 +1,16 @@
-- sections:
-  - local: index
-    title: Bits & Bytes
+- title: Get started
+  sections:
+  - local: introduction
+    title: Introduction
   - local: quickstart
     title: Quickstart
   - local: installation
     title: Installation
-  title: Get started
+- title: Features & Integrations
+  sections:
+  - local: quantization
+    title: Quantization
+  - local: optimizers
+    title: Optimizers
+  - local: integrations
+    title: Integrations

@@ -1,0 +1,103 @@
+Here we provide a short description and usage examples for each optimizer in `bitsandbytes.optim. We'll start by explaining the core optimizer class `Optimizer8bit`, followed by the specific implementations `Adagrad`, `Adagrad8bit` and `Adagrad32bit`.
+
+Each of these optimizers can be utilized depending on the specific requirements of the task at hand, such as memory constraints, computational efficiency and the need for precision.
+
+# Optimizer base class
+
+## `Optimizer8bit`
+
+The `Optimizer8bit` class serves as a base class for all 8-bit optimizers, providing common functionalities required for quantized optimization. The class is designed to support both 32-bit and 8-bit computations, where 8-bit optimizations can significantly reduce memory footprint and increase computation speed.
+
+### Usage:
+
+```python
+import torch
+from bitsandbytes.optim import Optimizer8bit
+
+model = YourModel()
+params = model.parameters()
+
+# Initialize the optimizer with your model's parameters
+optimizer = Optimizer8bit(params, defaults={
+    'lr': 0.001,
+    'betas': (0.9, 0.999),
+    'eps': 1e-08,
+    'weight_decay': 0
+}, optim_bits=8)  # Use optim_bits=32 for 32-bit optimization
+
+# In your training loop
+optimizer.zero_grad()
+loss = compute_loss()  # Implement your loss computation
+loss.backward()
+optimizer.step()
+```
+
+# Adagrad implementations
+
+## `Adagrad`
+
+The `Adagrad` class is an implementation of the Adagrad optimizer, which adapts the learning rate for each parameter based on the historical gradient information. This version allows for both 32-bit and 8-bit representations, with specific classes for each.
+
+### `Adagrad` Usage:
+
+```python
+import torch
+from bitsandbytes.optim import Adagrad
+
+model = YourModel()
+params = model.parameters()
+
+# Initialize the optimizer with your model's parameters
+optimizer = Adagrad(params, lr=0.01)
+
+# In your training loop
+optimizer.zero_grad()
+loss = compute_loss()  # Implement your loss computation
+loss.backward()
+optimizer.step()
+```
+
+## `Adagrad8bit`
+
+The `Adagrad8bit` class is specifically tailored for 8-bit optimization, inheriting from `Optimizer1State`. It is designed for models where memory efficiency is crucial and it operates with reduced precision to save memory and increase computation speed.
+
+### `Adagrad8bit` Usage:
+
+```python
+import torch
+from bitsandbytes.optim import Adagrad8bit
+
+model = YourModel()
+
+# Initialize the optimizer with your model's parameters
+optimizer = Adagrad8bit(params, lr=0.01)
+
+# In your training loop
+optimizer.zero_grad()
+loss = compute_loss()  # Implement your loss computation
+loss.backward()
+optimizer.step()
+```
+
+## Adagrad32bit
+
+The `Adagrad32bit` class is similar to `Adagrad` but ensures that all computations are carried out with 32-bit precision. This class is preferable when numerical precision is more critical than memory efficiency.
+
+### Adagrad32bit Usage:
+
+```python
+import torch
+from bitsandbytes.optim import Adagrad32bit
+
+model = YourModel()
+params = model.parameters()
+
+# Initialize the optimizer with your model's parameters
+optimizer = Adagrad32bit(params, lr=0.01)
+
+# In your training loop
+optimizer.zero_grad()
+loss = compute_loss()  # Implement your loss computation
+loss.backward()
+optimizer.step()
+```
