@@ -56,7 +56,7 @@ def get_potentially_lib_path_containing_env_vars() -> Dict[str, str]:
 def restore_original_system_env_vars(env_vars: Dict[str, str]):
     """
         If the system supports `sudo` command, and the python program was started with `sudo`,
-        Use the `sudo -i env` command to obtain the original environment variables of the system, including CONDA_PREFIX, LD_LIBRARY_PATH...
+        Use the `sudo -i env` and `env` command to obtain the original environment variables of the system, including CONDA_PREFIX, LD_LIBRARY_PATH...
         Then replace the environment variables obtained from the current shell, to obtain correct and complete environment variables
     """
     if shutil.which('sudo') is None:
@@ -64,8 +64,11 @@ def restore_original_system_env_vars(env_vars: Dict[str, str]):
     if os.geteuid() != 0:
         return
 
-    for env_line in subprocess.check_output(['sudo', '-i', 'env'], encoding="utf-8").splitlines():
-        if '=' in env_line:
-            key, value = env_line.split('=', 1)
-            if (key == "CONDA_PREFIX" or key == "LD_LIBRARY_PATH") and key not in env_vars:
-                env_vars[key] = value
+    sudo_env_output = subprocess.check_output(['sudo', '-i', 'env'], encoding="utf-8")
+    current_env_output = subprocess.check_output(['env'], encoding="utf-8")
+    sudo_env_dict = dict(line.split('=', 1) for line in sudo_env_output.splitlines() if '=' in line)
+    current_env_dict = dict(line.split('=', 1) for line in current_env_output.splitlines() if '=' in line)
+    combined_env_dict = {**current_env_dict, **sudo_env_dict}
+    for key, value in combined_env_dict.items():
+        if key in ("CONDA_PREFIX", "LD_LIBRARY_PATH") and key not in env_vars:
+            env_vars[key] = value
