@@ -15,15 +15,23 @@ jobs:
       fail-fast: false
 
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: ['3.10', '3.11']
         cuda-version: ['11.8', '12.1']
         build_type: [Release]
-        c_compiler: [gcc]
+        c_compiler: [gcc, cl]
         include:
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
+        exclude:
+          - os: ubuntu-latest
+            c_compiler: cl
+          - os: windows-latest
+            c_compiler: gcc
 
     steps:
     - uses: actions/checkout@v4
