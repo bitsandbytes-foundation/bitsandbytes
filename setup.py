@@ -19,7 +19,7 @@ def read(fname):
 
 setup(
     name="bitsandbytes",
-    version="0.42.0",
+    version="0.43.0.dev0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="k-bit optimizers and matrix multiplication routines.",
