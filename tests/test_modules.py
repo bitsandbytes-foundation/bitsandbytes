@@ -483,7 +483,14 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         assert (idx == 0).sum().item() <= b1.numel() * 0.005
 
 
-@pytest.mark.parametrize("module", [lambda nin, nout, bias=True: bnb.nn.Linear8bitLt(nin, nout, bias=bias, has_fp16_weights=False), bnb.nn.LinearFP4], ids=['Int8Lt', 'FP4'])
+@pytest.mark.parametrize(
+    "module",
+    [
+        lambda n_in, n_out, bias=True: bnb.nn.Linear8bitLt(n_in, n_out, bias=bias, has_fp16_weights=False),
+        bnb.nn.LinearFP4,
+    ],
+    ids=['Int8Lt', 'FP4'],
+)
 def test_linear_kbit_fp32_bias(module):
     # casts model to fp16 -> int8 automatically
     l1 = module(32, 64).cuda()

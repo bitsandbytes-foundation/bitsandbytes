@@ -168,9 +168,9 @@ Possible options for the config override are: `betas, eps, weight_decay, lr, opt
 For overrides for particular layers, we recommend overriding locally in each module. You can do this by passing the module, the parameter, and its attribute name to the GlobalOptimManager:
 ```py
 class MyModule(torch.nn.Module):
-  def __init__(din, dout):
+  def __init__(d_in, d_out):
     super(MyModule, self).__init__()
-    self.linear = torch.nn.Linear(din, dout)
+    self.linear = torch.nn.Linear(d_in, d_out)
     # optimization will happen in 32-bit and
     # learning rate will be set to 0.0001 independent of the main learning rate
     config = {'optim_bits': 32, 'lr' : 0.0001}

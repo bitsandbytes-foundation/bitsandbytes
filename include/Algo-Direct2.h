@@ -157,7 +157,7 @@ private:
         FVec<AVX, float> vxp = _mm256_i32gather_ps(xi, idxp, sizeof(float));
         IVec<AVX, float> ip = idxm;
 
-#else // do not use gather instrucions
+#else // do not use gather instructions
 
         union U {
             __m256i vec;
