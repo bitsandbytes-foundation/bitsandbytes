@@ -1,5 +1,9 @@
 #include <BinSearch.h>
+#ifdef _WIN32
+#include <thread>
+#else
 #include <pthread.h>
+#endif
 #include <common.h>
 
 using namespace BinSearch;
@@ -31,7 +35,11 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
     for(long long offset = 0; offset < num_blocks; offset+=thread_wave_size)
     {
       long long valid_chunks = num_blocks - offset >= thread_wave_size ? thread_wave_size : num_blocks - offset;
+#ifdef _WIN32
+      std::thread *threads = (std::thread *) malloc(sizeof(std::thread) * valid_chunks);
+#else
       pthread_t *threads = (pthread_t *) malloc(sizeof(pthread_t) * valid_chunks);
+#endif
 
       struct quantize_block_args **args = (quantize_block_args **) malloc(valid_chunks * sizeof(quantize_block_args *));
 
@@ -55,14 +63,23 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
           arg->threadidx = block_idx / blocksize;
           arg->blocksize = blocksize;
 
+#ifdef _WIN32
+          new (&threads[chunks_processed]) std::thread(quantize_block, arg);
+#else
           pthread_create(&threads[chunks_processed], NULL, &quantize_block, (void *) arg);
+#endif
           chunks_processed += 1;
           if(chunks_processed == valid_chunks){ break; }
       }
 
       for (int i = 0; i < valid_chunks; i++)
+      {
+#ifdef _WIN32
+          threads[i].join();
+#else
           int err = pthread_join(threads[i], NULL);
-
+#endif
+      }
       free(threads);
       for (int i = 0; i < valid_chunks; i++)
           free(args[i]);
