@@ -210,7 +210,7 @@ def remove_non_existent_dirs(candidate_paths: Set[Path]) -> Set[Path]:
             if path.exists():
                 existent_directories.add(path)
         except PermissionError:
-            # Handle the PermissionError first as it is a subtype of OSError 
+            # Handle the PermissionError first as it is a subtype of OSError
             # https://docs.python.org/3/library/exceptions.html#exception-hierarchy
             pass
         except OSError as exc:

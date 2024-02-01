@@ -120,6 +120,3 @@ def test_pi(requires_cuda, model_and_tokenizer, inference_kernel, DQ, dtype):
         for out in outputs:
             print(out)
         raise ValueError(f'Failure count: {failure_count}/{n_cases}')
-
-
-

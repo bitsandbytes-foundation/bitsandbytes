@@ -83,7 +83,7 @@ class MatMulFP8Mixed(torch.autograd.Function):
         # fp8out_transpose = fp8out_transpose.view(grad_output.shape[0], grad_output.shape[1], grad_output.shape[2])
 
         # not supported by PyTorch. TODO: create work-around
-        if req_gradA: 
+        if req_gradA:
             grad_A = torch.matmul(fp8out, B.t().to(fp8out.dtype)).to(A.dtype)
 
         if req_gradB:
@@ -167,7 +167,7 @@ class MatMulFP8Global(torch.autograd.Function):
         # fp8out_transpose = fp8out_transpose.view(grad_output.shape[0], grad_output.shape[1], grad_output.shape[2])
 
         # not supported by PyTorch. TODO: create work-around
-        if req_gradA: 
+        if req_gradA:
             grad_A = torch.matmul(fp8out, B.t().to(fp8out.dtype)).to(A.dtype)
 
         if req_gradB:

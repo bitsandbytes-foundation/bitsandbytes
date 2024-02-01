@@ -50,7 +50,7 @@ else:
         max_val = tl.load(state_x + pid)
         output = max_val * x * inv_127
         tl.store(output_ptr + offsets, output, mask=row_mask)
-        
+
 
     def dequantize_rowwise(x: torch.Tensor, state_x: torch.Tensor):
         output = torch.empty(*x.shape, device=x.device, dtype=torch.float16)

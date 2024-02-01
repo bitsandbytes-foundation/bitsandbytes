@@ -120,7 +120,7 @@ else:
             acc += tl.dot(a, b)
             A += BLOCK_K * SPLIT_K * stride_ak
             B += BLOCK_K * SPLIT_K * stride_bk
-        
+
         acc = (w_factor * (x_factor * (acc * divfactor)))
         acc = acc.to(C.dtype.element_ty)
 

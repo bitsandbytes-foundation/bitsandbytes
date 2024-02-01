@@ -519,4 +519,3 @@ def test_matmul_fp8( dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
                     torch.testing.assert_close(
                         gradB1, gradB2, atol=0.18, rtol=0.3
                     )
-
