@@ -1,4 +1,3 @@
-from itertools import product
 import os
 from tempfile import TemporaryDirectory
 
@@ -6,6 +5,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
+from tests.helpers import TRUE_FALSE
 
 storage = {
     'uint8': torch.uint8,
@@ -14,10 +14,10 @@ storage = {
     'float32': torch.float32
 }
 
-@pytest.mark.parametrize(
-    "quant_type, compress_statistics, bias, quant_storage",
-    list(product(["nf4", "fp4"], [False, True], [False, True], ['uint8', 'float16', 'bfloat16', 'float32'])),
-)
+@pytest.mark.parametrize("quant_storage", ['uint8', 'float16', 'bfloat16', 'float32'])
+@pytest.mark.parametrize("bias", TRUE_FALSE)
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage):
     original_dtype = torch.float16
     compute_dtype = None
