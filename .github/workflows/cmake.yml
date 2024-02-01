@@ -20,16 +20,11 @@ jobs:
 
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ['3.10', '3.11']
         cuda-version: ['11.8', '12.1']
         build_type: [Release]
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
 
     - name: Set up MSVC
       if: matrix.os == 'windows-latest'
@@ -52,7 +47,7 @@ jobs:
         environment-file: environment-bnb.yml
         use-only-tar-bz2: false
         auto-activate-base: true
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.10"
         mamba-version: "*"
 
     - name: Set reusable strings
@@ -159,6 +154,6 @@ jobs:
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4.3.0
       with:
-        name: bitsandbytes-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cuda-version }}
+        name: bitsandbytes-${{ matrix.os }}-${{ matrix.cuda-version }}
         path: |
           ${{ github.workspace }}/dist/
