@@ -110,7 +110,7 @@ __device__ float dDequantizeFP4Tree(unsigned char val, float absmax)
         return 1.00000000f*absmax*sign; // 1011
       else
         return 0.66666667f*absmax*sign; // 1010
-    else 
+    else
       if((val & 0b0001) == 1) // 100
         return 5.208333333e-03f*absmax*sign; // 1001
       else
@@ -174,36 +174,36 @@ __device__ half dhDequantizeNF4(unsigned char val)
     if((val & 0b0100) == 4) // 1
       if((val & 0b0010) == 2) // 11
         if((val & 0b0001) == 1) // 111
-          return 1.0f; 
+          return 1.0f;
         else
           return 0.7229568362236023f;
       else
         if((val & 0b0001) == 1) // 110
-          return 0.5626170039176941f; 
+          return 0.5626170039176941f;
         else
-          return 0.44070982933044434f; 
+          return 0.44070982933044434f;
     else
       if((val & 0b0010) == 2) //10
         if((val & 0b0001) == 1) // 101
-          return 0.33791524171829224f; 
+          return 0.33791524171829224f;
         else
-          return 0.24611230194568634f; 
-      else 
+          return 0.24611230194568634f;
+      else
         if((val & 0b0001) == 1) // 100
-          return 0.16093020141124725f; 
+          return 0.16093020141124725f;
         else
-          return 0.07958029955625534f; 
+          return 0.07958029955625534f;
 
   else
     if((val & 0b0100) == 4) // 0
       if((val & 0b0010) == 2) //01
         if((val & 0b0001) == 1) // 011
-          return 0.0f; 
+          return 0.0f;
         else
-          return -0.09105003625154495f; 
+          return -0.09105003625154495f;
       else
         if((val & 0b0001) == 1) // 010
-          return -0.18477343022823334f; 
+          return -0.18477343022823334f;
         else
           return -0.28444138169288635f;
     else
@@ -211,12 +211,12 @@ __device__ half dhDequantizeNF4(unsigned char val)
         if((val & 0b0001) == 1) // 001
           return -0.39491748809814453f;
         else
-          return -0.5250730514526367f; 
-      else 
+          return -0.5250730514526367f;
+      else
         if((val & 0b0001) == 1) // 000
-          return -0.6961928009986877f; 
+          return -0.6961928009986877f;
         else
-          return -1.0f; 
+          return -1.0f;
 
 }
 
@@ -229,36 +229,36 @@ __device__ float dDequantizeNF4(unsigned char val)
     if((val & 0b0100) == 4) // 1
       if((val & 0b0010) == 2) // 11
         if((val & 0b0001) == 1) // 111
-          return 1.0f; 
+          return 1.0f;
         else
           return 0.7229568362236023f;
       else
         if((val & 0b0001) == 1) // 110
-          return 0.5626170039176941f; 
+          return 0.5626170039176941f;
         else
-          return 0.44070982933044434f; 
+          return 0.44070982933044434f;
     else
       if((val & 0b0010) == 2) //10
         if((val & 0b0001) == 1) // 101
-          return 0.33791524171829224f; 
+          return 0.33791524171829224f;
         else
-          return 0.24611230194568634f; 
-      else 
+          return 0.24611230194568634f;
+      else
         if((val & 0b0001) == 1) // 100
-          return 0.16093020141124725f; 
+          return 0.16093020141124725f;
         else
-          return 0.07958029955625534f; 
+          return 0.07958029955625534f;
 
   else
     if((val & 0b0100) == 4) // 0
       if((val & 0b0010) == 2) //01
         if((val & 0b0001) == 1) // 011
-          return 0.0f; 
+          return 0.0f;
         else
-          return -0.09105003625154495f; 
+          return -0.09105003625154495f;
       else
         if((val & 0b0001) == 1) // 010
-          return -0.18477343022823334f; 
+          return -0.18477343022823334f;
         else
           return -0.28444138169288635f;
     else
@@ -266,12 +266,12 @@ __device__ float dDequantizeNF4(unsigned char val)
         if((val & 0b0001) == 1) // 001
           return -0.39491748809814453f;
         else
-          return -0.5250730514526367f; 
-      else 
+          return -0.5250730514526367f;
+      else
         if((val & 0b0001) == 1) // 000
-          return -0.6961928009986877f; 
+          return -0.6961928009986877f;
         else
-          return -1.0f; 
+          return -1.0f;
 
 }
 
@@ -1863,7 +1863,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
               //float ratio = (g_val*g_val)/fmaxf(s2_vals[j], eps*eps);
               //g_val = ratio > 2.0f ? 2.0f*g_val/ratio : g_val;
               g_val *= gnorm_scale;
-              
+
 							s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
 
 							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
@@ -3069,7 +3069,7 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //// use k warps per thread block
 //// 1. threadblock use read-only cache to read in register tile for A into shared memory
 //// 2. each warp loops over shared memory tiles of A of size 8x16 and loads them into fragments
-//// 3. each warp reads a segment of values 16x32 from B 
+//// 3. each warp reads a segment of values 16x32 from B
 //// 4. do dequantization from register of B into second pair of registers
 //// 5. store (4) into fragment
 //// 6. matmul aggregate into fragment C
@@ -3531,7 +3531,7 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, i
 template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
-  // per threadblock: 
+  // per threadblock:
   // load step-by-step in chunks of [32,warps]: 1x32 * [32,warps] -> [1,warps]
   // 4 warps -> 4 loads per iter
   // 1x32 * 32x4 -> 1x4 outputs per thread block
@@ -3764,7 +3764,7 @@ template <typename T, int FUNC> __global__ void kfunc(T *A, T *B, T value, long 
   {
     switch(FUNC)
     {
-      case FILL: 
+      case FILL:
         A[i] = (T)value;
         break;
       case ARANGE:

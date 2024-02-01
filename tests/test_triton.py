@@ -58,4 +58,3 @@ def test_switchback(vector_wise_quantization):
 
             print('GX1', err_sb, err_baseline)
             assert err_sb < 2 * err_baseline
-

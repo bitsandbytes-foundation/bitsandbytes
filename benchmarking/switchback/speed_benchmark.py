@@ -42,7 +42,7 @@ if __name__ == '__main__':
     for dim in [1024, 1280, 1408, 1664, 2048, 4096]:
         # note "batch_size" is actually "batch_size * embed_dim", which is why it's large
         for batch_size in [256*32, 256*64, 256*128, 256*256, 256*512]:
-            
+
             # switch switches dim_in and dim_out
             for switch in [False, True]:
 
@@ -62,7 +62,7 @@ if __name__ == '__main__':
                 x = torch.randn(batch_size, dim_in, dtype=torch.float16).cuda()
                 g = torch.randn(batch_size, dim_out, dtype=torch.float16).cuda()
                 w = torch.randn(dim_out, dim_in, dtype=torch.float16).cuda()
-                
+
                 x_int8 = x.clone().to(torch.int8)
                 g_int8 = g.clone().to(torch.int8)
                 w_int8 = w.clone().to(torch.int8)

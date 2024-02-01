@@ -49,13 +49,13 @@ def install_cuda(version, base_path, download_path):
     # Install CUDA
     print(f"Installing CUDA version {version}...")
     install_command = [
-        "bash", filepath, 
-        "--no-drm", "--no-man-page", "--override", 
+        "bash", filepath,
+        "--no-drm", "--no-man-page", "--override",
         "--toolkitpath=" + install_path, "--toolkit", "--silent"
     ]
 
     print(f"Running command: {' '.join(install_command)}")
-    
+
     try:
         subprocess.run(install_command, check=True)
     except subprocess.CalledProcessError as e:

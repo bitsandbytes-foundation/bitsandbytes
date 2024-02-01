@@ -2345,5 +2345,3 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
         torch.testing.assert_close(A, C2)
         #torch.testing.assert_close(A, C1, rtol=1e-5, atol=0.00001)
         #torch.testing.assert_close(A, C2, rtol=1e-5, atol=0.080)
-
-

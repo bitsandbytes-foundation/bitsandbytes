@@ -637,6 +637,3 @@ def test_4bit_warnings():
         net(inp)
 
     assert len(record) == 2
-
-
-
