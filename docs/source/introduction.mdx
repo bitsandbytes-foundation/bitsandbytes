@@ -1,39 +1,11 @@
+TODO: Many parts of this doc will still be redistributed among the new doc structure.
+
 # `bitsandbytes`
 
 The `bitsandbytes` library is a lightweight Python wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions.
 
 There are ongoing efforts to support further hardware backends, i.e. Intel CPU + GPU, AMD GPU, Apple Silicon. Windows support is on its way as well.
 
-# Resources:
-- [8-bit Optimizer Paper](https://arxiv.org/abs/2110.02861) --  [Video](https://www.youtube.com/watch?v=IxrlHAJtqKE) -- [Docs](https://bitsandbytes.readthedocs.io/en/latest/)
-
-- [LLM.int8() Paper](https://arxiv.org/abs/2208.07339) -- [LLM.int8() Software Blog Post](https://huggingface.co/blog/hf-bitsandbytes-integration) -- [LLM.int8() Emergent Features Blog Post](https://timdettmers.com/2022/08/17/llm-int8-and-emergent-features/)
-
-## TL;DR
-**Requirements**
-Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + CUDA > 10.0.
-
-(Deprecated: CUDA 10.0 is deprecated and only CUDA >= 11.0) will be supported with release 0.39.0)
-
-**Installation**:
-
-``pip install bitsandbytes``
-
-In some cases it can happen that you need to compile from source. If this happens please consider submitting a bug report with `python -m bitsandbytes` information. What now follows is some short instructions which might work out of the box if `nvcc` is installed. If these do not work see further below.
-
-Compilation quickstart:
-```bash
-git clone https://github.com/timdettmers/bitsandbytes.git
-cd bitsandbytes
-
-# CUDA_VERSIONS in {110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 120}
-# make argument in {cuda110, cuda11x, cuda12x}
-# if you do not know what CUDA you have, try looking at the output of: python -m bitsandbytes
-CUDA_VERSION=117 make cuda11x
-python setup.py install
-```
-
-**Using Int8 inference with HuggingFace Transformers**
 
 ```python
 from transformers import AutoModelForCausalLM
@@ -89,9 +61,6 @@ The bitsandbytes library is currently only supported on Linux distributions. Win
 
 The requirements can best be fulfilled by installing pytorch via anaconda. You can install PyTorch by following the ["Get Started"](https://pytorch.org/get-started/locally/) instructions on the official website.
 
-To install run:
-
-``pip install bitsandbytes``
 
 ## Using bitsandbytes
 
@@ -166,26 +135,3 @@ For more detailed instruction, please follow the [compile_from_source.md](compil
 The majority of bitsandbytes is licensed under MIT, however portions of the project are available under separate license terms: Pytorch is licensed under the BSD license.
 
 We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fabiocannizzo/FastBinarySearch) which we use for CPU quantization.
-
-## How to cite us
-If you found this library and found LLM.int8() useful, please consider citing our work:
-
-```bibtex
-@article{dettmers2022llmint8,
-  title={LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale},
-  author={Dettmers, Tim and Lewis, Mike and Belkada, Younes and Zettlemoyer, Luke},
-  journal={arXiv preprint arXiv:2208.07339},
-  year={2022}
-}
-```
-
-For 8-bit optimizers or quantization routines, please consider citing the following work:
-
-```bibtex
-@article{dettmers2022optimizers,
-  title={8-bit Optimizers via Block-wise Quantization},
-  author={Dettmers, Tim and Lewis, Mike and Shleifer, Sam and Zettlemoyer, Luke},
-  journal={9th International Conference on Learning Representations, ICLR},
-  year={2022}
-}
-```

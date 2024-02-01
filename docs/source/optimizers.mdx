@@ -1,103 +1,129 @@
-Here we provide a short description and usage examples for each optimizer in `bitsandbytes.optim. We'll start by explaining the core optimizer class `Optimizer8bit`, followed by the specific implementations `Adagrad`, `Adagrad8bit` and `Adagrad32bit`.
+# Introduction: 8-bit optimizers
+With 8-bit optimizers, larger models can be finetuned with the same GPU memory compared to standard 32-bit optimizer training. 8-bit optimizers are a drop-in replacement for regular optimizers:
 
-Each of these optimizers can be utilized depending on the specific requirements of the task at hand, such as memory constraints, computational efficiency and the need for precision.
+- Faster (e.g. 4x faster than regular Adam)
+- 75% less memory, same performance
+- No hyperparameter tuning needed
 
-# Optimizer base class
+8-bit optimizers are mostly useful to finetune large models that did not fit into memory before. They also make it easier to pretrain larger models and have great synergy with sharded data parallelism. 8-bit Adam, for example, is already used across multiple teams in Facebook. This optimizer saves a ton of memory at no accuracy hit.
 
-## `Optimizer8bit`
+See here the biggest models
 
-The `Optimizer8bit` class serves as a base class for all 8-bit optimizers, providing common functionalities required for quantized optimization. The class is designed to support both 32-bit and 8-bit computations, where 8-bit optimizations can significantly reduce memory footprint and increase computation speed.
+We feature 8-bit Adam/AdamW, SGD momentum, LARS, LAMB, and RMSProp.
 
-### Usage:
+It only requires a two-line code change to get started.
+```
+import bitsandbytes as bnb
+
+# before: adam = torch.optim.Adam(...)
+adam = bnb.optim.Adam8bit(...)
+
+# recommended for NLP models
+# before: torch.nn.Embedding(...)
+bnb.nn.StableEmbedding(...)
+```
+
+The arguments passed are the same as standard Adam. For NLP models we recommend also to use the StableEmbedding layers which improves results and helps with stable 8-bit optimization.
+
+## Overview of expected gradients
+
+TODO: add pics here, no idea how to do that
+
+Want to add both pics in https://huggingface.co/datasets/huggingface/documentation-images/tree/main/bitsandbytes
+
+# Research Background
+
+Stateful optimizers maintain gradient statistics over time, e.g. the exponentially smoothed sum (SGD with momentum) or squared sum (Adam) of past gradient values. This state can be used to accelerate optimization compared to plain stochastic gradient descent but uses memory that might otherwise be allocated to model parameters, thereby limiting the maximum size of models trained in practice. `bitsandbytes` optimizers use 8-bit statistics, while maintaining the performance levels of using 32-bit optimizer states.
+
+To overcome the resulting computational, quantization and stability challenges, 8-bit optimizers have three components:
+1) **Block-wise quantization** divides input tensors into smaller blocks that are independently quantized, therein isolating outliers and distributing the error more equally over all bits. Each block is processed in parallel across cores, yielding faster optimization and high precision quantization.
+2) **dynamic quantization**, which quantizes both small and large values with high precision,
+3) a **stable embedding layer** improves stability during optimization for models with word embeddings.
+
+With these components, performing an optimizer update with 8-bit states is straightforward. We dequantize the 8-bit optimizer states to 32-bit, perform the update and then quantize the states back to 8-bit for storage.
+
+We do this 8-bit to 32-bit conversion element-by-element in registers, which means no slow copies to GPU memory or additional temporary memory are needed to perform quantization and dequantization. For GPUs, this makes 8-bit optimizers faster than regular 32-bit optimizers.
+
+For more details, please refer to the paper [8-bit Optimizers via Block-wise Quantization](https://arxiv.org/abs/2110.02861)
+
+## Stable Embedding Layer
+
+The Stable Embedding Layer enhances the standard word embedding layer for improved training stability in NLP tasks. It addresses the challenge of non-uniform input distributions and mitigates extreme gradient variations, ensuring smoother training processes.
+
+### Features:
+
+- **Initialization**: Utilizes Xavier uniform initialization to maintain consistent variance, reducing the likelihood of large gradients.
+- **Normalization**: Incorporates layer normalization before adding positional embeddings, aiding in output stability.
+- **Optimizer States**: Employs 32-bit optimizer states exclusively for this layer to enhance stability, while the rest of the model may use standard 16-bit precision.
+
+### Benefits:
+
+- Designed to support more aggressive quantization strategies without compromising training stability.
+- Helps in achieving stable training outcomes, particularly important for models dealing with diverse and complex language data.
+
+# Usage
+
+Some more examples of how you can replace your old optimizer with the 8-bit optimizer:
+
+```
+import bitsandbytes as bnb
+
+# adam = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # comment out old optimizer
+adam = bnb.optim.Adam8bit(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # add bnb optimizer
+adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995), optim_bits=8) # equivalent
+
+# use 32-bit Adam with 5th percentile clipping
+adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995),
+                      optim_bits=32, percentile_clipping=5)
+```
+
+# How to override config hyperparameters for particular weights/parameters
+
+If you want to optimize some unstable parameters with 32-bit Adam and others with 8-bit Adam, you can use the `GlobalOptimManager`. With this, we can also configure specific hyperparameters for particular layers, such as embedding layers. To do that, we need two things:
+
+1) Register the parameter while they are still on the CPU,
+2) override the config with the new desired hyperparameters (anytime, anywhere)
+
+For global overrides in many different places in your code you can do:
 
 ```python
 import torch
-from bitsandbytes.optim import Optimizer8bit
+import bitsandbytes as bnb
 
-model = YourModel()
-params = model.parameters()
+mng = bnb.optim.GlobalOptimManager.get_instance()
 
-# Initialize the optimizer with your model's parameters
-optimizer = Optimizer8bit(params, defaults={
-    'lr': 0.001,
-    'betas': (0.9, 0.999),
-    'eps': 1e-08,
-    'weight_decay': 0
-}, optim_bits=8)  # Use optim_bits=32 for 32-bit optimization
+model = MyModel()
+mng.register_parameters(model.parameters()) # 1. register parameters while still on CPU
 
-# In your training loop
-optimizer.zero_grad()
-loss = compute_loss()  # Implement your loss computation
-loss.backward()
-optimizer.step()
+model = model.cuda()
+# use 8-bit optimizer states for all parameters
+adam = bnb.optim.Adam(model.parameters(), lr=0.001, optim_bits=8)
+
+# 2a. override: the parameter model.fc1.weight now uses 32-bit Adam
+mng.override_config(model.fc1.weight, 'optim_bits', 32)
+
+# 2b. override: the two special layers use
+# sparse optimization + different learning rate + different Adam betas
+mng.override_config([model.special.weight, model.also_special.weight],
+                    key_value_dict ={'is_sparse': True, 'lr': 1e-5, 'betas'=(0.9, 0.98)})
 ```
+Possible options for the config override are: `betas, eps, weight_decay, lr, optim_bits, min_8bit_size, percentile_clipping, block_wise, max_unorm`
 
-# Adagrad implementations
-
-## `Adagrad`
-
-The `Adagrad` class is an implementation of the Adagrad optimizer, which adapts the learning rate for each parameter based on the historical gradient information. This version allows for both 32-bit and 8-bit representations, with specific classes for each.
-
-### `Adagrad` Usage:
-
+For overrides for particular layers we recommend overriding locally in each module. You can do this by passing the module, the parameter, and its attribute name to the GlobalOptimManager:
 ```python
-import torch
-from bitsandbytes.optim import Adagrad
+class MyModule(torch.nn.Module):
+  def __init__(din, dout):
+    super(MyModule, self).__init__()
+    self.linear = torch.nn.Linear(din, dout)
+    # optimization will happen in 32-bit and
+    # learning rate will be set to 0.0001 independent of the main learning rate
+    config = {'optim_bits': 32, 'lr' : 0.0001}
+    GlobalOptimManager.get_instance().register_module_override(self, 'weight', config)
 
-model = YourModel()
-params = model.parameters()
-
-# Initialize the optimizer with your model's parameters
-optimizer = Adagrad(params, lr=0.01)
-
-# In your training loop
-optimizer.zero_grad()
-loss = compute_loss()  # Implement your loss computation
-loss.backward()
-optimizer.step()
 ```
 
-## `Adagrad8bit`
+# API Docs
 
-The `Adagrad8bit` class is specifically tailored for 8-bit optimization, inheriting from `Optimizer1State`. It is designed for models where memory efficiency is crucial and it operates with reduced precision to save memory and increase computation speed.
+... under construction ...
 
-### `Adagrad8bit` Usage:
-
-```python
-import torch
-from bitsandbytes.optim import Adagrad8bit
-
-model = YourModel()
-
-# Initialize the optimizer with your model's parameters
-optimizer = Adagrad8bit(params, lr=0.01)
-
-# In your training loop
-optimizer.zero_grad()
-loss = compute_loss()  # Implement your loss computation
-loss.backward()
-optimizer.step()
-```
-
-## Adagrad32bit
-
-The `Adagrad32bit` class is similar to `Adagrad` but ensures that all computations are carried out with 32-bit precision. This class is preferable when numerical precision is more critical than memory efficiency.
-
-### Adagrad32bit Usage:
-
-```python
-import torch
-from bitsandbytes.optim import Adagrad32bit
-
-model = YourModel()
-params = model.parameters()
-
-# Initialize the optimizer with your model's parameters
-optimizer = Adagrad32bit(params, lr=0.01)
-
-# In your training loop
-optimizer.zero_grad()
-loss = compute_loss()  # Implement your loss computation
-loss.backward()
-optimizer.step()
-```
+Here we'll provide auto-generated API docs soon. Please feel free to contribute doc-strings for the respective optimizers, as `bitsandbytes` is a community effort.

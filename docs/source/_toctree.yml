@@ -6,6 +6,8 @@
     title: Quickstart
   - local: installation
     title: Installation
+  - local: moduletree
+    title: Module Tree
 - title: Features & Integrations
   sections:
   - local: quantization
@@ -14,3 +16,17 @@
     title: Optimizers
   - local: integrations
     title: Integrations
+  - local: qlora
+    title: QLoRA
+- title: Support & Learning
+  sections:
+  - local: resources
+    title: Papers, related resources & how to cite
+  - local: faqs
+    title: FAQs (Frequently Asked Questions)
+- title: Contributors Guidelines
+  sections:
+  - local: contributing
+    title: Contributing
+  # - local: code_of_conduct
+  #   title: Code of Conduct
