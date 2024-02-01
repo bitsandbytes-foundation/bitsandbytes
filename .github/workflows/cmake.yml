@@ -23,19 +23,6 @@ jobs:
         python-version: ['3.10', '3.11']
         cuda-version: ['11.8', '12.1']
         build_type: [Release]
-        c_compiler: [gcc, cl]
-        include:
-          - os: windows-latest
-            c_compiler: cl
-            cpp_compiler: cl
-          - os: ubuntu-latest
-            c_compiler: gcc
-            cpp_compiler: g++
-        exclude:
-          - os: ubuntu-latest
-            c_compiler: cl
-          - os: windows-latest
-            c_compiler: gcc
 
     steps:
     - uses: actions/checkout@v4
@@ -101,8 +88,13 @@ jobs:
         echo CUDA_PATH=$CUDA_HOME >> "$GITHUB_ENV"
 
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            echo CXX_COMPILER=cl >> "$GITHUB_ENV"
+            echo C_COMPILER=cl >> "$GITHUB_ENV"
             # without -DCMAKE_CUDA_COMPILER=nvcc, cmake config always fail for cuda-11.8
             echo DCMAKE_CUDA_COMPILER=-DCMAKE_CUDA_COMPILER=nvcc >> "$GITHUB_ENV"
+        else
+            echo CXX_COMPILER=g++ >> "$GITHUB_ENV"
+            echo C_COMPILER=gcc >> "$GITHUB_ENV"
         fi
 
         nvcc --version
@@ -113,26 +105,27 @@ jobs:
     - name: Prep build
       run: python -m pip install cmake==3.27.9 ninja setuptools wheel
 
-    - name: Configure CMake
+    # TODO: the following steps (CUDA, NOBLASLT, CPU) could be moved to the matrix, so they're built in parallel
+
+    - name: Configure CUDA
       run: >
         cmake -B ${{ steps.strings.outputs.build-output-dir }}
         -G Ninja ${{ env.DCMAKE_CUDA_COMPILER }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_CXX_COMPILER=${{ env.CXX_COMPILER }}
+        -DCMAKE_C_COMPILER=${{ env.C_COMPILER }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -DCOMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90"
         -S ${{ github.workspace }}
 
-    - name: Build
-      # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
+    - name: Build CUDA
       run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
 
     - name: Configure NOBLASLT
       run: >
         cmake -B ${{ steps.strings.outputs.build-output-dir }}
         -G Ninja ${{ env.DCMAKE_CUDA_COMPILER }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_CXX_COMPILER=${{ env.CXX_COMPILER }}
+        -DCMAKE_C_COMPILER=${{ env.C_COMPILER }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -DCOMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90"
         -DNO_CUBLASLT=ON
@@ -145,8 +138,8 @@ jobs:
       run: >
         cmake -B ${{ steps.strings.outputs.build-output-dir }}
         -G Ninja ${{ env.DCMAKE_CUDA_COMPILER }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_CXX_COMPILER=${{ env.CXX_COMPILER }}
+        -DCMAKE_C_COMPILER=${{ env.C_COMPILER }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -DNO_CUBLASLT=ON
         -DBUILD_CUDA=OFF
