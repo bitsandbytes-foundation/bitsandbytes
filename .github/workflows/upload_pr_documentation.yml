@@ -10,7 +10,7 @@ jobs:
   build:
     uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@main
     with:
-      package_name: peft
+      package_name: bitsandbytes
     secrets:
       hf_token: ${{ secrets.HUGGINGFACE_PUSH }}
       comment_bot_token: ${{ secrets.GITHUB_TOKEN }}
