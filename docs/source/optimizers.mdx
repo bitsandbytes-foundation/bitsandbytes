@@ -1,4 +1,4 @@
-# Introduction: 8-bit optimizers
+## Introduction: 8-bit optimizers
 
 With 8-bit optimizers, larger models can be finetuned with the same GPU memory compared to standard 32-bit optimizer training. 8-bit optimizers are a drop-in replacement for regular optimizers:
 
@@ -29,7 +29,7 @@ The arguments passed are the same as standard Adam. For NLP models we recommend 
 ## Overview of supported 8-bit optimizers
 
 TOOD: List here all optimizers in `bitsandbytes/optim/__init__.py`
-TODO (future) have an automated API docs through doc-builder
+TODO (future) document all optimizers as we did for Linear4bit / Linear8bitLt classes
 
 ## Overview of expected gradients
 
@@ -41,7 +41,7 @@ TODO (future) have an automated API docs through doc-builder
 <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bitsandbytes/optimizer_largest_model.png", width="50%">
 </div>
 
-# Research Background
+### Research Background
 
 Stateful optimizers maintain gradient statistics over time, e.g. the exponentially smoothed sum (SGD with momentum) or squared sum (Adam) of past gradient values. This state can be used to accelerate optimization compared to plain stochastic gradient descent but uses memory that might otherwise be allocated to model parameters, thereby limiting the maximum size of models trained in practice. `bitsandbytes` optimizers use 8-bit statistics, while maintaining the performance levels of using 32-bit optimizer states.
 
@@ -61,18 +61,18 @@ For more details, please refer to the paper [8-bit Optimizers via Block-wise Qua
 
 The Stable Embedding Layer enhances the standard word embedding layer for improved training stability in NLP tasks. It addresses the challenge of non-uniform input distributions and mitigates extreme gradient variations, ensuring smoother training processes.
 
-### Features:
+#### Features:
 
 - **Initialization**: Utilizes Xavier uniform initialization to maintain consistent variance, reducing the likelihood of large gradients.
 - **Normalization**: Incorporates layer normalization before adding positional embeddings, aiding in output stability.
 - **Optimizer States**: Employs 32-bit optimizer states exclusively for this layer to enhance stability, while the rest of the model may use standard 16-bit precision.
 
-### Benefits:
+#### Benefits:
 
 - Designed to support more aggressive quantization strategies without compromising training stability.
 - Helps in achieving stable training outcomes, particularly important for models dealing with diverse and complex language data.
 
-# Usage
+## Usage
 
 Some more examples of how you can replace your old optimizer with the 8-bit optimizer:
 
@@ -83,11 +83,11 @@ import bitsandbytes as bnb
 + adam = bnb.optim.Adam8bit(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # add bnb optimizer
 
 # use 32-bit Adam with 5th percentile clipping
-+ adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995),
-                      optim_bits=32, percentile_clipping=5)
++ adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995), optim_bits=32, percentile_clipping=5)
+- adam = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # comment out old optimizer
 ```
 
-# How to override config hyperparameters for particular weights/parameters
+### How to override config hyperparameters for particular weights/parameters
 
 If you want to optimize some unstable parameters with 32-bit Adam and others with 8-bit Adam, you can use the `GlobalOptimManager`. With this, we can also configure specific hyperparameters for particular layers, such as embedding layers. To do that, we need two things:
 
@@ -132,7 +132,7 @@ class MyModule(torch.nn.Module):
 
 ```
 
-# API Docs
+## API Docs
 
 ... under construction ...
 

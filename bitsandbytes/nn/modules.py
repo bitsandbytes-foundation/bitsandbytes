@@ -19,6 +19,9 @@ T = TypeVar("T", bound="torch.nn.Module")
 
 
 class StableEmbedding(torch.nn.Embedding):
+    """
+    TODO: @titus fill this with some info
+    """
     def __init__(
         self,
         num_embeddings: int,
