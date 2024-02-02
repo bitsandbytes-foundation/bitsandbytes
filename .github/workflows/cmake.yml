@@ -5,6 +5,14 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+    paths:
+      # Run only when relevant files are modified
+      - "csrc/**"
+      - "include/**"
+      - "bitsandbytes/**"
+      - ".github/**.yml"
+      - "tests/**"
+
 
 concurrency:
   group: cmake-${{ github.ref }}
