@@ -96,7 +96,7 @@ If you want to optimize some unstable parameters with 32-bit Adam and others wit
 
 For global overrides in many different places in your code you can do:
 
-```python
+```py
 import torch
 import bitsandbytes as bnb
 
@@ -120,7 +120,7 @@ mng.override_config([model.special.weight, model.also_special.weight],
 Possible options for the config override are: `betas, eps, weight_decay, lr, optim_bits, min_8bit_size, percentile_clipping, block_wise, max_unorm`
 
 For overrides for particular layers we recommend overriding locally in each module. You can do this by passing the module, the parameter, and its attribute name to the GlobalOptimManager:
-```python
+```py
 class MyModule(torch.nn.Module):
   def __init__(din, dout):
     super(MyModule, self).__init__()
