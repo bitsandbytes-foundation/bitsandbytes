@@ -1,6 +1,6 @@
-## How to use a CUDA version that is different from PyTorch
+# How to use a CUDA version that is different from PyTorch
 
-Some features of bitsandbytes may need a newer CUDA version than regularly supported by PyTorch binaries from conda / pip. In that case you can use the following instructions to load a precompiled bitsandbytes binary that works for you.
+Some features of `bitsandbytes` may need a newer CUDA version than regularly supported by PyTorch binaries from conda / pip. In that case you can use the following instructions to load a precompiled `bitsandbytes` binary that works for you.
 
 ## Installing or determining the CUDA installation
 
@@ -12,7 +12,7 @@ Determine the path of the CUDA version that you want to use. Common paths paths 
 
 where XX.X is the CUDA version number.
 
-You can also install CUDA version that you need locally with a script provided by bitsandbytes as follows:
+You can also install CUDA version that you need locally with a script provided by `bitsandbytes` as follows:
 
 ```bash
 wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cuda.sh
@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cud
 bash cuda_install.sh 117 ~/local 1
 ```
 
-## Setting the environmental variables BNB_CUDA_VERSION, and LD_LIBRARY_PATH
+## Setting the environmental variables `BNB_CUDA_VERSION`, and `LD_LIBRARY_PATH`
 
 To manually override the PyTorch installed CUDA version you need to set to variable, like so:
 

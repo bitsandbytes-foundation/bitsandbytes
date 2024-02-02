@@ -16,10 +16,18 @@
     title: Optimizers
   - local: integrations
     title: Integrations
+  - local: algorithms
+    title: Algorithms
 - title: Support & Learning
   sections:
   - local: resources
-    title: Papers, related resources & how to cite
+    title: Papers, resources & how to cite
+  - local: errors
+    title: Errors & Solutions
+  - local: nonpytorchcuda
+    title: Non-PyTorch CUDA
+  - local: compiling
+    title: Compilation from Source (extended)
   - local: faqs
     title: FAQs (Frequently Asked Questions)
 - title: Contributors Guidelines

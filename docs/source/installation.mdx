@@ -5,6 +5,12 @@ Note currently `bitsandbytes` is only supported on CUDA GPU hardwares, support f
 <hfoptions id="OS system">
 <hfoption id="Linux">
 
+## Hardware requirements:
+ - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or newer).
+ - 8-bit optimizers and quantization: NVIDIA Kepler GPU or newer (>=GTX 78X).
+
+Supported CUDA versions: 10.2 - 12.0  #TODO: check currently supported versions
+
 ## Linux
 
 ### From Pypi
@@ -22,6 +28,8 @@ python setup.py install
 ```
 
 with `XXX` being your CUDA version, for <12.0 call `make cuda 11x`. Note support for non-CUDA GPUs (e.g. AMD, Intel), is also coming soon.
+
+For a more detailed guide, head to the [dedicated page on the topic](#compiling)
 
 </hfoption>
 <hfoption id="Windows">
