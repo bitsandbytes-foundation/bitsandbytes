@@ -19,12 +19,12 @@ def read(fname):
 
 # Tested with wheel v0.29.0
 class BinaryDistribution(Distribution):
-    def has_ext_modules(foo):
+    def has_ext_modules(self):
         return True
 
 setup(
     name="bitsandbytes",
-    version="0.42.0",
+    version="0.43.0.dev0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="k-bit optimizers and matrix multiplication routines.",

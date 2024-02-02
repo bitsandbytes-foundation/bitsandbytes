@@ -1,4 +1,4 @@
-- sections: 
+- sections:
   - local: index
     title: Bits & Bytes
   - local: quickstart

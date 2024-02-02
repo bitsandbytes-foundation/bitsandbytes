@@ -18,7 +18,7 @@ body:
     attributes:
       label: Motivation
       description: |
-        Please outline the motivation for the proposal. Is your feature request related to a problem? 
+        Please outline the motivation for the proposal. Is your feature request related to a problem?
 
   - type: textarea
     id: contribution
@@ -27,4 +27,4 @@ body:
     attributes:
       label: Your contribution
       description: |
-        Is there any way that you could help, e.g. by submitting a PR? 
+        Is there any way that you could help, e.g. by submitting a PR?

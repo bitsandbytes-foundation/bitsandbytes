@@ -19,11 +19,3 @@ def test_manual_override(requires_cuda):
     import bitsandbytes as bnb
     loaded_lib = bnb.cuda_setup.main.CUDASetup.get_instance().binary_name
     #assert loaded_lib == 'libbitsandbytes_cuda122.so'
-
-
-
-
-
-
-
-

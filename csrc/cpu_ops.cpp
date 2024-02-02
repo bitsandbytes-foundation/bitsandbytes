@@ -26,7 +26,7 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
     BinAlgo<Scalar, float, Direct2> bin_searcher(code, elements_code);
 
     int thread_wave_size = 256;
-    // we chunk the thresds into waves of 256 since the max limit is
+    // we chunk the threads into waves of 256 since the max limit is
     // between 16k and 64k on Linux (we reach this when running BLOOM-176B with a large batch size)
     for(long long offset = 0; offset < num_blocks; offset+=thread_wave_size)
     {
