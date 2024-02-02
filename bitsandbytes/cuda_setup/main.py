@@ -123,7 +123,7 @@ class CUDASetup:
                     )
                     binary_name = self.binary_name.rsplit(".", 1)[0]
                     suffix = ".so" if os.name != "nt" else ".dll"
-                    self.binary_name = binary_name[:-3] + f'{os.environ["BNB_CUDA_VERSION"]}.{suffix}'
+                    self.binary_name = binary_name[:-3] + f'{os.environ["BNB_CUDA_VERSION"]}{suffix}'
 
     def run_cuda_setup(self):
         self.initialized = True
@@ -143,7 +143,7 @@ class CUDASetup:
         suffix = ".so" if os.name != "nt" else ".dll"
         try:
             if not binary_path.exists():
-                self.add_log_entry(f"CUDA SETUP: Required library version not found: {binary_name}. Maybe you need to compile it from source?")
+                self.add_log_entry(f"CUDA SETUP: Required library version not found: {self.binary_name}. Maybe you need to compile it from source?")
                 legacy_binary_name = f"libbitsandbytes_cpu{suffix}"
                 self.add_log_entry(f"CUDA SETUP: Defaulting to {legacy_binary_name}...")
                 binary_path = package_dir / legacy_binary_name
