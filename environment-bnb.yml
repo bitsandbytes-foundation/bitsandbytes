@@ -7,10 +7,10 @@ channels:
 
 dependencies:
   - python
-  - accelerate
-  - einops
+  #- accelerate
+  #- einops
   - scipy
-  - transformers
+  #- transformers
   - pytest
   - pytest-cases
   - ipython
