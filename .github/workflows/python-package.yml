@@ -51,9 +51,9 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
         fi
         if [ ${build_os:0:5} == macos -a ${build_arch} == aarch64 ]; then
-          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DENABLE_CUDA=OFF .
+          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCOMPUTE_BACKEND=cpu .
         else
-          cmake -DENABLE_CUDA=OFF .
+          cmake -DCOMPUTE_BACKEND=cpu .
         fi
         if [ ${build_os:0:7} == windows ]; then
           pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
@@ -125,10 +125,10 @@ jobs:
           docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
             "apt-get update \
             && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-            && cmake -DENABLE_CUDA=ON . \
+            && cmake -DCOMPUTE_BACKEND=cuda . \
             && make"
         else
-          cmake -DENABLE_CUDA=ON .
+          cmake -DCOMPUTE_BACKEND=cuda .
           pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
         fi
         mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
