@@ -6,8 +6,6 @@
     title: Quickstart
   - local: installation
     title: Installation
-  - local: moduletree
-    title: Module Tree
 - title: Features & Integrations
   sections:
   - local: quantization
@@ -34,5 +32,3 @@
   sections:
   - local: contributing
     title: Contributing
-  # - local: code_of_conduct
-  #   title: Code of Conduct
