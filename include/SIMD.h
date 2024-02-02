@@ -28,16 +28,6 @@ struct IVec;
 template <InstrSet I, class T>
 struct FVec1;
 
-template <> struct InstrFloatTraits<Scalar, float>
-{
-    typedef __m128  vec_t;
-};
-
-template <> struct InstrFloatTraits<Scalar, double>
-{
-    typedef __m128d vec_t;
-};
-
 }
 }
 
