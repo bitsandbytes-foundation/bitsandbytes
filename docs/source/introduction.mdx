@@ -5,20 +5,10 @@ TODO: Many parts of this doc will still be redistributed among the new doc struc
 The `bitsandbytes` library is a lightweight Python wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions.
 
 There are ongoing efforts to support further hardware backends, i.e. Intel CPU + GPU, AMD GPU, Apple Silicon. Windows support is on its way as well.
+The library includes quantization primitives for 8-bit & 4-bit operations, through `bitsandbytes.nn.Linear8bitLt` and `bitsandbytes.nn.Linear4bit` and 8bit optimizers through `bitsandbytes.optim` module.
 
+**Using 8-bit optimizers**:
 
-```python
-from transformers import AutoModelForCausalLM
-model = AutoModelForCausalLM.from_pretrained(
-  'decapoda-research/llama-7b-hf',
-  device_map='auto',
-  load_in_8bit=True,
-  max_memory=f'{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB')
-```
-
-A more detailed example, can be found in [examples/int8_inference_huggingface.py](examples/int8_inference_huggingface.py).
-
-**Using 8-bit optimizer**:
 1. Comment out optimizer: ``#torch.optim.Adam(....)``
 2. Add 8-bit optimizer of your choice ``bnb.optim.Adam8bit(....)`` (arguments stay the same)
 3. Replace embedding layer if necessary: ``torch.nn.Embedding(..) -> bnb.nn.Embedding(..)``
@@ -40,6 +30,7 @@ out = linear(x.to(torch.float16))
 
 
 ## Features
+
 - 8-bit Matrix multiplication with mixed precision decomposition
 - LLM.int8() inference
 - 8-bit Optimizers: Adam, AdamW, RMSProp, LARS, LAMB, Lion (saves 75% memory)

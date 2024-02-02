@@ -16,8 +16,6 @@
     title: Optimizers
   - local: integrations
     title: Integrations
-  - local: qlora
-    title: QLoRA
 - title: Support & Learning
   sections:
   - local: resources

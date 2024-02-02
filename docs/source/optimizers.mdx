@@ -1,4 +1,5 @@
 # Introduction: 8-bit optimizers
+
 With 8-bit optimizers, larger models can be finetuned with the same GPU memory compared to standard 32-bit optimizer training. 8-bit optimizers are a drop-in replacement for regular optimizers:
 
 - Faster (e.g. 4x faster than regular Adam)
@@ -12,7 +13,7 @@ See here the biggest models
 We feature 8-bit Adam/AdamW, SGD momentum, LARS, LAMB, and RMSProp.
 
 It only requires a two-line code change to get started.
-```
+```py
 import bitsandbytes as bnb
 
 # before: adam = torch.optim.Adam(...)
@@ -25,20 +26,30 @@ bnb.nn.StableEmbedding(...)
 
 The arguments passed are the same as standard Adam. For NLP models we recommend also to use the StableEmbedding layers which improves results and helps with stable 8-bit optimization.
 
+## Overview of supported 8-bit optimizers 
+
+TOOD: List here all optimizers in `bitsandbytes/optim/__init__.py`
+TODO (future) have an automated API docs through doc-builder
+
 ## Overview of expected gradients
 
-TODO: add pics here, no idea how to do that
+<div style="text-align: center">
+<img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bitsandbytes/optimizer_comparison.png", width="50%">
+</div>
 
-Want to add both pics in https://huggingface.co/datasets/huggingface/documentation-images/tree/main/bitsandbytes
+<div style="text-align: center">
+<img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bitsandbytes/optimizer_largest_model.png", width="50%">
+</div>
 
 # Research Background
 
 Stateful optimizers maintain gradient statistics over time, e.g. the exponentially smoothed sum (SGD with momentum) or squared sum (Adam) of past gradient values. This state can be used to accelerate optimization compared to plain stochastic gradient descent but uses memory that might otherwise be allocated to model parameters, thereby limiting the maximum size of models trained in practice. `bitsandbytes` optimizers use 8-bit statistics, while maintaining the performance levels of using 32-bit optimizer states.
 
 To overcome the resulting computational, quantization and stability challenges, 8-bit optimizers have three components:
-1) **Block-wise quantization** divides input tensors into smaller blocks that are independently quantized, therein isolating outliers and distributing the error more equally over all bits. Each block is processed in parallel across cores, yielding faster optimization and high precision quantization.
-2) **dynamic quantization**, which quantizes both small and large values with high precision,
-3) a **stable embedding layer** improves stability during optimization for models with word embeddings.
+
+1- **Block-wise quantization** divides input tensors into smaller blocks that are independently quantized, therein isolating outliers and distributing the error more equally over all bits. Each block is processed in parallel across cores, yielding faster optimization and high precision quantization.
+2- **dynamic quantization**, which quantizes both small and large values with high precision,
+3- a **stable embedding layer** improves stability during optimization for models with word embeddings.
 
 With these components, performing an optimizer update with 8-bit states is straightforward. We dequantize the 8-bit optimizer states to 32-bit, perform the update and then quantize the states back to 8-bit for storage.
 
@@ -65,15 +76,14 @@ The Stable Embedding Layer enhances the standard word embedding layer for improv
 
 Some more examples of how you can replace your old optimizer with the 8-bit optimizer:
 
-```
+```diff
 import bitsandbytes as bnb
 
-# adam = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # comment out old optimizer
-adam = bnb.optim.Adam8bit(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # add bnb optimizer
-adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995), optim_bits=8) # equivalent
+- adam = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # comment out old optimizer
++ adam = bnb.optim.Adam8bit(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # add bnb optimizer
 
 # use 32-bit Adam with 5th percentile clipping
-adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995),
++ adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995),
                       optim_bits=32, percentile_clipping=5)
 ```
 

@@ -4,7 +4,6 @@ Note currently `bitsandbytes` is only supported on CUDA GPU hardwares, support f
 
 <hfoptions id="OS system">
 <hfoption id="Linux">
-<hfoption id="MacOS">
 
 ## Linux
 
@@ -22,7 +21,7 @@ CUDA_VERSION=XXX make cuda12x
 python setup.py install
 ```
 
-with `XXX` being your CUDA version, for <12.0 call `make cuda 11x`
+with `XXX` being your CUDA version, for <12.0 call `make cuda 11x`. Note support for non-CUDA GPUs (e.g. AMD, Intel), is also coming soon.
 
 </hfoption>
 <hfoption id="Windows">
@@ -41,11 +40,12 @@ python -m build --wheel
 Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com/Jamezo97), [rickardp](https://github.com/rickardp), [akx](https://github.com/akx) for their amazing contributions to make bitsandbytes compatible with Windows.
 
 </hfoption>
-<hfoption id="Windows">
+<hfoption id="MacOS">
 
 ## MacOS
 
-Mac support is still a work in progress.
+Mac support is still a work in progress. Please make sure to check out the latest bitsandbytes issues to get notified about the progress with respect to MacOS integration.
 
 </hfoption>
+
 </hfoptions>
