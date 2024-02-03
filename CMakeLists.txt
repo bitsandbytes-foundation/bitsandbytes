@@ -59,6 +59,7 @@ endif()
 
 if(BUILD_CUDA)
     enable_language(CUDA) # This will fail if CUDA is not found
+    find_package(CUDAToolkit REQUIRED)
 
     # Convert the CUDA version from X.Y.z to XY. There's probably a shorter way of doing this
     string(REGEX MATCH "^[0-9]+.[0-9]+" _CUDA_VERSION_FIRST_TWO "${CMAKE_CUDA_COMPILER_VERSION}")
