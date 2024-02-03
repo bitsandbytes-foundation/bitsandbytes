@@ -20,6 +20,6 @@ struct quantize_block_args {
 };
 
 
-void *quantize_block(void *arguments);
+void quantize_block(const quantize_block_args& args);
 
 #endif
