@@ -40,6 +40,9 @@ setup(
     },
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
+    # HACK: pretend we have a native extension module so the wheel is tagged
+    #       correctly with a platform tag (e.g. `-linux_x86_64.whl`).
+    ext_modules=[Extension("bitsandbytes", sources=[], language="c")],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
