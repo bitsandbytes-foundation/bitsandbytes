@@ -81,7 +81,7 @@ typedef unsigned __int64  uint64;
 
 namespace Details {
 
-#define myassert(cond, msg) if (!(cond)){ std::ostringstream os; os << "\nassertion failed: " << #cond << ", " << msg << "\n"; throw std::invalid_argument(os.str()); }
+#define myassert(cond, msg) if (!cond){ std::ostringstream os; os << "\nassertion failed: " << #cond << ", " << msg << "\n"; throw std::invalid_argument(os.str()); }
 
 // log2 is not defined in VS2008
 #if defined(_MSC_VER)

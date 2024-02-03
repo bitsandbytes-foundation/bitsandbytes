@@ -86,18 +86,8 @@ template <> struct InstrFloatTraits<SSE, double>
     typedef __m128d vec_t;
 };
 
-template <> struct InstrFloatTraits<Scalar, float>
-{
-    typedef float  vec_t;
-};
-
-template <> struct InstrFloatTraits<Scalar, double>
-{
-    typedef double vec_t;
-};
-
-template <InstrSet I, typename T>
-struct FTOITraits
+template <>
+struct FTOITraits<SSE, float>
 {
     typedef IVec<SSE, float> vec_t;
 };
