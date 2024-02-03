@@ -30,8 +30,6 @@ option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 if(APPLE)
   set(CMAKE_OSX_DEPLOYMENT_TARGET 13.1)
 endif()
-set(CMAKE_CXX_STANDARD 14)
-set(CXX_STANDARD_REQUIRED C++14)
 
 set(BNB_OUTPUT_NAME "bitsandbytes")
 
@@ -157,6 +155,7 @@ endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
+target_compile_features(bitsandbytes PUBLIC cxx_std_14)
 target_include_directories(bitsandbytes PUBLIC csrc include)
 
 
