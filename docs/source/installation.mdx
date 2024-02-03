@@ -1,3 +1,43 @@
 # Installation
 
-... work in progress ...
+Note currently `bitsandbytes` is only supported on CUDA GPU hardwares, support for AMD GPUs and M1 chips (MacOS) is coming soon.
+
+<hfoptions id="OS system">
+<hfoption id="Linux">
+
+## Linux
+
+### From Pypi
+
+```bash
+pip install bitsandbytes
+```
+
+### From source
+
+```bash
+git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
+CUDA_VERSION=XXX make cuda12x
+python setup.py install
+```
+
+with `XXX` being your CUDA version, for <12.0 call `make cuda 11x`
+
+</hfoption>
+<hfoption id="Windows">
+
+## Windows
+
+Currently for Windows users, you need to build bitsandbytes from source
+
+```bash
+git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
+cmake -B build -DBUILD_CUDA=ON -S .
+cmake --build build --config Release
+python -m build --wheel
+```
+
+Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com/Jamezo97), [rickardp](https://github.com/rickardp), [akx](https://github.com/akx) for their amazing contributions to make bitsandbytes compatible with Windows.
+
+</hfoption>
+</hfoptions>

@@ -12,10 +12,10 @@ You can install CUDA locally without sudo by following the following steps:
 wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cuda.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
 #   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122}
-#   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True 
+#   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True
 
 # For example, the following installs CUDA 11.7 to ~/local/cuda-11.7 and exports the path to your .bashrc
-bash install_cuda.sh 117 ~/local 1 
+bash install_cuda.sh 117 ~/local 1
 ```
 
 By default, the Makefile will look at your `CUDA_HOME` environmental variable to find your CUDA version for compiling the library. If this path is not set it is inferred from the path of your `nvcc` compiler.
@@ -37,4 +37,3 @@ If you have problems compiling the library with these instructions from source, 
 ## Compilation with Kepler
 
 Since 0.39.1 bitsandbytes installed via pip no longer provides Kepler binaries and these need to be compiled from source. Follow the steps above and instead of `cuda11x_nomatmul` etc use `cuda11x_nomatmul_kepler`
-
