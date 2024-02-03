@@ -23,6 +23,9 @@ bitsandbytes.dir/
 Debug/
 Release/
 
+# IDE local files
+.vs/
+
 # Distribution / packaging
 .Python
 build/
