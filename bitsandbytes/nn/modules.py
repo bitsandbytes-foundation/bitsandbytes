@@ -226,11 +226,11 @@ class Params4bit(torch.nn.Parameter):
 
 class Linear4bit(nn.Linear):
     """
-    This class is the base module for the 4-bit quantization algorithm presented in [QLoRA](https://arxiv.org/abs/2305.14314). 
+    This class is the base module for the 4-bit quantization algorithm presented in [QLoRA](https://arxiv.org/abs/2305.14314).
     QLoRA 4-bit linear layers uses blockwise k-bit quantization under the hood, with the possibility of selecting various
     compute datatypes such as FP4 and NF4.
 
-    In order to quantize a linear layer one should first load the original fp16 / bf16 weights into 
+    In order to quantize a linear layer one should first load the original fp16 / bf16 weights into
     the Linear8bitLt module, then call `quantized_module.to("cuda")` to quantize the fp16 / bf16 weights.
 
     Example:
@@ -442,10 +442,10 @@ def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_k
 
 class Linear8bitLt(nn.Linear):
     """
-    This class is the base module for the [LLM.int8()](https://arxiv.org/abs/2208.07339) algorithm. 
+    This class is the base module for the [LLM.int8()](https://arxiv.org/abs/2208.07339) algorithm.
     To read more about it, have a look at the paper.
 
-    In order to quantize a linear layer one should first load the original fp16 / bf16 weights into 
+    In order to quantize a linear layer one should first load the original fp16 / bf16 weights into
     the Linear8bitLt module, then call `int8_module.to("cuda")` to quantize the fp16 weights.
 
     Example:
