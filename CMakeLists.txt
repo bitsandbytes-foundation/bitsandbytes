@@ -161,11 +161,11 @@ target_include_directories(bitsandbytes PUBLIC csrc include)
 
 if(BUILD_CUDA)
     target_include_directories(bitsandbytes PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+    target_link_libraries(bitsandbytes CUDA::cudart CUDA::cublas CUDA::cusparse)
     if(NO_CUBLASLT)
-        target_link_libraries(bitsandbytes CUDA::cudart CUDA::cublas CUDA::cusparse)
         target_compile_definitions(bitsandbytes PUBLIC NO_CUBLASLT)
     else()
-        target_link_libraries(bitsandbytes PUBLIC CUDA::cudart CUDA::cublas CUDA::cusparse CUDA::cublasLt)
+        target_link_libraries(bitsandbytes PUBLIC CUDA::cublasLt)
     endif()
 
     set_target_properties(bitsandbytes
