@@ -28,6 +28,16 @@ struct IVec;
 template <InstrSet I, class T>
 struct FVec1;
 
+template <> struct InstrFloatTraits<Scalar, float>
+{
+    typedef __m128  vec_t;
+};
+
+template <> struct InstrFloatTraits<Scalar, double>
+{
+    typedef __m128d vec_t;
+};
+
 }
 }
 
@@ -76,26 +86,10 @@ template <> struct InstrFloatTraits<SSE, double>
     typedef __m128d vec_t;
 };
 
-template <> struct InstrFloatTraits<Scalar, float>
-{
-    typedef float  vec_t;
-};
-
-template <> struct InstrFloatTraits<Scalar, double>
-{
-    typedef double vec_t;
-};
-
-template <InstrSet I, typename T>
-struct FTOITraits
+template <>
+struct FTOITraits<SSE, float>
 {
     typedef IVec<SSE, float> vec_t;
-};
-
-template <>
-struct FTOITraits<Scalar, float>
-{
-    typedef IVec<Scalar, float> vec_t;
 };
 
 #ifdef USE_AVX
