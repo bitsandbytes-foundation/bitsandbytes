@@ -5,6 +5,12 @@ Note currently `bitsandbytes` is only supported on CUDA GPU hardwares, support f
 <hfoptions id="OS system">
 <hfoption id="Linux">
 
+## Hardware requirements:
+ - LLM.int8(): NVIDIA Turing (RTX 20xx; T4) or Ampere GPU (RTX 30xx; A4-A100); (a GPU from 2018 or newer).
+ - 8-bit optimizers and quantization: NVIDIA Kepler GPU or newer (>=GTX 78X).
+
+Supported CUDA versions: 10.2 - 12.0  #TODO: check currently supported versions
+
 ## Linux
 
 ### From Pypi
@@ -21,14 +27,16 @@ CUDA_VERSION=XXX make cuda12x
 python setup.py install
 ```
 
-with `XXX` being your CUDA version, for <12.0 call `make cuda 11x`
+with `XXX` being your CUDA version, for <12.0 call `make cuda 11x`. Note support for non-CUDA GPUs (e.g. AMD, Intel), is also coming soon.
+
+For a more detailed compilation guide, head to the [dedicated page on the topic](./compiling)
 
 </hfoption>
 <hfoption id="Windows">
 
 ## Windows
 
-Currently for Windows users, you need to build bitsandbytes from source
+Currently for Windows users, you need to build bitsandbytes from source:
 
 ```bash
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
@@ -39,5 +47,15 @@ python -m build --wheel
 
 Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com/Jamezo97), [rickardp](https://github.com/rickardp), [akx](https://github.com/akx) for their amazing contributions to make bitsandbytes compatible with Windows.
 
+For a more detailed compilation guide, head to the [dedicated page on the topic](./compiling)
+
 </hfoption>
+<hfoption id="MacOS">
+
+## MacOS
+
+Mac support is still a work in progress. Please make sure to check out the [Apple Silicon implementation coordination issue](https://github.com/TimDettmers/bitsandbytes/issues/1020) to get notified about the discussions and progress with respect to MacOS integration.
+
+</hfoption>
+
 </hfoptions>

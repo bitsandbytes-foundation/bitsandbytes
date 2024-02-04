@@ -1,0 +1,41 @@
+# Compiling from Source[[compiling]]
+
+To compile from source, the CUDA Toolkit is required. Ensure `nvcc` is installed; if not, follow these steps to install it along with the CUDA Toolkit:
+
+```bash
+wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cuda.sh
+# Use the following syntax: cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
+#   CUDA_VERSION options include 110 to 122
+#   EXPORT_TO_BASH: 0 for False, 1 for True
+
+# Example for installing CUDA 11.7 at ~/local/cuda-11.7 and exporting the path to .bashrc:
+bash install_cuda.sh 117 ~/local 1
+```
+
+For a single compile run with a specific CUDA version, set `CUDA_HOME` to point to your CUDA installation directory. For instance, to compile using CUDA 11.7 located at `~/local/cuda-11.7`, use:
+
+```
+CUDA_HOME=~/local/cuda-11.7 CUDA_VERSION=117 make cuda11x
+```
+
+## General Compilation Steps
+
+1. Use `CUDA_VERSION=XXX make [target]` to compile, where `[target]` includes options like `cuda92`, `cuda10x`, `cuda11x`, and others.
+2. Install with `python setup.py install`.
+
+Ensure `nvcc` is available in your system. If using Anaconda, determine your CUDA version with PyTorch using `conda list | grep cudatoolkit` and match it by downloading the corresponding version from the [CUDA Toolkit Archive](https://developer.nvidia.com/cuda-toolkit-archive).
+
+To install CUDA locally without administrative rights:
+
+```bash
+wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cuda.sh
+# Follow the same syntax and example as mentioned earlier
+```
+
+The compilation process relies on the `CUDA_HOME` environment variable to locate CUDA. If `CUDA_HOME` is unset, it will attempt to infer the location from `nvcc`. If `nvcc` is not in your path, you may need to add it or set `CUDA_HOME` manually. For example, if `python -m bitsandbytes` indicates your CUDA path as `/usr/local/cuda-11.7`, you can set `CUDA_HOME` to this path.
+
+If compilation issues arise, please report them.
+
+## Compilation for Kepler Architecture
+
+From version 0.39.1, bitsandbytes no longer includes Kepler binaries in pip installations, requiring manual compilation. Follow the general steps and use `cuda11x_nomatmul_kepler` for Kepler-targeted compilation.

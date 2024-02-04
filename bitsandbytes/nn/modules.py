@@ -19,6 +19,42 @@ T = TypeVar("T", bound="torch.nn.Module")
 
 
 class StableEmbedding(torch.nn.Embedding):
+    """
+    Custom embedding layer designed for stable training in NLP tasks. The stable
+    embedding layer improves stability during optimization for models with word
+    embeddings, addressing issues related to the non-uniform distribution of input
+    tokens.
+
+    This stable embedding layer is initialized with Xavier uniform initialization,
+    followed by layer normalization. It is designed to support aggressive quantization,
+    addressing extreme gradient variations in non-uniform input distributions. The
+    stability of training is enhanced by using 32-bit optimizer states specifically
+    for this layer.
+
+    Example:
+
+    ```
+    # Initialize StableEmbedding layer with vocabulary size 1000, embedding dimension 300
+    embedding_layer = StableEmbedding(num_embeddings=1000, embedding_dim=300)
+
+    # Reset embedding parameters
+    embedding_layer.reset_parameters()
+
+    # Perform a forward pass with input tensor
+    input_tensor = torch.tensor([1, 2, 3])
+    output_embedding = embedding_layer(input_tensor)
+    ```
+
+    Attributes:
+        norm (torch.nn.LayerNorm): Layer normalization applied after the embedding.
+
+    Methods:
+        reset_parameters(): Reset embedding parameters using Xavier uniform initialization.
+        forward(input: Tensor) -> Tensor: Forward pass through the stable embedding layer.
+
+    Reference:
+        - [8-bit optimizer paper](https://arxiv.org/pdf/2110.02861.pdf)
+    """
     def __init__(
         self,
         num_embeddings: int,
@@ -32,6 +68,17 @@ class StableEmbedding(torch.nn.Embedding):
         device=None,
         dtype=None,
     ) -> None:
+        """
+        Args:
+            num_embeddings (`int`): The number of unique embeddings (vocabulary size).
+            embedding_dim (`int`): The dimensionality of the embedding.
+            padding_idx (`Optional[int]`): If specified, pads the output with zeros at the given index.
+            max_norm (`Optional[float]`): If given, renormalizes embeddings to have a maximum L2 norm.
+            norm_type (`float`, defaults to `2.0`): The p-norm to compute for the max_norm option.
+            scale_grad_by_freq (`bool`): Scale gradient by frequency during backpropagation.
+            sparse (`bool`): If True, computes sparse gradients; False, computes dense gradients.
+            _weight (`Optional[Tensor]`): Pre-trained embeddings.
+        """
         super().__init__(
             num_embeddings,
             embedding_dim,
@@ -222,8 +269,49 @@ class Params4bit(torch.nn.Parameter):
 
 
 class Linear4bit(nn.Linear):
+    """
+    This class is the base module for the 4-bit quantization algorithm presented in [QLoRA](https://arxiv.org/abs/2305.14314).
+    QLoRA 4-bit linear layers uses blockwise k-bit quantization under the hood, with the possibility of selecting various
+    compute datatypes such as FP4 and NF4.
 
+    In order to quantize a linear layer one should first load the original fp16 / bf16 weights into
+    the Linear8bitLt module, then call `quantized_module.to("cuda")` to quantize the fp16 / bf16 weights.
+
+    Example:
+
+    ```python
+    import torch
+    import torch.nn as nn
+
+    import bitsandbytes as bnb
+    from bnb.nn import Linear4bit
+
+    fp16_model = nn.Sequential(
+        nn.Linear(64, 64),
+        nn.Linear(64, 64)
+    )
+
+    quantized_model = nn.Sequential(
+        Linear4bit(64, 64),
+        Linear4bit(64, 64)
+    )
+
+    quantized_model.load_state_dict(fp16_model.state_dict())
+    quantized_model = quantized_model.to(0) # Quantization happens here
+    ```
+    """
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4', quant_storage=torch.uint8, device=None):
+        """
+        Initialize Linear4bit class.
+
+        Args:
+            input_features (`str`):
+                Number of input features of the linear layer.
+            output_features (`str`):
+                Number of output features of the linear layer.
+            bias (`bool`, defaults to `True`):
+                Whether the linear class uses the bias term as well.
+        """
         super().__init__(input_features, output_features, bias, device)
         self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type, quant_storage=quant_storage, module=self)
         # self.persistent_buffers = []  # TODO consider as way to save quant state
@@ -397,8 +485,49 @@ def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_k
 
 
 class Linear8bitLt(nn.Linear):
+    """
+    This class is the base module for the [LLM.int8()](https://arxiv.org/abs/2208.07339) algorithm.
+    To read more about it, have a look at the paper.
+
+    In order to quantize a linear layer one should first load the original fp16 / bf16 weights into
+    the Linear8bitLt module, then call `int8_module.to("cuda")` to quantize the fp16 weights.
+
+    Example:
+
+    ```python
+    import torch
+    import torch.nn as nn
+
+    import bitsandbytes as bnb
+    from bnb.nn import Linear8bitLt
+
+    fp16_model = nn.Sequential(
+        nn.Linear(64, 64),
+        nn.Linear(64, 64)
+    )
+
+    int8_model = nn.Sequential(
+        Linear8bitLt(64, 64, has_fp16_weights=False),
+        Linear8bitLt(64, 64, has_fp16_weights=False)
+    )
+
+    int8_model.load_state_dict(fp16_model.state_dict())
+    int8_model = int8_model.to(0) # Quantization happens here
+    ```
+    """
     def __init__(self, input_features, output_features, bias=True, has_fp16_weights=True,
                        memory_efficient_backward=False, threshold=0.0, index=None, device=None):
+        """
+        Initialize Linear8bitLt class.
+
+        Args:
+            input_features (`str`):
+                Number of input features of the linear layer.
+            output_features (`str`):
+                Number of output features of the linear layer.
+            bias (`bool`, defaults to `True`):
+                Whether the linear class uses the bias term as well.
+        """
         super().__init__(input_features, output_features, bias, device)
         assert not memory_efficient_backward, "memory_efficient_backward is no longer required and the argument is deprecated in 0.37.0 and will be removed in 0.39.0"
         self.state = bnb.MatmulLtState()
