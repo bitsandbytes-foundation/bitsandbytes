@@ -4,6 +4,18 @@ on:
   push: {}
   pull_request:
     branches: [ main ]
+    paths:
+      - '.github/workflows/python-package.yml'
+      - 'bitsandbytes/**'
+      - 'csrc/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - 'requirements*.txt'
+      - 'setup.py'
+      - 'pyproject.toml'
+      - 'pytest.ini'
+      - '**/*.md'
   release:
     types: [ published ]
 
