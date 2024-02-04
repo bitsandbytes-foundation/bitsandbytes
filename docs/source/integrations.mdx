@@ -11,7 +11,7 @@
 ... TODO: to be filled out ...
 
 Here we point out to relevant doc sections in transformers / peft / Trainer + very briefly explain how these are integrated:
-e.g. for transformers state that you can load any model in 8-bit / 4-bit precision, for PEFT, you can use QLoRA out of the box with `LoraConfig` + 4-bit base model, for Trainer: all bnb optimizers are supported by passing the correct string in `TrainingArguments` : https://github.com/huggingface/transformers/blob/abbffc4525566a48a9733639797c812301218b83/src/transformers/training_args.py#L134
+e.g. for transformers state that you can load any model in 8-bit / 4-bit precision, for PEFT, you can use QLoRA out of the box with `LoraConfig` + 4-bit base model, for Trainer: all bnb optimizers are supported by passing the correct string in `TrainingArguments`'s `optim` attribute - e.g. (`paged_adamw_32bit`):
 
 Few references:
 
