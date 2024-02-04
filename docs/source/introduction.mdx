@@ -1,43 +1,10 @@
-TODO: Many parts of this doc will still be redistributed among the new doc structure.
-
 # `bitsandbytes`
 
-The `bitsandbytes` library is a lightweight Python wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions.
+The `bitsandbytes` library is a lightweight Python wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and 8 + 4-bit quantization functions.
 
-There are ongoing efforts to support further hardware backends, i.e. Intel CPU + GPU, AMD GPU, Apple Silicon. Windows support is on its way as well.
 The library includes quantization primitives for 8-bit & 4-bit operations, through `bitsandbytes.nn.Linear8bitLt` and `bitsandbytes.nn.Linear4bit` and 8bit optimizers through `bitsandbytes.optim` module.
 
-## Requirements & Installation
-
-Requirements: anaconda, cudatoolkit, pytorch
-
-
-
-The bitsandbytes library is currently only supported on Linux distributions. Windows is not supported at the moment.
-
-The requirements can best be fulfilled by installing pytorch via anaconda. You can install PyTorch by following the ["Get Started"](https://pytorch.org/get-started/locally/) instructions on the official website.
-
-
-## Using bitsandbytes
-
-###
-
-For instructions how to use LLM.int8() inference layers in your own code, see the TL;DR above or for extended instruction see [this blog post](https://huggingface.co/blog/hf-bitsandbytes-integration).
-
-### Change Bits and other Hyperparameters for Individual Parameters
-
-If you want to optimize some unstable parameters with 32-bit Adam and others with 8-bit Adam, you can use the `GlobalOptimManager`. With this, we can also configure specific hyperparameters for particular layers, such as embedding layers. To do that, we need two things: (1) register the parameter while they are still on the CPU, (2) override the config with the new desired hyperparameters (anytime, anywhere). See our [guide](howto_config_override.md) for more details
-
-### Fairseq Users
-
-To use the Stable Embedding Layer, override the respective `build_embedding(...)` function of your model. Make sure to also use the `--no-scale-embedding` flag to disable scaling of the word embedding layer (nor replaced with layer norm). You can use the optimizers by replacing the optimizer in the respective file (`adam.py` etc.).
-
-## Release and Feature History
-
-For upcoming features and changes and full history see [Patch Notes](CHANGELOG.md).
-
-
-
+There are ongoing efforts to support further hardware backends, i.e. Intel CPU + GPU, AMD GPU, Apple Silicon. Windows support is on its way as well.
 
 ## License
 

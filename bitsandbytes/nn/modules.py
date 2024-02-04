@@ -20,7 +20,40 @@ T = TypeVar("T", bound="torch.nn.Module")
 
 class StableEmbedding(torch.nn.Embedding):
     """
-    TODO: @titus fill this with some info
+    Custom embedding layer designed for stable training in NLP tasks. The stable
+    embedding layer improves stability during optimization for models with word
+    embeddings, addressing issues related to the non-uniform distribution of input
+    tokens.
+
+    This stable embedding layer is initialized with Xavier uniform initialization,
+    followed by layer normalization. It is designed to support aggressive quantization,
+    addressing extreme gradient variations in non-uniform input distributions. The
+    stability of training is enhanced by using 32-bit optimizer states specifically
+    for this layer.
+
+    Example:
+
+    ```
+    # Initialize StableEmbedding layer with vocabulary size 1000, embedding dimension 300
+    embedding_layer = StableEmbedding(num_embeddings=1000, embedding_dim=300)
+
+    # Reset embedding parameters
+    embedding_layer.reset_parameters()
+
+    # Perform a forward pass with input tensor
+    input_tensor = torch.tensor([1, 2, 3])
+    output_embedding = embedding_layer(input_tensor)
+    ```
+
+    Attributes:
+        norm (torch.nn.LayerNorm): Layer normalization applied after the embedding.
+
+    Methods:
+        reset_parameters(): Reset embedding parameters using Xavier uniform initialization.
+        forward(input: Tensor) -> Tensor: Forward pass through the stable embedding layer.
+
+    Reference:
+        - [8-bit optimizer paper](https://arxiv.org/pdf/2110.02861.pdf)
     """
     def __init__(
         self,
@@ -35,6 +68,17 @@ class StableEmbedding(torch.nn.Embedding):
         device=None,
         dtype=None,
     ) -> None:
+        """
+        Args:
+            num_embeddings (`int`): The number of unique embeddings (vocabulary size).
+            embedding_dim (`int`): The dimensionality of the embedding.
+            padding_idx (`Optional[int]`): If specified, pads the output with zeros at the given index.
+            max_norm (`Optional[float]`): If given, renormalizes embeddings to have a maximum L2 norm.
+            norm_type (`float`, defaults to `2.0`): The p-norm to compute for the max_norm option.
+            scale_grad_by_freq (`bool`): Scale gradient by frequency during backpropagation.
+            sparse (`bool`): If True, computes sparse gradients; False, computes dense gradients.
+            _weight (`Optional[Tensor]`): Pre-trained embeddings.
+        """
         super().__init__(
             num_embeddings,
             embedding_dim,
