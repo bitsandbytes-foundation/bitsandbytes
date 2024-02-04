@@ -1,5 +1,5 @@
+import glob
 import os
-from os.path import isdir
 import sys
 from warnings import warn
 
@@ -8,17 +8,9 @@ import torch
 HEADER_WIDTH = 60
 
 
-def find_file_recursive(folder, filename):
-    import glob
-    outs = []
-    try:
-        for ext in ["so", "dll", "dylib"]:
-            out = glob.glob(os.path.join(folder, "**", filename + ext))
-            outs.extend(out)
-    except Exception as e:
-        raise RuntimeError('Error: Something when wrong when trying to find file.') from e
-
-    return outs
+def find_dynamic_library(folder, filename):
+    for ext in ("so", "dll", "dylib"):
+        yield from glob.glob(os.path.join(folder, "**", filename + ext))
 
 
 def generate_bug_report_information():
@@ -27,40 +19,25 @@ def generate_bug_report_information():
     print_header("")
     print('')
 
-    if 'CONDA_PREFIX' in os.environ:
-        paths = find_file_recursive(os.environ['CONDA_PREFIX'], '*cuda*')
-        print_header("ANACONDA CUDA PATHS")
-        print(paths)
-        print('')
-    if isdir('/usr/local/'):
-        paths = find_file_recursive('/usr/local', '*cuda*')
-        print_header("/usr/local CUDA PATHS")
-        print(paths)
-        print('')
-    if 'CUDA_PATH' in os.environ and isdir(os.environ['CUDA_PATH']):
-        paths = find_file_recursive(os.environ['CUDA_PATH'], '*cuda*')
-        print_header("CUDA PATHS")
-        print(paths)
-        print('')
+    path_sources = [
+        ("ANACONDA CUDA PATHS", os.environ.get("CONDA_PREFIX")),
+        ("/usr/local CUDA PATHS", "/usr/local"),
+        ("CUDA PATHS", os.environ.get("CUDA_PATH")),
+        ("WORKING DIRECTORY CUDA PATHS", os.getcwd()),
+    ]
+    try:
+        ld_library_path = os.environ.get("LD_LIBRARY_PATH")
+        if ld_library_path:
+            for path in set(ld_library_path.strip().split(os.pathsep)):
+                path_sources.append((f"LD_LIBRARY_PATH {path} CUDA PATHS", path))
+    except Exception as e:
+        print(f"Could not parse LD_LIBRARY_PATH: {e}")
 
-    if isdir(os.getcwd()):
-        paths = find_file_recursive(os.getcwd(), '*cuda*')
-        print_header("WORKING DIRECTORY CUDA PATHS")
-        print(paths)
-        print('')
-
-    print_header("LD_LIBRARY CUDA PATHS")
-    if 'LD_LIBRARY_PATH' in os.environ:
-        lib_path = os.environ['LD_LIBRARY_PATH'].strip()
-        for path in set(lib_path.split(os.pathsep)):
-            try:
-                if isdir(path):
-                    print_header(f"{path} CUDA PATHS")
-                    paths = find_file_recursive(path, '*cuda*')
-                    print(paths)
-            except Exception as e:
-                print(f'Could not read LD_LIBRARY_PATH: {path} ({e})')
-    print('')
+    for name, path in path_sources:
+        if path and os.path.isdir(path):
+            print_header(name)
+            print(list(find_dynamic_library(path, '*cuda*')))
+            print("")
 
 
 def print_header(
