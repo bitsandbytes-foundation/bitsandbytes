@@ -3,7 +3,7 @@
 The bitsandbytes is a lightweight wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions.
 
 
-
+Read more about bitsandbytes on its dedicated documentation page: https://huggingface.co/docs/bitsandbytes/main
 
 
 ## TL;DR
