@@ -8,7 +8,6 @@ import os
 from setuptools import find_packages, setup
 from setuptools.dist import Distribution
 
-
 libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.*"))
 libs = [os.path.basename(p) for p in libs]
 print("libs:", libs)
@@ -17,10 +16,12 @@ print("libs:", libs)
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
+
 # Tested with wheel v0.29.0
 class BinaryDistribution(Distribution):
     def has_ext_modules(self):
         return True
+
 
 setup(
     name="bitsandbytes",
@@ -33,10 +34,10 @@ setup(
     url="https://github.com/TimDettmers/bitsandbytes",
     packages=find_packages(),
     package_data={"": libs},
-    install_requires=['torch', 'numpy'],
+    install_requires=["torch", "numpy"],
     extras_require={
-        'benchmark': ['pandas', 'matplotlib'],
-        'test': ['scipy'],
+        "benchmark": ["pandas", "matplotlib"],
+        "test": ["scipy"],
     },
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
@@ -44,5 +45,5 @@ setup(
         "Development Status :: 4 - Beta",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    distclass=BinaryDistribution
+    distclass=BinaryDistribution,
 )
