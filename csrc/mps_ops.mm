@@ -16,10 +16,10 @@ static inline MPSGraph* get_graph()
 
 static inline id<MTLDevice> get_device()
 {
-  NSError *error = nil;  
+  NSError *error = nil;
   static id<MTLDevice> device = nil;
   if(!device) {
-    device = MTLCreateSystemDefaultDevice();  
+    device = MTLCreateSystemDefaultDevice();
   }
   if(!device) {
     NSLog(@"Failed to get MPS device");
@@ -30,7 +30,7 @@ static inline id<MTLDevice> get_device()
 
 static inline id<MTLLibrary> get_library()
 {
-  NSError *error = nil;  
+  NSError *error = nil;
   static id<MTLLibrary> library = nil;
   if(!library) {
     library = [get_device() newLibraryWithURL:[NSURL fileURLWithPath:@"bitsandbytes.metallib"] error:&error];
@@ -40,7 +40,7 @@ static inline id<MTLLibrary> get_library()
     abort();
   }
   return library;
-}  
+}
 
 /*MPSGraphTensor* dequantize_mps(MPSGraphTensor* code, MPSGraphTensor* A, int n)
 {
@@ -49,7 +49,7 @@ static inline id<MTLLibrary> get_library()
 }*/
 
 
-// MPSGraph function for quantize  
+// MPSGraph function for quantize
 extern "C" MPSGraphTensor* quantize_mps(MPSGraph* graph, MPSGraphTensor* code, MPSGraphTensor* A, int n)
 {
   id<MTLDevice> device = get_device();

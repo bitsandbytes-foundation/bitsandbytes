@@ -83,35 +83,35 @@ static unsigned char quantize_scalar(
     }
 }
 
-kernel void quantize(device float* code [[buffer(0)]],  
-                      device float* A [[buffer(1)]],  
-                      device uchar* out [[buffer(2)]],  
-                      constant uint& n [[buffer(3)]],  
-                      uint id [[thread_position_in_grid]]) {  
-  const uint n_full = (NUM_BLOCK * (n / NUM_BLOCK)) + (n % NUM_BLOCK == 0 ? 0 : NUM_BLOCK);  
-  uint valid_items = (id / NUM_BLOCK + 1 == (n + NUM_BLOCK - 1) / NUM_BLOCK) ? n - (id / NUM_BLOCK * NUM_BLOCK) : NUM_BLOCK;  
-  const uint base_idx = (id / NUM_BLOCK * NUM_BLOCK);  
-  
-  float vals[NUM];  
-  uchar qvals[NUM];  
-  
-  for (uint i = base_idx; i < n_full; i += ((n + NUM_BLOCK - 1) / NUM_BLOCK) * NUM_BLOCK) {  
-    valid_items = n - i > NUM_BLOCK ? NUM_BLOCK : n - i;  
-  
-    threadgroup_barrier(mem_flags::mem_threadgroup);  
-  
-    for (uint j = 0; j < valid_items; j++) {  
-      vals[j] = A[i + j];  
-    }  
-  
-    for (uint j = 0; j < valid_items; j++) {  
+kernel void quantize(device float* code [[buffer(0)]],
+                      device float* A [[buffer(1)]],
+                      device uchar* out [[buffer(2)]],
+                      constant uint& n [[buffer(3)]],
+                      uint id [[thread_position_in_grid]]) {
+  const uint n_full = (NUM_BLOCK * (n / NUM_BLOCK)) + (n % NUM_BLOCK == 0 ? 0 : NUM_BLOCK);
+  uint valid_items = (id / NUM_BLOCK + 1 == (n + NUM_BLOCK - 1) / NUM_BLOCK) ? n - (id / NUM_BLOCK * NUM_BLOCK) : NUM_BLOCK;
+  const uint base_idx = (id / NUM_BLOCK * NUM_BLOCK);
+
+  float vals[NUM];
+  uchar qvals[NUM];
+
+  for (uint i = base_idx; i < n_full; i += ((n + NUM_BLOCK - 1) / NUM_BLOCK) * NUM_BLOCK) {
+    valid_items = n - i > NUM_BLOCK ? NUM_BLOCK : n - i;
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint j = 0; j < valid_items; j++) {
+      vals[j] = A[i + j];
+    }
+
+    for (uint j = 0; j < valid_items; j++) {
       qvals[j] = quantize_scalar<false>(0.0f, code, vals[j]);
-    }  
-  
-    threadgroup_barrier(mem_flags::mem_threadgroup);  
-  
-    for (uint j = 0; j < valid_items; j++) {  
-      out[i + j] = qvals[j];  
-    }  
-  }  
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint j = 0; j < valid_items; j++) {
+      out[i + j] = qvals[j];
+    }
+  }
 }

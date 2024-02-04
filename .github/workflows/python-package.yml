@@ -8,7 +8,7 @@ on:
     types: [ published ]
 
 jobs:
-  
+
   ##
   # This job matrix builds the non-CUDA versions of the libraries for all supported platforms.
   ##
@@ -120,7 +120,7 @@ jobs:
         build_os=${{ matrix.os }}
         build_arch=${{ matrix.arch }}
         for NO_CUBLASLT in ON OFF; do
-          if [ ${build_os:0:6} == ubuntu ]; then 
+          if [ ${build_os:0:6} == ubuntu ]; then
             image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
             echo "Using image $image"
             docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
