@@ -154,4 +154,3 @@ dmypy.json
 dependencies
 cuda_build
 output/
-.vscode/*
