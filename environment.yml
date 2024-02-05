@@ -27,6 +27,7 @@ dependencies:
   - conda-forge::monkeytype   # infer type annotations
   - conda-forge::rich         # better, colored tracebacks, etc
   - conda-forge::pytest-sugar # better pytest output
+  # - conda-forge::nodejs       # for `doc-builder preview` (optional)
 
 ## ENV CREATION - steps to reproduce:
 # mamba env remove -n bnb

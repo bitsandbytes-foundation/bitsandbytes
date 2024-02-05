@@ -178,5 +178,5 @@ inline T prev(T x)
     return x;
 }
 
-} // namepsace Details
+} // namespace Details
 } // namespace BinSearch

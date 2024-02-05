@@ -1,0 +1,11 @@
+[files]
+
+[default.extend-identifiers]
+
+[type.py.extend-words]
+"BA" = "BA"  # used as a commented-out variable in tests
+
+[type.cuda.extend-words]
+"subtile" = "subtile"
+"subtiles" = "subtiles"
+"transation" = "transation"  # TODO: is this transition, transaction, translation..?

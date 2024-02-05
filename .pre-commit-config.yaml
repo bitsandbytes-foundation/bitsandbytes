@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.15
+    rev: v0.2.0
     hooks:
       - id: ruff
         args:
@@ -17,3 +17,7 @@ repos:
       - id: mixed-line-ending
         args:
           - --fix=lf
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.17.2
+    hooks:
+      - id: typos

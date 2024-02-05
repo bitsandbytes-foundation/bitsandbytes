@@ -1,0 +1,42 @@
+# Transformers
+
+With Transformers it's very easy to load any model in 4 or 8-bit, quantizing them on the fly with bitsandbytes primitives.
+
+Please review the [bitsandbytes section in the Accelerate docs](https://huggingface.co/docs/transformers/v4.37.2/en/quantization#bitsandbytes).
+
+Details about the BitsAndBytesConfig can be found here](https://huggingface.co/docs/transformers/v4.37.2/en/main_classes/quantization#transformers.BitsAndBytesConfig).
+
+## Beware: bf16 is optional compute data type
+If your hardware supports it, `bf16` is the optimal compute dtype. The default is `float32` for backward compatibility and numerical stability. `float16` often leads to numerical instabilities, but `bfloat16` provides the benefits of both worlds: numerical stability and significant computation speedup. Therefore, be sure to check if your hardware supports `bf16` and configure it using the `bnb_4bit_compute_dtype` parameter in BitsAndBytesConfig:
+
+```py
+import torch
+from transformers import BitsAndBytesConfig
+
+quantization_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
+```
+
+# PEFT
+With `PEFT`, you can use QLoRA out of the box with `LoraConfig` and a 4-bit base model.
+
+Please review the [bitsandbytes section in the Accelerate docs](https://huggingface.co/docs/peft/developer_guides/quantization#quantize-a-model).
+
+# Accelerate
+
+Bitsandbytes is also easily usable from within Accelerate.
+
+Please review the [bitsandbytes section in the Accelerate docs](https://huggingface.co/docs/accelerate/en/usage_guides/quantization).
+
+# Trainer for the optimizers
+
+You can use any of the 8-bit and/or paged optimizers by simple passing them to the `transformers.Trainer` class on initialization.All bnb optimizers are supported by passing the correct string in `TrainingArguments`'s `optim` attribute - e.g. (`paged_adamw_32bit`).
+
+See the [official API docs for reference](https://huggingface.co/docs/transformers/main_classes/trainer#transformers.Trainer).
+
+Here we point out to relevant doc sections in transformers / peft / Trainer + very briefly explain how these are integrated:
+e.g. for transformers state that you can load any model in 8-bit / 4-bit precision, for PEFT, you can use QLoRA out of the box with `LoraConfig` + 4-bit base model, for Trainer: all bnb optimizers are supported by passing the correct string in `TrainingArguments`'s `optim` attribute - e.g. (`paged_adamw_32bit`):
+
+# Blog posts
+
+- [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes)
+- [A Gentle Introduction to 8-bit Matrix Multiplication for transformers at scale using Hugging Face Transformers, Accelerate and bitsandbytes](https://huggingface.co/blog/hf-bitsandbytes-integration)

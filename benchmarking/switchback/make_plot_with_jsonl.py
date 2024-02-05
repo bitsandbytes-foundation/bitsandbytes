@@ -36,8 +36,8 @@ if __name__ == '__main__':
 
         ('x_quantize_rowwise', 'P', '--', 'C4', 'Quantize rowwise X (switchback)'),
         ('g_quantize_rowwise', 'P', '-.', 'C4', 'Quantize rowwise G (switchback)'),
-        ('w_quantize_global', '.', '--', 'C4', 'Quatnize global W (switchback)'),
-        ('w_quantize_global_transpose', '.', '-.', 'C4', 'Quantize gloabl and\ntranspose W (switchback)'),
+        ('w_quantize_global', '.', '--', 'C4', 'Quantize global W (switchback)'),
+        ('w_quantize_global_transpose', '.', '-.', 'C4', 'Quantize global and\ntranspose W (switchback)'),
     ]:
         xs = []
         ys = []

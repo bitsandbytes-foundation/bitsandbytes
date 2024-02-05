@@ -584,6 +584,6 @@ FORCE_INLINE FVec<AVX, double> mulSub(const FVec<AVX, double>& a, const FVec<AVX
 
 #endif
 
-} // namepsace Details
+} // namespace Details
 } // namespace BinSearch
 #endif // !defined(__aarch64__)
