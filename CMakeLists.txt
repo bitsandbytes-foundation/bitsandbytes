@@ -128,13 +128,13 @@ elseif(BUILD_MPS)
     string(APPEND BNB_OUTPUT_NAME "_mps")
     add_compile_definitions(BUILD_MPS)
     file(MAKE_DIRECTORY "build")
-    add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"
-                COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_FILES}
-                COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
+    add_custom_command(OUTPUT "${CMAKE_SOURCE_DIR}/bitsandbytes/bitsandbytes.metallib"
+                COMMAND xcrun metal -c -o "bitsandbytes.air" "${CMAKE_SOURCE_DIR}/${METAL_FILES}"
+                COMMAND xcrun metallib "bitsandbytes.air" -o "${CMAKE_SOURCE_DIR}/bitsandbytes/bitsandbytes.metallib"
                 DEPENDS "${METAL_FILES}"
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
-    add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+    add_custom_target(metallib DEPENDS "${CMAKE_SOURCE_DIR}/bitsandbytes/bitsandbytes.metallib")
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
@@ -182,10 +182,10 @@ if(WIN32)
 endif()
 set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME ${BNB_OUTPUT_NAME})
 if(MSVC)
-    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELEASE bitsandbytes)
-    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_DEBUG bitsandbytes)
-    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE bitsandbytes)
-    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG bitsandbytes)
+    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELEASE "$<1:${CMAKE_SOURCE_DIR}/bitsandbytes>")
+    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_DEBUG "$<1:${CMAKE_SOURCE_DIR}/bitsandbytes>")
+    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "$<1:${CMAKE_SOURCE_DIR}/bitsandbytes>")
+    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG "$<1:${CMAKE_SOURCE_DIR}/bitsandbytes>")
 endif()
 
-set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY bitsandbytes)
+set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_SOURCE_DIR}/bitsandbytes>")
