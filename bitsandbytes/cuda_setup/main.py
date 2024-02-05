@@ -4,7 +4,7 @@ extract factors the build is dependent on:
     [ ] TODO: Q - What if we have multiple GPUs of different makes?
 - CUDA version
 - Software:
-    - CPU-only: only CPU quantization functions (no optimizer, no matrix multipl)
+    - CPU-only: only CPU quantization functions (no optimizer, no matrix multiply)
     - CuBLAS-LT: full-build 8-bit optimizer
     - no CuBLAS-LT: no 8-bit matrix multiplication (`nomatmul`)
 
@@ -263,7 +263,7 @@ def warn_in_case_of_duplicates(results_paths: Set[Path]) -> None:
         warning_msg = (
             f"Found duplicate {CUDA_RUNTIME_LIBS} files: {results_paths}.. "
             "We select the PyTorch default libcudart.so, which is {torch.version.cuda},"
-            "but this might missmatch with the CUDA version that is needed for bitsandbytes."
+            "but this might mismatch with the CUDA version that is needed for bitsandbytes."
             "To override this behavior set the BNB_CUDA_VERSION=<version string, e.g. 122> environmental variable"
             "For example, if you want to use the CUDA version 122"
             "BNB_CUDA_VERSION=122 python ..."
