@@ -24,8 +24,7 @@ pip install bitsandbytes
 ```bash
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 cmake -B build -DBUILD_CUDA=ON -S .
-cmake --build build --config Release
-python -m build --wheel
+python setup.py develop
 ```
 Note support for non-CUDA GPUs (e.g. AMD, Intel), is also coming soon.
 For a more detailed compilation guide, head to the [dedicated page on the topic](./compiling)
