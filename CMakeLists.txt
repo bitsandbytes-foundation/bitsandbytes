@@ -2,8 +2,8 @@
 # Ensure the CUDA Toolkit is available on your path. Then run:
 #   For  GCC: `cmake -B build . && cmake --build build`
 #   For MSVC: `cmake -B build . && cmake --build build --config Release`
-# You can also use the following options
-#  - BUILD_CUDA: Default ON, will build with CUDA
+# You can also use the following options and variables
+#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, or `mps` to select the backend
 #  - NO_CUBLASLT: Default OFF, will skip building/linking CUBLASLT support
 #  - CUDA_VERSION: The expected CUDA version, for sanity checking. The actual version
 #                  is whatever CMake finds on your path.
@@ -11,25 +11,53 @@
 #                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90`
 #                        Check your compute capability here: https://developer.nvidia.com/cuda-gpus
 #  - PTXAS_VERBOSE: Pass the `-v` option to the PTX Assembler
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.22.1)
 
-project(bitsandbytes LANGUAGES C CXX)
+project(bitsandbytes LANGUAGES CXX)
 
-option(BUILD_CUDA "Build bitsandbytes with CUDA support" ON)
-option(NO_CUBLASLT "Disable CUBLAS" OFF)
-option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
-
-set(CPP_FILES csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.c)
-list(APPEND CUDA_FILES csrc/ops.cu csrc/kernels.cu)
+# Define included source files
+set(CPP_FILES csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
+set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
+set(MPS_FILES csrc/mps_ops.mm)
+set(METAL_FILES csrc/mps_kernels.metal)
+# C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-message(STATUS "BUILD_CUDA := ${BUILD_CUDA}")
-message(STATUS "NO_CUBLASLT := ${NO_CUBLASLT}")
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, mps)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda mps)
+option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
+
+if(APPLE)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET 13.1)
+endif()
 
 set(BNB_OUTPUT_NAME "bitsandbytes")
 
+message(STATUS "Building with backend ${COMPUTE_BACKEND}")
+
+if(${COMPUTE_BACKEND} STREQUAL "cuda")
+    if(APPLE)
+        message(FATAL_ERROR "CUDA is not supported on macOS" )
+    endif()
+    option(NO_CUBLASLT "Disable CUBLAS" OFF)
+    set(BUILD_CUDA ON)
+    set(BUILD_MPS OFF)
+    message(STATUS "NO_CUBLASLT := ${NO_CUBLASLT}")
+elseif(${COMPUTE_BACKEND} STREQUAL "mps")
+    if(NOT APPLE)
+        message(FATAL_ERROR "MPS is only supported on macOS" )
+    endif()
+    set(BUILD_CUDA OFF)
+    set(BUILD_MPS ON)
+else()
+    set(BUILD_CUDA OFF)
+    set(BUILD_MPS OFF)
+endif()
+
+
 if(BUILD_CUDA)
     enable_language(CUDA) # This will fail if CUDA is not found
+    find_package(CUDAToolkit REQUIRED)
 
     # Convert the CUDA version from X.Y.z to XY. There's probably a shorter way of doing this
     string(REGEX MATCH "^[0-9]+.[0-9]+" _CUDA_VERSION_FIRST_TWO "${CMAKE_CUDA_COMPILER_VERSION}")
@@ -87,28 +115,56 @@ if(BUILD_CUDA)
     if(NO_CUBLASLT)
         string(APPEND BNB_OUTPUT_NAME "_nocublaslt")
     endif()
-else()
-    message(STATUS "Building CPU Only")
-    string(APPEND BNB_OUTPUT_NAME "_cpu")
-    if(NO_CUBLASLT)
-        message(WARNING "We're building in CPU only mode but NO_CUBLASLT is enabled. It will have no effect.")
+    add_compile_definitions(BUILD_CUDA)
+elseif(BUILD_MPS)
+    if(NOT APPLE)
+        message(FATAL_ERROR "MPS is only supported on macOS" )
     endif()
+
+    enable_language(OBJCXX)
+
+    list(APPEND SRC_FILES ${MPS_FILES})
+
+    string(APPEND BNB_OUTPUT_NAME "_mps")
+    add_compile_definitions(BUILD_MPS)
+    file(MAKE_DIRECTORY "build")
+    add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"
+                COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_FILES}
+                COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
+                DEPENDS "${METAL_FILES}"
+                COMMENT "Compiling Metal kernels"
+                VERBATIM)
+    add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+else()
+    set(LIBSUFFIX "cpu")
+    set(GPU_SOURCES)
+endif()
+
+
+if(WIN32)
+    # Export all symbols
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+
+# Weird MSVC hacks
+if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /arch:AVX2 /fp:fast")
 endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
-include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-target_include_directories(bitsandbytes PUBLIC csrc include)
 target_compile_features(bitsandbytes PUBLIC cxx_std_14)
+target_include_directories(bitsandbytes PUBLIC csrc include)
 
 
 if(BUILD_CUDA)
-    target_compile_definitions(bitsandbytes PUBLIC BUILD_CUDA)
-    target_link_libraries(bitsandbytes PUBLIC cudart cublas cusparse)
+    target_include_directories(bitsandbytes PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+    target_link_libraries(bitsandbytes PUBLIC CUDA::cudart CUDA::cublas CUDA::cusparse)
     if(NO_CUBLASLT)
         target_compile_definitions(bitsandbytes PUBLIC NO_CUBLASLT)
     else()
-        target_link_libraries(bitsandbytes PUBLIC cublasLt)
+        target_link_libraries(bitsandbytes PUBLIC CUDA::cublasLt)
     endif()
 
     set_target_properties(bitsandbytes
@@ -116,17 +172,20 @@ if(BUILD_CUDA)
             CUDA_SEPARABLE_COMPILATION ON
     )
 endif()
+if(BUILD_MPS)
+    add_dependencies(bitsandbytes metallib)
+    target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
+endif()
 
 if(WIN32)
     set_target_properties(bitsandbytes PROPERTIES PREFIX "lib")
 endif()
+set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME ${BNB_OUTPUT_NAME})
+if(MSVC)
+    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELEASE bitsandbytes)
+    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_DEBUG bitsandbytes)
+    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE bitsandbytes)
+    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG bitsandbytes)
+endif()
 
-set_target_properties(bitsandbytes
-    PROPERTIES
-        OUTPUT_NAME ${BNB_OUTPUT_NAME}
-        # We have to use a generator expression to prevent MSVC Debug/Release subdirs being made
-        RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_SOURCE_DIR}/bitsandbytes>"
-        LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_SOURCE_DIR}/bitsandbytes>"
-        POSITION_INDEPENDENT_CODE ON # The `-fPIC` commands for non-windows compilers
-        WINDOWS_EXPORT_ALL_SYMBOLS ON # On Windows, export all c methods as DLL exports
-)
+set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY bitsandbytes)

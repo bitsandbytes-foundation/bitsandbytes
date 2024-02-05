@@ -1,3 +1,0 @@
-lion-pytorch
-pytest
-scipy
