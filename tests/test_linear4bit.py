@@ -1,26 +1,30 @@
 import os
-from contextlib import nullcontext
-from itertools import product
 from tempfile import TemporaryDirectory
 
 import pytest
 import torch
 
 import bitsandbytes as bnb
+from tests.helpers import TRUE_FALSE
 
+storage = {
+    'uint8': torch.uint8,
+    'float16': torch.float16,
+    'bfloat16': torch.bfloat16,
+    'float32': torch.float32
+}
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
-@pytest.mark.parametrize(
-    "quant_type, compress_statistics, bias",
-    list(product(["nf4", "fp4"], [False, True], [False, True])),
-)
-def test_linear_serialization(quant_type, compress_statistics, bias):
+@pytest.mark.parametrize("quant_storage", ['uint8', 'float16', 'bfloat16', 'float32'])
+@pytest.mark.parametrize("bias", TRUE_FALSE)
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage):
     original_dtype = torch.float16
     compute_dtype = None
     device = "cuda"
     layer_shape = (300, 400)
 
-    linear = torch.nn.Linear(*layer_shape, dtype=original_dtype)  # original layer
+    linear = torch.nn.Linear(*layer_shape, dtype=original_dtype, device="cpu")  # original layer
 
     # Quantizing original layer
     linear_q = bnb.nn.Linear4bit(
@@ -30,19 +34,22 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
         compute_dtype=compute_dtype,
         compress_statistics=compress_statistics,
         quant_type=quant_type,
-        device=device,
+        device="meta",
     )
-    new_weight = bnb.nn.Params4bit(data=linear.weight, requires_grad=False)
-    linear_q.weight = new_weight.to(device)
+    new_weight = bnb.nn.Params4bit(data=linear.weight, quant_type=quant_type, requires_grad=False)
+    linear_q.weight = new_weight
     if bias:
-        linear_q.bias.data = linear.bias.data.to(device)
+        linear_q.bias = torch.nn.Parameter(linear.bias)
+    linear_q = linear_q.to(device)
 
     # saving to state_dict:
     sd = linear_q.state_dict()
+
     # restoring from state_dict:
     bias_data2 = sd.pop("bias", None)
     weight_data2 = sd.pop("weight")
     weight2 = bnb.nn.Params4bit.from_prequantized(quantized_stats=sd, data=weight_data2)
+
     # creating new layer with same params:
     linear_q2 = bnb.nn.Linear4bit(
         linear.in_features,
@@ -51,15 +58,32 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
         compute_dtype=compute_dtype,
         compress_statistics=compress_statistics,
         quant_type=quant_type,
-        device=device,                  # TODO create on meta device to save loading time
+        device="meta",
     )
     # loading weights from state_dict:
-    linear_q2.weight = weight2.to(device)
+    linear_q2.weight = weight2
     if bias:
         linear_q2.bias = torch.nn.Parameter(bias_data2)
+    linear_q2 = linear_q2.to(device)
 
     # MATCHING
     a, b = linear_q.weight, linear_q2.weight
+
+    # Quantizing original layer with specified quant_storage type
+    linear_qs = bnb.nn.Linear4bit(
+        linear.in_features,
+        linear.out_features,
+        bias=bias,
+        compute_dtype=compute_dtype,
+        compress_statistics=compress_statistics,
+        quant_type=quant_type,
+        quant_storage=storage[quant_storage],
+        device="meta",
+    )
+    linear_qs.weight = bnb.nn.Params4bit(data=linear.weight, requires_grad=False, quant_type=quant_type, quant_storage=storage[quant_storage])
+    if bias:
+        linear_qs.bias = torch.nn.Parameter(linear.bias)
+    linear_qs = linear_qs.to(device)
 
     assert a.device == b.device
     assert a.dtype == b.dtype
@@ -92,9 +116,21 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
     x = torch.rand(42, layer_shape[0], device=device)
     a = linear_q(x)
     b = linear_q2(x)
+    c = linear_qs(x)
     assert a.device == b.device
     assert a.dtype == b.dtype
+    assert a.device == c.device
+    assert a.dtype == c.dtype
     assert torch.equal(a, b)
+    assert torch.equal(a, c)
+
+    # Test moving to CPU and back to GPU
+    linear_q2.to('cpu')
+    linear_q2.to(device)
+    d = linear_qs(x)
+    assert c.dtype == d.dtype
+    assert c.device == d.device
+    assert torch.equal(c, d)
 
     # Saved size ratio test. Target set for layer_shape == (300, 400) w/ bias
     with TemporaryDirectory() as tmpdir:
@@ -107,6 +143,6 @@ def test_linear_serialization(quant_type, compress_statistics, bias):
             state_path_4bit
         )
         size_ratio = size_4 / size_orig
-        target_compression = 0.143 if original_dtype == torch.float32 else 0.285
+        target_compression = 0.143 if original_dtype == torch.float32 else 0.29  # these numbers get lower as weight shape increases
         ratio_error_msg = f"quantized_size {size_4:,} is larger on disk than {target_compression:.2%} of original size {size_orig:,}"
         assert size_ratio < target_compression, ratio_error_msg

@@ -1,6 +1,5 @@
-import os
 from contextlib import nullcontext
-from itertools import product
+import os
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -10,7 +9,7 @@ import bitsandbytes as bnb
 from bitsandbytes import functional as F
 from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
 from bitsandbytes.nn.modules import Linear8bitLt
-
+from tests.helpers import TRUE_FALSE, id_formatter
 
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
@@ -33,7 +32,6 @@ def test_layout_exact_match():
         assert torch.all(torch.eq(restored_x, x))
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
 def test_linear_no_igemmlt():
     linear = torch.nn.Linear(1024, 3072)
     x = torch.randn(3, 1024, dtype=torch.half)
@@ -68,9 +66,10 @@ def test_linear_no_igemmlt():
     assert linear_custom.state.CxB is None
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
-@pytest.mark.parametrize("has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt",
-                         list(product([False, True], [False, True], [False, True], [False, True])))
+@pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
+@pytest.mark.parametrize("serialize_before_forward", TRUE_FALSE, ids=id_formatter("serialize_before_forward"))
+@pytest.mark.parametrize("deserialize_before_cuda", TRUE_FALSE, ids=id_formatter("deserialize_before_cuda"))
+@pytest.mark.parametrize("force_no_igemmlt", TRUE_FALSE, ids=id_formatter("force_no_igemmlt"))
 def test_linear_serialization(has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt):
     linear = torch.nn.Linear(32, 96)
     x = torch.randn(3, 32, dtype=torch.half)

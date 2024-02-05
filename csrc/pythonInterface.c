@@ -389,7 +389,7 @@ extern "C"
 		int hasPrefetch = 0;
 		CUDA_CHECK_RETURN(cudaDeviceGetAttribute(&hasPrefetch, cudaDevAttrConcurrentManagedAccess, device)); // 40ns overhead
 		if (hasPrefetch == 0) return;
- 
+
 		CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, device, 0));
 		CUDA_CHECK_RETURN(cudaPeekAtLastError());
 	}

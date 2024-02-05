@@ -1,10 +1,12 @@
-from itertools import product
+import math
 
+import einops
 import pytest
 import torch
 from torch import nn
 
 import bitsandbytes as bnb
+from tests.helpers import id_formatter
 
 
 class MockArgs:
@@ -310,12 +312,7 @@ class Linear8bit(nn.Module):
         return LinearFunction.apply(x, self.weight, self.bias, self.args)
 
 
-threshold = [0.0, 3.0]
-values = threshold
-names = [f"threshold_{vals}" for vals in values]
-
-
-@pytest.mark.parametrize("threshold", values, ids=names)
+@pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("threshold"))
 def test_linear8bitlt_inference(threshold):
     l1 = bnb.nn.Linear8bitLt(32, 64, threshold=threshold).cuda().half()
     assert l1.weight.device.type == "cuda"
@@ -509,19 +506,21 @@ def test_linear_kbit_fp32_bias(module):
         o1 = l1(b1)
         assert l1.bias is None
 
-modules = []
-modules.append(bnb.nn.Linear8bitLt)
-modules.append(bnb.nn.Linear4bit)
-modules.append(bnb.nn.LinearFP4)
-modules.append(bnb.nn.LinearNF4)
-modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True))
-modules.append(lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compress_statistics=True))
-modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float32))
-modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float16))
-modules.append(lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.bfloat16))
-names = ['Int8Lt', '4bit', 'FP4', 'NF4', 'FP4+C', 'NF4+C', 'NF4+fp32', 'NF4+fp16', 'NF4+bf16']
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
-@pytest.mark.parametrize("module", modules, ids=names)
+
+module_dict = {
+    "Int8Lt": bnb.nn.Linear8bitLt,
+    "4bit": bnb.nn.Linear4bit,
+    "FP4": bnb.nn.LinearFP4,
+    "NF4": bnb.nn.LinearNF4,
+    "FP4+C": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True),
+    "NF4+C": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compress_statistics=True),
+    "NF4+fp32": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float32),
+    "NF4+fp16": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float16),
+    "NF4+bf16": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.bfloat16),
+}
+
+
+@pytest.mark.parametrize("module", module_dict.values(), ids=module_dict.keys())
 def test_kbit_backprop(module):
     b = 17
     dim1 = 37
@@ -576,10 +575,10 @@ def test_kbit_backprop(module):
 
         assert kbit[0].weight.grad is None or kbit[0].weight.grad.sum().item() == 0
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
-    print('out', sum(errs1)/len(errs1))
-    print('grad', sum(errs2)/len(errs2))
-    print('rel out', sum(relerrs1)/len(relerrs1))
-    print('rel grad', sum(relerrs2)/len(relerrs2))
+    #print('out', sum(errs1)/len(errs1))
+    #print('grad', sum(errs2)/len(errs2))
+    #print('rel out', sum(relerrs1)/len(relerrs1))
+    #print('rel grad', sum(relerrs2)/len(relerrs2))
 
 def test_fp8linear():
 
@@ -638,6 +637,3 @@ def test_4bit_warnings():
         net(inp)
 
     assert len(record) == 2
-
-
-

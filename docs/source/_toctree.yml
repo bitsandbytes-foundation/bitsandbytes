@@ -1,0 +1,34 @@
+- title: Get started
+  sections:
+  - local: index
+    title: Index
+  - local: quickstart
+    title: Quickstart
+  - local: installation
+    title: Installation
+- title: Features & Integrations
+  sections:
+  - local: quantization
+    title: Quantization
+  - local: optimizers
+    title: Optimizers
+  - local: integrations
+    title: Integrations
+  - local: algorithms
+    title: Algorithms
+- title: Support & Learning
+  sections:
+  - local: resources
+    title: Papers, resources & how to cite
+  - local: errors
+    title: Errors & Solutions
+  - local: nonpytorchcuda
+    title: Non-PyTorch CUDA
+  - local: compiling
+    title: Compilation from Source (extended)
+  - local: faqs
+    title: FAQs (Frequently Asked Questions)
+- title: Contributors Guidelines
+  sections:
+  - local: contributing
+    title: Contributing

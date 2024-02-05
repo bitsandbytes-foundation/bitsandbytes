@@ -5,9 +5,10 @@
 import glob
 import os
 
-from setuptools import find_packages, setup
+from setuptools import Extension, find_packages, setup
 
 libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.so"))
+libs += list(glob.glob("./bitsandbytes/libbitsandbytes*.dll"))
 libs = [os.path.basename(p) for p in libs]
 print("libs:", libs)
 
@@ -17,8 +18,8 @@ def read(fname):
 
 
 setup(
-    name=f"bitsandbytes",
-    version=f"0.41.2",
+    name="bitsandbytes",
+    version="0.43.0.dev0",
     author="Tim Dettmers",
     author_email="dettmers@cs.washington.edu",
     description="k-bit optimizers and matrix multiplication routines.",
@@ -27,8 +28,16 @@ setup(
     url="https://github.com/TimDettmers/bitsandbytes",
     packages=find_packages(),
     package_data={"": libs},
+    install_requires=['torch', 'numpy'],
+    extras_require={
+        'benchmark': ['pandas', 'matplotlib'],
+        'test': ['scipy'],
+    },
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
+    # HACK: pretend we have a native extension module so the wheel is tagged
+    #       correctly with a platform tag (e.g. `-linux_x86_64.whl`).
+    ext_modules=[Extension("bitsandbytes", sources=[], language="c")],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",

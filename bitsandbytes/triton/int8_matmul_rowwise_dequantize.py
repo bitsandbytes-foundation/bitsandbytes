@@ -57,7 +57,8 @@ else:
             triton.Config({'BLOCK_M': 64, 'BLOCK_N': 128, 'BLOCK_K': 64, 'SPLIT_K': 1}, num_stages=4, num_warps=4),
             triton.Config({'BLOCK_M': 128, 'BLOCK_N': 32, 'BLOCK_K': 64, 'SPLIT_K': 1}, num_stages=4, num_warps=4),
             triton.Config({'BLOCK_M': 64, 'BLOCK_N': 32, 'BLOCK_K': 64, 'SPLIT_K': 1}, num_stages=5, num_warps=2),
-        ] + get_configs_io_bound(),
+            *get_configs_io_bound(),
+        ],
         key=['M', 'N', 'K'],
         prune_configs_by={
             'early_config_prune': early_config_prune,
@@ -118,7 +119,7 @@ else:
             acc += tl.dot(a, b)
             A += BLOCK_K * SPLIT_K * stride_ak
             B += BLOCK_K * SPLIT_K * stride_bk
-        
+
         acc = (w_factor * (x_factor * (acc * divfactor)))
         acc = acc.to(C.dtype.element_ty)
 

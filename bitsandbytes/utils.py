@@ -1,8 +1,10 @@
 import json
 import shlex
 import subprocess
-import torch
 from typing import Tuple
+
+import torch
+
 
 def outlier_hook(module, input):
     assert isinstance(module, torch.nn.Linear)
@@ -37,7 +39,7 @@ def outlier_hook(module, input):
             hook.remove()
 
 
-class OutlierTracer(object):
+class OutlierTracer:
     _instance = None
 
     def __init__(self):
@@ -122,7 +124,13 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
 
 
 
-def replace_linear(model, linear_replacement, skip_modules=["lm_head"], copy_weights=False, post_processing_function=None):
+def replace_linear(
+    model,
+    linear_replacement,
+    skip_modules=("lm_head",),
+    copy_weights=False,
+    post_processing_function=None,
+):
     """
     Replace linear modules with a new Linear module.
     Parameters:
@@ -187,7 +195,7 @@ def unpack_tensor_to_dict(tensor_data):
     Returns:
     A Python dictionary containing the unpacked data.
     """
-    json_bytes = bytes(tensor_data.numpy())
+    json_bytes = bytes(tensor_data.cpu().numpy())
     json_str = json_bytes.decode('utf-8')
     unpacked_dict = json.loads(json_str)
 

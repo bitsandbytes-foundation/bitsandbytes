@@ -1,15 +1,46 @@
-name: 8-bit
+name: bnb
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
-  - pytorch
+
 dependencies:
-  - python=3.9
-  - pytest
-  - pytorch
-  - torchaudio
-  - torchvision
-  - cudatoolkit=11.1
-  - typer
-  - ca-certificates
-  - certifi
-  - openssl
+  # Base
+  - conda-forge::python=3.8
+  - pytorch::pytorch=>2.1
+  - pytorch::pytorch-cuda=11.8
+  - nvidia::cuda=11.8
+  # Libraries
+  - conda-forge::accelerate
+  - conda-forge::einops
+  - conda-forge::scipy
+  - conda-forge::transformers
+  # Development
+  - conda-forge::pytest
+  - conda-forge::build        # build Python packages
+  - conda-forge::twine        # upload Python packages
+  - conda-forge::pytest-cases # more readable and composable parametrized tests
+  - conda-forge::ipython      # better interactive shell
+  - conda-forge::debugpy      # debugger-support for VSCode
+  - conda-forge::ruff         # linting
+  - conda-forge::yapf         # code formatting
+  - conda-forge::monkeytype   # infer type annotations
+  - conda-forge::rich         # better, colored tracebacks, etc
+  - conda-forge::pytest-sugar # better pytest output
+  # - conda-forge::nodejs       # for `doc-builder preview` (optional)
+
+## ENV CREATION - steps to reproduce:
+# mamba env remove -n bnb
+# mamba create -y -n bnb python=3.8 # creating an empty env bypasses conda
+# # and leads to much faster env resolution in the next step https://github.com/mamba-org/mamba/issues/633#issuecomment-812272143
+# mamba env update -n bnb -f environment.yml
+# mamba activate bnb
+
+## PIP dependencies (install *after* ENV CREATION):
+# pip install --no-cache-dir --no-deps lion_pytorch triton hf-doc-builder watchdog
+## NOTE: conda peft is not up to date, so we install from pip
+# cd pip install -e .  ## installs bitsandbytes as editable development install from within repo root dir
+
+## ENV UPDATE:
+# # add new packages to environment.yml, then:
+# mamba env update -n bnb -f environment.yml

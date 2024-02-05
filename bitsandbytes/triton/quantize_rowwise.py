@@ -1,6 +1,6 @@
 import math
+
 import torch
-import time
 
 from bitsandbytes.triton.triton_utils import is_triton_available
 
@@ -10,7 +10,6 @@ else:
 
     import triton
     import triton.language as tl
-    from triton.ops.matmul_perf_model import early_config_prune, estimate_matmul_time
 
     # rowwise quantize
 
@@ -47,7 +46,7 @@ else:
         offsets = block_start + arange
         row_mask = arange < BLOCK_SIZE
         x = tl.load(x_ptr + offsets, mask=row_mask)
-        
+
         abs_x = tl.abs(x)
         max_val = tl.max(tl.where(row_mask, abs_x, 0), axis=0)
         output = tl.libdevice.llrint(127. * (x / max_val))
@@ -65,4 +64,3 @@ else:
         grid = lambda meta: (x.shape[0],)
         _quantize_rowwise[grid](x, output, output_maxs, n_elements, BLOCK_SIZE=x.shape[1], P2=P2)
         return output, output_maxs
-

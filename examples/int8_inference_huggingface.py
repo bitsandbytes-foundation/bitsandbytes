@@ -22,6 +22,3 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 generated_ids = model.generate(input_ids, max_length=MAX_NEW_TOKENS)
 print(tokenizer.decode(generated_ids[0], skip_special_tokens=True))
-
-
-

@@ -1,20 +1,15 @@
-import pytest
-import torch
+from itertools import product
 import math
 
-from itertools import product
-
+import pytest
+import torch
 import transformers
 from transformers import (
-  AutoConfig,
   AutoModelForCausalLM,
-  AutoTokenizer,
   BitsAndBytesConfig,
-  GenerationConfig,
-  set_seed,
-
 )
 
+from tests.helpers import TRUE_FALSE, describe_dtype, id_formatter
 
 
 def get_4bit_config():
@@ -66,23 +61,19 @@ def generate(model, tokenizer, text, generation_config, prompt_func=get_prompt_f
 
 models = ['huggyllama/llama-7b', 'bigscience/bloom-1b7']
 dtypes = ['nf4', 'fp4']
-load_in_4bit = [True, False]
-values = list(product(models, dtypes))
-strfunc = lambda lst: [str(x) for x in lst]
-ids = ['_'.join(strfunc(x)) for x in values]
-@pytest.fixture(scope='session', params=values, ids=ids)
+
+@pytest.fixture(scope='session', params=product(models, dtypes))
 def model_and_tokenizer(request):
     model, tokenizer = get_model_and_tokenizer(request.param)
     yield request.param, model, tokenizer
     del model
 
-@pytest.mark.parametrize("DQ", [True, False], ids=['DQ_True', 'DQ_False'])
-@pytest.mark.parametrize("inference_kernel", [True, False], ids=['inference_kernel_True', 'inference_kernel_False'])
-#@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
-def test_pi(model_and_tokenizer, inference_kernel, DQ):
-    print('')
-    dtype = torch.float16
 
+@pytest.mark.parametrize("DQ", TRUE_FALSE, ids=id_formatter("dq"))
+@pytest.mark.parametrize("inference_kernel", TRUE_FALSE, ids=id_formatter("inference_kernel"))
+@pytest.mark.parametrize("dtype", [torch.float16], ids=describe_dtype)
+@pytest.mark.slow
+def test_pi(requires_cuda, model_and_tokenizer, inference_kernel, DQ, dtype):
     fixture_config, model, tokenizer = model_and_tokenizer
 
     generation_config = transformers.GenerationConfig(
@@ -129,6 +120,3 @@ def test_pi(model_and_tokenizer, inference_kernel, DQ):
         for out in outputs:
             print(out)
         raise ValueError(f'Failure count: {failure_count}/{n_cases}')
-
-
-

@@ -1,20 +1,18 @@
-import operator
-import warnings
-from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
+import operator
+from typing import Optional
+import warnings
 
 import torch
 
+from bitsandbytes.autograd._functions import GlobalOutlierPooler, MatmulLtState
 import bitsandbytes.functional as F
-
-from bitsandbytes.autograd._functions import MatmulLtState, GlobalOutlierPooler
 
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
     return reduce(operator.mul, iterable, 1)
 
-tensor = torch.Tensor
 
 class MatMulFP8Mixed(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
@@ -85,7 +83,7 @@ class MatMulFP8Mixed(torch.autograd.Function):
         # fp8out_transpose = fp8out_transpose.view(grad_output.shape[0], grad_output.shape[1], grad_output.shape[2])
 
         # not supported by PyTorch. TODO: create work-around
-        if req_gradA: 
+        if req_gradA:
             grad_A = torch.matmul(fp8out, B.t().to(fp8out.dtype)).to(A.dtype)
 
         if req_gradB:
@@ -169,7 +167,7 @@ class MatMulFP8Global(torch.autograd.Function):
         # fp8out_transpose = fp8out_transpose.view(grad_output.shape[0], grad_output.shape[1], grad_output.shape[2])
 
         # not supported by PyTorch. TODO: create work-around
-        if req_gradA: 
+        if req_gradA:
             grad_A = torch.matmul(fp8out, B.t().to(fp8out.dtype)).to(A.dtype)
 
         if req_gradB:
@@ -186,7 +184,9 @@ class MatMulFP8Global(torch.autograd.Function):
 
 class SwitchBackBnb(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState()):
+    # TODO: the B008 on the line below is a likely bug; the current implementation will
+    #       have each SwitchBackBnb instance share a single MatmulLtState instance!!!
+    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState()):  # noqa: B008
         # default to pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
@@ -389,19 +389,38 @@ def get_block_sizes(input_matrix, weight_matrix):
 
     return bsz, bsz2
 
-def matmul_fp8_global(A: tensor, B: tensor, fw_code: tensor, bw_code: tensor, out: tensor = None, bsz : int = -1, bsz2 : int = -1):
+
+def matmul_fp8_global(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    fw_code: torch.Tensor,
+    bw_code: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    bsz: int = -1,
+    bsz2: int = -1,
+):
     if bsz == -1 or bsz2 == -1: bsz, bsz2 = get_block_sizes(A, B)
     return MatMulFP8Global.apply(A, B, out, fw_code, bw_code, bsz, bsz2)
 
-def matmul_fp8_mixed(A: tensor, B: tensor, fw_code: tensor, bw_code: tensor, out: tensor = None, bsz : int = -1, bsz2 : int = -1):
+
+def matmul_fp8_mixed(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    fw_code: torch.Tensor,
+    bw_code: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    bsz: int = -1,
+    bsz2: int = -1,
+):
     if bsz == -1 or bsz2 == -1: bsz, bsz2 = get_block_sizes(A, B)
     return MatMulFP8Mixed.apply(A, B, out, fw_code, bw_code, bsz, bsz2)
 
+
 def switchback_bnb(
-    A: tensor,
-    B: tensor,
-    out: tensor = None,
-    state: MatmulLtState = None,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    state: Optional[MatmulLtState] = None,
     threshold=0.0,
     bias=None
 ):
