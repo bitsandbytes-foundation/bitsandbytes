@@ -37,7 +37,7 @@ else:  # Linux or other
     # we have libcudart.so.11.0 which causes a lot of errors before
     # not sure if libcudart.so.12.0 exists in pytorch installs, but it does not hurt
     CUDA_RUNTIME_LIBS = ["libcudart.so", "libcudart.so.11.0", "libcudart.so.12.0", "libcudart.so.12.1", "libcudart.so.12.2"]
-    DYNAMIC_LIBRARY_SUFFIX = ".so"
+    DYNAMIC_LIBRARY_SUFFIX = { "Darwin": ".dylib", "Windows":".dll" }.get(platform.system(), ".so")
 
 
 class CUDASetup:
