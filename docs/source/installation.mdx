@@ -23,12 +23,10 @@ pip install bitsandbytes
 
 ```bash
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
-CUDA_VERSION=XXX make cuda12x
-python setup.py install
+cmake -B build -DBUILD_CUDA=ON -S .
+pip install .
 ```
-
-with `XXX` being your CUDA version, for <12.0 call `make cuda 11x`. Note support for non-CUDA GPUs (e.g. AMD, Intel), is also coming soon.
-
+Note support for non-CUDA GPUs (e.g. AMD, Intel), is also coming soon.
 For a more detailed compilation guide, head to the [dedicated page on the topic](./compiling)
 
 </hfoption>
