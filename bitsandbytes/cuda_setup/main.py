@@ -28,16 +28,15 @@ import torch
 
 from .env_vars import get_potentially_lib_path_containing_env_vars
 
-if platform.system() == 'Windows':  # Windows
+DYNAMIC_LIBRARY_SUFFIX = { "Darwin": ".dylib", "Windows": ".dll", "Linux": ".so"}.get(platform.system(), ".so")
+if platform.system() == "Windows":  # Windows
     CUDA_RUNTIME_LIBS = ["nvcuda.dll"]
-    DYNAMIC_LIBRARY_SUFFIX = ".dll"
 else:  # Linux or other
     # these are the most common libs names
     # libcudart.so is missing by default for a conda install with PyTorch 2.0 and instead
     # we have libcudart.so.11.0 which causes a lot of errors before
     # not sure if libcudart.so.12.0 exists in pytorch installs, but it does not hurt
     CUDA_RUNTIME_LIBS = ["libcudart.so", "libcudart.so.11.0", "libcudart.so.12.0", "libcudart.so.12.1", "libcudart.so.12.2"]
-    DYNAMIC_LIBRARY_SUFFIX = ".so"
 
 
 class CUDASetup:
