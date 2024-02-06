@@ -1,5 +1,4 @@
-from .cuda import CUDABackend
-
+from bitsandbytes.cextension import COMPILED_WITH_CUDA
 
 class Backends:
     """
@@ -13,28 +12,17 @@ class Backends:
     devices = {}
 
     @classmethod
-    def register_backend(cls, backend_name: str, backend_class):
+    def register_backend(cls, backend_name: str, backend_instance):
         assert backend_name.lower() in {
             "cpu",
             "cuda",
             "xpu",
         }, "register device backend choices in [cpu, cuda, xpu]"
 
-        # check 8bits and 4bits interfaces
-        if (
-            hasattr(backend_class, "double_quant")
-            and hasattr(backend_class, "transform")
-            and hasattr(backend_class, "igemmlt")
-            and hasattr(backend_class, "mm_dequant")
-            and hasattr(backend_class, "extract_outliers")
-            and hasattr(backend_class, "quantize_4bit")
-            and hasattr(backend_class, "dequantize_4bit")
-        ):
-            cls.devices[backend_name.lower()] = backend_class
-        else:
-            assert (
-                False
-            ), f"register device backend {backend_name.lower()} but its interfaces are not compelete"
+        cls.devices[backend_name.lower()] = backend_instance
 
-
-Backends.register_backend("cuda", CUDABackend)
+if COMPILED_WITH_CUDA:
+    from .cuda import CUDABackend
+    cuda_backend = CUDABackend(torch.device("cuda").type)
+    Backends.register_backend(cuda_backend.get_name(), cuda_backend)
+# TODO: register more backends support 

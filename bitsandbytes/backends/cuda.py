@@ -18,9 +18,15 @@ from bitsandbytes.functional import (
 )
 from bitsandbytes.functional import CUBLAS_Context, QuantState
 from bitsandbytes.cextension import lib
+from .basic_backend import DeviceBackends
 
+class CUDABackend(DeviceBackends):
+    def __init__(self, backend_name: str):
+        self.backend_name = backend_name
 
-class CUDABackend:
+    def get_name(self) -> str:
+        return self.backend_name
+
     @classmethod
     def double_quant(
         cls, A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
