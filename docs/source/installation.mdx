@@ -26,7 +26,7 @@ You need CMake and Python installed. For Linux, make sure to install a compiler 
 ```bash
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 pip install -r requirements-dev.txt
-cmake -DCOMPUTE_BACKEND=cuda
+cmake -DCOMPUTE_BACKEND=cuda -S .
 make
 pip install .
 ```
