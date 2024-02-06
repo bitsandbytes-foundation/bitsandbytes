@@ -23,7 +23,7 @@ set(METAL_FILES csrc/mps_kernels.metal)
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, mps)")
+set(COMPUTE_BACKEND "" CACHE STRING "The compute backend to use (cpu, cuda, mps)")
 set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda mps)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
@@ -31,11 +31,18 @@ if(APPLE)
   set(CMAKE_OSX_DEPLOYMENT_TARGET 13.1)
 endif()
 
+option(BUILD_CUDA "Build bitsandbytes with CUDA support" OFF)
+option(BUILD_MPS "Build bitsandbytes with MPS support" OFF)
+option(NO_CUBLASLT "Disable CUBLAS" OFF)
+
 set(BNB_OUTPUT_NAME "bitsandbytes")
 
-message(STATUS "Building with backend ${COMPUTE_BACKEND}")
+if("${COMPUTE_BACKEND}" STREQUAL "")
+else()
+    message(STATUS "Building with backend ${COMPUTE_BACKEND}")
+endif()
 
-if(${COMPUTE_BACKEND} STREQUAL "cuda")
+if("${COMPUTE_BACKEND}" STREQUAL "cuda")
     if(APPLE)
         message(FATAL_ERROR "CUDA is not supported on macOS" )
     endif()
@@ -43,19 +50,20 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
     set(BUILD_CUDA ON)
     set(BUILD_MPS OFF)
     message(STATUS "NO_CUBLASLT := ${NO_CUBLASLT}")
-elseif(${COMPUTE_BACKEND} STREQUAL "mps")
+elseif("${COMPUTE_BACKEND}" STREQUAL "mps")
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
     set(BUILD_MPS ON)
-else()
-    set(BUILD_CUDA OFF)
-    set(BUILD_MPS OFF)
 endif()
 
 
 if(BUILD_CUDA)
+    if(APPLE)
+        message(FATAL_ERROR "CUDA is not supported on macOS" )
+    endif()
+    message(STATUS "Building with BUILD_CUDA...")
     enable_language(CUDA) # This will fail if CUDA is not found
     find_package(CUDAToolkit REQUIRED)
 
@@ -120,6 +128,7 @@ elseif(BUILD_MPS)
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
     endif()
+    message(STATUS "Building with BUILD_MPS...")
 
     enable_language(OBJCXX)
 
