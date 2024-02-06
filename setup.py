@@ -5,16 +5,22 @@
 import glob
 import os
 
-from setuptools import Extension, find_packages, setup
+from setuptools import find_packages, setup
+from setuptools.dist import Distribution
 
-libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.so"))
-libs += list(glob.glob("./bitsandbytes/libbitsandbytes*.dll"))
+libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.*"))
 libs = [os.path.basename(p) for p in libs]
 print("libs:", libs)
 
 
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
+
+
+# Tested with wheel v0.29.0
+class BinaryDistribution(Distribution):
+    def has_ext_modules(self):
+        return True
 
 
 setup(
@@ -28,18 +34,16 @@ setup(
     url="https://github.com/TimDettmers/bitsandbytes",
     packages=find_packages(),
     package_data={"": libs},
-    install_requires=['torch', 'numpy'],
+    install_requires=["torch", "numpy"],
     extras_require={
-        'benchmark': ['pandas', 'matplotlib'],
-        'test': ['scipy'],
+        "benchmark": ["pandas", "matplotlib"],
+        "test": ["scipy"],
     },
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
-    # HACK: pretend we have a native extension module so the wheel is tagged
-    #       correctly with a platform tag (e.g. `-linux_x86_64.whl`).
-    ext_modules=[Extension("bitsandbytes", sources=[], language="c")],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
+    distclass=BinaryDistribution,
 )

@@ -1,0 +1,227 @@
+name: Python package
+
+on:
+  push: {}
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/python-package.yml'
+      - 'bitsandbytes/**'
+      - 'csrc/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - 'requirements*.txt'
+      - 'setup.py'
+      - 'pyproject.toml'
+      - 'pytest.ini'
+      - '**/*.md'
+  release:
+    types: [ published ]
+
+jobs:
+
+  ##
+  # This job matrix builds the non-CUDA versions of the libraries for all supported platforms.
+  ##
+  build-shared-libs:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [x86_64, aarch64]
+        exclude:
+          - os: windows-latest # This probably requires arm64 Windows agents
+            arch: aarch64
+    runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
+    steps:
+      # Check out code
+    - uses: actions/checkout@v4
+      # On Linux we use CMake within Docker
+    - name: Setup cmake
+      uses: jwlawson/actions-setup-cmake@v1.14
+      with:
+        cmake-version: '3.26.x'
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v1.1
+      if: ${{ startsWith(matrix.os, 'windows') }}
+      # Check out dependencies code
+    - uses: actions/checkout@v4
+      name: Check out NVidia cub
+      with:
+        repository: nvidia/cub
+        ref: 1.11.0
+        path: dependencies/cub
+      # Compile C++ code
+    - name: Build C++
+      shell: bash
+      run: |
+        set -ex
+        build_os=${{ matrix.os }}
+        build_arch=${{ matrix.arch }}
+        if [ ${build_os:0:6} == ubuntu -a ${build_arch} == aarch64 ]; then
+          # Allow cross-compile om aarch64
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+        fi
+        if [ ${build_os:0:5} == macos -a ${build_arch} == aarch64 ]; then
+          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCOMPUTE_BACKEND=cpu .
+        else
+          cmake -DCOMPUTE_BACKEND=cpu .
+        fi
+        if [ ${build_os:0:7} == windows ]; then
+          pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
+        else
+          make
+        fi
+        mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
+        ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: shared_library_${{ matrix.os }}_${{ matrix.arch }}
+        path: output/*
+        retention-days: 7
+  ##
+  # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
+  ##
+  build-shared-libs-cuda:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        arch: [x86_64, aarch64]
+        cuda_version: ['12.1.0']
+        exclude:
+          - os: windows-latest # This probably requires arm64 Windows agents
+            arch: aarch64
+    runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
+    steps:
+      # Check out code
+    - uses: actions/checkout@v4
+      # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
+    - name: Set up Docker multiarch
+      if: startsWith(matrix.os, 'ubuntu')
+      uses: docker/setup-qemu-action@v2
+      # On Linux we use CMake within Docker
+    - name: Setup cmake
+      if: ${{ !startsWith(matrix.os, 'linux') }}
+      uses: jwlawson/actions-setup-cmake@v1.14
+      with:
+        cmake-version: '3.26.x'
+      # Windows: We install Cuda on the agent (slow)
+    - uses: Jimver/cuda-toolkit@v0.2.14
+      if: startsWith(matrix.os, 'windows')
+      id: cuda-toolkit
+      with:
+        cuda: ${{ matrix.cuda_version }}
+        method: 'local'
+        # sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","cusparse_dev","visual_studio_integration"]'
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v1.1
+      if: ${{ startsWith(matrix.os, 'windows') }}
+      # Check out dependencies code
+    - uses: actions/checkout@v4
+      name: Check out NVidia cub
+      with:
+        repository: nvidia/cub
+        ref: 1.11.0
+        path: dependencies/cub
+      # Compile C++ code
+    - name: Build C++
+      shell: bash
+      run: |
+        set -ex
+        build_os=${{ matrix.os }}
+        build_arch=${{ matrix.arch }}
+        for NO_CUBLASLT in ON OFF; do
+          if [ ${build_os:0:6} == ubuntu ]; then
+            image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
+            echo "Using image $image"
+            docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
+              "apt-get update \
+              && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
+              && cmake -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} . \
+              && make"
+          else
+            cmake -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} .
+            pwsh -Command "msbuild bitsandbytes.vcxproj /property:Configuration=Release"
+          fi
+        done
+        mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
+        ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
+        path: output/*
+        retention-days: 7
+  build-wheels:
+    needs:
+    - build-shared-libs
+    - build-shared-libs-cuda
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        arch: [x86_64, aarch64]
+        exclude:
+          - os: windows-latest # This probably requires arm64 Windows agents
+            arch: aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Check out code
+    - uses: actions/checkout@v4
+      # Download shared libraries
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        merge-multiple: true
+        pattern: "shared_library*_${{ matrix.os }}_${{ matrix.arch }}*"
+        path: output/
+    - name: Copy correct platform shared library
+      shell: bash
+      run: |
+        ls -lR output/
+        cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
+      # Set up the Python version needed
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
+    - name: Install build package
+      shell: bash
+      run: pip install build
+    - name: Install Python test dependencies
+      shell: bash
+      run: pip install -r requirements-ci.txt
+    # TODO: How to run CUDA tests on GitHub actions?
+    #- name: Run unit tests
+    #  if: ${{ matrix.arch == 'x86_64' }} # Tests are too slow to run in emulation. Wait for real aarch64 agents
+    #  run: |
+    #    PYTHONPATH=. pytest --log-cli-level=DEBUG tests
+    - name: Build wheel
+      shell: bash
+      run: python -m build .
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.python-version }}
+        path: dist/bitsandbytes-*.whl
+        retention-days: 7
+  publish:
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        path: dist/
+        merge-multiple: true
+        pattern: "bdist_wheel_*"
+    - run: |
+        ls -lR dist/
+    - name: Publish to PyPi
+      if: startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.pypi }}

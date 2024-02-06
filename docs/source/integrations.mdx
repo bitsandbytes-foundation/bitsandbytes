@@ -29,7 +29,7 @@ Please review the [bitsandbytes section in the Accelerate docs](https://huggingf
 
 # Trainer for the optimizers
 
-You can use any of the 8-bit and/or paged optimizers by simple passing them to the `transformers.Trainer` class on intialization.All bnb optimizers are supported by passing the correct string in `TrainingArguments`'s `optim` attribute - e.g. (`paged_adamw_32bit`).
+You can use any of the 8-bit and/or paged optimizers by simple passing them to the `transformers.Trainer` class on initialization.All bnb optimizers are supported by passing the correct string in `TrainingArguments`'s `optim` attribute - e.g. (`paged_adamw_32bit`).
 
 See the [official API docs for reference](https://huggingface.co/docs/transformers/main_classes/trainer#transformers.Trainer).
 

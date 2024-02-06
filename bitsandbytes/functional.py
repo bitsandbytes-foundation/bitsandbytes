@@ -120,7 +120,7 @@ class GlobalPageManager:
         return cls._instance
 
     def prefetch_all(self, to_cpu=False):
-        # assume the first added, will be hte
+        # assume the first added, will be the
         # ones that are used first, so swap them in last
         # in the case they are evicted again
         for t in self.paged_tensors[::-1]:
@@ -219,7 +219,7 @@ def elementwise_func(func_name, A, B, value, prefetch=True):
         # paged function are fully asynchronous
         # if we return from this function, we want to the tensor
         # to be in the correct state, that is the final state after the
-        # operation occured. So we synchronize.
+        # operation occurred. So we synchronize.
         torch.cuda.synchronize()
 
 def fill(A, value, device=None, prefetch=True): elementwise_func('fill', A, None, value)
@@ -589,7 +589,7 @@ def estimate_quantiles(A: Tensor, out: Optional[torch.Tensor] = None, offset: fl
 
 
 class QuantState:
-    """container for quantization state components to work with Params4bit and similar clases"""
+    """container for quantization state components to work with Params4bit and similar classes"""
     valid_quant_types = ('fp4', 'nf4')
     valid_qs_type_keys = [f"bitsandbytes__{x}" for x in valid_quant_types]
     valid_qs_keys = ['absmax', 'quant_map', 'nested_absmax', 'nested_quant_map', 'quant_state', 'quant_type',

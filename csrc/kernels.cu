@@ -134,10 +134,10 @@ __device__ unsigned char dQuantizeFP4(float x)
 
   // we do a binary search
   // the pivots are divided by 12 (the FP4 absmax)
-  // since we assum input data is in [-1.0, 1.0]
+  // since we assume input data is in [-1.0, 1.0]
 
   // !be careful here, its easy to make a mistake
-  // that is difficult to noice if you add an extra
+  // that is difficult to notice if you add an extra
   // zero somewhere!
 
   int sign = x < 0 ? 0b1000 : 0b0000;
@@ -2259,8 +2259,8 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   }
 
   // 4. store data via atomicMax
-  // to store col data efficienctly we need to rewrite the smem blocked data [0, 1, 2, 3...] for t0
-  // into a striped arangement: [0, 8, 16, 24, ..] for t0
+  // to store col data efficiently we need to rewrite the smem blocked data [0, 1, 2, 3...] for t0
+  // into a striped arrangement: [0, 8, 16, 24, ..] for t0
   __syncthreads();
   BlockExchange(temp_storage.exchange).BlockedToStriped(local_col_absmax_values);
 
@@ -2310,7 +2310,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
   // data is in 32 column-tile major with tile width 32 columns and numRows rows
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
-  // L2. Load data in warp-striped arangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
+  // L2. Load data in warp-striped arrangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
   // C1. Compute val(row_stat*col_stat)/(127*127) (load 1/(127*127 into register))
   // C2. Compute normalization values and store col values in register
   // S1. Store C1 into 16-bit output
@@ -2383,7 +2383,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     if(valid_items <= 0) // the sub-tile might have more elements than the tile itself
       break;
 
-    // L2. Load data in warp-striped arangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
+    // L2. Load data in warp-striped arrangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
     LoadInt32(loadint32).Load(&(A[subtile_idx]), local_values, valid_items, 0);
     ExchangeInt32(exchangeint32).BlockedToWarpStriped(local_values, local_values);
 
@@ -2650,7 +2650,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   // row1 [col0 col1 ... col31]
                   // ...
                   //
-                  // As such we read consequtive entries with 256 threads (8rows x 32 columns)
+                  // As such we read consecutive entries with 256 threads (8rows x 32 columns)
                   // as j increase, the row increase by a factor of 8
                   // We load 8 rows per subrow loop, and subrow increase by 8 per loop
                   // so we have an offset of 8 rows every loop or (subrow/warps)*8 = (subrow/8)*8
@@ -2747,7 +2747,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // each of these has 32 values in total for 32*4 = 128 as offset if odd
                     // every set of 4 columns increases the total offset by 16
                     // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc so: subrow/2*4 = subrow*2
-                    // this happends every 8 rows anew (subrow % 8)
+                    // this happens every 8 rows anew (subrow % 8)
                     // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
                     int subcol = warp_lane;
 
@@ -3073,7 +3073,7 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //// 4. do dequantization from register of B into second pair of registers
 //// 5. store (4) into fragment
 //// 6. matmul aggregate into fragment C
-//// 7. aggreecate files of C into shared memroy block C
+//// 7. aggreecate files of C into shared memory block C
 //// 8. sum (7)
 //// 9. write outputs to matmul output matrix
 //}
