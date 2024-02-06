@@ -21,12 +21,16 @@ pip install bitsandbytes
 
 ### From source
 
+You need CMake and Python installed. For Linux, make sure to install a compiler (`apt install build-essential`, for example).
+
 ```bash
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
-cmake -B build -DBUILD_CUDA=ON -S .
+pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=cuda -S .
+make
 pip install .
 ```
-Note support for non-CUDA GPUs (e.g. AMD, Intel), is also coming soon.
+Note support for non-CUDA GPUs (e.g. AMD, Intel, Apple Silicon), is also coming soon.
 For a more detailed compilation guide, head to the [dedicated page on the topic](./compiling)
 
 </hfoption>
@@ -34,12 +38,15 @@ For a more detailed compilation guide, head to the [dedicated page on the topic]
 
 ## Windows
 
+Windows builds require Visual Studio with C++ support, as well as the Cuda SDK installed.
+
 Currently for Windows users, you need to build bitsandbytes from source:
 
 ```bash
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
-cmake -B build -DBUILD_CUDA=ON -S .
-cmake --build build --config Release
+pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=cuda -S .
+cmake --build . --config Release
 python -m build --wheel
 ```
 
