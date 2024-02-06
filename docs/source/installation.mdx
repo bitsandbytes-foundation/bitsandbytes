@@ -40,7 +40,7 @@ Currently for Windows users, you need to build bitsandbytes from source:
 
 ```bash
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
-cmake -DCOMPUTE_BACKEND=cuda
+cmake -DCOMPUTE_BACKEND=cuda -S .
 cmake --build . --config Release
 python -m build --wheel
 ```
