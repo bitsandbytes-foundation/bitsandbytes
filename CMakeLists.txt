@@ -136,7 +136,7 @@ elseif(BUILD_MPS)
                 VERBATIM)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
 else()
-    set(LIBSUFFIX "cpu")
+    string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
 endif()
 
