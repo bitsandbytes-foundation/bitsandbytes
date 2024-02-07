@@ -44,13 +44,6 @@ jobs:
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v1.1
       if: ${{ startsWith(matrix.os, 'windows') }}
-      # Check out dependencies code
-    - uses: actions/checkout@v4
-      name: Check out NVidia cub
-      with:
-        repository: nvidia/cub
-        ref: 1.11.0
-        path: dependencies/cub
       # Compile C++ code
     - name: Build C++
       shell: bash
@@ -117,13 +110,6 @@ jobs:
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v1.1
       if: ${{ startsWith(matrix.os, 'windows') }}
-      # Check out dependencies code
-    - uses: actions/checkout@v4
-      name: Check out NVidia cub
-      with:
-        repository: nvidia/cub
-        ref: 1.11.0
-        path: dependencies/cub
       # Compile C++ code
     - name: Build C++
       shell: bash
