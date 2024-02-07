@@ -1,5 +1,6 @@
 from bitsandbytes.cextension import COMPILED_WITH_CUDA
 
+
 class Backends:
     """
     An dict class for device backends that registered with 8bits and 4bits functions.
@@ -25,4 +26,4 @@ if COMPILED_WITH_CUDA:
     from .cuda import CUDABackend
     cuda_backend = CUDABackend(torch.device("cuda").type)
     Backends.register_backend(cuda_backend.get_name(), cuda_backend)
-# TODO: register more backends support 
+# TODO: register more backends support

@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
-import torch
 from typing import Optional, Tuple
+
+import torch
+
 from bitsandbytes.functional import QuantState
 
 

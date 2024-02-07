@@ -2081,6 +2081,7 @@ def pipeline_test(A, batch_size):
 
 from bitsandbytes.backends import Backends
 
+
 # 8 bits common functions
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
     assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
@@ -2127,4 +2128,3 @@ def quantize_4bit(
 def dequantize_4bit(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
     assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
     return Backends.devices[A.device.type].dequantize_4bit(A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type)
-

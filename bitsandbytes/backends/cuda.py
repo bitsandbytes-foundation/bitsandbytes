@@ -1,24 +1,29 @@
-import torch
-from torch import Tensor
 import ctypes as ct
 from typing import Optional, Tuple
+
+import torch
+from torch import Tensor
+
+from bitsandbytes.cextension import lib
 from bitsandbytes.functional import (
-    pre_call,
-    post_call,
-    get_colrow_absmax,
-    get_ptr,
-    is_on_gpu,
+    CUBLAS_Context,
+    QuantState,
     coo_zeros,
-    get_transform_buffer,
-    prod,
-    get_4bit_type,
-    quantize_blockwise,
     dequantize_blockwise,
     dtype2bytes,
+    get_4bit_type,
+    get_colrow_absmax,
+    get_ptr,
+    get_transform_buffer,
+    is_on_gpu,
+    post_call,
+    pre_call,
+    prod,
+    quantize_blockwise,
 )
-from bitsandbytes.functional import CUBLAS_Context, QuantState
-from bitsandbytes.cextension import lib
+
 from .basic_backend import DeviceBackends
+
 
 class CUDABackend(DeviceBackends):
     def __init__(self, backend_name: str):

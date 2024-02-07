@@ -2,6 +2,7 @@ import ctypes as ct
 from warnings import warn
 
 import torch
+
 from bitsandbytes.device_setup.cuda.main import CUDASetup
 
 setup = CUDASetup.get_instance()
