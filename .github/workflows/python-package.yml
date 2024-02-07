@@ -104,7 +104,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         arch: [x86_64, aarch64]
-        cuda-version: ['11.8.0', '12.1.1']
+        cuda-version: ${{ startsWith(github.ref, 'refs/tags') && fromJson('["11.8.0","12.1.1"]') || fromJson('["12.1.1"]') }}
         build_type: [Release]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
