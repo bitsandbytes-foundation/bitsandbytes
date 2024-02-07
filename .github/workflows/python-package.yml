@@ -33,6 +33,8 @@ jobs:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
+    env:
+      CUDA_VERSION: notset
     steps:
       # Check out code
     - uses: actions/checkout@v4
@@ -100,7 +102,7 @@ jobs:
     - name: Set CUDA version
       shell: bash
       run: |
-        cuda_version=$(scripts/get_docker_info.sh docker/cuda.Dockerfile cuda${{ matrix.cuda_version }})
+        cuda_version=$(scripts/get_docker_info.sh -v docker/cuda.Dockerfile cuda${{ matrix.cuda_version }} | sed -e 's/-.*//')
         echo "CUDA version to use is $cuda_version"
         echo "CUDA_VERSION=$cuda_version" >> $GITHUB_ENV
       # On Linux we use CMake within Docker
@@ -118,7 +120,7 @@ jobs:
       if: startsWith(matrix.os, 'windows')
       id: cuda-toolkit
       with:
-        cuda: ${{ vars.CUDA_VERSION }}
+        cuda: ${{ env.CUDA_VERSION }}
         method: 'local'
         # sub-packages: '["nvcc","cudart","nvrtc_dev","cublas_dev","cusparse_dev","visual_studio_integration"]'
     - name: Add msbuild to PATH
@@ -140,7 +142,7 @@ jobs:
         build_arch=${{ matrix.arch }}
         for NO_CUBLASLT in ON OFF; do
           if [ ${build_os:0:6} == ubuntu ]; then
-            image=nvidia/cuda:${{ vars.CUDA_VERSION }}-devel-ubuntu22.04
+            image=nvidia/cuda:${{ env.CUDA_VERSION }}-devel-ubuntu22.04
             echo "Using image $image"
             docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
               "apt-get update \
@@ -157,7 +159,7 @@ jobs:
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ vars.CUDA_VERSION }}
+        name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ env.CUDA_VERSION }}
         path: output/*
         retention-days: 7
   build-wheels:
