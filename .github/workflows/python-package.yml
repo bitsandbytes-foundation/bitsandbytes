@@ -1,9 +1,9 @@
 name: Python package
 
 on:
-  push: {}
-  pull_request:
+  push:
     branches: [ main ]
+  pull_request:
     paths:
       - '.github/workflows/python-package.yml'
       - 'bitsandbytes/**'
@@ -17,7 +17,12 @@ on:
       - 'pytest.ini'
       - '**/*.md'
   release:
+    branches: [ main ]
     types: [ published ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
@@ -26,9 +31,13 @@ jobs:
   ##
   build-shared-libs:
     strategy:
+      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
+      fail-fast: false
+
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         arch: [x86_64, aarch64]
+        build_type: [Release]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
@@ -36,49 +45,67 @@ jobs:
     steps:
       # Check out code
     - uses: actions/checkout@v4
-      # On Linux we use CMake within Docker
-    - name: Setup cmake
-      uses: jwlawson/actions-setup-cmake@v1.14
-      with:
-        cmake-version: '3.26.x'
+    - name: Allow cross-compile on aarch64
+      if: ${{ startsWith(matrix.os, 'ubuntu') && matrix.arch == 'aarch64' }}
+      run: |
+        # Allow cross-compile on aarch64
+        sudo apt-get install -y g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
     - name: Setup MSVC
       if: startsWith(matrix.os, 'windows')
       #uses: microsoft/setup-msbuild@v1.1 # to use msbuild
       uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
-      # Compile C++ code
-    - name: Build C++
-      shell: bash
+    - name: Prep Compilers
+      shell: bash -el {0}
       run: |
-        set -ex
-        build_os=${{ matrix.os }}
-        build_arch=${{ matrix.arch }}
-        if [ ${build_os:0:6} == ubuntu -a ${build_arch} == aarch64 ]; then
-          # Allow cross-compile om aarch64
-          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-        fi
-        if [ ${build_os:0:5} == macos -a ${build_arch} == aarch64 ]; then
-          cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCOMPUTE_BACKEND=cpu .
+        python3 -m pip install cmake==3.27.9 ninja
+        if [[ "${{ matrix.os }}" = windows-* ]]; then
+          echo CXX_COMPILER=-DCMAKE_CXX_COMPILER=cl >> "$GITHUB_ENV"
+        elif [[ "${{ matrix.os }}" = ubuntu-* ]] && [[ "${{ matrix.arch }}" = "aarch64" ]]; then
+          echo CXX_COMPILER=-DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ >> "$GITHUB_ENV"
         else
-          cmake -DCOMPUTE_BACKEND=cpu .
+          echo CXX_COMPILER=-DCMAKE_CXX_COMPILER=g++ >> "$GITHUB_ENV"
         fi
-        cmake --build . --config Release
+
+        if [[ "${{ matrix.os }}" = macos-* ]] && [[ "${{ matrix.arch }}" = "aarch64" ]]; then
+          echo DCMAKE_OSX_ARCHITECTURES=-DCMAKE_OSX_ARCHITECTURES=arm64 >> "$GITHUB_ENV"
+        fi
+
+    - name: Build CPU
+      shell: bash -el {0}
+      run: |
+        cmake -B build \
+        -G Ninja ${{ env.DCMAKE_OSX_ARCHITECTURES }} \
+        ${{ env.CXX_COMPILER }} \
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+        -DCOMPUTE_BACKEND=cpu \
+        -S .
+
+        cmake --build build --config ${{ matrix.build_type }}
+
         mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
+        ls -l bitsandbytes
+        echo " check lib files..."
+        file bitsandbytes/libbitsandbytes*.*
         ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: shared_library_${{ matrix.os }}_${{ matrix.arch }}
         path: output/*
-        retention-days: 7
   ##
   # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
   ##
   build-shared-libs-cuda:
     strategy:
+      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
+      fail-fast: false
+
       matrix:
         os: [ubuntu-latest, windows-latest]
         arch: [x86_64, aarch64]
-        cuda_version: ['12.1.0']
+        cuda-version: ['11.8.0', '12.1.1']
+        build_type: [Release]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
@@ -90,56 +117,98 @@ jobs:
     - name: Set up Docker multiarch
       if: startsWith(matrix.os, 'ubuntu')
       uses: docker/setup-qemu-action@v2
-      # On Linux we use CMake within Docker
-    - name: Setup cmake
-      if: ${{ !startsWith(matrix.os, 'linux') }}
-      uses: jwlawson/actions-setup-cmake@v1.14
-      with:
-        cmake-version: '3.26.x'
       # Windows: We install Cuda on the agent (slow)
     - uses: Jimver/cuda-toolkit@v0.2.14
       if: startsWith(matrix.os, 'windows')
       id: cuda-toolkit
       with:
-        cuda: ${{ matrix.cuda_version }}
+        cuda: ${{ matrix.cuda-version }}
         method: 'network'
         sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
         linux-local-args: '["--toolkit"]'
         use-github-cache: false
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
     - name: Setup MSVC
       if: startsWith(matrix.os, 'windows')
       #uses: microsoft/setup-msbuild@v1.1 # to use msbuild
       uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
-      # Compile C++ code
-    - name: Build C++
+    - name: Setup Environments
+      if: startsWith(matrix.os, 'windows')
+      shell: bash -el {0}
+      run: |
+        if [[ "${{ matrix.os }}" = windows-* ]]; then
+          echo CXX_COMPILER=-DCMAKE_CXX_COMPILER=cl >> "$GITHUB_ENV"
+          # without -DCMAKE_CUDA_COMPILER=nvcc, cmake config always fail for cuda-11.8
+          echo DCMAKE_CUDA_COMPILER=-DCMAKE_CUDA_COMPILER=nvcc >> "$GITHUB_ENV"
+        else
+          echo CXX_COMPILER=-DCMAKE_CXX_COMPILER=g++ >> "$GITHUB_ENV"
+        fi
+
+        if [[ "${{ matrix.os }}" = macos-* ]] && [[ "${{ matrix.arch }}" = "aarch64" ]]; then
+          echo DCMAKE_OSX_ARCHITECTURES=-DCMAKE_OSX_ARCHITECTURES=arm64 >> "$GITHUB_ENV"
+        fi
+
+        nvcc --version
+
+    - name: Prep build
+      if: startsWith(matrix.os, 'windows')
+      run: python -m pip install cmake==3.27.9 ninja
+
+    - name: Build CUDA
+      if: startsWith(matrix.os, 'windows')
+      shell: bash -el {0}
+      run: |
+        cmake -B build \
+        -G Ninja ${{ env.DCMAKE_CUDA_COMPILER }} \
+        ${{ env.CXX_COMPILER }} \
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+        -DCOMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90" \
+        -DCOMPUTE_BACKEND=cuda \
+        -S .
+
+        cmake --build build --config ${{ matrix.build_type }}
+
+    - name: Build CUDA (docker)
+      if: startsWith(matrix.os, 'ubuntu')
+      uses: addnab/docker-run-action@v3
+      with:
+        image: ${{ format('nvidia/cuda:{0}-{1}', matrix.cuda-version, 'devel-ubuntu22.04') }}
+        options: --platform linux/${{ matrix.arch }} -w /src -v ${{ github.workspace }}:/src
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake python3 python3-pip
+          # install ninja to use -G ninja
+          python3 -m pip install ninja
+
+          for NO_CUBLASLT in OFF ON; do
+            cmake -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCOMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90" \
+            -DCOMPUTE_BACKEND=cuda \
+            -DNO_CUBLASLT=$NO_CUBLASLT \
+            -S .
+
+            cmake --build build --config ${{ matrix.build_type }}
+          done
+
+    - name: Copy libraries
       shell: bash
       run: |
-        set -ex
-        build_os=${{ matrix.os }}
-        build_arch=${{ matrix.arch }}
-        [[ "${{ matrix.os }}" = windows-* ]] && python3 -m pip install ninja
-        for NO_CUBLASLT in ON OFF; do
-          if [ ${build_os:0:6} == ubuntu ]; then
-            image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
-            echo "Using image $image"
-            docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
-              "apt-get update \
-              && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-              && cmake -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} . \
-              && cmake --build ."
-          else
-            cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} -DCMAKE_BUILD_TYPE=Release -S .
-            cmake --build . --config Release
-          fi
-        done
         mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
+        echo " check lib files..."
+        file bitsandbytes/libbitsandbytes*.*
         ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
+        name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda-version }}
         path: output/*
-        retention-days: 7
+
   build-wheels:
     needs:
     - build-shared-libs
@@ -147,7 +216,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.10"]
         arch: [x86_64, aarch64]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
@@ -187,16 +256,23 @@ jobs:
     #    PYTHONPATH=. pytest --log-cli-level=DEBUG tests
     - name: Build wheel
       shell: bash
-      run: python -m build .
+      run: |
+        python -m build . --wheel
+        # fix wheel name
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            o=$(ls dist/*.whl)
+            n=$(echo $o | sed 's@_x86_64@_aarch64@')
+            [ "$n" != "$o" ] && mv $o $n
+        fi
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.python-version }}
-        path: dist/bitsandbytes-*.whl
-        retention-days: 7
+        name: bdist_wheel_${{ matrix.os }}-${{ matrix.arch }}
+        path: ${{ github.workspace }}/dist/bitsandbytes-*.whl
   publish:
     needs: build-wheels
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags')
     steps:
     - uses: actions/checkout@v4
     - name: Download build artifact
@@ -208,7 +284,6 @@ jobs:
     - run: |
         ls -lR dist/
     - name: Publish to PyPi
-      if: startsWith(github.ref, 'refs/tags')
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.pypi }}
