@@ -16,7 +16,9 @@ from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
 from .cextension import COMPILED_WITH_CUDA, lib
 
-from bitsandbytes.backends import Backends
+from bitsandbytes.utils import QuantState
+
+from bitsandbytes.backends import backends
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
@@ -589,125 +591,6 @@ def estimate_quantiles(A: Tensor, out: Optional[torch.Tensor] = None, offset: fl
     return out
 
 
-class QuantState:
-    """container for quantization state components to work with Params4bit and similar classes"""
-    valid_quant_types = ('fp4', 'nf4')
-    valid_qs_type_keys = [f"bitsandbytes__{x}" for x in valid_quant_types]
-    valid_qs_keys = ['absmax', 'quant_map', 'nested_absmax', 'nested_quant_map', 'quant_state', 'quant_type',
-                     'blocksize', 'dtype', 'shape', 'nested_blocksize', 'nested_dtype', 'nested_offset']
-
-    def __init__(self, absmax, shape=None, code=None, blocksize=None, quant_type=None, dtype=None, offset=None, state2=None):
-        self.absmax = absmax
-        self.shape = shape
-        self.code = code
-        self.dtype = dtype
-        self.blocksize = blocksize
-        self.quant_type = quant_type
-        self.offset = offset
-        self.state2 = state2
-        self.nested = state2 is not None
-
-    def __get_item__(self, idx):
-        """
-        ensures compatibility with older quant state scheme with nested lists.
-        assumes the following layout:
-        state = [qabsmax, input_shape, A.dtype, blocksize, [offset, state2], quant_type]
-        state2 = [absmax, input_shape, A.dtype, blocksize, None, quant_type]
-        """
-        if self.nested:
-            list_repr = [self.absmax, self.shape, self.dtype, self.blocksize, [self.offset, self.state2], self.quant_type]
-        else:
-            list_repr = [self.absmax, self.shape, self.dtype, self.blocksize, None, self.quant_type]
-        return list_repr[idx]
-
-    @classmethod
-    def from_dict(cls, qs_dict: Dict[str, Any], device: torch.device) -> 'QuantState':
-        """
-        unpacks components of state_dict into QuantState
-        where necessary, convert into strings, torch.dtype, ints, etc.
-
-        qs_dict: based on state_dict, with only relevant keys, striped of prefixes.
-
-        item with key `quant_state.bitsandbytes__[nf4/fp4]` may contain minor and non-tensor quant state items.
-        """
-
-        # unpacking tensor with non-tensor components
-        qs_key = [k for k, v in qs_dict.items() if "quant_state" in k and isinstance(v, torch.Tensor)]
-        if not len(qs_key) and 'quant_type' not in qs_dict:
-            raise ValueError("Expected packed or unpacked quant_state items, found neither")
-        elif len(qs_key) != 1 or qs_key[0].split(".")[-1] not in cls.valid_qs_type_keys:
-            raise ValueError(f"There should be exactly one `quant_state` item with ending from {cls.valid_qs_type_keys}.\nDetected {qs_key}.")
-
-        # unpacking minor and non-tensor quant state items if necessary
-        if len(qs_key) == 1:
-            first_qs_key = qs_key[0]
-            qs_dict.update(unpack_tensor_to_dict(qs_dict.pop(first_qs_key)))
-
-        qs_dict = {k.split('.')[-1]: v for k, v in qs_dict.items()}  # strip prefixes
-        assert set(qs_dict.keys()).issubset(cls.valid_qs_keys)
-
-        if 'nested_absmax' in qs_dict:
-            offset = torch.tensor(float(qs_dict['nested_offset'])).to(device)
-            state2 = cls(
-                absmax=qs_dict['nested_absmax'].to(device),
-                blocksize=qs_dict['nested_blocksize'],
-                code=qs_dict['nested_quant_map'].to(device),
-                dtype=getattr(torch, qs_dict['nested_dtype']),
-            )
-        else:
-            offset, state2 = None, None
-
-        quant_state = cls(
-            quant_type=qs_dict['quant_type'],
-            absmax=qs_dict['absmax'].to(device),
-            blocksize=qs_dict['blocksize'],
-            code=qs_dict['quant_map'].to(device),
-            dtype=getattr(torch, qs_dict['dtype']),
-            shape=torch.Size(qs_dict['shape']) if qs_dict['shape'] is not None else None,
-            offset=offset,
-            state2=state2,
-        )
-        return quant_state
-
-    def as_dict(self, packed=False):
-        """
-        returns dict of tensors and strings to use in serialization via _save_to_state_dict()
-        param: packed -- returns dict[str, torch.Tensor] for state_dict fit for safetensors saving
-        """
-        qs_dict = {
-            'quant_type': self.quant_type,
-            'absmax': self.absmax,
-            'blocksize': self.blocksize,
-            'quant_map': self.code,
-            'dtype': str(self.dtype).strip('torch.'),
-            'shape': tuple(self.shape),
-        }
-        if self.nested:
-            qs_dict.update({
-                'nested_absmax': self.state2.absmax,
-                'nested_blocksize': self.state2.blocksize,
-                'nested_quant_map': self.state2.code.clone(),  # un-shared to avoid restoring it after shared tensors are removed by safetensors
-                'nested_dtype': str(self.state2.dtype).strip('torch.'),
-                'nested_offset': self.offset.item(),
-            })
-        if not packed:
-            return qs_dict
-
-        # packed format allows serialization of non-tensor components, critical for saving in safetensors format
-        qs_packed_dict = {k: v for k, v in qs_dict.items() if isinstance(v, torch.Tensor)}
-        non_tensor_dict = {k: v for k, v in qs_dict.items() if not isinstance(v, torch.Tensor)}
-        qs_packed_dict["quant_state." + "bitsandbytes__" + self.quant_type] = pack_dict_to_tensor(non_tensor_dict)
-        return qs_packed_dict
-
-    def to(self, device):
-        # make sure the quantization state is on the right device
-        self.absmax = self.absmax.to(device)
-        if self.nested:
-            self.offset = self.offset.to(device)
-            self.state2.absmax = self.state2.absmax.to(device)
-            self.state2.code = self.state2.code.to(device)
-
-
 def quantize_blockwise(
     A: Tensor,
     code: Optional[torch.Tensor] = None,
@@ -918,11 +801,80 @@ def quantize_fp4(A: Tensor, absmax: Optional[torch.Tensor] = None, out: Optional
 def quantize_nf4(A: Tensor, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize=64, compress_statistics=False, quant_storage=torch.uint8):
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4', quant_storage)
 
+
+def quantize_4bit(
+    A: Tensor,
+    absmax: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    blocksize=64,
+    compress_statistics=False,
+    quant_type='fp4',
+    quant_storage=torch.uint8,
+) -> Tuple[Tensor, QuantState]:
+    """
+    Quantize tensor A in blocks of 4-bit values.
+
+    Quantizes tensor A by dividing it into blocks which are independently quantized to FP4.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        The input tensor.
+    absmax : torch.Tensor
+        The absmax values.
+    out : torch.Tensor
+        The output tensor.
+    blocksize : int
+        The blocksize used in quantization.
+    quant_type : str
+        The 4-bit quantization data type {fp4, nf4}
+
+    Returns
+    -------
+    torch.Tensor:
+        Tensor with packed 4-bit values.
+    tuple(torch.Tensor, torch.Size, torch.dtype, int):
+        The quantization state to undo the quantization.
+    """
+    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    return backends[A.device.type].quantize_4bit(A, absmax=absmax, out=out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type, quant_storage=quant_storage)
+
 def dequantize_fp4(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'fp4')
 
 def dequantize_nf4(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64) -> Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'nf4')
+
+def dequantize_4bit(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
+    """
+    Dequantizes FP4 blockwise quantized values.
+
+    Dequantizes the tensor A with maximum absolute values absmax in blocks of size blocksize.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        The input tensor (packed 4-bit values).
+    quant_state : QuantState
+        object with quantisation stats, incl. absmax values, original tensor shape and original dtype.
+    absmax : torch.Tensor
+        The absmax values.
+    out : torch.Tensor
+        Dequantized output tensor.
+    blocksize : int
+        The blocksize used in quantization.
+    quant_type : str
+        The 4-bit quantization data type {fp4, nf4}
+
+
+    Returns
+    -------
+    torch.Tensor:
+        Dequantized tensor.
+    """
+    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    return backends[A.device.type].dequantize_4bit(A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type)
+
 
 def quantize(
     A: Tensor,
@@ -1690,6 +1642,25 @@ def batched_igemm(
     return out
 
 
+def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
+    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    return backends[A.device.type].igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
+
+
+def mm_dequant(
+    A,
+    quant_state,
+    row_stats,
+    col_stats,
+    out=None,
+    new_row_stats=None,
+    new_col_stats=None,
+    bias=None
+):
+    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    return backends[A.device.type].mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
+
+
 def get_colrow_absmax(
     A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0
 ):
@@ -1821,6 +1792,16 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     colidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
     values = torch.zeros((nnz,), dtype=dtype, device=device)
     return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
+
+
+def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
+    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    return backends[A.device.type].double_quant(A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
+
+
+def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    return backends[A.device.type].transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
 
 
 def spmm_coo(cooA, B, out=None):
@@ -2075,54 +2056,12 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
     return x.to(dtype)
 
 
+def extract_outliers(A, SA, idx):
+    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    return backends[A.device.type].extract_outliers(A, SA, idx)
+
+
 def pipeline_test(A, batch_size):
     out = torch.zeros_like(A)
     lib.cpipeline_test(get_ptr(A), get_ptr(out), ct.c_size_t(A.numel()), ct.c_size_t(batch_size))
     return out
-
-# 8 bits common functions
-def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
-    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
-    return Backends.devices[A.device.type].double_quant(A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
-
-def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
-    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
-    return Backends.devices[A.device.type].transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
-
-def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
-    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
-    return Backends.devices[A.device.type].igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
-
-def mm_dequant(
-    A,
-    quant_state,
-    row_stats,
-    col_stats,
-    out=None,
-    new_row_stats=None,
-    new_col_stats=None,
-    bias=None
-):
-    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
-    return Backends.devices[A.device.type].mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
-
-def extract_outliers(A, SA, idx):
-    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
-    return Backends.devices[A.device.type].extract_outliers(A, SA, idx)
-
-# 4 bits common functions
-def quantize_4bit(
-    A: Tensor,
-    absmax: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
-    blocksize=64,
-    compress_statistics=False,
-    quant_type='fp4',
-    quant_storage=torch.uint8,
-) -> Tuple[Tensor, QuantState]:
-    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
-    return Backends.devices[A.device.type].quantize_4bit(A, absmax=absmax, out=out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type, quant_storage=quant_storage)
-
-def dequantize_4bit(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
-    assert A.device.type in Backends.devices, f"Device backend for {A.device.type} is not supported"
-    return Backends.devices[A.device.type].dequantize_4bit(A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type)

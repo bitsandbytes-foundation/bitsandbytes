@@ -2,12 +2,10 @@ import ctypes as ct
 from typing import Optional, Tuple
 
 import torch
-from torch import Tensor
 
 from bitsandbytes.cextension import lib
 from bitsandbytes.functional import (
     CUBLAS_Context,
-    QuantState,
     coo_zeros,
     dequantize_blockwise,
     dtype2bytes,
@@ -22,19 +20,14 @@ from bitsandbytes.functional import (
     quantize_blockwise,
 )
 
-from .basic_backend import DeviceBackends
+from bitsandbytes.utils import QuantState
+
+from .base import Backend
 
 
-class CUDABackend(DeviceBackends):
-    def __init__(self, backend_name: str):
-        self.backend_name = backend_name
-
-    def get_name(self) -> str:
-        return self.backend_name
-
-    @classmethod
+class CUDABackend(Backend):
     def double_quant(
-        cls, A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
+        self, A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
     ):
         device = A.device
         assert A.dtype == torch.half
@@ -128,8 +121,7 @@ class CUDABackend(DeviceBackends):
 
         return out_row, out_col, row_stats, col_stats, coo_tensor
 
-    @classmethod
-    def transform(cls, A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+    def transform(self, A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
         prev_device = pre_call(A.device)
         if state is None: state = (A.shape, from_order)
         else: from_order = state[1]
@@ -172,8 +164,7 @@ class CUDABackend(DeviceBackends):
 
         return out, new_state
 
-    @classmethod
-    def igemmlt(cls, A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
+    def igemmlt(self, A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
         shapeA = SA[0]
         shapeB = SB[0]
         dimsA = len(shapeA)
@@ -272,9 +263,8 @@ class CUDABackend(DeviceBackends):
 
         return out, Sout
 
-    @classmethod
     def mm_dequant(
-        cls,
+        self,
         A,
         quant_state,
         row_stats,
@@ -324,8 +314,7 @@ class CUDABackend(DeviceBackends):
 
         return out
 
-    @classmethod
-    def extract_outliers(cls, A, SA, idx):
+    def extract_outliers(self, A, SA, idx):
         shapeA = SA[0]
         formatA = SA[1]
         assert formatA in ["col_turing", "col_ampere"]
@@ -351,42 +340,16 @@ class CUDABackend(DeviceBackends):
 
         return out
 
-    @classmethod
     def quantize_4bit(
-        cls,
-        A: Tensor,
+        self,
+        A: torch.Tensor,
         absmax: Optional[torch.Tensor] = None,
         out: Optional[torch.Tensor] = None,
         blocksize=64,
         compress_statistics=False,
         quant_type='fp4',
         quant_storage=torch.uint8,
-    ) -> Tuple[Tensor, QuantState]:
-        """
-        Quantize tensor A in blocks of 4-bit values.
-
-        Quantizes tensor A by dividing it into blocks which are independently quantized to FP4.
-
-        Parameters
-        ----------
-        A : torch.Tensor
-            The input tensor.
-        absmax : torch.Tensor
-            The absmax values.
-        out : torch.Tensor
-            The output tensor.
-        blocksize : int
-            The blocksize used in quantization.
-        quant_type : str
-            The 4-bit quantization data type {fp4, nf4}
-
-        Returns
-        -------
-        torch.Tensor:
-            Tensor with packed 4-bit values.
-        tuple(torch.Tensor, torch.Size, torch.dtype, int):
-            The quantization state to undo the quantization.
-        """
+    ) -> Tuple[torch.Tensor, QuantState]:
         if A.device.type != 'cuda':
             raise NotImplementedError(f'Device type not supported for FP4 quantization: {A.device.type}')
         if quant_type not in ['fp4', 'nf4']:
@@ -442,34 +405,7 @@ class CUDABackend(DeviceBackends):
 
         return out, state
 
-    @classmethod
-    def dequantize_4bit(cls, A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64, quant_type='fp4') -> Tensor:
-        """
-        Dequantizes FP4 blockwise quantized values.
-
-        Dequantizes the tensor A with maximum absolute values absmax in blocks of size blocksize.
-
-        Parameters
-        ----------
-        A : torch.Tensor
-            The input tensor (packed 4-bit values).
-        quant_state : QuantState
-            object with quantisation stats, incl. absmax values, original tensor shape and original dtype.
-        absmax : torch.Tensor
-            The absmax values.
-        out : torch.Tensor
-            Dequantized output tensor.
-        blocksize : int
-            The blocksize used in quantization.
-        quant_type : str
-            The 4-bit quantization data type {fp4, nf4}
-
-
-        Returns
-        -------
-        torch.Tensor:
-            Dequantized tensor.
-        """
+    def dequantize_4bit(self, A: torch.Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64, quant_type='fp4') -> torch.Tensor:
         if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
             raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
         if quant_type not in ['fp4', 'nf4']:
