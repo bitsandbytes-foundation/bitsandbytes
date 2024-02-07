@@ -154,6 +154,14 @@ jobs:
 
         nvcc --version
 
+    - name: Select COMPUTE_CAPABILITY
+      shell: bash -el {0}
+      run: |
+        # set COMPUTE_CAPABILITY
+        COMPUTE_CAPABILITY="61;75;86;89"
+        [[ "${{ env.GITHUB_REF }}" = refs/tags/* ]] && COMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90"
+        echo "COMPUTE_CAPABILITY=$COMPUTE_CAPABILITY" >> "$GITHUB_ENV"
+
     - name: Prep build
       if: startsWith(matrix.os, 'windows')
       run: python -m pip install cmake==3.27.9 ninja
@@ -166,7 +174,7 @@ jobs:
         -G Ninja ${{ env.DCMAKE_CUDA_COMPILER }} \
         ${{ env.CXX_COMPILER }} \
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-        -DCOMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90" \
+        -DCOMPUTE_CAPABILITY="${{ env.COMPUTE_CAPABILITY }}" \
         -DCOMPUTE_BACKEND=cuda \
         -S .
 
@@ -177,7 +185,7 @@ jobs:
       uses: addnab/docker-run-action@v3
       with:
         image: ${{ format('nvidia/cuda:{0}-{1}', matrix.cuda-version, 'devel-ubuntu22.04') }}
-        options: --platform linux/${{ matrix.arch }} -w /src -v ${{ github.workspace }}:/src
+        options: --platform linux/${{ matrix.arch }} -w /src -v ${{ github.workspace }}:/src -e "COMPUTE_CAPABILITY"
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake python3 python3-pip
@@ -188,7 +196,7 @@ jobs:
             cmake -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCOMPUTE_CAPABILITY="50;52;60;61;62;70;72;75;80;86;87;89;90" \
+            -DCOMPUTE_CAPABILITY="${{ env.COMPUTE_CAPABILITY }}" \
             -DCOMPUTE_BACKEND=cuda \
             -DNO_CUBLASLT=$NO_CUBLASLT \
             -S .
