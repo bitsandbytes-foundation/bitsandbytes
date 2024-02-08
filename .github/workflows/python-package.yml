@@ -102,7 +102,7 @@ jobs:
       id: cuda-toolkit
       with:
         cuda: ${{ matrix.cuda_version }}
-        method: 'local'
+        method: 'network'
         sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
         linux-local-args: '["--toolkit"]'
         use-github-cache: false
@@ -117,6 +117,7 @@ jobs:
         set -ex
         build_os=${{ matrix.os }}
         build_arch=${{ matrix.arch }}
+        [[ "${{ matrix.os }}" = windows-* ]] && python3 -m pip install ninja
         for NO_CUBLASLT in ON OFF; do
           if [ ${build_os:0:6} == ubuntu ]; then
             image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
@@ -127,7 +128,6 @@ jobs:
               && cmake -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} . \
               && cmake --build ."
           else
-            python3 -m pip install cmake==3.27.9 ninja
             cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} -DCMAKE_BUILD_TYPE=Release -S .
             cmake --build . --config Release
           fi
