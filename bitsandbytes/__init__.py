@@ -17,7 +17,9 @@ from .nn import modules
 
 if COMPILED_WITH_CUDA:
     from .optim import adam
-
+    from .backends import register_backend, backends
+    from .backends.cuda import CUDABackend
+    register_backend("cuda", CUDABackend())
 __pdoc__ = {
     "libbitsandbytes": False,
     "optim.optimizer.Optimizer8bit": False,
