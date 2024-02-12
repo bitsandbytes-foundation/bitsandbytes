@@ -264,7 +264,6 @@ class Params4bit(torch.nn.Parameter):
             self.module.quant_state = quant_state
         self.bnb_quantized = True
         return self
-    
 
     def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
         return self.to(device='cuda' if device is None else device, non_blocking=non_blocking)
