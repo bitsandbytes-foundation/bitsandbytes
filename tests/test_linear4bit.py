@@ -1,6 +1,7 @@
 import os
 from tempfile import TemporaryDirectory
 
+import copy
 import pytest
 import torch
 
@@ -146,3 +147,18 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         target_compression = 0.143 if original_dtype == torch.float32 else 0.29  # these numbers get lower as weight shape increases
         ratio_error_msg = f"quantized_size {size_4:,} is larger on disk than {target_compression:.2%} of original size {size_orig:,}"
         assert size_ratio < target_compression, ratio_error_msg
+           
+def test_copy_param():
+    tensor = torch.tensor([1.,2.,3.,4.])
+    param = bnb.nn.Params4bit(data = tensor, requires_grad=False).cuda(0)
+
+    shallow_copy_param = copy.copy(param)
+    assert param.quant_state is shallow_copy_param.quant_state
+    assert param.data.data_ptr() == shallow_copy_param.data.data_ptr()
+
+def test_deepcopy_param():
+    tensor = torch.tensor([1.,2.,3.,4.])
+    param = bnb.nn.Params4bit(data = tensor, requires_grad=False).cuda(0)
+    copy_param = copy.deepcopy(param)
+    assert param.quant_state is not copy_param.quant_state
+    assert param.data.data_ptr() != copy_param.data.data_ptr()
