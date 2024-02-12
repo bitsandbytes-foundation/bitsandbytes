@@ -5,6 +5,7 @@
 from typing import Any, Dict, Optional, TypeVar, Union, overload
 import warnings
 
+import copy
 import torch
 from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
@@ -213,6 +214,34 @@ class Params4bit(torch.nn.Parameter):
         self.data = data
         self.module = module
         return self
+    
+    def __getstate__(self):
+        state = self.__dict__
+        state["data"] = self.data
+        state["requires_grad"] = self.requires_grad
+        return state
+
+    def __setstate__(self, state):
+        self.requires_grad = state["requires_grad"]
+        self.blocksize = state["blocksize"]
+        self.compress_statistics = state["compress_statistics"]
+        self.quant_type = state["quant_type"]
+        self.quant_state = state["quant_state"]
+        self.data = state["data"]
+    
+    def __deepcopy__(self,memo):
+        new_instance = type(self).__new__(type(self))
+        state = self.__getstate__()
+        new_instance.__setstate__(state)
+        new_instance.quant_state = copy.deepcopy(state["quant_state"])
+        new_instance.data = copy.deepcopy(state["data"])
+        return new_instance
+
+    def __copy__(self):
+        new_instance = type(self).__new__(type(self))
+        state = self.__getstate__()
+        new_instance.__setstate__(state)
+        return new_instance
 
     @classmethod
     def from_prequantized(cls, data: torch.Tensor, quantized_stats: Dict[str, Any], requires_grad: bool = False, device='cuda', **kwargs) -> "Params4bit":
@@ -235,6 +264,7 @@ class Params4bit(torch.nn.Parameter):
             self.module.quant_state = quant_state
         self.bnb_quantized = True
         return self
+    
 
     def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
         return self.to(device='cuda' if device is None else device, non_blocking=non_blocking)
