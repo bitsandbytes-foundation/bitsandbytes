@@ -9,8 +9,8 @@ import pytest
 from scipy.stats import norm
 import torch
 
-import bitsandbytes as bnb
 from bitsandbytes import functional as F
+import bitsandbytes as bnb
 from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,

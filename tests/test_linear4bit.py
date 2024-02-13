@@ -1,7 +1,7 @@
+import copy
 import os
 from tempfile import TemporaryDirectory
 
-import copy
 import pytest
 import torch
 
