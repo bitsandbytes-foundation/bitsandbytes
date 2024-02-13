@@ -393,15 +393,15 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
 
   if(DTYPE == 8)
   {
-    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&A_desc, HIPBLASLT_R_8I, dim1, dim2, ldA));
-    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&B_desc, HIPBLASLT_R_8I, 0, 0, 0));
-    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIPBLASLT_R_8I, dim1, dim2, ldOut));
+    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&A_desc, HIP_R_8I, dim1, dim2, ldA));
+    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&B_desc, HIP_R_8I, 0, 0, 0));
+    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIP_R_8I, dim1, dim2, ldOut));
   }
   else if(DTYPE == 32)
   {
-    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&A_desc, HIPBLASLT_R_32I, dim1, dim2, ldA));
-    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&B_desc, HIPBLASLT_R_32I, 0, 0, 0));
-    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIPBLASLT_R_32I, dim1, dim2, ldOut));
+    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&A_desc, HIP_R_32I, dim1, dim2, ldA));
+    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&B_desc, HIP_R_32I, 0, 0, 0));
+    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIP_R_32I, dim1, dim2, ldOut));
   }
   else
   {
@@ -411,7 +411,7 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(A_desc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
   checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(out_desc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderOut, sizeof(orderOut)));
 
-  checkHipblasStatus(hipblasLtMatrixTransformDescCreate(&A2Out_desc, HIPBLASLT_R_32F));
+  checkHipblasStatus(hipblasLtMatrixTransformDescCreate(&A2Out_desc, HIP_R_32F));
 
   if(transpose){ checkHipblasStatus(hipblasLtMatrixTransformDescSetAttribute(A2Out_desc, HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose))); }
 
@@ -510,8 +510,8 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
     hipblasLtOrder_t col_turing = HIPBLASLT_ORDER_COL;
     hipblasLtOrder_t col_ampere = HIPBLASLT_ORDER_COL;
 
-    has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Adesc, HIPBLASLT_R_8I, m, k, lda));
-    has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Bdesc, HIPBLASLT_R_8I, n, k, ldb));
+    has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_8I, m, k, lda));
+    has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Bdesc, HIP_R_8I, n, k, ldb));
     has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Adesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
 
 
@@ -528,14 +528,14 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
 
     if(DTYPE_OUT == 32)
     {
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLASLT_COMPUTE_I32, HIPBLASLT_R_32I));
+      has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32I, HIP_R_32I));
       auto opA = HIPBLAS_OP_N;
       has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(int32_t)));
       has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(int32_t)));
       hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_DEFAULT;
       checkHipblasStatus(hipblasLtMatmulDescSetAttribute(
         matmulDesc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
-      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Cdesc, HIPBLASLT_R_32I, m, n, ldc));
+      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Cdesc, HIP_R_32I, m, n, ldc));
       has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Cdesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
       int alpha = 1, beta = 0;
 
@@ -578,9 +578,9 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
     }
     else
     {
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLASLT_COMPUTE_I32, HIPBLASLT_R_32F));
+      has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32I, HIP_R_32F));
       has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
-      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Cdesc, HIPBLASLT_R_8I, m, n, ldc));
+      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Cdesc, HIP_R_8I, m, n, ldc));
       has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Cdesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
       /* Algo and workspace TODO: need to rework to not be duplicated */
       // Set User Preference attributes
