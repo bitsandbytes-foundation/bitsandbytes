@@ -6,19 +6,17 @@ import ctypes as ct
 from functools import reduce  # Required in Python 3
 import itertools
 import operator
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
 from torch import Tensor
 
-from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
+from bitsandbytes.backends import backends
+from bitsandbytes.utils import QuantState
 
 from .cextension import COMPILED_WITH_CUDA, lib
 
-from bitsandbytes.utils import QuantState
-
-from bitsandbytes.backends import backends
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):

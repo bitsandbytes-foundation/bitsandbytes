@@ -19,7 +19,6 @@ from bitsandbytes.functional import (
     prod,
     quantize_blockwise,
 )
-
 from bitsandbytes.utils import QuantState
 
 from .base import Backend

@@ -1,7 +1,7 @@
 import json
 import shlex
 import subprocess
-from typing import Tuple, Dict, Any
+from typing import Any, Dict, Tuple
 
 import torch
 

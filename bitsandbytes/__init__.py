@@ -16,9 +16,9 @@ from .cextension import COMPILED_WITH_CUDA
 from .nn import modules
 
 if COMPILED_WITH_CUDA:
-    from .optim import adam
     from .backends import register_backend
     from .backends.cuda import CUDABackend
+    from .optim import adam
     register_backend("cuda", CUDABackend())
 __pdoc__ = {
     "libbitsandbytes": False,
