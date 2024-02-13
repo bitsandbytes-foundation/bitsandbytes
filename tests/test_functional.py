@@ -91,7 +91,6 @@ def setup():
 def teardown():
     pass
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize(
     "dtype", [torch.float32, torch.float16], ids=["float", "half"]
 )
@@ -111,7 +110,6 @@ def test_estimate_quantiles(dtype):
     diff = torch.abs(code - quantiles)
     assert (diff > 5e-02).sum().item() == 0
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_quantile_quantization():
     for i in range(100):
         A1 = torch.randn(1024, 1024, device="cuda")
@@ -2207,7 +2205,6 @@ def test_few_bit_quant():
     #assert False
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_kbit_quantile_estimation():
     for i in range(100):
         data = torch.randn(1024, 1024, device='cuda')
