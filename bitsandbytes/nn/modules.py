@@ -275,7 +275,7 @@ class Linear4bit(nn.Linear):
     compute datatypes such as FP4 and NF4.
 
     In order to quantize a linear layer one should first load the original fp16 / bf16 weights into
-    the Linear8bitLt module, then call `quantized_module.to("cuda")` to quantize the fp16 / bf16 weights.
+    the Linear4bit module, then call `quantized_module.to("cuda")` to quantize the fp16 / bf16 weights.
 
     Example:
 
