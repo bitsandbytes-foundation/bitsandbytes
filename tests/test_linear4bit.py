@@ -149,16 +149,17 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         assert size_ratio < target_compression, ratio_error_msg
            
 def test_copy_param():
-    tensor = torch.tensor([1.,2.,3.,4.])
-    param = bnb.nn.Params4bit(data = tensor, requires_grad=False).cuda(0)
+    tensor = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).cuda(0)
 
     shallow_copy_param = copy.copy(param)
     assert param.quant_state is shallow_copy_param.quant_state
     assert param.data.data_ptr() == shallow_copy_param.data.data_ptr()
 
+
 def test_deepcopy_param():
-    tensor = torch.tensor([1.,2.,3.,4.])
-    param = bnb.nn.Params4bit(data = tensor, requires_grad=False).cuda(0)
+    tensor = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).cuda(0)
     copy_param = copy.deepcopy(param)
     assert param.quant_state is not copy_param.quant_state
     assert param.data.data_ptr() != copy_param.data.data_ptr()
