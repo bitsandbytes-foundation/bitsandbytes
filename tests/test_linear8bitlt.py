@@ -5,8 +5,8 @@ from tempfile import TemporaryDirectory
 import pytest
 import torch
 
-from bitsandbytes import functional as F
 import bitsandbytes as bnb
+from bitsandbytes import functional as F
 from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
 from bitsandbytes.nn.modules import Linear8bitLt
 from tests.helpers import TRUE_FALSE, id_formatter
