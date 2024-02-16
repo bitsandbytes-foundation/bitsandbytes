@@ -32,8 +32,3 @@ except AttributeError as ex:
         "8-bit optimizers, 8-bit multiplication, and CUDA GPU quantization are unavailable.")
     COMPILED_WITH_CUDA = False
     print(str(ex))
-
-
-# print the setup details after checking for errors so we do not print twice
-#if 'BITSANDBYTES_NOWELCOME' not in os.environ or str(os.environ['BITSANDBYTES_NOWELCOME']) == '0':
-    #setup.print_log_stack()
