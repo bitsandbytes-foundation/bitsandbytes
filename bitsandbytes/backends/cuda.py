@@ -152,7 +152,7 @@ class CUDABackend(Backend):
                 lib.ctransform_row2turingT(get_ptr(A), get_ptr(out), dim1, dim2)
             else:
                 lib.ctransform_row2turing(get_ptr(A), get_ptr(out), dim1, dim2)
-    
+
         elif to_order == "col_ampere":
             if transpose:
                 lib.ctransform_row2ampereT(get_ptr(A), get_ptr(out), dim1, dim2)
@@ -349,7 +349,7 @@ class CUDABackend(Backend):
             lib.cextractOutliers_turing(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
         elif formatA == "col_ampere":
             lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
-    
+
         post_call(prev_device)
 
         return out
@@ -403,7 +403,7 @@ class CUDABackend(Backend):
                 lib.cquantize_blockwise_bf16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
             else:
                 lib.cquantize_blockwise_bf16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
-    
+
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
 
@@ -474,6 +474,6 @@ class CUDABackend(Backend):
         post_call(A.device)
 
         is_transposed = (True if A.shape[0] == 1 else False)
-        
+
         if is_transposed: return out.t()
         else: return out
