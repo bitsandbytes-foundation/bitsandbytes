@@ -122,10 +122,15 @@ class CUDABackend(Backend):
 
     def transform(self, A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
         prev_device = pre_call(A.device)
-        if state is None: state = (A.shape, from_order)
-        else: from_order = state[1]
-        if out is None: out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1], transpose)
-        else: new_state = (state[0], to_order) # (shape, order)
+        if state is None:
+            state = (A.shape, from_order)
+        else:
+            from_order = state[1]
+
+        if out is None:
+            out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1], transpose)
+        else:
+            new_state = (state[0], to_order) # (shape, order)
 
         shape = state[0]
         if len(shape) == 2:
@@ -141,21 +146,25 @@ class CUDABackend(Backend):
                 lib.ctransform_row2col32T(get_ptr(A), get_ptr(out), dim1, dim2)
             else:
                 lib.ctransform_row2col32(get_ptr(A), get_ptr(out), dim1, dim2)
+
         elif to_order == "col_turing":
             if transpose:
                 lib.ctransform_row2turingT(get_ptr(A), get_ptr(out), dim1, dim2)
             else:
                 lib.ctransform_row2turing(get_ptr(A), get_ptr(out), dim1, dim2)
+    
         elif to_order == "col_ampere":
             if transpose:
                 lib.ctransform_row2ampereT(get_ptr(A), get_ptr(out), dim1, dim2)
             else:
                 lib.ctransform_row2ampere(get_ptr(A), get_ptr(out), dim1, dim2)
+
         elif to_order == "row":
             if from_order == "col_turing":
                 lib.ctransform_turing2row(get_ptr(A), get_ptr(out), dim1, dim2)
             elif from_order == "col_ampere":
                 lib.ctransform_ampere2row(get_ptr(A), get_ptr(out), dim1, dim2)
+
         else:
             raise NotImplementedError(f'Transform function not implemented: From {from_order} to {to_order}')
 
@@ -168,6 +177,7 @@ class CUDABackend(Backend):
         shapeB = SB[0]
         dimsA = len(shapeA)
         dimsB = len(shapeB)
+
         assert dimsB == 2, 'Only two dimensional matrices are supported for argument B'
         if dimsA == 2:
             m = shapeA[0]
@@ -204,6 +214,7 @@ class CUDABackend(Backend):
         assert (
             shapeA[-1] == shapeB[-1]
         ), f"Matmullt only supports A @ B^T. Inner matrix dimensions do not match: A @ B = {shapeA} @ {shapeB}"
+
         formatB = SB[1]
         prev_device = A.device
         torch.cuda.set_device(A.device)
@@ -232,6 +243,7 @@ class CUDABackend(Backend):
         has_error = 0
         ptrRowScale = get_ptr(None)
         is_on_gpu([A, B, out])
+
         if formatB == 'col_turing':
             if dtype == torch.int32:
                 has_error = lib.cigemmlt_turing_32(
@@ -241,6 +253,7 @@ class CUDABackend(Backend):
                 has_error = lib.cigemmlt_turing_8(
                     ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc
                 )
+
         elif formatB == "col_ampere":
             if dtype == torch.int32:
                 has_error = lib.cigemmlt_ampere_32(
@@ -331,10 +344,12 @@ class CUDABackend(Backend):
         ptrOut = get_ptr(out)
 
         prev_device = pre_call(A.device)
+
         if formatA == 'col_turing':
             lib.cextractOutliers_turing(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
         elif formatA == "col_ampere":
             lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
+    
         post_call(prev_device)
 
         return out
@@ -362,7 +377,6 @@ class CUDABackend(Backend):
             blocks += 1 if n % blocksize > 0 else 0
             absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
 
-
         if out is None:
             mod = dtype2bytes[quant_storage] * 2
             out = torch.zeros(((n+1)//mod, 1), dtype=quant_storage, device=A.device)
@@ -377,18 +391,22 @@ class CUDABackend(Backend):
                 lib.cquantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
             else:
                 lib.cquantize_blockwise_fp32_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+
         elif A.dtype == torch.float16:
             if quant_type == 'fp4':
                 lib.cquantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
             else:
                 lib.cquantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+
         elif A.dtype == torch.bfloat16:
             if quant_type == 'fp4':
                 lib.cquantize_blockwise_bf16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
             else:
                 lib.cquantize_blockwise_bf16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n))
+    
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
+
         post_call(A.device)
 
         code = get_4bit_type(quant_type, device=A.device)
@@ -399,14 +417,16 @@ class CUDABackend(Backend):
             qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
             del absmax
             state = QuantState(absmax=qabsmax, shape=input_shape, dtype=A.dtype, blocksize=blocksize, code=code, quant_type=quant_type, offset=offset, state2=state2)
+
         else:
-            state = QuantState(absmax=absmax, shape=input_shape, dtype=A.dtype, blocksize=blocksize, code=code, quant_type=quant_type, )
+            state = QuantState(absmax=absmax, shape=input_shape, dtype=A.dtype, blocksize=blocksize, code=code, quant_type=quant_type)
 
         return out, state
 
     def dequantize_4bit(self, A: torch.Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64, quant_type='fp4') -> torch.Tensor:
         if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
             raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]")
+
         if quant_type not in ['fp4', 'nf4']:
             raise NotImplementedError(f'4-bit quantization data type {quant_type} is not implemented.')
 
@@ -414,10 +434,8 @@ class CUDABackend(Backend):
             assert absmax is not None and out is not None
 
             quant_state = QuantState(absmax=absmax, shape=out.shape, dtype=out.dtype, blocksize=blocksize, quant_type=quant_type)
-
         else:
             absmax = quant_state.absmax
-
 
         if quant_state.nested:
             absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
@@ -431,25 +449,31 @@ class CUDABackend(Backend):
 
         device = pre_call(A.device)
         is_on_gpu([A, absmax, out])
+
         if out.dtype == torch.float32:
             if quant_state.quant_type == 'fp4':
                 lib.cdequantize_blockwise_fp32_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
             else:
                 lib.cdequantize_blockwise_fp32_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
+
         elif out.dtype == torch.float16:
             if quant_state.quant_type == 'fp4':
                 lib.cdequantize_blockwise_fp16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
             else:
                 lib.cdequantize_blockwise_fp16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
+
         elif out.dtype == torch.bfloat16:
             if quant_state.quant_type == 'fp4':
                 lib.cdequantize_blockwise_bf16_fp4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
             else:
                 lib.cdequantize_blockwise_bf16_nf4(get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(n))
+
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
+
         post_call(A.device)
 
         is_transposed = (True if A.shape[0] == 1 else False)
+        
         if is_transposed: return out.t()
         else: return out
