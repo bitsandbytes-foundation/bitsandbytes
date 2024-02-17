@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from bitsandbytes.backends import backends
+from bitsandbytes.backends import backends, ensure_backend_is_available
 from bitsandbytes.utils import QuantState
 
 from .cextension import COMPILED_WITH_CUDA, lib
@@ -834,7 +834,7 @@ def quantize_4bit(
     tuple(torch.Tensor, torch.Size, torch.dtype, int):
         The quantization state to undo the quantization.
     """
-    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    ensure_backend_is_available(A.device.type)
     return backends[A.device.type].quantize_4bit(A, absmax=absmax, out=out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type, quant_storage=quant_storage)
 
 def dequantize_fp4(A: Tensor, quant_state: Optional[QuantState] = None, absmax: Optional[torch.Tensor] = None, out: Optional[torch.Tensor] = None, blocksize: int = 64) -> Tensor:
@@ -870,7 +870,7 @@ def dequantize_4bit(A: Tensor, quant_state: Optional[QuantState] = None, absmax:
     torch.Tensor:
         Dequantized tensor.
     """
-    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    ensure_backend_is_available(A.device.type)
     return backends[A.device.type].dequantize_4bit(A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type)
 
 
@@ -1641,7 +1641,7 @@ def batched_igemm(
 
 
 def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
-    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    ensure_backend_is_available(A.device.type)
     return backends[A.device.type].igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
 
 
@@ -1655,7 +1655,7 @@ def mm_dequant(
     new_col_stats=None,
     bias=None
 ):
-    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    ensure_backend_is_available(A.device.type)
     return backends[A.device.type].mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
 
 
@@ -1793,12 +1793,12 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
 
 
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
-    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    ensure_backend_is_available(A.device.type)
     return backends[A.device.type].double_quant(A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
 
 
 def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
-    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    ensure_backend_is_available(A.device.type)
     return backends[A.device.type].transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
 
 
@@ -2055,7 +2055,7 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
 
 
 def extract_outliers(A, SA, idx):
-    assert A.device.type in backends, f"Device backend for {A.device.type} is not supported"
+    ensure_backend_is_available(A.device.type)
     return backends[A.device.type].extract_outliers(A, SA, idx)
 
 
