@@ -30,7 +30,7 @@ name2qmap = {}
 if COMPILED_WITH_CUDA:
     """C FUNCTIONS FOR OPTIMIZERS"""
     str2optimizer32bit = {}
-    str2optimizer32bit["adam"] = (lib.cadam32bit_grad_fp32, lib.cadam32bit_grad_fp16) #, lib.cadam32bit_grad_bf16)
+    str2optimizer32bit["adam"] = (lib.cadam32bit_grad_fp32, lib.cadam32bit_grad_fp16, lib.cadam32bit_grad_bf16)
     str2optimizer32bit["momentum"] = (
         lib.cmomentum32bit_grad_32,
         lib.cmomentum32bit_grad_16,
@@ -39,7 +39,7 @@ if COMPILED_WITH_CUDA:
         lib.crmsprop32bit_grad_32,
         lib.crmsprop32bit_grad_16,
     )
-    str2optimizer32bit["lion"] = (lib.clion32bit_grad_fp32, lib.clion32bit_grad_fp16) #, lib.clion32bit_grad_bf16)
+    str2optimizer32bit["lion"] = (lib.clion32bit_grad_fp32, lib.clion32bit_grad_fp16, lib.clion32bit_grad_bf16)
     str2optimizer32bit["adagrad"] = (
         lib.cadagrad32bit_grad_32,
         lib.cadagrad32bit_grad_16,
@@ -75,7 +75,7 @@ if COMPILED_WITH_CUDA:
     str2optimizer8bit_blockwise["adam"] = (
         lib.cadam_8bit_blockwise_grad_fp32,
         lib.cadam_8bit_blockwise_grad_fp16,
-        #lib.cadam_8bit_blockwise_grad_bf16,
+        lib.cadam_8bit_blockwise_grad_bf16,
     )
     str2optimizer8bit_blockwise["momentum"] = (
         lib.cmomentum_8bit_blockwise_grad_fp32,
@@ -88,7 +88,7 @@ if COMPILED_WITH_CUDA:
     str2optimizer8bit_blockwise["lion"] = (
         lib.clion_8bit_blockwise_grad_fp32,
         lib.clion_8bit_blockwise_grad_fp16,
-        #lib.clion_8bit_blockwise_grad_bf16,
+        lib.clion_8bit_blockwise_grad_bf16,
     )
     str2optimizer8bit_blockwise["adagrad"] = (
         lib.cadagrad_8bit_blockwise_grad_fp32,
@@ -1643,7 +1643,7 @@ def gemv_4bit(
 
     if B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32]:
         if A.dtype == torch.float16:
-            lib.cgemm_4bit_inference_naive_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state.code), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
+            lib.cgemm_4bit_inference(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
         elif A.dtype == torch.bfloat16:
             lib.cgemm_4bit_inference_naive_bf16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state.code), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
         elif A.dtype == torch.float32:

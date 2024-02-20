@@ -966,14 +966,14 @@ template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
 
 MAKE_optimizer32bit(ADAM, half)
 MAKE_optimizer32bit(ADAM, float)
-//MAKE_optimizer32bit(ADAM, hip_bfloat16)
+MAKE_optimizer32bit(ADAM, hip_bfloat16)
 MAKE_optimizer32bit(MOMENTUM, half)
 MAKE_optimizer32bit(MOMENTUM, float)
 MAKE_optimizer32bit(RMSPROP, half)
 MAKE_optimizer32bit(RMSPROP, float)
 MAKE_optimizer32bit(LION, half)
 MAKE_optimizer32bit(LION, float)
-//MAKE_optimizer32bit(LION, hip_bfloat16)
+MAKE_optimizer32bit(LION, hip_bfloat16)
 MAKE_optimizer32bit(ADAGRAD, half)
 MAKE_optimizer32bit(ADAGRAD, float)
 
@@ -1009,11 +1009,11 @@ MAKE_optimizerStatic8bitBlockwise(half, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(float, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(half, LION);
 MAKE_optimizerStatic8bitBlockwise(float, LION);
-//MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, LION);
+MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, LION);
 MAKE_optimizerStatic8bitBlockwise(half, ADAGRAD);
 MAKE_optimizerStatic8bitBlockwise(float, ADAGRAD);
 
 template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
 template void percentileClipping(half * g, float *gnorm_vec, int step, const int n);
 
-//MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, ADAM);
+MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, ADAM);
