@@ -725,7 +725,7 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         )
         C1 = torch.matmul(A.float(), B.float())
 
-        B2t, SBt = F.nvidia_transform(B, "col_turing", transpose=True)
+        B2t, SBt = F.transform(B, "col_turing", transpose=True)
         C2, SC = F.igemmlt(A2, B2t, SA, SBt)
         C3, S = F.nvidia_transform(C2, "row", state=SC)
         torch.testing.assert_close(C1, C3.float())
