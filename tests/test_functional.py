@@ -719,19 +719,16 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         C3, S = F.nvidia_transform(C2, "row", state=SC)
         torch.testing.assert_close(C1, C3.float())
 
-        # Since ROCm supports row to col transformation only which is same as transpose,
-        # skipping this for HIP environment
-        if not HIP_ENVIRONMENT:
-            ## transpose
-            B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(
-                torch.int8
-            )
-            C1 = torch.matmul(A.float(), B.float())
+        ## transpose
+        B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(
+            torch.int8
+        )
+        C1 = torch.matmul(A.float(), B.float())
 
-            B2t, SBt = F.transform(B, "col_turing", transpose=True)
-            C2, SC = F.igemmlt(A2, B2t, SA, SBt)
-            C3, S = F.nvidia_transform(C2, "row", state=SC)
-            torch.testing.assert_close(C1, C3.float())
+        B2t, SBt = F.nvidia_transform(B, "col_turing", transpose=True)
+        C2, SC = F.igemmlt(A2, B2t, SA, SBt)
+        C3, S = F.nvidia_transform(C2, "row", state=SC)
+        torch.testing.assert_close(C1, C3.float())
 
 
 dim1 = [32]
