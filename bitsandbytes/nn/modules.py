@@ -228,6 +228,9 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = state["quant_type"]
         self.quant_state = state["quant_state"]
         self.data = state["data"]
+        self.quant_storage = state["quant_storage"]
+        self.bnb_quantized = state["bnb_quantized"]
+        self.module = state["module"]
     
     def __deepcopy__(self,memo):
         new_instance = type(self).__new__(type(self))
