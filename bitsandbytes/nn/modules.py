@@ -192,7 +192,7 @@ class Params4bit(torch.nn.Parameter):
     def __new__(
             cls,
             data: Optional[torch.Tensor] = None,
-            requires_grad=True,
+            requires_grad=False,  # quantized weights should be frozen by default
             quant_state: Optional[QuantState] = None,
             blocksize: int = 64,
             compress_statistics: bool = True,
@@ -214,7 +214,7 @@ class Params4bit(torch.nn.Parameter):
         self.data = data
         self.module = module
         return self
-    
+
     def __getstate__(self):
         state = self.__dict__
         state["data"] = self.data
@@ -231,7 +231,7 @@ class Params4bit(torch.nn.Parameter):
         self.quant_storage = state["quant_storage"]
         self.bnb_quantized = state["bnb_quantized"]
         self.module = state["module"]
-    
+
     def __deepcopy__(self,memo):
         new_instance = type(self).__new__(type(self))
         state = self.__getstate__()
@@ -259,9 +259,13 @@ class Params4bit(torch.nn.Parameter):
 
     def _quantize(self, device):
         w = self.data.contiguous().cuda(device)
-        w_4bit, quant_state = bnb.functional.quantize_4bit(w, blocksize=self.blocksize, compress_statistics=self.compress_statistics,
-                                                           quant_type=self.quant_type, quant_storage=self.quant_storage)
-        self.data = w_4bit
+        w_4bit, quant_state = bnb.functional.quantize_4bit(
+            w,
+            blocksize=self.blocksize,
+            compress_statistics=self.compress_statistics,
+            quant_type=self.quant_type,
+            quant_storage=self.quant_storage,
+        )
         self.quant_state = quant_state
         if self.module is not None:
             self.module.quant_state = quant_state
