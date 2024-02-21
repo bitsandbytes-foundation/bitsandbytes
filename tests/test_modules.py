@@ -42,11 +42,11 @@ def get_args():
 
 
 def assert_all_approx_close(a, b, atol=1e-8, rtol=1e-5, count=10):
-    idx = torch.isclose(a, b, rtol, atol)
+    idx = torch.isclose(a, b, rtol=rtol, atol=atol)
     sumval = (idx == 0).sum().item()
     if sumval > count:
         print(f"Too many values not close: assert {sumval} < {count}")
-        torch.testing.assert_close(a, b, rtol, atol)
+        torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
 
 class LinearFunction(torch.autograd.Function):
