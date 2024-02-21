@@ -6,3 +6,9 @@ ea7c14f8ef64924f2d0ff80df3cdabf2c7299848
 
 # Remove f-prefix from strings that don't use formatting
 7727fa4c8c6c1ef2b109120aff4196a0a6bf3ed6
+
+# format bitsandbytes/cextension.py
+04f691ef3061e6659aa0a741ca97d00d031618c4
+
+# whitespace in pyproject.toml
+f7b791863083429ba79dc00f925a041beab63297
