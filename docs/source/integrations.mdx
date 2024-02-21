@@ -6,8 +6,10 @@ Please review the [bitsandbytes section in the Accelerate docs](https://huggingf
 
 Details about the BitsAndBytesConfig can be found [here](https://huggingface.co/docs/transformers/v4.37.2/en/main_classes/quantization#transformers.BitsAndBytesConfig).
 
-## Beware: bf16 is optional compute data type
-If your hardware supports it, `bf16` is the optimal compute dtype. The default is `float32` for backward compatibility and numerical stability. `float16` often leads to numerical instabilities, but `bfloat16` provides the benefits of both worlds: numerical stability and significant computation speedup. Therefore, be sure to check if your hardware supports `bf16` and configure it using the `bnb_4bit_compute_dtype` parameter in BitsAndBytesConfig:
+> [!WARNING]
+> **Beware: bf16 is the optimal compute data type!**
+>
+> If your hardware supports it, `bf16` is the optimal compute dtype. The default is `float32` for backward compatibility and numerical stability. `float16` often leads to numerical instabilities, but `bfloat16` provides the benefits of both worlds: numerical stability equivalent to float32, but combined with the memory footprint and significant computation speedup of a 16-bit data type. Therefore, be sure to check if your hardware supports `bf16` and configure it using the `bnb_4bit_compute_dtype` parameter in BitsAndBytesConfig:
 
 ```py
 import torch
