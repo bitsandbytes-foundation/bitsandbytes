@@ -230,10 +230,6 @@ def supports_igemmlt(device: torch.device) -> bool:
     nvidia16_models = ('GTX 1630', 'GTX 1650', 'GTX 1660')  # https://en.wikipedia.org/wiki/GeForce_16_series
     if any(model_name in device_name for model_name in nvidia16_models):
         return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
-    if device.type == "cpu":
-        #TODO: will return True once CPU backend upstream the supports
-        return False
-
     return True
 
 
@@ -568,7 +564,7 @@ def matmul(
 
 def matmul_4bit(A: torch.Tensor, B: torch.Tensor, quant_state: F.QuantState, out: Optional[torch.Tensor] = None, bias=None):
     assert quant_state is not None
-    if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type == "cuda":
+    if A.numel() == A.shape[-1] and A.requires_grad == False:
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(f'Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
