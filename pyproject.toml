@@ -13,13 +13,13 @@ target-version = "py38"
 
 [tool.ruff.lint]
 ignore = [
-    "B007",  # Loop control variable not used within the loop body (TODO: enable)
-    "B028",  # Warning without stacklevel (TODO: enable)
-    "E501",  # Supress line-too-long warnings: trust yapf's judgement on this one.
-    "E701",  # Multiple statements on one line (TODO: enable)
-    "E712",  # Allow using if x == False, as it's not always equivalent to if x.
-    "E731",  # Do not use lambda
-    "F841",  # Local assigned but not used (TODO: enable, these are likely bugs)
+    "B007",    # Loop control variable not used within the loop body (TODO: enable)
+    "B028",    # Warning without stacklevel (TODO: enable)
+    "E501",    # Supress line-too-long warnings: trust yapf's judgement on this one.
+    "E701",    # Multiple statements on one line (TODO: enable)
+    "E712",    # Allow using if x == False, as it's not always equivalent to if x.
+    "E731",    # Do not use lambda
+    "F841",    # Local assigned but not used (TODO: enable, these are likely bugs)
     "RUF012",  # Mutable class attribute annotations
     "ISC001",  # String concatination warning: may cause conflicts when used with the formatter
 ]
