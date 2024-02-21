@@ -1,4 +1,6 @@
+import copy
 import os
+import pickle
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -8,13 +10,14 @@ import bitsandbytes as bnb
 from tests.helpers import TRUE_FALSE
 
 storage = {
-    'uint8': torch.uint8,
-    'float16': torch.float16,
-    'bfloat16': torch.bfloat16,
-    'float32': torch.float32
+    "uint8": torch.uint8,
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+    "float32": torch.float32,
 }
 
-@pytest.mark.parametrize("quant_storage", ['uint8', 'float16', 'bfloat16', 'float32'])
+
+@pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
 @pytest.mark.parametrize("bias", TRUE_FALSE)
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
@@ -24,7 +27,9 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
     device = "cuda"
     layer_shape = (300, 400)
 
-    linear = torch.nn.Linear(*layer_shape, dtype=original_dtype, device="cpu")  # original layer
+    linear = torch.nn.Linear(
+        *layer_shape, dtype=original_dtype, device="cpu"
+    )  # original layer
 
     # Quantizing original layer
     linear_q = bnb.nn.Linear4bit(
@@ -36,7 +41,9 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         quant_type=quant_type,
         device="meta",
     )
-    new_weight = bnb.nn.Params4bit(data=linear.weight, quant_type=quant_type, requires_grad=False)
+    new_weight = bnb.nn.Params4bit(
+        data=linear.weight, quant_type=quant_type, requires_grad=False
+    )
     linear_q.weight = new_weight
     if bias:
         linear_q.bias = torch.nn.Parameter(linear.bias)
@@ -80,7 +87,12 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         quant_storage=storage[quant_storage],
         device="meta",
     )
-    linear_qs.weight = bnb.nn.Params4bit(data=linear.weight, requires_grad=False, quant_type=quant_type, quant_storage=storage[quant_storage])
+    linear_qs.weight = bnb.nn.Params4bit(
+        data=linear.weight,
+        requires_grad=False,
+        quant_type=quant_type,
+        quant_storage=storage[quant_storage],
+    )
     if bias:
         linear_qs.bias = torch.nn.Parameter(linear.bias)
     linear_qs = linear_qs.to(device)
@@ -91,7 +103,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
 
     q0 = a.quant_state
     q1 = b.quant_state
-    for attr in ('code', 'dtype', 'blocksize', 'absmax'):
+    for attr in ("code", "dtype", "blocksize", "absmax"):
         c, d = getattr(q0, attr), getattr(q1, attr)
         if isinstance(c, torch.Tensor):
             assert torch.equal(c, d)
@@ -99,7 +111,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
             assert c == d, f"{c} != {d}"
 
     if q0.state2 is not None:
-        for attr in ('code', 'dtype', 'blocksize', 'absmax'):
+        for attr in ("code", "dtype", "blocksize", "absmax"):
             c, d = getattr(q0.state2, attr), getattr(q1.state2, attr)
             if isinstance(c, torch.Tensor):
                 assert torch.equal(c, d)
@@ -125,7 +137,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
     assert torch.equal(a, c)
 
     # Test moving to CPU and back to GPU
-    linear_q2.to('cpu')
+    linear_q2.to("cpu")
     linear_q2.to(device)
     d = linear_qs(x)
     assert c.dtype == d.dtype
@@ -139,10 +151,47 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         torch.save(linear.state_dict(), state_path)
         torch.save(linear_q.state_dict(), state_path_4bit)
 
-        size_orig, size_4 = os.path.getsize(state_path), os.path.getsize(
-            state_path_4bit
+        size_orig, size_4 = (
+            os.path.getsize(state_path),
+            os.path.getsize(state_path_4bit),
         )
         size_ratio = size_4 / size_orig
-        target_compression = 0.143 if original_dtype == torch.float32 else 0.29  # these numbers get lower as weight shape increases
+        target_compression = (
+            0.143 if original_dtype == torch.float32 else 0.29
+        )  # these numbers get lower as weight shape increases
         ratio_error_msg = f"quantized_size {size_4:,} is larger on disk than {target_compression:.2%} of original size {size_orig:,}"
         assert size_ratio < target_compression, ratio_error_msg
+
+
+def test_copy_param():
+    tensor = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).cuda(0)
+
+    shallow_copy_param = copy.copy(param)
+    assert param.quant_state is shallow_copy_param.quant_state
+    assert param.data.data_ptr() == shallow_copy_param.data.data_ptr()
+
+
+def test_deepcopy_param():
+    tensor = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).cuda(0)
+    copy_param = copy.deepcopy(param)
+    assert param.quant_state is not copy_param.quant_state
+    assert param.data.data_ptr() != copy_param.data.data_ptr()
+
+
+def test_params4bit_real_serialization():
+    original_tensor = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
+    original_param = bnb.nn.Params4bit(data=original_tensor, quant_type="fp4")
+
+    original_param.cuda(0)  # move to CUDA to trigger quantization
+
+    serialized_param = pickle.dumps(original_param)
+    deserialized_param = pickle.loads(serialized_param)
+
+    assert torch.equal(original_param.data, deserialized_param.data)
+    assert original_param.requires_grad == deserialized_param.requires_grad == False
+    assert original_param.quant_type == deserialized_param.quant_type
+    assert original_param.blocksize == deserialized_param.blocksize
+    assert original_param.compress_statistics == deserialized_param.compress_statistics
+    assert original_param.quant_state == deserialized_param.quant_state
