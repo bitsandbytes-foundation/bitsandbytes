@@ -266,6 +266,7 @@ class Params4bit(torch.nn.Parameter):
             quant_type=self.quant_type,
             quant_storage=self.quant_storage,
         )
+        self.data = w_4bit
         self.quant_state = quant_state
         if self.module is not None:
             self.module.quant_state = quant_state
