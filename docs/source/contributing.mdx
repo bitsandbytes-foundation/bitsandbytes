@@ -1,12 +1,17 @@
 # Contributors guidelines
 ... still under construction ... (feel free to propose materials, `bitsandbytes` is a community project)
 
-## Setup pre-commit hooks
+## Setup
+
+### Setup pre-commit hooks
 - Install pre-commit hooks with `pip install pre-commit`.
 - Run `pre-commit autoupdate` once to configure the hooks.
 - Re-run `pre-commit autoupdate` every time a new hook got added.
 
 Now all the pre-commit hooks will be automatically run when you try to commit and if they introduce some changes, you need to re-add the changed files before being able to commit and push.
+
+### Ignore formatting revs
+- Run `git config blame.ignoreRevsFile .git-blame-ignore-revs`. This will make it so that `git blame` is aware of commits that were logged to be solely formatting-related.
 
 ## Doc-string syntax
 
