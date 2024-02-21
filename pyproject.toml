@@ -21,6 +21,7 @@ ignore = [
     "E731",  # Do not use lambda
     "F841",  # Local assigned but not used (TODO: enable, these are likely bugs)
     "RUF012",  # Mutable class attribute annotations
+    "ISC001",  # String concatination warning: may cause conflicts when used with the formatter
 ]
 ignore-init-module-imports = true  # allow to expose in __init__.py via imports
 select = [
