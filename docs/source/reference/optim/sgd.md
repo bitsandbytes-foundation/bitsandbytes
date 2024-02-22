@@ -1,7 +1,7 @@
 # SGD
 
-[[autodoc]] SGD
+[[autodoc]] optim.SGD
 
-[[autodoc]] SGD8bit
+[[autodoc]] optim.SGD8bit
 
-[[autodoc]] SGD32bit
+[[autodoc]] optim.SGD32bit

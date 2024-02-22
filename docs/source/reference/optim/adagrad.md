@@ -1,7 +1,7 @@
 # AdaGrad
 
-[[autodoc]] Adagrad
+[[autodoc]] optim.Adagrad
 
-[[autodoc]] Adagrad8bit
+[[autodoc]] optim.Adagrad8bit
 
-[[autodoc]] Adagrad32bit
+[[autodoc]] optim.Adagrad32bit

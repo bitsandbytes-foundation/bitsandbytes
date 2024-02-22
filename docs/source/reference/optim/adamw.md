@@ -1,15 +1,15 @@
 # AdamW
 
-[[autodoc]] AdamW
+[[autodoc]] optim.AdamW
 
-[[autodoc]] AdamW8bit
+[[autodoc]] optim.AdamW8bit
 
-[[autodoc]] AdamW32bit
+[[autodoc]] optim.AdamW32bit
 
 ## Paged AdamW
 
-[[autodoc]] PagedAdamW
+[[autodoc]] optim.PagedAdamW
 
-[[autodoc]] PagedAdamW8bit
+[[autodoc]] optim.PagedAdamW8bit
 
-[[autodoc]] PagedAdamW32bit
+[[autodoc]] optim.PagedAdamW32bit

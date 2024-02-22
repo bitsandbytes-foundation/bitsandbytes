@@ -1,11 +1,11 @@
 # Overview
 
-[[autodoc]] Optimizer8bit
+[[autodoc]] optim.Optimizer8bit
 
-[[autodoc]] Optimizer2State
+[[autodoc]] optim.Optimizer2State
 
-[[autodoc]] Optimizer1State
+[[autodoc]] optim.Optimizer1State
 
 ## Utilities
 
-[[autodoc]] GlobalOptimManager
+[[autodoc]] optim.GlobalOptimManager

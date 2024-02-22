@@ -1,15 +1,15 @@
 # Lion
 
-[[autodoc]] Lion
+[[autodoc]] optim.Lion
 
-[[autodoc]] Lion8bit
+[[autodoc]] optim.Lion8bit
 
-[[autodoc]] Lion32bit
+[[autodoc]] optim.Lion32bit
 
 ## Paged Lion
 
-[[autodoc]] PagedLion
+[[autodoc]] optim.PagedLion
 
-[[autodoc]] PagedLion8bit
+[[autodoc]] optim.PagedLion8bit
 
-[[autodoc]] PagedLion32bit
+[[autodoc]] optim.PagedLion32bit

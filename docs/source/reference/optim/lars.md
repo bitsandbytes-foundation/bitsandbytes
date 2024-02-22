@@ -1,7 +1,7 @@
 # LARS
 
-[[autodoc]] LARS
+[[autodoc]] optim.LARS
 
-[[autodoc]] LARS8bit
+[[autodoc]] optim.LARS8bit
 
-[[autodoc]] LARS32bit
+[[autodoc]] optim.LARS32bit
