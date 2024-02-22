@@ -3,7 +3,7 @@ from warnings import warn
 
 import torch
 
-from bitsandbytes.cuda_setup.main import CUDASetup
+from bitsandbytes.device_setup.cuda.main import CUDASetup
 
 setup = CUDASetup.get_instance()
 if setup.initialized != True:
