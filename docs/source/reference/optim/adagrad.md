@@ -1,7 +1,7 @@
 # AdaGrad
 
-[[autodoc]] optim.Adagrad
+[[autodoc]] bitsandbytes.optim.Adagrad
 
-[[autodoc]] optim.Adagrad8bit
+[[autodoc]] bitsandbytes.optim.Adagrad8bit
 
-[[autodoc]] optim.Adagrad32bit
+[[autodoc]] bitsandbytes.optim.Adagrad32bit

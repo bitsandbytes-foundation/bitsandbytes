@@ -1,7 +1,7 @@
 # SGD
 
-[[autodoc]] optim.SGD
+[[autodoc]] bitsandbytes.optim.SGD
 
-[[autodoc]] optim.SGD8bit
+[[autodoc]] bitsandbytes.optim.SGD8bit
 
-[[autodoc]] optim.SGD32bit
+[[autodoc]] bitsandbytes.optim.SGD32bit

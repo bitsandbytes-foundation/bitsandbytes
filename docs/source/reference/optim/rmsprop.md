@@ -1,7 +1,7 @@
 # RMSprop
 
-[[autodoc]] optim.RMSprop
+[[autodoc]] bitsandbytes.optim.RMSprop
 
-[[autodoc]] optim.RMSprop8bit
+[[autodoc]] bitsandbytes.optim.RMSprop8bit
 
-[[autodoc]] optim.RMSprop32bit
+[[autodoc]] bitsandbytes.optim.RMSprop32bit

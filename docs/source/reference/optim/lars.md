@@ -1,7 +1,7 @@
 # LARS
 
-[[autodoc]] optim.LARS
+[[autodoc]] bitsandbytes.optim.LARS
 
-[[autodoc]] optim.LARS8bit
+[[autodoc]] bitsandbytes.optim.LARS8bit
 
-[[autodoc]] optim.LARS32bit
+[[autodoc]] bitsandbytes.optim.LARS32bit

@@ -1,7 +1,7 @@
 # LAMB
 
-[[autodoc]] optim.LAMB
+[[autodoc]] bitsandbytes.optim.LAMB
 
-[[autodoc]] optim.LAMB8bit
+[[autodoc]] bitsandbytes.optim.LAMB8bit
 
-[[autodoc]] optim.LAMB32bit
+[[autodoc]] bitsandbytes.optim.LAMB32bit
