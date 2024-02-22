@@ -1,5 +1,12 @@
 # AdaGrad
 
+[AdaGrad (Adaptive Gradient)](https://jmlr.org/papers/v12/duchi11a.html) is an optimizer that adaptively adjusts the learning rate for each parameter based on their historical gradients.
+
+* Parameters with larger gradients are updated with smaller learning rates to avoid overshooting the minimum. 
+* Parameters with smaller gradients are updated with larger learning rates to catch up and converge faster.
+
+Since learning rates are automatically adjusted, AdaGrad does not require manually tuning learning rates.
+
 [[autodoc]] bitsandbytes.optim.Adagrad
 
 [[autodoc]] bitsandbytes.optim.Adagrad8bit
