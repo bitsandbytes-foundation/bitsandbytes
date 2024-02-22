@@ -12,3 +12,6 @@ ea7c14f8ef64924f2d0ff80df3cdabf2c7299848
 
 # whitespace in pyproject.toml
 f7b791863083429ba79dc00f925a041beab63297
+
+# format bitsandbytes/functional.py
+64ad928224ab1134dff416feee5e7ca663331bc0
