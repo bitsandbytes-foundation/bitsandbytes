@@ -161,7 +161,7 @@ class CUDASetup:
                     self.add_log_entry('3. CUDA not installed')
                     self.add_log_entry('4. You have multiple conflicting CUDA libraries')
                     self.add_log_entry('5. Required library not pre-compiled for this bitsandbytes release!')
-                    self.add_log_entry('CUDA SETUP: If you compiled from source, try again with `make CUDA_VERSION=DETECTED_CUDA_VERSION` for example, `make CUDA_VERSION=113`.')
+                    self.add_log_entry('CUDA SETUP: If you compiled from source, try again with `make CUDA_VERSION=DETECTED_CUDA_VERSION` for example, `make CUDA_VERSION=118`.')
                     self.add_log_entry('CUDA SETUP: The CUDA version for the compile might depend on your conda install. Inspect CUDA version via `conda list | grep cuda`.')
                     self.add_log_entry('='*80)
                     self.add_log_entry('')
@@ -268,7 +268,7 @@ def warn_in_case_of_duplicates(results_paths: Set[Path]) -> None:
             "BNB_CUDA_VERSION=122 python ..."
             "OR set the environmental variable in your .bashrc: export BNB_CUDA_VERSION=122"
             "In the case of a manual override, make sure you set the LD_LIBRARY_PATH, e.g."
-            "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-11.2")
+            "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-12.2")
         CUDASetup.get_instance().add_log_entry(warning_msg, is_warning=True)
 
 
