@@ -36,7 +36,7 @@
       title: AdaGrad
     - local: reference/optim/adam
       title: Adam
-    - local: reference/optim/AdamW
+    - local: reference/optim/adamw
       title: AdamW
     - local: reference/optim/lamb
       title: LAMB
