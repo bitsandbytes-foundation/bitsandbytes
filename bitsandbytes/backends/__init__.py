@@ -2,7 +2,7 @@ from ..cextension import lib
 from ._base import COOSparseTensor
 from .nvidia import CudaBackend
 
-_backend = CudaBackend(lib)
+_backend = CudaBackend(lib) if lib else None
 # TODO: this should actually be done in `cextension.py` and potentially with .get_instance()
 #       for now this is just a simplifying assumption
 #
