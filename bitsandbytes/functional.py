@@ -1643,7 +1643,7 @@ def gemv_4bit(
 
     if B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32]:
         if A.dtype == torch.float16:
-            lib.cgemm_4bit_inference(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
+            lib.cgemm_4bit_inference_naive_fp16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state.code), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
         elif A.dtype == torch.bfloat16:
             lib.cgemm_4bit_inference_naive_bf16(m, n, k, get_ptr(A), get_ptr(B), get_ptr(absmax), get_ptr(state.code), get_ptr(out), lda, ldb, ldc, ct.c_int32(state.blocksize))
         elif A.dtype == torch.float32:
