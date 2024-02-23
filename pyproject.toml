@@ -44,7 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
 benchmark = ["pandas", "matplotlib"]
-docs = ["hf-doc-builder"]
+docs = ["hf-doc-builder", "black"]
 dev = [
     "bitsandbytes[test]",
     "build",
@@ -70,8 +70,10 @@ docs = "https://huggingface.co/docs/bitsandbytes/main"
 issues = "https://github.com/TimDettmers/bitsandbytes/issues"
 
 [tool.setuptools]
-packages = ["bitsandbytes"]
 package-data = { "*" = ["libbitsandbytes*.*"] }
+
+[tool.setuptools.dynamic]
+version = {attr = "bitsandbytes.__version__"}
 
 [tool.ruff]
 src = [

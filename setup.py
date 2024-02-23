@@ -2,7 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from setuptools import setup
+from setuptools import find_packages, setup
 from setuptools.dist import Distribution
 
 
@@ -13,5 +13,6 @@ class BinaryDistribution(Distribution):
 
 setup(
     version="0.43.0.dev0",
-    distclass=BinaryDistribution,
+    packages=find_packages(),
+    distclass=BinaryDistribution
 )
