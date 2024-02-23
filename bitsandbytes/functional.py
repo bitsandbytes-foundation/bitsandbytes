@@ -461,11 +461,7 @@ def get_transform_buffer(
         state = (shape[::-1], to_order)
 
     if to_order == "row" or to_order == "col":
-        if HIP_ENVIRONMENT and to_order == "col":
-            # row to col transformation transposes output shape, so change buffer allocation accordingly
-            return init_func(shape[::-1], dtype=dtype, device=device), state
-        else:
-            return init_func(shape, dtype=dtype, device=device), state
+        return init_func(shape, dtype=dtype, device=device), state
     elif to_order == "col32":
         # blocks of 32 columns (padded)
         cols = 32 * ((cols + 31) // 32)
@@ -503,7 +499,7 @@ def nvidia_transform(
         from_order = state[1]
     if out is None:
         out, new_state = get_transform_buffer(
-            state[0], A.dtype, A.device, to_order, state[1]
+            state[0], A.dtype, A.device, to_order, state[1], transpose
         )
     else:
         new_state = (state[1], to_order)

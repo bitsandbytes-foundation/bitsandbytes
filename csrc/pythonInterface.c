@@ -158,6 +158,9 @@ void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(hipblasLtHandle_t lt
 #endif
 
 MAKE_FUNC_TRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8);
+MAKE_FUNC_TRANSFORM(8, row, col, t, int8_t, ROW, COL, true, 8);
+MAKE_FUNC_TRANSFORM(32, row, col, n, int32_t, ROW, COL, false, 32);
+MAKE_FUNC_TRANSFORM(32, row, col, t, int32_t, ROW, COL, true, 32);
 MAKE_FUNC_TRANSFORM(8, row, row, n, int8_t, ROW, ROW, false, 8);
 MAKE_FUNC_TRANSFORM(8, row, col32, n, int8_t, ROW, COL32, false, 8);
 MAKE_FUNC_TRANSFORM(32, row, col32, n, int32_t, ROW, COL32, false, 32);
@@ -406,6 +409,9 @@ extern "C"
 
 
 	MAKE_FUNC_CTRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8)
+	MAKE_FUNC_CTRANSFORM(8, row, col, t, int8_t, ROW, COL, true, 8)
+	MAKE_FUNC_CTRANSFORM(32, row, col, n, int32_t, ROW, COL, false, 32)
+	MAKE_FUNC_CTRANSFORM(32, row, col, t, int32_t, ROW, COL, true, 32)
 	MAKE_FUNC_CTRANSFORM(8, row, row, n, int8_t, ROW, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, row, col32, n, int8_t, ROW, COL32, false, 8)
 	MAKE_FUNC_CTRANSFORM(32, row, col32, n, int32_t, ROW, COL32, false, 32)

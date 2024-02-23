@@ -383,7 +383,12 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   hipblasLtOrder_t orderA = get_order<SRC>();
   hipblasLtOrder_t orderOut = get_order<TARGET>();
   int ldA = get_leading_dim<SRC>(dim1, dim2);
-  int ldOut = get_leading_dim<TARGET>(dim1, dim2);
+  int ldOut;
+  if (TARGET==COL && transpose) {
+    ldOut = dim2;
+  } else {
+    ldOut = get_leading_dim<TARGET>(dim1, dim2);
+  }
 
   hipblasLtMatrixLayout_t A_desc = NULL, out_desc = NULL, B_desc = NULL;
   T B = T(0);
@@ -395,13 +400,21 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   {
     checkHipblasStatus(hipblasLtMatrixLayoutCreate(&A_desc, HIP_R_8I, dim1, dim2, ldA));
     checkHipblasStatus(hipblasLtMatrixLayoutCreate(&B_desc, HIP_R_8I, 0, 0, 0));
-    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIP_R_8I, dim1, dim2, ldOut));
+    if (TARGET==COL && transpose) {
+	checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIP_R_8I, dim2, dim1, ldOut));
+    } else {
+	checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIP_R_8I, dim1, dim2, ldOut));
+    }
   }
   else if(DTYPE == 32)
   {
     checkHipblasStatus(hipblasLtMatrixLayoutCreate(&A_desc, HIP_R_32I, dim1, dim2, ldA));
     checkHipblasStatus(hipblasLtMatrixLayoutCreate(&B_desc, HIP_R_32I, 0, 0, 0));
-    checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIP_R_32I, dim1, dim2, ldOut));
+    if (TARGET==COL && transpose) {
+	checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIP_R_32I, dim2, dim1, ldOut));
+    } else {
+        checkHipblasStatus(hipblasLtMatrixLayoutCreate(&out_desc, HIP_R_32I, dim1, dim2, ldOut));
+    }
   }
   else
   {
@@ -424,6 +437,9 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
 }
 
 template void transform<int8_t, ROW, COL, false, 8>(hipblasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
+template void transform<int8_t, ROW, COL, true, 8>(hipblasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
+template void transform<int32_t, ROW, COL, false, 32>(hipblasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
+template void transform<int32_t, ROW, COL, true, 32>(hipblasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
 template void transform<int8_t, ROW, ROW, false, 8>(hipblasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int8_t, ROW, COL32, false, 8>(hipblasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int32_t, ROW, COL32, false, 32>(hipblasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
