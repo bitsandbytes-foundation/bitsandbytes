@@ -252,3 +252,42 @@ class CudaBackend(BackendInterface):
         post_call(prev_device)
 
         return out_row, out_col, row_stats, col_stats, coo_tensor
+
+    """
+    # CUDA specific interface (do not include in general interface):
+    'CUBLAS_Context'
+    'Cusparse_Context'
+    'GlobalPageManager'
+    '_mul'
+    'arange'
+    'dtype2bytes'
+    'elementwise_func'
+    'fill'
+    'get_paged'
+    'get_4bit_type'
+    'get_ptr'
+    'get_special_format_str'
+    'get_transform_buffer'
+    'get_transform_func'
+    'is_on_gpu'
+    'nvidia_transform'
+    'transform'
+
+    ## Deprecate these:
+    'optimizer_update_8bit'
+    'dequant_min_max'
+    'dequantize'
+    'dequantize_no_absmax'
+    'igemm'
+    'quantize'
+    'spmm_coo'
+    'spmm_coo_very_sparse'
+    'vectorwise_dequant'
+    'vectorwise_mm_dequant'
+    'vectorwise_quant'
+    'CSCSparseTensor'
+    'CSRSparseTensor'
+    'coo2csc'
+    'coo2csr'
+    'histogram_scatter_add_2d'
+    """
