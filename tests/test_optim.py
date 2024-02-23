@@ -110,7 +110,6 @@ gtype = [torch.float32, torch.float16, torch.bfloat16]
 optimizer_names = ["adam", "momentum", "rmsprop", 'paged_adamw', 'paged_adam', 'lion', 'paged_lion']
 values = list(product(dim1, dim2, gtype, optimizer_names))
 names = ["dim1_{}_dim2_{}_gtype_{}_optim_{}".format(*vals) for vals in values]
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_optimizer32bit(dim1, dim2, gtype, optim_name):
     if gtype == torch.bfloat16 and optim_name in ['momentum', 'rmsprop']: pytest.skip()
@@ -253,7 +252,6 @@ names = [
 ]
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim2, gtype, optim_name", values, ids=names)
 def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     if gtype == torch.bfloat16 and optim_name not in ['adam8bit_blockwise', 'lion8bit_blockwise']: pytest.skip()
