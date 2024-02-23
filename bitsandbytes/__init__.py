@@ -12,6 +12,7 @@ from .autograd._functions import (
     matmul_cublas,
     mm_cublas,
 )
+from .backends import _backend as backend
 from .cextension import COMPILED_WITH_CUDA
 from .nn import modules
 

@@ -3,10 +3,14 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import ctypes as ct
-from functools import reduce  # Required in Python 3
+from functools import (
+    reduce,  # Required in Python 3
+    wraps,
+)
 import itertools
 import operator
 from typing import Any, Dict, Optional, Tuple
+import warnings
 
 import numpy as np
 import torch
@@ -14,12 +18,46 @@ from torch import Tensor
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
+from .backends import _backend as backend
+from .backends._helpers import get_ptr, is_on_gpu, post_call, pre_call
 from .cextension import COMPILED_WITH_CUDA, lib
 
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
     return reduce(operator.mul, iterable, 1)
+
+
+def deprecated(_func=None, *, new_func_name=None):
+    """
+    A decorator to mark functions as deprecated. It issues a warning when the decorated function is called,
+    advising to use a specified new function instead.
+
+    Parameters:
+    - _func (callable, optional): The function to be deprecated. This is for internal use when the decorator is applied without parentheses.
+    - new_func_name (str, optional): The name of the new function to use instead of the deprecated one. Defaults to 'bitsandbytes.backend.<function_name>'.
+
+    Usage:
+    @deprecated
+    def old_function():
+        ...
+
+    @deprecated(new_func_name='module.new_function')
+    def another_old_function():
+        ...
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            replacement = new_func_name or f"bitsandbytes.backend.{func.__name__}"
+            warning_message = f"'{func.__name__}' is deprecated and will be removed in a future version. Use '{replacement}' instead."
+            warnings.warn(warning_message, DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator if _func is None else decorator(_func)
 
 
 name2qmap = {}
@@ -415,56 +453,6 @@ def get_special_format_str():
     if major == 8:
         return "col_ampere"
     return "col_turing"
-
-
-def is_on_gpu(tensors):
-    on_gpu = True
-    gpu_ids = set()
-    for t in tensors:
-        if t is None:
-            continue  # NULL pointers are fine
-        is_paged = getattr(t, "is_paged", False)
-        on_gpu &= t.device.type == "cuda" or is_paged
-        if not is_paged:
-            gpu_ids.add(t.device.index)
-    if not on_gpu:
-        raise TypeError(
-            f"All input tensors need to be on the same GPU, but found some tensors to not be on a GPU:\n {[(t.shape, t.device) for t in tensors]}"
-        )
-    if len(gpu_ids) > 1:
-        raise TypeError(
-            f"Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}"
-        )
-    return on_gpu
-
-
-def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
-    """
-    Get the ctypes pointer from a PyTorch Tensor.
-
-    Parameters
-    ----------
-    A : torch.tensor
-        The PyTorch tensor.
-
-    Returns
-    -------
-    ctypes.c_void_p
-    """
-    if A is None:
-        return None
-    else:
-        return ct.c_void_p(A.data.data_ptr())
-
-
-def pre_call(device):
-    prev_device = torch.cuda.current_device()
-    torch.cuda.set_device(device)
-    return prev_device
-
-
-def post_call(prev_device):
-    torch.cuda.set_device(prev_device)
 
 
 def get_transform_func(dtype, orderA, orderOut, transpose=False):
@@ -2511,69 +2499,9 @@ def mm_dequant(
     return out
 
 
-def get_colrow_absmax(
-    A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0
-):
-    assert A.dtype == torch.float16
-    device = A.device
-
-    cols = A.shape[-1]
-    if len(A.shape) == 3:
-        rows = A.shape[0] * A.shape[1]
-    else:
-        rows = A.shape[0]
-
-    col_tiles = (cols + 255) // 256
-    tiled_rows = ((rows + 15) // 16) * 16
-    if row_stats is None:
-        row_stats = torch.empty((rows,), dtype=torch.float32, device=device).fill_(
-            -50000.0
-        )
-    if col_stats is None:
-        col_stats = torch.empty((cols,), dtype=torch.float32, device=device).fill_(
-            -50000.0
-        )
-
-    if nnz_block_ptr is None and threshold > 0.0:
-        nnz_block_ptr = torch.zeros(
-            ((tiled_rows * col_tiles) + 1,), dtype=torch.int32, device=device
-        )
-
-    ptrA = get_ptr(A)
-    ptrRowStats = get_ptr(row_stats)
-    ptrColStats = get_ptr(col_stats)
-    ptrNnzrows = get_ptr(nnz_block_ptr)
-    rows = ct.c_int32(rows)
-    cols = ct.c_int32(cols)
-
-    prev_device = pre_call(A.device)
-    is_on_gpu([A, row_stats, col_stats, nnz_block_ptr])
-    lib.cget_col_row_stats(
-        ptrA, ptrRowStats, ptrColStats, ptrNnzrows, ct.c_float(threshold), rows, cols
-    )
-    post_call(prev_device)
-
-    if threshold > 0.0:
-        nnz_block_ptr.cumsum_(0)
-
-    return row_stats, col_stats, nnz_block_ptr
-
-
-class COOSparseTensor:
-    def __init__(self, rows, cols, nnz, rowidx, colidx, values):
-        assert rowidx.dtype == torch.int32
-        assert colidx.dtype == torch.int32
-        assert values.dtype == torch.float16
-        assert values.numel() == nnz
-        assert rowidx.numel() == nnz
-        assert colidx.numel() == nnz
-
-        self.rows = rows
-        self.cols = cols
-        self.nnz = nnz
-        self.rowidx = rowidx
-        self.colidx = colidx
-        self.values = values
+@deprecated
+def get_colrow_absmax(*args, **kwargs):
+    return backend.get_colrow_absmax(*args, **kwargs)
 
 
 class CSRSparseTensor:
@@ -2633,105 +2561,14 @@ def coo2csc(cooA):
     return CSCSparseTensor(cooA.rows, cooA.cols, cooA.nnz, colptr, rowidx, values)
 
 
-def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
-    rowidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
-    colidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
-    values = torch.zeros((nnz,), dtype=dtype, device=device)
-    return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
+@deprecated
+def coo_zeros(*args, **kwargs):
+    return backend.coo_zeros(*args, **kwargs)
 
 
-def double_quant(
-    A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
-):
-    device = A.device
-    assert A.dtype == torch.half
-    assert device.type == "cuda"
-    prev_device = pre_call(A.device)
-
-    cols = A.shape[-1]
-    if len(A.shape) == 3:
-        rows = A.shape[0] * A.shape[1]
-    else:
-        rows = A.shape[0]
-
-    if row_stats is None or col_stats is None:
-        row_stats, col_stats, nnz_row_ptr = get_colrow_absmax(A, threshold=threshold)
-
-    if out_col is None:
-        out_col = torch.zeros(A.shape, device=device, dtype=torch.int8)
-    if out_row is None:
-        out_row = torch.zeros(A.shape, device=device, dtype=torch.int8)
-
-    coo_tensor = None
-    ptrA = get_ptr(A)
-    ptrColStats = get_ptr(col_stats)
-    ptrRowStats = get_ptr(row_stats)
-    ptrOutCol = get_ptr(out_col)
-    ptrOutRow = get_ptr(out_row)
-
-    is_on_gpu([A, col_stats, row_stats, out_col, out_row])
-    if threshold > 0.0:
-        nnz = nnz_row_ptr[-1].item()
-        if nnz > 0:
-            coo_tensor = coo_zeros(
-                A.shape[0], A.shape[1], nnz_row_ptr[-1].item(), device
-            )
-            ptrRowIdx = get_ptr(coo_tensor.rowidx)
-            ptrColIdx = get_ptr(coo_tensor.colidx)
-            ptrVal = get_ptr(coo_tensor.values)
-            ptrRowPtr = get_ptr(nnz_row_ptr)
-
-            lib.cdouble_rowcol_quant(
-                ptrA,
-                ptrRowStats,
-                ptrColStats,
-                ptrOutCol,
-                ptrOutRow,
-                ptrRowIdx,
-                ptrColIdx,
-                ptrVal,
-                ptrRowPtr,
-                ct.c_float(threshold),
-                ct.c_int32(rows),
-                ct.c_int32(cols),
-            )
-            val, idx = torch.sort(coo_tensor.rowidx)
-            coo_tensor.rowidx = val
-            coo_tensor.colidx = coo_tensor.colidx[idx]
-            coo_tensor.values = coo_tensor.values[idx]
-        else:
-            lib.cdouble_rowcol_quant(
-                ptrA,
-                ptrRowStats,
-                ptrColStats,
-                ptrOutCol,
-                ptrOutRow,
-                None,
-                None,
-                None,
-                None,
-                ct.c_float(0.0),
-                ct.c_int32(rows),
-                ct.c_int32(cols),
-            )
-    else:
-        lib.cdouble_rowcol_quant(
-            ptrA,
-            ptrRowStats,
-            ptrColStats,
-            ptrOutCol,
-            ptrOutRow,
-            None,
-            None,
-            None,
-            None,
-            ct.c_float(threshold),
-            ct.c_int32(rows),
-            ct.c_int32(cols),
-        )
-    post_call(prev_device)
-
-    return out_row, out_col, row_stats, col_stats, coo_tensor
+@deprecated
+def double_quant(*args, **kwargs):
+    return backend.double_quant(*args, **kwargs)
 
 
 def transform(
