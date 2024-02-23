@@ -177,9 +177,9 @@ jobs:
     - name: Install build package
       shell: bash
       run: pip install build
-    - name: Install Python test dependencies
-      shell: bash
-      run: pip install -r requirements-ci.txt
+    #- name: Install Python test dependencies
+    #  shell: bash
+    #  run: pip install -r requirements-ci.txt
     # TODO: How to run CUDA tests on GitHub actions?
     #- name: Run unit tests
     #  if: ${{ matrix.arch == 'x86_64' }} # Tests are too slow to run in emulation. Wait for real aarch64 agents
