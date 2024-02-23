@@ -3075,7 +3075,7 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //// 4. do dequantization from register of B into second pair of registers
 //// 5. store (4) into fragment
 //// 6. matmul aggregate into fragment C
-//// 7. aggreecate files of C into shared memory block C
+//// 7. aggregate files of C into shared memory block C
 //// 8. sum (7)
 //// 9. write outputs to matmul output matrix
 //}
