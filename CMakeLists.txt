@@ -112,7 +112,7 @@ if(BUILD_CUDA)
     # Ensure we build the PTX for the latest version.
     # This is similar to the "all" and "all-major" options in CMake >= 23.
     # TODO: Consider bumping CMake requirement and using CMAKE_CUDA_ARCHITECTURES=[all | native] by default
-    list(SORT COMPUTE_CAPABILITYY COMPARE NATURAL)
+    list(SORT COMPUTE_CAPABILITY COMPARE NATURAL)
     list(POP_BACK COMPUTE_CAPABILITY _LATEST_CAPABILITY)
     list(TRANSFORM COMPUTE_CAPABILITY APPEND "-real" OUTPUT_VARIABLE CMAKE_CUDA_ARCHITECTURES)
     list(APPEND CMAKE_CUDA_ARCHITECTURES ${_LATEST_CAPABILITY})
