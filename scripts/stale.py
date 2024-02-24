@@ -15,6 +15,7 @@
 Script to close stale issue. Taken in part from the AllenNLP repository.
 https://github.com/allenai/allennlp.
 """
+
 from datetime import datetime as dt, timezone
 import os
 
@@ -50,7 +51,7 @@ def main():
             issue.create_comment(
                 "This issue has been automatically marked as stale because it has not had "
                 "recent activity. If you think this still needs to be addressed "
-                "please comment on this thread.\n\n"
+                "please comment on this thread.\n\n",
             )
 
 

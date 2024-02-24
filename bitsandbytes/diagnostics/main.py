@@ -25,7 +25,7 @@ def sanity_check():
             See the documentation for more details if needed.
 
             Trying a simple check anyway, but this will likely fail...
-            """
+            """,
         )
 
     from bitsandbytes.optim import Adam
@@ -71,7 +71,7 @@ def main():
         print(
             f"WARNING: {__package__} is currently running as CPU-only!\n"
             "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
-            f"If you think that this is so erroneously,\nplease report an issue!"
+            f"If you think that this is so erroneously,\nplease report an issue!",
         )
     except Exception:
         traceback.print_exc()
@@ -80,6 +80,6 @@ def main():
         Above we output some debug information.
         Please provide this info when creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose
         WARNING: Please be sure to sanitize sensitive info from the output before posting it.
-        """
+        """,
     )
     sys.exit(1)

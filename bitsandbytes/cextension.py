@@ -56,7 +56,7 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
             "This can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n"
             "If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n"
             "If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n"
-            "For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n"
+            "For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n",
         )
 
     return PACKAGE_DIR / library_name
@@ -100,7 +100,7 @@ def get_native_library() -> BNBNativeLibrary:
 
     logger.warning(
         "The installed version of bitsandbytes was compiled without GPU support. "
-        "8-bit optimizers, 8-bit multiplication, and GPU quantization are unavailable."
+        "8-bit optimizers, 8-bit multiplication, and GPU quantization are unavailable.",
     )
     return BNBNativeLibrary(dll)
 
@@ -120,5 +120,5 @@ python -m bitsandbytes
 Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
 to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
 and open an issue at: https://github.com/TimDettmers/bitsandbytes/issues
-"""
+""",
         )

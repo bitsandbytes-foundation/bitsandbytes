@@ -19,6 +19,7 @@ from tests.helpers import (
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
 
+
 @pytest.mark.skipif(
     not torch.cuda.is_available() or torch.cuda.get_device_capability() < (7, 5),
     reason="this test requires a turing-generation or newer GPU, see bitsandbytes docs",
@@ -50,7 +51,9 @@ def test_linear_no_igemmlt():
     linear_custom.state.force_no_igemmlt = True
 
     linear_custom.weight = bnb.nn.Int8Params(
-        linear.weight.data.clone(), requires_grad=False, has_fp16_weights=False
+        linear.weight.data.clone(),
+        requires_grad=False,
+        has_fp16_weights=False,
     ).to(linear.weight.dtype)
     linear_custom.bias = linear.bias
     linear_custom = linear_custom.cuda()
@@ -77,7 +80,14 @@ def test_linear_no_igemmlt():
 @pytest.mark.parametrize("force_no_igemmlt", TRUE_FALSE, ids=id_formatter("force_no_igemmlt"))
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
 @pytest.mark.parametrize("load_before_cuda", TRUE_FALSE, ids=id_formatter("load_before_cuda"))
-def test_linear_serialization(has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt, save_before_forward, load_before_cuda):
+def test_linear_serialization(
+    has_fp16_weights,
+    serialize_before_forward,
+    deserialize_before_cuda,
+    force_no_igemmlt,
+    save_before_forward,
+    load_before_cuda,
+):
     linear = torch.nn.Linear(32, 96)
     x = torch.randn(3, 32, dtype=torch.half)
 
@@ -92,7 +102,9 @@ def test_linear_serialization(has_fp16_weights, serialize_before_forward, deseri
         linear_custom.state.force_no_igemmlt = True
 
     linear_custom.weight = bnb.nn.Int8Params(
-        linear.weight.data.clone(), requires_grad=has_fp16_weights, has_fp16_weights=has_fp16_weights
+        linear.weight.data.clone(),
+        requires_grad=has_fp16_weights,
+        has_fp16_weights=has_fp16_weights,
     )
     linear_custom.bias = linear.bias
     linear_custom = linear_custom.cuda()

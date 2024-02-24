@@ -120,7 +120,7 @@ def print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
 
         The CUDA version for the compile might depend on your conda install, if using conda.
         Inspect CUDA version via `conda list | grep cuda`.
-        """
+        """,
         )
 
     cuda_major, cuda_minor = cuda_specs.cuda_version_tuple
@@ -129,7 +129,7 @@ def print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
             """
             WARNING: CUDA versions lower than 11 are currently not supported for LLM.int8().
             You will be only to use 8-bit optimizers and quantization routines!
-            """
+            """,
         )
 
     print(f"To manually override the PyTorch CUDA version please see: {NONPYTORCH_DOC_URL}")
@@ -170,7 +170,7 @@ def print_cuda_runtime_diagnostics() -> None:
 
             In the case of a manual override, make sure you set LD_LIBRARY_PATH, e.g.
             export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-11.2,
-            """
+            """,
         )
         for pth in cudart_paths:
             print(f"* Found CUDA runtime at: {pth}")
