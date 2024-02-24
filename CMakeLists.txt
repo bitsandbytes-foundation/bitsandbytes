@@ -14,6 +14,7 @@
 cmake_minimum_required(VERSION 3.22.1)
 
 project(bitsandbytes LANGUAGES CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Define included source files
 set(CPP_FILES csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
@@ -33,7 +34,11 @@ endif()
 
 set(BNB_OUTPUT_NAME "bitsandbytes")
 
-message(STATUS "Building with backend ${COMPUTE_BACKEND}")
+message(STATUS "Configuring ${PROJECT_NAME} (${CMAKE_BUILD_TYPE})")
+message(STATUS "Backend: ${COMPUTE_BACKEND}")
+message(STATUS "System: ${CMAKE_SYSTEM_NAME} / ${CMAKE_SYSTEM_PROCESSOR}")
+message(STATUS "CXX: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "CMake Generator: ${CMAKE_GENERATOR}")
 
 if(${COMPUTE_BACKEND} STREQUAL "cuda")
     if(APPLE)
@@ -103,10 +108,16 @@ if(BUILD_CUDA)
     message(STATUS "CUDA Capabilities Available: ${POSSIBLE_CAPABILITIES}")
     message(STATUS "CUDA Capabilities  Selected: ${COMPUTE_CAPABILITY}")
 
-    foreach(capability ${COMPUTE_CAPABILITY})
-        string(APPEND CMAKE_CUDA_FLAGS " -gencode arch=compute_${capability},code=sm_${capability}")
-    endforeach()
+    # Use the "real" option to build native cubin for all selections.
+    # Ensure we build the PTX for the latest version.
+    # This is similar to the "all" and "all-major" options in CMake >= 23.
+    # TODO: Consider bumping CMake requirement and using CMAKE_CUDA_ARCHITECTURES=[all | native] by default
+    list(SORT COMPUTE_CAPABILITYY COMPARE NATURAL)
+    list(POP_BACK COMPUTE_CAPABILITY _LATEST_CAPABILITY)
+    list(TRANSFORM COMPUTE_CAPABILITY APPEND "-real" OUTPUT_VARIABLE CMAKE_CUDA_ARCHITECTURES)
+    list(APPEND CMAKE_CUDA_ARCHITECTURES ${_LATEST_CAPABILITY})
 
+    message(STATUS "CUDA Targets: ${CMAKE_CUDA_ARCHITECTURES}")
     message(STATUS "CUDA NVCC Flags: ${CMAKE_CUDA_FLAGS}")
 
     list(APPEND SRC_FILES ${CUDA_FILES})
@@ -149,7 +160,6 @@ endif()
 # Weird MSVC hacks
 if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /arch:AVX2 /fp:fast")
 endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
