@@ -125,10 +125,10 @@ jobs:
             docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
               "apt-get update \
               && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-              && cmake -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} . \
+              && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY="50;52;60;61;70;75;80;86;89;90" -DNO_CUBLASLT=${NO_CUBLASLT} . \
               && cmake --build ."
           else
-            cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY="50;52;60;61;70;75;80;86;89;90" -DNO_CUBLASLT=${NO_CUBLASLT} -DCMAKE_BUILD_TYPE=Release -S .
+            cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} -DCMAKE_BUILD_TYPE=Release -S .
             cmake --build . --config Release
           fi
         done
