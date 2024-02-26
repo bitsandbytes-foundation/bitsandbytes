@@ -34,11 +34,7 @@ endif()
 
 set(BNB_OUTPUT_NAME "bitsandbytes")
 
-message(STATUS "Configuring ${PROJECT_NAME} (${CMAKE_BUILD_TYPE})")
-message(STATUS "Backend: ${COMPUTE_BACKEND}")
-message(STATUS "System: ${CMAKE_SYSTEM_NAME} / ${CMAKE_SYSTEM_PROCESSOR}")
-message(STATUS "CXX: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
-message(STATUS "CMake Generator: ${CMAKE_GENERATOR}")
+message(STATUS "Configuring ${PROJECT_NAME} (Backend: ${COMPUTE_BACKEND})")
 
 if(${COMPUTE_BACKEND} STREQUAL "cuda")
     if(APPLE)
@@ -87,6 +83,31 @@ if(BUILD_CUDA)
         message(FATAL_ERROR "CUDA Version > 12 is not supported")
     endif()
 
+    # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
+    if(CMAKE_VERSION VERSION_LESS "3.23.0")
+        message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
+
+        # 11.x and 12.x both support these at a minimum.
+        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80)
+        set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+
+        # CUDA 11.1 adds Ampere support for GA102-GA107.
+        if (CMAKE_CUDA_COMPILER_TOOLKIT_VERSION VERSION_GREATER_EQUAL "11.1")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 86)
+        endif()
+
+        # CUDA 11.4 adds Ampere support for GA10B.
+        if (CMAKE_CUDA_COMPILER_TOOLKIT_VERSION VERSION_GREATER_EQUAL "11.1")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 87)
+        endif()
+
+        # CUDA 11.8 adds support for Ada and Hopper.
+        if (CMAKE_CUDA_COMPILER_TOOLKIT_VERSION VERSION_GREATER_EQUAL "11.8")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
+        endif()
+    endif()
+
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
     if(PTXAS_VERBOSE)
         # Verbose? Outputs register usage information, and other things...
@@ -112,6 +133,7 @@ if(BUILD_CUDA)
     # Ensure we build the PTX for the latest version.
     # This is similar to the "all" and "all-major" options in CMake >= 23.
     # TODO: Consider bumping CMake requirement and using CMAKE_CUDA_ARCHITECTURES=[all | native] by default
+    list(REMOVE_DUPLICATES COMPUTE_CAPABILITY)
     list(SORT COMPUTE_CAPABILITY COMPARE NATURAL)
     list(POP_BACK COMPUTE_CAPABILITY _LATEST_CAPABILITY)
     list(TRANSFORM COMPUTE_CAPABILITY APPEND "-real" OUTPUT_VARIABLE CMAKE_CUDA_ARCHITECTURES)
