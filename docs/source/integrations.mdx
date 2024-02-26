@@ -2,7 +2,7 @@
 
 With Transformers it's very easy to load any model in 4 or 8-bit, quantizing them on the fly with `bitsandbytes` primitives.
 
-Please review the [`bitsandbytes` section in the Accelerate docs](https://huggingface.co/docs/transformers/v4.37.2/en/quantization#bitsandbytes).
+Please review the [`bitsandbytes` section in the Transformers docs](https://huggingface.co/docs/transformers/main/en/quantization#bitsandbytes).
 
 Details about the BitsAndBytesConfig can be found [here](https://huggingface.co/docs/transformers/v4.37.2/en/main_classes/quantization#transformers.BitsAndBytesConfig).
 
@@ -25,7 +25,7 @@ Please review the [`bitsandbytes` section in the Accelerate docs](https://huggin
 
 # Accelerate
 
-Bitsandbytes is also easily usable from within Accelerate, where you can quantize any model simply by passing a quantization config; e.g:
+Bitsandbytes is also easily usable from within Accelerate, where you can quantize any pytorch model simply by passing a quantization config; e.g:
 
 ```py
 from accelerate import init_empty_weights
