@@ -130,7 +130,8 @@ if(BUILD_CUDA)
 
     # Use the "real" option to build native cubin for all selections.
     # Ensure we build the PTX for the latest version.
-    # This is similar to the "all" and "all-major" options in CMake >= 23.
+    # This behavior of adding a PTX (virtual) target for the highest architecture
+    # is similar to how the "all" and "all-major" options would behave in CMake >= 3.23.
     # TODO: Consider bumping CMake requirement and using CMAKE_CUDA_ARCHITECTURES=[all | native] by default
     list(REMOVE_DUPLICATES COMPUTE_CAPABILITY)
     list(SORT COMPUTE_CAPABILITY COMPARE NATURAL)
