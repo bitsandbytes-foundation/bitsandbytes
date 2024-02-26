@@ -1,5 +1,5 @@
 # Requirements used for GitHub actions
-pytest==7.2.2
+pytest==8.0.2
 einops==0.6.0
 wheel==0.40.0
 lion-pytorch==0.0.6
