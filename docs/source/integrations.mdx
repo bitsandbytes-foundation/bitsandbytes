@@ -21,7 +21,7 @@ quantization_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dty
 # PEFT
 With `PEFT`, you can use QLoRA out of the box with `LoraConfig` and a 4-bit base model.
 
-Please review the [`bitsandbytes` section in the Accelerate docs](https://huggingface.co/docs/peft/developer_guides/quantization#quantize-a-model).
+Please review the [bitsandbytes section in the PEFT docs](https://huggingface.co/docs/peft/developer_guides/quantization#quantize-a-model).
 
 # Accelerate
 
@@ -56,6 +56,25 @@ quantized_model = load_and_quantize_model(
 ```
 
 For further details, e.g. model saving, cpu-offloading andfine-tuning, please review the [`bitsandbytes` section in the Accelerate docs](https://huggingface.co/docs/accelerate/en/usage_guides/quantization).
+
+
+
+# PyTorch Lightning and Lightning Fabric
+
+Bitsandbytes is available from within both
+- [PyTorch Lightning](https://lightning.ai/docs/pytorch/stable/), a deep learning framework for professional AI researchers and machine learning engineers who need maximal flexibility without sacrificing performance at scale;
+-  and [Lightning Fabric](https://lightning.ai/docs/fabric/stable/), a fast and lightweight way to scale PyTorch models without boilerplate).
+
+Please review the [bitsandbytes section in the PyTorch Lightning docs](https://lightning.ai/docs/pytorch/stable/common/precision_intermediate.html#quantization-via-bitsandbytes).
+
+
+# Lit-GPT
+
+Bitsandbytes is integrated into [Lit-GPT](https://github.com/Lightning-AI/lit-gpt), a hackable implementation of state-of-the-art open-source large language models, based on Lightning Fabric, where it can be used for quantization during training, finetuning, and inference.
+
+Please review the [bitsandbytes section in the Lit-GPT quantization docs](https://github.com/Lightning-AI/lit-gpt/blob/main/tutorials/quantize.md).
+
+
 
 # Trainer for the optimizers
 
