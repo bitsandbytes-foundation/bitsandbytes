@@ -29,6 +29,16 @@ Bitsandbytes is also easily usable from within Accelerate.
 
 Please review the [bitsandbytes section in the Accelerate docs](https://huggingface.co/docs/accelerate/en/usage_guides/quantization).
 
+
+
+# Lit-GPT
+
+Bitsandbytes is integrated into [Lit-GPT](https://github.com/Lightning-AI/lit-gpt), a hackable implementation of state-of-the-art open-source large language models released under the Apache 2.0 license, where it can be used for quantization during training, finetuning, and inference.
+
+Please review the [bitsandbytes section in the Lit-GPT quantization docs](https://github.com/Lightning-AI/lit-gpt/blob/main/tutorials/quantize.md).
+
+
+
 # Trainer for the optimizers
 
 You can use any of the 8-bit and/or paged optimizers by simple passing them to the `transformers.Trainer` class on initialization.All bnb optimizers are supported by passing the correct string in `TrainingArguments`'s `optim` attribute - e.g. (`paged_adamw_32bit`).
