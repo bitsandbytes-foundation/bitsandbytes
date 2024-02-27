@@ -654,6 +654,8 @@ __global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const f
       for(int j = threadIdx.x; j < BLOCK_ESTIMATE; j+=blockDim.x)
           temp_storage.smem_qidx[j] = -1;
 
+      __syncthreads();
+
       if(threadIdx.x < 256)
       {
           float q_interval = (1.0f-(2.0f*offset))/255.0f;
@@ -3073,7 +3075,7 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //// 4. do dequantization from register of B into second pair of registers
 //// 5. store (4) into fragment
 //// 6. matmul aggregate into fragment C
-//// 7. aggreecate files of C into shared memory block C
+//// 7. aggregate files of C into shared memory block C
 //// 8. sum (7)
 //// 9. write outputs to matmul output matrix
 //}

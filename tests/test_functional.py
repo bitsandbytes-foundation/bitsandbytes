@@ -26,12 +26,12 @@ k = 20
 
 
 def assert_all_approx_close(a, b, rtol=1e-3, atol=1e-3, count=0, throw=True):
-    idx = torch.isclose(a, b, rtol, atol)
+    idx = torch.isclose(a, b, rtol=rtol, atol=atol)
     sumval = (idx == 0).sum().item()
     if sumval > count:
         if throw:
             print(f"Too many values not close: assert {sumval} < {count}")
-            torch.testing.assert_close(a, b, rtol, atol)
+            torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
     return sumval
 

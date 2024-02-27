@@ -706,6 +706,21 @@ class QuantState:
             self.state2.absmax = self.state2.absmax.to(device)
             self.state2.code = self.state2.code.to(device)
 
+    def __eq__(self, other):
+        if not isinstance(other, QuantState):
+            return False
+
+        return (
+            torch.allclose(self.absmax, other.absmax, atol=1e-6) and
+            self.shape == other.shape and
+            torch.allclose(self.code, other.code, atol=1e-6) and
+            self.dtype == other.dtype and
+            self.blocksize == other.blocksize and
+            self.quant_type == other.quant_type and
+            (self.offset == other.offset if self.offset is not None and other.offset is not None else self.offset is other.offset) and
+            (self.state2 == other.state2 if self.state2 is not None and other.state2 is not None else self.state2 is other.state2)
+        )
+
 
 def quantize_blockwise(
     A: Tensor,
