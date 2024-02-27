@@ -30,7 +30,7 @@ from .env_vars import get_potentially_lib_path_containing_env_vars
 
 DYNAMIC_LIBRARY_SUFFIX = { "Darwin": ".dylib", "Windows": ".dll", "Linux": ".so"}.get(platform.system(), ".so")
 if platform.system() == "Windows":  # Windows
-    CUDA_RUNTIME_LIBS = ["nvcuda.dll"]
+    CUDA_RUNTIME_LIBS = ["cudart64_110.dll", "cudart64_12.dll"]
 else:  # Linux or other
     # these are the most common libs names
     # libcudart.so is missing by default for a conda install with PyTorch 2.0 and instead
