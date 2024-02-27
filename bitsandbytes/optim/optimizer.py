@@ -59,8 +59,8 @@ class GlobalOptimManager:
         Override initial optimizer config with specific hyperparameters.
 
         The key-values of the optimizer config for the input parameters are overridden
-        This can be both, optimizer parameters like "betas" or "lr", or it can be
-        8-bit specific parameters like "optim_bits" or "percentile_clipping".
+        This can be both, optimizer parameters like `betas` or `lr`, or it can be
+        8-bit specific parameters like `optim_bits` or `percentile_clipping`.
 
         Arguments:
            parameters (`torch.Tensor` or `list(torch.Tensors)`):
@@ -160,7 +160,7 @@ class Optimizer8bit(torch.optim.Optimizer):
         """Load an optimizer state.
 
         Arguments:
-            state_dict (`dict`): 
+            state_dict (`dict`):
                 An optimizer state (should be returned from a call to `state_dict`) to load.
         """
         # deepcopy, to be consistent with module API
@@ -272,7 +272,7 @@ class Optimizer8bit(torch.optim.Optimizer):
         """Perform a single optimization step.
 
         Arguments:
-            closure (`Callable`, *optional*, defaults to `None`): 
+            closure (`Callable`, *optional*, defaults to `None`):
                 A closure that reevaluates the model and returns the loss.
         """
         loss = None
@@ -648,7 +648,7 @@ class Optimizer1State(Optimizer8bit):
             skip_zeros (`bool`, defaults to `False`):
                 Whether to skip zero values for sparse gradients and models to ensure correct updates.
             is_paged (`bool`, defaults to `False`):
-                Whether the optimizer is a paged optimizer or not.        
+                Whether the optimizer is a paged optimizer or not.
         """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")

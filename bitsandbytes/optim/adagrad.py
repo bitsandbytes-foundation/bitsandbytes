@@ -35,7 +35,7 @@ class Adagrad(Optimizer1State):
             initial_accumulator_value (`int`, defaults to 0):
                 The initial momemtum values.
             eps (`float`, defaults to 1e-10):
-                The epsilon value for the optimizer.
+                The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
             args (`dict`, defaults to `None`):
@@ -104,7 +104,7 @@ class Adagrad8bit(Optimizer1State):
             initial_accumulator_value (`int`, defaults to 0):
                 The initial momemtum values.
             eps (`float`, defaults to 1e-10):
-                The epsilon value for the optimizer.
+                The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 8):
                 The number of bits of the optimizer state.
             args (`dict`, defaults to `None`):
@@ -174,7 +174,7 @@ class Adagrad32bit(Optimizer1State):
             initial_accumulator_value (`int`, defaults to 0):
                 The initial momemtum values.
             eps (`float`, defaults to 1e-10):
-                The epsilon value for the optimizer.
+                The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
             args (`dict`, defaults to `None`):
@@ -185,7 +185,7 @@ class Adagrad32bit(Optimizer1State):
                 Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
             block_wise (`bool`, defaults to `True`):
                 Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
-        """        
+        """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
