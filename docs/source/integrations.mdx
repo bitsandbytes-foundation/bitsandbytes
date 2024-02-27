@@ -1,8 +1,8 @@
 # Transformers
 
-With Transformers it's very easy to load any model in 4 or 8-bit, quantizing them on the fly with bitsandbytes primitives.
+With Transformers it's very easy to load any model in 4 or 8-bit, quantizing them on the fly with `bitsandbytes` primitives.
 
-Please review the [bitsandbytes section in the Transformers docs](https://huggingface.co/docs/transformers/v4.37.2/en/quantization#bitsandbytes).
+Please review the [`bitsandbytes` section in the Transformers docs](https://huggingface.co/docs/transformers/main/en/quantization#bitsandbytes).
 
 Details about the BitsAndBytesConfig can be found [here](https://huggingface.co/docs/transformers/v4.37.2/en/main_classes/quantization#transformers.BitsAndBytesConfig).
 
@@ -25,9 +25,37 @@ Please review the [bitsandbytes section in the PEFT docs](https://huggingface.co
 
 # Accelerate
 
-Bitsandbytes is also easily usable from within Accelerate.
+Bitsandbytes is also easily usable from within Accelerate, where you can quantize any PyTorch model simply by passing a quantization config; e.g:
 
-Please review the [bitsandbytes section in the Accelerate docs](https://huggingface.co/docs/accelerate/en/usage_guides/quantization).
+```py
+from accelerate import init_empty_weights
+from accelerate.utils import BnbQuantizationConfig, load_and_quantize_model
+from mingpt.model import GPT
+
+model_config = GPT.get_default_config()
+model_config.model_type = 'gpt2-xl'
+model_config.vocab_size = 50257
+model_config.block_size = 1024
+
+with init_empty_weights():
+    empty_model = GPT(model_config)
+
+bnb_quantization_config = BnbQuantizationConfig(
+  load_in_4bit=True,
+  bnb_4bit_compute_dtype=torch.bfloat16,  # optional
+  bnb_4bit_use_double_quant=True,         # optional
+  bnb_4bit_quant_type="nf4"               # optional
+)
+
+quantized_model = load_and_quantize_model(
+  empty_model,
+  weights_location=weights_location,
+  bnb_quantization_config=bnb_quantization_config,
+  device_map = "auto"
+)
+```
+
+For further details, e.g. model saving, cpu-offloading andfine-tuning, please review the [`bitsandbytes` section in the Accelerate docs](https://huggingface.co/docs/accelerate/en/usage_guides/quantization).
 
 
 
@@ -59,5 +87,5 @@ e.g. for transformers state that you can load any model in 8-bit / 4-bit precisi
 
 # Blog posts
 
-- [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes)
-- [A Gentle Introduction to 8-bit Matrix Multiplication for transformers at scale using Hugging Face Transformers, Accelerate and bitsandbytes](https://huggingface.co/blog/hf-bitsandbytes-integration)
+- [Making LLMs even more accessible with `bitsandbytes`, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes)
+- [A Gentle Introduction to 8-bit Matrix Multiplication for transformers at scale using Hugging Face Transformers, Accelerate and `bitsandbytes`](https://huggingface.co/blog/hf-bitsandbytes-integration)
