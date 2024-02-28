@@ -449,7 +449,9 @@ class Int8Params(torch.nn.Parameter):
         cls.SCB = None
         if data is None:
             data = torch.empty(0)
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+        obj = torch.Tensor._make_subclass(cls, data, requires_grad)
+        obj.CB, obj.SCB = cls.CB, cls.SCB
+        return obj
 
     def cuda(self, device):
         if self.has_fp16_weights:

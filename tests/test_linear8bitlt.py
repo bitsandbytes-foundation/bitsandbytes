@@ -1,4 +1,5 @@
 from contextlib import nullcontext
+from io import BytesIO
 import os
 from tempfile import TemporaryDirectory
 
@@ -65,12 +66,25 @@ def test_linear_no_igemmlt():
     assert linear_custom.state.CB is not None
     assert linear_custom.state.CxB is None
 
+def torch_save_to_buffer(obj):
+    buffer = BytesIO()
+    torch.save(obj, buffer)
+    buffer.seek(0)
+    return buffer
+
+def torch_load_from_buffer(buffer):
+    buffer.seek(0)
+    obj = torch.load(buffer)
+    buffer.seek(0)
+    return obj
 
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
 @pytest.mark.parametrize("serialize_before_forward", TRUE_FALSE, ids=id_formatter("serialize_before_forward"))
 @pytest.mark.parametrize("deserialize_before_cuda", TRUE_FALSE, ids=id_formatter("deserialize_before_cuda"))
 @pytest.mark.parametrize("force_no_igemmlt", TRUE_FALSE, ids=id_formatter("force_no_igemmlt"))
-def test_linear_serialization(has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt):
+@pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
+@pytest.mark.parametrize("load_before_cuda", TRUE_FALSE, ids=id_formatter("load_before_cuda"))
+def test_linear_serialization(has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt, save_before_forward, load_before_cuda):
     linear = torch.nn.Linear(32, 96)
     x = torch.randn(3, 32, dtype=torch.half)
 
@@ -93,6 +107,9 @@ def test_linear_serialization(has_fp16_weights, serialize_before_forward, deseri
     if serialize_before_forward:
         state_dict_8bit = linear_custom.state_dict()
 
+    if save_before_forward:
+        bytes_8bit = torch_save_to_buffer(linear_custom)
+
     x_first = x.clone().cuda().requires_grad_(True)
     fx_first = linear_custom(x_first).float()
     grad_proj = torch.randn_like(fx_first)
@@ -100,6 +117,9 @@ def test_linear_serialization(has_fp16_weights, serialize_before_forward, deseri
 
     if not serialize_before_forward:
         state_dict_8bit = linear_custom.state_dict()
+
+    if not save_before_forward:
+        bytes_8bit = torch_save_to_buffer(linear_custom)
 
     with TemporaryDirectory() as tmpdir:
         state_path_8bit = os.path.join(tmpdir, "state_8bit.pth")
@@ -127,16 +147,28 @@ def test_linear_serialization(has_fp16_weights, serialize_before_forward, deseri
         with nullcontext() if has_fp16_weights else pytest.raises(RuntimeError):
             new_linear_custom.load_state_dict(new_state_dict, strict=True)
 
+    if load_before_cuda:
+        new_linear_custom2 = torch_load_from_buffer(bytes_8bit)
+
     new_linear_custom = new_linear_custom.cuda()
 
     if not deserialize_before_cuda:
         new_linear_custom.load_state_dict(new_state_dict, strict=True)
 
+    if not load_before_cuda:
+        new_linear_custom2 = torch_load_from_buffer(bytes_8bit)
+
     x_second = x.clone().cuda().requires_grad_(True)
     fx_second = new_linear_custom(x_second).float()
     (fx_second * grad_proj).mean().backward()
+
+    x_third = x.clone().cuda().requires_grad_(True)
+    fx_third = new_linear_custom2(x_third).float()
+    (fx_third * grad_proj).mean().backward()
 
     # if 8-bit weights were loaded before .cuda, state is incorrect anyway and RuntimeError was raised
     if has_fp16_weights or not deserialize_before_cuda:
         assert torch.allclose(fx_first, fx_second, atol=1e-5)
         assert torch.allclose(x_first.grad, x_second.grad, atol=1e-5)
+    assert torch.allclose(fx_first, fx_third, atol=1e-5)
+    assert torch.allclose(x_first.grad, x_third.grad, atol=1e-5)
