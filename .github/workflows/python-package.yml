@@ -15,9 +15,12 @@ on:
       - 'setup.py'
       - 'pyproject.toml'
       - 'pytest.ini'
-      - '**/*.md'
   release:
     types: [ published ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
@@ -53,7 +56,8 @@ jobs:
         build_os=${{ matrix.os }}
         build_arch=${{ matrix.arch }}
         if [ ${build_os:0:6} == ubuntu -a ${build_arch} == aarch64 ]; then
-          # Allow cross-compile om aarch64
+          # Allow cross-compile on aarch64
+          sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu g++-aarch64-linux-gnu
           cmake -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ -DCOMPUTE_BACKEND=cpu .
         elif [ ${build_os:0:5} == macos -a ${build_arch} == aarch64 ]; then
@@ -125,7 +129,7 @@ jobs:
             docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
               "apt-get update \
               && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-              && cmake -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} . \
+              && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"50;52;60;61;70;75;80;86;89;90\" -DNO_CUBLASLT=${NO_CUBLASLT} . \
               && cmake --build ."
           else
             cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=${NO_CUBLASLT} -DCMAKE_BUILD_TYPE=Release -S .

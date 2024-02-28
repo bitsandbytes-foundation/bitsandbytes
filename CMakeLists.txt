@@ -33,7 +33,7 @@ endif()
 
 set(BNB_OUTPUT_NAME "bitsandbytes")
 
-message(STATUS "Building with backend ${COMPUTE_BACKEND}")
+message(STATUS "Configuring ${PROJECT_NAME} (Backend: ${COMPUTE_BACKEND})")
 
 if(${COMPUTE_BACKEND} STREQUAL "cuda")
     if(APPLE)
@@ -82,6 +82,31 @@ if(BUILD_CUDA)
         message(FATAL_ERROR "CUDA Version > 12 is not supported")
     endif()
 
+    # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
+    if(CMAKE_VERSION VERSION_LESS "3.23.0")
+        message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
+
+        # 11.x and 12.x both support these at a minimum.
+        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80)
+        set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+
+        # CUDA 11.1 adds Ampere support for GA102-GA107.
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.1")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 86)
+        endif()
+
+        # CUDA 11.4 adds Ampere support for GA10B.
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.4")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 87)
+        endif()
+
+        # CUDA 11.8 adds support for Ada and Hopper.
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
+        endif()
+    endif()
+
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
     if(PTXAS_VERBOSE)
         # Verbose? Outputs register usage information, and other things...
@@ -103,10 +128,18 @@ if(BUILD_CUDA)
     message(STATUS "CUDA Capabilities Available: ${POSSIBLE_CAPABILITIES}")
     message(STATUS "CUDA Capabilities  Selected: ${COMPUTE_CAPABILITY}")
 
-    foreach(capability ${COMPUTE_CAPABILITY})
-        string(APPEND CMAKE_CUDA_FLAGS " -gencode arch=compute_${capability},code=sm_${capability}")
-    endforeach()
+    # Use the "real" option to build native cubin for all selections.
+    # Ensure we build the PTX for the latest version.
+    # This behavior of adding a PTX (virtual) target for the highest architecture
+    # is similar to how the "all" and "all-major" options would behave in CMake >= 3.23.
+    # TODO: Consider bumping CMake requirement and using CMAKE_CUDA_ARCHITECTURES=[all | native] by default
+    list(REMOVE_DUPLICATES COMPUTE_CAPABILITY)
+    list(SORT COMPUTE_CAPABILITY COMPARE NATURAL)
+    list(POP_BACK COMPUTE_CAPABILITY _LATEST_CAPABILITY)
+    list(TRANSFORM COMPUTE_CAPABILITY APPEND "-real" OUTPUT_VARIABLE CMAKE_CUDA_ARCHITECTURES)
+    list(APPEND CMAKE_CUDA_ARCHITECTURES ${_LATEST_CAPABILITY})
 
+    message(STATUS "CUDA Targets: ${CMAKE_CUDA_ARCHITECTURES}")
     message(STATUS "CUDA NVCC Flags: ${CMAKE_CUDA_FLAGS}")
 
     list(APPEND SRC_FILES ${CUDA_FILES})
@@ -149,7 +182,6 @@ endif()
 # Weird MSVC hacks
 if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /arch:AVX2 /fp:fast")
 endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
@@ -182,10 +214,10 @@ if(WIN32)
 endif()
 set_target_properties(bitsandbytes PROPERTIES OUTPUT_NAME ${BNB_OUTPUT_NAME})
 if(MSVC)
-    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELEASE bitsandbytes)
-    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_DEBUG bitsandbytes)
-    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE bitsandbytes)
-    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG bitsandbytes)
+    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/bitsandbytes")
+    set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/bitsandbytes")
+    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/bitsandbytes")
+    set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/bitsandbytes")
 endif()
 
 set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY bitsandbytes)
