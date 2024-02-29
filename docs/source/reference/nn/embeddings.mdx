@@ -1,0 +1,15 @@
+# Embedding
+
+The embedding class is used to store and retrieve word embeddings from their indices. There are two types of embeddings in bitsandbytes, the standard PyTorch [`Embedding`] class and the [`StableEmbedding`] class.
+
+The [`StableEmbedding`] class was introduced in the [8-bit Optimizers via Block-wise Quantization](https://hf.co/papers/2110.02861) paper to reduce gradient variance as a result of the non-uniform distribution of input tokens. This class is designed to support quantization.
+
+## Embedding
+
+[[autodoc]] bitsandbytes.nn.Embedding
+    - __init__
+
+## StableEmbedding
+
+[[autodoc]] bitsandbytes.nn.StableEmbedding
+    - __init__

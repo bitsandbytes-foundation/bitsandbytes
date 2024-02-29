@@ -48,3 +48,11 @@
       title: RMSprop
     - local: reference/optim/sgd
       title: SGD
+  - title: k-bit quantizers
+    sections:
+    - local: reference/nn/linear8bit
+      title: 8-bit quantizer
+    - local: reference/nn/linear4bit
+      title: 4-bit quantizer
+    - local: reference/nn/embeddings
+      title: Embedding
