@@ -57,9 +57,7 @@ dev = [
 test = [
     "einops~=0.6.0",
     "lion-pytorch==0.0.6",
-    "pytest==7.4.4",
-    "pytest-cases>=3.7.0,<4",
-    "pytest-sugar>=1.0.0,<1.1.0",
+    "pytest~=7.4",
     "scipy>=1.10,<2",
     "transformers>=4.30.1,<5"
 ]
