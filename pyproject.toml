@@ -9,7 +9,7 @@ description = "k-bit optimizers and matrix multiplication routines."
 authors = [{name="Tim Dettmers", email="dettmers@cs.washington.edu"}]
 requires-python = ">=3.8"
 readme = "README.md"
-license = "MIT"
+license = {file="LICENSE"}
 keywords = [
     "gpu",
     "optimizers",
