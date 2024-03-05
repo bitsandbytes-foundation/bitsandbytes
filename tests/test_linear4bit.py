@@ -1,4 +1,5 @@
 import copy
+from io import BytesIO
 import os
 import pickle
 from tempfile import TemporaryDirectory
@@ -16,12 +17,24 @@ storage = {
     "float32": torch.float32,
 }
 
+def torch_save_to_buffer(obj):
+    buffer = BytesIO()
+    torch.save(obj, buffer)
+    buffer.seek(0)
+    return buffer
+
+def torch_load_from_buffer(buffer):
+    buffer.seek(0)
+    obj = torch.load(buffer)
+    buffer.seek(0)
+    return obj
 
 @pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
 @pytest.mark.parametrize("bias", TRUE_FALSE)
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage):
+@pytest.mark.parametrize("save_before_forward", TRUE_FALSE)
+def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage, save_before_forward):
     original_dtype = torch.float16
     compute_dtype = None
     device = "cuda"
@@ -124,6 +137,9 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         assert a.dtype == b.dtype
         assert torch.equal(a, b)
 
+    if save_before_forward:
+        bytes_4bit = torch_save_to_buffer(linear_q)
+
     # Forward test
     x = torch.rand(42, layer_shape[0], device=device)
     a = linear_q(x)
@@ -136,10 +152,19 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
     assert torch.equal(a, b)
     assert torch.equal(a, c)
 
+    if not save_before_forward:
+        bytes_4bit = torch_save_to_buffer(linear_q)
+    linear_q3 = torch_load_from_buffer(bytes_4bit)
+
     # Test moving to CPU and back to GPU
     linear_q2.to("cpu")
     linear_q2.to(device)
     d = linear_qs(x)
+    assert c.dtype == d.dtype
+    assert c.device == d.device
+    assert torch.equal(c, d)
+
+    d = linear_q3(x)
     assert c.dtype == d.dtype
     assert c.device == d.device
     assert torch.equal(c, d)
