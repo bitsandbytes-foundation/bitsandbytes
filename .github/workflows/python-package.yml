@@ -207,13 +207,7 @@ jobs:
   publish:
     needs: build-wheels
     runs-on: ubuntu-18.04
-    if: >
-      github.event_name == 'workflow_dispatch' && (
-      github.actor == 'TimDettmers' ||
-      github.actor == 'Titus-von-Koeller' ||
-      github.actor == 'younesbelkada' ||
-      github.actor == 'matthewdouglas'
-      )
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - name: Download build artifact
