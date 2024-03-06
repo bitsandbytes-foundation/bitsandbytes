@@ -1,5 +1,4 @@
 from contextlib import nullcontext
-from io import BytesIO
 import os
 from tempfile import TemporaryDirectory
 
@@ -10,7 +9,12 @@ import bitsandbytes as bnb
 from bitsandbytes import functional as F
 from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
 from bitsandbytes.nn.modules import Linear8bitLt
-from tests.helpers import TRUE_FALSE, id_formatter
+from tests.helpers import (
+    TRUE_FALSE,
+    id_formatter,
+    torch_load_from_buffer,
+    torch_save_to_buffer,
+)
 
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
@@ -66,17 +70,6 @@ def test_linear_no_igemmlt():
     assert linear_custom.state.CB is not None
     assert linear_custom.state.CxB is None
 
-def torch_save_to_buffer(obj):
-    buffer = BytesIO()
-    torch.save(obj, buffer)
-    buffer.seek(0)
-    return buffer
-
-def torch_load_from_buffer(buffer):
-    buffer.seek(0)
-    obj = torch.load(buffer)
-    buffer.seek(0)
-    return obj
 
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
 @pytest.mark.parametrize("serialize_before_forward", TRUE_FALSE, ids=id_formatter("serialize_before_forward"))

@@ -1,5 +1,4 @@
 import copy
-from io import BytesIO
 import os
 import pickle
 from tempfile import TemporaryDirectory
@@ -8,7 +7,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
-from tests.helpers import TRUE_FALSE
+from tests.helpers import TRUE_FALSE, torch_load_from_buffer, torch_save_to_buffer
 
 storage = {
     "uint8": torch.uint8,
@@ -17,17 +16,6 @@ storage = {
     "float32": torch.float32,
 }
 
-def torch_save_to_buffer(obj):
-    buffer = BytesIO()
-    torch.save(obj, buffer)
-    buffer.seek(0)
-    return buffer
-
-def torch_load_from_buffer(buffer):
-    buffer.seek(0)
-    obj = torch.load(buffer)
-    buffer.seek(0)
-    return obj
 
 @pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
 @pytest.mark.parametrize("bias", TRUE_FALSE)
