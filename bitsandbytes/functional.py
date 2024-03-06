@@ -740,7 +740,10 @@ def quantize_blockwise(A: Tensor, code: Tensor = None, absmax: Tensor = None, ou
         out = torch.zeros_like(A, dtype=torch.uint8)
 
     if A.device.type != 'cpu':
-        assert blocksize in [4096, 2048, 1024, 512, 256, 128]
+        if not HIP_ENVIRONMENT:
+            assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+        else:
+            assert blocksize in [4096, 2048, 1024, 512, 256, 128]
         cblocksize = ct.c_int32(blocksize)
         prev_device = pre_call(A.device)
         code = code.to(A.device)
@@ -825,8 +828,11 @@ def dequantize_blockwise(
     if A.device.type != 'cpu':
         device = pre_call(A.device)
         code = quant_state.code.to(A.device)
-        if quant_state.blocksize not in [2048, 4096, 1024, 512, 256, 128]:
-            raise ValueError(f"The blockwise of {quant_state.blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128]")
+        supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
+        if HIP_ENVIRONMENT:
+            supported_blocksizes = supported_blocksizes[:-1]
+        if quant_state.blocksize not in supported_blocksizes:
+            raise ValueError(f"The blockwise of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}")
         is_on_gpu([A, absmax, out])
         if out.dtype == torch.float32:
             lib.cdequantize_blockwise_fp32(get_ptr(quant_state.code), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int(quant_state.blocksize), ct.c_int(A.numel()))
@@ -894,13 +900,17 @@ def get_4bit_type(typename, device=None, blocksize=64):
     return data.to(device)
 
 
-def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=128, compress_statistics=False, quant_storage=torch.uint8):
+def quantize_fp4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=None, compress_statistics=False, quant_storage=torch.uint8):
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'fp4', quant_storage)
 
-def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=128, compress_statistics=False, quant_storage=torch.uint8):
+def quantize_nf4(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=None, compress_statistics=False, quant_storage=torch.uint8):
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, 'nf4', quant_storage)
 
-def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=128, compress_statistics=False, quant_type='fp4', quant_storage=torch.uint8) -> Tensor:
+def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksize=None, compress_statistics=False, quant_type='fp4', quant_storage=torch.uint8) -> Tensor:
     """
     Quantize tensor A in blocks of 4-bit values.
 
@@ -926,6 +936,8 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
     tuple(torch.Tensor, torch.Size, torch.dtype, int):
         The quantization state to undo the quantization.
     """
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     if A.device.type != 'cuda':
         raise NotImplementedError(f'Device type not supported for FP4 quantization: {A.device.type}')
     if quant_type not in ['fp4', 'nf4']:
@@ -944,7 +956,10 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
         mod = dtype2bytes[quant_storage] * 2
         out = torch.zeros(((n+1)//mod, 1), dtype=quant_storage, device=A.device)
 
-    assert blocksize in [4096, 2048, 1024, 512, 256, 128]
+    if not HIP_ENVIRONMENT:
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+    else:
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128]
 
     prev_device = pre_call(A.device)
     is_on_gpu([A, out, absmax])
@@ -981,13 +996,19 @@ def quantize_4bit(A: Tensor, absmax: Tensor = None, out: Tensor = None, blocksiz
 
     return out, state
 
-def dequantize_fp4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 128) -> Tensor:
+def dequantize_fp4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = None) -> Tensor:
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
+
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'fp4')
 
-def dequantize_nf4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 128) -> Tensor:
+def dequantize_nf4(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = None) -> Tensor:
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
+    
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, 'nf4')
 
-def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = 128, quant_type='fp4') -> Tensor:
+def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = None, out: Tensor = None, blocksize: int = None, quant_type='fp4') -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
 
@@ -1014,8 +1035,15 @@ def dequantize_4bit(A: Tensor, quant_state: QuantState = None, absmax: Tensor = 
     torch.Tensor:
         Dequantized tensor.
     """
-    if blocksize not in [2048, 4096, 1024, 512, 256, 128]:
-        raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128]")
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
+    
+    supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
+    if HIP_ENVIRONMENT:
+        supported_blocksizes = supported_blocksizes[:-1]
+
+    if blocksize not in supported_blocksizes:
+        raise ValueError(f"The blockwise of {blocksize} is not supported. Supported values: {supported_blocksizes}")
     if quant_type not in ['fp4', 'nf4']:
         raise NotImplementedError(f'4-bit quantization data type {quant_type} is not implemented.')
 
