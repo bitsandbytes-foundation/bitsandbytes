@@ -31,7 +31,7 @@ jobs:
   build-shared-libs:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-18.04, macos-latest, windows-latest]
         arch: [x86_64, aarch64]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
@@ -81,13 +81,13 @@ jobs:
   build-shared-libs-cuda:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-18.04, windows-latest]
         arch: [x86_64, aarch64]
         cuda_version: ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2"]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
-          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+          - os: ubuntu-18.04 # Temporary. Takes too long, not ready yet.
             arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
@@ -156,7 +156,7 @@ jobs:
     - build-shared-libs-cuda
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-18.04, macos-latest, windows-latest]
         python-version: ["3.10"]
         arch: [x86_64, aarch64]
         exclude:
@@ -206,7 +206,7 @@ jobs:
         retention-days: 7
   publish:
     needs: build-wheels
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     if: >
       github.event_name == 'workflow_dispatch' && (
       github.actor == 'TimDettmers' ||
