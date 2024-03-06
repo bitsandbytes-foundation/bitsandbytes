@@ -123,6 +123,7 @@ jobs:
         build_arch=${{ matrix.arch }}
         build_capability="50;52;60;61;70;75;80;86;89;90"
         [[ "${{ matrix.cuda_version }}" == 11.7.* ]] && build_capability=${build_capability%??????}
+        [[ "${{ matrix.cuda_version }}" == 11.8.* ]] && build_capability=${build_capability%???}
         [[ "${{ matrix.os }}" = windows-* ]] && python3 -m pip install ninja
         for NO_CUBLASLT in ON OFF; do
           if [ ${build_os:0:6} == ubuntu ]; then
