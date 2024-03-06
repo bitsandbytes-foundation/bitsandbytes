@@ -214,8 +214,17 @@ jobs:
         pattern: "bdist_wheel_*"
     - run: |
         ls -lR dist/
-    - name: Publish to PyPi
-      if: startsWith(github.ref, 'refs/tags')
+    - name: Publish to TestPyPI
+      if: >-
+        github.event_name == 'workflow_dispatch' &&
+        contains(fromJson('[
+          "TimDettmers",
+          "Titus-von-Koeller",
+          "younesbelkada",
+          "matthewdouglas"
+        ]'), github.actor)
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        password: ${{ secrets.pypi }}
+        repository_url: https://test.pypi.org/legacy/
+        user: __token__
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
