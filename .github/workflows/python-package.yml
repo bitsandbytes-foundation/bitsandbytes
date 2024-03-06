@@ -17,6 +17,7 @@ on:
       - 'pytest.ini'
   release:
     types: [ published ]
+  workflow_dispatch: {}  # Allow manual trigger
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -206,27 +207,26 @@ jobs:
   publish:
     needs: build-wheels
     runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' && (
+      github.actor == 'TimDettmers' ||
+      github.actor == 'Titus-von-Koeller' ||
+      github.actor == 'younesbelkada' ||
+      github.actor == 'matthewdouglas'
+      )
     steps:
-    - uses: actions/checkout@v4
-    - name: Download build artifact
-      uses: actions/download-artifact@v4
-      with:
-        path: dist/
-        merge-multiple: true
-        pattern: "bdist_wheel_*"
-    - run: |
-        ls -lR dist/
-    - name: Publish to TestPyPI
-      if: >-
-        github.event_name == 'workflow_dispatch' &&
-        contains(fromJson('[
-          "TimDettmers",
-          "Titus-von-Koeller",
-          "younesbelkada",
-          "matthewdouglas"
-        ]'), github.actor)
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        repository_url: https://test.pypi.org/legacy/
-        user: __token__
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      - uses: actions/checkout@v4
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+          pattern: "bdist_wheel_*"
+      - run: |
+          ls -lR dist/
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository_url: https://test.pypi.org/legacy/
+          user: __token__
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
