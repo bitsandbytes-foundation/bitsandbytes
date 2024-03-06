@@ -153,11 +153,14 @@ def test_dynamic_quantization():
         assert diff < 0.004
 
 
-
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
+def get_blocksizes(hip_env=False):
+    if not hip_env:
+        return [4096, 2048, 1024, 512, 256, 128, 64]
+    else:
+        return [4096, 2048, 1024, 512, 256, 128]
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=["fp32", "fp16", "bf16"])
 @pytest.mark.parametrize("nested", [False, True], ids=["False", "True"])
-@pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
+@pytest.mark.parametrize("blocksize", get_blocksizes(HIP_ENVIRONMENT))
 @pytest.mark.parametrize("signed", [True, False], ids=['signed_True', 'signed_False'])
 def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
     #print('')
@@ -2283,10 +2286,10 @@ def test_fp4_quant(dtype):
     assert relerr.item() < 0.28
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
 def test_4bit_compressed_stats(quant_type):
-    for blocksize in [128, 64]:
+    blocksizes = [128, 64] if not HIP_ENVIRONMENT else [128]
+    for blocksize in blocksizes:
         errs1 = []
         errs2 = []
         for i in range(10):
