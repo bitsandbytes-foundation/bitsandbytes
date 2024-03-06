@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.22.1)
 project(bitsandbytes LANGUAGES CXX)
 
 if (CMAKE_COMPILER_IS_GNUCXX)
-   add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
+   add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=1)
 endif()
 
 # Define included source files
