@@ -211,22 +211,22 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
     steps:
-      - uses: actions/checkout@v4
-      - name: Download all wheel artifacts
-        uses: actions/download-artifact@v2
-        with:
-          path: dist/
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: pip
-      - name: Show auditwheel information
-        run: |
-          python --version
-          cat $GITHUB_STEP_SUMMARY
-          pip install -q auditwheel && python ./scripts/auditwheel_show.py
-          cat $GITHUB_STEP_SUMMARY
+    - uses: actions/checkout@v4
+    - name: Download all wheel artifacts
+      uses: actions/download-artifact@v2
+      with:
+        path: dist/
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: pip
+    - name: Show auditwheel information
+      run: |
+        python --version
+        cat $GITHUB_STEP_SUMMARY
+        pip install -q auditwheel && python ./scripts/auditwheel_show.py
+        cat $GITHUB_STEP_SUMMARY
 
   publish:
     needs: build-wheels
