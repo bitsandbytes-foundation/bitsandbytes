@@ -1,6 +1,18 @@
 #include <BinSearch.h>
 #include <common.h>
+#include "config.h"
+
+#ifdef BNB_USE_STD_THREADS
 #include <thread>
+#else
+#include <pthread.h>
+
+// Wrapper for `pthread_start` to match the signature of `std::thread`
+static void* quantize_block_w(void* arg) {
+    quantize_block(*(quantize_block_args*)arg);
+    return nullptr;
+}
+#endif
 
 using namespace BinSearch;
 
@@ -31,7 +43,11 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
     for(long long offset = 0; offset < num_blocks; offset+=thread_wave_size)
     {
       long long valid_chunks = num_blocks - offset >= thread_wave_size ? thread_wave_size : num_blocks - offset;
+#ifdef BNB_USE_STD_THREADS
       std::vector<std::thread> threads(valid_chunks);
+#else
+      std::vector<pthread_t> threads(valid_chunks);
+#endif
       std::vector<quantize_block_args> args(valid_chunks);
 
       int chunks_processed = 0;
@@ -51,13 +67,25 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
           arg.threadidx = block_idx / blocksize;
           arg.blocksize = blocksize;
 
+#ifdef BNB_USE_STD_THREADS
           threads[chunks_processed] = std::thread([arg] { quantize_block(arg); });
+#else
+          pthread_create(&threads[chunks_processed], NULL, quantize_block_w, &arg);
+          // TODO: handle error from pthread_create
+#endif
           chunks_processed += 1;
           if(chunks_processed == valid_chunks){ break; }
       }
 
       for (int i = 0; i < valid_chunks; i++)
+      {
+#ifdef BNB_USE_STD_THREADS
           threads[i].join();
+#else
+          int err = pthread_join(threads[i], NULL);
+#endif
+      }
+
     }
 
 }

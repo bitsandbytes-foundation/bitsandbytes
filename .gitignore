@@ -22,6 +22,7 @@ CMakeFiles/
 bitsandbytes.dir/
 Debug/
 Release/
+csrc/config.h
 
 # IDE local files
 .vs/

@@ -25,15 +25,22 @@ list(APPEND SRC_FILES ${CPP_FILES})
 
 set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, mps)")
 set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda mps)
+
+set(BNB_USE_STD_THREADS OFF CACHE BOOL "Use std::thread for parallelism")
+
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
   set(CMAKE_OSX_DEPLOYMENT_TARGET 13.1)
 endif()
 
+if(WIN32)
+    set(BNB_USE_STD_THREADS ON)  # no pthread on Windows
+endif()
+
 set(BNB_OUTPUT_NAME "bitsandbytes")
 
-message(STATUS "Configuring ${PROJECT_NAME} (Backend: ${COMPUTE_BACKEND})")
+message(STATUS "Configuring ${PROJECT_NAME} (Backend: ${COMPUTE_BACKEND}, std::thread: ${BNB_USE_STD_THREADS})")
 
 if(${COMPUTE_BACKEND} STREQUAL "cuda")
     if(APPLE)
@@ -188,7 +195,7 @@ set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
 target_compile_features(bitsandbytes PUBLIC cxx_std_14)
 target_include_directories(bitsandbytes PUBLIC csrc include)
-
+configure_file(csrc/config.h.in "csrc/config.h")
 
 if(BUILD_CUDA)
     target_include_directories(bitsandbytes PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
