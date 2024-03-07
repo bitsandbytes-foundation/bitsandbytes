@@ -4,6 +4,7 @@ import subprocess
 
 
 def append_to_summary(content):
+    print(content + '\n')  # only for debugging now
     with open(os.getenv("GITHUB_STEP_SUMMARY"), "a") as summary_file:
         summary_file.write(content + "\n")
 
