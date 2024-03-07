@@ -184,14 +184,6 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
         cache: pip
-    - name: Install recent CMake and adjust PATH accordingly
-      # (needed due to old nvidia/cuda:*ubuntu20.04 being consciously used for many_linux compatibility)
-      run: |
-        pip install -q cmake==3.28.3
-        CMAKE_BIN_PATH=$(pip show cmake | grep Location | cut -d' ' -f2)/bin
-        echo "CMAKE_BIN_PATH=$CMAKE_BIN_PATH" >> $GITHUB_ENV
-        echo "PATH=$CMAKE_BIN_PATH:$PATH" >> $GITHUB_ENV
-        which cmake
     - name: Install build package
       shell: bash
       run: pip install build
