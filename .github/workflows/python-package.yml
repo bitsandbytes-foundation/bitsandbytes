@@ -157,6 +157,9 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # The specific Python version is irrelevant in this context as we are only packaging non-C extension
+        # code. This ensures compatibility across Python versions, including Python 3.8, as compatibility is
+        # dictated by the packaged code itself, not the Python version used for packaging.
         python-version: ["3.10"]
         arch: [x86_64, aarch64]
         exclude:
