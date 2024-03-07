@@ -223,8 +223,9 @@ jobs:
         cache: pip
     - name: Show auditwheel information
       run: |
-        python --version
-        cat $GITHUB_STEP_SUMMARY
+        sudo apt-get update && sudo apt-get install -y tree
+        tree
+        echo $GITHUB_STEP_SUMMARY
         pip install -q auditwheel && python ./scripts/auditwheel_show.py
         cat $GITHUB_STEP_SUMMARY
 
