@@ -207,6 +207,9 @@ jobs:
   publish:
     needs: build-wheels
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # needed to use an OIDC token for a trusted publishing exchange w/ PyPi
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
