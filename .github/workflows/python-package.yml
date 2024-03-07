@@ -130,7 +130,7 @@ jobs:
         [[ "${{ matrix.os }}" = windows-* ]] && python3 -m pip install ninja
         for NO_CUBLASLT in ON OFF; do
           if [ ${build_os:0:6} == ubuntu ]; then
-            image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
+            image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu20.04
             echo "Using image $image"
             docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
               "apt-get update \
