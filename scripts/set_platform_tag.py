@@ -8,10 +8,10 @@ def get_platform_tag(architecture):
 
     if system == "Linux":
         tag = (
-            "manylinux_2_24_x86_64" if architecture == "x86_64" else "manylinux2014_aarch64"
+            "manylinux_2_24_x86_64" if architecture == "x86_64" else "manylinux_2_24_aarch64"
         )
     elif system == "Darwin":
-        tag = "macosx_10_15_x86_64" if architecture == "x86_64" else "macosx_11_0_arm64"
+        tag = "macosx_13_1_x86_64" if architecture == "x86_64" else "macosx_13_1_arm64"
     elif system == "Windows":
         tag = "win_amd64" if architecture == "x86_64" else "win_arm64"
     else:
