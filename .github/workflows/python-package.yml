@@ -198,15 +198,35 @@ jobs:
     - name: Build wheel
       shell: bash
       run: python -m build .
-    - name: Show auditwheel information
-      if: matrix.os == 'ubuntu-latest'
-      run: pip install -q auditwheel && python ./scripts/auditwheel_show.py
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.python-version }}
         path: dist/bitsandbytes-*.whl
         retention-days: 7
+
+  audit-wheels:
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: 1
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v2
+        with:
+          path: dist/
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+      - name: Show auditwheel information
+        run: |
+          python --version
+          cat $GITHUB_STEP_SUMMARY
+          pip install -q auditwheel && python ./scripts/auditwheel_show.py
+          cat $GITHUB_STEP_SUMMARY
+
   publish:
     needs: build-wheels
     runs-on: ubuntu-latest
