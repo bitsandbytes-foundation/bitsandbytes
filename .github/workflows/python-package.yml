@@ -196,17 +196,7 @@ jobs:
       run: python -m build .
     - name: Show auditwheel information
       if: matrix.os == 'ubuntu-latest'
-      run: |
-        pip install -q auditwheel
-        for whl in dist/*.whl; do
-          printf '%.0s=' {1..60}  # separator line, same as below
-          echo -e "\nChecking wheel: $whl"
-          printf '%.0s-' {1..60}
-          echo
-          auditwheel show "$whl"
-          printf '%.0s-' {1..60}
-          echo
-        done
+      run: pip install -q auditwheel && python ./scripts/auditwheel_show.py
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
