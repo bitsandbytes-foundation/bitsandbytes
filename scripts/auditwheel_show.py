@@ -12,6 +12,7 @@ def append_to_summary(content):
 subprocess.run(["pip", "install", "-q", "auditwheel"])
 
 wheel_files = glob.glob("**/*.whl", recursive=True)
+print(wheel_files)  # only for debugging now
 
 if not wheel_files:
     append_to_summary("No wheel files found in `dist/` directory.")
