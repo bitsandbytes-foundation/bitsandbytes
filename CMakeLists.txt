@@ -15,8 +15,10 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project(bitsandbytes LANGUAGES CXX)
 
-if (CMAKE_COMPILER_IS_GNUCXX)
-   add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=1)
+message(STATUS "CMAKE_VERSION ${CMAKE_VERSION}")
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
 endif()
 
 # Define included source files
