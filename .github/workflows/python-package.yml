@@ -35,6 +35,8 @@ jobs:
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
+          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+            arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
       # Check out code
@@ -85,6 +87,8 @@ jobs:
         cuda_version: ['12.1.0']
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
+            arch: aarch64
+          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
             arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
