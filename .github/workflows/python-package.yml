@@ -211,6 +211,7 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
     steps:
+      - uses: actions/checkout@v4
       - name: Download all wheel artifacts
         uses: actions/download-artifact@v2
         with:
