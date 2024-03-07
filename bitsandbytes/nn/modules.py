@@ -21,16 +21,7 @@ T = TypeVar("T", bound="torch.nn.Module")
 
 class StableEmbedding(torch.nn.Embedding):
     """
-    Custom embedding layer designed for stable training in NLP tasks. The stable
-    embedding layer improves stability during optimization for models with word
-    embeddings, addressing issues related to the non-uniform distribution of input
-    tokens.
-
-    This stable embedding layer is initialized with Xavier uniform initialization,
-    followed by layer normalization. It is designed to support aggressive quantization,
-    addressing extreme gradient variations in non-uniform input distributions. The
-    stability of training is enhanced by using 32-bit optimizer states specifically
-    for this layer.
+    Custom embedding layer designed to improve stability during training for NLP tasks by using 32-bit optimizer states. It is designed to reduce gradient variations that can result from quantization. This embedding layer is initialized with Xavier uniform initialization followed by layer normalization.
 
     Example:
 
@@ -47,14 +38,11 @@ class StableEmbedding(torch.nn.Embedding):
     ```
 
     Attributes:
-        norm (torch.nn.LayerNorm): Layer normalization applied after the embedding.
+        norm (`torch.nn.LayerNorm`): Layer normalization applied after the embedding.
 
     Methods:
         reset_parameters(): Reset embedding parameters using Xavier uniform initialization.
         forward(input: Tensor) -> Tensor: Forward pass through the stable embedding layer.
-
-    Reference:
-        - [8-bit optimizer paper](https://arxiv.org/pdf/2110.02861.pdf)
     """
     def __init__(
         self,
@@ -71,14 +59,22 @@ class StableEmbedding(torch.nn.Embedding):
     ) -> None:
         """
         Args:
-            num_embeddings (`int`): The number of unique embeddings (vocabulary size).
-            embedding_dim (`int`): The dimensionality of the embedding.
-            padding_idx (`Optional[int]`): If specified, pads the output with zeros at the given index.
-            max_norm (`Optional[float]`): If given, renormalizes embeddings to have a maximum L2 norm.
-            norm_type (`float`, defaults to `2.0`): The p-norm to compute for the max_norm option.
-            scale_grad_by_freq (`bool`): Scale gradient by frequency during backpropagation.
-            sparse (`bool`): If True, computes sparse gradients; False, computes dense gradients.
-            _weight (`Optional[Tensor]`): Pre-trained embeddings.
+            num_embeddings (`int`):
+                The number of unique embeddings (vocabulary size).
+            embedding_dim (`int`):
+                The dimensionality of the embedding.
+            padding_idx (`Optional[int]`):
+                Pads the output with zeros at the given index.
+            max_norm (`Optional[float]`):
+                Renormalizes embeddings to have a maximum L2 norm.
+            norm_type (`float`, defaults to `2.0`):
+                The p-norm to compute for the `max_norm` option.
+            scale_grad_by_freq (`bool`, defaults to `False`):
+                Scale gradient by frequency during backpropagation.
+            sparse (`bool`, defaults to `False`):
+                Computes dense gradients. Set to `True` to compute sparse gradients instead.
+            _weight (`Optional[Tensor]`):
+                Pretrained embeddings.
         """
         super().__init__(
             num_embeddings,
@@ -131,6 +127,9 @@ class StableEmbedding(torch.nn.Embedding):
 
 
 class Embedding(torch.nn.Embedding):
+    """
+    Embedding class to store and retrieve word embeddings from their indices.
+    """
     def __init__(
         self,
         num_embeddings: int,
@@ -143,6 +142,25 @@ class Embedding(torch.nn.Embedding):
         _weight: Optional[Tensor] = None,
         device: Optional[device] = None,
     ) -> None:
+        """
+        Args:
+            num_embeddings (`int`):
+                The number of unique embeddings (vocabulary size).
+            embedding_dim (`int`):
+                The dimensionality of the embedding.
+            padding_idx (`Optional[int]`):
+                Pads the output with zeros at the given index.
+            max_norm (`Optional[float]`):
+                Renormalizes embeddings to have a maximum L2 norm.
+            norm_type (`float`, defaults to `2.0`):
+                The p-norm to compute for the `max_norm` option.
+            scale_grad_by_freq (`bool`, defaults to `False`):
+                Scale gradient by frequency during backpropagation.
+            sparse (`bool`, defaults to `False`):
+                Computes dense gradients. Set to `True` to compute sparse gradients instead.
+            _weight (`Optional[Tensor]`):
+                Pretrained embeddings.
+        """
         super().__init__(
             num_embeddings,
             embedding_dim,
@@ -416,7 +434,19 @@ class Linear4bit(nn.Linear):
 
 
 class LinearFP4(Linear4bit):
+    """
+    Implements the FP4 data type.
+    """
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_storage=torch.uint8, device=None):
+        """
+        Args:
+            input_features (`str`):
+                Number of input features of the linear layer.
+            output_features (`str`):
+                Number of output features of the linear layer.
+            bias (`bool`, defaults to `True`):
+                Whether the linear class uses the bias term as well.
+        """
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'fp4', quant_storage, device)
 
 
@@ -432,6 +462,15 @@ class LinearNF4(Linear4bit):
         the `functional.py` file: https://github.com/TimDettmers/bitsandbytes/blob/main/bitsandbytes/functional.py#L236.
     '''
     def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_storage=torch.uint8, device=None):
+        """
+        Args:
+            input_features (`str`):
+                Number of input features of the linear layer.
+            output_features (`str`):
+                Number of output features of the linear layer.
+            bias (`bool`, defaults to `True`):
+                Whether the linear class uses the bias term as well.
+        """
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'nf4', quant_storage, device)
 
 

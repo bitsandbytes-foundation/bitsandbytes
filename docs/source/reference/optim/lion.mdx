@@ -1,0 +1,33 @@
+# Lion
+
+[Lion (Evolved Sign Momentum)](https://hf.co/papers/2302.06675) is a unique optimizer that uses the sign of the gradient to determine the update direction of the momentum. This makes Lion more memory-efficient and faster than [`AdamW`] which tracks and store the first and second-order moments.
+
+## Lion[[api-class]]
+
+[[autodoc]] bitsandbytes.optim.Lion
+    - __init__
+
+## Lion8bit
+
+[[autodoc]] bitsandbytes.optim.Lion8bit
+    - __init__
+
+## Lion32bit
+
+[[autodoc]] bitsandbytes.optim.Lion32bit
+    - __init__
+
+## PagedLion
+
+[[autodoc]] bitsandbytes.optim.PagedLion
+    - __init__
+
+## PagedLion8bit
+
+[[autodoc]] bitsandbytes.optim.PagedLion8bit
+    - __init__
+
+## PagedLion32bit
+
+[[autodoc]] bitsandbytes.optim.PagedLion32bit
+    - __init__

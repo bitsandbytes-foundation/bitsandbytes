@@ -1,0 +1,21 @@
+# LAMB
+
+[LAMB (Layerwise adaptive large batch optimization)](https://hf.co/papers/1904.00962) is an adaptive optimizer designed for training with large batch sizes to accelerate training, combining ideas from [`LARS`] and [`Adam`] to automatically scale the learning rate for each layer:
+
+- calculates a *trust ratio* between the weight and gradient norm in a layer and clips the ratio to prevent overly large or small updates
+- updates weights with the first and second-moments
+
+## LAMB[[api-class]]
+
+[[autodoc]] bitsandbytes.optim.LAMB
+    - __init__
+
+## LAMB8bit
+
+[[autodoc]] bitsandbytes.optim.LAMB8bit
+    - __init__
+
+## LAMB32bit
+
+[[autodoc]] bitsandbytes.optim.LAMB32bit
+    - __init__
