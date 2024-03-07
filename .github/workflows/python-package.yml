@@ -211,7 +211,7 @@ jobs:
       run: |
         PLATFORM_TAG=$(python scripts/set_platform_tag.py ${{ matrix.arch }})
         echo "PLATFORM_TAG=$PLATFORM_TAG"
-        wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbyts-*.whl
+        wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
   publish:
     needs: build-wheels
     runs-on: ubuntu-latest
