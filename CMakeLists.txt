@@ -113,10 +113,6 @@ if(BUILD_CUDA)
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
 
-    # in our current build image, if it wasn't for libstdc++, which is not libc, the .so would be manylinux_2_18
-    # therefore, we statically link this specific library
-    string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -static-libstdc++")
-
     if(PTXAS_VERBOSE)
         # Verbose? Outputs register usage information, and other things...
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
