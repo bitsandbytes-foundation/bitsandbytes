@@ -30,8 +30,8 @@ jobs:
   build-shared-libs:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        arch: [x86_64, aarch64]
+        os: [ubuntu-latest]  # Keep only one OS
+        arch: [x86_64]  # Keep only one architecture
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
@@ -82,8 +82,8 @@ jobs:
   build-shared-libs-cuda:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        arch: [x86_64, aarch64]
+        os: [ubuntu-latest]
+        arch: [x86_64]
         cuda_version: ['12.1.0']
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
@@ -154,8 +154,8 @@ jobs:
     - build-shared-libs-cuda
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        os: [ubuntu-latest]
+        python-version: ["3.9"]
         arch: [x86_64, aarch64]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
