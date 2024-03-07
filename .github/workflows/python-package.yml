@@ -17,6 +17,7 @@ on:
       - 'pytest.ini'
   release:
     types: [ published ]
+  workflow_dispatch: {}  # Allow manual trigger
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -129,7 +130,7 @@ jobs:
         [[ "${{ matrix.os }}" = windows-* ]] && python3 -m pip install ninja
         for NO_CUBLASLT in ON OFF; do
           if [ ${build_os:0:6} == ubuntu ]; then
-            image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
+            image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu20.04
             echo "Using image $image"
             docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
               "apt-get update \
@@ -183,6 +184,10 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
         cache: pip
+    - name: Upgrade CMake
+      # (needed due to old nvidia/cuda:*ubuntu20.04 being consciously used for many_linux compatibility)
+      run: |
+        pip install -q cmake==3.28.3
     - name: Install build package
       shell: bash
       run: pip install build
@@ -206,27 +211,23 @@ jobs:
   publish:
     needs: build-wheels
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # needed to use an OIDC token for a trusted publishing exchange w/ PyPi
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
-    - uses: actions/checkout@v4
-    - name: Download build artifact
-      uses: actions/download-artifact@v4
-      with:
-        path: dist/
-        merge-multiple: true
-        pattern: "bdist_wheel_*"
-    - run: |
-        ls -lR dist/
-    - name: Publish to TestPyPI
-      if: >-
-        github.event_name == 'workflow_dispatch' &&
-        contains(fromJson('[
-          "TimDettmers",
-          "Titus-von-Koeller",
-          "younesbelkada",
-          "matthewdouglas"
-        ]'), github.actor)
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        repository_url: https://test.pypi.org/legacy/
-        user: __token__
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      - uses: actions/checkout@v4
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+          pattern: "bdist_wheel_*"
+      - run: |
+          ls -lR dist/
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          user: __token__
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}

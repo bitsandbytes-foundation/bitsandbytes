@@ -114,6 +114,7 @@ if(BUILD_CUDA)
     endif()
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
+
     if(PTXAS_VERBOSE)
         # Verbose? Outputs register usage information, and other things...
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
