@@ -156,6 +156,8 @@ jobs:
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
+          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+            arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
       # Check out code
