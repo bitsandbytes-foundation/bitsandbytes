@@ -207,6 +207,11 @@ jobs:
         name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.python-version }}
         path: dist/bitsandbytes-*.whl
         retention-days: 7
+    - name: Determine and Set Platform Tag, then Tag Wheel
+      run: |
+        PLATFORM_TAG=$(python scripts/set_platform_tag.py ${{ matrix.arch }})
+        echo "PLATFORM_TAG=$PLATFORM_TAG"
+        wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbyts-*.whl
   publish:
     needs: build-wheels
     runs-on: ubuntu-latest
