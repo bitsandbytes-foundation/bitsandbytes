@@ -15,8 +15,10 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project(bitsandbytes LANGUAGES CXX)
 
-message(STATUS "CMAKE_VERSION ${CMAKE_VERSION}")
-
+# If run without specifying a build type, default to using the Release configuration:
+#    optimizing the generated binaries for performance and also adds the `-DNDEBUG` flag,
+#    which turns off a bunch of asserts which seem to link to new symbols in libstdc++,
+#    worsening our many_linux compliance..
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
