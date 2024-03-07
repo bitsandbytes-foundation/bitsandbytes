@@ -184,6 +184,10 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
         cache: pip
+    - name: Upgrade CMake
+      # (needed due to old nvidia/cuda:*ubuntu20.04 being consciously used for many_linux compatibility)
+      run: |
+        pip install -q cmake==3.28.3
     - name: Install build package
       shell: bash
       run: pip install build
