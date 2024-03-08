@@ -3,17 +3,14 @@ import math
 
 import pytest
 import torch
-import transformers
-from transformers import (
-  AutoModelForCausalLM,
-  BitsAndBytesConfig,
-)
 
 from tests.helpers import TRUE_FALSE, describe_dtype, id_formatter
 
+transformers = pytest.importorskip("transformers")
+
 
 def get_4bit_config():
-  return BitsAndBytesConfig(
+  return transformers.BitsAndBytesConfig(
     load_in_4bit=True,
     load_in_8bit=False,
     llm_int8_threshold=6.0,
@@ -31,7 +28,7 @@ def get_model_and_tokenizer(config):
         bnb_config.load_in_4bit = False
     else:
         bnb_config.bnb_4bit_quant_type= quant_type
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path,
+    model = transformers.AutoModelForCausalLM.from_pretrained(model_name_or_path,
         quantization_config=bnb_config,
         max_memory={0:'48GB'},
         device_map='auto',
