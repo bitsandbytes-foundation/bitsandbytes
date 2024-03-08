@@ -342,3 +342,27 @@ Bug fixes:
  - Fixed a bug where kgetColRowStats (LLM.int8()) would fail for certain dimensions @LucQueen @905
  - Fixed a bug where the adjusted regular Embedding layer was not available via bnb.nn.Embedding @neel04 #563
  - Fixed added missing scipy requirement @dulalbert #525
+
+### 0.43.0
+
+#### Improvements and New Features:
+- QLoRA + FSDP official support is now live! https://github.com/TimDettmers/bitsandbytes/pull/970 by @warner-benjamin and team - with FSDP you can train very large models (70b scale) on multiple 24GB consumer-type GPUs. See https://www.answer.ai/posts/2024-03-06-fsdp-qlora.html for more details.
+- Introduced improvements to the CI process for enhanced performance and efficiency during builds, specifically enabling more effective cross-compilation on Linux platforms. This was accomplished by deprecating Make and migrating to Cmake, as well as implementing new corresponding workflows. Huge thanks go to @wkpark, @rickardp, @matthewdouglas and @younesbelkada; #1055, #1050, #1111.
+- Windows should be officially supported in bitsandbytes if you install the library from source. See: https://huggingface.co/docs/bitsandbytes/main/en/index for more details
+- Updated installation instructions to provide more comprehensive guidance for users. This includes clearer explanations and additional tips for various setup scenarios, making the library more accessible to a broader audience (@rickardp, #1047).
+- Enhanced the library's compatibility and setup process, including fixes for CPU-only installations and improvements in CUDA setup error messaging. This effort aims to streamline the installation process and improve user experience across different platforms and setups (@wkpark, @akx, #1038, #996, #1012).
+- Setup a new documentation at https://huggingface.co/docs/bitsandbytes/main with extensive new sections and content to help users better understand and utilize the library. Especially notable are the new API docs. (big thanks to @stevhliu and @mishig25 from HuggingFace #1012). The API docs have been also addressed in #1075.
+
+#### Bug Fixes:
+- Addressed a race condition in kEstimateQuantiles, enhancing the reliability of quantile estimation in concurrent environments (@pnunna93, #1061).
+- Fixed various minor issues, including typos in code comments and documentation, to improve code clarity and prevent potential confusion (@Brian Vaughan, #1063).
+
+#### Internal and Build System Enhancements:
+- Implemented several enhancements to the internal and build systems, including adjustments to the CI workflows, portability improvements, and build artifact management. These changes contribute to a more robust and flexible development process, ensuring the library's ongoing quality and maintainability (@rickardp, @akx, @wkpark, @matthewdouglas; #949, #1053, #1045, #1037).
+
+#### Contributors:
+This release is made possible thanks to the many active contributors that submitted PRs and many others who contributed to discussions, reviews, and testing. Your efforts greatly enhance the library's quality and user experience. It's truly inspiring to work with such a dedicated and competent group of volunteers and professionals!
+
+We give a special thanks to @TimDettmers for managing to find a little bit of time for valuable consultations on critical topics, despite preparing for and touring the states applying for professor positions. We wish him the utmost success!
+
+We also extend our gratitude to the broader community for your continued support, feedback, and engagement, which play a crucial role in driving the library's development forward.
