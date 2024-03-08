@@ -35,6 +35,8 @@ jobs:
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
+          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+            arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +116,8 @@ jobs:
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
+          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+            arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -147,3 +151,23 @@ jobs:
           name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
           path: dist/bitsandbytes-*.whl
           retention-days: 7
+
+  audit-wheels:
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          pattern: "bdist_wheel_*"
+          path: wheels/
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install auditwheel
+      - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
