@@ -37,37 +37,15 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
-      # Check out code
       - uses: actions/checkout@v4
-        # On Linux we use CMake within Docker
-      - name: Setup cmake
-        uses: jwlawson/actions-setup-cmake@v1.14
-        with:
-          cmake-version: "3.26.x"
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
-        #uses: microsoft/setup-msbuild@v1.1 # to use msbuild
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
-        # Compile C++ code
       - name: Build C++
-        shell: bash
-        run: |
-          set -ex
-          build_os=${{ matrix.os }}
-          build_arch=${{ matrix.arch }}
-          if [ ${build_os:0:6} == ubuntu -a ${build_arch} == aarch64 ]; then
-            # Allow cross-compile on aarch64
-            sudo apt-get update
-            sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu g++-aarch64-linux-gnu
-            cmake -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ -DCOMPUTE_BACKEND=cpu .
-          elif [ ${build_os:0:5} == macos -a ${build_arch} == aarch64 ]; then
-            cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCOMPUTE_BACKEND=cpu .
-          else
-            cmake -DCOMPUTE_BACKEND=cpu .
-          fi
-          cmake --build . --config Release
-          mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
-          ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
+        run: bash .github/scripts/build-cpu.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -91,18 +69,11 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
-      # Check out code
       - uses: actions/checkout@v4
         # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
       - name: Set up Docker multiarch
         if: startsWith(matrix.os, 'ubuntu')
         uses: docker/setup-qemu-action@v2
-        # On Linux we use CMake within Docker
-      - name: Setup cmake
-        if: ${{ !startsWith(matrix.os, 'linux') }}
-        uses: jwlawson/actions-setup-cmake@v1.14
-        with:
-          cmake-version: "3.26.x"
         # Windows: We install Cuda on the agent (slow)
       - uses: Jimver/cuda-toolkit@v0.2.14
         if: startsWith(matrix.os, 'windows')
@@ -115,35 +86,13 @@ jobs:
           use-github-cache: false
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
-        #uses: microsoft/setup-msbuild@v1.1 # to use msbuild
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
-        # Compile C++ code
       - name: Build C++
-        shell: bash
-        run: |
-          set -ex
-          build_os=${{ matrix.os }}
-          build_arch=${{ matrix.arch }}
-          build_capability="50;52;60;61;70;75;80;86;89;90"
-          [[ "${{ matrix.cuda_version }}" == 11.7.* ]] && build_capability=${build_capability%??????}
-          [[ "${{ matrix.cuda_version }}" == 11.8.* ]] && build_capability=${build_capability%???}
-          [[ "${{ matrix.os }}" = windows-* ]] && python3 -m pip install ninja
-          for NO_CUBLASLT in ON OFF; do
-            if [ ${build_os:0:6} == ubuntu ]; then
-              image=nvidia/cuda:${{ matrix.cuda_version }}-devel-ubuntu22.04
-              echo "Using image $image"
-              docker run --platform linux/$build_arch -i -w /src -v $PWD:/src $image sh -c \
-                "apt-get update \
-                && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-                && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" -DNO_CUBLASLT=${NO_CUBLASLT} . \
-                && cmake --build ."
-            else
-              cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY="${build_capability}" -DNO_CUBLASLT=${NO_CUBLASLT} -DCMAKE_BUILD_TYPE=Release -S .
-              cmake --build . --config Release
-            fi
-          done
-          mkdir -p output/${{ matrix.os }}/${{ matrix.arch }}
-          ( shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} output/${{ matrix.os }}/${{ matrix.arch }}/ )
+        run: bash .github/scripts/build-cuda.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+          cuda_version: ${{ matrix.cuda_version }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -167,9 +116,7 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
-      # Check out code
       - uses: actions/checkout@v4
-        # Download shared libraries
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -181,30 +128,17 @@ jobs:
         run: |
           ls -lR output/
           cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
-        # Set up the Python version needed
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install build package
-        shell: bash
-        run: pip install build
-      - name: Install Python test dependencies
-        shell: bash
-        run: pip install -r requirements-ci.txt
-      # TODO: How to run CUDA tests on GitHub actions?
-      #- name: Run unit tests
-      #  if: ${{ matrix.arch == 'x86_64' }} # Tests are too slow to run in emulation. Wait for real aarch64 agents
-      #  run: |
-      #    PYTHONPATH=. pytest --log-cli-level=DEBUG tests
-      - name: Build wheel
-        shell: bash
-        run: python -m build .
+      - run: pip install build wheel
+      - run: python -m build .
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |
-          PLATFORM_TAG=$(python scripts/set_platform_tag.py ${{ matrix.arch }})
+          PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ matrix.arch }}")
           echo "PLATFORM_TAG=$PLATFORM_TAG"
           wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
       - name: Upload build artifact
