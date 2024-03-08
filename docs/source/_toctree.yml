@@ -26,5 +26,33 @@
     title: Papers, resources & how to cite
 - title: API reference
   sections:
-  - local: quantization
+  - local: reference/quantization
     title: Quantization
+  - title: Optimizers
+    sections:
+    - local: reference/optim/optim_overview
+      title: Overview
+    - local: reference/optim/adagrad
+      title: AdaGrad
+    - local: reference/optim/adam
+      title: Adam
+    - local: reference/optim/adamw
+      title: AdamW
+    - local: reference/optim/lamb
+      title: LAMB
+    - local: reference/optim/lars
+      title: LARS
+    - local: reference/optim/lion
+      title: Lion
+    - local: reference/optim/rmsprop
+      title: RMSprop
+    - local: reference/optim/sgd
+      title: SGD
+  - title: k-bit quantizers
+    sections:
+    - local: reference/nn/linear8bit
+      title: 8-bit quantizer
+    - local: reference/nn/linear4bit
+      title: 4-bit quantizer
+    - local: reference/nn/embeddings
+      title: Embedding

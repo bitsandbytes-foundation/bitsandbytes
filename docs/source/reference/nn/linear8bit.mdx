@@ -1,0 +1,13 @@
+# 8-bit quantization
+
+[LLM.int8()](https://hf.co/papers/2208.07339) is a quantization method that doesn't degrade performance which makes large model inference more accessible. The key is to extract the outliers from the inputs and weights and multiply them in 16-bit. All other values are multiplied in 8-bit and quantized to Int8 before being dequantized back to 16-bits. The outputs from the 16-bit and 8-bit multiplication are combined to produce the final output.
+
+## Linear8bitLt
+
+[[autodoc]] bitsandbytes.nn.Linear8bitLt
+    - __init__
+
+## Int8Params
+
+[[autodoc]] bitsandbytes.nn.Int8Params
+    - __init__
