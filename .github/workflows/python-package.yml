@@ -171,3 +171,33 @@ jobs:
           python-version: "3.12"
       - run: pip install auditwheel
       - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
+
+#  test:
+#    needs:
+#      - build-wheels
+#    strategy:
+#      fail-fast: false
+#      matrix:
+#        include:
+#          - os: ubuntu-latest
+#            arch: x86_64
+#            python-version: "3.8"
+#          - os: windows-latest
+#            arch: x86_64
+#            python-version: "3.8"
+#    runs-on: ${{ matrix.os }}
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/download-artifact@v4
+#        with:
+#          merge-multiple: true
+#          pattern: "bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}*"
+#          path: wheel/
+#      - uses: actions/setup-python@v5
+#        with:
+#          python-version: ${{ matrix.python-version }}
+#          cache: pip
+#      - shell: bash
+#        run: ls -lar wheel/
+#      - run: pip install wheel/*.whl -r requirements-ci.txt
+#      - run: pytest --log-cli-level=DEBUG --continue-on-collection-errors tests
