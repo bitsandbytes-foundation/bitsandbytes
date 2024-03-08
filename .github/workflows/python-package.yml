@@ -213,36 +213,3 @@ jobs:
         name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
         path: dist/bitsandbytes-*.whl
         retention-days: 7
-  publish:
-    needs: build-wheels
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write  # needed to use an OIDC token for a trusted publishing exchange w/ PyPi
-    # TODO: remove pull_request condition once done testing
-    if: >
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          path: dist/
-          merge-multiple: true
-          pattern: "bdist_wheel_*"
-      - run: |
-          ls -lR dist/
-      - name: Publish to TestPyPI (PRs)
-        if: github.event_name == 'pull_request'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          user: __token__
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-      - name: Publish to PyPI (Tagged on main)
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
