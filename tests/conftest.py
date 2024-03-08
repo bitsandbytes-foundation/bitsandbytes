@@ -13,6 +13,11 @@ def pytest_runtest_call(item):
         if str(ae) == "Torch not compiled with CUDA enabled":
             pytest.skip("Torch not compiled with CUDA enabled")
         raise
+    except RuntimeError as re:
+        # CUDA-enabled Torch build, but no CUDA-capable device found
+        if "Found no NVIDIA driver on your system" in str(re):
+            pytest.skip("No NVIDIA driver found")
+        raise
 
 
 @pytest.fixture(scope="session")
