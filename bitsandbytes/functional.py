@@ -452,13 +452,13 @@ def get_transform_buffer(
         rows = shape[0] * shape[1]
     cols = shape[-1]
 
-    state = (shape, to_order)
     if transpose:
         # swap dims
         tmp = rows
         rows = cols
         cols = tmp
-        state = (shape[::-1], to_order)
+        shape = shape[::-1]
+    state = (shape, to_order)
 
     if to_order == "row" or to_order == "col":
         return init_func(shape, dtype=dtype, device=device), state
