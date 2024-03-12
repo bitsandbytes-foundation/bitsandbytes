@@ -666,6 +666,7 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   int threads = 512;
   //int tileCols = fill_up_to_nearest_multiple(numCols, 32);
   //int n = numRows*tileCols;
+  int tileCols = numCols;
   int n = numRows*numCols;
   //int subtile_rows = 128;
   //int tilesize = 32*subtile_rows;
