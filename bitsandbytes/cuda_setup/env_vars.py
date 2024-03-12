@@ -8,6 +8,7 @@ def to_be_ignored(env_var: str, value: str) -> bool:
         "OLDPWD",
         "SSH_AUTH_SOCK",  # SSH stuff, therefore unrelated
         "SSH_TTY",
+        "GOOGLE_VM_CONFIG_LOCK_FILE",  # GCP: requires elevated permissions, causing problems in VMs and Jupyter notebooks
         "HOME",  # Linux shell default
         "TMUX",  # Terminal Multiplexer
         "XDG_DATA_DIRS",  # XDG: Desktop environment stuff
@@ -25,7 +26,7 @@ def to_be_ignored(env_var: str, value: str) -> bool:
 
 
 def might_contain_a_path(candidate: str) -> bool:
-    return "/" in candidate
+    return os.sep in candidate
 
 
 def is_active_conda_env(env_var: str) -> bool:

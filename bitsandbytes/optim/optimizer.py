@@ -2,8 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from collections import abc as container_abcs
-from collections import defaultdict
+from collections import abc as container_abcs, defaultdict
 from copy import deepcopy
 from itertools import chain
 
@@ -19,6 +18,9 @@ class MockArgs:
 
 
 class GlobalOptimManager:
+    """
+    A global optimizer manager for enabling custom optimizer configs.
+    """
     _instance = None
 
     def __init__(self):
@@ -54,22 +56,40 @@ class GlobalOptimManager:
         self, parameters, key=None, value=None, key_value_dict=None
     ):
         """
-        Overrides initial optimizer config for specific parameters.
+        Override initial optimizer config with specific hyperparameters.
 
         The key-values of the optimizer config for the input parameters are overridden
-        This can be both, optimizer parameters like "betas", or "lr" or it can be
-        8-bit specific parameters like "optim_bits", "percentile_clipping".
+        This can be both, optimizer parameters like `betas` or `lr`, or it can be
+        8-bit specific parameters like `optim_bits` or `percentile_clipping`.
 
-        Parameters
-        ----------
-        parameters : torch.Tensor or list(torch.Tensors)
-            The input parameters.
-        key : str
-            The hyperparamter to override.
-        value : object
-            The value for the hyperparamters.
-        key_value_dict : dict
-            A dictionary with multiple key-values to override.
+        Arguments:
+           parameters (`torch.Tensor` or `list(torch.Tensors)`):
+             The input parameters.
+           key (`str`):
+             The hyperparamter to override.
+           value:
+             The hyperparameter values.
+           key_value_dict (`dict`):
+             A dictionary with multiple key-values to override.
+
+        Example:
+
+        ```py
+        import torch
+        import bitsandbytes as bnb
+
+        mng = bnb.optim.GlobalOptimManager.get_instance()
+
+        model = MyModel()
+        mng.register_parameters(model.parameters()) # 1. register parameters while still on CPU
+
+        model = model.cuda()
+        # use 8-bit optimizer states for all parameters
+        adam = bnb.optim.Adam(model.parameters(), lr=0.001, optim_bits=8)
+
+        # 2. override: the parameter model.fc1.weight now uses 32-bit Adam
+        mng.override_config(model.fc1.weight, 'optim_bits', 32)
+        ```
         """
         self.uses_config_override = True
         if isinstance(parameters, torch.nn.Parameter):
@@ -93,6 +113,17 @@ class GlobalOptimManager:
 
 class Optimizer8bit(torch.optim.Optimizer):
     def __init__(self, params, defaults, optim_bits=32, is_paged=False):
+        """
+        Base 8-bit optimizer class.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
         super().__init__(params, defaults)
         self.initialized = False
         self.name2qmap = {}
@@ -126,11 +157,11 @@ class Optimizer8bit(torch.optim.Optimizer):
         super().__setstate__(state)
 
     def load_state_dict(self, state_dict):
-        r"""Loads the optimizer state.
+        """Load an optimizer state.
 
-        Args:
-            state_dict (dict): optimizer state. Should be an object returned
-                from a call to :meth:`state_dict`.
+        Arguments:
+            state_dict (`dict`):
+                An optimizer state (should be returned from a call to `state_dict`) to load.
         """
         # deepcopy, to be consistent with module API
         state_dict = deepcopy(state_dict)
@@ -238,11 +269,11 @@ class Optimizer8bit(torch.optim.Optimizer):
 
     @torch.no_grad()
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
+            closure (`Callable`, *optional*, defaults to `None`):
+                A closure that reevaluates the model and returns the loss.
         """
         loss = None
         if closure is not None:
@@ -340,6 +371,39 @@ class Optimizer2State(Optimizer8bit):
         skip_zeros=False,
         is_paged=False
     ):
+        """
+        Base 2-state update optimizer class.
+
+        Arguments:
+            optimizer_name (`str`):
+                The name of the optimizer.
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-3):
+                The learning rate.
+            betas (`tuple`, defaults to (0.9, 0.999)):
+                The beta values for the optimizer.
+            eps (`float`, defaults to 1e-8):
+                The epsilon value for the optimizer.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`dict`, defaults to `None`):
+                A dictionary with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+            max_unorm (`float`, defaults to 0.0):
+                The maximum value to normalize each block with.
+            skip_zeros (`bool`, defaults to `False`):
+                Whether to skip zero values for sparse gradients and models to ensure correct updates.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -553,6 +617,39 @@ class Optimizer1State(Optimizer8bit):
         skip_zeros=False,
         is_paged=False
     ):
+        """
+        Base 1-state update optimizer class.
+
+        Arguments:
+            optimizer_name (`str`):
+                The name of the optimizer.
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-3):
+                The learning rate.
+            betas (`tuple`, defaults to (0.9, 0.0)):
+                The beta values for the optimizer.
+            eps (`float`, defaults to 1e-8):
+                The epsilon value for the optimizer.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`dict`, defaults to `None`):
+                A dictionary with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+            max_unorm (`float`, defaults to 0.0):
+                The maximum value to normalize each block with.
+            skip_zeros (`bool`, defaults to `False`):
+                Whether to skip zero values for sparse gradients and models to ensure correct updates.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:

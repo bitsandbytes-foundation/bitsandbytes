@@ -20,6 +20,33 @@ class Adagrad(Optimizer1State):
         percentile_clipping=100,
         block_wise=True,
     ):
+        """
+        Base Adagrad optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-2):
+                The learning rate.
+            lr_decay (`int`, defaults to 0):
+                The learning rate decay.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            initial_accumulator_value (`int`, defaults to 0):
+                The initial momemtum values.
+            eps (`float`, defaults to 1e-10):
+                The epsilon value prevents division by zero in the optimizer.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`dict`, defaults to `None`):
+                A dictionary with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+        """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
@@ -62,6 +89,33 @@ class Adagrad8bit(Optimizer1State):
         percentile_clipping=100,
         block_wise=True,
     ):
+        """
+        8-bit Adagrad optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-2):
+                The learning rate.
+            lr_decay (`int`, defaults to 0):
+                The learning rate decay.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            initial_accumulator_value (`int`, defaults to 0):
+                The initial momemtum values.
+            eps (`float`, defaults to 1e-10):
+                The epsilon value prevents division by zero in the optimizer.
+            optim_bits (`int`, defaults to 8):
+                The number of bits of the optimizer state.
+            args (`dict`, defaults to `None`):
+                A dictionary with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+        """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
@@ -105,6 +159,33 @@ class Adagrad32bit(Optimizer1State):
         percentile_clipping=100,
         block_wise=True,
     ):
+        """
+        32-bit Adagrad optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-2):
+                The learning rate.
+            lr_decay (`int`, defaults to 0):
+                The learning rate decay.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            initial_accumulator_value (`int`, defaults to 0):
+                The initial momemtum values.
+            eps (`float`, defaults to 1e-10):
+                The epsilon value prevents division by zero in the optimizer.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`dict`, defaults to `None`):
+                A dictionary with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+        """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:

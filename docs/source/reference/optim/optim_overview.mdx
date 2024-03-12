@@ -1,0 +1,24 @@
+# Overview
+
+[8-bit optimizers](https://hf.co/papers/2110.02861) reduce the memory footprint of 32-bit optimizers without any performance degradation which means you can train large models with many parameters faster. At the core of 8-bit optimizers is block-wise quantization which enables quantization accuracy, computational efficiency, and stability.
+
+bitsandbytes provides 8-bit optimizers through the base [`Optimizer8bit`] class, and additionally provides [`Optimizer2State`] and [`Optimizer1State`] for 2-state (for example, [`Adam`]) and 1-state (for example, [`Adagrad`]) optimizers respectively. To provide custom optimizer hyperparameters, use the [`GlobalOptimManager`] class to configure the optimizer.
+
+## Optimizer8bit
+
+[[autodoc]] bitsandbytes.optim.optimizer.Optimizer8bit
+    - __init__
+
+## Optimizer2State
+
+[[autodoc]] bitsandbytes.optim.optimizer.Optimizer2State
+    - __init__
+
+## Optimizer1State
+
+[[autodoc]] bitsandbytes.optim.optimizer.Optimizer1State
+    - __init__
+
+## Utilities
+
+[[autodoc]] bitsandbytes.optim.optimizer.GlobalOptimManager

@@ -2,6 +2,46 @@
 
 #include "Portable.h"
 
+#ifdef USE_SSE2
+#include <emmintrin.h>
+#if defined(USE_AVX) || defined(USE_AVX2)
+#include <immintrin.h>
+#else
+#ifdef USE_SSE41
+#include <smmintrin.h>
+#endif
+#endif
+#endif
+
+namespace BinSearch {
+namespace Details {
+
+template <InstrSet I, typename T>
+struct FTOITraits{};
+
+template <InstrSet I, class T>
+struct FVec;
+
+template <InstrSet I, class T>
+struct IVec;
+
+template <InstrSet I, class T>
+struct FVec1;
+
+template <> struct InstrFloatTraits<Scalar, float>
+{
+    typedef __m128  vec_t;
+};
+
+template <> struct InstrFloatTraits<Scalar, double>
+{
+    typedef __m128d vec_t;
+};
+
+}
+}
+
+#if !defined(__aarch64__)
 #ifdef USE_SSE42
 #ifndef _MSC_VER
 #include <popcntintrin.h>
@@ -26,28 +66,10 @@ FORCE_INLINE int popcnt32(int x32)
 } // namespace
 #endif
 
-#if defined(USE_AVX) || defined(USE_AVX2)
-#include <immintrin.h>
-#else
-#include <emmintrin.h>
-#ifdef USE_SSE41
-#include <smmintrin.h>
-#endif
-#endif
-
 #include "Type.h"
 
 namespace BinSearch {
 namespace Details {
-
-template <InstrSet I, class T>
-struct FVec;
-
-template <InstrSet I, class T>
-struct IVec;
-
-template <InstrSet I, class T>
-struct FVec1;
 
 template <> struct InstrIntTraits<SSE>
 {
@@ -64,8 +86,8 @@ template <> struct InstrFloatTraits<SSE, double>
     typedef __m128d vec_t;
 };
 
-template <InstrSet I, typename T>
-struct FTOITraits
+template <>
+struct FTOITraits<SSE, float>
 {
     typedef IVec<SSE, float> vec_t;
 };
@@ -285,9 +307,11 @@ FORCE_INLINE FVec<SSE,float> operator-   (const FVec<SSE,float>& a,  const FVec<
 FORCE_INLINE FVec<SSE,float> operator*   (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_mul_ps( a, b ); }
 FORCE_INLINE FVec<SSE,float> operator/   (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_div_ps( a, b ); }
 FORCE_INLINE IVec<SSE,float> ftoi        (const FVec<SSE,float>& a)                             { return _mm_cvttps_epi32(a); }
+#ifndef __clang__ // Conflicts with builtin operator
 FORCE_INLINE IVec<SSE,float> operator<=  (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_castps_si128( _mm_cmple_ps( a, b ) ); }
 FORCE_INLINE IVec<SSE,float> operator>=  (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_castps_si128( _mm_cmpge_ps( a, b ) ); }
 FORCE_INLINE IVec<SSE,float> operator<   (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_castps_si128(_mm_cmplt_ps(a, b)); }
+#endif
 #ifdef USE_FMA
 FORCE_INLINE FVec<SSE, float> mulSub(const FVec<SSE, float>& a, const FVec<SSE, float>& b, const FVec<SSE, float>& c) { return _mm_fmsub_ps(a, b, c); }
 #endif
@@ -339,9 +363,11 @@ FORCE_INLINE FVec<SSE,double> operator-   (const FVec<SSE,double>& a, const FVec
 FORCE_INLINE FVec<SSE,double> operator*   (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_mul_pd( a, b ); }
 FORCE_INLINE FVec<SSE,double> operator/   (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_div_pd( a, b ); }
 FORCE_INLINE IVec<SSE,float>  ftoi        (const FVec<SSE,double>& a)                               { return _mm_cvttpd_epi32(a); }
+#ifndef __clang__ // Conflicts with builtin operator
 FORCE_INLINE IVec<SSE,double> operator<=  (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_castpd_si128( _mm_cmple_pd( a, b ) ); }
 FORCE_INLINE IVec<SSE,double> operator<   (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_castpd_si128(_mm_cmplt_pd(a, b)); }
 FORCE_INLINE IVec<SSE,double> operator>=  (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_castpd_si128( _mm_cmpge_pd( a, b ) ); }
+#endif
 #ifdef USE_FMA
 FORCE_INLINE FVec<SSE, double> mulSub(const FVec<SSE, double>& a, const FVec<SSE, double>& b, const FVec<SSE, double>& c ) { return _mm_fmsub_pd(a, b, c); }
 #endif
@@ -558,5 +584,6 @@ FORCE_INLINE FVec<AVX, double> mulSub(const FVec<AVX, double>& a, const FVec<AVX
 
 #endif
 
-} // namepsace Details
+} // namespace Details
 } // namespace BinSearch
+#endif // !defined(__aarch64__)

@@ -1,6 +1,7 @@
 import math
+
 import torch
-import time
+
 from bitsandbytes.triton.triton_utils import is_triton_available
 
 if not is_triton_available():
@@ -9,7 +10,6 @@ else:
 
     import triton
     import triton.language as tl
-    from triton.ops.matmul_perf_model import early_config_prune, estimate_matmul_time
 
     # This kernel does fused columnwise quantization and transpose.
 
@@ -54,7 +54,7 @@ else:
         max_val = tl.max(tl.where(p2_arange_mask, abs_x, 0), axis=0)
         output = tl.libdevice.llrint(127. * (x / max_val))
 
-        new_start = pid * M 
+        new_start = pid * M
         new_offsets = new_start + p2_arange
         tl.store(output_ptr + new_offsets, output, mask=p2_arange_mask)
         tl.store(output_maxs + pid, max_val)
@@ -71,4 +71,3 @@ else:
         grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
         _quantize_columnwise_and_transpose[grid](x, output, output_maxs, n_elements, M, N, BLOCK_SIZE=M, P2=P2)
         return output, output_maxs
-

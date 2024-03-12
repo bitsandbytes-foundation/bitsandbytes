@@ -110,7 +110,7 @@ __device__ float dDequantizeFP4Tree(unsigned char val, float absmax)
         return 1.00000000f*absmax*sign; // 1011
       else
         return 0.66666667f*absmax*sign; // 1010
-    else 
+    else
       if((val & 0b0001) == 1) // 100
         return 5.208333333e-03f*absmax*sign; // 1001
       else
@@ -134,10 +134,10 @@ __device__ unsigned char dQuantizeFP4(float x)
 
   // we do a binary search
   // the pivots are divided by 12 (the FP4 absmax)
-  // since we assum input data is in [-1.0, 1.0]
+  // since we assume input data is in [-1.0, 1.0]
 
   // !be careful here, its easy to make a mistake
-  // that is difficult to noice if you add an extra
+  // that is difficult to notice if you add an extra
   // zero somewhere!
 
   int sign = x < 0 ? 0b1000 : 0b0000;
@@ -174,36 +174,36 @@ __device__ half dhDequantizeNF4(unsigned char val)
     if((val & 0b0100) == 4) // 1
       if((val & 0b0010) == 2) // 11
         if((val & 0b0001) == 1) // 111
-          return 1.0f; 
+          return 1.0f;
         else
           return 0.7229568362236023f;
       else
         if((val & 0b0001) == 1) // 110
-          return 0.5626170039176941f; 
+          return 0.5626170039176941f;
         else
-          return 0.44070982933044434f; 
+          return 0.44070982933044434f;
     else
       if((val & 0b0010) == 2) //10
         if((val & 0b0001) == 1) // 101
-          return 0.33791524171829224f; 
+          return 0.33791524171829224f;
         else
-          return 0.24611230194568634f; 
-      else 
+          return 0.24611230194568634f;
+      else
         if((val & 0b0001) == 1) // 100
-          return 0.16093020141124725f; 
+          return 0.16093020141124725f;
         else
-          return 0.07958029955625534f; 
+          return 0.07958029955625534f;
 
   else
     if((val & 0b0100) == 4) // 0
       if((val & 0b0010) == 2) //01
         if((val & 0b0001) == 1) // 011
-          return 0.0f; 
+          return 0.0f;
         else
-          return -0.09105003625154495f; 
+          return -0.09105003625154495f;
       else
         if((val & 0b0001) == 1) // 010
-          return -0.18477343022823334f; 
+          return -0.18477343022823334f;
         else
           return -0.28444138169288635f;
     else
@@ -211,12 +211,12 @@ __device__ half dhDequantizeNF4(unsigned char val)
         if((val & 0b0001) == 1) // 001
           return -0.39491748809814453f;
         else
-          return -0.5250730514526367f; 
-      else 
+          return -0.5250730514526367f;
+      else
         if((val & 0b0001) == 1) // 000
-          return -0.6961928009986877f; 
+          return -0.6961928009986877f;
         else
-          return -1.0f; 
+          return -1.0f;
 
 }
 
@@ -229,36 +229,36 @@ __device__ float dDequantizeNF4(unsigned char val)
     if((val & 0b0100) == 4) // 1
       if((val & 0b0010) == 2) // 11
         if((val & 0b0001) == 1) // 111
-          return 1.0f; 
+          return 1.0f;
         else
           return 0.7229568362236023f;
       else
         if((val & 0b0001) == 1) // 110
-          return 0.5626170039176941f; 
+          return 0.5626170039176941f;
         else
-          return 0.44070982933044434f; 
+          return 0.44070982933044434f;
     else
       if((val & 0b0010) == 2) //10
         if((val & 0b0001) == 1) // 101
-          return 0.33791524171829224f; 
+          return 0.33791524171829224f;
         else
-          return 0.24611230194568634f; 
-      else 
+          return 0.24611230194568634f;
+      else
         if((val & 0b0001) == 1) // 100
-          return 0.16093020141124725f; 
+          return 0.16093020141124725f;
         else
-          return 0.07958029955625534f; 
+          return 0.07958029955625534f;
 
   else
     if((val & 0b0100) == 4) // 0
       if((val & 0b0010) == 2) //01
         if((val & 0b0001) == 1) // 011
-          return 0.0f; 
+          return 0.0f;
         else
-          return -0.09105003625154495f; 
+          return -0.09105003625154495f;
       else
         if((val & 0b0001) == 1) // 010
-          return -0.18477343022823334f; 
+          return -0.18477343022823334f;
         else
           return -0.28444138169288635f;
     else
@@ -266,12 +266,12 @@ __device__ float dDequantizeNF4(unsigned char val)
         if((val & 0b0001) == 1) // 001
           return -0.39491748809814453f;
         else
-          return -0.5250730514526367f; 
-      else 
+          return -0.5250730514526367f;
+      else
         if((val & 0b0001) == 1) // 000
-          return -0.6961928009986877f; 
+          return -0.6961928009986877f;
         else
-          return -1.0f; 
+          return -1.0f;
 
 }
 
@@ -653,6 +653,8 @@ __global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const f
       __syncthreads();
       for(int j = threadIdx.x; j < BLOCK_ESTIMATE; j+=blockDim.x)
           temp_storage.smem_qidx[j] = -1;
+
+      __syncthreads();
 
       if(threadIdx.x < 256)
       {
@@ -1863,7 +1865,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
               //float ratio = (g_val*g_val)/fmaxf(s2_vals[j], eps*eps);
               //g_val = ratio > 2.0f ? 2.0f*g_val/ratio : g_val;
               g_val *= gnorm_scale;
-              
+
 							s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
 
 							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
@@ -2178,7 +2180,12 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   {
     //smem_col_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
     smem_row_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
-    smem_row_nnz_values[threadIdx.x + (j*THREADS)] = 0;
+    // smem_row_nnz_values[threadIdx.x + (j*THREADS)] = 0;
+  }
+
+  #pragma unroll TILE_ROWS
+  for (int j = 0; j < TILE_ROWS; j++) {
+    smem_row_nnz_values[j] = 0;
   }
 
   #pragma unroll ITEMS_PER_THREAD
@@ -2254,8 +2261,8 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   }
 
   // 4. store data via atomicMax
-  // to store col data efficienctly we need to rewrite the smem blocked data [0, 1, 2, 3...] for t0
-  // into a striped arangement: [0, 8, 16, 24, ..] for t0
+  // to store col data efficiently we need to rewrite the smem blocked data [0, 1, 2, 3...] for t0
+  // into a striped arrangement: [0, 8, 16, 24, ..] for t0
   __syncthreads();
   BlockExchange(temp_storage.exchange).BlockedToStriped(local_col_absmax_values);
 
@@ -2305,7 +2312,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
   // data is in 32 column-tile major with tile width 32 columns and numRows rows
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
-  // L2. Load data in warp-striped arangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
+  // L2. Load data in warp-striped arrangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
   // C1. Compute val(row_stat*col_stat)/(127*127) (load 1/(127*127 into register))
   // C2. Compute normalization values and store col values in register
   // S1. Store C1 into 16-bit output
@@ -2378,7 +2385,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     if(valid_items <= 0) // the sub-tile might have more elements than the tile itself
       break;
 
-    // L2. Load data in warp-striped arangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
+    // L2. Load data in warp-striped arrangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
     LoadInt32(loadint32).Load(&(A[subtile_idx]), local_values, valid_items, 0);
     ExchangeInt32(exchangeint32).BlockedToWarpStriped(local_values, local_values);
 
@@ -2645,7 +2652,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   // row1 [col0 col1 ... col31]
                   // ...
                   //
-                  // As such we read consequtive entries with 256 threads (8rows x 32 columns)
+                  // As such we read consecutive entries with 256 threads (8rows x 32 columns)
                   // as j increase, the row increase by a factor of 8
                   // We load 8 rows per subrow loop, and subrow increase by 8 per loop
                   // so we have an offset of 8 rows every loop or (subrow/warps)*8 = (subrow/8)*8
@@ -2742,7 +2749,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // each of these has 32 values in total for 32*4 = 128 as offset if odd
                     // every set of 4 columns increases the total offset by 16
                     // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc so: subrow/2*4 = subrow*2
-                    // this happends every 8 rows anew (subrow % 8)
+                    // this happens every 8 rows anew (subrow % 8)
                     // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
                     int subcol = warp_lane;
 
@@ -3064,11 +3071,11 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //// use k warps per thread block
 //// 1. threadblock use read-only cache to read in register tile for A into shared memory
 //// 2. each warp loops over shared memory tiles of A of size 8x16 and loads them into fragments
-//// 3. each warp reads a segment of values 16x32 from B 
+//// 3. each warp reads a segment of values 16x32 from B
 //// 4. do dequantization from register of B into second pair of registers
 //// 5. store (4) into fragment
 //// 6. matmul aggregate into fragment C
-//// 7. aggreecate files of C into shared memroy block C
+//// 7. aggregate files of C into shared memory block C
 //// 8. sum (7)
 //// 9. write outputs to matmul output matrix
 //}
@@ -3526,7 +3533,7 @@ template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, i
 template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
-  // per threadblock: 
+  // per threadblock:
   // load step-by-step in chunks of [32,warps]: 1x32 * [32,warps] -> [1,warps]
   // 4 warps -> 4 loads per iter
   // 1x32 * 32x4 -> 1x4 outputs per thread block
@@ -3759,7 +3766,7 @@ template <typename T, int FUNC> __global__ void kfunc(T *A, T *B, T value, long 
   {
     switch(FUNC)
     {
-      case FILL: 
+      case FILL:
         A[i] = (T)value;
         break;
       case ARANGE:
@@ -3816,12 +3823,12 @@ template __global__ void kgemm_4bit_inference_naive<float, 128, 32>(int M, int N
 template __global__ void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 template __global__ void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA);
 
-template __global__ void kspmm_coo_very_sparse_naive<half, 8, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<half, 16, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<half, 32, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<signed char, 8, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<signed char, 16, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
-template __global__ void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<half, 8, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<half, 16, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<half, 32, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<signed char, 8, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<signed char, 16, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
+template __global__ void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
 
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);
 template __global__ void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols);

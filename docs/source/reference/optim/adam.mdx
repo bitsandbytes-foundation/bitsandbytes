@@ -1,0 +1,38 @@
+# Adam
+
+[Adam (Adaptive moment estimation)](https://hf.co/papers/1412.6980) is an adaptive learning rate optimizer, combining ideas from [`SGD`] with momentum and [`RMSprop`] to automatically scale the learning rate:
+
+- a weighted average of the past gradients to provide direction (first-moment)
+- a weighted average of the *squared* past gradients to adapt the learning rate to each parameter (second-moment)
+
+bitsandbytes also supports paged optimizers which take advantage of CUDAs unified memory to transfer memory from the GPU to the CPU when GPU memory is exhausted.
+
+## Adam[[api-class]]
+
+[[autodoc]] bitsandbytes.optim.Adam
+    - __init__
+
+## Adam8bit
+
+[[autodoc]] bitsandbytes.optim.Adam8bit
+    - __init__
+
+## Adam32bit
+
+[[autodoc]] bitsandbytes.optim.Adam32bit
+    - __init__
+
+## PagedAdam
+
+[[autodoc]] bitsandbytes.optim.PagedAdam
+    - __init__
+
+## PagedAdam8bit
+
+[[autodoc]] bitsandbytes.optim.PagedAdam8bit
+    - __init__
+
+## PagedAdam32bit
+
+[[autodoc]] bitsandbytes.optim.PagedAdam32bit
+    - __init__

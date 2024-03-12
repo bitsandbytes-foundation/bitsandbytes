@@ -1,9 +1,7 @@
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-import os
 
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
+import pandas as pd
 
 cmap=plt.get_cmap('cool')
 
@@ -35,11 +33,11 @@ if __name__ == '__main__':
 
         ('global_fwd', '^', '--', 'C4', 'Int8 Matmul XW (switchback)'),
         ('global_bwd', '^', '-.', 'C4', 'Int8 Matmul GW (switchback)'),
-        
+
         ('x_quantize_rowwise', 'P', '--', 'C4', 'Quantize rowwise X (switchback)'),
         ('g_quantize_rowwise', 'P', '-.', 'C4', 'Quantize rowwise G (switchback)'),
-        ('w_quantize_global', '.', '--', 'C4', 'Quatnize global W (switchback)'),
-        ('w_quantize_global_transpose', '.', '-.', 'C4', 'Quantize gloabl and\ntranspose W (switchback)'),
+        ('w_quantize_global', '.', '--', 'C4', 'Quantize global W (switchback)'),
+        ('w_quantize_global_transpose', '.', '-.', 'C4', 'Quantize global and\ntranspose W (switchback)'),
     ]:
         xs = []
         ys = []
@@ -57,7 +55,7 @@ if __name__ == '__main__':
                 y_ += df_[k_].values[0]
             ys.append(y_ * 0.5)
 
-        
+
         ax.plot(xs, ys, color=color, label=name, marker=marker, markersize=5 if marker=='s' else 5, linestyle=ls, linewidth=2 if '+' in k else 1.)
 
 
@@ -69,7 +67,7 @@ if __name__ == '__main__':
     ax.set_xscale('log')
     if logscale_plot1:
         ax.set_yscale('log')
-    
+
     ax.tick_params(axis='x', labelsize=11)
     ax.tick_params(axis='y', labelsize=11)
 
@@ -93,7 +91,7 @@ if __name__ == '__main__':
             ('standard_gx+standard_gw+standard_fwd', 's', '-', 'C2', 'Standard fp16 (total time)'),
             ('x_quantize_rowwise+g_quantize_rowwise+w_quantize_global+w_quantize_global_transpose+standard_gw+global_fwd+global_bwd', 'o', '-', 'C4', 'SwitchBack int8 (total time)'),
         ]:
-        
+
             xs, ys = [], []
             df = rdf[rdf.batch_size == batch_size]
             for embed_dim in dims_to_consider:
@@ -135,4 +133,3 @@ if __name__ == '__main__':
 
 
     plt.savefig('speed_benchmark/plot_with_info.pdf', bbox_inches='tight')
-

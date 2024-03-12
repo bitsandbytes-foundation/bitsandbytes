@@ -1,8 +1,8 @@
-import operator
-import warnings
 from dataclasses import dataclass
 from functools import reduce  # Required in Python 3
-from typing import Tuple, Optional, List
+import operator
+from typing import Callable, Optional, Tuple
+import warnings
 from warnings import warn
 
 import torch
@@ -13,9 +13,6 @@ import bitsandbytes.functional as F
 # math.prod not compatible with python < 3.8
 def prod(iterable):
     return reduce(operator.mul, iterable, 1)
-
-tensor = torch.Tensor
-
 
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
@@ -56,7 +53,10 @@ class GlobalOutlierPooler:
         return torch.Tensor(list(self.outliers)).to(torch.int64)
 
 
-def get_inverse_transform_indices(transform_tile: callable, tile_size: Tuple[int, int]):
+def get_inverse_transform_indices(
+    transform_tile: Callable[[torch.Tensor], torch.Tensor],
+    tile_size: Tuple[int, int],
+):
     """
     Compute a permutation of indices that invert the specified (tiled) matrix transformation
 
@@ -496,7 +496,7 @@ class MatMul4Bit(torch.autograd.Function):
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
 
     @staticmethod
-    def forward(ctx, A, B, out=None, bias=None, state=None):
+    def forward(ctx, A, B, out=None, bias=None, quant_state: Optional[F.QuantState] = None):
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
@@ -504,7 +504,7 @@ class MatMul4Bit(torch.autograd.Function):
             ctx.A = A
             ctx.B = B
             ctx.bias = bias
-            B_shape = state[1]
+            B_shape = quant_state.shape
             if A.shape[-1] == B_shape[0]:
                 return torch.empty(A.shape[:-1] + B_shape[1:], dtype=A.dtype, device=A.device)
             else:
@@ -513,10 +513,10 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, state).to(A.dtype).t(), bias)
+        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
 
         # 3. Save state
-        ctx.state = state
+        ctx.state = quant_state
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
         if any(ctx.needs_input_grad[:2]):
@@ -534,7 +534,6 @@ class MatMul4Bit(torch.autograd.Function):
 
         req_gradA, _, _, req_gradBias, _= ctx.needs_input_grad
         A, B = ctx.tensors
-        state = ctx.state
 
         grad_A, grad_B, grad_bias = None, None, None
 
@@ -550,10 +549,10 @@ class MatMul4Bit(torch.autograd.Function):
 
 
 def matmul(
-    A: tensor,
-    B: tensor,
-    out: tensor = None,
-    state: MatmulLtState = None,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    state: Optional[MatmulLtState] = None,
     threshold=0.0,
     bias=None
 ):
@@ -563,12 +562,11 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_4bit(A: tensor, B: tensor, quant_state: List, out: tensor = None, bias=None):
+def matmul_4bit(A: torch.Tensor, B: torch.Tensor, quant_state: F.QuantState, out: Optional[torch.Tensor] = None, bias=None):
     assert quant_state is not None
     if A.numel() == A.shape[-1] and A.requires_grad == False:
-        absmax, shape, dtype, blocksize, compressed_stats, quant_type, data_type = quant_state
-        if A.shape[-1] % blocksize != 0:
-            warn(f'Some matrices hidden dimension is not a multiple of {blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')
+        if A.shape[-1] % quant_state.blocksize != 0:
+            warn(f'Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
         else:
             out = F.gemv_4bit(A, B.t(), out, state=quant_state)

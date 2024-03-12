@@ -1,12 +1,9 @@
-from typing import Optional, TypeVar, Union, overload
+from typing import TypeVar
 
 import torch
-import torch.nn.functional as F
-from torch import Tensor, device, dtype, nn
+from torch import nn
 
 import bitsandbytes as bnb
-from bitsandbytes.optim import GlobalOptimManager
-from bitsandbytes.utils import OutlierTracer, find_outlier_dims
 
 T = TypeVar("T", bound="torch.nn.Module")
 

@@ -1,16 +1,24 @@
-import torch
-import torch.nn as nn
-import time
 from functools import partial
 
-from bitsandbytes.triton.triton_utils import is_triton_available
+import torch
+import torch.nn as nn
 
 from bitsandbytes.triton.dequantize_rowwise import dequantize_rowwise
+from bitsandbytes.triton.int8_matmul_mixed_dequantize import (
+    int8_matmul_mixed_dequantize,
+)
+from bitsandbytes.triton.int8_matmul_rowwise_dequantize import (
+    int8_matmul_rowwise_dequantize,
+)
+from bitsandbytes.triton.quantize_columnwise_and_transpose import (
+    quantize_columnwise_and_transpose,
+)
+from bitsandbytes.triton.quantize_global import (
+    quantize_global,
+    quantize_global_transpose,
+)
 from bitsandbytes.triton.quantize_rowwise import quantize_rowwise
-from bitsandbytes.triton.quantize_columnwise_and_transpose import quantize_columnwise_and_transpose
-from bitsandbytes.triton.int8_matmul_rowwise_dequantize import int8_matmul_rowwise_dequantize
-from bitsandbytes.triton.quantize_global import quantize_global, quantize_global_transpose
-from bitsandbytes.triton.int8_matmul_mixed_dequanitze import int8_matmul_mixed_dequanitze
+from bitsandbytes.triton.triton_utils import is_triton_available
 
 
 class _switchback_global(torch.autograd.Function):
@@ -29,7 +37,7 @@ class _switchback_global(torch.autograd.Function):
 
         # matmult, fused dequant and add bias
         # call "mixed" because we are mixing rowwise quantized and global quantized
-        return int8_matmul_mixed_dequanitze(
+        return int8_matmul_mixed_dequantize(
             X_int8, W_int8.t(), state_X, state_W, bias
         ).view(*X_3D.size()[:-1], -1)
 
@@ -47,7 +55,7 @@ class _switchback_global(torch.autograd.Function):
             # so we transpose once then call .t() in the matmul
             G_int8, state_G = quantize_rowwise(G)
             W_int8, state_W = quantize_global_transpose(W)
-            grad_X = int8_matmul_mixed_dequanitze(G_int8, W_int8.t(), state_G, state_W, None).view(
+            grad_X = int8_matmul_mixed_dequantize(G_int8, W_int8.t(), state_G, state_W, None).view(
                 *G_3D.size()[:-1], -1
             )
         if ctx.needs_input_grad[1]:
@@ -119,7 +127,7 @@ class _switchback_global_mem_efficient(torch.autograd.Function):
 
         # matmult, fused dequant and add bias
         # call "mixed" because we are mixing rowwise quantized and global quantized
-        return int8_matmul_mixed_dequanitze(
+        return int8_matmul_mixed_dequantize(
             X_int8, W_int8.t(), state_X, state_W, bias
         ).view(*X_3D_sz[:-1], -1)
 
@@ -143,7 +151,7 @@ class _switchback_global_mem_efficient(torch.autograd.Function):
             G_int8, state_G = quantize_rowwise(G)
             del G
             W_int8 = W_int8.t().contiguous()
-            grad_X = int8_matmul_mixed_dequanitze(G_int8, W_int8.t(), state_G, state_W, None).view(
+            grad_X = int8_matmul_mixed_dequantize(G_int8, W_int8.t(), state_G, state_W, None).view(
                 *G_3D_sz[:-1], -1
             )
 
@@ -162,7 +170,7 @@ class SwitchBackLinear(nn.Linear):
         ):
         super().__init__(in_features, out_features, bias, device, dtype)
 
-        if not is_triton_available:
+        if not is_triton_available():
             raise ImportError('''Could not import triton. Please install triton to use SwitchBackLinear.
                                Alternatively, you can use bnb.nn.SwitchBackLinearBnb, but it will be slower''')
 
@@ -215,7 +223,7 @@ class SwitchBackLinear(nn.Linear):
                     X_int8, self.W_int8.t(), state_X, self.state_W, self.bias
                 ).view(*x.size()[:-1], -1)
             else:
-                return int8_matmul_mixed_dequanitze(
+                return int8_matmul_mixed_dequantize(
                     X_int8, self.W_int8.t(), state_X, self.state_W, self.bias
                 ).view(*x.size()[:-1], -1)
 

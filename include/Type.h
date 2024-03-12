@@ -10,7 +10,7 @@ using std::size_t;
 
 namespace BinSearch {
 
-enum InstrSet { Scalar, SSE, AVX };
+enum InstrSet { Scalar, SSE, AVX, Neon };
 
 #define ALGOENUM(x, b) x,
 enum Algos

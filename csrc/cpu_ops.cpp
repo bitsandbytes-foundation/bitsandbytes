@@ -1,6 +1,6 @@
 #include <BinSearch.h>
-#include <pthread.h>
 #include <common.h>
+#include <thread>
 
 using namespace BinSearch;
 
@@ -26,17 +26,13 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
     BinAlgo<Scalar, float, Direct2> bin_searcher(code, elements_code);
 
     int thread_wave_size = 256;
-    // we chunk the thresds into waves of 256 since the max limit is
+    // we chunk the threads into waves of 256 since the max limit is
     // between 16k and 64k on Linux (we reach this when running BLOOM-176B with a large batch size)
     for(long long offset = 0; offset < num_blocks; offset+=thread_wave_size)
     {
       long long valid_chunks = num_blocks - offset >= thread_wave_size ? thread_wave_size : num_blocks - offset;
-      pthread_t *threads = (pthread_t *) malloc(sizeof(pthread_t) * valid_chunks);
-
-      struct quantize_block_args **args = (quantize_block_args **) malloc(valid_chunks * sizeof(quantize_block_args *));
-
-      for(long long i = 0; i < valid_chunks; i++)
-          args[i] = (quantize_block_args *) malloc(sizeof(quantize_block_args));
+      std::vector<std::thread> threads(valid_chunks);
+      std::vector<quantize_block_args> args(valid_chunks);
 
       int chunks_processed = 0;
       for(long long block_idx = offset*blocksize; block_idx < n; block_idx += blocksize)
@@ -44,30 +40,24 @@ void quantize_cpu(float *code, float *A, float *absmax, unsigned char *out, long
           long long valid_items = n - block_idx >= blocksize ? blocksize : n - block_idx;
           long long block_end = block_idx + valid_items;
 
-          struct quantize_block_args *arg = args[chunks_processed];
-          arg->bin_searcher = &bin_searcher;
-          arg->code = code;
-          arg->A = A;
-          arg->absmax = absmax;
-          arg->out = out;
-          arg->block_end = block_end;
-          arg->block_idx = block_idx;
-          arg->threadidx = block_idx / blocksize;
-          arg->blocksize = blocksize;
+          struct quantize_block_args& arg = args[chunks_processed];
+          arg.bin_searcher = &bin_searcher;
+          arg.code = code;
+          arg.A = A;
+          arg.absmax = absmax;
+          arg.out = out;
+          arg.block_end = block_end;
+          arg.block_idx = block_idx;
+          arg.threadidx = block_idx / blocksize;
+          arg.blocksize = blocksize;
 
-          pthread_create(&threads[chunks_processed], NULL, &quantize_block, (void *) arg);
+          threads[chunks_processed] = std::thread([arg] { quantize_block(arg); });
           chunks_processed += 1;
           if(chunks_processed == valid_chunks){ break; }
       }
 
       for (int i = 0; i < valid_chunks; i++)
-          int err = pthread_join(threads[i], NULL);
-
-      free(threads);
-      for (int i = 0; i < valid_chunks; i++)
-          free(args[i]);
-      free(args);
-
+          threads[i].join();
     }
 
 }

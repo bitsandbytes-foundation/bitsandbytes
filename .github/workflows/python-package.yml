@@ -1,0 +1,203 @@
+name: Python package
+
+on:
+  push: {}
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/python-package.yml"
+      - "bitsandbytes/**"
+      - "csrc/**"
+      - "include/**"
+      - "tests/**"
+      - "CMakeLists.txt"
+      - "requirements*.txt"
+      - "setup.py"
+      - "pyproject.toml"
+      - "pytest.ini"
+  release:
+    types: [published]
+  workflow_dispatch: {} # Allow manual trigger
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ##
+  # This job matrix builds the non-CUDA versions of the libraries for all supported platforms.
+  ##
+  build-shared-libs:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [x86_64, aarch64]
+        exclude:
+          - os: windows-latest # This probably requires arm64 Windows agents
+            arch: aarch64
+          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+            arch: aarch64
+    runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+      - name: Build C++
+        run: bash .github/scripts/build-cpu.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared_library_${{ matrix.os }}_${{ matrix.arch }}
+          path: output/*
+          retention-days: 7
+  ##
+  # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
+  ##
+  build-shared-libs-cuda:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        arch: [x86_64, aarch64]
+        cuda_version:
+          ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2"]
+        exclude:
+          - os: windows-latest # This probably requires arm64 Windows agents
+            arch: aarch64
+          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+            arch: aarch64
+    runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
+    steps:
+      - uses: actions/checkout@v4
+        # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
+      - name: Set up Docker multiarch
+        if: startsWith(matrix.os, 'ubuntu')
+        uses: docker/setup-qemu-action@v2
+        # Windows: We install Cuda on the agent (slow)
+      - uses: Jimver/cuda-toolkit@v0.2.14
+        if: startsWith(matrix.os, 'windows')
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: "network"
+          sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
+          linux-local-args: '["--toolkit"]'
+          use-github-cache: false
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+      - name: Build C++
+        run: bash .github/scripts/build-cuda.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+          cuda_version: ${{ matrix.cuda_version }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
+          path: output/*
+          retention-days: 7
+  build-wheels:
+    needs:
+      - build-shared-libs
+      - build-shared-libs-cuda
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # The specific Python version is irrelevant in this context as we are only packaging non-C extension
+        # code. This ensures compatibility across Python versions, including Python 3.8, as compatibility is
+        # dictated by the packaged code itself, not the Python version used for packaging.
+        python-version: ["3.10"]
+        arch: [x86_64, aarch64]
+        exclude:
+          - os: windows-latest # This probably requires arm64 Windows agents
+            arch: aarch64
+          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+            arch: aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          pattern: "shared_library*_${{ matrix.os }}_${{ matrix.arch }}*"
+          path: output/
+      - name: Copy correct platform shared library
+        shell: bash
+        run: |
+          ls -lR output/
+          cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install build wheel
+      - run: python -m build .
+      - name: Determine and Set Platform Tag, then Tag Wheel
+        shell: bash
+        run: |
+          PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ matrix.arch }}")
+          echo "PLATFORM_TAG=$PLATFORM_TAG"
+          wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
+          path: dist/bitsandbytes-*.whl
+          retention-days: 7
+
+  audit-wheels:
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          pattern: "bdist_wheel_*"
+          path: wheels/
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install auditwheel
+      - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
+
+#  test:
+#    needs:
+#      - build-wheels
+#    strategy:
+#      fail-fast: false
+#      matrix:
+#        include:
+#          - os: ubuntu-latest
+#            arch: x86_64
+#            python-version: "3.8"
+#          - os: windows-latest
+#            arch: x86_64
+#            python-version: "3.8"
+#    runs-on: ${{ matrix.os }}
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/download-artifact@v4
+#        with:
+#          merge-multiple: true
+#          pattern: "bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}*"
+#          path: wheel/
+#      - uses: actions/setup-python@v5
+#        with:
+#          python-version: ${{ matrix.python-version }}
+#          cache: pip
+#      - shell: bash
+#        run: ls -lar wheel/
+#      - run: pip install wheel/*.whl -r requirements-ci.txt
+#      - run: pytest --log-cli-level=DEBUG --continue-on-collection-errors tests

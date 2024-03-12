@@ -1,6 +1,7 @@
 import math
+
 import torch
-import time
+
 from bitsandbytes.triton.triton_utils import is_triton_available
 
 if not is_triton_available():
@@ -9,7 +10,6 @@ else:
 
     import triton
     import triton.language as tl
-    from triton.ops.matmul_perf_model import early_config_prune, estimate_matmul_time
 
     # rowwise quantize
 
@@ -50,7 +50,7 @@ else:
         max_val = tl.load(state_x + pid)
         output = max_val * x * inv_127
         tl.store(output_ptr + offsets, output, mask=row_mask)
-        
+
 
     def dequantize_rowwise(x: torch.Tensor, state_x: torch.Tensor):
         output = torch.empty(*x.shape, device=x.device, dtype=torch.float16)

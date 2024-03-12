@@ -2,9 +2,29 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
+*.dll
+*.dylib
+*.o
+*.obj
+*.air
+*.metallib
+
+# CMake generated files
+CMakeCache.txt
+CMakeScripts/
+cmake_install.cmake
+Makefile
+CMakeFiles/
+*.sln
+*.vcxproj*
+*.xcodeproj/
+bitsandbytes.dir/
+Debug/
+Release/
+
+# IDE local files
+.vs/
 
 # Distribution / packaging
 .Python
@@ -133,3 +153,4 @@ dmypy.json
 
 dependencies
 cuda_build
+output/

@@ -1,13 +1,15 @@
 import pytest
 import torch
 
-from bitsandbytes.triton.triton_utils import is_triton_available
-from bitsandbytes.nn.triton_based_modules import SwitchBackLinear
 from bitsandbytes.nn import Linear8bitLt
+from bitsandbytes.nn.triton_based_modules import SwitchBackLinear
+from bitsandbytes.triton.triton_utils import is_triton_available
+from tests.helpers import TRUE_FALSE
+
 
 @pytest.mark.skipif(not is_triton_available() or not torch.cuda.is_available() or not torch.cuda.get_device_capability()[0] >= 8,
                     reason="This test requires triton and a GPU with compute capability 8.0 or higher.")
-@pytest.mark.parametrize("vector_wise_quantization", [False, True])
+@pytest.mark.parametrize("vector_wise_quantization", TRUE_FALSE)
 def test_switchback(vector_wise_quantization):
     for dim in [83]:
         for batch in [13]:
@@ -56,4 +58,3 @@ def test_switchback(vector_wise_quantization):
 
             print('GX1', err_sb, err_baseline)
             assert err_sb < 2 * err_baseline
-
