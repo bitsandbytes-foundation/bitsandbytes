@@ -2040,7 +2040,6 @@ def test_zeropoint():
     print(err1, err2, err3, err4, err5, err6)
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_extract_outliers():
     for i in range(k):
         shapeA = (4096, 4096 * 4)
