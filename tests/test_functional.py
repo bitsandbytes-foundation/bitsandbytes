@@ -1356,6 +1356,7 @@ names = [
     for vals in values
 ]
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_overflow():
     formatB = F.get_special_format_str()
     print(formatB)
