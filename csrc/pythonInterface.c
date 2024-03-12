@@ -34,8 +34,13 @@ void gemm_4bit_inference(int m, int n, int k, half * A,  unsigned char* B,  floa
 void gemm_4bit_inference_naive_fp16(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize)
 { gemm_4bit_inference_naive<half, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
+#if defined(BUILD_CUDA)
+void gemm_4bit_inference_naive_bf16(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
+{ gemm_4bit_inference_naive<__nv_bfloat16, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
+#elif defined(BUILD_HIP)
 void gemm_4bit_inference_naive_bf16(int m, int n, int k, hip_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, hip_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
 { gemm_4bit_inference_naive<hip_bfloat16, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
+#endif
 
 void gemm_4bit_inference_naive_fp32(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize)
 { gemm_4bit_inference_naive<float, 32>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
@@ -60,12 +65,20 @@ MAKE_FUNC32(momentum, MOMENTUM, float, 32)
 MAKE_FUNC32(momentum, MOMENTUM, half, 16)
 MAKE_FUNC32(adam, ADAM, float, fp32)
 MAKE_FUNC32(adam, ADAM, half, fp16)
+#if defined(BUILD_CUDA)
+MAKE_FUNC32(adam, ADAM, __nv_bfloat16, bf16)
+#elif defined(BUILD_HIP)
 MAKE_FUNC32(adam, ADAM, hip_bfloat16, bf16)
+#endif
 MAKE_FUNC32(rmsprop, RMSPROP, float, 32)
 MAKE_FUNC32(rmsprop, RMSPROP, half, 16)
 MAKE_FUNC32(lion, LION, float, fp32)
 MAKE_FUNC32(lion, LION, half, fp16)
+#if defined(BUILD_CUDA)
+MAKE_FUNC32(lion, LION, __nv_bfloat16, bf16)
+#elif defined(BUILD_HIP)
 MAKE_FUNC32(lion, LION, hip_bfloat16, bf16)
+#endif
 MAKE_FUNC32(adagrad, ADAGRAD, float, 32)
 MAKE_FUNC32(adagrad, ADAGRAD, half, 16)
 
@@ -105,11 +118,18 @@ MAKE_BLOCKWISE8(rmsprop, RMSPROP, half, fp16)
 MAKE_BLOCKWISE8(rmsprop, RMSPROP, float, fp32)
 MAKE_BLOCKWISE8(adagrad, ADAGRAD, half, fp16)
 MAKE_BLOCKWISE8(adagrad, ADAGRAD, float, fp32)
+#if defined(BUILD_CUDA)
+MAKE_BLOCKWISE8(adam, ADAM, __nv_bfloat16, bf16)
+#elif defined(BUILD_HIP)
 MAKE_BLOCKWISE8(adam, ADAM, hip_bfloat16, bf16)
+#endif
 MAKE_BLOCKWISE8(lion, LION, half, fp16)
 MAKE_BLOCKWISE8(lion, LION, float, fp32)
+#if defined(BUILD_CUDA)
+MAKE_BLOCKWISE8(lion, LION, __nv_bfloat16, bf16)
+#elif defined(BUILD_HIP)
 MAKE_BLOCKWISE8(lion, LION, hip_bfloat16, bf16)
-
+#endif
 
 void percentileClipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping<float>(g, gnorm_vec, step, n); }
 void percentileClipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping<half>(g, gnorm_vec, step, n); }
@@ -118,9 +138,15 @@ void quantizeBlockwise_fp16(float * code, half *A, float *absmax, unsigned char 
 void quantizeBlockwise_fp16_fp4(float * code, half *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<half, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_fp16_nf4(float * code, half *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<half, 0, NF4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
 
+#if defined(BUILD_CUDA)
+void quantizeBlockwise_bf16(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<__nv_bfloat16, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n); }
+void quantizeBlockwise_bf16_fp4(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<__nv_bfloat16, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
+void quantizeBlockwise_bf16_nf4(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<__nv_bfloat16, 0, NF4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
+#elif defined(BUILD_HIP)
 void quantizeBlockwise_bf16(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<hip_bfloat16, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_bf16_fp4(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<hip_bfloat16, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_bf16_nf4(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<hip_bfloat16, 0, NF4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
+#endif
 
 void quantizeBlockwise_fp32(float * code, float *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<float, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n); }
 void quantizeBlockwise_fp32_fp4(float * code, float *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise<float, 0, FP4>(NULL, A, absmax, out, NULL, 0, blocksize, n); }
@@ -134,10 +160,15 @@ void dequantizeBlockwise_fp32(float *code, unsigned char *A, float *absmax, floa
 void dequantizeBlockwise_fp32_fp4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float, FP4>(NULL, A, absmax, out, blocksize, n); }
 void dequantizeBlockwise_fp32_nf4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise<float, NF4>(NULL, A, absmax, out, blocksize, n); }
 
+#if defined(BUILD_CUDA)
+void dequantizeBlockwise_bf16(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<__nv_bfloat16, General8bit>(code, A, absmax, out, blocksize, n); }
+void dequantizeBlockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<__nv_bfloat16, FP4>(NULL, A, absmax, out, blocksize, n); }
+void dequantizeBlockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<__nv_bfloat16, NF4>(NULL, A, absmax, out, blocksize, n); }
+#elif defined(BUILD_HIP)
 void dequantizeBlockwise_bf16(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<hip_bfloat16, General8bit>(code, A, absmax, out, blocksize, n); }
 void dequantizeBlockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<hip_bfloat16, FP4>(NULL, A, absmax, out, blocksize, n); }
 void dequantizeBlockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<hip_bfloat16, NF4>(NULL, A, absmax, out, blocksize, n); }
-
+#endif
 
 #ifndef NO_HIPBLASLT
 #if BUILD_CUDA
@@ -158,9 +189,6 @@ void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(hipblasLtHandle_t lt
 #endif
 
 MAKE_FUNC_TRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8);
-MAKE_FUNC_TRANSFORM(8, row, col, t, int8_t, ROW, COL, true, 8);
-MAKE_FUNC_TRANSFORM(32, row, col, n, int32_t, ROW, COL, false, 32);
-MAKE_FUNC_TRANSFORM(32, row, col, t, int32_t, ROW, COL, true, 32);
 MAKE_FUNC_TRANSFORM(8, row, row, n, int8_t, ROW, ROW, false, 8);
 MAKE_FUNC_TRANSFORM(8, row, col32, n, int8_t, ROW, COL32, false, 8);
 MAKE_FUNC_TRANSFORM(32, row, col32, n, int32_t, ROW, COL32, false, 32);
@@ -168,8 +196,14 @@ MAKE_FUNC_TRANSFORM(8, row, col_turing, n, int8_t, ROW, COL_TURING, false, 8);
 MAKE_FUNC_TRANSFORM(8, row, col_ampere, n, int8_t, ROW, COL_AMPERE, false, 8);
 MAKE_FUNC_TRANSFORM(8, col32, row, n, int8_t, COL32, ROW, false, 8);
 MAKE_FUNC_TRANSFORM(32, col32, row, n, int32_t, COL32, ROW, false, 32);
+
+#if defined(BUILD_HIP)
+MAKE_FUNC_TRANSFORM(8, row, col, t, int8_t, ROW, COL, true, 8);
+MAKE_FUNC_TRANSFORM(32, row, col, n, int32_t, ROW, COL, false, 32);
+MAKE_FUNC_TRANSFORM(32, row, col, t, int32_t, ROW, COL, true, 32);
 MAKE_FUNC_TRANSFORM(8, col, row, n, int8_t, COL, ROW, false, 8);
 MAKE_FUNC_TRANSFORM(32, col, row, n, int32_t, COL, ROW, false, 32);
+#endif
 #endif
 
 void transform_row2col32(char * A, char *out, int rows, int cols){ transformRowToFormat<COL32, 0>(A, out, rows, cols); }
@@ -258,6 +292,16 @@ extern "C"
   void cdequantize_blockwise_fp32_fp4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise_fp32_fp4(code, A, absmax, out, blocksize, n); }
   void cdequantize_blockwise_fp32_nf4(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n){ dequantizeBlockwise_fp32_nf4(code, A, absmax, out, blocksize, n); }
 
+#if defined(BUILD_CUDA)
+  void cquantize_blockwise_bf16(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16(code, A, absmax, out, blocksize, n); }
+  void cquantize_blockwise_bf16_fp4(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n); }
+  void cquantize_blockwise_bf16_nf4(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n); }
+
+  void cdequantize_blockwise_bf16(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16(code, A, absmax, out, blocksize, n); }
+  void cdequantize_blockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n); }
+  void cdequantize_blockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n); }
+
+#elif defined(BUILD_HIP)
   void cquantize_blockwise_bf16(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16(code, A, absmax, out, blocksize, n); }
   void cquantize_blockwise_bf16_fp4(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n); }
   void cquantize_blockwise_bf16_nf4(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, int blocksize, const int n){ quantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n); }
@@ -265,7 +309,7 @@ extern "C"
   void cdequantize_blockwise_bf16(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16(code, A, absmax, out, blocksize, n); }
   void cdequantize_blockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n); }
   void cdequantize_blockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n); }
-
+#endif
 	#define MAKE_CFUNC32(name, gtype, gbits) \
 	void c##name##32bit_grad_##gbits(gtype *g, gtype *p, \
 								 float* state1, float* state2, float *unorm, float max_unorm, float param_norm, \
@@ -275,14 +319,22 @@ extern "C"
 
 	MAKE_CFUNC32(adam, float, fp32)
 	MAKE_CFUNC32(adam, half, fp16)
+	#if defined(BUILD_CUDA)
+	MAKE_CFUNC32(adam, __nv_bfloat16, bf16)
+	#elif defined(BUILD_HIP)
 	MAKE_CFUNC32(adam, hip_bfloat16, bf16)
+	#endif
 	MAKE_CFUNC32(momentum, float, 32)
 	MAKE_CFUNC32(momentum, half, 16)
 	MAKE_CFUNC32(rmsprop, float, 32)
 	MAKE_CFUNC32(rmsprop, half, 16)
 	MAKE_CFUNC32(lion, float, fp32)
 	MAKE_CFUNC32(lion, half, fp16)
+	#if defined(BUILD_CUDA)
+	MAKE_CFUNC32(lion, __nv_bfloat16, bf16)
+	#elif defined(BUILD_HIP)
 	MAKE_CFUNC32(lion, hip_bfloat16, bf16)
+	#endif
 	MAKE_CFUNC32(adagrad, float, 32)
 	MAKE_CFUNC32(adagrad, half, 16)
 
@@ -322,10 +374,18 @@ extern "C"
 	MAKE_CBLOCKWISE8(rmsprop, RMSPROP, float, fp32)
 	MAKE_CBLOCKWISE8(adagrad, ADAGRAD, half, fp16)
 	MAKE_CBLOCKWISE8(adagrad, ADAGRAD, float, fp32)
+	#if defined(BUILD_CUDA)
+	MAKE_CBLOCKWISE8(adam, ADAM, __nv_bfloat16, bf16)
+	#elif defined(BUILD_HIP)
 	MAKE_CBLOCKWISE8(adam, ADAM, hip_bfloat16, bf16)
+	#endif
 	MAKE_CBLOCKWISE8(lion, LION, half, fp16)
 	MAKE_CBLOCKWISE8(lion, LION, float, fp32)
+	#if defined(BUILD_CUDA)
+	MAKE_CBLOCKWISE8(lion, LION, __nv_bfloat16, bf16)
+	#elif defined(BUILD_HIP)
 	MAKE_CBLOCKWISE8(lion, LION, hip_bfloat16, bf16)
+	#endif
 
 	void cpercentile_clipping_g32(float * g, float *gnorm_vec, int step, const int n){ percentileClipping_g32(g, gnorm_vec, step, n); }
 	void cpercentile_clipping_g16(half * g, float *gnorm_vec, int step, const int n){ percentileClipping_g16(g, gnorm_vec, step, n); }
@@ -409,9 +469,6 @@ extern "C"
 
 
 	MAKE_FUNC_CTRANSFORM(8, row, col, n, int8_t, ROW, COL, false, 8)
-	MAKE_FUNC_CTRANSFORM(8, row, col, t, int8_t, ROW, COL, true, 8)
-	MAKE_FUNC_CTRANSFORM(32, row, col, n, int32_t, ROW, COL, false, 32)
-	MAKE_FUNC_CTRANSFORM(32, row, col, t, int32_t, ROW, COL, true, 32)
 	MAKE_FUNC_CTRANSFORM(8, row, row, n, int8_t, ROW, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, row, col32, n, int8_t, ROW, COL32, false, 8)
 	MAKE_FUNC_CTRANSFORM(32, row, col32, n, int32_t, ROW, COL32, false, 32)
@@ -419,8 +476,14 @@ extern "C"
 	MAKE_FUNC_CTRANSFORM(8, row, col_ampere, n, int8_t, ROW, COL_AMPERE, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, col32, row, n, int8_t, COL32, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(32, col32, row, n, int32_t, COL32, ROW, false, 32)
+
+	#if defined(BUILD_HIP)
+	MAKE_FUNC_CTRANSFORM(8, row, col, t, int8_t, ROW, COL, true, 8)
+	MAKE_FUNC_CTRANSFORM(32, row, col, n, int32_t, ROW, COL, false, 32)
+	MAKE_FUNC_CTRANSFORM(32, row, col, t, int32_t, ROW, COL, true, 32)
 	MAKE_FUNC_CTRANSFORM(8, col, row, n, int8_t, COL, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(32, col, row, n, int32_t, COL, ROW, false, 32)
+	#endif
 #endif
 	void cdequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, half* bias, int numRows, int numCols)
 	{ dequant_mm_int32_fp16(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols); }
@@ -531,7 +594,11 @@ extern "C"
 	void cgemm_4bit_inference_naive_fp16(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize)
 	{ gemm_4bit_inference_naive_fp16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
+	#if defined(BUILD_CUDA)
+	void cgemm_4bit_inference_naive_bf16(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
+	#elif defined(BUILD_HIP)
 	void cgemm_4bit_inference_naive_bf16(int m, int n, int k, hip_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, hip_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize)
+	#endif
 	{ gemm_4bit_inference_naive_bf16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
 	void cgemm_4bit_inference_naive_fp32(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize)
