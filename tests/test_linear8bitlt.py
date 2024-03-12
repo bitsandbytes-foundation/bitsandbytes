@@ -68,7 +68,6 @@ def test_linear_no_igemmlt():
     assert linear_custom.state.CxB is None
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt",
                          list(product([False, True], [False, True], [False, True], [False, True])))
 def test_linear_serialization(has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt):
