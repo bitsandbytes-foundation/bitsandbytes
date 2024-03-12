@@ -2974,7 +2974,7 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 {
 	int local_colidx = idx[blockIdx.x];
 
-	if(FORMAT==COL_TURING)
+	/*if(FORMAT==COL_TURING)
 	{
 		// TURING FORMAT:
 		// 8*32 tiles with 4*4 subtiles
@@ -3030,6 +3030,17 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 			int out_idx = (row*idx_size) + blockIdx.x;
 			out[out_idx] = val;
 		}
+	}*/
+
+	//Only col format is used on ROCm
+	for(int row = threadIdx.x; row < rowsA; row+= blockDim.x)
+	{
+		//col-major offset
+		int offset = local_colidx * rowsA + row;
+	
+		char val = A[offset];
+		int out_idx = (row*idx_size) + blockIdx.x;
+		out[out_idx] = val;
 	}
 }
 

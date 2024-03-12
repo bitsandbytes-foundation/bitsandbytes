@@ -833,14 +833,17 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 
 	int num_blocks = idx_size;
 
-  if(FORMAT == COL_TURING)
+  /*if(FORMAT == COL_TURING)
   {
       tiledRows = fill_up_to_nearest_multiple(rows, 8);
   }
   else if(FORMAT == COL_AMPERE)
   {
       tiledRows = fill_up_to_nearest_multiple(rows, 32);
-	}
+  }*/
+
+  //for col format on ROCm
+  tiledRows = rows;
 
  hipLaunchKernelGGL(( kExtractOutliers<FORMAT>), dim3(num_blocks), dim3(threads), 0, 0, A, idx, out, idx_size, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
