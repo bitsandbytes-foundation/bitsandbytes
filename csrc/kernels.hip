@@ -2300,13 +2300,16 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
   const int n_out = numRows*numCols;
 
-  int num_row_tiles = (numRows/SUBTILE_ROWS) + (numRows % SUBTILE_ROWS == 0 ? 0 : 1);
+  //int num_row_tiles = (numRows/SUBTILE_ROWS) + (numRows % SUBTILE_ROWS == 0 ? 0 : 1);
   // we have tiles of size numRows*32, thus col only increases every numRows
   // num_row_tiles is the tiles after which the column increases by 32
   // blockIdx.x is the index of the current tile
-  int col = ((threadIdx.x % 32) + ((blockIdx.x/num_row_tiles)*32));
+  //int col = ((threadIdx.x % 32) + ((blockIdx.x/num_row_tiles)*32));
   // base_row increases by SUBTILE_ROWS every block. It wraps back to zero once num_row_tiles is reached
-  int base_row = (blockIdx.x*SUBTILE_ROWS) % (num_row_tiles*SUBTILE_ROWS);
+  //int base_row = (blockIdx.x*SUBTILE_ROWS) % (num_row_tiles*SUBTILE_ROWS);
+
+  int block_offset = blockIdx.x * THREADS * ITEMS_PER_THREAD;
+  int thread_offset = threadIdx.x * ITEMS_PER_THREAD;
 
   // SUBTILE_ROWS is independent from ITEMS_PER_THREAD is independent from THREADS
   // subtiles have 32*SUBTILE_ROWS elements <= THREADS*ITEMS_PER_THREAD
@@ -2321,20 +2324,33 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
 
   int local_values[ITEMS_PER_THREAD];
   half local_output[ITEMS_PER_THREAD];
-  float local_rowStats[ITEMS_PER_THREAD];
-  __shared__ float smem_rowStats[SUBTILE_ROWS];
+  //float local_rowStats[ITEMS_PER_THREAD];
+  //__shared__ float smem_rowStats[SUBTILE_ROWS];
 
   typedef hipcub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, hipcub::BLOCK_LOAD_DIRECT> LoadInt32;
-  typedef hipcub::BlockExchange<int, THREADS, ITEMS_PER_THREAD> ExchangeInt32;
+  //typedef hipcub::BlockExchange<int, THREADS, ITEMS_PER_THREAD> ExchangeInt32;
   __shared__ typename LoadInt32::TempStorage loadint32;
-  __shared__ typename ExchangeInt32::TempStorage exchangeint32;
+  //__shared__ typename ExchangeInt32::TempStorage exchangeint32;
 
 
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
-  float colStat = col >= numCols ? 0.0f : colStats[col];
-  float local_biasValue = ((bias == NULL) || (col >= numCols)) ? 0.0f : __half2float(bias[col]);
+  //float colStat = col >= numCols ? 0.0f : colStats[col];
+  //float local_biasValue = ((bias == NULL) || (col >= numCols)) ? 0.0f : __half2float(bias[col]);
+  int row_idx, col_idx;
+  float colStat[ITEMS_PER_THREAD];
+  float local_biasValue[ITEMS_PER_THREAD];
+  float rowStat[ITEMS_PER_THREAD];
+  #pragma unroll ITEMS_PER_THREAD
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+  {
+       row_idx = (block_offset + thread_offset + j) / numCols;
+       col_idx = (block_offset + thread_offset + j) % numCols;
+       colStat[j] = col_idx >= numCols ? 0.0f : colStats[col_idx];
+       local_biasValue[j] = ((bias == NULL) || (col_idx >= numCols)) ? 0.0f : __half2float(bias[col_idx]);
+       rowStat[j] = row_idx >= numRows ? 0.0f : rowStats[row_idx];
+  }
   // no block loads for rows for now -- keep it simple
-  for(int j = threadIdx.x; j < SUBTILE_ROWS; j+=blockDim.x)
+  /*for(int j = threadIdx.x; j < SUBTILE_ROWS; j+=blockDim.x)
   {
     // todo: is this global mem access slow due to overlaps or does the L1 cache work well here?
     int row = (base_row+j) % numRows; // wrap around
@@ -2342,12 +2358,25 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     // todo: update description about striped shared memory, it is not needed
     // rowidx: [0, 1, 2, 3...] and each warp reads ITEMS_PER_THREAD consequitive elements
     smem_rowStats[j] = rowStats[row];
-  }
+  }*/
   __syncthreads();
 
+  int valid_items = block_offset + THREADS * ITEMS_PER_THREAD < n_out ? THREADS * ITEMS_PER_THREAD : n_out - block_offset;
+  LoadInt32(loadint32).Load(&(A[block_offset]), local_values, valid_items, 0);
 
+  #pragma unroll ITEMS_PER_THREAD
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+    local_output[j] = __float2half((local_values[j]*MM_DEQUANT_CONST*rowStat[j]*colStat[j]) + local_biasValue[j]);
+ 
   // each block processes SUBTILE_ROWS*32 elements
-  const int items_per_load = THREADS*ITEMS_PER_THREAD;
+  #pragma unroll ITEMS_PER_THREAD
+  for(int j = 0; j < ITEMS_PER_THREAD; j++)
+  {
+    int outIdx = block_offset + thread_offset + j;
+    if(outIdx< n_out)
+      out[outIdx] = local_output[j];
+  }
+  /*const int items_per_load = THREADS*ITEMS_PER_THREAD;
   const int rows_per_load = items_per_load/32;
 
   int subtile_base_row = (threadIdx.x / 32)*ITEMS_PER_THREAD; // row within the tile
@@ -2368,7 +2397,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
       local_rowStats[j] = smem_rowStats[subtile_base_row+row_offset+j];
-
+	
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
       local_output[j] = __float2half((local_values[j]*MM_DEQUANT_CONST*local_rowStats[j]*colStat) + local_biasValue);
@@ -2388,7 +2417,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kd
     }
 
     row_offset += rows_per_load;
-  }
+  }*/
 }
 
 
@@ -2974,7 +3003,7 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 {
 	int local_colidx = idx[blockIdx.x];
 
-	if(FORMAT==COL_TURING)
+	/*if(FORMAT==COL_TURING)
 	{
 		// TURING FORMAT:
 		// 8*32 tiles with 4*4 subtiles
@@ -3030,6 +3059,17 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 			int out_idx = (row*idx_size) + blockIdx.x;
 			out[out_idx] = val;
 		}
+	}*/
+
+	//Only col format is used on ROCm
+	for(int row = threadIdx.x; row < rowsA; row+= blockDim.x)
+	{
+		//col-major offset
+		int offset = local_colidx * rowsA + row;
+	
+		char val = A[offset];
+		int out_idx = (row*idx_size) + blockIdx.x;
+		out[out_idx] = val;
 	}
 }
 

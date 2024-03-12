@@ -452,13 +452,13 @@ def get_transform_buffer(
         rows = shape[0] * shape[1]
     cols = shape[-1]
 
-    state = (shape, to_order)
     if transpose:
         # swap dims
         tmp = rows
         rows = cols
         cols = tmp
-        state = (shape[::-1], to_order)
+        shape = shape[::-1]
+    state = (shape, to_order)
 
     if to_order == "row" or to_order == "col":
         return init_func(shape, dtype=dtype, device=device), state
@@ -1980,6 +1980,8 @@ def mm_dequant(
     new_col_stats=None,
     bias=None
 ):
+    if HIP_ENVIRONMENT:
+        A, quant_state = nvidia_transform(A, "row", state = quant_state)
     assert A.dtype == torch.int32
     if bias is not None: assert bias.dtype == torch.float16
     out_shape = quant_state[0]
@@ -2552,7 +2554,10 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
 def extract_outliers(A, SA, idx):
     shapeA = SA[0]
     formatA = SA[1]
-    assert formatA in ["col_turing", "col_ampere"]
+    if not HIP_ENVIRONMENT:
+        assert formatA in ["col_turing", "col_ampere"]
+    else:
+        assert formatA in ["col"]
     assert A.device.type == "cuda"
 
     out = torch.zeros(
@@ -2567,7 +2572,7 @@ def extract_outliers(A, SA, idx):
     ptrOut = get_ptr(out)
 
     prev_device = pre_call(A.device)
-    if formatA == 'col_turing':
+    if formatA == 'col_turing' or HIP_ENVIRONMENT:
         lib.cextractOutliers_turing(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
     elif formatA == "col_ampere":
         lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)

@@ -970,7 +970,6 @@ has_bias = [True, False]
 values = list(product(dim1, dim4, dims, formatB, has_bias))
 names = ["dim1_{}_dim4_{}_dims_{}_formatB_{}_has_bias_{}".format(*vals) for vals in values]
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1, dim4, dims, formatB, has_bias", values, ids=names)
 def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
     inner = torch.randint(1, 128, size=(1,)).item()
@@ -1312,7 +1311,6 @@ names = [
     for vals in values
 ]
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize(
     "dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose",
     values,
@@ -2045,7 +2043,6 @@ def test_zeropoint():
     print(err1, err2, err3, err4, err5, err6)
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_extract_outliers():
     for i in range(k):
         shapeA = (4096, 4096 * 4)

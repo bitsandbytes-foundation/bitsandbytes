@@ -587,7 +587,9 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
     }
     else
     {
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32I, HIP_R_32F));
+      has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32I, HIP_R_8I));
+      hipblasOperation_t opA = HIPBLAS_OP_N;
+      has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA)));
       has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
       has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Cdesc, HIP_R_8I, m, n, ldc));
       has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Cdesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
@@ -651,14 +653,18 @@ int fill_up_to_nearest_multiple(int value, int multiple)
 void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, half *bias, int numRows, int numCols)
 {
   int threads = 512;
-  int tileCols = fill_up_to_nearest_multiple(numCols, 32);
-  int n = numRows*tileCols;
-  int subtile_rows = 128;
-  int tilesize = 32*subtile_rows;
-  int num_blocks = numRows/subtile_rows;
-  num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
-  num_blocks = num_blocks*(tileCols/32);
-  assert(threads <= tilesize);
+  //int tileCols = fill_up_to_nearest_multiple(numCols, 32);
+  //int n = numRows*tileCols;
+  int tileCols = numCols;
+  int n = numRows*numCols;
+  //int subtile_rows = 128;
+  //int tilesize = 32*subtile_rows;
+  //int num_blocks = numRows/subtile_rows;
+  //num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
+  //num_blocks = num_blocks*(tileCols/32);
+  //assert(threads <= tilesize);
+  int num_blocks = numRows * numCols / (threads * 4);
+  num_blocks += (numRows * numCols) % (threads * 4) == 0 ? 0 : 1;
 
  hipLaunchKernelGGL(( kdequant_mm_int32_fp16<4, 128, 512>), dim3(num_blocks), dim3(threads), 0, 0, A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
@@ -820,14 +826,17 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 
 	int num_blocks = idx_size;
 
-  if(FORMAT == COL_TURING)
+  /*if(FORMAT == COL_TURING)
   {
       tiledRows = fill_up_to_nearest_multiple(rows, 8);
   }
   else if(FORMAT == COL_AMPERE)
   {
       tiledRows = fill_up_to_nearest_multiple(rows, 32);
-	}
+  }*/
+
+  //for col format on ROCm
+  tiledRows = rows;
 
  hipLaunchKernelGGL(( kExtractOutliers<FORMAT>), dim3(num_blocks), dim3(threads), 0, 0, A, idx, out, idx_size, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
