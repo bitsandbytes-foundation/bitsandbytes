@@ -2524,7 +2524,10 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
 def extract_outliers(A, SA, idx):
     shapeA = SA[0]
     formatA = SA[1]
-    assert formatA in ["col_turing", "col_ampere"]
+    if not HIP_ENVIRONMENT:
+        assert formatA in ["col_turing", "col_ampere"]
+    else:
+        assert formatA in ["col"]
     assert A.device.type == "cuda"
 
     out = torch.zeros(
@@ -2539,7 +2542,7 @@ def extract_outliers(A, SA, idx):
     ptrOut = get_ptr(out)
 
     prev_device = pre_call(A.device)
-    if formatA == 'col_turing':
+    if formatA == 'col_turing' or HIP_ENVIRONMENT:
         lib.cextractOutliers_turing(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
     elif formatA == "col_ampere":
         lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
