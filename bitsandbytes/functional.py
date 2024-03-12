@@ -1952,6 +1952,8 @@ def mm_dequant(
     new_col_stats=None,
     bias=None
 ):
+    if HIP_ENVIRONMENT:
+        A, quant_state = nvidia_transform(A, "row", state = quant_state)
     assert A.dtype == torch.int32
     if bias is not None: assert bias.dtype == torch.float16
     out_shape = quant_state[0]
