@@ -45,11 +45,16 @@ def find_cuda_libraries_in_path_list(paths_list_candidate: str) -> Iterable[Path
     for dir_string in paths_list_candidate.split(os.pathsep):
         if not dir_string:
             continue
+        if os.sep not in dir_string:
+            continue
         try:
             dir = Path(dir_string)
-            if not dir.exists():
-                logger.warning(f"The directory listed in your path is found to be non-existent: {dir}")
-                continue
+            try:
+                if not dir.exists():
+                    logger.warning(f"The directory listed in your path is found to be non-existent: {dir}")
+                    continue
+            except OSError:  # Assume an esoteric error trying to poke at the directory
+                pass
             for lib_pattern in CUDA_RUNTIME_LIB_PATTERNS:
                 for pth in dir.glob(lib_pattern):
                     if pth.is_file():
@@ -63,8 +68,10 @@ def is_relevant_candidate_env_var(env_var: str, value: str) -> bool:
         env_var in CUDART_PATH_PREFERRED_ENVVARS  # is a preferred location
         or (
             os.sep in value  # might contain a path
-            and "CONDA" not in env_var  # not another conda envvar
             and env_var not in CUDART_PATH_IGNORED_ENVVARS  # not ignored
+            and "CONDA" not in env_var  # not another conda envvar
+            and "BASH_FUNC" not in env_var  # not a bash function defined via envvar
+            and "\n" not in value  # likely e.g. a script or something?
         )
     )
 
