@@ -14,7 +14,7 @@ from torch import Tensor
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import COMPILED_WITH_CUDA, lib
+from .cextension import lib
 
 
 # math.prod not compatible with python < 3.8
@@ -23,7 +23,7 @@ def prod(iterable):
 
 name2qmap = {}
 
-if COMPILED_WITH_CUDA:
+if lib and lib.compiled_with_cuda:
     """C FUNCTIONS FOR OPTIMIZERS"""
     str2optimizer32bit = {
         "adam": (
