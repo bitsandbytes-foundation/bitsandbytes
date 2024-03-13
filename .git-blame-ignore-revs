@@ -9,3 +9,6 @@ ea7c14f8ef64924f2d0ff80df3cdabf2c7299848
 
 # format tests/linear_4bit.py
 34735ba89de8235ea9da6ef409f814dcea9e2038
+
+# Reformat with ruff-format
+5a4263f4dc05fe8f78f4111beab9f68a81deeab1
