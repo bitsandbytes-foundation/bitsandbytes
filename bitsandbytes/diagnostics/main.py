@@ -13,6 +13,21 @@ from bitsandbytes.diagnostics.utils import print_dedented, print_header
 
 
 def sanity_check():
+    from bitsandbytes.cextension import lib
+
+    if lib is None:
+        print_dedented(
+            """
+            Couldn't load the bitsandbytes library, likely due to missing binaries.
+            Please ensure bitsandbytes is properly installed.
+
+            For source installations, compile the binaries with `cmake -DCOMPUTE_BACKEND=cuda -S .`.
+            See the documentation for more details if needed.
+
+            Trying a simple check anyway, but this will likely fail...
+            """
+        )
+
     from bitsandbytes.optim import Adam
 
     p = torch.nn.Parameter(torch.rand(10, 10).cuda())
