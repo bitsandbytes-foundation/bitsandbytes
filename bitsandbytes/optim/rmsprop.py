@@ -51,9 +51,7 @@ class RMSprop(Optimizer1State):
                 Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
         """
         if alpha == 0:
-            raise NotImplementedError(
-                "RMSprop with alpha==0.0 is not supported!"
-            )
+            raise NotImplementedError("RMSprop with alpha==0.0 is not supported!")
         if centered:
             raise NotImplementedError("Centered RMSprop is not supported!")
         super().__init__(
@@ -116,9 +114,7 @@ class RMSprop8bit(Optimizer1State):
                 Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
         """
         if alpha == 0:
-            raise NotImplementedError(
-                "RMSprop with alpha==0.0 is not supported!"
-            )
+            raise NotImplementedError("RMSprop with alpha==0.0 is not supported!")
         if centered:
             raise NotImplementedError("Centered RMSprop is not supported!")
         super().__init__(
@@ -182,9 +178,7 @@ class RMSprop32bit(Optimizer1State):
         """
 
         if alpha == 0:
-            raise NotImplementedError(
-                "RMSprop with alpha==0.0 is not supported!"
-            )
+            raise NotImplementedError("RMSprop with alpha==0.0 is not supported!")
         if centered:
             raise NotImplementedError("Centered RMSprop is not supported!")
         super().__init__(
