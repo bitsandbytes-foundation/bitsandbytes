@@ -39,8 +39,8 @@ class AdamW(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -100,8 +100,8 @@ class AdamW8bit(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -161,8 +161,8 @@ class AdamW32bit(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -221,8 +221,8 @@ class PagedAdamW(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -281,8 +281,8 @@ class PagedAdamW8bit(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -341,8 +341,8 @@ class PagedAdamW32bit(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
