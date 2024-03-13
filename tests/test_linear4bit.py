@@ -28,9 +28,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
     device = "cuda"
     layer_shape = (300, 400)
 
-    linear = torch.nn.Linear(
-        *layer_shape, dtype=original_dtype, device="cpu"
-    )  # original layer
+    linear = torch.nn.Linear(*layer_shape, dtype=original_dtype, device="cpu")  # original layer
 
     # Quantizing original layer
     linear_q = bnb.nn.Linear4bit(
@@ -42,9 +40,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         quant_type=quant_type,
         device="meta",
     )
-    new_weight = bnb.nn.Params4bit(
-        data=linear.weight, quant_type=quant_type, requires_grad=False
-    )
+    new_weight = bnb.nn.Params4bit(data=linear.weight, quant_type=quant_type, requires_grad=False)
     linear_q.weight = new_weight
     if bias:
         linear_q.bias = torch.nn.Parameter(linear.bias)
@@ -172,7 +168,9 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         target_compression = (
             0.143 if original_dtype == torch.float32 else 0.29
         )  # these numbers get lower as weight shape increases
-        ratio_error_msg = f"quantized_size {size_4:,} is larger on disk than {target_compression:.2%} of original size {size_orig:,}"
+        ratio_error_msg = (
+            f"quantized_size {size_4:,} is larger on disk than {target_compression:.2%} of original size {size_orig:,}"
+        )
         assert size_ratio < target_compression, ratio_error_msg
 
 

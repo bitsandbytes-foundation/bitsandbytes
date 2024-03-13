@@ -20,6 +20,7 @@ cuda_versions = {
     "124": "https://developer.download.nvidia.com/compute/cuda/12.4.0/local_installers/cuda_12.4.0_550.54.14_linux.run"
 }
 
+
 def install_cuda(version, base_path, download_path):
     formatted_version = f"{version[:-1]}.{version[-1]}"
     folder = f"cuda-{formatted_version}"
@@ -30,7 +31,7 @@ def install_cuda(version, base_path, download_path):
         subprocess.run(["rm", "-rf", install_path], check=True)
 
     url = cuda_versions[version]
-    filename = url.split('/')[-1]
+    filename = url.split("/")[-1]
     filepath = os.path.join(download_path, filename)
 
     if not os.path.exists(filepath):
@@ -45,9 +46,14 @@ def install_cuda(version, base_path, download_path):
     # Install CUDA
     print(f"Installing CUDA version {version}...")
     install_command = [
-        "bash", filepath,
-        "--no-drm", "--no-man-page", "--override",
-        "--toolkitpath=" + install_path, "--toolkit", "--silent"
+        "bash",
+        filepath,
+        "--no-drm",
+        "--no-man-page",
+        "--override",
+        "--toolkitpath=" + install_path,
+        "--toolkit",
+        "--silent",
     ]
 
     print(f"Running command: {' '.join(install_command)}")
@@ -62,6 +68,7 @@ def install_cuda(version, base_path, download_path):
         os.remove(filepath)
 
     print(f"CUDA version {version} installed at {install_path}")
+
 
 def main():
     user_base_path = os.path.expanduser("~/cuda")
@@ -93,6 +100,7 @@ def main():
     else:
         print(f"Invalid CUDA version: {version}. Available versions are: {', '.join(cuda_versions.keys())}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

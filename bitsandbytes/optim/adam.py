@@ -14,8 +14,21 @@ from bitsandbytes.optim.optimizer import Optimizer2State
 
 
 class Adam(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         Base Adam optimizer.
 
@@ -45,11 +58,38 @@ class Adam(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, optim_bits, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            optim_bits,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
+
 
 class Adam8bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         8-bit Adam optimizer.
 
@@ -79,11 +119,38 @@ class Adam8bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 8, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            8,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
+
 
 class Adam32bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         32-bit Adam optimizer.
 
@@ -113,11 +180,38 @@ class Adam32bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 32, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            32,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
+
 
 class PagedAdam(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         Paged Adam optimizer.
 
@@ -147,11 +241,38 @@ class PagedAdam(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, optim_bits, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            optim_bits,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
+
 
 class PagedAdam8bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         8-bit paged Adam optimizer.
 
@@ -181,11 +302,38 @@ class PagedAdam8bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 8, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            8,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
+
 
 class PagedAdam32bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         Paged 32-bit Adam optimizer.
 
@@ -215,7 +363,21 @@ class PagedAdam32bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 32, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            32,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
+
 
 class AnalysisAdam(torch.optim.Optimizer):
     """Adam that performs 8-bit vs 32-bit error analysis.
@@ -293,9 +455,7 @@ class AnalysisAdam(torch.optim.Optimizer):
                 if grad.dtype in {torch.float16, torch.bfloat16}:
                     grad = grad.float()
                 if grad.is_sparse:
-                    raise RuntimeError(
-                        "Adam does not support sparse gradients, please consider SparseAdam instead"
-                    )
+                    raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
                 amsgrad = group.get("amsgrad", False)
                 assert not amsgrad
 
@@ -312,15 +472,9 @@ class AnalysisAdam(torch.optim.Optimizer):
                     state["exp_avg"] = torch.zeros_like(p_data_fp32)
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(p_data_fp32)
-                    state["abserrors"] = torch.zeros(
-                        (256, 256), device=p_data_fp32.device
-                    )
-                    state["relerrors"] = torch.zeros(
-                        (256, 256), device=p_data_fp32.device
-                    )
-                    state["counts"] = torch.zeros(
-                        (256, 256), device=p_data_fp32.device
-                    )
+                    state["abserrors"] = torch.zeros((256, 256), device=p_data_fp32.device)
+                    state["relerrors"] = torch.zeros((256, 256), device=p_data_fp32.device)
+                    state["counts"] = torch.zeros((256, 256), device=p_data_fp32.device)
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state["max_exp_avg_sq"] = torch.zeros_like(p_data_fp32)
@@ -328,25 +482,19 @@ class AnalysisAdam(torch.optim.Optimizer):
                     state["exp_avg"] = state["exp_avg"].to(p_data_fp32)
                     state["exp_avg_sq"] = state["exp_avg_sq"].to(p_data_fp32)
                     if amsgrad:
-                        state["max_exp_avg_sq"] = state["max_exp_avg_sq"].to(
-                            p_data_fp32
-                        )
+                        state["max_exp_avg_sq"] = state["max_exp_avg_sq"].to(p_data_fp32)
 
                 state["step"] += 1
                 beta1, beta2 = group["betas"]
                 bias_correction1 = 1 - beta1 ** state["step"]
                 bias_correction2 = 1 - beta2 ** state["step"]
-                step_size = (
-                    group["lr"] * math.sqrt(bias_correction2) / bias_correction1
-                )
+                step_size = group["lr"] * math.sqrt(bias_correction2) / bias_correction1
                 e = state["abserrors"]
                 rele = state["relerrors"]
                 counts = state["counts"]
 
                 if group["weight_decay"] != 0:
-                    p_data_fp32.add_(
-                        p_data_fp32, alpha=-group["weight_decay"] * group["lr"]
-                    )
+                    p_data_fp32.add_(p_data_fp32, alpha=-group["weight_decay"] * group["lr"])
 
                 exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                 if amsgrad:
@@ -359,10 +507,7 @@ class AnalysisAdam(torch.optim.Optimizer):
                 denom = exp_avg_sq.sqrt().add_(group["eps"])
                 update_fp32 = exp_avg / denom
 
-                if (
-                    p_data_fp32.numel() <= 8192
-                    or p_data_fp32.numel() > 50000 * 1000
-                ):
+                if p_data_fp32.numel() <= 8192 or p_data_fp32.numel() > 50000 * 1000:
                     # embedding layer or too small
                     p_data_fp32 += -step_size * update_fp32
                 else:
@@ -401,9 +546,7 @@ class AnalysisAdam(torch.optim.Optimizer):
                         # 3. dequantize
                         # Error will be calculated automatically!
                     else:
-                        raise ValueError(
-                            f"Invalid analysis value: {self.analysis}!"
-                        )
+                        raise ValueError(f"Invalid analysis value: {self.analysis}!")
 
                     denom = state2.sqrt().add_(group["eps"])
                     update_8bit = state1 / denom
@@ -415,9 +558,7 @@ class AnalysisAdam(torch.optim.Optimizer):
 
                     F.histogram_scatter_add_2d(e, C1.int(), C2.int(), abserr)
                     F.histogram_scatter_add_2d(rele, C1.int(), C2.int(), relerr)
-                    F.histogram_scatter_add_2d(
-                        counts, C1.int(), C2.int(), torch.ones_like(abserr)
-                    )
+                    F.histogram_scatter_add_2d(counts, C1.int(), C2.int(), torch.ones_like(abserr))
 
                     p_data_fp32 += -step_size * update_fp32
 
@@ -425,18 +566,10 @@ class AnalysisAdam(torch.optim.Optimizer):
                         if self.savedir != "" and state["step"] % 100 == 0:
                             if not os.path.exists(self.savedir):
                                 os.makedirs(self.savedir)
-                            shapestr = "_".join(
-                                [str(dim) for dim in p_data_fp32.shape]
-                            )
-                            pathe = os.path.join(
-                                self.savedir, f"{p_id}_{shapestr}_abserr.pkl"
-                            )
-                            pathrele = os.path.join(
-                                self.savedir, f"{p_id}_{shapestr}_relerr.pkl"
-                            )
-                            pathcounts = os.path.join(
-                                self.savedir, f"{p_id}_{shapestr}_counts.pkl"
-                            )
+                            shapestr = "_".join([str(dim) for dim in p_data_fp32.shape])
+                            pathe = os.path.join(self.savedir, f"{p_id}_{shapestr}_abserr.pkl")
+                            pathrele = os.path.join(self.savedir, f"{p_id}_{shapestr}_relerr.pkl")
+                            pathcounts = os.path.join(self.savedir, f"{p_id}_{shapestr}_counts.pkl")
                             torch.save(e, pathe)
                             torch.save(rele, pathrele)
                             torch.save(counts, pathcounts)
