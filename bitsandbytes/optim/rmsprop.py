@@ -41,8 +41,8 @@ class RMSprop(Optimizer1State):
                 Whether the gradients are normalized by the variance. If `True`, it can help training at the expense of additional compute.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -104,8 +104,8 @@ class RMSprop8bit(Optimizer1State):
                 Whether the gradients are normalized by the variance. If `True`, it can help training at the expense of additional compute.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -167,8 +167,8 @@ class RMSprop32bit(Optimizer1State):
                 Whether the gradients are normalized by the variance. If `True`, it can help training at the expense of additional compute.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
