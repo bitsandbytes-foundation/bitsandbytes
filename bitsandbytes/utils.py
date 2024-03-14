@@ -140,7 +140,7 @@ def replace_linear(
             List of modules names not to convert. Defaults to `lm_head`.
         copy_weights (`bool`):
             Copy the weights from the old linear module to the new one
-        post_processing_fun_name (`str`):
+        post_processing_function (`str`):
             A function name of the replacement linear class that is called
             after processing.
     """

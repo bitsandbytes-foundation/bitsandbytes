@@ -658,8 +658,8 @@ class Linear8bitLt(nn.Linear):
 
     def __init__(
         self,
-        input_features,
-        output_features,
+        input_features: int,
+        output_features: int,
         bias=True,
         has_fp16_weights=True,
         memory_efficient_backward=False,
@@ -671,9 +671,9 @@ class Linear8bitLt(nn.Linear):
         Initialize Linear8bitLt class.
 
         Args:
-            input_features (`str`):
+            input_features (`int`):
                 Number of input features of the linear layer.
-            output_features (`str`):
+            output_features (`int`):
                 Number of output features of the linear layer.
             bias (`bool`, defaults to `True`):
                 Whether the linear class uses the bias term as well.

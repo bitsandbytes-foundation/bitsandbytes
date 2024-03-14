@@ -38,8 +38,8 @@ class Adagrad(Optimizer1State):
                 The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -105,8 +105,8 @@ class Adagrad8bit(Optimizer1State):
                 The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 8):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -173,8 +173,8 @@ class Adagrad32bit(Optimizer1State):
                 The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
