@@ -12,7 +12,7 @@ With Transformers, it's very easy to load any model in 4 or 8-bit and quantize t
 For example, to load and quantize a model to 4-bits and use the bfloat16 data type for compute:
 
 > [!WARNING]
-> bfloat16 is the optimal compute data type if your hardware supports it. The default is float32 for backward compatibility and numerical stability, but it can often lead to numerical instabilities. bfloat16 provides the best of both worlds, numerical stability equivalent to float32, but combined with the memory footprint and significant computation speedup of a 16-bit data type. Make sure to check if your hardware supports bfloat16!
+> bfloat16 is the optimal compute data type if your hardware supports it. The default is float32 for backward compatibility and numerical stability, but it can often lead to numerical instabilities. bfloat16 provides the best of both worlds, numerical stability equivalent to float32, but combined with the memory footprint and significant computation speedup of a 16-bit data type. Make sure to check if your hardware supports bfloat16 and if it does, configure it using the `bnb_4bit_compute_dtype` parameter in [`~transformers.BitsAndBytesConfig`]!
 
 ```py
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig

@@ -1,6 +1,6 @@
 # bitsandbytes
 
-bitsandbytes makes large language model inference and training more accessible by dramatically reducing memory consumption with 8-bit optimizers and k-bit quantization.
+bitsandbytes enables accessible large language models via k-bit quantization for PyTorch. bitsandbytes provides three main features for dramatically reducing memory consumption for inference and training:
 
 * 8-bit optimizers uses block-wise quantization to maintain 32-bit performance at a small fraction of the memory cost.
 * LLM.Int() or 8-bit quantization enables large language model inference with only half the required memory and without any performance degradation. This method is based on vector-wise quantization to quantize most features to 8-bits and separately treating outliers with 16-bit matrix multiplication.
@@ -8,6 +8,6 @@ bitsandbytes makes large language model inference and training more accessible b
 
 # License
 
-The majority of bitsandbytes is MIT licensed. However, portions of the project are available under separate license terms such as the parts adapted from PyTorch which are licensed under the BSD license.
+bitsandbytes is MIT licensed.
 
 We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fabiocannizzo/FastBinarySearch) which we use for CPU quantization.
