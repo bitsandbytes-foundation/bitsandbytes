@@ -1,3 +1,4 @@
+from io import BytesIO
 from itertools import product
 import random
 from typing import Any, List
@@ -5,6 +6,25 @@ from typing import Any, List
 import torch
 
 test_dims_rng = random.Random(42)
+
+
+TRUE_FALSE = (True, False)
+BOOLEAN_TRIPLES = list(product(TRUE_FALSE, repeat=3))  # all combinations of (bool, bool, bool)
+BOOLEAN_TUPLES = list(product(TRUE_FALSE, repeat=2))  # all combinations of (bool, bool)
+
+
+def torch_save_to_buffer(obj):
+    buffer = BytesIO()
+    torch.save(obj, buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def torch_load_from_buffer(buffer):
+    buffer.seek(0)
+    obj = torch.load(buffer)
+    buffer.seek(0)
+    return obj
 
 
 def get_test_dims(min: int, max: int, *, n: int) -> List[int]:
@@ -42,10 +62,3 @@ DTYPE_NAMES = {
 
 def describe_dtype(dtype: torch.dtype) -> str:
     return DTYPE_NAMES.get(dtype) or str(dtype).rpartition(".")[2]
-
-
-TRUE_FALSE = (True, False)
-BOOLEAN_TRIPLES = list(
-    product(TRUE_FALSE, repeat=3)
-)  # all combinations of (bool, bool, bool)
-BOOLEAN_TUPLES = list(product(TRUE_FALSE, repeat=2))  # all combinations of (bool, bool)

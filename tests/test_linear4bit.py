@@ -7,7 +7,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
-from tests.helpers import TRUE_FALSE
+from tests.helpers import TRUE_FALSE, torch_load_from_buffer, torch_save_to_buffer
 
 storage = {
     "uint8": torch.uint8,
@@ -21,15 +21,14 @@ storage = {
 @pytest.mark.parametrize("bias", TRUE_FALSE)
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage):
+@pytest.mark.parametrize("save_before_forward", TRUE_FALSE)
+def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage, save_before_forward):
     original_dtype = torch.float16
     compute_dtype = None
     device = "cuda"
     layer_shape = (300, 400)
 
-    linear = torch.nn.Linear(
-        *layer_shape, dtype=original_dtype, device="cpu"
-    )  # original layer
+    linear = torch.nn.Linear(*layer_shape, dtype=original_dtype, device="cpu")  # original layer
 
     # Quantizing original layer
     linear_q = bnb.nn.Linear4bit(
@@ -41,9 +40,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         quant_type=quant_type,
         device="meta",
     )
-    new_weight = bnb.nn.Params4bit(
-        data=linear.weight, quant_type=quant_type, requires_grad=False
-    )
+    new_weight = bnb.nn.Params4bit(data=linear.weight, quant_type=quant_type, requires_grad=False)
     linear_q.weight = new_weight
     if bias:
         linear_q.bias = torch.nn.Parameter(linear.bias)
@@ -124,6 +121,9 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         assert a.dtype == b.dtype
         assert torch.equal(a, b)
 
+    if save_before_forward:
+        bytes_4bit = torch_save_to_buffer(linear_q)
+
     # Forward test
     x = torch.rand(42, layer_shape[0], device=device)
     a = linear_q(x)
@@ -136,10 +136,19 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
     assert torch.equal(a, b)
     assert torch.equal(a, c)
 
+    if not save_before_forward:
+        bytes_4bit = torch_save_to_buffer(linear_q)
+    linear_q3 = torch_load_from_buffer(bytes_4bit)
+
     # Test moving to CPU and back to GPU
     linear_q2.to("cpu")
     linear_q2.to(device)
     d = linear_qs(x)
+    assert c.dtype == d.dtype
+    assert c.device == d.device
+    assert torch.equal(c, d)
+
+    d = linear_q3(x)
     assert c.dtype == d.dtype
     assert c.device == d.device
     assert torch.equal(c, d)
@@ -159,7 +168,9 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         target_compression = (
             0.143 if original_dtype == torch.float32 else 0.29
         )  # these numbers get lower as weight shape increases
-        ratio_error_msg = f"quantized_size {size_4:,} is larger on disk than {target_compression:.2%} of original size {size_orig:,}"
+        ratio_error_msg = (
+            f"quantized_size {size_4:,} is larger on disk than {target_compression:.2%} of original size {size_orig:,}"
+        )
         assert size_ratio < target_compression, ratio_error_msg
 
 

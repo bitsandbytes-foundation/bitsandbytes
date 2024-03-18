@@ -1,0 +1,18 @@
+# LARS
+
+[LARS (Layer-wise Adaptive Rate Scaling)](https:/hf.co/papers/1708.03888) is an optimizer designed for training with large batch sizes to accelerate training. LARS uses a separate learning rate for each *layer* instead of each parameter. The learning rate is calculated from a *trust ratio* between the weight and gradient norm in a layer. This helps calibrate a stable update size.
+
+## LARS[[api-class]]
+
+[[autodoc]] bitsandbytes.optim.LARS
+    - __init__
+
+## LARS8bit
+
+[[autodoc]] bitsandbytes.optim.LARS8bit
+    - __init__
+
+## LARS32bit
+
+[[autodoc]] bitsandbytes.optim.LARS32bit
+    - __init__

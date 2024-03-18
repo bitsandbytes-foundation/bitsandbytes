@@ -15,6 +15,14 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project(bitsandbytes LANGUAGES CXX)
 
+# If run without specifying a build type, default to using the Release configuration:
+#    optimizing the generated binaries for performance and also adds the `-DNDEBUG` flag,
+#    which turns off a bunch of asserts which seem to link to new symbols in libstdc++,
+#    worsening our many_linux compliance..
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
 # Define included source files
 set(CPP_FILES csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
 set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
@@ -108,6 +116,7 @@ if(BUILD_CUDA)
     endif()
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
+
     if(PTXAS_VERBOSE)
         # Verbose? Outputs register usage information, and other things...
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
@@ -220,4 +229,4 @@ if(MSVC)
     set_target_properties(bitsandbytes PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/bitsandbytes")
 endif()
 
-set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY bitsandbytes)
+set_target_properties(bitsandbytes PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bitsandbytes")

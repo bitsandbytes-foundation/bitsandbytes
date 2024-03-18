@@ -6,3 +6,9 @@ ea7c14f8ef64924f2d0ff80df3cdabf2c7299848
 
 # Remove f-prefix from strings that don't use formatting
 7727fa4c8c6c1ef2b109120aff4196a0a6bf3ed6
+
+# format tests/linear_4bit.py
+34735ba89de8235ea9da6ef409f814dcea9e2038
+
+# Reformat with ruff-format
+5a4263f4dc05fe8f78f4111beab9f68a81deeab1

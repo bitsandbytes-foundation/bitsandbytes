@@ -11,8 +11,5 @@ class BinaryDistribution(Distribution):
     def has_ext_modules(self):
         return True
 
-setup(
-    version="0.43.0.dev0",
-    packages=find_packages(),
-    distclass=BinaryDistribution
-)
+
+setup(version="0.44.0.dev0", packages=find_packages(), distclass=BinaryDistribution)
