@@ -30,7 +30,7 @@ def outlier_hook(module, input):
             # (1) zscore test of std of hidden dimension
             outlier_idx = find_outlier_dims(merged, reduction_dim=1, zscore=3)
             # (2) magnitude > 6 test
-            dims = (torch.abs(input[0])> 6).sum(dim=list(range(len(input[0].shape)-1)))
+            dims = (torch.abs(input[0]) > 6).sum(dim=list(range(len(input[0].shape) - 1)))
             outlier_idx2 = torch.where(dims > 0)[0]
             outlier_idx = torch.cat([outlier_idx, outlier_idx2]).unique()
             tracer.hvalue2outlier_idx[hvalue] = outlier_idx
@@ -59,14 +59,14 @@ class OutlierTracer:
                 self.hooks.append(m.register_forward_pre_hook(outlier_hook))
 
     def is_initialized(self):
-        return getattr(self, 'initialized', False)
+        return getattr(self, "initialized", False)
 
     def get_hvalue(self, weight):
         return weight.data.storage().data_ptr()
 
     def get_outliers(self, weight):
         if not self.is_initialized():
-            print('Outlier tracer is not initialized...')
+            print("Outlier tracer is not initialized...")
             return None
         hvalue = self.get_hvalue(weight)
         if hvalue in self.hvalue2outlier_idx:
@@ -80,6 +80,7 @@ class OutlierTracer:
             cls._instance = cls.__new__(cls)
         return cls._instance
 
+
 def find_outlier_dims(weight, reduction_dim=0, zscore=4.0, topk=None, rdm=False):
     if rdm:
         return torch.randint(0, weight.shape[1], size=(topk,), device=weight.device).long()
@@ -87,13 +88,13 @@ def find_outlier_dims(weight, reduction_dim=0, zscore=4.0, topk=None, rdm=False)
     m = weight.mean(reduction_dim)
     mm = m.mean()
     mstd = m.std()
-    zm = (m-mm)/mstd
+    zm = (m - mm) / mstd
 
     std = weight.std(reduction_dim)
     stdm = std.mean()
     stdstd = std.std()
 
-    zstd = (std-stdm)/stdstd
+    zstd = (std - stdm) / stdstd
 
     if topk is not None:
         val, idx = torch.topk(std.abs(), k=topk, dim=0)
@@ -105,10 +106,7 @@ def find_outlier_dims(weight, reduction_dim=0, zscore=4.0, topk=None, rdm=False)
 
 def execute_and_return(command_string: str) -> Tuple[str, str]:
     def _decode(subprocess_err_out_tuple):
-        return tuple(
-            to_decode.decode("UTF-8").strip()
-            for to_decode in subprocess_err_out_tuple
-        )
+        return tuple(to_decode.decode("UTF-8").strip() for to_decode in subprocess_err_out_tuple)
 
     def execute_and_return_decoded_std_streams(command_string):
         return _decode(
@@ -116,12 +114,11 @@ def execute_and_return(command_string: str) -> Tuple[str, str]:
                 shlex.split(command_string),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-            ).communicate()
+            ).communicate(),
         )
 
     std_out, std_err = execute_and_return_decoded_std_streams(command_string)
     return std_out, std_err
-
 
 
 def replace_linear(
@@ -143,7 +140,7 @@ def replace_linear(
             List of modules names not to convert. Defaults to `lm_head`.
         copy_weights (`bool`):
             Copy the weights from the old linear module to the new one
-        post_processing_fun_name (`str`):
+        post_processing_function (`str`):
             A function name of the replacement linear class that is called
             after processing.
     """
@@ -163,8 +160,9 @@ def replace_linear(
                 model._modules[name].bias = old_module.bias
 
             if post_processing_function is not None:
-               func = getattr(module, post_processing_function, None)
-               if func is not None: func(module)
+                func = getattr(module, post_processing_function, None)
+                if func is not None:
+                    func(module)
     return model
 
 
@@ -179,7 +177,7 @@ def pack_dict_to_tensor(source_dict):
     A torch tensor containing the packed data.
     """
     json_str = json.dumps(source_dict)
-    json_bytes = json_str.encode('utf-8')
+    json_bytes = json_str.encode("utf-8")
     tensor_data = torch.tensor(list(json_bytes), dtype=torch.uint8)
 
     return tensor_data
@@ -196,7 +194,7 @@ def unpack_tensor_to_dict(tensor_data):
     A Python dictionary containing the unpacked data.
     """
     json_bytes = bytes(tensor_data.cpu().numpy())
-    json_str = json_bytes.decode('utf-8')
+    json_str = json_bytes.decode("utf-8")
     unpacked_dict = json.loads(json_str)
 
     return unpacked_dict

@@ -14,9 +14,9 @@ import bitsandbytes.functional as F
 def prod(iterable):
     return reduce(operator.mul, iterable, 1)
 
+
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
-
 
 
 """
@@ -24,6 +24,8 @@ def prod(iterable):
     This is particularly important for small models where outlier features
     are less systematic and occur with low frequency.
 """
+
+
 class GlobalOutlierPooler:
     _instance = None
 
@@ -82,6 +84,7 @@ def get_inverse_transform_indices(
         if d1 * d2 < 256**i:
             break  # if all indices fit in i bytes, stop early
     return permuted_tile_indices
+
 
 def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -> torch.Tensor:
     """
@@ -159,20 +162,12 @@ class MatMul8bit(torch.autograd.Function):
                     )
                     if not A.is_contiguous():
                         A = A.contiguous()
-                    qA, S2 = F.vectorwise_quant(
-                        A.view(-1, A.shape[2]), dim=0, quant_type=quant_type
-                    )
+                    qA, S2 = F.vectorwise_quant(A.view(-1, A.shape[2]), dim=0, quant_type=quant_type)
                     igrad_B = F.igemm(qA.t(), qgrad_output)
-                    grad_B = F.vectorwise_mm_dequant(
-                        igrad_B, S2.t(), S1, grad_output.dtype, quant_type
-                    )
+                    grad_B = F.vectorwise_mm_dequant(igrad_B, S2.t(), S1, grad_output.dtype, quant_type)
                 else:
-                    qgrad_output, S1 = F.vectorwise_quant(
-                        grad_output, dim=dims, quant_type=quant_type
-                    )
-                    qA, S2 = F.vectorwise_quant(
-                        A, dim=dims, quant_type=quant_type
-                    )
+                    qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
+                    qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
                     igrad_B = F.igemm(qA.permute(permute_dim), qgrad_output)
                     grad_B = F.vectorwise_mm_dequant(
                         igrad_B,
@@ -201,9 +196,7 @@ class MatMul8bit(torch.autograd.Function):
                 with torch.no_grad():
                     grad_A = torch.matmul(grad_output, B.permute(permute_dim))
             else:
-                qgrad_output, S1 = F.vectorwise_quant(
-                    grad_output, dim=dims, quant_type=quant_type
-                )
+                qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
                 qB, S3 = F.vectorwise_quant(B, dim=dim_B, quant_type=quant_type)
                 igrad_A = F.igemm(qgrad_output, qB.permute(permute_dim))
                 grad_A = F.vectorwise_mm_dequant(
@@ -227,7 +220,7 @@ def supports_igemmlt(device: torch.device) -> bool:
     if torch.cuda.get_device_capability(device=device) < (7, 5):
         return False
     device_name = torch.cuda.get_device_name(device=device)
-    nvidia16_models = ('GTX 1630', 'GTX 1650', 'GTX 1660')  # https://en.wikipedia.org/wiki/GeForce_16_series
+    nvidia16_models = ("GTX 1630", "GTX 1650", "GTX 1660")  # https://en.wikipedia.org/wiki/GeForce_16_series
     if any(model_name in device_name for model_name in nvidia16_models):
         return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
     return True
@@ -245,6 +238,7 @@ def get_tile_inds(format, device):
     transform = lambda x: F.transform(x.to(device), from_order="row", to_order=format)[0].to(x.device)
     with torch.no_grad():
         return get_inverse_transform_indices(transform, _get_tile_size(format)).to(device)
+
 
 @dataclass
 class MatmulLtState:
@@ -510,7 +504,6 @@ class MatMul4Bit(torch.autograd.Function):
             else:
                 return torch.empty(A.shape[:-1] + B_shape[:1], dtype=A.dtype, device=A.device)
 
-
         # 1. Dequantize
         # 2. MatmulnN
         output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
@@ -532,7 +525,7 @@ class MatMul4Bit(torch.autograd.Function):
             bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
-        req_gradA, _, _, req_gradBias, _= ctx.needs_input_grad
+        req_gradA, _, _, req_gradBias, _ = ctx.needs_input_grad
         A, B = ctx.tensors
 
         grad_A, grad_B, grad_bias = None, None, None
@@ -542,8 +535,9 @@ class MatMul4Bit(torch.autograd.Function):
             grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
 
         # not supported by PyTorch. TODO: create work-around
-        #if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
-        if req_gradA: grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
+        # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
+        if req_gradA:
+            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
 
         return grad_A, grad_B, None, grad_bias, None
 
@@ -554,7 +548,7 @@ def matmul(
     out: Optional[torch.Tensor] = None,
     state: Optional[MatmulLtState] = None,
     threshold=0.0,
-    bias=None
+    bias=None,
 ):
     state = state or MatmulLtState()
     if threshold > 0.0:
@@ -562,11 +556,19 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
-def matmul_4bit(A: torch.Tensor, B: torch.Tensor, quant_state: F.QuantState, out: Optional[torch.Tensor] = None, bias=None):
+def matmul_4bit(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    quant_state: F.QuantState,
+    out: Optional[torch.Tensor] = None,
+    bias=None,
+):
     assert quant_state is not None
     if A.numel() == A.shape[-1] and A.requires_grad == False:
         if A.shape[-1] % quant_state.blocksize != 0:
-            warn(f'Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}')
+            warn(
+                f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",
+            )
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
         else:
             out = F.gemv_4bit(A, B.t(), out, state=quant_state)

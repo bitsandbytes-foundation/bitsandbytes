@@ -195,9 +195,9 @@ class SwitchBackBnb(torch.autograd.Function):
             ctx.B = B
             ctx.bias = bias
             if A.shape[-1] == B.shape[0]:
-                return torch.empty(A.shape[:-1]+B.shape[1:], dtype=A.dtype, device=A.device)
+                return torch.empty(A.shape[:-1] + B.shape[1:], dtype=A.dtype, device=A.device)
             else:
-                return torch.empty(A.shape[:-1]+B.shape[:1], dtype=A.dtype, device=A.device)
+                return torch.empty(A.shape[:-1] + B.shape[:1], dtype=A.dtype, device=A.device)
 
         # 1. Quantize A
         # 2. Quantize B
@@ -216,9 +216,7 @@ class SwitchBackBnb(torch.autograd.Function):
         # 1. Quantize A
         if len(A.shape) == 3:
             A = A.view(-1, A.shape[-1]).contiguous()
-        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(
-            A.to(torch.float16), threshold=state.threshold
-        )
+        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
 
         if state.threshold > 0.0 and coo_tensorA is not None:
             if state.has_fp16_weights:
@@ -234,14 +232,14 @@ class SwitchBackBnb(torch.autograd.Function):
                     # we also need to convert it to the turing/ampere format
                     state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
         else:
-            #print('A shape', A.shape)
+            # print('A shape', A.shape)
             if not state.has_fp16_weights and state.CxB is None:
                 state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
             subA = None
 
         # 2. Quantize B
         if state.has_fp16_weights:
-            #print('B shape', B.shape)
+            # print('B shape', B.shape)
             has_grad = True if (getattr(B, "grad", None) is not None) else False
             is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
             if is_transposed:
@@ -272,12 +270,7 @@ class SwitchBackBnb(torch.autograd.Function):
             # else:
             #    state.idx = outlier_idx
             outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
-            state.subB = (
-                (outliers * state.SCB.view(-1, 1) / 127.0)
-                .t()
-                .contiguous()
-                .to(A.dtype)
-            )
+            state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
             CA[:, state.idx.long()] = 0
             CAt[:, state.idx.long()] = 0
             subA = A[:, state.idx.long()]
@@ -320,14 +313,13 @@ class SwitchBackBnb(torch.autograd.Function):
             ctx.tensor_states = (None, None)
             ctx.save_for_backward(None, None)
 
-
-        clone_func = torch.clone if len(output_shape) == 3 else lambda x : x
+        clone_func = torch.clone if len(output_shape) == 3 else lambda x: x
         return clone_func(output.view(output_shape))
 
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.is_empty:
-            bias_grad = (None if ctx.bias is None else torch.zeros_like(ctx.bias))
+            bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
         CAt, subA, A = ctx.tensors
@@ -342,9 +334,7 @@ class SwitchBackBnb(torch.autograd.Function):
 
         # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
-            grad_output = grad_output.reshape(
-                -1, grad_output.shape[-1]
-            ).contiguous()
+            grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
         Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
 
@@ -357,25 +347,24 @@ class SwitchBackBnb(torch.autograd.Function):
             if state.CBt is not None:
                 C32grad, Sgrad = F.transform(Cgrad, "col32")
                 if state.CxBt is None:
-                    state.CxBt, state.SBt = F.transform(
-                        state.CBt, to_order=formatB, transpose=True
-                    )
+                    state.CxBt, state.SBt = F.transform(state.CBt, to_order=formatB, transpose=True)
                 # print('back B shape', state.CxBt.shape)
                 # print('back grad shape', C32grad.shape)
                 gradA32, SgradA32 = F.igemmlt(C32grad, state.CxBt, Sgrad, state.SBt)
                 grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
 
             elif state.CB is not None:
-                CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1. / 127.0))
+                CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             else:
-                raise Exception('State must contain either CBt or CB matrix for backward')
+                raise Exception("State must contain either CBt or CB matrix for backward")
 
         return grad_A, grad_B, None, grad_bias, None
 
+
 def get_block_sizes(input_matrix, weight_matrix):
     input_features = input_matrix.shape[-1]
-    output_features = (weight_matrix.shape[0] if weight_matrix.shape[1] == input_features else weight_matrix.shape[1])
+    output_features = weight_matrix.shape[0] if weight_matrix.shape[1] == input_features else weight_matrix.shape[1]
     array = [4096, 2048, 1024, 512, 256, 128, 64, 0]
     bsz, bsz2 = 1024, 1024
     for i, k in enumerate(array):
@@ -399,7 +388,8 @@ def matmul_fp8_global(
     bsz: int = -1,
     bsz2: int = -1,
 ):
-    if bsz == -1 or bsz2 == -1: bsz, bsz2 = get_block_sizes(A, B)
+    if bsz == -1 or bsz2 == -1:
+        bsz, bsz2 = get_block_sizes(A, B)
     return MatMulFP8Global.apply(A, B, out, fw_code, bw_code, bsz, bsz2)
 
 
@@ -412,7 +402,8 @@ def matmul_fp8_mixed(
     bsz: int = -1,
     bsz2: int = -1,
 ):
-    if bsz == -1 or bsz2 == -1: bsz, bsz2 = get_block_sizes(A, B)
+    if bsz == -1 or bsz2 == -1:
+        bsz, bsz2 = get_block_sizes(A, B)
     return MatMulFP8Mixed.apply(A, B, out, fw_code, bw_code, bsz, bsz2)
 
 
@@ -422,7 +413,7 @@ def switchback_bnb(
     out: Optional[torch.Tensor] = None,
     state: Optional[MatmulLtState] = None,
     threshold=0.0,
-    bias=None
+    bias=None,
 ):
     state = state or MatmulLtState()
     if threshold > 0.0:

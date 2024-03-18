@@ -8,6 +8,10 @@ src = [
     "tests",
     "benchmarking"
 ]
+target-version = "py38"
+line-length = 119
+
+[tool.ruff.lint]
 select = [
     "B",    # bugbear: security warnings
     "E",    # pycodestyle
@@ -17,7 +21,6 @@ select = [
     "UP",   # alert you when better syntax is available in your python version
     "RUF",  # the ruff developer's own rules
 ]
-target-version = "py38"
 ignore = [
     "B007",  # Loop control variable not used within the loop body (TODO: enable)
     "B028",  # Warning without stacklevel (TODO: enable)
@@ -30,7 +33,7 @@ ignore = [
 ]
 ignore-init-module-imports = true  # allow to expose in __init__.py via imports
 
-[tool.ruff.extend-per-file-ignores]
+[tool.ruff.lint.extend-per-file-ignores]
 "**/__init__.py" = ["F401"]  # allow unused imports in __init__.py
 "{benchmarking,tests}/**/*.py" = [
     "B007",
@@ -42,7 +45,7 @@ ignore-init-module-imports = true  # allow to expose in __init__.py via imports
     "UP030",
 ]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 combine-as-imports = true
 detect-same-package = true
 force-sort-within-sections = true

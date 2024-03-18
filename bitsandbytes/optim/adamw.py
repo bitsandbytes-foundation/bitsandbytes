@@ -6,8 +6,21 @@ from bitsandbytes.optim.optimizer import Optimizer2State
 
 
 class AdamW(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=1e-2,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         Base AdamW optimizer.
 
@@ -26,8 +39,8 @@ class AdamW(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -37,11 +50,38 @@ class AdamW(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, optim_bits, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged )
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            optim_bits,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
+
 
 class AdamW8bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=1e-2,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         8-bit AdamW optimizer.
 
@@ -60,8 +100,8 @@ class AdamW8bit(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -71,11 +111,38 @@ class AdamW8bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 8, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged )
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            8,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
+
 
 class AdamW32bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=1e-2,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
         """
         32-bit AdamW optimizer.
 
@@ -94,8 +161,8 @@ class AdamW32bit(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -105,12 +172,37 @@ class AdamW32bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 32, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            32,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
 
 
 class PagedAdamW(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=1e-2,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+    ):
         """
         Paged AdamW optimizer.
 
@@ -129,8 +221,8 @@ class PagedAdamW(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -140,11 +232,37 @@ class PagedAdamW(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, optim_bits, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            optim_bits,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
+
 
 class PagedAdamW8bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=1e-2,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+    ):
         """
         Paged 8-bit AdamW optimizer.
 
@@ -163,8 +281,8 @@ class PagedAdamW8bit(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -174,11 +292,37 @@ class PagedAdamW8bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 8, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            8,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
+
 
 class PagedAdamW32bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=1e-2,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+    ):
         """
         Paged 32-bit AdamW optimizer.
 
@@ -197,8 +341,8 @@ class PagedAdamW32bit(Optimizer2State):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
-            args (`dict`, defaults to `None`):
-                A dictionary with additional arguments.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             percentile_clipping (`int`, defaults to 100):
@@ -208,4 +352,17 @@ class PagedAdamW32bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 32, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            32,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
