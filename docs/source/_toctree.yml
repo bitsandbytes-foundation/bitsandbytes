@@ -22,12 +22,12 @@
     title: FAQs
 - title: Explanation
   sections:
-  - local: resources
+  - local: explanations/optimizers
+    title: 8-bit optimizers
+  - local: explanations/resources
     title: Papers, resources & how to cite
 - title: API reference
   sections:
-  - local: reference/quantization
-    title: Quantization
   - title: Optimizers
     sections:
     - local: reference/optim/optim_overview
