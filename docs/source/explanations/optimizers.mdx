@@ -1,0 +1,51 @@
+# 8-bit optimizers
+
+Stateful optimizers maintain gradient statistics over time, for example, the exponentially smoothed sum (SGD with momentum) or squared sum (Adam) of past gradient values. This state can be used to accelerate optimization compared to plain stochastic gradient descent, but uses memory that might otherwise be allocated to model parameters. As a result, this limits the maximum size of models that can be trained in practice. Now take a look at the biggest models that can be trained with 8-bit optimizers.
+
+<div class="flex justify-center">
+    <figure>
+        <img class="rounded-xl" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bitsandbytes/optimizer_largest_model.png"/>
+        <figcaption class="text-center">Depending on your GPU size, you can train a much larger model with a 8-bit optimizer.</figcaption>
+    </figure>
+</div>
+
+bitsandbytes optimizers use 8-bit statistics, while maintaining the performance levels of using 32-bit optimizer states.
+
+To overcome the resulting computational, quantization and stability challenges, 8-bit optimizers have three components:
+
+1. Block-wise quantization: divides input tensors into smaller blocks that are independently quantized, isolating outliers and distributing the error more equally over all bits. Each block is processed in parallel across cores, yielding faster optimization and high precision quantization.
+2. Dynamic quantization: quantizes both small and large values with high precision.
+3. Stable embedding layer: improves stability during optimization for models with word embeddings.
+
+With these components, performing an optimizer update with 8-bit states is straightforward. The 8-bit optimizer states are dequantized to 32-bit before you perform the update, and then the states are quantized back to 8-bit for storage.
+
+The 8-bit to 32-bit conversion happens element-by-element in registers, meaning no slow copies to GPU memory or additional temporary memory are needed to perform quantization and dequantization. For GPUs, this makes 8-bit optimizers much faster than regular 32-bit optimizers.
+
+<div class="flex justify-center">
+    <figure>
+        <img class="rounded-xl" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bitsandbytes/optimizer_comparison.png"/>
+        <figcaption class="text-center">A comparison of memory and time saved using 8-bit and 32-bit optimizers.</figcaption>
+    </figure>
+</div>
+
+## Stable embedding layer
+
+The stable embedding layer improves the training stability of the standard word embedding layer for NLP tasks. It addresses the challenge of non-uniform input distributions and mitigates extreme gradient variations. This means the stable embedding layer can support more aggressive quantization strategies without compromising training stability, and it can help achieve stable training outcomes, which is particularly important for models dealing with diverse and complex language data.
+
+There are three features of the stable embedding layer:
+
+- Initialization: utilizes Xavier uniform initialization to maintain consistent variance, reducing the likelihood of large gradients.
+- Normalization: incorporates layer normalization before adding positional embeddings, aiding in output stability.
+- Optimizer states: employs 32-bit optimizer states exclusively for this layer to enhance stability, while the rest of the model may use standard 16-bit precision.
+
+## Paged optimizers
+
+Paged optimizers are built on top of the [unified memory](https://developer.nvidia.com/blog/unified-memory-cuda-beginners/) feature of CUDA. Unified memory provides a single memory space the GPU and CPU can easily access. While this feature is not supported by PyTorch, it has been added to bitsandbytes.
+
+Paged optimizers works like regular CPU paging, which means that it *only becomes active if you run out of GPU memory*. When that happens, memory is transferred page-by-page from GPU to CPU. The memory is mapped, meaning that pages are pre-allocated on the CPU but they are not updated automatically. Pages are only updated if the memory is accessed or a swapping operation is launched.
+
+The unified memory feature is less efficient than regular asynchronous memory transfers, and you usually won't be able to get full PCIe memory bandwidth utilization. If you do a manual prefetch, transfer speeds can be high but still only about half or worse than the full PCIe memory bandwidth (tested on 16x lanes PCIe 3.0).
+
+This means performance depends highly on the particular use-case. For example, if you evict 1 GB of memory per forward-backward-optimizer loop, then you can expect about 50% of the PCIe bandwidth as time in the best case. So, 1 GB for PCIe 3.0 with 16x lanes would run at 16 GB/s, which is `1/(16*0.5) = 1/8 = 125ms` of overhead per optimizer step. Other overhead can be estimated for the particular use-case given a PCIe interface, lanes, and the memory evicted in each iteration.
+
+Compared to CPU offloading, a paged optimizer has zero overhead if all the memory fits onto the device and only some overhead if some of memory needs to be evicted. For offloading, you usually offload fixed parts of the model and need to off and onload all this memory with each iteration through the model (sometimes twice for both forward and backward pass).
