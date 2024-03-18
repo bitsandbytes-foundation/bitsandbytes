@@ -205,7 +205,7 @@ def prefetch_tensor(A: torch.Tensor, to_cpu=False):
 def elementwise_func(
     func_name: str, A: torch.Tensor, B: Optional[torch.Tensor], value: Union[float, int], prefetch=True
 ):
-    func: Optional[ct._NamedFuncPointer] = None
+    func: Optional[Callable] = None
     if A.dtype == torch.float32:
         func = getattr(lib, f"c{func_name}_fp32", None)
         cvalue = ct.c_float(value)
