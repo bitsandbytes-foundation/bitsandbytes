@@ -6,7 +6,7 @@ import ctypes as ct
 from functools import reduce  # Required in Python 3
 import itertools
 import operator
-from typing import Any, Callable, Dict, Iterable, Literal, Optional, Self, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Literal, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -105,7 +105,7 @@ if lib and lib.compiled_with_cuda:
 
 
 class GlobalPageManager:
-    _instance: Self = None
+    _instance = None
 
     def __init__(self):
         raise RuntimeError("Call get_instance() instead")
