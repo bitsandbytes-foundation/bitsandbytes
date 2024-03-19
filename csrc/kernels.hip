@@ -500,7 +500,7 @@ __global__ void kHistogramScatterAdd2D(float* histogram, int *index1, int *index
 template<typename T, int BLOCK_SIZE, int NUM_MAX>
 __global__ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, const int n)
 {
-  typedef hipcub::WarpReduce<T> WarpReduce;
+  typedef hipcub::WarpReduce<T, 32> WarpReduce;
   __shared__ typename WarpReduce::TempStorage temp_storage;
   typedef hipcub::BlockLoad<T, BLOCK_SIZE/8 , 8, hipcub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
   __shared__ typename LoadT::TempStorage loadt;
@@ -3553,7 +3553,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
   // load step-by-step in chunks of [32,warps]: 1x32 * [32,warps] -> [1,warps]
   // 4 warps -> 4 loads per iter
   // 1x32 * 32x4 -> 1x4 outputs per thread block
-  typedef hipcub::WarpReduce<float> WarpReduce;
+  typedef hipcub::WarpReduce<float, 32> WarpReduce;
   __shared__ typename WarpReduce::TempStorage temp_storage[THREADS/32];
 
   const int warp_idx = threadIdx.x / 32;
