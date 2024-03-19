@@ -2375,7 +2375,7 @@ def test_normal_map_tree():
 @pytest.mark.parametrize("kind", ['fc1', 'fc2', 'attn', 'attn_packed'], ids=['fc1', 'fc2', 'attn', 'attn_packed'])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=['fp16', 'bf16', 'fp32'])
 @pytest.mark.parametrize("quant_storage", [torch.uint8, torch.float16, torch.bfloat16, torch.float32], ids=['uint8', 'fp16', 'bf16', 'fp32'])
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64")
 def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
     for dim in [128, 256, 512, 1024]:
     #for dim in [4*1024]:
