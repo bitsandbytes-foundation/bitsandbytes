@@ -200,22 +200,6 @@ class GaLoreAdamW8bit(Optimizer2State):
                 if "step" not in state:
                     state["step"] = 0
 
-                if "rank" in group:
-                    if "projector" not in state:
-                        state["projector"] = GaLoreProjector(
-                            group["rank"],
-                            update_proj_gap=group["update_proj_gap"],
-                            scale=group["scale"],
-                            proj_type=group["proj_type"],
-                        )
-
-                    grad = state["projector"].project(p.grad, state["step"])
-
-                else:
-                    pass
-
-                ####
-
                 # GaLore Projection
                 if "rank" in group:
                     if "projector" not in state:
