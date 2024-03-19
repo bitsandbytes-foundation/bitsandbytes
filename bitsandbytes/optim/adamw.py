@@ -228,7 +228,7 @@ class GaLoreAdamW8bit(Optimizer2State):
                 self.prefetch_state(p)
 
                 if "rank" in group:
-                    self.update_step(group, p, gindex, pindex, return_updates=lor_update)
+                    self.update_step(group, lor_update, gindex, pindex, return_updates=lor_update)
 
                     # GaLore Projection Back
                     p.data.add_(state["projector"].project_back(lor_update))
