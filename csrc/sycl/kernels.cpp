@@ -7,12 +7,13 @@
 #include <oneapi/dpl/algorithm>
 #include <sycl/sycl.hpp>
 #include <dpct/dpct.hpp>
-#include <oneapi/dpl/execution>
-#include <oneapi/dpl/algorithm>
-#include <sycl/sycl.hpp>
-#include <dpct/dpct.hpp>
+#include <dpct/dpl_extras/dpcpp_extensions.h>
 #include "kernels.dp.hpp"
 #include <dpct/dpl_utils.hpp>
+
+#include <cmath>
+
+
 
 #define HLF_MAX 65504
 #define TH 1024
@@ -26,10 +27,7 @@ float atomicMax(float* address, float val) {
   int old = *address_as_i, assumed;
   do {
     assumed = old;
-    old = dpct::atomic_compare_exchange_strong<
-        sycl::access::address_space::generic_space>(
-        reinterpret_cast<int *>(address), assumed,
-        sycl::bit_cast<int>(sycl::fmax(val, sycl::bit_cast<float>(assumed))));
+    old = dpct::atomic_compare_exchange_strong<sycl::access::address_space::generic_space>(reinterpret_cast<int*>(address), assumed, sycl::bit_cast<int>(sycl::fmax(val, sycl::bit_cast<float>(assumed))));
   } while (assumed != old);
   return sycl::bit_cast<float>(old);
 }
@@ -39,10 +37,7 @@ float atomicMin(float* address, float val) {
   int old = *address_as_i, assumed;
   do {
     assumed = old;
-    old = dpct::atomic_compare_exchange_strong<
-        sycl::access::address_space::generic_space>(
-        reinterpret_cast<int *>(address), assumed,
-        sycl::bit_cast<int>(sycl::fmin(val, sycl::bit_cast<float>(assumed))));
+    old = dpct::atomic_compare_exchange_strong<sycl::access::address_space::generic_space>(reinterpret_cast<int*>(address), assumed, sycl::bit_cast<int>(sycl::fmin(val, sycl::bit_cast<float>(assumed))));
   } while (assumed != old);
   return sycl::bit_cast<float>(old);
 }
@@ -109,7 +104,7 @@ float dDequantizeFP4Tree(unsigned char val, float absmax)
         return 1.00000000f*absmax*sign; // 1011
       else
         return 0.66666667f*absmax*sign; // 1010
-    else 
+    else
       if((val & 0b0001) == 1) // 100
         return 5.208333333e-03f*absmax*sign; // 1001
       else
@@ -133,10 +128,10 @@ unsigned char dQuantizeFP4(float x)
 
   // we do a binary search
   // the pivots are divided by 12 (the FP4 absmax)
-  // since we assum input data is in [-1.0, 1.0]
+  // since we assume input data is in [-1.0, 1.0]
 
   // !be careful here, its easy to make a mistake
-  // that is difficult to noice if you add an extra
+  // that is difficult to notice if you add an extra
   // zero somewhere!
 
   int sign = x < 0 ? 0b1000 : 0b0000;
@@ -173,36 +168,36 @@ sycl::half dhDequantizeNF4(unsigned char val)
     if((val & 0b0100) == 4) // 1
       if((val & 0b0010) == 2) // 11
         if((val & 0b0001) == 1) // 111
-          return 1.0f; 
+          return 1.0f;
         else
           return 0.7229568362236023f;
       else
         if((val & 0b0001) == 1) // 110
-          return 0.5626170039176941f; 
+          return 0.5626170039176941f;
         else
-          return 0.44070982933044434f; 
+          return 0.44070982933044434f;
     else
       if((val & 0b0010) == 2) //10
         if((val & 0b0001) == 1) // 101
-          return 0.33791524171829224f; 
+          return 0.33791524171829224f;
         else
-          return 0.24611230194568634f; 
-      else 
+          return 0.24611230194568634f;
+      else
         if((val & 0b0001) == 1) // 100
-          return 0.16093020141124725f; 
+          return 0.16093020141124725f;
         else
-          return 0.07958029955625534f; 
+          return 0.07958029955625534f;
 
   else
     if((val & 0b0100) == 4) // 0
       if((val & 0b0010) == 2) //01
         if((val & 0b0001) == 1) // 011
-          return 0.0f; 
+          return 0.0f;
         else
-          return -0.09105003625154495f; 
+          return -0.09105003625154495f;
       else
         if((val & 0b0001) == 1) // 010
-          return -0.18477343022823334f; 
+          return -0.18477343022823334f;
         else
           return -0.28444138169288635f;
     else
@@ -210,12 +205,12 @@ sycl::half dhDequantizeNF4(unsigned char val)
         if((val & 0b0001) == 1) // 001
           return -0.39491748809814453f;
         else
-          return -0.5250730514526367f; 
-      else 
+          return -0.5250730514526367f;
+      else
         if((val & 0b0001) == 1) // 000
-          return -0.6961928009986877f; 
+          return -0.6961928009986877f;
         else
-          return -1.0f; 
+          return -1.0f;
 
 }
 
@@ -228,36 +223,36 @@ float dDequantizeNF4(unsigned char val)
     if((val & 0b0100) == 4) // 1
       if((val & 0b0010) == 2) // 11
         if((val & 0b0001) == 1) // 111
-          return 1.0f; 
+          return 1.0f;
         else
           return 0.7229568362236023f;
       else
         if((val & 0b0001) == 1) // 110
-          return 0.5626170039176941f; 
+          return 0.5626170039176941f;
         else
-          return 0.44070982933044434f; 
+          return 0.44070982933044434f;
     else
       if((val & 0b0010) == 2) //10
         if((val & 0b0001) == 1) // 101
-          return 0.33791524171829224f; 
+          return 0.33791524171829224f;
         else
-          return 0.24611230194568634f; 
-      else 
+          return 0.24611230194568634f;
+      else
         if((val & 0b0001) == 1) // 100
-          return 0.16093020141124725f; 
+          return 0.16093020141124725f;
         else
-          return 0.07958029955625534f; 
+          return 0.07958029955625534f;
 
   else
     if((val & 0b0100) == 4) // 0
       if((val & 0b0010) == 2) //01
         if((val & 0b0001) == 1) // 011
-          return 0.0f; 
+          return 0.0f;
         else
-          return -0.09105003625154495f; 
+          return -0.09105003625154495f;
       else
         if((val & 0b0001) == 1) // 010
-          return -0.18477343022823334f; 
+          return -0.18477343022823334f;
         else
           return -0.28444138169288635f;
     else
@@ -265,12 +260,12 @@ float dDequantizeNF4(unsigned char val)
         if((val & 0b0001) == 1) // 001
           return -0.39491748809814453f;
         else
-          return -0.5250730514526367f; 
-      else 
+          return -0.5250730514526367f;
+      else
         if((val & 0b0001) == 1) // 000
-          return -0.6961928009986877f; 
+          return -0.6961928009986877f;
         else
-          return -1.0f; 
+          return -1.0f;
 
 }
 
@@ -393,14 +388,14 @@ unsigned char dQuantize(float* smem_code, const float rand, float x)
     {
       if(x > val)
       {
-        float dist_to_upper = sycl::fabs(upper - x);
+        float dist_to_upper = sycl::fabs(upper-x);
         float dist_full = upper-val;
         if(rand >= dist_to_upper/dist_full) return upper_pivot;
         else return pivot;
       }
       else
       {
-        float dist_to_lower = sycl::fabs(lower - x);
+        float dist_to_lower = sycl::fabs(lower-x);
         float dist_full = val-lower;
         if(rand >= dist_to_lower/dist_full) return lower_pivot;
         else return pivot;
@@ -409,9 +404,7 @@ unsigned char dQuantize(float* smem_code, const float rand, float x)
 }
 
 template <int SIGNED>
-__dpct_inline__ unsigned char quantize_2D(float *__restrict__ quadrants,
-                                          float *__restrict__ const smem_code,
-                                          float x)
+__dpct_inline__ unsigned char quantize_2D(float *__restrict__ quadrants, float *__restrict__ const smem_code, float x)
 {
     int pivot = 127;
     int upper_pivot = 255;
@@ -466,9 +459,7 @@ __dpct_inline__ unsigned char quantize_2D(float *__restrict__ quadrants,
 }
 
 template <int SIGNED>
-__dpct_inline__ unsigned char
-quantize_quadrant(int QUADRANT, float *__restrict__ const smem_code, float x,
-                  float lower, float midpoint, float upper)
+__dpct_inline__ unsigned char quantize_quadrant(int QUADRANT, float *__restrict__ const smem_code, float x, float lower, float midpoint, float upper)
 {
     int lower_pivot = QUADRANT*16-1 - 0;
     int pivot = QUADRANT*16-1 + 16;
@@ -512,96 +503,42 @@ quantize_quadrant(int QUADRANT, float *__restrict__ const smem_code, float x,
     }
 }
 
-void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n,
+SYCL_EXTERNAL void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n,
                             const sycl::nd_item<3> &item_ct1)
 {
-  const int tid = item_ct1.get_local_id(2) +
-                  (item_ct1.get_local_range(2) * item_ct1.get_group(2));
-  const int numThreads =
-      item_ct1.get_local_range(2) * item_ct1.get_group_range(2);
+  const int tid = item_ct1.get_local_id(2) + (item_ct1.get_local_range(2)*item_ct1.get_group(2));
+  const int numThreads = item_ct1.get_local_range(2)*item_ct1.get_group_range(2);
 
   for(int i = tid; i < n; i+=numThreads)
   {
       int idx = (index1[i]*maxidx1) + index2[i];
-      dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(
-          &histogram[idx], src[i]);
+      dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&histogram[idx], src[i]);
   }
 }
 
+void warpreduceKernelMax(int* data, const sycl::nd_item<3> &item_ct1) {
+  int threadid = item_ct1.get_local_id(2);
+  int input = data[threadid];
+  int output = 0;
+  output = sycl::reduce_over_group(item_ct1.get_sub_group(), input, sycl::maximum<>());
+  data[threadid] = output;
+}
 
-/*
-template <size_t BlockSize, size_t NumPerThread>
-class BlockLoadKernel {
-public:
-    BlockLoadKernel(sycl::queue& queue, const float* input, float* output, size_t numElements)
-        : queue_(queue), input_(input), output_(output), numElements_(numElements) {
-    }
-
-    void operator()() {
-        queue_.submit([&](sycl::handler& cgh) {
-            auto input = input_;
-            auto output = output_;
-
-            cgh.parallel_for<class BlockLoadKernel>(
-                sycl::nd_range<1>(sycl::range<1>(numElements_), sycl::range<1>(BlockSize)),
-                [=](sycl::nd_item<1> item) {
-                    // Create a local memory buffer to hold a block of data
-                    dpct::local<float> localBuffer[BlockSize / NumPerThread];
-
-                    // Compute global index
-                    size_t globalIndex = item.get_global_linear_id();
-                    
-                    // Compute local index within the block
-                    size_t localIndex = item.get_local_id(0) / NumPerThread;
-                    
-                    // Compute index within the block for each thread
-                    size_t blockIndex = item.get_local_id(0) % (BlockSize / NumPerThread);
-
-                    // Load data from global memory into local memory
-                    localBuffer[blockIndex] = input[globalIndex];
-
-                    // Synchronize to ensure all work-items have loaded data
-                    item.barrier();
-
-                    // Use the loaded data from local memory (e.g., perform some computation)
-                    float result = localBuffer[localIndex];
-
-                    // Store the result back to global memory
-                    output[globalIndex] = result;
-                });
-        });
-    }
-
-private:
-    sycl::queue& queue_;
-    const float* input_;
-    float* output_;
-    size_t numElements_;
-};
-*/
-
-
-template <typename T, int BLOCK_SIZE, int NUM_MAX>
-void kCompressMax(T *__restrict__ const A, T *out, unsigned char *out_idx,
-                  const int n, const sycl::nd_item<3> &item_ct1)
+template<typename T, int BLOCK_SIZE, int NUM_MAX>
+void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, const int n,
+                  const sycl::nd_item<3> &item_ct1, int *smem_max_indices,
+                  float *smem_max_values)
 {
-  //typedef cub::WarpReduce<T> WarpReduce;
-  //__shared__ typename WarpReduce::TempStorage temp_storage;
-  typedef cub::BlockLoad<T, BLOCK_SIZE/8 , 8, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-  __shared__ typename LoadT::TempStorage loadt;
+  
+  
+  //typename WarpReduce::TempStorage temp_storage;
+  //typedef cub::BlockLoad<T, BLOCK_SIZE/8 , 8, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+  //typename LoadT::TempStorage loadt;
 
-  const int warp_idx = item_ct1.get_local_id(2) / 32;
-  const int valid_items = n - (item_ct1.get_group(2) * BLOCK_SIZE) > BLOCK_SIZE
-                              ? BLOCK_SIZE
-                              : n - (item_ct1.get_group(2) * BLOCK_SIZE);
+  const int warp_idx = item_ct1.get_local_id(2)/32;
+  const int valid_items = n - (item_ct1.get_group(2)*BLOCK_SIZE) > BLOCK_SIZE ? BLOCK_SIZE : n - (item_ct1.get_group(2)*BLOCK_SIZE);
 
   //  BLOCK_SIZE/32 == number of warps
-  //sycl::local_accessor<int, 1> smem_max_indices
-  //__shared__ int smem_max_indices[8*BLOCK_SIZE/32];
-  //__shared__ float smem_max_values[8*BLOCK_SIZE/32];
-  int smem_max_indices[8*BLOCK_SIZE/32];
-  float smem_max_values[8*BLOCK_SIZE/32];
-  
   T values[8];
   T max1 = -64000.0f;
   T max2 = -64000.0f;
@@ -610,16 +547,36 @@ void kCompressMax(T *__restrict__ const A, T *out, unsigned char *out_idx,
   int sign1 = -1;
   int sign2 = -1;
 
-  // 1. load 8 values per thread
-  // 2. compute 2-max in registers (64 max per warp)
-  // 3. do warp reduction + broadcast back
-  // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
-  // 5. Repeat (3) 8 times for top 8 values in 256
-  // 6. store with byte index
-
-  LoadT(loadt).Load(&(A[(item_ct1.get_group(2) * BLOCK_SIZE)]), values,
-                    valid_items, (T)0.0f);
-#pragma unroll 8
+  sycl::buffer<T, 1>  buff_indices(smem_max_indices, sycl::range<1>(8*BLOCK_SIZE/32));
+  sycl::buffer<T, 1>  buff_values(smem_max_values, sycl::range<1>(8*BLOCK_SIZE/32));
+  sycl::buffer<T, 1>  buff_A(A,sycl::range<1>(8*BLOCK_SIZE/32));
+  
+  dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+ 
+ 
+      using group_load = dpct::group::workgroup_load<BLOCK_SIZE/8,BLOCK_LOAD_DIRECT>;
+      size_t temp_storage_size = group_load::get_local_memory_size(8*BLOCK_SIZE/32);
+      sycl::local_accessor<uint8_t, 1> tacc(
+        temp_storage_size, h);
+      sycl::accessor dacc(buff_A[(item_ct1.get_local_id(2)*BLOCK_SIZE)], h, sycl::read_write);
+      
+      // 1. load 8 values per thread
+      // 2. compute 2-max in registers (64 max per warp)
+      // 3. do warp reduction + broadcast back
+      // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+      // 5. Repeat (3) 8 times for top 8 values in 256
+      // 6. store with byte index
+      h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 128), sycl::range<3>(1, 1, 128)),
+        [=](sycl::nd_item<3> item) {
+          auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+          auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+          group_load(tmp).load(item,item.get_local_linear_id(), d, values);
+        
+        });
+      
+  });
+   
+  #pragma unroll 8
   for(int i = 0; i < 8; i++)
   {
     T absval = fabsf(values[i]);
@@ -627,29 +584,32 @@ void kCompressMax(T *__restrict__ const A, T *out, unsigned char *out_idx,
     {
       max1 = values[i];
       sign1 = signbit(values[i]);
-      max_idx1 = 8 * item_ct1.get_local_id(2) + i;
+      max_idx1 = 8*item_ct1.get_local_id(2) + i;
     }
     else if(absval > max2)
     {
       max2 = values[i];
       sign2 = signbit(values[i]);
-      max_idx2 = 8 * item_ct1.get_local_id(2) + i;
+      max_idx2 = 8*item_ct1.get_local_id(2) + i;
     }
   }
-
+  
   float warp_max;
+  sycl::host_accessor hacc_values{buff_values};
+  sycl::host_accessor hacc_indices{buff_indices};
   for(int i = 0; i < 8; i++)
   {
     // 3. do warp reduction + broadcast back
-    //warp_max = WarpReduce(temp_storage).Reduce(max1, sycl::maximum<>());
-    warp_max = dpct::group::reduce(item_ct1, max1, sycl::maximum<>());
+    
+    output = sycl::reduce_over_group(item_ct1.get_sub_group(), max1, sycl::maximum<>());
     warp_max = item_ct1.get_sub_group().shuffle(warp_max, 0);
 
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     if(warp_max == max1)
     {
-      smem_max_values[warp_idx*8 + i] = sign1 != 0 ? -max1 : max1;
-      smem_max_indices[warp_idx*8 + i] = max_idx1;
+	
+      hacc_values[warp_idx*8 + i] = sign1 != 0 ? -max1 : max1;
+      hacc_indices_indices[warp_idx*8 + i] = max_idx1;
 
       sign1 = sign2;
       max1 = max2;
@@ -660,11 +620,11 @@ void kCompressMax(T *__restrict__ const A, T *out, unsigned char *out_idx,
     sycl::group_barrier(item_ct1.get_sub_group());
   }
 
-  if (item_ct1.get_local_id(2) % 32 < 8)
+  if(item_ct1.get_local_id(2) % 32 < 8)
   {
     // offset: 8 values per 256 input values
     //
-    int offset = BLOCK_SIZE * item_ct1.get_group(2) * BLOCK_SIZE / 32 * 8;
+    int offset = BLOCK_SIZE*item_ct1.get_group(2)*BLOCK_SIZE/32*8;
   }
 
 }
@@ -674,32 +634,28 @@ void kCompressMax(T *__restrict__ const A, T *out, unsigned char *out_idx,
 #define BLOCK_ESTIMATE 4096
 
 template<typename T>
-
+SYCL_EXTERNAL 
 void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset, const T max_val, const int n,
-                        const sycl::nd_item<3> &item_ct1,
-                        uint8_t *temp_storage_ct1)
+                        const sycl::nd_item<3> &item_ct1)
 {
   const int n_full = (BLOCK_ESTIMATE*(n/BLOCK_ESTIMATE)) + (n % BLOCK_ESTIMATE == 0 ? 0 : BLOCK_ESTIMATE);
-  int valid_items = (item_ct1.get_group(2) + 1 == item_ct1.get_group_range(2))
-                        ? n - (item_ct1.get_group(2) * BLOCK_ESTIMATE)
-                        : BLOCK_ESTIMATE;
+  int valid_items = (item_ct1.get_group(2)+1 == item_ct1.get_group_range(2)) ? n - (item_ct1.get_group(2)*BLOCK_ESTIMATE) : BLOCK_ESTIMATE;
   const int base_idx = (item_ct1.get_group(2) * BLOCK_ESTIMATE);
   const float reciprocal_num_blocks = 1.0f/(n < 4096 ? 1.0f : (n/BLOCK_ESTIMATE));
 
   T vals[NUM_ESTIMATE];
 
-  typedef cub::BlockRadixSort<T, THREADS_ESTIMATE, NUM_ESTIMATE, cub::NullType, 4, true, cub::BLOCK_SCAN_RAKING> BlockRadixSort;
+  typedef cub::BlockRadixSort<T, THREADS_ESTIMATE, NUM_ESTIMATE, dpct::null_type, 4, true, cub::BLOCK_SCAN_RAKING> BlockRadixSort;
   typedef cub::BlockLoad<T, THREADS_ESTIMATE, NUM_ESTIMATE, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
 
-  union type_ct1 {
+  union  type_ct1{
       typename LoadFloat::TempStorage loadf;
       typename BlockRadixSort::TempStorage sort;
       int smem_qidx[BLOCK_ESTIMATE];
   };
   type_ct1 &temp_storage = *(type_ct1 *)temp_storage_ct1;
 
-  for (unsigned int i = base_idx; i < n_full;
-       i += item_ct1.get_group_range(2) * BLOCK_ESTIMATE)
+  for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_ESTIMATE)
   {
       valid_items = n - i > BLOCK_ESTIMATE ? BLOCK_ESTIMATE : n - i;
 
@@ -711,100 +667,100 @@ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset
           vals[j] = max_val;
 
       /*
-      DPCT1065:0: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:76: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:96: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:81: Migration of cub::BlockLoad::Load is not supported.
       */
+      
+      
       LoadFloat(temp_storage.loadf).Load(&(A[i]), vals, valid_items);
 
-#pragma unroll 4
+      #pragma unroll 4
       for(int j = 0; j < NUM_ESTIMATE; j++)
           vals[j] = ((float)vals[j]) * reciprocal_num_blocks;
 
+
       /*
-      DPCT1065:1: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:77: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       // sort into striped pattern to mitigate bank conflicts
       // striped pattern index for thread 0 [0, 1024, 2048, 3096]
       // striped pattern index for thread 1 [1, 1025, 2049, 3097]
       /*
-      DPCT1007:97: Migration of cub::BlockRadixSort.SortBlockedToStriped is not
-      supported.
+      DPCT1007:82: Migration of cub::BlockRadixSort::SortBlockedToStriped is not supported.
       */
       BlockRadixSort(temp_storage.sort).SortBlockedToStriped(vals);
 
       /*
-      DPCT1065:2: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:78: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
-      for (int j = item_ct1.get_local_id(2); j < BLOCK_ESTIMATE;
-           j += item_ct1.get_local_range(2))
+      for(int j = item_ct1.get_local_id(2); j < BLOCK_ESTIMATE; j+=item_ct1.get_local_range(2))
           temp_storage.smem_qidx[j] = -1;
 
-      if (item_ct1.get_local_id(2) < 256)
+      /*
+      DPCT1065:79: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
+      */
+      item_ct1.barrier();
+
+      if(item_ct1.get_local_id(2) < 256)
       {
           float q_interval = (1.0f-(2.0f*offset))/255.0f;
-          int local_idx =
-              sycl::round(((offset + (item_ct1.get_local_id(2) * q_interval)) *
-                           (valid_items - 1)));
+          /*
+          DPCT1064:83: Migrated round call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
+          */
+          int local_idx = sycl::round(((offset+(item_ct1.get_local_id(2)*q_interval))*(valid_items-1)));
           temp_storage.smem_qidx[local_idx] = item_ct1.get_local_id(2);
       }
 
       /*
-      DPCT1065:3: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:80: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
 
-      for (int i = item_ct1.get_local_id(2); i < BLOCK_ESTIMATE;
-           i += item_ct1.get_local_range(2))
+      for(int i = item_ct1.get_local_id(2); i < BLOCK_ESTIMATE; i+=item_ct1.get_local_range(2))
       {
           if(temp_storage.smem_qidx[i] != -1)
-              dpct::atomic_fetch_add<
-                  sycl::access::address_space::generic_space>(
-                  &code[temp_storage.smem_qidx[i]], vals[i / THREADS_ESTIMATE]);
+              dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&code[temp_storage.smem_qidx[i]], vals[i/THREADS_ESTIMATE]);
       }
   }
 }
 
 
-void kQuantize(float *code, float *__restrict__ const A, unsigned char *out,
-               const int n, const sycl::nd_item<3> &item_ct1, float *smem_code)
+SYCL_EXTERNAL 
+void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n,
+               const sycl::nd_item<3> &item_ct1, float *smem_code)
 {
   const int n_full = (NUM_BLOCK*(n/NUM_BLOCK)) + (n % NUM_BLOCK == 0 ? 0 : NUM_BLOCK);
-  int valid_items = (item_ct1.get_group(2) + 1 == item_ct1.get_group_range(2))
-                        ? n - (item_ct1.get_group(2) * NUM_BLOCK)
-                        : NUM_BLOCK;
+  int valid_items = (item_ct1.get_group(2)+1 == item_ct1.get_group_range(2)) ? n - (item_ct1.get_group(2)*NUM_BLOCK) : NUM_BLOCK;
   const int base_idx = (item_ct1.get_group(2) * NUM_BLOCK);
 
   float vals[NUM];
   unsigned char qvals[NUM];
   //const int lane_id = threadIdx.x % 2;
 
-  typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  typedef cub::BlockStore<unsigned char, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+  //typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+  //typedef cub::BlockStore<unsigned char, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
 
+  sycl::buffer<float, 1> buff_smem_code(smem_code,sycl::range<1>(257));
+  sycl::buffer<float, 1> buff_vals(vals, sycl::range<1>(NUM));
+  sycl::buffer<float, 1> buff_A(A,sycl::range<1>(NUM));
+  sycl::buffer<unsigned char, 1> buff_out(out,sycl::range<1>(NUM));
+  
   //__shared__ float smem_code[2][257];
 
-  if (item_ct1.get_local_id(2) < 256)
+  if(item_ct1.get_local_id(2) < 256)
   {
     smem_code[item_ct1.get_local_id(2)] = code[item_ct1.get_local_id(2)];
     //smem_code[0][threadIdx.x] = code[threadIdx.x];
     //smem_code[1][threadIdx.x] = smem_code[0][threadIdx.x];
   }
 
-  for (unsigned int i = base_idx; i < n_full;
-       i += item_ct1.get_group_range(2) * NUM_BLOCK)
+
+  for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*NUM_BLOCK)
   {
       // number of values already processed in blocks +
       // number of values already processed in this block +
@@ -812,42 +768,89 @@ void kQuantize(float *code, float *__restrict__ const A, unsigned char *out,
       valid_items = n - i > NUM_BLOCK ? NUM_BLOCK : n - i;
 
       /*
-      DPCT1065:89: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1118:50: SYCL group functions and algorithms must be encountered in converged control flow. You may need to adjust the code.
       */
-      item_ct1.barrier();
       /*
-      DPCT1007:160: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1065:224: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
-      LoadFloat(loadf).Load(&(A[i]), vals, valid_items);
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
+      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_load<NUM,BLOCK_LOAD_DIRECT,float>;
+          size_t temp_storage_size = group_load::get_local_memory_size(NUM);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_A[i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_load(tmp).load(item,item.get_local_linear_id(), d, vals);
+            });
+          
+     });
+      
+      //LoadFloat(loadf).Load(&(A[i]), vals, valid_items);
 
-#pragma unroll 4
+
+      #pragma unroll 4
       for(int j = 0; j < NUM; j++)
           qvals[j] = dQuantize<0>(smem_code, 0.0f, vals[j]);
 
       /*
-      DPCT1065:90: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1118:51: SYCL group functions and algorithms must be encountered in converged control flow. You may need to adjust the code.
       */
-      item_ct1.barrier();
       /*
-      DPCT1007:161: Migration of cub::BlockStore.Store is not supported.
+      DPCT1065:225: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
-      StoreChar(storec).Store(&(out[i]), qvals, valid_items);
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
+      
+      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_store<NUM,BLOCK_STORE_DIRECT,unsigned char>;
+          size_t temp_storage_size = group_store::get_local_memory_size(NUM);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_out[i], h, sycl::read_write);
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_store(tmp).store(item,item.get_local_linear_id(), d, qvals);
+            });
+          
+     });
+      
+      
+      //StoreChar(storec).Store(&(out[i]), qvals, valid_items);
   }
 }
 
-template <typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC,
-          int DATA_TYPE>
+template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TYPE>
 //__launch_bounds__(TH, 4)
-void kQuantizeBlockwise(float *code, T *__restrict__ const A, float *absmax,
-                        unsigned char *out, float *__restrict__ const rand,
-                        const int rand_offset, const int n,
-                        const sycl::nd_item<3> &item_ct1
-                        float *smem_code, float *smem_absmax_value)
+SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n,
+                        const sycl::nd_item<3> &item_ct1, float *smem_code,
+                        float *smem_absmax_value)
 {
+  
+  
   const int n_full = item_ct1.get_group_range(2) * BLOCK_SIZE;
   int valid_items = 0;
   const int base_idx = (item_ct1.get_group(2) * BLOCK_SIZE);
@@ -859,33 +862,62 @@ void kQuantizeBlockwise(float *code, T *__restrict__ const A, float *absmax,
   float local_abs_max = 0.0f;
   int local_rand_idx = 0;
 
-  typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-  typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, (DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+  
+  sycl::buffer<T, 1> buff_A(A,sycl::range<1>(NUM_PER_TH));
+  sycl::buffer<unsigned char, 1> buff_out(out,sycl::range<1>(NUM_PER_TH));
+  sycl::buffer<float, 1> buff_rand(rand,sycl::range<1>(NUM_PER_TH));
+  
+  
+  //typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+  //typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, (DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+  
+  //typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
 
-  typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-
+  
   if(DATA_TYPE == General8bit)
-    for (int i = item_ct1.get_local_id(2); i < 256;
-         i += item_ct1.get_local_range(2))
+    for(int i = item_ct1.get_local_id(2); i < 256; i+=item_ct1.get_local_range(2))
       smem_code[i] = code[i];
 
-  for (unsigned int i = base_idx; i < n_full;
-       i += item_ct1.get_group_range(2) * BLOCK_SIZE)
+  for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
   {
     valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
     local_abs_max = -FLT_MAX;
 
     /*
-    DPCT1065:4: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:84: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
-    item_ct1.barrier();
+    item_ct1.barrier(sycl::access::fence_space::local_space);
     /*
-    DPCT1007:98: Migration of cub::BlockLoad.Load is not supported.
+    DPCT1007:87: Migration of cub::BlockLoad::Load is not supported.
     */
-    LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
+    //LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
 
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_load<NUM,BLOCK_LOAD_DIRECT,float>;
+          size_t temp_storage_size = group_load::get_local_memory_size(NUM_PER_TH);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_A[i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_load(tmp).load(item,item.get_local_linear_id(), d, vals);
+            });
+          
+     });
+      
+    
+    
     // 1. compute local max
     // 2. broadcast local max
     // 3. normalize inputs and quantize
@@ -895,23 +927,20 @@ void kQuantizeBlockwise(float *code, T *__restrict__ const A, float *absmax,
        local_abs_max = sycl::fmax(local_abs_max, sycl::fabs((float)vals[j]));
 
     /*
-    DPCT1007:7: Migration of cub::Reduce is not supported.
+    DPCT1007:0: Migration of cub::Reduce is not supported.
     */
-    local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, sycl::maximum<>(),
-                                               valid_items);
-    //local_abs_max = dpct::group::reduce(item_ct1, local_abs_max, sycl::maximum<>()
+    //local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, sycl::maximum<>(), valid_items);
+    local_abs_max = dpct::group::reduce(item_ct1, local_abs_max, sycl::maximum<>());
 
-    if (item_ct1.get_local_id(2) == 0)
+    if(item_ct1.get_local_id(2) == 0)
       smem_absmax_value[0] = local_abs_max;
 
     /*
-    DPCT1065:5: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:85: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
-    item_ct1.barrier();
+    item_ct1.barrier(sycl::access::fence_space::local_space);
 
-    if (item_ct1.get_local_id(2) == 0)
+    if(item_ct1.get_local_id(2) == 0)
       absmax[i/BLOCK_SIZE] = local_abs_max;
     else
       local_abs_max = smem_absmax_value[0];
@@ -922,13 +951,38 @@ void kQuantizeBlockwise(float *code, T *__restrict__ const A, float *absmax,
 
     if(STOCHASTIC)
     {
-      local_rand_idx = ((item_ct1.get_group(2) * NUM_BLOCK) +
-                        (item_ct1.get_local_id(2) * NUM) + rand_offset) %
-                       (1024 - 4);
+      local_rand_idx = ((item_ct1.get_group(2)*NUM_BLOCK) + (item_ct1.get_local_id(2)*NUM) + rand_offset) % (1024-4);
       /*
-      DPCT1007:99: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:88: Migration of cub::BlockLoad::Load is not supported.
       */
-      LoadFloat(loadf).Load(&rand[local_rand_idx], rand_vals, BLOCK_SIZE, 0);
+      
+      //LoadFloat(loadf).Load(&rand[local_rand_idx], rand_vals, BLOCK_SIZE, 0);
+      
+      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_load<NUM,BLOCK_LOAD_DIRECT,float>;
+          size_t temp_storage_size = group_load::get_local_memory_size(NUM_PER_TH);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_rand[local_rand_idx], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_load(tmp).load(item,item.get_local_linear_id(), d, rand_vals);
+            });
+          
+     });
+      
+    
     }
 
     unsigned char packed_4bit = 0;
@@ -965,23 +1019,43 @@ void kQuantizeBlockwise(float *code, T *__restrict__ const A, float *absmax,
     }
 
     /*
-    DPCT1065:6: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:86: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
-    item_ct1.barrier();
+    item_ct1.barrier(sycl::access::fence_space::local_space);
     /*
-    DPCT1007:100: Migration of cub::BlockStore.Store is not supported.
+    DPCT1007:89: Migration of cub::BlockStore::Store is not supported.
     */
-    StoreChar(storec).Store(&(out[(DATA_TYPE > 0) ? i / 2 : i]), qvals,
-                            (DATA_TYPE > 0) ? (valid_items + 1) / 2
-                                            : valid_items);
+    
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_store = dpct::group::workgroup_store<NUM,BLOCK_STORE_DIRECT,float>;
+          size_t temp_storage_size = group_store::get_local_memory_size(NUM_PER_TH);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_out[(DATA_TYPE > 0) ? i/2 : i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_store(tmp).store(item,item.get_local_linear_id(), d, qvals);
+            });
+          
+     });
+      
+    //StoreChar(storec).Store(&(out[(DATA_TYPE > 0) ? i/2 : i]), qvals, (DATA_TYPE > 0) ? (valid_items+1)/2 : valid_items);
   }
 }
 
-template <typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
-void kDequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
-                          const int blocksize, const int n,
+template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
+SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n,
                           const sycl::nd_item<3> &item_ct1)
 {
 
@@ -994,11 +1068,17 @@ void kDequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
   unsigned char qvals[NUM_PER_TH];
   float local_abs_max = -FLT_MAX;
 
-  typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
-  typedef cub::BlockStore<T, THREADS, NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1), cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+  sycl::buffer<T, 1> buff_out(out, sycl::range<1>(NUM_PER_TH));
+  sycl::buffer<unsigned char, 1> buff_A(A,sycl::range<1>(NUM_PER_TH));
+  
+  
+  //typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+  //typedef cub::BlockStore<T, THREADS, NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1), cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
-  for (unsigned int i = base_idx; i < n_load;
-       i += item_ct1.get_group_range(2) * TILE_SIZE)
+  
+  
+
+  for (unsigned int i = base_idx; i < n_load; i += item_ct1.get_group_range(2)*TILE_SIZE)
   {
     if(DATA_TYPE > 0)
     {
@@ -1011,22 +1091,46 @@ void kDequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
       valid_items_store = n - i > TILE_SIZE ? TILE_SIZE : n - i;
     }
     /*
-    DPCT1026:101: The call to __ldg was removed because there is no
-    corresponding API in SYCL.
+    DPCT1098:92: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
     */
-    local_abs_max =
-        absmax[(i + item_ct1.get_local_id(2) * NUM_PER_TH) / (blocksize)];
+    /*
+    DPCT1064:96: Migrated __ldg call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
+    */
+    local_abs_max = absmax[(i+item_ct1.get_local_id(2)*NUM_PER_TH)/(blocksize)];
 
     /*
-    DPCT1065:8: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:90: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
-    item_ct1.barrier();
+    item_ct1.barrier(sycl::access::fence_space::local_space);
     /*
-    DPCT1007:102: Migration of cub::BlockLoad.Load is not supported.
+    DPCT1007:93: Migration of cub::BlockLoad::Load is not supported.
     */
-    LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
+    //LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_load<NUM,BLOCK_LOAD_DIRECT,float>;
+          size_t temp_storage_size = group_load::get_local_memory_size(NUM_PER_TH);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_A[i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_load(tmp).load(item,item.get_local_linear_id(), d, qvals);
+            });
+          
+     });
+      
+    
 
     switch(DATA_TYPE)
     {
@@ -1035,10 +1139,12 @@ void kDequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
           #pragma unroll NUM_PER_TH
           for(int j = 0; j < NUM_PER_TH; j++)
             /*
-            DPCT1026:103: The call to __ldg was removed because there is no
-            corresponding API in SYCL.
+            DPCT1098:94: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
             */
-            vals[j] = code[qvals[j]] * local_abs_max;
+            /*
+            DPCT1064:228: Migrated __ldg call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
+            */
+            vals[j] = code[qvals[j]]*local_abs_max;
           break;
         case FP4:
           #pragma unroll NUM_PER_TH
@@ -1059,35 +1165,55 @@ void kDequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
     }
 
     /*
-    DPCT1065:9: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:91: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
     /*
-    DPCT1007:104: Migration of cub::BlockStore.Store is not supported.
+    DPCT1007:95: Migration of cub::BlockStore::Store is not supported.
     */
-    StoreT(storet).Store(&(out[(DATA_TYPE > 0) ? i * 2 : i]), vals,
-                         valid_items_store);
+    //StoreT(storet).Store(&(out[(DATA_TYPE > 0) ? i*2 : i]), vals, valid_items_store);
+    
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_store = dpct::group::workgroup_store<NUM,BLOCK_STORE_DIRECT,float>;
+          size_t temp_storage_size = group_store::get_local_memory_size(NUM_PER_TH);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_out[(DATA_TYPE > 0) ? i/2 : i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_store(tmp).store(item,item.get_local_linear_id(), d, vals);
+            });
+          
+     });
   }
 }
 
-void kDequantize(float *code, unsigned char *A, float *out, const int n,
+SYCL_EXTERNAL void kDequantize(float *code, unsigned char *A, float *out, const int n,
                  const sycl::nd_item<3> &item_ct1, float *smem_code)
 {
-        const unsigned int numThreads =
-            item_ct1.get_local_range(2) * item_ct1.get_group_range(2);
-        const int idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2)) +
-                        item_ct1.get_local_id(2);
+	const unsigned int numThreads = item_ct1.get_local_range(2) * item_ct1.get_group_range(2);
+	const int idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2)) + item_ct1.get_local_id(2);
 
-        if (item_ct1.get_local_id(2) < 256)
-        {
-                smem_code[item_ct1.get_local_id(2)] = code[item_ct1.get_local_id(2)];
-        }
+	
+	if(item_ct1.get_local_id(2) < 256)
+	{
+		smem_code[item_ct1.get_local_id(2)] = code[item_ct1.get_local_id(2)];
+	}
 
-        item_ct1.barrier(sycl::access::fence_space::local_space);
+	item_ct1.barrier(sycl::access::fence_space::local_space);
 
-        for (int i = idx;i < n; i += numThreads)
+	for (int i = idx;i < n; i += numThreads)
 	{
 		out[i] = smem_code[A[i]];
 	}
@@ -1096,7 +1222,10 @@ void kDequantize(float *code, unsigned char *A, float *out, const int n,
 
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
-
+/*
+DPCT1110:1: The total declared local variable size in device function kPreconditionOptimizer32bit2State exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+SYCL_EXTERNAL 
 void kPreconditionOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
@@ -1105,8 +1234,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
 {
 
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
-  const int base_idx =
-      (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_VALS);
+  const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_VALS);
   int valid_items = 0;
 
   T g_vals[NUM_VALS];
@@ -1114,59 +1242,50 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
   float s1_vals[NUM_VALS];
   float s2_vals[NUM_VALS];
 
-  const float correction1 = 1.0f / (1.0f - sycl::pow<float>(beta1, step));
-  const float correction2 = 1.0f / (1.0f - sycl::pow<float>(beta2, step));
+  const float correction1 = 1.0f/(1.0f - dpct::pow(beta1, step));
+  const float correction2 = 1.0f/(1.0f - dpct::pow(beta2, step));
 
   typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
   typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
   typedef sycl::group<3> BlockReduce;
 
-  union type_ct2 {
+  union  type_ct2{
       typename Load::TempStorage load;
       typename LoadFloat::TempStorage loadf;
       typename BlockReduce::TempStorage reduce;
   };
   type_ct2 &temp_storage = *(type_ct2 *)temp_storage_ct1;
 
-  for (unsigned int i = base_idx; i < n_full;
-       i += item_ct1.get_group_range(2) * BLOCK_SIZE)
+  for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
   {
       valid_items = n - i >= (BLOCK_SIZE) ? (BLOCK_SIZE) : n - i;
 
       /*
-      DPCT1065:10: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:97: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:105: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:101: Migration of cub::BlockLoad::Load is not supported.
       */
       Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, 0.0f);
       /*
-      DPCT1065:11: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:98: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:106: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:102: Migration of cub::BlockLoad::Load is not supported.
       */
-      LoadFloat(temp_storage.loadf)
-          .Load(&(state1[i]), s1_vals, valid_items, 0.0f);
+      LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items, 0.0f);
       /*
-      DPCT1065:12: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:99: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:107: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:103: Migration of cub::BlockLoad::Load is not supported.
       */
-      LoadFloat(temp_storage.loadf)
-          .Load(&(state2[i]), s2_vals, valid_items, 0.0f);
+      LoadFloat(temp_storage.loadf).Load(&(state2[i]), s2_vals, valid_items, 0.0f);
 
-# pragma unroll NUM_VALS
+      # pragma unroll NUM_VALS
       for(unsigned int j = 0; j < NUM_VALS; j++)
         g_vals[j] = gnorm_scale*((float)g_vals[j]);
 
@@ -1180,8 +1299,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
                   s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
                   s1_vals[j] *= correction1;
                   s2_vals[j] *= correction2;
-                  s1_vals[j] =
-                      s1_vals[j] / (sycl::sqrt(s2_vals[j]) + eps); // update
+                  s1_vals[j] = s1_vals[j]/(sycl::sqrt(s2_vals[j])+eps); // update
                   s1_vals[j] *= s1_vals[j]; // update l2 norm (update*update)
                   break;
           }
@@ -1192,17 +1310,13 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
           s1_vals[0] += s1_vals[j];
 
       /*
-      DPCT1065:13: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:100: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
-      s1_vals[0] = sycl::reduce_over_group(item_ct1.get_group(), s1_vals[0],
-                                           sycl::plus<>());
+      s1_vals[0] = sycl::reduce_over_group(item_ct1.get_group(), s1_vals[0], sycl::plus<>());
 
-      if (item_ct1.get_local_id(2) == 0)
-        dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(
-            &unorm[0], s1_vals[0]);
+      if(item_ct1.get_local_id(2) == 0)
+        dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&unorm[0], s1_vals[0]);
 
       sycl::group_barrier(item_ct1.get_sub_group());
   }
@@ -1213,7 +1327,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
 #define NUM_PER_THREAD 4
 
 template<typename T, int OPTIMIZER>
-
+SYCL_EXTERNAL 
 void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
@@ -1222,8 +1336,7 @@ void kOptimizer32bit2State(T* g, T* p,
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
-  const int base_idx =
-      (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
+  const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
   int valid_items = 0;
   float update_scale = 0.0f;
   T g_vals[NUM_PER_THREAD];
@@ -1232,8 +1345,8 @@ void kOptimizer32bit2State(T* g, T* p,
   float s1_vals[NUM_PER_THREAD];
   float s2_vals[NUM_PER_THREAD];
 
-  const float correction1 = 1.0f - sycl::pow<float>(beta1, step);
-  const float correction2 = sycl::sqrt(1.0f - sycl::pow<float>(beta2, step));
+  const float correction1 = 1.0f - dpct::pow(beta1, step);
+  const float correction2 = sycl::sqrt(1.0f - dpct::pow(beta2, step));
   const float step_size = -lr*correction2/correction1;
 
   if(max_unorm > 0.0f)
@@ -1244,13 +1357,20 @@ void kOptimizer32bit2State(T* g, T* p,
   }
   else{ update_scale = 1.0f; }
 
-  typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-  typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
+  sycl::buffer<float, 1> buff_smem_code(smem_code,sycl::range<1>(257));
+  sycl::buffer<float, 1> buff_vals(vals, sycl::range<1>(NUM_PER_TH));
+  sycl::buffer<T, 1> buff_A(A,sycl::range<1>(NUM_PER_TH));
+  sycl::buffer<unsigned char, 1> buff_out(out,sycl::range<1>(NUM_PER_TH));
+  sycl::buffer<float, 1> buff_rand(rand,sycl::range<1>(NUM_PER_TH));
+  
+  
+  //typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
+  //typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
 
-  typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
+  //typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+  //typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
 
-  union type_ct3 {
+  union  type_ct3{
       typename Load::TempStorage load;
       typename Store::TempStorage store;
       typename LoadFloat::TempStorage loadf;
@@ -1258,53 +1378,44 @@ void kOptimizer32bit2State(T* g, T* p,
   };
   type_ct3 &temp_storage = *(type_ct3 *)temp_storage_ct1;
 
-  for (unsigned int i = base_idx; i < n_full;
-       i += item_ct1.get_group_range(2) * TH * NUM_PER_THREAD)
+  for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*TH*NUM_PER_THREAD)
   {
       valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
       /*
-      DPCT1065:14: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:104: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
-      item_ct1.barrier();
+      item_ct1.barrier(sycl::access::fence_space::local_space);
       /*
-      DPCT1007:108: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:111: Migration of cub::BlockLoad::Load is not supported.
       */
       Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
       /*
-      DPCT1065:15: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:105: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:109: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:112: Migration of cub::BlockLoad::Load is not supported.
       */
       LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
       /*
-      DPCT1065:16: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:106: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:110: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:113: Migration of cub::BlockLoad::Load is not supported.
       */
       LoadFloat(temp_storage.loadf).Load(&(state2[i]), s2_vals, valid_items);
       /*
-      DPCT1065:17: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:107: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:111: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:114: Migration of cub::BlockLoad::Load is not supported.
       */
       Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
 
-# pragma unroll 4
+      # pragma unroll 4
       for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
         g_vals[j] = gnorm_scale*((float)g_vals[j]);
 
@@ -1318,18 +1429,7 @@ void kOptimizer32bit2State(T* g, T* p,
 									{
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
 										s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
-                                                                                p_vals[j] =
-                                                                                    ((float)p_vals
-                                                                                         [j]) +
-                                                                                    (update_scale *
-                                                                                     step_size *
-                                                                                     (s1_vals
-                                                                                          [j] /
-                                                                                      (sycl::sqrt(
-                                                                                           s2_vals
-                                                                                               [j]) +
-                                                                                       (eps *
-                                                                                        correction2))));
+										p_vals[j] = ((float)p_vals[j]) + (update_scale*step_size*(s1_vals[j]/(sycl::sqrt(s2_vals[j])+(eps*correction2))));
 
                     if(weight_decay > 0.0f)
                         p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
@@ -1339,40 +1439,34 @@ void kOptimizer32bit2State(T* g, T* p,
       }
 
       /*
-      DPCT1065:18: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:108: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:112: Migration of cub::BlockStore.Store is not supported.
+      DPCT1007:115: Migration of cub::BlockStore::Store is not supported.
       */
       Store(temp_storage.store).Store(&(p[i]), p_vals, valid_items);
       /*
-      DPCT1065:19: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:109: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:113: Migration of cub::BlockStore.Store is not supported.
+      DPCT1007:116: Migration of cub::BlockStore::Store is not supported.
       */
       StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
       /*
-      DPCT1065:20: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:110: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:114: Migration of cub::BlockStore.Store is not supported.
+      DPCT1007:117: Migration of cub::BlockStore::Store is not supported.
       */
       StoreFloat(temp_storage.storef).Store(&(state2[i]), s2_vals, valid_items);
   }
 }
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
-
+SYCL_EXTERNAL 
 void kPreconditionOptimizer32bit1State(T* g, T* p,
                 float* state1, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
@@ -1381,8 +1475,7 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
 {
 
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
-  const int base_idx =
-      (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_VALS);
+  const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_VALS);
   int valid_items = 0;
 
   T g_vals[NUM_VALS];
@@ -1393,41 +1486,35 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
   typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
   typedef sycl::group<3> BlockReduce;
 
-  union type_ct4 {
+  union  type_ct4{
       typename Load::TempStorage load;
       typename LoadFloat::TempStorage loadf;
       typename BlockReduce::TempStorage reduce;
   };
   type_ct4 &temp_storage = *(type_ct4 *)temp_storage_ct1;
 
-  for (unsigned int i = base_idx; i < n_full;
-       i += item_ct1.get_group_range(2) * BLOCK_SIZE)
+  for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
   {
       valid_items = n - i >= (BLOCK_SIZE) ? (BLOCK_SIZE) : n - i;
 
       /*
-      DPCT1065:21: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:118: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:115: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:121: Migration of cub::BlockLoad::Load is not supported.
       */
       Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, 0.0f);
       /*
-      DPCT1065:22: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:119: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:116: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:122: Migration of cub::BlockLoad::Load is not supported.
       */
-      LoadFloat(temp_storage.loadf)
-          .Load(&(state1[i]), s1_vals, valid_items, 0.0f);
+      LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items, 0.0f);
 
-# pragma unroll NUM_VALS
+      # pragma unroll NUM_VALS
       for(unsigned int j = 0; j < NUM_VALS; j++)
         g_vals[j] = gnorm_scale*((float)g_vals[j]);
 
@@ -1448,14 +1535,12 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
                   break;
               case RMSPROP:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j])); // state update
-                  s1_vals[j] = (float)g_vals[j] /
-                               (sycl::sqrt(s1_vals[j]) + eps); // update value
+                  s1_vals[j] = (float)g_vals[j] / (sycl::sqrt(s1_vals[j])+eps); // update value
                   s1_vals[j] = s1_vals[j]*s1_vals[j]; // update norm
                   break;
               case ADAGRAD:
                   s1_vals[j] = s1_vals[j] + ((float)g_vals[j])*((float)g_vals[j]); // state update
-                  s1_vals[j] = (float)g_vals[j] /
-                               (sycl::sqrt(s1_vals[j]) + eps); // update value
+                  s1_vals[j] = (float)g_vals[j] / (sycl::sqrt(s1_vals[j])+eps); // update value
                   s1_vals[j] = s1_vals[j]*s1_vals[j]; // update norm
                   break;
           }
@@ -1466,27 +1551,23 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
         s1_vals[0] += s1_vals[j];
 
       /*
-      DPCT1065:23: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:120: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:24: Migration of cub::Sum is not supported.
+      DPCT1007:2: Migration of cub::Sum is not supported.
       */
-      s1_vals[0] =
-          BlockReduce(temp_storage.reduce).Sum(s1_vals[0], valid_items);
+      s1_vals[0] = BlockReduce(temp_storage.reduce).Sum(s1_vals[0], valid_items);
 
-      if (item_ct1.get_local_id(2) == 0)
-        dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(
-            &unorm[0], s1_vals[0]);
+      if(item_ct1.get_local_id(2) == 0)
+        dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&unorm[0], s1_vals[0]);
 
       sycl::group_barrier(item_ct1.get_sub_group());
   }
 }
 
 template<typename T, int OPTIMIZER>
-
+SYCL_EXTERNAL 
 void kOptimizer32bit1State(T *g, T *p,
                 float *state1, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
@@ -1495,8 +1576,7 @@ void kOptimizer32bit1State(T *g, T *p,
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
-  const int base_idx =
-      (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
+  const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
   int valid_items = 0;
   float update_scale = 0.0f;
 
@@ -1519,7 +1599,7 @@ void kOptimizer32bit1State(T *g, T *p,
   typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
   typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
 
-  union type_ct5 {
+  union  type_ct5{
       typename Load::TempStorage load;
       typename Store::TempStorage store;
       typename LoadFloat::TempStorage loadf;
@@ -1527,43 +1607,36 @@ void kOptimizer32bit1State(T *g, T *p,
   };
   type_ct5 &temp_storage = *(type_ct5 *)temp_storage_ct1;
 
-  for (unsigned int i = base_idx; i < n_full;
-       i += item_ct1.get_group_range(2) * TH * NUM_PER_THREAD)
+  for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*TH*NUM_PER_THREAD)
   {
       valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
       /*
-      DPCT1065:25: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:123: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:117: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:128: Migration of cub::BlockLoad::Load is not supported.
       */
       Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
       /*
-      DPCT1065:26: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:124: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:118: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:129: Migration of cub::BlockLoad::Load is not supported.
       */
       LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
       /*
-      DPCT1065:27: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:125: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:119: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:130: Migration of cub::BlockLoad::Load is not supported.
       */
       Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
 
-# pragma unroll 4
+      # pragma unroll 4
       for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
       {
         g_vals[j] = gnorm_scale*((float)g_vals[j]);
@@ -1592,53 +1665,30 @@ void kOptimizer32bit1State(T *g, T *p,
 										break;
 								case RMSPROP:
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*((float)g_vals[j])*((float)g_vals[j]));
-                                                                                p_vals[j] =
-                                                                                    ((float)p_vals
-                                                                                         [j]) -
-                                                                                    update_scale *
-                                                                                        (lr *
-                                                                                         (float)g_vals
-                                                                                             [j] /
-                                                                                         (sycl::sqrt(
-                                                                                              (float)s1_vals
-                                                                                                  [j]) +
-                                                                                          eps));
-                                                                                break;
+										p_vals[j] = ((float)p_vals[j]) - update_scale*(lr*(float)g_vals[j] / (sycl::sqrt((float)s1_vals[j])+eps));
+										break;
 								case ADAGRAD:
 										s1_vals[j] = s1_vals[j] + ((float)g_vals[j])*((float)g_vals[j]);
-                                                                                p_vals[j] =
-                                                                                    ((float)p_vals
-                                                                                         [j]) -
-                                                                                    lr *
-                                                                                        (float)g_vals
-                                                                                            [j] /
-                                                                                        (sycl::sqrt(
-                                                                                             (float)s1_vals
-                                                                                                 [j]) +
-                                                                                         eps);
-                                                                                break;
+										p_vals[j] = ((float)p_vals[j]) - lr*(float)g_vals[j] / (sycl::sqrt((float)s1_vals[j])+eps);
+										break;
 						}
 					}
       }
 
       /*
-      DPCT1065:28: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:126: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:120: Migration of cub::BlockStore.Store is not supported.
+      DPCT1007:131: Migration of cub::BlockStore::Store is not supported.
       */
       Store(temp_storage.store).Store(&(p[i]), p_vals, valid_items);
       /*
-      DPCT1065:29: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:127: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:121: Migration of cub::BlockStore.Store is not supported.
+      DPCT1007:132: Migration of cub::BlockStore::Store is not supported.
       */
       StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
   }
@@ -1650,7 +1700,10 @@ void kOptimizer32bit1State(T *g, T *p,
 #define NUM_PER_BLOCK 4096
 
 template<typename T, int OPTIMIZER>
-void
+/*
+DPCT1110:6: The total declared local variable size in device function kPreconditionOptimizerStatic8bit2State exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+SYCL_EXTERNAL void
 
 kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2,
                 float *unorm,
@@ -1663,12 +1716,8 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
                 float *smem_quantiles1, float *smem_quantiles2)
 {
     const int n_full = item_ct1.get_group_range(2) * NUM_PER_BLOCK;
-    const int base_idx =
-        (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
-    int valid_items =
-        n - (item_ct1.get_group(2) * NUM_PER_BLOCK) > NUM_PER_BLOCK
-            ? NUM_PER_BLOCK
-            : n - (item_ct1.get_group(2) * NUM_PER_BLOCK);
+    const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
+    int valid_items = n - (item_ct1.get_group(2)*NUM_PER_BLOCK) > NUM_PER_BLOCK ? NUM_PER_BLOCK : n - (item_ct1.get_group(2)*NUM_PER_BLOCK);
     float g_val = 0.0f;
     float local_max_s1 = -FLT_MAX;
     float local_max_s2 = -FLT_MAX;
@@ -1684,67 +1733,58 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
     typedef cub::BlockLoad<unsigned char, NUM_THREADS, NUM8BIT, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadUInt8;
     typedef sycl::group<3> BlockReduce;
 
-    union type_ct6 {
+
+    union  type_ct6{
         typename LoadT::TempStorage loadh;
         typename LoadUInt8::TempStorage loadc;
         typename BlockReduce::TempStorage reduce;
     };
     type_ct6 &temp_storage = *(type_ct6 *)temp_storage_ct1;
 
-    if (item_ct1.get_local_id(2) < 256)
+    
+    
+
+    if(item_ct1.get_local_id(2) < 256)
     {
-        smem_quantiles1[item_ct1.get_local_id(2)] =
-            quantiles1[item_ct1.get_local_id(2)];
-        smem_quantiles2[item_ct1.get_local_id(2)] =
-            quantiles2[item_ct1.get_local_id(2)];
+        smem_quantiles1[item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
+        smem_quantiles2[item_ct1.get_local_id(2)] = quantiles2[item_ct1.get_local_id(2)];
     }
 
     /*
-    DPCT1065:42: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:150: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
 
-    for (unsigned int i = base_idx; i < n_full;
-         i += NUM_THREADS * item_ct1.get_group_range(2) * NUM8BIT)
+    for (unsigned int i = base_idx; i < n_full; i += NUM_THREADS*item_ct1.get_group_range(2)*NUM8BIT)
     {
         valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
         /*
-        DPCT1007:129: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:156: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
         /*
-        DPCT1065:45: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:153: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:130: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:157: Migration of cub::BlockLoad::Load is not supported.
         */
-        LoadUInt8(temp_storage.loadc)
-            .Load(&(state1[i]), m_c1, valid_items, 128);
+        LoadUInt8(temp_storage.loadc).Load(&(state1[i]), m_c1, valid_items, 128);
         /*
-        DPCT1065:46: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:154: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:131: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:158: Migration of cub::BlockLoad::Load is not supported.
         */
-        LoadUInt8(temp_storage.loadc)
-            .Load(&(state2[i]), r_c2, valid_items, 128);
+        LoadUInt8(temp_storage.loadc).Load(&(state2[i]), r_c2, valid_items, 128);
         /*
-        DPCT1065:47: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:155: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
 
-#pragma unroll 16
+        #pragma unroll 16
         for(int j = 0; j < NUM8BIT; j++)
         {
             g_val = g_vals[j];
@@ -1769,62 +1809,49 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
           #pragma unroll 16
           for(int j = 0; j < NUM8BIT; j++)
           {
-            float correction1 = 1.0f / (1.0f - sycl::pow<float>(beta1, step));
-            float correction2 = 1.0f / (1.0f - sycl::pow<float>(beta2, step));
+            float correction1 = 1.0f / (1.0f - dpct::pow(beta1, step));
+            float correction2 = 1.0f / (1.0f - dpct::pow(beta2, step));
             s1_vals[j] *= correction1;
             s2_vals[j] *= correction2;
-            float update_val =
-                s1_vals[j] / (sycl::sqrt(s2_vals[j]) + eps); // update
+            float update_val = s1_vals[j]/(sycl::sqrt(s2_vals[j])+eps); // update
             local_unorm += update_val*update_val;
           }
         }
     }
 
     /*
-    DPCT1065:43: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:151: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
     /*
-    DPCT1007:48: Migration of cub::Reduce is not supported.
+    DPCT1007:7: Migration of cub::Reduce is not supported.
     */
-    local_max_s1 = BlockReduce(temp_storage.reduce)
-                       .Reduce(local_max_s1, sycl::maximum<>(), valid_items);
+    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, sycl::maximum<>(), valid_items);
     /*
-    DPCT1065:44: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:152: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
     /*
-    DPCT1007:49: Migration of cub::Reduce is not supported.
+    DPCT1007:8: Migration of cub::Reduce is not supported.
     */
-    local_max_s2 = BlockReduce(temp_storage.reduce)
-                       .Reduce(local_max_s2, sycl::maximum<>(), valid_items);
+    local_max_s2 = BlockReduce(temp_storage.reduce).Reduce(local_max_s2, sycl::maximum<>(), valid_items);
     if(unorm != NULL)
     {
       /*
-      DPCT1065:50: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:159: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:51: Migration of cub::Reduce is not supported.
+      DPCT1007:9: Migration of cub::Reduce is not supported.
       */
-      local_unorm = BlockReduce(temp_storage.reduce)
-                        .Reduce(local_unorm, sycl::plus<>(), valid_items);
+      local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, sycl::plus<>(), valid_items);
     }
 
-    if (item_ct1.get_local_id(2) == 0)
+    if(item_ct1.get_local_id(2) == 0)
     {
         atomicMax(&new_max1[0], local_max_s1);
         atomicMax(&new_max2[0], local_max_s2);
-        if (unorm != NULL) {
-            dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(
-                &unorm[0], local_unorm);
-        }
+        if(unorm != NULL){ dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&unorm[0], local_unorm); }
     }
 }
 
@@ -1833,7 +1860,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
 #define NUM_PER_BLOCK2 4096
 
 template<typename T, int OPTIMIZER>
-void
+SYCL_EXTERNAL void
 
 kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned char* state2,
                 const float *unorm, const float max_unorm, const float param_norm, \
@@ -1847,17 +1874,14 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 float *smem_quantiles2, uint8_t *temp_storage_ct1)
 {
 
-    const int n_full =
-        (item_ct1.get_local_range(2) * item_ct1.get_group_range(2)) *
-        NUM_PER_THREAD2;
-    const int base_idx =
-        (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD2);
+    const int n_full = (item_ct1.get_local_range(2) * item_ct1.get_group_range(2))*NUM_PER_THREAD2;
+    const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD2);
     int valid_items = 0;
     float g_val = 0.0f;
     float s1_vals[NUM_PER_THREAD2];
     float s2_vals[NUM_PER_THREAD2];
-    const float correction1 = 1.0f - sycl::pow<float>(beta1, step);
-    const float correction2 = sycl::sqrt(1.0f - sycl::pow<float>(beta2, step));
+    const float correction1 = 1.0f - dpct::pow(beta1, step);
+    const float correction2 = sycl::sqrt(1.0f - dpct::pow(beta2, step));
     const float step_size = -lr*correction2/correction1;
     //const float step_size = -lr*correction2/correction1;
     float new_max_val1 = 1.0f/new_max1[0];
@@ -1882,7 +1906,10 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
     typedef cub::BlockStore<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
     typedef cub::BlockStore<T, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
-    union type_ct7 {
+    
+    
+
+    union  type_ct7{
         typename LoadT::TempStorage loadh;
         typename LoadChar::TempStorage loadc;
         typename StoreChar::TempStorage storec;
@@ -1890,68 +1917,54 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
     };
     type_ct7 &temp_storage = *(type_ct7 *)temp_storage_ct1;
 
-    if (item_ct1.get_local_id(2) < 512)
+    if(item_ct1.get_local_id(2) < 512)
     {
-        if (item_ct1.get_local_id(2) < 256)
-            smem_quantiles1[item_ct1.get_local_id(2)] =
-                quantiles1[item_ct1.get_local_id(2)];
+        if(item_ct1.get_local_id(2) < 256)
+            smem_quantiles1[item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
         else
-            smem_quantiles2[item_ct1.get_local_id(2) - 256] =
-                quantiles2[item_ct1.get_local_id(2) - 256];
+            smem_quantiles2[item_ct1.get_local_id(2)-256] = quantiles2[item_ct1.get_local_id(2)-256];
     }
 
     /*
-    DPCT1065:52: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:160: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
 
-    for (unsigned int i = base_idx; i < n_full;
-         i += item_ct1.get_group_range(2) * NUM_THREADS2 * NUM_PER_THREAD2)
+    for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*NUM_THREADS2*NUM_PER_THREAD2)
     {
         valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
         /*
-        DPCT1007:132: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:167: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
         /*
-        DPCT1065:53: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:161: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:133: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:168: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
         /*
-        DPCT1065:54: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:162: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:134: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:169: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 0);
         /*
-        DPCT1065:55: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:163: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:135: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:170: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items);
 
-        if ((i + (item_ct1.get_local_id(2) * NUM_PER_THREAD2) +
-             NUM_PER_THREAD2) > n) {
-            continue;
-        }
+        if((i + (item_ct1.get_local_id(2)*NUM_PER_THREAD2) + NUM_PER_THREAD2) > n){ continue; }
 
-# pragma unroll 4
+        # pragma unroll 4
         for(unsigned int j = 0; j < NUM_PER_THREAD2; j++)
         {
             g_val = float(g_vals[j]);
@@ -1965,8 +1978,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
-            if (sycl::signbit(smem_quantiles1[c1s[j]]) !=
-                sycl::signbit(s1_vals[j]))
+            if(sycl::signbit(smem_quantiles1[c1s[j]]) != sycl::signbit(s1_vals[j]))
             {
               if(s1_vals[j] > 0.0f)
                   c1s[j] += 1;
@@ -1983,42 +1995,33 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         # pragma unroll 4
         for(unsigned int j = 0; j < NUM_PER_THREAD2; j++)
         {
-            p_vals[j] = (T)(((float)p_vals[j]) +
-                            ((update_scale * step_size *
-                              (s1_vals[j] / (sycl::sqrt(s2_vals[j]) +
-                                             (correction2 * eps))))));
+            p_vals[j] = (T)(((float)p_vals[j]) + ((update_scale*step_size*(s1_vals[j]/(sycl::sqrt(s2_vals[j])+(correction2*eps))))));
             if(weight_decay > 0.0f)
                 p_vals[j] = update_scale*((float)p_vals[j])*(1.0f-(lr*weight_decay));
         }
 
         /*
-        DPCT1007:136: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:171: Migration of cub::BlockStore::Store is not supported.
         */
         StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
         /*
-        DPCT1065:56: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:164: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:137: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:172: Migration of cub::BlockStore::Store is not supported.
         */
         StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
         /*
-        DPCT1065:57: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:165: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:138: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:173: Migration of cub::BlockStore::Store is not supported.
         */
         StoreChar(temp_storage.storec).Store(&(state2[i]), c2s, valid_items);
         /*
-        DPCT1065:58: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:166: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
     }
@@ -2026,7 +2029,10 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 
 
 template<typename T, int OPTIMIZER>
-void
+/*
+DPCT1110:3: The total declared local variable size in device function kPreconditionOptimizerStatic8bit1State exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+SYCL_EXTERNAL void
 
 kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1,
                 float *unorm,
@@ -2040,12 +2046,8 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                 float *smem_quantiles1)
 {
     const int n_full = item_ct1.get_group_range(2) * NUM_PER_BLOCK;
-    const int base_idx =
-        (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
-    int valid_items =
-        n - (item_ct1.get_group(2) * NUM_PER_BLOCK) > NUM_PER_BLOCK
-            ? NUM_PER_BLOCK
-            : n - (item_ct1.get_group(2) * NUM_PER_BLOCK);
+    const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
+    int valid_items = n - (item_ct1.get_group(2)*NUM_PER_BLOCK) > NUM_PER_BLOCK ? NUM_PER_BLOCK : n - (item_ct1.get_group(2)*NUM_PER_BLOCK);
     float g_val = 0.0f;
     float local_max_s1 = -FLT_MAX;
     float local_unorm = 0.0f;
@@ -2058,52 +2060,46 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
     typedef cub::BlockLoad<unsigned char, NUM_THREADS, NUM8BIT, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadUInt8;
     typedef sycl::group<3> BlockReduce;
 
-    union type_ct8 {
+
+    union  type_ct8{
         typename LoadT::TempStorage loadh;
         typename LoadUInt8::TempStorage loadc;
         typename BlockReduce::TempStorage reduce;
     };
     type_ct8 &temp_storage = *(type_ct8 *)temp_storage_ct1;
 
-    if (item_ct1.get_local_id(2) < 256)
-      smem_quantiles1[item_ct1.get_local_id(2)] =
-          quantiles1[item_ct1.get_local_id(2)];
+    
+
+    if(item_ct1.get_local_id(2) < 256)
+      smem_quantiles1[item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
 
     /*
-    DPCT1065:30: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:133: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
 
-    for (unsigned int i = base_idx; i < n_full;
-         i += item_ct1.get_group_range(2) * NUM_THREADS * NUM8BIT)
+    for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*NUM_THREADS*NUM8BIT)
     {
         valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
         /*
-        DPCT1065:32: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:135: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:122: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:137: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
         /*
-        DPCT1065:33: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:136: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:123: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:138: Migration of cub::BlockLoad::Load is not supported.
         */
-        LoadUInt8(temp_storage.loadc)
-            .Load(&(state1[i]), m_c1, valid_items, 128);
+        LoadUInt8(temp_storage.loadc).Load(&(state1[i]), m_c1, valid_items, 128);
 
-#pragma unroll 16
+        #pragma unroll 16
         for(int j = 0; j < NUM8BIT; j++)
         {
             g_val = g_vals[j];
@@ -2132,42 +2128,31 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
     }
 
     /*
-    DPCT1065:31: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:134: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
     /*
-    DPCT1007:34: Migration of cub::Reduce is not supported.
+    DPCT1007:4: Migration of cub::Reduce is not supported.
     */
-    local_max_s1 = BlockReduce(temp_storage.reduce)
-                       .Reduce(local_max_s1, sycl::maximum<>(), valid_items);
-    if (item_ct1.get_local_id(2) == 0) {
-        atomicMax(&new_max1[0], local_max_s1);
-    }
+    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, sycl::maximum<>(), valid_items);
+    if(item_ct1.get_local_id(2) == 0){ atomicMax(&new_max1[0], local_max_s1); }
     if(unorm != NULL)
     {
       /*
-      DPCT1065:35: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:139: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:36: Migration of cub::Reduce is not supported.
+      DPCT1007:5: Migration of cub::Reduce is not supported.
       */
-      local_unorm = BlockReduce(temp_storage.reduce)
-                        .Reduce(local_unorm, sycl::plus<>(), valid_items);
-      if (item_ct1.get_local_id(2) == 0) {
-          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(
-              &unorm[0], local_unorm);
-      }
+      local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, sycl::plus<>(), valid_items);
+      if(item_ct1.get_local_id(2) == 0){ dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&unorm[0], local_unorm); }
     }
 
 }
 
 template<typename T, int OPTIMIZER>
-void
+SYCL_EXTERNAL void
 
 kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 const float *unorm, const float max_unorm, const float param_norm,
@@ -2181,11 +2166,8 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 uint8_t *temp_storage_ct1)
 {
 
-    const int n_full =
-        (item_ct1.get_local_range(2) * item_ct1.get_group_range(2)) *
-        NUM_PER_THREAD2;
-    const int base_idx =
-        (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD2);
+    const int n_full = (item_ct1.get_local_range(2) * item_ct1.get_group_range(2))*NUM_PER_THREAD2;
+    const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD2);
     int valid_items = 0;
     float g_val = 0.0f;
     float s1_vals[NUM_PER_THREAD2];
@@ -2209,7 +2191,9 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
     typedef cub::BlockStore<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
     typedef cub::BlockStore<T, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
-    union type_ct9 {
+    
+
+    union  type_ct9{
         typename LoadT::TempStorage loadh;
         typename LoadChar::TempStorage loadc;
         typename StoreChar::TempStorage storec;
@@ -2217,52 +2201,41 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
     };
     type_ct9 &temp_storage = *(type_ct9 *)temp_storage_ct1;
 
-    if (item_ct1.get_local_id(2) < 256)
-        smem_quantiles1[item_ct1.get_local_id(2)] =
-            quantiles1[item_ct1.get_local_id(2)];
+    if(item_ct1.get_local_id(2) < 256)
+        smem_quantiles1[item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
 
     /*
-    DPCT1065:37: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:140: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
 
-    for (unsigned int i = base_idx; i < n_full;
-         i += item_ct1.get_group_range(2) * NUM_THREADS2 * NUM_PER_THREAD2)
+    for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*NUM_THREADS2*NUM_PER_THREAD2)
     {
         valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
         /*
-        DPCT1007:124: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:145: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
         /*
-        DPCT1065:38: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:141: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:125: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:146: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
         /*
-        DPCT1065:39: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:142: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:126: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:147: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items);
 
-        if ((i + (item_ct1.get_local_id(2) * NUM_PER_THREAD2) +
-             NUM_PER_THREAD2) > n) {
-            continue;
-        }
+        if((i + (item_ct1.get_local_id(2)*NUM_PER_THREAD2) + NUM_PER_THREAD2) > n){ continue; }
 
-# pragma unroll 4
+        # pragma unroll 4
         for(unsigned int j = 0; j < NUM_PER_THREAD2; j++)
         {
             g_val = float(g_vals[j]);
@@ -2298,16 +2271,14 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                   break;
               case RMSPROP:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
-                  p_vals[j] = ((float)p_vals[j]) -
-                              (lr * g_val / (sycl::sqrt(s1_vals[j]) + eps));
+                  p_vals[j] = ((float)p_vals[j]) - (lr*g_val / (sycl::sqrt(s1_vals[j])+eps));
                   break;
             }
 
             c1s[j] = dQuantize<0>(smem_quantiles1, 0.0f, s1_vals[j]*new_max_val1);
 
             // make sure state1 term has still the same sign after quantization
-            if (sycl::signbit(smem_quantiles1[c1s[j]]) !=
-                sycl::signbit(s1_vals[j]))
+            if(sycl::signbit(smem_quantiles1[c1s[j]]) != sycl::signbit(s1_vals[j]))
             {
               if(s1_vals[j] > 0.0f)
                   c1s[j] += 1;
@@ -2317,79 +2288,74 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         }
 
         /*
-        DPCT1007:127: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:148: Migration of cub::BlockStore::Store is not supported.
         */
         StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
         /*
-        DPCT1065:40: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:143: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:128: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:149: Migration of cub::BlockStore::Store is not supported.
         */
         StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
         /*
-        DPCT1065:41: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:144: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
     }
 }
 
-template <typename T, int BLOCK_SIZE, int NUM_VALS>
-void kPercentileClipping(T *__restrict__ g, float *gnorm_vec, int step,
-                         const int n, const sycl::nd_item<3> &item_ct1)
+
+template<typename T, int BLOCK_SIZE, int NUM_VALS>
+SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,
+                         const sycl::nd_item<3> &item_ct1)
 {
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
   int valid_items = 0;
 
+  
   typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-  typename BlockReduce::TempStorage &reduce;
 
+  
+
+  
   T vals[NUM_VALS];
   float local_sum = 0.0f;
 
-  for (unsigned int i = (item_ct1.get_group(2) * BLOCK_SIZE); i < n_full;
-       i += item_ct1.get_group_range(2) * BLOCK_SIZE)
+  for (unsigned int i = (item_ct1.get_group(2) * BLOCK_SIZE); i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
   {
       valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
       local_sum = 0.0f;
 
       /*
-      DPCT1065:75: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:202: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
       /*
-      DPCT1007:151: Migration of cub::BlockLoad.Load is not supported.
+      DPCT1007:203: Migration of cub::BlockLoad::Load is not supported.
       */
       LoadT(loadT).Load(&(g[i]), vals, valid_items, (T)0.0f);
 
-#pragma unroll NUM_VALS
+     #pragma unroll NUM_VALS
      for(int j = 0; j < NUM_VALS; j++)
        local_sum += ((float)vals[j])*((float)vals[j]);
 
     /*
-    DPCT1007:76: Migration of cub::Sum is not supported.
+    DPCT1007:12: Migration of cub::Sum is not supported.
     */
     local_sum = BlockReduce(reduce).Sum(local_sum, valid_items);
-    if (item_ct1.get_local_id(2) == 0)
+    if(item_ct1.get_local_id(2) == 0)
     {
       if(step == 1)
       {
         // initialize with the same norm for all positions
         //#pragma unroll 10
         for(int j = 0; j < 100; j++)
-          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(
-              &gnorm_vec[j], local_sum);
+          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&gnorm_vec[j], local_sum);
       }
       else
-          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(
-              &gnorm_vec[step % 100], local_sum);
+          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&gnorm_vec[step % 100], local_sum);
     }
 
   }
@@ -2398,19 +2364,24 @@ void kPercentileClipping(T *__restrict__ g, float *gnorm_vec, int step,
 
 #define LANES 2
 #define QUAD 3
-template <typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
-
-void kOptimizerStatic8bit2StateBlockwise(
-    T *p, T *__restrict__ const g, unsigned char *state1, unsigned char *state2,
-    const float beta1, const float beta2, const float eps, const int step,
-    const float lr, float *__restrict__ const quantiles1,
-    float *__restrict__ const quantiles2, float *absmax1, float *absmax2,
-    float weight_decay, const float gnorm_scale, const bool skip_zeros,
-    const int n, const sycl::nd_item<3> &item_ct1,
-    sycl::local_accessor<float, 2> smem_quantiles1,
-    sycl::local_accessor<float, 2> smem_quantiles2,
-     float *smem_exchange1,
-    float *smem_exchange2, uint8_t *temp_storage_ct1)
+template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
+/*
+DPCT1110:10: The total declared local variable size in device function kOptimizerStatic8bit2StateBlockwise exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+SYCL_EXTERNAL 
+void
+kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,
+                const float beta1, const float beta2,
+                const float eps, const int step, const float lr,
+                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
+                float* absmax1, float* absmax2,
+                float weight_decay,
+                const float gnorm_scale, const bool skip_zeros, const int n,
+                const sycl::nd_item<3> &item_ct1,
+                sycl::local_accessor<float, 2> smem_quantiles1,
+                sycl::local_accessor<float, 2> smem_quantiles2,
+                float *smem_exchange1, float *smem_exchange2,
+                uint8_t *temp_storage_ct1)
 {
 
     //const int n_full = n + (n%BLOCK_SIZE);
@@ -2421,9 +2392,9 @@ void kOptimizerStatic8bit2StateBlockwise(
     float s1_vals[N_PER_TH];
     float s2_vals[N_PER_TH];
     // 2-5%
-    const float correction1 = 1.0f - sycl::pow<float>(beta1, step);
-    const float correction2 = sycl::sqrt(1.0f - sycl::pow<float>(beta2, step));
-    const float step_size = (-lr * correction2) / correction1;
+    const float correction1 = 1.0f - dpct::pow(beta1, step);
+    const float correction2 = sycl::sqrt(1.0f -dpct::pow(beta2, step));
+    const float step_size = (-lr*correction2) / correction1;
     const int lane_id = item_ct1.get_local_id(2) % LANES;
     float new_local_abs_max1 = -FLT_MAX;
     float new_local_abs_max2 = -FLT_MAX;
@@ -2440,16 +2411,16 @@ void kOptimizerStatic8bit2StateBlockwise(
     typedef cub::BlockStore<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
     typedef cub::BlockStore<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
-
-    //__shared__ float smem_quantiles1[LANES][257];
-    //__shared__ float smem_quantiles2[LANES][257];
-    typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce1;
-    typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce2;
-    typename BlockReduce1::TempStorage reduce1;
-    typename BlockReduce2::TempStorage reduce2;
-
     
-    union type_ct10 {
+    
+    
+    
+    
+    
+    
+    
+
+    union  type_ct10{
         typename LoadT::TempStorage loadh;
         typename LoadChar::TempStorage loadc;
         typename StoreChar::TempStorage storec;
@@ -2459,66 +2430,54 @@ void kOptimizerStatic8bit2StateBlockwise(
     // init: 0.2 -> 0.23
 
     // 0.23 -> 0.23
-      smem_quantiles1[0][item_ct1.get_local_id(2)] =
-          quantiles1[item_ct1.get_local_id(2)];
-      smem_quantiles2[0][item_ct1.get_local_id(2)] =
-          quantiles2[item_ct1.get_local_id(2)];
-# pragma unroll
+      smem_quantiles1[0][item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
+      smem_quantiles2[0][item_ct1.get_local_id(2)] = quantiles2[item_ct1.get_local_id(2)];
+      # pragma unroll
       for(unsigned int j = 1; j < LANES; j++)
       {
-        smem_quantiles1[j][item_ct1.get_local_id(2)] =
-            smem_quantiles1[0][item_ct1.get_local_id(2)];
-        smem_quantiles2[j][item_ct1.get_local_id(2)] =
-            smem_quantiles2[0][item_ct1.get_local_id(2)];
+        smem_quantiles1[j][item_ct1.get_local_id(2)] = smem_quantiles1[0][item_ct1.get_local_id(2)];
+        smem_quantiles2[j][item_ct1.get_local_id(2)] = smem_quantiles2[0][item_ct1.get_local_id(2)];
       }
 
     /*
-    DPCT1065:59: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:174: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
 
-#pragma unroll
+    #pragma unroll
     for(int k = 0; k < QUAD; k++)
     {
       quadrants1[k] = smem_quantiles1[lane_id][(k*256/(QUAD+1)) + (256/(QUAD+1)-1)];
       quadrants2[k] = smem_quantiles2[lane_id][(k*256/(QUAD+1)) + (256/(QUAD+1)-1)];
     }
 
-    for (unsigned int i = base_idx; i < n_full;
-         i += item_ct1.get_group_range(2) * BLOCK_SIZE)
+
+    for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
     {
         // loads: 0.23 -> 0.85/1.44
         valid_items = n - i >= BLOCK_SIZE ? BLOCK_SIZE : n - i;
         /*
-        DPCT1065:60: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:175: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:139: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:183: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
         /*
-        DPCT1065:61: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:176: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:140: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:184: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
         /*
-        DPCT1065:62: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:177: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:141: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:185: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 0);
 
@@ -2529,15 +2488,14 @@ void kOptimizerStatic8bit2StateBlockwise(
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            if (!sycl::isnan((float)g_vals[j]) &&
-                !sycl::isinf((float)g_vals[j]))
-                                                {
+            if(!sycl::isnan((float)g_vals[j]) && !sycl::isinf((float)g_vals[j]))
+						{
 							s2_vals[j] = smem_quantiles2[lane_id][c2s[j]]*absmax2[i/BLOCK_SIZE];
               g_val = g_vals[j];
               //float ratio = (g_val*g_val)/fmaxf(s2_vals[j], eps*eps);
               //g_val = ratio > 2.0f ? 2.0f*g_val/ratio : g_val;
               g_val *= gnorm_scale;
-              
+
 							s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
 
 							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
@@ -2549,33 +2507,27 @@ void kOptimizerStatic8bit2StateBlockwise(
               s2_vals[j] = 0.0f;
             }
 
-            new_local_abs_max1 =
-                sycl::fmax(new_local_abs_max1, sycl::fabs(s1_vals[j]));
-            new_local_abs_max2 =
-                sycl::fmax(new_local_abs_max2, sycl::fabs(s2_vals[j]));
+            new_local_abs_max1 = sycl::fmax(new_local_abs_max1, sycl::fabs(s1_vals[j]));
+            new_local_abs_max2 = sycl::fmax(new_local_abs_max2, sycl::fabs(s2_vals[j]));
         }
 
 
         //  reduce: 2.51/1.60 -> 2.67/1.69
-        new_local_abs_max1 = sycl::reduce_over_group(
-            item_ct1.get_group(), new_local_abs_max1, sycl::maximum<>());
-        new_local_abs_max2 = sycl::reduce_over_group(
-            item_ct1.get_group(), new_local_abs_max2, sycl::maximum<>());
+        new_local_abs_max1 = sycl::reduce_over_group(item_ct1.get_group(), new_local_abs_max1, sycl::maximum<>());
+        new_local_abs_max2 = sycl::reduce_over_group(item_ct1.get_group(), new_local_abs_max2, sycl::maximum<>());
 
-        if (item_ct1.get_local_id(2) == 0)
+        if(item_ct1.get_local_id(2) == 0)
         {
           smem_exchange1[0] = new_local_abs_max1;
           smem_exchange2[0] = new_local_abs_max2;
         }
 
         /*
-        DPCT1065:63: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:178: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
 
-        if (item_ct1.get_local_id(2) == 0)
+        if(item_ct1.get_local_id(2) == 0)
         {
           absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
           absmax2[i/BLOCK_SIZE] = new_local_abs_max2;
@@ -2587,13 +2539,11 @@ void kOptimizerStatic8bit2StateBlockwise(
         }
 
         /*
-        DPCT1065:64: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:179: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:142: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:186: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
         //  reduce: 2.67/1.69 -> 2.67/1.70
@@ -2601,33 +2551,21 @@ void kOptimizerStatic8bit2StateBlockwise(
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
 						//if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
-            if (!sycl::isnan((float)g_vals[j]) &&
-                !sycl::isinf((float)g_vals[j]))
-                                                {
-                                                        p_vals[j] =
-                                                            (T)(((float)p_vals
-                                                                     [j]) +
-                                                                ((step_size *
-                                                                  (s1_vals[j] /
-                                                                   (sycl::sqrt(
-                                                                        s2_vals
-                                                                            [j]) +
-                                                                    (correction2 *
-                                                                     eps))))));
-                                                        if(weight_decay > 0.0f)
+            if(!sycl::isnan((float)g_vals[j]) && !sycl::isinf((float)g_vals[j]))
+						{
+							p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(s1_vals[j] / (sycl::sqrt(s2_vals[j])+(correction2*eps))))));
+							if(weight_decay > 0.0f)
 									p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
 						}
         }
 
         //  store: 0.85/1.44 -> 2.48/1.57
         /*
-        DPCT1065:65: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:180: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:143: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:187: Migration of cub::BlockStore::Store is not supported.
         */
         StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
 
@@ -2635,15 +2573,12 @@ void kOptimizerStatic8bit2StateBlockwise(
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id],
-                                    s1_vals[j] / new_local_abs_max1);
-            c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id],
-                                    s2_vals[j] / new_local_abs_max2);
+            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], s1_vals[j] / new_local_abs_max1);
+            c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id], s2_vals[j] / new_local_abs_max2);
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
-            if (sycl::signbit(smem_quantiles1[lane_id][c1s[j]]) !=
-                sycl::signbit(s1_vals[j]))
+            if(sycl::signbit(smem_quantiles1[lane_id][c1s[j]]) != sycl::signbit(s1_vals[j]))
             {
               if(s1_vals[j] > 0.0f)
                   c1s[j] += 1;
@@ -2653,23 +2588,19 @@ void kOptimizerStatic8bit2StateBlockwise(
         }
 
         /*
-        DPCT1065:66: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:181: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:144: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:188: Migration of cub::BlockStore::Store is not supported.
         */
         StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
         /*
-        DPCT1065:67: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:182: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:145: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:189: Migration of cub::BlockStore::Store is not supported.
         */
         StoreChar(temp_storage.storec).Store(&(state2[i]), c2s, valid_items);
     }
@@ -2678,17 +2609,22 @@ void kOptimizerStatic8bit2StateBlockwise(
 
 #define LANES 2
 #define QUAD 3
-template <typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
-
-void kOptimizerStatic8bit1StateBlockwise(
-    T *p, T *__restrict__ const g, unsigned char *state1, const float beta1,
-    const float beta2, const float eps, const int step, const float lr,
-    float *__restrict__ const quantiles1, float *absmax1, float weight_decay,
-    const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1,
-    sycl::local_accessor<float, 2> smem_quantiles1,
-    float *smem_exchange1,
-    uint8_t *temp_storage_ct1)
+template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
+/*
+DPCT1110:11: The total declared local variable size in device function kOptimizerStatic8bit1StateBlockwise exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+SYCL_EXTERNAL 
+void
+kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char* state1,
+                const float beta1, const float beta2,
+                const float eps, const int step, const float lr,
+                float* __restrict__ const quantiles1,
+                float* absmax1,
+                float weight_decay,
+                const float gnorm_scale, const bool skip_zeros, const int n,
+                const sycl::nd_item<3> &item_ct1,
+                sycl::local_accessor<float, 2> smem_quantiles1,
+                float *smem_exchange1, uint8_t *temp_storage_ct1)
 {
 
     //const int n_full = n + (n%BLOCK_SIZE);
@@ -2712,12 +2648,12 @@ void kOptimizerStatic8bit1StateBlockwise(
     typedef cub::BlockStore<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
     typedef cub::BlockStore<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
-     //__shared__ float smem_quantiles1[LANES][257];
-    typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce1;
-    __shared__ typename BlockReduce1::TempStorage reduce1;
-    //__shared__ float smem_exchange1[1];
+    
+    
+    
+    
 
-    union type_ct11 {
+    union  type_ct11{
         typename LoadT::TempStorage loadh;
         typename LoadChar::TempStorage loadc;
         typename StoreChar::TempStorage storec;
@@ -2727,57 +2663,46 @@ void kOptimizerStatic8bit1StateBlockwise(
     // init: 0.2 -> 0.23
 
     // 0.23 -> 0.23
-                smem_quantiles1[0][item_ct1.get_local_id(2)] =
-                    quantiles1[item_ct1.get_local_id(2)];
-# pragma unroll
+		smem_quantiles1[0][item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
+		# pragma unroll
 		for(unsigned int j = 1; j < LANES; j++)
-                        smem_quantiles1[j][item_ct1.get_local_id(2)] =
-                            smem_quantiles1[0][item_ct1.get_local_id(2)];
+			smem_quantiles1[j][item_ct1.get_local_id(2)] = smem_quantiles1[0][item_ct1.get_local_id(2)];
 
     /*
-    DPCT1065:68: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:190: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
 
-#pragma unroll
+    #pragma unroll
     for(int k = 0; k < QUAD; k++)
       quadrants1[k] = smem_quantiles1[lane_id][(k*256/(QUAD+1)) + (256/(QUAD+1)-1)];
 
-    for (unsigned int i = base_idx; i < n_full;
-         i += item_ct1.get_group_range(2) * BLOCK_SIZE)
+    for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
     {
         // loads: 0.23 -> 0.85/1.44
         valid_items = n - i >= BLOCK_SIZE ? BLOCK_SIZE : n - i;
         /*
-        DPCT1065:69: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:191: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:146: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:197: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
         /*
-        DPCT1065:70: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:192: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:147: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:198: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
         /*
-        DPCT1065:71: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:193: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:148: Migration of cub::BlockLoad.Load is not supported.
+        DPCT1007:199: Migration of cub::BlockLoad::Load is not supported.
         */
         LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
 
@@ -2828,26 +2753,22 @@ void kOptimizerStatic8bit1StateBlockwise(
 							}
 						}
 
-            new_local_abs_max1 =
-                sycl::fmax(new_local_abs_max1, sycl::fabs(s1_vals[j]));
+            new_local_abs_max1 = sycl::fmax(new_local_abs_max1, sycl::fabs(s1_vals[j]));
         }
 
 
         //  reduce: 2.51/1.60 -> 2.67/1.69
-        new_local_abs_max1 = sycl::reduce_over_group(
-            item_ct1.get_group(), new_local_abs_max1, sycl::maximum<>());
+        new_local_abs_max1 = sycl::reduce_over_group(item_ct1.get_group(), new_local_abs_max1, sycl::maximum<>());
 
-        if (item_ct1.get_local_id(2) == 0)
+        if(item_ct1.get_local_id(2) == 0)
           smem_exchange1[0] = new_local_abs_max1;
 
         /*
-        DPCT1065:72: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:194: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
 
-        if (item_ct1.get_local_id(2) == 0)
+        if(item_ct1.get_local_id(2) == 0)
           absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
         else
           new_local_abs_max1 = smem_exchange1[0];
@@ -2868,41 +2789,23 @@ void kOptimizerStatic8bit1StateBlockwise(
 										break;
 									case RMSPROP:
 										g_val = g_vals[j];
-                                                                                p_vals[j] =
-                                                                                    ((float)p_vals
-                                                                                         [j]) -
-                                                                                    lr *
-                                                                                        (g_val /
-                                                                                         (sycl::sqrt(
-                                                                                              s1_vals
-                                                                                                  [j]) +
-                                                                                          eps));
-                                                                                break;
+										p_vals[j] = ((float)p_vals[j]) - lr*(g_val / (sycl::sqrt(s1_vals[j])+eps));
+										break;
 									case ADAGRAD:
 										g_val = g_vals[j];
-                                                                                p_vals[j] =
-                                                                                    ((float)p_vals
-                                                                                         [j]) -
-                                                                                    lr *
-                                                                                        (g_val /
-                                                                                         (sycl::sqrt(
-                                                                                              s1_vals
-                                                                                                  [j]) +
-                                                                                          eps));
-                                                                                break;
+										p_vals[j] = ((float)p_vals[j]) - lr*(g_val / (sycl::sqrt(s1_vals[j])+eps));
+										break;
 							}
 						}
 				}
 
         //  store: 0.85/1.44 -> 2.48/1.57
         /*
-        DPCT1065:73: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:195: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:149: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:200: Migration of cub::BlockStore::Store is not supported.
         */
         StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
 
@@ -2910,13 +2813,11 @@ void kOptimizerStatic8bit1StateBlockwise(
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id],
-                                    s1_vals[j] / new_local_abs_max1);
+            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], s1_vals[j] / new_local_abs_max1);
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
-            if (sycl::signbit(smem_quantiles1[lane_id][c1s[j]]) !=
-                sycl::signbit(s1_vals[j]))
+            if(sycl::signbit(smem_quantiles1[lane_id][c1s[j]]) != sycl::signbit(s1_vals[j]))
             {
               if(s1_vals[j] > 0.0f)
                   c1s[j] += 1;
@@ -2926,13 +2827,11 @@ void kOptimizerStatic8bit1StateBlockwise(
         }
 
         /*
-        DPCT1065:74: Consider replacing sycl::nd_item::barrier() with
-        sycl::nd_item::barrier(sycl::access::fence_space::local_space) for
-        better performance if there is no access to global memory.
+        DPCT1065:196: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier();
         /*
-        DPCT1007:150: Migration of cub::BlockStore.Store is not supported.
+        DPCT1007:201: Migration of cub::BlockStore::Store is not supported.
         */
         StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
     }
@@ -2953,10 +2852,9 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   // each block loads TILE_COLs columns and TILE_ROW rows
   // after reading a tile the row counter increase by TILE_ROWS
   // the col counter reset after reading TILE_COL elements
-  const int base_row =
-      ((item_ct1.get_group(2) * TILE_COLS) / tiledCols) * TILE_ROWS;
+  const int base_row = ((item_ct1.get_group(2)*TILE_COLS)/tiledCols)*TILE_ROWS;
   // col increases by TILE_SIZE for each block and wraps back to 0 after tiledCols is reached
-  const int base_col = (item_ct1.get_group(2) * TILE_COLS) % tiledCols;
+  const int base_col = (item_ct1.get_group(2)*TILE_COLS) % tiledCols;
   const int base_idx = (base_row*cols) + base_col;
   const int items_per_load = ITEMS_PER_THREAD*THREADS;
 
@@ -2965,13 +2863,16 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   typedef sycl::group<3> BlockRowSum;
   typedef cub::BlockExchange<float, THREADS, ITEMS_PER_THREAD> BlockExchange;
 
-  union type_ct12 {
+  union  type_ct12{
     typename BlockExchange::TempStorage exchange;
     typename BlockRowReduce::TempStorage rowreduce;
     typename BlockRowSum::TempStorage rowsum;
     typename LoadT::TempStorage loadt;
   };
   type_ct12 &temp_storage = *(type_ct12 *)temp_storage_ct1;
+
+  
+  
 
   sycl::half local_data[ITEMS_PER_THREAD];
   float local_data_fp32[ITEMS_PER_THREAD];
@@ -2983,8 +2884,13 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
   {
     //smem_col_absmax_values[threadIdx.x + (j*THREADS)] = -FLT_MAX;
-    smem_row_absmax_values[item_ct1.get_local_id(2) + (j * THREADS)] = -FLT_MAX;
-    smem_row_nnz_values[item_ct1.get_local_id(2) + (j * THREADS)] = 0;
+    smem_row_absmax_values[item_ct1.get_local_id(2) + (j*THREADS)] = -FLT_MAX;
+    // smem_row_nnz_values[threadIdx.x + (j*THREADS)] = 0;
+  }
+
+  #pragma unroll TILE_ROWS
+  for (int j = 0; j < TILE_ROWS; j++) {
+    smem_row_nnz_values[j] = 0;
   }
 
   #pragma unroll ITEMS_PER_THREAD
@@ -2992,9 +2898,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     local_col_absmax_values[j] = -FLT_MAX;
 
   /*
-  DPCT1065:79: Consider replacing sycl::nd_item::barrier() with
-  sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-  performance if there is no access to global memory.
+  DPCT1065:208: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
   */
   item_ct1.barrier();
 
@@ -3009,22 +2913,18 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     i = base_idx + ((row)*cols);
     // each thread gets data from the same column
     /*
-    DPCT1065:81: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:210: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
     /*
-    DPCT1007:154: Migration of cub::BlockLoad.Load is not supported.
+    DPCT1007:213: Migration of cub::BlockLoad::Load is not supported.
     */
-    LoadT(temp_storage.loadt)
-        .Load(&(A[i]), local_data, valid_items,
-              sycl::vec<float, 1>{0.0f}
-                  .convert<sycl::half, sycl::rounding_mode::automatic>()[0]);
+    LoadT(temp_storage.loadt).Load(&(A[i]), local_data, valid_items, sycl::vec<float, 1>(0.0f).convert<sycl::half, sycl::rounding_mode::automatic>()[0]);
 
-#pragma unroll ITEMS_PER_THREAD
+    #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
       local_data[j] = sycl::fabs(local_data[j]);
+
 
     if(SPARSE_DECOMP)
       #pragma unroll ITEMS_PER_THREAD
@@ -3043,10 +2943,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
       // take the col max for this row
       // we use shared memory because register pressure is too high if we do this locally
       //smem_col_absmax_values[threadIdx.x + (j*THREADS)] = fmaxf(smem_col_absmax_values[threadIdx.x + (j*THREADS)], __half2float(local_data[j]));
-      local_col_absmax_values[j] =
-          sycl::fmax(local_col_absmax_values[j],
-                     sycl::vec<sycl::half, 1>{local_data[j]}
-                         .convert<float, sycl::rounding_mode::automatic>()[0]);
+      local_col_absmax_values[j] = sycl::fmax(local_col_absmax_values[j], sycl::vec<sycl::half, 1>(local_data[j]).convert<float, sycl::rounding_mode::automatic>()[0]);
 
     // 3. compute row max (per block); store in smem to accumulate full global mem transation
 
@@ -3056,29 +2953,23 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
       local_data_fp32[j] = local_data[j];
 
     /*
-    DPCT1065:82: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:211: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
 
-    row_absmax = (float)dpct::group::reduce(item_ct1, local_data_fp32,
-                                            sycl::maximum<>());
+    row_absmax = (float)dpct::group::reduce(item_ct1, local_data_fp32, sycl::maximum<>());
     if(SPARSE_DECOMP)
     {
       /*
-      DPCT1065:84: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:214: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
-      local_row_nnz_count = sycl::reduce_over_group(
-          item_ct1.get_group(), local_row_nnz_count, sycl::plus<>());
+      local_row_nnz_count = sycl::reduce_over_group(item_ct1.get_group(), local_row_nnz_count, sycl::plus<>());
     }
     // we store the data temporarily in shared memory so we
     // can execute a full atomic block transaction into global memory later
     // we use a striped arrangement [0, 8, 16, 24, ..] for t0 for faster stores
-    if (item_ct1.get_local_id(2) == 0)
+    if(item_ct1.get_local_id(2) == 0)
     {
       smem_row_absmax_values[(row % ITEMS_PER_THREAD) + ((row/ITEMS_PER_THREAD)*ITEMS_PER_THREAD)] = row_absmax;
       // each blockIdx.x process 16 rows and 64*4=256 columns -> we sum nnz over 256 columns and have 16 values per block
@@ -3086,80 +2977,63 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     }
 
     /*
-    DPCT1065:83: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:212: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
+
   }
 
   // 4. store data via atomicMax
-  // to store col data efficienctly we need to rewrite the smem blocked data [0, 1, 2, 3...] for t0
-  // into a striped arangement: [0, 8, 16, 24, ..] for t0
+  // to store col data efficiently we need to rewrite the smem blocked data [0, 1, 2, 3...] for t0
+  // into a striped arrangement: [0, 8, 16, 24, ..] for t0
   /*
-  DPCT1065:80: Consider replacing sycl::nd_item::barrier() with
-  sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-  performance if there is no access to global memory.
+  DPCT1065:209: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
   */
   item_ct1.barrier();
   /*
-  DPCT1007:155: Migration of cub::BlockExchange.BlockedToStriped is not
-  supported.
+  DPCT1007:215: Migration of cub::BlockExchange::BlockedToStriped is not supported.
   */
-  BlockExchange(temp_storage.exchange)
-      .BlockedToStriped(local_col_absmax_values);
+  BlockExchange(temp_storage.exchange).BlockedToStriped(local_col_absmax_values);
 
-#pragma unroll ITEMS_PER_THREAD
+  #pragma unroll ITEMS_PER_THREAD
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
-    if (base_col + item_ct1.get_local_id(2) + (j * THREADS) < cols)
+    if(base_col+item_ct1.get_local_id(2)+(j*THREADS) < cols)
     {
-      float val =
-          colStats[base_col + (item_ct1.get_local_id(2) + (j * THREADS))];
+      float val = colStats[base_col+(item_ct1.get_local_id(2)+(j*THREADS))];
       if(val < local_col_absmax_values[j])
-        atomicMax(
-            &colStats[base_col + (item_ct1.get_local_id(2) + (j * THREADS))],
-            local_col_absmax_values[j]);
+        atomicMax(&colStats[base_col+(item_ct1.get_local_id(2)+(j*THREADS))], local_col_absmax_values[j]);
     }
 
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
-    if (base_row + item_ct1.get_local_id(2) + (j * THREADS) < rows)
+    if(base_row+item_ct1.get_local_id(2)+(j*THREADS) < rows)
     {
-      float val =
-          rowStats[base_row + (item_ct1.get_local_id(2) + (j * THREADS))];
-      if (val <
-          smem_row_absmax_values[item_ct1.get_local_id(2) + (j * THREADS)])
-        atomicMax(
-            &rowStats[base_row + (item_ct1.get_local_id(2) + (j * THREADS))],
-            smem_row_absmax_values[item_ct1.get_local_id(2) + (j * THREADS)]);
+      float val = rowStats[base_row+(item_ct1.get_local_id(2)+(j*THREADS))];
+      if(val < smem_row_absmax_values[item_ct1.get_local_id(2)+(j*THREADS)])
+        atomicMax(&rowStats[base_row+(item_ct1.get_local_id(2)+(j*THREADS))], smem_row_absmax_values[item_ct1.get_local_id(2)+(j*THREADS)]);
     }
 
     if(SPARSE_DECOMP)
-      if (item_ct1.get_local_id(2) < TILE_ROWS)
-        nnz_count_row[item_ct1.get_group(2) * TILE_ROWS +
-                      item_ct1.get_local_id(2) + 1] =
-            smem_row_nnz_values[item_ct1.get_local_id(2)];
+      if(item_ct1.get_local_id(2) < TILE_ROWS)
+        nnz_count_row[item_ct1.get_group(2)*TILE_ROWS+item_ct1.get_local_id(2)+1] = smem_row_nnz_values[item_ct1.get_local_id(2)];
+
 }
 
-template void kgetColRowStats<sycl::half, 64, 4, 16, 64 * 4, 0>(
-    sycl::half *__restrict__ A, float *rowStats, float *colStats,
-    int *nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows,
-    int tiledCols, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1,
-    float *smem_row_absmax_values, int *smem_row_nnz_values);
-template void kgetColRowStats<sycl::half, 64, 4, 16, 64 * 4, 1>(
-    sycl::half *__restrict__ A, float *rowStats, float *colStats,
-    int *nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows,
-    int tiledCols, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1,
-    float *smem_row_absmax_values, int *smem_row_nnz_values);
+template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 0>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,
+                                                        const sycl::nd_item<3> &item_ct1,
+                                                        uint8_t *temp_storage_ct1,
+                                                        float *smem_row_absmax_values,
+                                                        int *smem_row_nnz_values);
+template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 1>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,
+                                                        const sycl::nd_item<3> &item_ct1,
+                                                        uint8_t *temp_storage_ct1,
+                                                        float *smem_row_absmax_values,
+                                                        int *smem_row_nnz_values);
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
-template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>
-void kdequant_mm_int32_fp16(
-    int *__restrict__ const A, float *__restrict__ const rowStats,
-    float *__restrict__ const colStats, sycl::half *out, float *newRowStats,
-    float *newcolStats, sycl::half *__restrict__ const bias, const int numRows,
-    const int numCols, const int tileCols, const int n,
-    const sycl::nd_item<3> &item_ct1, float *smem_rowStats)
+template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *__restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,
+                                                                                          const sycl::nd_item<3> &item_ct1,
+                                                                                          float *smem_rowStats)
 {
 
   // Strategy: To dequantize we need to load col/row statistics. This can be very expensive
@@ -3177,7 +3051,7 @@ void kdequant_mm_int32_fp16(
 
   // data is in 32 column-tile major with tile width 32 columns and numRows rows
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
-  // L2. Load data in warp-striped arangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
+  // L2. Load data in warp-striped arrangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
   // C1. Compute val(row_stat*col_stat)/(127*127) (load 1/(127*127 into register))
   // C2. Compute normalization values and store col values in register
   // S1. Store C1 into 16-bit output
@@ -3193,11 +3067,9 @@ void kdequant_mm_int32_fp16(
   // we have tiles of size numRows*32, thus col only increases every numRows
   // num_row_tiles is the tiles after which the column increases by 32
   // blockIdx.x is the index of the current tile
-  int col = ((item_ct1.get_local_id(2) % 32) +
-             ((item_ct1.get_group(2) / num_row_tiles) * 32));
+  int col = ((item_ct1.get_local_id(2) % 32) + ((item_ct1.get_group(2)/num_row_tiles)*32));
   // base_row increases by SUBTILE_ROWS every block. It wraps back to zero once num_row_tiles is reached
-  int base_row =
-      (item_ct1.get_group(2) * SUBTILE_ROWS) % (num_row_tiles * SUBTILE_ROWS);
+  int base_row = (item_ct1.get_group(2)*SUBTILE_ROWS) % (num_row_tiles*SUBTILE_ROWS);
 
   // SUBTILE_ROWS is independent from ITEMS_PER_THREAD is independent from THREADS
   // subtiles have 32*SUBTILE_ROWS elements <= THREADS*ITEMS_PER_THREAD
@@ -3213,20 +3085,19 @@ void kdequant_mm_int32_fp16(
   int local_values[ITEMS_PER_THREAD];
   sycl::half local_output[ITEMS_PER_THREAD];
   float local_rowStats[ITEMS_PER_THREAD];
+  
 
   typedef cub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadInt32;
   typedef cub::BlockExchange<int, THREADS, ITEMS_PER_THREAD> ExchangeInt32;
+  
+  
+
 
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
   float colStat = col >= numCols ? 0.0f : colStats[col];
-  float local_biasValue =
-      ((bias == NULL) || (col >= numCols))
-          ? 0.0f
-          : sycl::vec<sycl::half, 1>{bias[col]}
-                .convert<float, sycl::rounding_mode::automatic>()[0];
+  float local_biasValue = ((bias == NULL) || (col >= numCols)) ? 0.0f : sycl::vec<sycl::half, 1>(bias[col]).convert<float, sycl::rounding_mode::automatic>()[0];
   // no block loads for rows for now -- keep it simple
-  for (int j = item_ct1.get_local_id(2); j < SUBTILE_ROWS;
-       j += item_ct1.get_local_range(2))
+  for(int j = item_ct1.get_local_id(2); j < SUBTILE_ROWS; j+=item_ct1.get_local_range(2))
   {
     // todo: is this global mem access slow due to overlaps or does the L1 cache work well here?
     int row = (base_row+j) % numRows; // wrap around
@@ -3236,22 +3107,19 @@ void kdequant_mm_int32_fp16(
     smem_rowStats[j] = rowStats[row];
   }
   /*
-  DPCT1065:78: Consider replacing sycl::nd_item::barrier() with
-  sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-  performance if there is no access to global memory.
+  DPCT1065:205: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
   */
   item_ct1.barrier();
+
 
   // each block processes SUBTILE_ROWS*32 elements
   const int items_per_load = THREADS*ITEMS_PER_THREAD;
   const int rows_per_load = items_per_load/32;
 
-  int subtile_base_row =
-      (item_ct1.get_local_id(2) / 32) * ITEMS_PER_THREAD; // row within the tile
+  int subtile_base_row = (item_ct1.get_local_id(2) / 32)*ITEMS_PER_THREAD; // row within the tile
   int row_offset = 0;
   // subtile_idx starts at the base_row*32 + the total offset for a full numRow*32 tile is passed
-  int subtile_start = (item_ct1.get_group(2) / num_row_tiles) * (numRows * 32) +
-                      (base_row * 32);
+  int subtile_start = (item_ct1.get_group(2)/num_row_tiles)*(numRows*32) + (base_row*32);
   for(int subtile_idx = subtile_start; subtile_idx < subtile_start + (SUBTILE_ROWS*32); subtile_idx+=items_per_load)
   {
     int valid_rows = numRows - (base_row+row_offset) > rows_per_load ? rows_per_load : numRows - (base_row+row_offset);
@@ -3259,29 +3127,23 @@ void kdequant_mm_int32_fp16(
     if(valid_items <= 0) // the sub-tile might have more elements than the tile itself
       break;
 
-    // L2. Load data in warp-striped arangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
+    // L2. Load data in warp-striped arrangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
     /*
-    DPCT1007:152: Migration of cub::BlockLoad.Load is not supported.
+    DPCT1007:206: Migration of cub::BlockLoad::Load is not supported.
     */
     LoadInt32(loadint32).Load(&(A[subtile_idx]), local_values, valid_items, 0);
     /*
-    DPCT1007:153: Migration of cub::BlockExchange.BlockedToWarpStriped is not
-    supported.
+    DPCT1007:207: Migration of cub::BlockExchange::BlockedToWarpStriped is not supported.
     */
-    ExchangeInt32(exchangeint32)
-        .BlockedToWarpStriped(local_values, local_values);
+    ExchangeInt32(exchangeint32).BlockedToWarpStriped(local_values, local_values);
 
-#pragma unroll ITEMS_PER_THREAD
+    #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
       local_rowStats[j] = smem_rowStats[subtile_base_row+row_offset+j];
 
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
-      local_output[j] =
-          sycl::vec<float, 1>{((local_values[j] * MM_DEQUANT_CONST *
-                                local_rowStats[j] * colStat) +
-                               local_biasValue)}
-              .convert<sycl::half, sycl::rounding_mode::automatic>()[0];
+      local_output[j] = sycl::vec<float, 1>((local_values[j]*MM_DEQUANT_CONST*local_rowStats[j]*colStat) + local_biasValue).convert<sycl::half, sycl::rounding_mode::automatic>()[0];
       //absmax_col = fmax(fabsf(local_output[j]), absmax_col);
 
     // we store data in row major
@@ -3301,17 +3163,11 @@ void kdequant_mm_int32_fp16(
   }
 }
 
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS,
-          int SPARSE_DECOMP>
-void kDoubleRowColQuant(sycl::half *__restrict__ const A,
-                        float *__restrict__ const rowStats,
-                        float *__restrict__ const colStats,
-                        char *out_col_normed, char *out_row_normed, int *rowidx,
-                        int *colidx, sycl::half *val,
-                        int *__restrict__ nnz_block_ptr, float threshold,
-                        int rows, int cols, int tiledCols,
-                        const sycl::nd_item<3> &item_ct1,
-                        float *smem_row_stats, unsigned int *smem_nnz_row_idx)
+
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kDoubleRowColQuant(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols,
+                                                                                                                      const sycl::nd_item<3> &item_ct1,
+                                                                                                                      float *smem_row_stats,
+                                                                                                                      unsigned int *smem_nnz_row_idx)
 {
   // assumes TILE_SIZE == THREADS*ITEMS_PER_THREAD
   // Each thread reads the same column but multiple rows
@@ -3325,18 +3181,19 @@ void kDoubleRowColQuant(sycl::half *__restrict__ const A,
   // each block loads TILE_COLs columns and TILE_ROW rows
   // after reading a tile the row counter increase by TILE_ROWS
   // the col counter reset after reading TILE_COL elements
-  const int base_row =
-      ((item_ct1.get_group(2) * TILE_COLS) / tiledCols) * TILE_ROWS;
+  const int base_row = ((item_ct1.get_group(2)*TILE_COLS)/tiledCols)*TILE_ROWS;
   // col increases by TILE_SIZE for each block and wraps back to 0 after tiledCols is reached
-  const int base_col = (item_ct1.get_group(2) * TILE_COLS) % tiledCols;
+  const int base_col = (item_ct1.get_group(2)*TILE_COLS) % tiledCols;
   const int base_idx = (base_row*cols) + base_col;
   const int items_per_load = ITEMS_PER_THREAD*THREADS;
 
-  typedef cub::BlockLoad<sycl::half, THREADS, ITEMS_PER_THREAD,
-                         cub::BLOCK_LOAD_VECTORIZE>
-      LoadHalf;
-
+  typedef cub::BlockLoad<sycl::half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadHalf;
+  
   typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
+  
+
+  
+  
 
   sycl::half local_data[ITEMS_PER_THREAD];
   float local_col_stats[ITEMS_PER_THREAD];
@@ -3345,25 +3202,22 @@ void kDoubleRowColQuant(sycl::half *__restrict__ const A,
   // 0. Load row stats data into shared memory; load col stat (1 fixed per thread)
   #pragma unroll ITEMS_PER_THREAD
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
-    if (base_col + (item_ct1.get_local_id(2) * ITEMS_PER_THREAD) + j < cols)
-      local_col_stats[j] =
-          127.0f / colStats[base_col +
-                            (item_ct1.get_local_id(2) * ITEMS_PER_THREAD) + j];
+    if(base_col+(item_ct1.get_local_id(2)*ITEMS_PER_THREAD) + j < cols)
+      /*
+      DPCT1064:221: Migrated __fdividef call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
+      */
+      local_col_stats[j] = 127.0f / colStats[base_col+(item_ct1.get_local_id(2)*ITEMS_PER_THREAD)+j];
 
-  for (int i = item_ct1.get_local_id(2); i < TILE_ROWS;
-       i += item_ct1.get_local_range(2))
+  for(int i = item_ct1.get_local_id(2); i < TILE_ROWS; i+=item_ct1.get_local_range(2))
   {
     if(base_row + i < rows)
       smem_row_stats[i] = rowStats[base_row+i];
 
     if(SPARSE_DECOMP)
-      smem_nnz_row_idx[i] =
-          nnz_block_ptr[(TILE_ROWS * item_ct1.get_group(2)) + i];
+      smem_nnz_row_idx[i] = nnz_block_ptr[(TILE_ROWS*item_ct1.get_group(2)) + i];
   }
   /*
-  DPCT1065:85: Consider replacing sycl::nd_item::barrier() with
-  sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-  performance if there is no access to global memory.
+  DPCT1065:216: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
   */
   item_ct1.barrier();
 
@@ -3375,8 +3229,9 @@ void kDoubleRowColQuant(sycl::half *__restrict__ const A,
     int i = base_idx + (row*cols);
     int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
 
+
     /*
-    DPCT1007:156: Migration of cub::BlockLoad.Load is not supported.
+    DPCT1007:218: Migration of cub::BlockLoad::Load is not supported.
     */
     LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
     float row_stat = 127.0f / smem_row_stats[row];
@@ -3389,47 +3244,29 @@ void kDoubleRowColQuant(sycl::half *__restrict__ const A,
       // what this does is float/absmax*127 = int8
       if(SPARSE_DECOMP)
       {
-        if (sycl::fabs((float)local_data[j]) >= threshold)
+        if(sycl::fabs((float)local_data[j]) >= threshold)
         {
           local_quantized_data[j] = 0;
 
-                                        int old_idx =
-                                            dpct::atomic_fetch_compare_inc<
-                                                sycl::access::address_space::
-                                                    generic_space>(
-                                                &smem_nnz_row_idx[row],
-                                                UINT_MAX);
+					int old_idx = dpct::atomic_fetch_compare_inc<sycl::access::address_space::generic_space>(&smem_nnz_row_idx[row], UINT_MAX);
 
           rowidx[old_idx] = base_row+row;
-          colidx[old_idx] =
-              base_col + (item_ct1.get_local_id(2) * ITEMS_PER_THREAD) + j;
+          colidx[old_idx] = base_col+(item_ct1.get_local_id(2)*ITEMS_PER_THREAD)+j;
           val[old_idx] = local_data[j];
         }
 				else
 				{
-                                        local_quantized_data[j] =
-                                            (char)(sycl::rint(
-                                                sycl::vec<sycl::half, 1>{
-                                                    local_data[j]}
-                                                    .convert<
-                                                        float,
-                                                        sycl::rounding_mode::
-                                                            automatic>()[0] *
-                                                row_stat));
-                                }
+					local_quantized_data[j] = (char)(sycl::rint(sycl::vec<sycl::half, 1>(local_data[j]).convert<float, sycl::rounding_mode::automatic>()[0]*row_stat));
+				}
       }
       else
-        local_quantized_data[j] = (char)(sycl::rint(
-            sycl::vec<sycl::half, 1>{local_data[j]}
-                .convert<float, sycl::rounding_mode::automatic>()[0] *
-            row_stat));
+        local_quantized_data[j] = (char)(sycl::rint(sycl::vec<sycl::half, 1>(local_data[j]).convert<float, sycl::rounding_mode::automatic>()[0]*row_stat));
     }
 
     /*
-    DPCT1007:157: Migration of cub::BlockStore.Store is not supported.
+    DPCT1007:219: Migration of cub::BlockStore::Store is not supported.
     */
-    StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data,
-                               valid_items);
+    StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
 
     // 2. quantize data with row/col stats
     #pragma unroll ITEMS_PER_THREAD
@@ -3437,28 +3274,27 @@ void kDoubleRowColQuant(sycl::half *__restrict__ const A,
     {
       // we already pre-normalized the col/row stat:
       // what this does is float/absmax*127 = int8
-                        local_quantized_data[j] = (char)(sycl::rint(
-                            sycl::vec<sycl::half, 1>{local_data[j]}
-                                .convert<float,
-                                         sycl::rounding_mode::automatic>()[0] *
-                            local_col_stats[j]));
+			local_quantized_data[j] = (char)(sycl::rint(sycl::vec<sycl::half, 1>(local_data[j]).convert<float, sycl::rounding_mode::automatic>()[0]*local_col_stats[j]));
     }
 
     /*
-    DPCT1065:86: Consider replacing sycl::nd_item::barrier() with
-    sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-    performance if there is no access to global memory.
+    DPCT1065:217: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
     */
     item_ct1.barrier();
     /*
-    DPCT1007:158: Migration of cub::BlockStore.Store is not supported.
+    DPCT1007:220: Migration of cub::BlockStore::Store is not supported.
     */
-    StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data,
-                               valid_items);
+    StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
+
   }
 }
 
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols, const sycl::nd_item<3> &item_ct1,char *smem_data)
+/*
+DPCT1110:14: The total declared local variable size in device function kTransformRowToFormat exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> SYCL_EXTERNAL void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
+                                                                                                                                 const sycl::nd_item<3> &item_ct1,
+                                                                                                                                 char *smem_data)
 {
 
   // 0. Load data into 32*32 shared memory tiles
@@ -3499,23 +3335,22 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   // each block loads TILE_COLs columns and TILE_ROW rows
   // after reading a tile the row counter increase by TILE_ROWS
   // the col counter reset after reading TILE_COL elements
-  const int base_row =
-      ((item_ct1.get_group(2) * TILE_COLS) / tiledCols) * TILE_ROWS;
+  const int base_row = ((item_ct1.get_group(2)*TILE_COLS)/tiledCols)*TILE_ROWS;
   // col increases by TILE_SIZE for each block and wraps back to 0 after tiledCols is reached
-  const int base_col = (item_ct1.get_group(2) * TILE_COLS) % tiledCols;
+  const int base_col = (item_ct1.get_group(2)*TILE_COLS) % tiledCols;
   const int base_idx = (base_row*cols) + base_col;
 
   // we load 128 bytes per warp with
   // 32 rows for transposes that fill col32 types
   // so that we can have contiguous stores
-
+  
   char local_data[ITEMS_PER_THREAD];
   typedef cub::BlockExchange<char, THREADS, ITEMS_PER_THREAD> BlockExchange;
 
   // we load row after row from the base_position
   // Load data row by row
-  int warps = item_ct1.get_local_range(2) / 32;
-  int warp_id = item_ct1.get_local_id(2) / 32;
+  int warps = item_ct1.get_local_range(2)/32;
+  int warp_id = item_ct1.get_local_id(2)/32;
   int warp_lane = item_ct1.get_local_id(2) % 32;
   int offset = 0;
 
@@ -3574,12 +3409,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
     if(smem_row % 32 == 0)
     {
       smem_row = 0;
-      /*
-      DPCT1065:87: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
+      item_ct1.barrier(sycl::access::fence_space::local_space);
 
       for(int subrow = warp_id; subrow < 32; subrow+=warps)
       {
@@ -3596,7 +3426,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   // row1 [col0 col1 ... col31]
                   // ...
                   //
-                  // As such we read consequtive entries with 256 threads (8rows x 32 columns)
+                  // As such we read consecutive entries with 256 threads (8rows x 32 columns)
                   // as j increase, the row increase by a factor of 8
                   // We load 8 rows per subrow loop, and subrow increase by 8 per loop
                   // so we have an offset of 8 rows every loop or (subrow/warps)*8 = (subrow/8)*8
@@ -3614,8 +3444,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // each 32 columns we have new tile
                     // each tile has size outRows*32 and base_row is done in increments of 32
                     offset = base_row*outRows;
-                    out[offset + (base_col + jrow + subrow_loop_row) * 32 +
-                        item_ct1.get_local_id(2)] = data;
+                    out[offset + (base_col + jrow + subrow_loop_row)*32 + item_ct1.get_local_id(2)] = data;
                   }
                 }
                 else
@@ -3694,7 +3523,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // each of these has 32 values in total for 32*4 = 128 as offset if odd
                     // every set of 4 columns increases the total offset by 16
                     // each even row increase the offset by 4, for example row 2 is offset by 4, 4 by 6 etc so: subrow/2*4 = subrow*2
-                    // this happends every 8 rows anew (subrow % 8)
+                    // this happens every 8 rows anew (subrow % 8)
                     // one writes 4 columns at once that is (col % 4) for the particular index in the subtile
                     int subcol = warp_lane;
 
@@ -3796,11 +3625,10 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 #define MAX_SPARSE_COUNT 32
 #define SMEM_SIZE 8*256
 template <typename T, int SPMM_ITEMS, int BITS>
-void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx,
-                                 int *offset_rowidx, int *rowidx, int *colidx,
-                                 sycl::half *values, T *B, sycl::half *out,
-                                 float *__restrict__ const dequant_stats,
-                                 int nnz, int rowsA, int rowsB, int colsB,
+/*
+DPCT1110:13: The total declared local variable size in device function kspmm_coo_very_sparse_naive exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                  const sycl::nd_item<3> &item_ct1,
                                  sycl::half *smem_dequant_stats)
 {
@@ -3838,11 +3666,7 @@ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx,
   // 2. Load A into registers
   for(int j = 0; j < MAX_SPARSE_COUNT; j++)
   {
-    local_valA[j] =
-        j < count
-            ? values[offset + j]
-            : sycl::vec<float, 1>{0.0f}
-                  .convert<sycl::half, sycl::rounding_mode::automatic>()[0];
+    local_valA[j] = j < count ? values[offset+j] : sycl::vec<float, 1>(0.0f).convert<sycl::half, sycl::rounding_mode::automatic>()[0];
     local_colidxA[j] = j < count ? colidx[offset+j] : 0;
   }
 
@@ -3850,21 +3674,20 @@ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx,
   // we expect each warp to be SPMM_ITEMS*32 apart
   // we have a total of 128 bytes for the bank with a bank size of 4 bytes
   // added 3 bytes = 6 values between warps should reduce bank conflicts
+  
+
 
   while(idx_col_B <  colsB)
   {
 
     if(dequant_stats != NULL)
     {
-      for (int i = item_ct1.get_local_id(2); i < SMEM_SIZE;
-           i += item_ct1.get_local_range(2))
+      for(int i = item_ct1.get_local_id(2); i < SMEM_SIZE; i+=item_ct1.get_local_range(2))
         if((idx_col_B+i-local_idx_col_B_offset) < colsB)
           smem_dequant_stats[i] = dequant_stats[idx_col_B+i-local_idx_col_B_offset];
 
       /*
-      DPCT1065:77: Consider replacing sycl::nd_item::barrier() with
-      sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-      performance if there is no access to global memory.
+      DPCT1065:204: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
     }
@@ -3888,13 +3711,9 @@ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx,
           if((idx+num_items < colsB))
           {
             if(BITS == 8)
-              reinterpret_cast<sycl::float2(&)[num_items]>(local_valsB)[0] =
-                  reinterpret_cast<sycl::float2 *>(
-                      B)[(row_offset + idx) / num_items];
+              reinterpret_cast<sycl::float2(&)[num_items]>(local_valsB)[0] = reinterpret_cast<sycl::float2*>(B)[(row_offset+ idx)/num_items];
             else
-              reinterpret_cast<sycl::float4(&)[num_items]>(local_valsB)[0] =
-                  reinterpret_cast<sycl::float4 *>(
-                      B)[(row_offset + idx) / num_items];
+              reinterpret_cast<sycl::float4(&)[num_items]>(local_valsB)[0] = reinterpret_cast<sycl::float4*>(B)[(row_offset+ idx)/num_items];
           }
           else
           {
@@ -3935,16 +3754,13 @@ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx,
       {
 
           // load outputs to do inplace addition
-          reinterpret_cast<sycl::float4(&)[num_items / 4]>(local_valOut)[0] =
-              reinterpret_cast<sycl::float4 *>(out)[idx_val / num_items];
+          reinterpret_cast<sycl::float4(&)[num_items/4]>(local_valOut)[0] = reinterpret_cast<sycl::float4*>(out)[idx_val/num_items];
 
-#pragma unroll num_items
+          #pragma unroll num_items
           for(int k = 0; k < num_items; k++)
             local_valC[(j/num_items) + k] = (float)local_valC[(j/num_items) + k] + (float)local_valOut[k];
 
-          reinterpret_cast<sycl::float4 *>(out)[idx_val / num_items] =
-              reinterpret_cast<sycl::float4(&)[num_items]>(
-                  local_valC)[j / num_items];
+          reinterpret_cast<sycl::float4*>(out)[idx_val/num_items] = reinterpret_cast<sycl::float4(&)[num_items]>(local_valC)[j/num_items];
       }
       else
       {
@@ -3955,17 +3771,17 @@ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx,
       }
     }
 
-    idx_col_B += item_ct1.get_local_range(2) * SPMM_ITEMS;
-    local_idx_col_B_offset += item_ct1.get_local_range(2) * SPMM_ITEMS;
+    idx_col_B += item_ct1.get_local_range(2)*SPMM_ITEMS;
+    local_idx_col_B_offset += item_ct1.get_local_range(2)*SPMM_ITEMS;
   }
 }
 
-template <int FORMAT> void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
+template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
                                             const sycl::nd_item<3> &item_ct1)
 {
-        int local_colidx = idx[item_ct1.get_group(2)];
+	int local_colidx = idx[item_ct1.get_group(2)];
 
-        if(FORMAT==COL_TURING)
+	if(FORMAT==COL_TURING)
 	{
 		// TURING FORMAT:
 		// 8*32 tiles with 4*4 subtiles
@@ -3979,9 +3795,8 @@ template <int FORMAT> void kExtractOutliers(char *A, int *idx, char *out, int id
 		// cols: [0 1 2 3, 0 1 2 4, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
 
 		// each thread reads 1 element = 1 row
-                for (int row = item_ct1.get_local_id(2); row < rowsA;
-                     row += item_ct1.get_local_range(2))
-                {
+		for(int row = item_ct1.get_local_id(2); row < rowsA; row+= item_ct1.get_local_range(2))
+		{
 			int offset_per_col_tile = ((rowsA+7)/8)*32*8;
 			int tile_offset_rows = (row/8)*32*8;
 			int tile_offset_cols = (local_colidx/32)*offset_per_col_tile;
@@ -3998,16 +3813,15 @@ template <int FORMAT> void kExtractOutliers(char *A, int *idx, char *out, int id
 
 			char val = A[offset];
 
-                        int out_idx = (row * idx_size) + item_ct1.get_group(2);
-                        out[out_idx] = val;
+			int out_idx = (row*idx_size) + item_ct1.get_group(2);
+			out[out_idx] = val;
 		}
 	}
 	else if(FORMAT == COL_AMPERE)
 	{
 
-                for (int row = item_ct1.get_local_id(2); row < rowsA;
-                     row += item_ct1.get_local_range(2))
-                {
+		for(int row = item_ct1.get_local_id(2); row < rowsA; row+= item_ct1.get_local_range(2))
+		{
 			// we got 32x32 tiles and we use the magic equation from the cublasLt doc to get the element
 			// within each tile.
 			int offset_per_col_tile = ((rowsA+31)/32)*32*32;
@@ -4020,8 +3834,8 @@ template <int FORMAT> void kExtractOutliers(char *A, int *idx, char *out, int id
 			offset += tile_offset_cols + tile_offset_rows;
 
 			char val = A[offset];
-                        int out_idx = (row * idx_size) + item_ct1.get_group(2);
-                        out[out_idx] = val;
+			int out_idx = (row*idx_size) + item_ct1.get_group(2);
+			out[out_idx] = val;
 		}
 	}
 }
@@ -4040,11 +3854,11 @@ template <int FORMAT> void kExtractOutliers(char *A, int *idx, char *out, int id
 //// use k warps per thread block
 //// 1. threadblock use read-only cache to read in register tile for A into shared memory
 //// 2. each warp loops over shared memory tiles of A of size 8x16 and loads them into fragments
-//// 3. each warp reads a segment of values 16x32 from B 
+//// 3. each warp reads a segment of values 16x32 from B
 //// 4. do dequantization from register of B into second pair of registers
 //// 5. store (4) into fragment
 //// 6. matmul aggregate into fragment C
-//// 7. aggreecate files of C into shared memroy block C
+//// 7. aggregate files of C into shared memory block C
 //// 8. sum (7)
 //// 9. write outputs to matmul output matrix
 //}
@@ -4066,17 +3880,23 @@ template <typename T, typename TCAST, int ITEMS> inline void vector_load(T *loca
 }
 
 #define WARPS 3
-template <typename T, int BITS, int THREADS> void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc)
+/*
+DPCT1110:15: The total declared local variable size in device function gemm_device exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc,
+                                                              const sycl::nd_item<3> &item_ct1,
+                                                              T *smem_A,
+                                                              T *smem_B)
 {
 
 #if DPCT_COMPATIBILITY_TEMP >= 750
-        //using namespace nvcuda;
-  int col_offset = blockIdx.x *32;
-  const int warp_id = threadIdx.x / 32;
-  const int half_warp_id = threadIdx.x / 16;
-  const int half_warp_lane = threadIdx.x % 16;
+	
+  int col_offset = item_ct1.get_group(2) *32;
+  const int warp_id = item_ct1.get_local_id(2) / 32;
+  const int half_warp_id = item_ct1.get_local_id(2) / 16;
+  const int half_warp_lane = item_ct1.get_local_id(2) % 16;
   const int batch_size_warps = (WARPS-1)*2;
-  const int val_per_iter = blockDim.x-32;
+  const int val_per_iter = item_ct1.get_local_range(2)-32;
 
   T local_A[4];
   T local_B[128];
@@ -4084,17 +3904,23 @@ template <typename T, int BITS, int THREADS> void gemm_device(int M, int N, int 
   const int a_tile_offset = 16;
   const int b_tile_offset = (16*32 + 16);
 
-  __shared__ T smem_A[8*16 + (2*16*(batch_size_warps-1))];
-  __shared__ T smem_B[2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))];
+  
+  
   //__shared__ T smem_C[8*32];
 
-   wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> a_frag;
-   wmma::fragment<wmma::matrix_b, 8, 32, 16, half, wmma::col_major> b_frag;
-   wmma::fragment<wmma::accumulator, 8, 32, 16, half> c_frag;
-   wmma::fill_fragment(c_frag, 0.0f);
+   /*
+   DPCT1082:16: Migration of nvcuda::wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> type is not supported.
+   */
+   /*
+   DPCT1082:17: Migration of nvcuda::wmma::matrix_a type is not supported.
+   */
+   /*
+   DPCT1082:18: Migration of nvcuda::wmma::row_major type is not supported.
+   */
+   wmma::fragment<wmma::matrix_a, 8, 32, 16, wmma::fragment<wmma::matrix_a, 8, 32, 16, sycl::half, wmma::row_major> 8, 32, 16, wmma::fragment<wmma::matrix_b, 8, 32, 16, sycl::half, wmma::col_major>or, 8, 32, 16, wmma::fragment<wmma::accumulator, 8, 32, 16, sycl::half>;
 
   int ticktock = 0;
-  int idx = 0 + threadIdx.x;
+  int idx = 0 + item_ct1.get_local_id(2);
   int loaded_values = 0;
   // prefetch
   if(idx < K && warp_id < (WARPS-1))
@@ -4165,11 +3991,11 @@ template <typename T, int BITS, int THREADS> void gemm_device(int M, int N, int 
   ticktock = ticktock == 0 ? 1 : 0;
 
   //for(int base_idx = blockDim.x-32; base_idx < K; base_idx+=blockDim.x-32)
-  for(int base_idx = blockDim.x-32; base_idx < K; base_idx+=blockDim.x-32)
+  for(int base_idx = item_ct1.get_local_range(2)-32; base_idx < K; base_idx+=item_ct1.get_local_range(2)-32)
   {
-    idx = base_idx + threadIdx.x;
+    idx = base_idx + item_ct1.get_local_id(2);
 
-    __syncthreads();
+    item_ct1.barrier(sycl::access::fence_space::local_space);
     if(idx < K && warp_id < (WARPS-1))
     {
       //local_A[0] = A[idx];
@@ -4246,27 +4072,48 @@ template <typename T, int BITS, int THREADS> void gemm_device(int M, int N, int 
     if(warp_id == (WARPS-1))
       for(int k = 0; k < batch_size_warps; k++)
       {
+        /*
+        DPCT1007:25: Migration of nvcuda::wmma::load_matrix_sync is not supported.
+        */
         wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+        /*
+        DPCT1007:26: Migration of nvcuda::wmma::load_matrix_sync is not supported.
+        */
         wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
+        /*
+        DPCT1007:27: Migration of nvcuda::wmma::mma_sync is not supported.
+        */
         wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
       }
   }
 
-  __syncthreads();
+  item_ct1.barrier(sycl::access::fence_space::local_space);
   if(warp_id != (WARPS-1)){ return; }
   // only warp_id == (WARPS-1) from here
-  int warp_lane = threadIdx.x % 32;
+  int warp_lane = item_ct1.get_local_id(2) % 32;
 
   ticktock = ticktock == 0 ? 1 : 0;
   for(int k = 0; k < batch_size_warps; k++)
   {
+    /*
+    DPCT1007:28: Migration of nvcuda::wmma::load_matrix_sync is not supported.
+    */
     wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+    /*
+    DPCT1007:29: Migration of nvcuda::wmma::load_matrix_sync is not supported.
+    */
     wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
+    /*
+    DPCT1007:30: Migration of nvcuda::wmma::mma_sync is not supported.
+    */
     wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
   }
 
   // 129 mu
   if(warp_id == (WARPS-1))
+    /*
+    DPCT1007:31: Migration of nvcuda::wmma::store_matrix_sync is not supported.
+    */
     wmma::store_matrix_sync(&(smem_A[0]), c_frag, 32, wmma::mem_row_major);
 
   if(col_offset + warp_lane < M)
@@ -4280,33 +4127,35 @@ template <typename T> void printnonzero(T *A, int num_values, const char * strva
 {
   for(int i = 0; i < num_values; i++)
     if((float)A[i] != 0.0)
-      
-      stream_ct1 <<"Strval "<< strval << "index "<<i <<" array element "<<(float)A[i] <<"\n";
+      /*
+      DPCT1015:52: Output needs adjustment.
+      */
+      stream_ct1 << "%s %i %f\n";
 }
 
 template void printnonzero<float>(float *A, int num_values, const char*strval,
                                   const sycl::stream &stream_ct1);
-template void printnonzero<sycl::half>(sycl::half *A, int num_values,
-                                       const char *strval,
-                                       const sycl::stream &stream_ct1);
+template void printnonzero<sycl::half>(sycl::half *A, int num_values, const char*strval,
+                                 const sycl::stream &stream_ct1);
 
-static dpct::global_memory<float, 1> nf4_data(
-    sycl::range<1>(16),
-    {-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453,
-     -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
-     0.07958029955625534, 0.16093020141124725, 0.24611230194568634,
-     0.33791524171829224, 0.44070982933044434, 0.5626170039176941,
-     0.7229568362236023, 1.0});
-template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
+static dpct::global_memory<float, 1> nf4_data(sycl::range<1>(16), {-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0});
+/*
+DPCT1110:32: The total declared local variable size in device function kgemm_4bit_inference exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize,
+                                                             const sycl::nd_item<3> &item_ct1,
+                                                             T *smem_A,
+                                                             T *smem_B,
+                                                             T *smem_C)
 {
 
 #if DPCT_COMPATIBILITY_TEMP >= 750
-        using namespace nvcuda;
-  int col_offset = blockIdx.x *32;
-  const int warp_id = threadIdx.x / 32;
-  const int warp_idx = threadIdx.x % 32;
-  const int half_warp_id = threadIdx.x / 16;
-  const int half_warp_lane = threadIdx.x % 16;
+	
+  int col_offset = item_ct1.get_group(2) *32;
+  const int warp_id = item_ct1.get_local_id(2) / 32;
+  const int warp_idx = item_ct1.get_local_id(2) % 32;
+  const int half_warp_id = item_ct1.get_local_id(2) / 16;
+  const int half_warp_lane = item_ct1.get_local_id(2) % 16;
   const int batch_size_warps = (WARPS-1)*2;
 
   T quant_map[16];
@@ -4324,22 +4173,28 @@ template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K
   const int a_tile_offset = 16;
   const int b_tile_offset = (16*32 + 16);
 
-  __shared__ T smem_A[8*16 + (16*(batch_size_warps-1))];
-  __shared__ T smem_B[2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))];
-  __shared__ T smem_C[8*32];
+  
+  
+  
 
-   wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> a_frag;
-   wmma::fragment<wmma::matrix_b, 8, 32, 16, half, wmma::col_major> b_frag;
-   wmma::fragment<wmma::accumulator, 8, 32, 16, half> c_frag;
-   wmma::fill_fragment(c_frag, 0.0f);
+   /*
+   DPCT1082:33: Migration of nvcuda::wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> type is not supported.
+   */
+   /*
+   DPCT1082:34: Migration of nvcuda::wmma::matrix_a type is not supported.
+   */
+   /*
+   DPCT1082:35: Migration of nvcuda::wmma::row_major type is not supported.
+   */
+   wmma::fragment<wmma::matrix_a, 8, 32, 16, wmma::fragment<wmma::matrix_a, 8, 32, 16, sycl::half, wmma::row_major> 8, 32, 16, wmma::fragment<wmma::matrix_b, 8, 32, 16, sycl::half, wmma::col_major>or, 8, 32, 16, wmma::fragment<wmma::accumulator, 8, 32, 16, sycl::half>;
 
-  for(int i = threadIdx.x; i < (8*32); i+=blockDim.x)
+  for(int i = item_ct1.get_local_id(2); i < (8*32); i+=item_ct1.get_local_range(2))
     smem_C[i] = 0.0f;
 
-  __syncthreads();
+  item_ct1.barrier(sycl::access::fence_space::local_space);
 
   int ticktock = 0;
-  int idx = 0 + threadIdx.x;
+  int idx = 0 + item_ct1.get_local_id(2);
   int loaded_values = 0;
   // prefetch
   if(idx < K && warp_id < (WARPS-1))
@@ -4347,7 +4202,7 @@ template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K
     if(loaded_values == 0)
     {
       local_A[0] = A[idx];
-      local_A[1] = A[idx+blockDim.x-32];
+      local_A[1] = A[idx+item_ct1.get_local_range(2)-32];
 
       #pragma unroll 32
       for(int col = 0; col < 32; col++)
@@ -4401,9 +4256,9 @@ template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K
       //printf("aa %i %i\n", idx, loaded_values);
 
   //for(int base_idx = blockDim.x-32; base_idx < K; base_idx+=blockDim.x-32)
-  for(int base_idx = blockDim.x-32; base_idx < K; base_idx+=blockDim.x-32)
+  for(int base_idx = item_ct1.get_local_range(2)-32; base_idx < K; base_idx+=item_ct1.get_local_range(2)-32)
   {
-    idx = base_idx + threadIdx.x;
+    idx = base_idx + item_ct1.get_local_id(2);
     //if(threadIdx.x == 0)
       //printf("%i %i\n", idx, loaded_values);
 
@@ -4413,7 +4268,7 @@ template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K
       if(loaded_values == 0)
       {
         local_A[0] = A[idx];
-        local_A[1] = A[idx+blockDim.x-32];
+        local_A[1] = A[idx+item_ct1.get_local_range(2)-32];
 
         #pragma unroll 32
         for(int col = 0; col < 32; col++)
@@ -4430,7 +4285,10 @@ template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K
         loaded_values--;
 
         int absidx = (idx + col_offset)/blocksize;
-        half local_absmax = __ldg(&(absmax[absidx]));
+        /*
+        DPCT1098:222: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
+        */
+        sycl::half local_absmax = absmax[absidx];
 
         #pragma unroll 64
         for(int col = 0; col < 64; col+=2)
@@ -4472,13 +4330,22 @@ template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K
     if(warp_id == (WARPS-1))
       for(int k = 0; k < batch_size_warps; k++)
       {
+        /*
+        DPCT1007:42: Migration of nvcuda::wmma::load_matrix_sync is not supported.
+        */
         wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+        /*
+        DPCT1007:43: Migration of nvcuda::wmma::load_matrix_sync is not supported.
+        */
         wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
+        /*
+        DPCT1007:44: Migration of nvcuda::wmma::mma_sync is not supported.
+        */
         wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
       }
   }
 
-  __syncthreads();
+  item_ct1.barrier(sycl::access::fence_space::local_space);
   //if(threadIdx.x == 0)
   //{
   //  printnonzero<T>(smem_A, 8*16 + (2*16*(batch_size_warps-1)), "A: ");
@@ -4486,20 +4353,32 @@ template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K
   //}
   if(warp_id != (WARPS-1)){ return; }
   // only warp_id == (WARPS-1) from here
-  int warp_lane = threadIdx.x % 32;
+  int warp_lane = item_ct1.get_local_id(2) % 32;
 
   ticktock = ticktock == 0 ? 1 : 0;
   for(int k = 0; k < batch_size_warps; k++)
   {
     //if(warp_lane == 0)
       //printf("%i %i %i %i\n", (ticktock*batch_size_warps + k)*a_tile_offset, k, ticktock, threadIdx.x);
+    /*
+    DPCT1007:45: Migration of nvcuda::wmma::load_matrix_sync is not supported.
+    */
     wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+    /*
+    DPCT1007:46: Migration of nvcuda::wmma::load_matrix_sync is not supported.
+    */
     wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
+    /*
+    DPCT1007:47: Migration of nvcuda::wmma::mma_sync is not supported.
+    */
     wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
   }
 
   // 129 mu
   if(warp_id == (WARPS-1))
+    /*
+    DPCT1007:48: Migration of nvcuda::wmma::store_matrix_sync is not supported.
+    */
     wmma::store_matrix_sync(&(smem_C[0]), c_frag, 32, wmma::mem_row_major);
 
   //printnonzero<T>(smem_C, 32, "");
@@ -4510,39 +4389,36 @@ template <typename T, int THREADS> void kgemm_4bit_inference(int M, int N, int K
 }
 
 #define num_values_4bit 32
-template <typename T, int THREADS, int BITS>
-void kgemm_4bit_inference_naive(int M, int N, int K, T *__restrict__ const A,
-                                unsigned char *B, float *absmax,
-                                const float *datatype, T *out, int lda, int ldb,
-                                int ldc, int blocksize,
-                                const sycl::nd_item<3> &item_ct1, T *quant_map)
+/*
+DPCT1110:49: The total declared local variable size in device function kgemm_4bit_inference_naive exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
+*/
+template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize,
+                                                                             const sycl::nd_item<3> &item_ct1,
+                                                                             T *quant_map)
 {
 
-  // per threadblock: 
+  // per threadblock:
   // load step-by-step in chunks of [32,warps]: 1x32 * [32,warps] -> [1,warps]
   // 4 warps -> 4 loads per iter
   // 1x32 * 32x4 -> 1x4 outputs per thread block
+  
+  
 
   const int warp_idx = item_ct1.get_local_id(2) / 32;
   const int warp_lane = item_ct1.get_local_id(2) % 32;
-  const int row_B = (THREADS / 32) * item_ct1.get_group(2) + warp_idx;
+  const int row_B = (THREADS/32)*item_ct1.get_group(2) + warp_idx;
   const int num_values_8bit = num_values_4bit/2;
   float local_C = 0.0f;
 
   unsigned char local_B_4bit[num_values_8bit];
-  T local_B[num_values_4bit];
-  T local_A[num_values_4bit];
+  T local_B[num_values_4bit/4];
+  T local_A[num_values_4bit/4];
+  
+	T local_absmax = T(0.0f);
 
-        T local_absmax = T(0.0f);
-
-  for (int i = item_ct1.get_local_id(2); i < 16; i++)
+  for(int i = item_ct1.get_local_id(2); i < 16; i++)
     quant_map[i] = T(datatype[i]);
-  /*
-  DPCT1065:88: Consider replacing sycl::nd_item::barrier() with
-  sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better
-  performance if there is no access to global memory.
-  */
-  item_ct1.barrier();
+  item_ct1.barrier(sycl::access::fence_space::local_space);
 
   // A: [1, K]
   // B: [N, K]
@@ -4551,20 +4427,17 @@ void kgemm_4bit_inference_naive(int M, int N, int K, T *__restrict__ const A,
     int inner_idx_halved = inner_idx/2;
     int offset_B = ldb*row_B;
     int absidx = ((2*offset_B)+inner_idx)/blocksize;
-          /*
-          DPCT1026:159: The call to __ldg was removed because there is no
-          corresponding API in SYCL.
-          */
-          local_absmax = absmax[absidx];
+	  /*
+	  DPCT1098:223: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
+	  */
+	  local_absmax = absmax[absidx];
 
     if(row_B < M)
     {
       if((inner_idx_halved + num_values_8bit) < (K/2))
       {
         // this is the most important for performance considerations
-        reinterpret_cast<sycl::int4(&)[num_values_8bit]>(local_B_4bit)[0] =
-            reinterpret_cast<sycl::int4 *>(
-                B)[(offset_B + (inner_idx_halved)) / (num_values_8bit)];
+        reinterpret_cast<sycl::int4(&)[num_values_8bit]>(local_B_4bit)[0] = reinterpret_cast<sycl::int4*>(B)[(offset_B+(inner_idx_halved))/(num_values_8bit)];
       }
       else
       {
@@ -4583,90 +4456,59 @@ void kgemm_4bit_inference_naive(int M, int N, int K, T *__restrict__ const A,
           local_B_4bit[j] = 0b01110111;
     }
 
-    #pragma unroll
-    for(int k = 0; k < num_values_8bit; k++)
+    for(int i = 0; i < 4; i++)
     {
-#if DPCT_COMPATIBILITY_TEMP >= 800
-        local_B[k*2] = quant_map[local_B_4bit[k] >> 4]*local_absmax;
-        local_B[k*2 + 1] = quant_map[local_B_4bit[k] & 0x0F]*local_absmax;
-      #else
-        // bf16 multipliation not supported
-        local_B[k*2] = T((float)quant_map[local_B_4bit[k] >> 4]*(float)local_absmax);
-        local_B[k*2 + 1] = T((float)quant_map[local_B_4bit[k] & 0x0F]*(float)local_absmax);
-      #endif
-    }
-
-    if(inner_idx+num_values_4bit < K)
-    {
-      // this is also relatively important for performance
-      if(BITS==16)
+      #pragma unroll
+      for(int k = 0; k < num_values_8bit/4; k++)
       {
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[0] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 4) + 0];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[1] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 4) + 1];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[2] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 4) + 2];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[3] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 4) + 3];
+        #if DPCT_COMPATIBILITY_TEMP >= 800
+          local_B[k*2] = quant_map[local_B_4bit[(i*num_values_8bit/4) + k] >> 4]*local_absmax;
+          local_B[k*2 + 1] = quant_map[local_B_4bit[(i*num_values_8bit/4) + k] & 0x0F]*local_absmax;
+        #else
+          // bf16 multipliation not supported
+          local_B[k*2] = T((float)quant_map[local_B_4bit[(i*num_values_8bit/4) + k] >> 4]*(float)local_absmax);
+          local_B[k*2 + 1] = T((float)quant_map[local_B_4bit[(i*num_values_8bit/4) + k] & 0x0F]*(float)local_absmax);
+        #endif
+      }
+
+      if(inner_idx+(num_values_4bit/4) + (i*num_values_4bit/4) < K)
+      {
+        // this is also relatively important for performance
+        if(BITS==16)
+        {
+          reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<sycl::int4*>(A)[inner_idx/(num_values_4bit/4) + i];
+        }
+        else
+        {
+          reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[0] = reinterpret_cast<sycl::int4*>(A)[inner_idx/(num_values_4bit/8) + (2*i) + 0];
+          reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[1] = reinterpret_cast<sycl::int4*>(A)[inner_idx/(num_values_4bit/8) + (2*i) + 1];
+        }
+
       }
       else
-      {
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[0] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 8) + 0];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[1] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 8) + 1];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[2] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 8) + 2];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[3] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 8) + 3];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[4] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 8) + 4];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[5] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 8) + 5];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[6] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 8) + 6];
-        reinterpret_cast<sycl::int4(&)[num_values_4bit]>(local_A)[7] =
-            reinterpret_cast<sycl::int4 *>(
-                A)[inner_idx / (num_values_4bit / 8) + 7];
-      }
+        #pragma unroll
+        for(int k = 0; k < num_values_4bit/4; k++)
+          if(inner_idx + (i*num_values_4bit/4) + k < K)
+            local_A[k] = A[inner_idx + k + (i*num_values_4bit/4)];
+          else
+            local_A[k] = T(0.0f);
 
-    }
-    else
+
+      // accumulate in float; small performance hit for Ampere, but lower error for outputs
       #pragma unroll
-      for(int k = 0; k < num_values_4bit; k++)
-        if(inner_idx + k < K)
-          local_A[k] = A[inner_idx + k];
-        else
-          local_A[k] = T(0.0f);
-
-
-    // accumulate in float; small performance hit for Ampere, but lower error for outputs
-    #pragma unroll
-    for(int k = 0; k < num_values_4bit; k++)
-    {
-#if DPCT_COMPATIBILITY_TEMP >= 800
-        local_C += (float)(local_A[k]*local_B[k]);
-      #else
-        // bf16 multipliation not supported
-        local_C += ((float)local_A[k]*(float)local_B[k]);
-      #endif
+      for(int k = 0; k < num_values_4bit/4; k++)
+      {
+        #if DPCT_COMPATIBILITY_TEMP >= 800
+          local_C += (float)(local_A[k]*local_B[k]);
+        #else
+          // bf16 multipliation not supported
+          local_C += ((float)local_A[k]*(float)local_B[k]);
+        #endif
+      }
     }
   }
 
-  local_C = sycl::reduce_over_group(item_ct1.get_sub_group(), local_C,
-                                    sycl::plus<>());
+  local_C = sycl::reduce_over_group(item_ct1.get_sub_group(), local_C, sycl::plus<>());
 
   if(row_B < M && warp_lane == 0)
     out[row_B] = T(local_C);
@@ -4785,16 +4627,14 @@ void kgemm_4bit_inference_naive(int M, int N, int K, T *__restrict__ const A,
 //}
 
 
-template <typename T, int FUNC> void kfunc(T *A, T *B, T value, long n,
+template <typename T, int FUNC> SYCL_EXTERNAL void kfunc(T *A, T *B, T value, long n,
                                            const sycl::nd_item<3> &item_ct1)
 {
-  for (long i = (item_ct1.get_local_range(2) * item_ct1.get_group(2)) +
-                item_ct1.get_local_id(2);
-       i < n; i += (item_ct1.get_local_range(2) * item_ct1.get_group_range(2)))
+  for(long i = (item_ct1.get_local_range(2)*item_ct1.get_group(2)) + item_ct1.get_local_id(2); i < n; i+=(item_ct1.get_local_range(2)*item_ct1.get_group_range(2)))
   {
     switch(FUNC)
     {
-      case FILL: 
+      case FILL:
         A[i] = (T)value;
         break;
       case ARANGE:
@@ -4812,266 +4652,210 @@ template <typename T, int FUNC> void kfunc(T *A, T *B, T value, long n,
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template void kfunc<float, FILL>(float *A, float *B, float value, long n,
+template SYCL_EXTERNAL void kfunc<float, FILL>(float *A, float *B, float value, long n,
                                  const sycl::nd_item<3> &item_ct1);
-template void kfunc<unsigned char, FILL>(unsigned char *A, unsigned char *B, unsigned char value, long n,
+template SYCL_EXTERNAL void kfunc<unsigned char, FILL>(unsigned char *A, unsigned char *B, unsigned char value, long n,
                                          const sycl::nd_item<3> &item_ct1);
-template void kfunc<float, ARANGE>(float *A, float *B, float value, long n,
+template SYCL_EXTERNAL void kfunc<float, ARANGE>(float *A, float *B, float value, long n,
                                    const sycl::nd_item<3> &item_ct1);
-template void kfunc<float, _MUL>(float *A, float *B, float value, long n,
+template SYCL_EXTERNAL void kfunc<float, _MUL>(float *A, float *B, float value, long n,
                                  const sycl::nd_item<3> &item_ct1);
 
 // these are not used and make no sense, but the compiler needs them
 //template __global__ void gemm_device<float, 16, 128>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 32, 256>(int M, int N, int K,
-                                               sycl::half *__restrict__ const A,
-                                               sycl::half *B, sycl::half *out,
-                                               int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 32, 192>(int M, int N, int K,
-                                               sycl::half *__restrict__ const A,
-                                               sycl::half *B, sycl::half *out,
-                                               int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 32, 160>(int M, int N, int K,
-                                               sycl::half *__restrict__ const A,
-                                               sycl::half *B, sycl::half *out,
-                                               int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 32, 128>(int M, int N, int K,
-                                               sycl::half *__restrict__ const A,
-                                               sycl::half *B, sycl::half *out,
-                                               int lda, int ldb, int ldc);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 256>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                         const sycl::nd_item<3> &item_ct1,
+                                         sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 192>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                         const sycl::nd_item<3> &item_ct1,
+                                         sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 160>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                         const sycl::nd_item<3> &item_ct1,
+                                         sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 128>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                         const sycl::nd_item<3> &item_ct1,
+                                         sycl::half *smem_A, sycl::half *smem_B);
 //template __global__ void gemm_device<float, 16, 32>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 32, 32>(int M, int N, int K,
-                                              sycl::half *__restrict__ const A,
-                                              sycl::half *B, sycl::half *out,
-                                              int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 32, 64>(int M, int N, int K,
-                                              sycl::half *__restrict__ const A,
-                                              sycl::half *B, sycl::half *out,
-                                              int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 32, 96>(int M, int N, int K,
-                                              sycl::half *__restrict__ const A,
-                                              sycl::half *B, sycl::half *out,
-                                              int lda, int ldb, int ldc);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 32>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                        const sycl::nd_item<3> &item_ct1,
+                                        sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 64>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                        const sycl::nd_item<3> &item_ct1,
+                                        sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 96>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                        const sycl::nd_item<3> &item_ct1,
+                                        sycl::half *smem_A, sycl::half *smem_B);
 // these are not used and make no sense, but the compiler needs them
 
 //template __global__ void gemm_device<float, 32, 128>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 16, 256>(int M, int N, int K,
-                                               sycl::half *__restrict__ const A,
-                                               sycl::half *B, sycl::half *out,
-                                               int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 16, 192>(int M, int N, int K,
-                                               sycl::half *__restrict__ const A,
-                                               sycl::half *B, sycl::half *out,
-                                               int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 16, 160>(int M, int N, int K,
-                                               sycl::half *__restrict__ const A,
-                                               sycl::half *B, sycl::half *out,
-                                               int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 16, 128>(int M, int N, int K,
-                                               sycl::half *__restrict__ const A,
-                                               sycl::half *B, sycl::half *out,
-                                               int lda, int ldb, int ldc);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 256>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                         const sycl::nd_item<3> &item_ct1,
+                                         sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 192>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                         const sycl::nd_item<3> &item_ct1,
+                                         sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 160>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                         const sycl::nd_item<3> &item_ct1,
+                                         sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 128>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                         const sycl::nd_item<3> &item_ct1,
+                                         sycl::half *smem_A, sycl::half *smem_B);
 //template __global__ void gemm_device<float, 32, 32>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 16, 32>(int M, int N, int K,
-                                              sycl::half *__restrict__ const A,
-                                              sycl::half *B, sycl::half *out,
-                                              int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 16, 64>(int M, int N, int K,
-                                              sycl::half *__restrict__ const A,
-                                              sycl::half *B, sycl::half *out,
-                                              int lda, int ldb, int ldc);
-template void gemm_device<sycl::half, 16, 96>(int M, int N, int K,
-                                              sycl::half *__restrict__ const A,
-                                              sycl::half *B, sycl::half *out,
-                                              int lda, int ldb, int ldc);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 32>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                        const sycl::nd_item<3> &item_ct1,
+                                        sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 64>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                        const sycl::nd_item<3> &item_ct1,
+                                        sycl::half *smem_A, sycl::half *smem_B);
+template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 96>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
+                                        const sycl::nd_item<3> &item_ct1,
+                                        sycl::half *smem_A, sycl::half *smem_B);
 
-template void kgemm_4bit_inference<sycl::half, 96>(
-    int M, int N, int K, sycl::half *__restrict__ const A, unsigned char *B,
-    float *absmax, sycl::half *out, int lda, int ldb, int ldc, int blocksize);
-template void kgemm_4bit_inference<sycl::half, 128>(
-    int M, int N, int K, sycl::half *__restrict__ const A, unsigned char *B,
-    float *absmax, sycl::half *out, int lda, int ldb, int ldc, int blocksize);
-template void kgemm_4bit_inference<sycl::half, 160>(
-    int M, int N, int K, sycl::half *__restrict__ const A, unsigned char *B,
-    float *absmax, sycl::half *out, int lda, int ldb, int ldc, int blocksize);
-template void kgemm_4bit_inference<sycl::half, 256>(
-    int M, int N, int K, sycl::half *__restrict__ const A, unsigned char *B,
-    float *absmax, sycl::half *out, int lda, int ldb, int ldc, int blocksize);
+template SYCL_EXTERNAL void kgemm_4bit_inference<sycl::half, 96>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
+                                             const sycl::nd_item<3> &item_ct1,
+                                             sycl::half *smem_A,
+                                             sycl::half *smem_B,
+                                             sycl::half *smem_C);
+template SYCL_EXTERNAL void kgemm_4bit_inference<sycl::half, 128>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
+                                              const sycl::nd_item<3> &item_ct1,
+                                              sycl::half *smem_A,
+                                              sycl::half *smem_B,
+                                              sycl::half *smem_C);
+template SYCL_EXTERNAL void kgemm_4bit_inference<sycl::half, 160>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
+                                              const sycl::nd_item<3> &item_ct1,
+                                              sycl::half *smem_A,
+                                              sycl::half *smem_B,
+                                              sycl::half *smem_C);
+template SYCL_EXTERNAL void kgemm_4bit_inference<sycl::half, 256>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
+                                              const sycl::nd_item<3> &item_ct1,
+                                              sycl::half *smem_A,
+                                              sycl::half *smem_B,
+                                              sycl::half *smem_C);
 
-template void kgemm_4bit_inference_naive<sycl::half, 128, 16>(
-    int M, int N, int K, sycl::half *__restrict__ const A, unsigned char *B,
-    float *absmax, const float *datatype, sycl::half *out, int lda, int ldb,
-    int ldc, int blocksize, const sycl::nd_item<3> &item_ct1,
-    sycl::half *quant_map);
-template void kgemm_4bit_inference_naive<oneapi::mkl::bfloat16, 128, 16>(
-    int M, int N, int K, oneapi::mkl::bfloat16 *__restrict__ const A,
-    unsigned char *B, float *absmax, const float *datatype,
-    oneapi::mkl::bfloat16 *out, int lda, int ldb, int ldc, int blocksize,
-    const sycl::nd_item<3> &item_ct1, oneapi::mkl::bfloat16 *quant_map);
-template void kgemm_4bit_inference_naive<float, 128, 32>(int M, int N, int K, float * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize,
+template SYCL_EXTERNAL void kgemm_4bit_inference_naive<sycl::half, 128, 16>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
+                                                        const sycl::nd_item<3> &item_ct1,
+                                                        sycl::half *quant_map);
+template SYCL_EXTERNAL void kgemm_4bit_inference_naive<sycl::ext::oneapi::bfloat16, 128, 16>(int M, int N, int K, sycl::ext::oneapi::bfloat16 * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, sycl::ext::oneapi::bfloat16 * out,  int lda, int ldb, int ldc, int blocksize,
+                                                                 const sycl::nd_item<3> &item_ct1,
+                                                                 sycl::ext::oneapi::bfloat16 *quant_map);
+template SYCL_EXTERNAL void kgemm_4bit_inference_naive<float, 128, 32>(int M, int N, int K, float * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize,
                                                          const sycl::nd_item<3> &item_ct1,
                                                          float *quant_map);
 
-template void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
+template SYCL_EXTERNAL void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
                                            const sycl::nd_item<3> &item_ct1);
-template void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
+template SYCL_EXTERNAL void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
                                            const sycl::nd_item<3> &item_ct1);
 
-template void kspmm_coo_very_sparse_naive<sycl::half, 8, 16>(
-    int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx,
-    sycl::half *values, sycl::half *B, sycl::half *out, float *dequant_stats,
-    int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
-    sycl::half *smem_dequant_stats);
-template void kspmm_coo_very_sparse_naive<sycl::half, 16, 16>(
-    int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx,
-    sycl::half *values, sycl::half *B, sycl::half *out, float *dequant_stats,
-    int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
-    sycl::half *smem_dequant_stats);
-template void kspmm_coo_very_sparse_naive<sycl::half, 32, 16>(
-    int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx,
-    sycl::half *values, sycl::half *B, sycl::half *out, float *dequant_stats,
-    int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
-    sycl::half *smem_dequant_stats);
-template void kspmm_coo_very_sparse_naive<signed char, 8, 8>(
-    int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx,
-    sycl::half *values, signed char *B, sycl::half *out, float *dequant_stats,
-    int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
-    sycl::half *smem_dequant_stats);
-template void kspmm_coo_very_sparse_naive<signed char, 16, 8>(
-    int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx,
-    sycl::half *values, signed char *B, sycl::half *out, float *dequant_stats,
-    int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
-    sycl::half *smem_dequant_stats);
-template void kspmm_coo_very_sparse_naive<signed char, 32, 8>(
-    int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx,
-    sycl::half *values, signed char *B, sycl::half *out, float *dequant_stats,
-    int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
-    sycl::half *smem_dequant_stats);
+template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<sycl::half, 8, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
+                                                       const sycl::nd_item<3> &item_ct1,
+                                                       sycl::half *smem_dequant_stats);
+template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<sycl::half, 16, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
+                                                        const sycl::nd_item<3> &item_ct1,
+                                                        sycl::half *smem_dequant_stats);
+template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<sycl::half, 32, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
+                                                        const sycl::nd_item<3> &item_ct1,
+                                                        sycl::half *smem_dequant_stats);
+template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 8, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
+                                                             const sycl::nd_item<3> &item_ct1,
+                                                             sycl::half *smem_dequant_stats);
+template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 16, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
+                                                              const sycl::nd_item<3> &item_ct1,
+                                                              sycl::half *smem_dequant_stats);
+template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
+                                                              const sycl::nd_item<3> &item_ct1,
+                                                              sycl::half *smem_dequant_stats);
 
-template void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
                                                                 const sycl::nd_item<3> &item_ct1,
                                                                 char *smem_data);
-template void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
                                                                 const sycl::nd_item<3> &item_ct1,
                                                                 char *smem_data);
-template void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
                                                                      const sycl::nd_item<3> &item_ct1,
                                                                      char *smem_data);
-template void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
                                                                      const sycl::nd_item<3> &item_ct1,
                                                                      char *smem_data);
-template void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
                                                                      const sycl::nd_item<3> &item_ct1,
                                                                      char *smem_data);
-template void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
                                                                      const sycl::nd_item<3> &item_ct1,
                                                                      char *smem_data);
 
-template void kdequant_mm_int32_fp16<4, 128, 512>(
-    int *__restrict__ const A, float *__restrict__ const rowStats,
-    float *__restrict__ const colStats, sycl::half *out, float *newRowStats,
-    float *newcolStats, sycl::half *__restrict__ const bias, const int numRows,
-    const int numCols, const int tileCols, const int n,
-    const sycl::nd_item<3> &item_ct1, float *smem_rowStats);
+template void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half * __restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,
+                                                  const sycl::nd_item<3> &item_ct1,
+                                                  float *smem_rowStats);
 
-template void kDoubleRowColQuant<64, 4, 16, 64 * 4, 0>(
-    sycl::half *__restrict__ const A, float *__restrict__ const rowStats,
-    float *__restrict__ const colStats, char *out_col_normed,
-    char *out_row_normed, int *rowidx, int *colidx, sycl::half *val,
-    int *__restrict__ nnz_block_ptr, float threshold, int rows, int cols,
-    int tiledCols, const sycl::nd_item<3> &item_ct1,
-    float *smem_row_stats,
-    unsigned int *smem_nnz_row_idx);
-template void kDoubleRowColQuant<64, 4, 16, 64 * 4, 1>(
-    sycl::half *__restrict__ const A, float *__restrict__ const rowStats,
-    float *__restrict__ const colStats, char *out_col_normed,
-    char *out_row_normed, int *rowidx, int *colidx, sycl::half *val,
-    int *__restrict__ nnz_block_ptr, float threshold, int rows, int cols,
-    int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats,
-    unsigned int *smem_nnz_row_idx);
+template void kDoubleRowColQuant<64, 4, 16, 64*4, 0>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols,
+                                                     const sycl::nd_item<3> &item_ct1,
+                                                     float *smem_row_stats,
+                                                     unsigned int *smem_nnz_row_idx);
+template void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols,
+                                                     const sycl::nd_item<3> &item_ct1,
+                                                     float *smem_row_stats,
+                                                     unsigned int *smem_nnz_row_idx);
 
 template unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
 
-template void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n,
+template SYCL_EXTERNAL void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n,
                                  const sycl::nd_item<3> &item_ct1,
                                  uint8_t *temp_storage_ct1);
-template void kEstimateQuantiles(sycl::half *__restrict__ const A, float *code,
-                                 const float offset, const sycl::half max_val,
-                                 const int n, const sycl::nd_item<3> &item_ct1,
+template SYCL_EXTERNAL void kEstimateQuantiles(sycl::half *__restrict__ const A, float *code, const float offset, const sycl::half max_val, const int n,
+                                 const sycl::nd_item<3> &item_ct1,
                                  uint8_t *temp_storage_ct1);
 
 #define MAKE_PreconditionOptimizer32bit1State(oname, gtype) \
 template void kPreconditionOptimizer32bit1State<gtype, oname, 4096, 8>(gtype* g, gtype* p, \
                 float* state1, float *unorm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1); \
 
-MAKE_PreconditionOptimizer32bit1State(MOMENTUM, sycl::half) 
-MAKE_PreconditionOptimizer32bit1State(MOMENTUM, float)
-MAKE_PreconditionOptimizer32bit1State(RMSPROP, sycl::half) 
-MAKE_PreconditionOptimizer32bit1State(RMSPROP, float)
-MAKE_PreconditionOptimizer32bit1State(LION, sycl::half) 
-MAKE_PreconditionOptimizer32bit1State(LION, float)
-MAKE_PreconditionOptimizer32bit1State(LION, oneapi::mkl::bfloat16)
-MAKE_PreconditionOptimizer32bit1State(ADAGRAD, sycl::half) 
-MAKE_PreconditionOptimizer32bit1State(ADAGRAD, float)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(MOMENTUM, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(MOMENTUM, float)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(RMSPROP, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(RMSPROP, float)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(LION, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(LION, float)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(LION, sycl::ext::oneapi::bfloat16)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(ADAGRAD, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(ADAGRAD, float)
 
 #define MAKE_Optimizer32bit1State(oname, gtype) \
 template void kOptimizer32bit1State<gtype, oname>(gtype* g, gtype* p, float* state1, float *unorm, const float max_unorm, const float param_norm, \
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1); \
 
-MAKE_Optimizer32bit1State(MOMENTUM, sycl::half) 
-MAKE_Optimizer32bit1State(MOMENTUM, float) 
-MAKE_Optimizer32bit1State(RMSPROP, sycl::half)
-MAKE_Optimizer32bit1State(RMSPROP, float) 
-MAKE_Optimizer32bit1State(LION, sycl::half)
-MAKE_Optimizer32bit1State(LION, float) 
-MAKE_Optimizer32bit1State(LION, oneapi::mkl::bfloat16)
-MAKE_Optimizer32bit1State(ADAGRAD, sycl::half) 
-MAKE_Optimizer32bit1State(ADAGRAD, float)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(MOMENTUM, sycl::half)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(MOMENTUM, float)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(RMSPROP, sycl::half)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(RMSPROP, float)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(LION, sycl::half)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(LION, float)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(LION, sycl::ext::oneapi::bfloat16)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(ADAGRAD, sycl::half)
+SYCL_EXTERNAL MAKE_Optimizer32bit1State(ADAGRAD, float)
 
 #define MAKE_PreconditionOptimizer32bit2State(oname, gtype) \
 template void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 8>(gtype* g, gtype* p,  \
                 float* state1, float* state2, float *unorm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
-                
-MAKE_PreconditionOptimizer32bit2State(ADAM, float)
-MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::half)
-MAKE_PreconditionOptimizer32bit2State(ADAM, oneapi::mkl::bfloat16)
+                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1); \
 
-template void kOptimizer32bit2State<float, ADAM>(
-                                                    float *g, float *p,
-                                                    float *state1,
-                                                    float *state2, float *unorm,
-                                                    const float max_unorm,
-                                                    const float param_norm,
-                                                    const float beta1,
-                                                    const float beta2,
-                                                    const float eps,
-                                                    const float weight_decay,
-                                                    const int step,
-                                                    const float lr,
-                                                    const float gnorm_scale,
-                                                    const bool skip_zeros,
-                                                    const int n,
-                                                    const sycl::nd_item<3>
-                                                        &item_ct1,
-                                                    uint8_t *temp_storage_ct1);
-template void kOptimizer32bit2State<sycl::half, ADAM>(
-    sycl::half *g, sycl::half *p, float *state1, float *state2, float *unorm,
-    const float max_unorm, const float param_norm, const float beta1,
-    const float beta2, const float eps, const float weight_decay,
-    const int step, const float lr, const float gnorm_scale,
-    const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1,
-    uint8_t *temp_storage_ct1);
-template void kOptimizer32bit2State<oneapi::mkl::bfloat16, ADAM>(
-    oneapi::mkl::bfloat16 *g, oneapi::mkl::bfloat16 *p, float *state1,
-    float *state2, float *unorm, const float max_unorm, const float param_norm,
-    const float beta1, const float beta2, const float eps,
-    const float weight_decay, const int step, const float lr,
-    const float gnorm_scale, const bool skip_zeros, const int n,
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, float)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::ext::oneapi::bfloat16)
+
+template SYCL_EXTERNAL void kOptimizer32bit2State<float, ADAM>(float* g, float* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
+    const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+template SYCL_EXTERNAL void kOptimizer32bit2State<sycl::half, ADAM>(sycl::half* g, sycl::half* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
+    const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+template SYCL_EXTERNAL void kOptimizer32bit2State<sycl::ext::oneapi::bfloat16, ADAM>(sycl::ext::oneapi::bfloat16* g, sycl::ext::oneapi::bfloat16* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
     const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
 
 #define MAKE_PreconditionStatic8bit1State(oname, gtype) \
@@ -5084,14 +4868,14 @@ template void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gty
                 float* max1, float* new_max1,  \
                 const float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1, float *smem_quantiles1);
+                const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1, float *smem_quantiles1); \
 
-MAKE_PreconditionStatic8bit1State(MOMENTUM, sycl::half) 
-MAKE_PreconditionStatic8bit1State(MOMENTUM, float)
-MAKE_PreconditionStatic8bit1State(RMSPROP, sycl::half) 
-MAKE_PreconditionStatic8bit1State(RMSPROP, float)
-MAKE_PreconditionStatic8bit1State( LION, sycl::half) 
-MAKE_PreconditionStatic8bit1State(LION, float)
+SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(MOMENTUM, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(MOMENTUM, float)
+SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(RMSPROP, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(RMSPROP, float)
+SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(LION, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(LION, float)
 
 #define MAKE_optimizerStatic8bit1State(oname, gtype) \
 template void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1,  \
@@ -5103,14 +4887,14 @@ template void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g,
                 float* max1, float* new_max1,  \
                 float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, uint8_t *temp_storage_ct1);
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, uint8_t *temp_storage_ct1); \
 
-MAKE_optimizerStatic8bit1State(MOMENTUM, sycl::half) 
-MAKE_optimizerStatic8bit1State(MOMENTUM, float)
-MAKE_optimizerStatic8bit1State(RMSPROP, sycl::half) 
-MAKE_optimizerStatic8bit1State(RMSPROP, float)
-MAKE_optimizerStatic8bit1State(LION, sycl::half) 
-MAKE_optimizerStatic8bit1State(LION, float)
+SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(MOMENTUM, sycl::half)
+SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(MOMENTUM, float)
+SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(RMSPROP, sycl::half)
+SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(RMSPROP, float)
+SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(LION, sycl::half)
+SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(LION, float)
 
 #define MAKE_PreconditionStatic8bit2State(oname, gtype) \
 template void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2, \
@@ -5120,10 +4904,10 @@ template void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gty
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1, float *smem_quantiles1, float *smem_quantiles2);
+                const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1, float *smem_quantiles1, float *smem_quantiles2); \
 
-MAKE_PreconditionStatic8bit2State(ADAM, sycl::half)
-MAKE_PreconditionStatic8bit2State(ADAM, float)
+SYCL_EXTERNAL MAKE_PreconditionStatic8bit2State(ADAM, sycl::half)
+SYCL_EXTERNAL MAKE_PreconditionStatic8bit2State(ADAM, float)
 
 #define MAKE_optimizerStatic8bit2State(oname, gtype) \
 template void kOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1, unsigned char* state2, \
@@ -5134,122 +4918,105 @@ template void kOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* const g,
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, float *smem_quantiles2, uint8_t *temp_storage_ct1);
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, float *smem_quantiles2, uint8_t *temp_storage_ct1); \
 
-MAKE_optimizerStatic8bit2State(ADAM, sycl::half)
-MAKE_optimizerStatic8bit2State(ADAM, float)
+SYCL_EXTERNAL MAKE_optimizerStatic8bit2State(ADAM, sycl::half)
+SYCL_EXTERNAL MAKE_optimizerStatic8bit2State(ADAM, float)
 
-template void kPercentileClipping<float, 2048, 4>(float *__restrict__ g,float *gnorm_vec, int step,const int n,const sycl::nd_item<3> &item_ct1);
-template void kPercentileClipping<sycl::half, 2048, 4>(sycl::half *__restrict__ g, float *gnorm_vec, int step, const int n, const sycl::nd_item<3> &item_ct1);
+template SYCL_EXTERNAL void kPercentileClipping<float, 2048, 4>(float * __restrict__ g, float *gnorm_vec, int step, const int n,
+                                                  const sycl::nd_item<3> &item_ct1);
+template SYCL_EXTERNAL void kPercentileClipping<sycl::half, 2048, 4>(sycl::half * __restrict__ g, float *gnorm_vec, int step, const int n,
+                                                 const sycl::nd_item<3> &item_ct1);
 
 #define MAKE_kQuantizeBlockwise(dtype, blocksize, num_per_thread, stochastic, data_type_name) \
-template void kQuantizeBlockwise<dtype, blocksize, num_per_thread, stochastic, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n, const sycl::nd_item<3> &item_ct1, float *smem_code, float *smem_absmax_value);
+template void kQuantizeBlockwise<dtype, blocksize, num_per_thread, stochastic, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n, const sycl::nd_item<3> &item_ct1, float *smem_code, float *smem_absmax_value); \
 
-MAKE_kQuantizeBlockwise(sycl::half, 4096,4, 0, General8bit) 
-MAKE_kQuantizeBlockwise(sycl::half,4096, 4,1, General8bit)
-MAKE_kQuantizeBlockwise(sycl::half,2048, 4, 0, General8bit) 
-MAKE_kQuantizeBlockwise(sycl::half, 1024, 4, 0, General8bit) 
-MAKE_kQuantizeBlockwise(sycl::half, 512, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(sycl::half, 256, 2, 0, General8bit) 
-MAKE_kQuantizeBlockwise(sycl::half, 128, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(sycl::half, 64, 2, 0, General8bit) 
-MAKE_kQuantizeBlockwise(sycl::half, 4096, 4, 0. FP4)
-MAKE_kQuantizeBlockwise(sycl::half, 2048, 4, 0, FP4) 
-MAKE_kQuantizeBlockwise(sycl::half, 1024, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(sycl::half, 512, 2, 0, FP4) 
-MAKE_kQuantizeBlockwise(sycl::half, 256, 2, 0, FP4) 
-MAKE_kQuantizeBlockwise(sycl::half, 128, 2, 0, FP4) 
-MAKE_kQuantizeBlockwise(sycl::half, 64, 2, 0. FP4)
-MAKE_kQuantizeBlockwise(sycl::half, 4096, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(sycl::half, 2048, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(sycl::half, 1024, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(sycl::half, 512, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(sycl::half, 256, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(sycl::half, 128, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(sycl::half, 64, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
-MAKE_kQuantizeBlockwise(float, 2048, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(float, 1024, 4, 0, General8bit) 
-MAKE_kQuantizeBlockwise(float, 512, 2, 0,  General8bit) 
-MAKE_kQuantizeBlockwise(float, 256, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(float, 128, 2, 0, General8bit) 
-MAKE_kQuantizeBlockwise(float, 64, 2, 0, General8bit) 
-MAKE_kQuantizeBlockwise(float, 4096, 4, 0, FP4) 
-MAKE_kQuantizeBlockwise(float, 2048, 4, 0, FP4) 
-MAKE_kQuantizeBlockwise(float, 1024, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(float, 512, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(float, 256, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(float, 128, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(float, 64, 2, 0, FP4) 
-MAKE_kQuantizeBlockwise(float, 4096, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(float, 2048, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(float, 1024, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(float, 512, 2, 0, NF4) 
-MAKE_kQuantizeBlockwise(float, 256,2, 0, NF4)
-MAKE_kQuantizeBlockwise(float, 128, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(float, 64, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,4096, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 4096, 4, 1, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 2048, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 1024, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 512, 2, 0, General8bit) 
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 256, 2, 0, General8bit) 
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 128, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 64, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 4096, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 2048, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 1024, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 512, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 256, 2, 0, FP4) 
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 128, 2, 0,FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 64, 2, 0, FP4) 
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 4096, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 4096, 4, 1, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 2048, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 1024, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  512, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  256, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  128, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,   64, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 4096, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 2048, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 1024, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  512, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  256, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  128, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,   64, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 4096, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 2048, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16, 1024, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  512, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  256, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,  128, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(oneapi::mkl::bfloat16,   64, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 1, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 2048, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 1024, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  512, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  256, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  128, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,   64, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 4096, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 2048, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 1024, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  512, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  256, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  128, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,   64, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 4096, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 2048, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 1024, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  512, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  256, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  128, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,   64, 2, 0, NF4)
 
-template void kDequantizeBlockwise<sycl::half, 512, 64, 8, FP4>(float *code,unsigned char  *A,float *absmax,sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1);
-template void kDequantizeBlockwise<sycl::half, 512, 64, 8, General8bit>(
-    float *code, unsigned char *A, float *absmax, sycl::half *out,
-    const int blocksize, const int n, const sycl::nd_item<3> &item_ct1);
-template void kDequantizeBlockwise<sycl::half, 512, 64, 8, NF4>(
-    float *code, unsigned char *A, float *absmax, sycl::half *out,
-    const int blocksize, const int n, const sycl::nd_item<3> &item_ct1);
-template void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 1, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, General8bit)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, FP4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, NF4)
+SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, NF4)
+
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n,
+                                                          const sycl::nd_item<3> &item_ct1);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n,
+                                                                  const sycl::nd_item<3> &item_ct1);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n,
+                                                          const sycl::nd_item<3> &item_ct1);
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,
                                                            const sycl::nd_item<3> &item_ct1);
-template void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,
                                                                    const sycl::nd_item<3> &item_ct1);
-template void kDequantizeBlockwise<float, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,
                                                            const sycl::nd_item<3> &item_ct1);
-template void kDequantizeBlockwise<oneapi::mkl::bfloat16, 512, 64, 8, FP4>(
-    float *code, unsigned char *A, float *absmax, oneapi::mkl::bfloat16 *out,
-    const int blocksize, const int n, const sycl::nd_item<3> &item_ct1);
-template void
-kDequantizeBlockwise<oneapi::mkl::bfloat16, 512, 64, 8, General8bit>(
-    float *code, unsigned char *A, float *absmax, oneapi::mkl::bfloat16 *out,
-    const int blocksize, const int n, const sycl::nd_item<3> &item_ct1);
-template void kDequantizeBlockwise<oneapi::mkl::bfloat16, 512, 64, 8, NF4>(
-    float *code, unsigned char *A, float *absmax, oneapi::mkl::bfloat16 *out,
-    const int blocksize, const int n, const sycl::nd_item<3> &item_ct1);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,
+                                                                   const sycl::nd_item<3> &item_ct1);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,
+                                                                           const sycl::nd_item<3> &item_ct1);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,
+                                                                   const sycl::nd_item<3> &item_ct1);
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \
 template void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_per_thread>(gtype* p, gtype* __restrict__ const g, unsigned char* state1, unsigned char* state2, \
@@ -5258,11 +5025,11 @@ template void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
                 float* absmax1, float* absmax2,  \
                 float weight_decay, \
-                const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, sycl::local_accessor<float, 2> smem_quantiles2, float *smem_exchange1, float *smem_exchange2, uint8_t *temp_storage_ct1);
+                const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, sycl::local_accessor<float, 2> smem_quantiles2, float *smem_exchange1, float *smem_exchange2, uint8_t *temp_storage_ct1); \
 
-MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
-MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::half, 2048, 8)
-MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, oneapi::mkl::bfloat16, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::half, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::ext::oneapi::bfloat16, 2048, 8)
 
 
 #define MAKE_OptimizerStatic8bit1StateBlockwise(oname, gtype, block_size, num_per_thread) \
@@ -5273,14 +5040,14 @@ template void kOptimizerStatic8bit1StateBlockwise<gtype, oname, block_size, num_
                 float* __restrict__ const quantiles1, \
                 float* absmax1, \
                 float weight_decay, \
-                const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, float *smem_exchange1, uint8_t *temp_storage_ct1);
+                const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, float *smem_exchange1, uint8_t *temp_storage_ct1); \
 
-MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, sycl::half, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, sycl::half, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(LION, float, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(LION, sycl::half, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(LION, oneapi::mkl::bfloat16, 2048, 8)
-MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 2048, 8)
- MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, sycl::half, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, sycl::half, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, sycl::half, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(LION, float, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(LION, sycl::half, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(LION, sycl::ext::oneapi::bfloat16, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 2048, 8)
+SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, sycl::half, 2048, 8)
