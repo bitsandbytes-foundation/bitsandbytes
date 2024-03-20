@@ -112,7 +112,7 @@ class MatMul8bit(torch.autograd.Function):
         B: torch.Tensor,
         out=None,
         quant_type: F.VectorwiseQuantType = "vector",
-        precision=Optional[List[int]],
+        precision: Optional[List[int]] = None,
     ):
         if precision is None:
             precision = [8, 8, 8]
