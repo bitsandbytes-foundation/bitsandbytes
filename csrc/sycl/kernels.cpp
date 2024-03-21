@@ -644,17 +644,20 @@ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset
   const float reciprocal_num_blocks = 1.0f/(n < 4096 ? 1.0f : (n/BLOCK_ESTIMATE));
 
   T vals[NUM_ESTIMATE];
-
-  typedef cub::BlockRadixSort<T, THREADS_ESTIMATE, NUM_ESTIMATE, dpct::null_type, 4, true, cub::BLOCK_SCAN_RAKING> BlockRadixSort;
-  typedef cub::BlockLoad<T, THREADS_ESTIMATE, NUM_ESTIMATE, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-
+  
+  //typedef cub::BlockRadixSort<T, THREADS_ESTIMATE, NUM_ESTIMATE, dpct::null_type, 4, true, cub::BLOCK_SCAN_RAKING> BlockRadixSort;
+  //typedef cub::BlockLoad<T, THREADS_ESTIMATE, NUM_ESTIMATE, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+  /*
   union  type_ct1{
       typename LoadFloat::TempStorage loadf;
       typename BlockRadixSort::TempStorage sort;
       int smem_qidx[BLOCK_ESTIMATE];
   };
   type_ct1 &temp_storage = *(type_ct1 *)temp_storage_ct1;
-
+  */
+  int smem_qidx[BLOCK_ESTIMATE];
+  sycl::buffer<T, 1> buff_A(A,sycl::range<1>(NUM_ESTIMATE));
+  sycl::buffer<T>
   for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_ESTIMATE)
   {
       valid_items = n - i > BLOCK_ESTIMATE ? BLOCK_ESTIMATE : n - i;
@@ -673,10 +676,31 @@ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset
       /*
       DPCT1007:81: Migration of cub::BlockLoad::Load is not supported.
       */
+      //LoadFloat(temp_storage.loadf).Load(&(A[i]), vals, valid_items);
+      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE,BLOCK_LOAD_DIRECT,T>;
+          size_t temp_storage_size = group_load::get_local_memory_size(NUM_ESTIMATE);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_A[i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_load(tmp).load(item,item.get_local_linear_id(), d, vals);
+            });
+          
+     });
       
-      
-      LoadFloat(temp_storage.loadf).Load(&(A[i]), vals, valid_items);
-
       #pragma unroll 4
       for(int j = 0; j < NUM_ESTIMATE; j++)
           vals[j] = ((float)vals[j]) * reciprocal_num_blocks;
@@ -692,8 +716,29 @@ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset
       /*
       DPCT1007:82: Migration of cub::BlockRadixSort::SortBlockedToStriped is not supported.
       */
-      BlockRadixSort(temp_storage.sort).SortBlockedToStriped(vals);
-
+      //BlockRadixSort(temp_storage.sort).SortBlockedToStriped(vals);
+      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_radix_sort = dpct::group::radix_sort<int, NUM_ESTIMATE>;
+          size_t temp_storage_size = group_radix_sort::get_local_memory_size(NUM_ESTIMATE);
+          sycl::local_accessor<int, 1> tacc(
+            temp_storage_size, h);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_radix_sort(tmp).sort_blocked_to_striped(item, vals);
+            });
+          
+     });
+    
       /*
       DPCT1065:78: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
@@ -713,7 +758,7 @@ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset
           DPCT1064:83: Migrated round call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
           */
           int local_idx = sycl::round(((offset+(item_ct1.get_local_id(2)*q_interval))*(valid_items-1)));
-          temp_storage.smem_qidx[local_idx] = item_ct1.get_local_id(2);
+          smem_qidx[local_idx] = item_ct1.get_local_id(2);
       }
 
       /*
@@ -723,8 +768,8 @@ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset
 
       for(int i = item_ct1.get_local_id(2); i < BLOCK_ESTIMATE; i+=item_ct1.get_local_range(2))
       {
-          if(temp_storage.smem_qidx[i] != -1)
-              dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&code[temp_storage.smem_qidx[i]], vals[i/THREADS_ESTIMATE]);
+          if(smem_qidx[i] != -1)
+              dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&code[smem_qidx[i]], vals[i/THREADS_ESTIMATE]);
       }
   }
 }
@@ -3260,8 +3305,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
                 const sycl::nd_item<3> &item_ct1,
                 sycl::local_accessor<float, 2> smem_quantiles1,
                 sycl::local_accessor<float, 2> smem_quantiles2,
-                float *smem_exchange1, float *smem_exchange2,
-                uint8_t *temp_storage_ct1)
+                float *smem_exchange1, float *smem_exchange2)
 {
 
     //const int n_full = n + (n%BLOCK_SIZE);
@@ -4019,6 +4063,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   const int base_idx = (base_row*cols) + base_col;
   const int items_per_load = ITEMS_PER_THREAD*THREADS;
 
+  /*
   typedef cub::BlockLoad<T, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadT;
   typedef sycl::group<3> BlockRowReduce;
   typedef sycl::group<3> BlockRowSum;
@@ -4031,8 +4076,8 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     typename LoadT::TempStorage loadt;
   };
   type_ct12 &temp_storage = *(type_ct12 *)temp_storage_ct1;
-
-  
+  */
+  sycl::buffer<T, 1> buff_A(A, sycl::range<1>(ITEMS_PER_THREAD));
   
 
   sycl::half local_data[ITEMS_PER_THREAD];
@@ -4080,8 +4125,30 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     /*
     DPCT1007:213: Migration of cub::BlockLoad::Load is not supported.
     */
-    LoadT(temp_storage.loadt).Load(&(A[i]), local_data, valid_items, sycl::vec<float, 1>(0.0f).convert<sycl::half, sycl::rounding_mode::automatic>()[0]);
-
+    //LoadT(temp_storage.loadt).Load(&(A[i]), local_data, valid_items, sycl::vec<float, 1>(0.0f).convert<sycl::half, sycl::rounding_mode::automatic>()[0]);
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_load<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,T>;
+          size_t temp_storage_size = group_load::get_local_memory_size(ITEMS_PER_THREAD);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_A[i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_load(tmp).load(item,item.get_local_linear_id(), d, local_data);
+            });
+          
+     });
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
       local_data[j] = sycl::fabs(local_data[j]);
@@ -4118,7 +4185,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     */
     item_ct1.barrier();
 
-    row_absmax = (float)dpct::group::reduce(item_ct1, local_data_fp32, sycl::maximum<>());
+    row_absmax = (float)sycl::reduce_over_group(item_ct1.get_group(), local_data_fp32, sycl::maximum<>());
     if(SPARSE_DECOMP)
     {
       /*
@@ -4154,8 +4221,28 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   /*
   DPCT1007:215: Migration of cub::BlockExchange::BlockedToStriped is not supported.
   */
-  BlockExchange(temp_storage.exchange).BlockedToStriped(local_col_absmax_values);
-
+  //BlockExchange(temp_storage.exchange).BlockedToStriped(local_col_absmax_values);
+  dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_exchange = dpct::group::exchange<float, ITEMS_PER_THREAD>;
+          size_t temp_storage_size = group_exchange::get_local_memory_size(ITEMS_PER_THREAD);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_exchange(tmp).blocked_to_striped(item, local_col_absmax_values);
+            });
+          
+     });
   #pragma unroll ITEMS_PER_THREAD
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
     if(base_col+item_ct1.get_local_id(2)+(j*THREADS) < cols)
@@ -4181,20 +4268,16 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
 
 template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 0>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,
                                                         const sycl::nd_item<3> &item_ct1,
-                                                        uint8_t *temp_storage_ct1,
                                                         float *smem_row_absmax_values,
                                                         int *smem_row_nnz_values);
 template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 1>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,
                                                         const sycl::nd_item<3> &item_ct1,
-                                                        uint8_t *temp_storage_ct1,
                                                         float *smem_row_absmax_values,
                                                         int *smem_row_nnz_values);
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
-template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *__restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,
-                                                                                          const sycl::nd_item<3> &item_ct1,
-                                                                                          float *smem_rowStats)
+template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *__restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,  const sycl::nd_item<3> &item_ct1, float *smem_rowStats)
 {
 
   // Strategy: To dequantize we need to load col/row statistics. This can be very expensive
@@ -4248,10 +4331,10 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
   float local_rowStats[ITEMS_PER_THREAD];
   
 
-  typedef cub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadInt32;
-  typedef cub::BlockExchange<int, THREADS, ITEMS_PER_THREAD> ExchangeInt32;
+  //typedef cub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadInt32;
+  //typedef cub::BlockExchange<int, THREADS, ITEMS_PER_THREAD> ExchangeInt32;
   
-  
+  sycl::buffer<int, 1> buff_A(A, sycl::range<1>(ITEMS_PER_THREAD));
 
 
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
@@ -4292,12 +4375,56 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
     /*
     DPCT1007:206: Migration of cub::BlockLoad::Load is not supported.
     */
-    LoadInt32(loadint32).Load(&(A[subtile_idx]), local_values, valid_items, 0);
+    //LoadInt32(loadint32).Load(&(A[subtile_idx]), local_values, valid_items, 0);
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_load<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,int>;
+          size_t temp_storage_size = group_load::get_local_memory_size(ITEMS_PER_THREAD);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_A[subtile_idx], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_load(tmp).load(item,item.get_local_linear_id(), d, local_values);
+            });
+          
+     });
     /*
     DPCT1007:207: Migration of cub::BlockExchange::BlockedToWarpStriped is not supported.
     */
-    ExchangeInt32(exchangeint32).BlockedToWarpStriped(local_values, local_values);
-
+    //ExchangeInt32(exchangeint32).BlockedToWarpStriped(local_values, local_values);
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_exchange = dpct::group::exchange<int, ITEMS_PER_THREAD>;
+          size_t temp_storage_size = group_exchange::get_local_memory_size(ITEMS_PER_THREAD);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_exchange(tmp).blocked_to_warpstriped(item, local_values);
+            });
+          
+     });
+    
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
       local_rowStats[j] = smem_rowStats[subtile_base_row+row_offset+j];
@@ -4325,10 +4452,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
 }
 
 
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kDoubleRowColQuant(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols,
-                                                                                                                      const sycl::nd_item<3> &item_ct1,
-                                                                                                                      float *smem_row_stats,
-                                                                                                                      unsigned int *smem_nnz_row_idx)
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kDoubleRowColQuant(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx)
 {
   // assumes TILE_SIZE == THREADS*ITEMS_PER_THREAD
   // Each thread reads the same column but multiple rows
@@ -4347,12 +4471,15 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
   const int base_col = (item_ct1.get_group(2)*TILE_COLS) % tiledCols;
   const int base_idx = (base_row*cols) + base_col;
   const int items_per_load = ITEMS_PER_THREAD*THREADS;
-
-  typedef cub::BlockLoad<sycl::half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadHalf;
-  
-  typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
   
 
+  //typedef cub::BlockLoad<sycl::half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadHalf;
+  
+  //typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
+  
+  sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(ITEMS_PER_THREAD));
+  sycl::buffer<char, 1> buff_out_row_normed(out_row_normed,sycl::range<1>(ITEMS_PER_THREAD));
+  sycl::buffer<char, 1> buff_out_col_normed(out_col_normed,sycl::range<1>(ITEMS_PER_THREAD));
   
   
 
@@ -4394,7 +4521,31 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     /*
     DPCT1007:218: Migration of cub::BlockLoad::Load is not supported.
     */
-    LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
+    //LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_load = dpct::group::workgroup_load<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,sycl::half>;
+          size_t temp_storage_size = group_load::get_local_memory_size(ITEMS_PER_THREAD);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_A[i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_load(tmp).load(item,item.get_local_linear_id(), d, local_data);
+            });
+          
+     });
+    
     float row_stat = 127.0f / smem_row_stats[row];
 
     // 2. quantize data with row/col stats
@@ -4427,8 +4578,30 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     /*
     DPCT1007:219: Migration of cub::BlockStore::Store is not supported.
     */
-    StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
-
+    //StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_store = dpct::group::workgroup_store<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,char>;
+          size_t temp_storage_size = group_store::get_local_memory_size(ITEMS_PER_THREAD);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_out_row_normed[i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_store(tmp).store(item,item.get_local_linear_id(), d, local_quantized_data);
+            });
+          
+     });
     // 2. quantize data with row/col stats
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
@@ -4445,17 +4618,37 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     /*
     DPCT1007:220: Migration of cub::BlockStore::Store is not supported.
     */
-    StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
-
+    //StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
+    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+     
+     
+          using group_store = dpct::group::workgroup_store<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,char>;
+          size_t temp_storage_size = group_store::get_local_memory_size(ITEMS_PER_THREAD);
+          sycl::local_accessor<uint8_t, 1> tacc(
+            temp_storage_size, h);
+          sycl::accessor dacc(buff_out_col_normed[i], h, sycl::read_write);
+          
+          // 1. load 8 values per thread
+          // 2. compute 2-max in registers (64 max per warp)
+          // 3. do warp reduction + broadcast back
+          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+          // 5. Repeat (3) 8 times for top 8 values in 256
+          // 6. store with byte index
+          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
+            [=](sycl::nd_item<3> item) {
+              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+              group_store(tmp).store(item,item.get_local_linear_id(), d, local_quantized_data);
+            });
+          
+     });
   }
 }
 
 /*
 DPCT1110:14: The total declared local variable size in device function kTransformRowToFormat exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
 */
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> SYCL_EXTERNAL void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
-                                                                                                                                 const sycl::nd_item<3> &item_ct1,
-                                                                                                                                 char *smem_data)
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> SYCL_EXTERNAL void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,  const sycl::nd_item<3> &item_ct1, char *smem_data)
 {
 
   // 0. Load data into 32*32 shared memory tiles
@@ -4506,8 +4699,10 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   // so that we can have contiguous stores
   
   char local_data[ITEMS_PER_THREAD];
-  typedef cub::BlockExchange<char, THREADS, ITEMS_PER_THREAD> BlockExchange;
+  //typedef cub::BlockExchange<char, THREADS, ITEMS_PER_THREAD> BlockExchange;
 
+  
+  
   // we load row after row from the base_position
   // Load data row by row
   int warps = item_ct1.get_local_range(2)/32;
@@ -4789,9 +4984,8 @@ template <typename T, int SPMM_ITEMS, int BITS>
 /*
 DPCT1110:13: The total declared local variable size in device function kspmm_coo_very_sparse_naive exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
 */
-SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
-                                 const sycl::nd_item<3> &item_ct1,
-                                 sycl::half *smem_dequant_stats)
+SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
+ sycl::half *smem_dequant_stats)
 {
 
   // 0. load balancing: We process rows with most columns first (count_vec)and we process one row per block
@@ -4937,8 +5131,7 @@ SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int
   }
 }
 
-template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
-                                            const sycl::nd_item<3> &item_ct1)
+template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1)
 {
 	int local_colidx = idx[item_ct1.get_group(2)];
 
@@ -5044,10 +5237,7 @@ template <typename T, typename TCAST, int ITEMS> inline void vector_load(T *loca
 /*
 DPCT1110:15: The total declared local variable size in device function gemm_device exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
 */
-template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc,
-                                                              const sycl::nd_item<3> &item_ct1,
-                                                              T *smem_A,
-                                                              T *smem_B)
+template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc, const sycl::nd_item<3> &item_ct1, T *smem_A, T *smem_B)
 {
 
 #if DPCT_COMPATIBILITY_TEMP >= 750
@@ -5963,17 +6153,15 @@ template unsigned char dQuantize<0>(float* smem_code, const float rand, float x)
 template unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
 
 template SYCL_EXTERNAL void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n,
-                                 const sycl::nd_item<3> &item_ct1,
-                                 uint8_t *temp_storage_ct1);
+                                 const sycl::nd_item<3> &item_ct1);
 template SYCL_EXTERNAL void kEstimateQuantiles(sycl::half *__restrict__ const A, float *code, const float offset, const sycl::half max_val, const int n,
-                                 const sycl::nd_item<3> &item_ct1,
-                                 uint8_t *temp_storage_ct1);
+                                 const sycl::nd_item<3> &item_ct1);
 
 #define MAKE_PreconditionOptimizer32bit1State(oname, gtype) \
 template void kPreconditionOptimizer32bit1State<gtype, oname, 4096, 8>(gtype* g, gtype* p, \
                 float* state1, float *unorm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1); \
+                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1; \
 
 SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(MOMENTUM, sycl::half)
 SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(MOMENTUM, float)
@@ -5987,7 +6175,7 @@ SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(ADAGRAD, float)
 
 #define MAKE_Optimizer32bit1State(oname, gtype) \
 template void kOptimizer32bit1State<gtype, oname>(gtype* g, gtype* p, float* state1, float *unorm, const float max_unorm, const float param_norm, \
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1); \
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1); \
 
 SYCL_EXTERNAL MAKE_Optimizer32bit1State(MOMENTUM, sycl::half)
 SYCL_EXTERNAL MAKE_Optimizer32bit1State(MOMENTUM, float)
@@ -6003,7 +6191,7 @@ SYCL_EXTERNAL MAKE_Optimizer32bit1State(ADAGRAD, float)
 template void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 8>(gtype* g, gtype* p,  \
                 float* state1, float* state2, float *unorm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1); \
+                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1); \
 
 SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, float)
 SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::half)
@@ -6011,13 +6199,13 @@ SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::ext::oneapi::bfl
 
 template SYCL_EXTERNAL void kOptimizer32bit2State<float, ADAM>(float* g, float* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+    const sycl::nd_item<3> &item_ct1);
 template SYCL_EXTERNAL void kOptimizer32bit2State<sycl::half, ADAM>(sycl::half* g, sycl::half* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+    const sycl::nd_item<3> &item_ct1);
 template SYCL_EXTERNAL void kOptimizer32bit2State<sycl::ext::oneapi::bfloat16, ADAM>(sycl::ext::oneapi::bfloat16* g, sycl::ext::oneapi::bfloat16* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+    const sycl::nd_item<3> &item_ct1);
 
 #define MAKE_PreconditionStatic8bit1State(oname, gtype) \
 template void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1,  \
@@ -6029,7 +6217,7 @@ template void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gty
                 float* max1, float* new_max1,  \
                 const float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1, float *smem_quantiles1); \
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1); \
 
 SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(MOMENTUM, sycl::half)
 SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(MOMENTUM, float)
@@ -6048,7 +6236,7 @@ template void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g,
                 float* max1, float* new_max1,  \
                 float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, uint8_t *temp_storage_ct1); \
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1); \
 
 SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(MOMENTUM, sycl::half)
 SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(MOMENTUM, float)
@@ -6065,7 +6253,7 @@ template void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gty
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1, float *smem_quantiles1, float *smem_quantiles2); \
+                const int n, const sycl::nd_item<3> &item_ct1,  float *smem_quantiles1, float *smem_quantiles2); \
 
 SYCL_EXTERNAL MAKE_PreconditionStatic8bit2State(ADAM, sycl::half)
 SYCL_EXTERNAL MAKE_PreconditionStatic8bit2State(ADAM, float)
@@ -6079,7 +6267,7 @@ template void kOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* const g,
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, float *smem_quantiles2, uint8_t *temp_storage_ct1); \
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, float *smem_quantiles2); \
 
 SYCL_EXTERNAL MAKE_optimizerStatic8bit2State(ADAM, sycl::half)
 SYCL_EXTERNAL MAKE_optimizerStatic8bit2State(ADAM, float)
@@ -6186,7 +6374,7 @@ template void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
                 float* absmax1, float* absmax2,  \
                 float weight_decay, \
-                const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, sycl::local_accessor<float, 2> smem_quantiles2, float *smem_exchange1, float *smem_exchange2, uint8_t *temp_storage_ct1); \
+                const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, sycl::local_accessor<float, 2> smem_quantiles2, float *smem_exchange1, float *smem_exchange2); \
 
 SYCL_EXTERNAL MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
 SYCL_EXTERNAL MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::half, 2048, 8)
@@ -6201,7 +6389,7 @@ template void kOptimizerStatic8bit1StateBlockwise<gtype, oname, block_size, num_
                 float* __restrict__ const quantiles1, \
                 float* absmax1, \
                 float weight_decay, \
-                const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, float *smem_exchange1, uint8_t *temp_storage_ct1); \
+                const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, float *smem_exchange1); \
 
 SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
 SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, sycl::half, 2048, 8)

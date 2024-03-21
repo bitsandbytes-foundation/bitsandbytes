@@ -156,7 +156,7 @@ extern SYCL_EXTERNAL void kdequant_mm_int32_fp16(
     const sycl::nd_item<3> &item_ct1, float *smem_rowStats);
 
 template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> extern SYCL_EXTERNAL void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,
- const sycl::nd_item<3> &item_ct1,uint8_t *temp_storage_ct1,float *smem_row_absmax_values,int *smem_row_nnz_values);
+ const sycl::nd_item<3> &item_ct1,float *smem_row_absmax_values,int *smem_row_nnz_values);
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS,
           int SPARSE_DECOMP>
 extern SYCL_EXTERNAL void kDoubleRowColQuant(sycl::half *__restrict__ const A,
