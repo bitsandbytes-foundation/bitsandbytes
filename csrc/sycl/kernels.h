@@ -16,8 +16,7 @@
 //template <int QUANT_TYPE, typename INP_TYPE, typename COMP_TYPE, typename OUT_TYPE>__global__ void kMatmul_inference_4bit(INP_TYPE *A, unsigned char *B, OUT_TYPE *out, int lda, int ldb, int rowsA, int colsA, int colsB);
 
 template<typename T> extern SYCL_EXTERNAL void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset, const T max_val, const int n,
-                                            const sycl::nd_item<3> &item_ct1,
-                                            uint8_t *temp_storage_ct1);
+                                            const sycl::nd_item<3> &item_ct1);
 
 extern SYCL_EXTERNAL void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n,
                const sycl::nd_item<3> &item_ct1);
@@ -28,36 +27,35 @@ template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TY
                                                                                                             const sycl::nd_item<3> &item_ct1,
                                                                                                             float *smem_code,
                                                                                                             float *smem_absmax_value);
-template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE> extern SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n,
-                                                                                                           const sycl::nd_item<3> &item_ct1);
+template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE> extern SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 extern SYCL_EXTERNAL void kPreconditionOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+                const sycl::nd_item<3> &item_ct1);
 
 template<typename T, int OPTIMIZER>
 extern SYCL_EXTERNAL void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+                const sycl::nd_item<3> &item_ct1);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 extern SYCL_EXTERNAL void kPreconditionOptimizer32bit1State(T* g, T* p,
                 float* state1, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+                const sycl::nd_item<3> &item_ct1);
 
 template<typename T, int OPTIMIZER>
 extern SYCL_EXTERNAL void kOptimizer32bit1State(T* g, T* p,
                 float* state1,  float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1);
+                const sycl::nd_item<3> &item_ct1);
 
 template<typename T, int OPTIMIZER>
 extern SYCL_EXTERNAL void
@@ -69,7 +67,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                 float* max1, float* new_max1,
                 const float weight_decay,
                 const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1,
+                const sycl::nd_item<3> &item_ct1,
                 float *smem_quantiles1);
 
 
@@ -82,8 +80,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 float* __restrict__ const quantiles1,
                 float* max1, float* new_max1,
                 float weight_decay, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,
-                uint8_t *temp_storage_ct1);
+                const sycl::nd_item<3> &item_ct1, float *smem_quantiles1);
 
 
 
@@ -96,7 +93,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, uint8_t *temp_storage_ct1,
+                const sycl::nd_item<3> &item_ct1, 
                 float *smem_quantiles1, float *smem_quantiles2);
 
 
@@ -110,7 +107,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay, const float gnorm_scale, const int n,
                 const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,
-                float *smem_quantiles2, uint8_t *temp_storage_ct1);
+                float *smem_quantiles2);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EXTERNAL void kOptimizerStatic8bit2StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,
@@ -120,8 +117,7 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EX
                 const sycl::nd_item<3> &item_ct1,
                 sycl::local_accessor<float, 2> smem_quantiles1,
                 sycl::local_accessor<float, 2> smem_quantiles2,
-                float *smem_exchange1, float *smem_exchange2,
-                uint8_t *temp_storage_ct1);
+                float *smem_exchange1, float *smem_exchange2);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EXTERNAL void kOptimizerStatic8bit1StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1,
@@ -133,7 +129,7 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EX
                 const float gnorm_scale, const bool skip_zeros, const int n,
                 const sycl::nd_item<3> &item_ct1,
                 sycl::local_accessor<float, 2> smem_quantiles1,
-                float *smem_exchange1, uint8_t *temp_storage_ct1);
+                float *smem_exchange1);
 
 
 template<typename T, int BLOCK_SIZE, int NUM_VALS> extern SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,const sycl::nd_item<3> &item_ct1);
