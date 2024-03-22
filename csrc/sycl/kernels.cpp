@@ -8,7 +8,7 @@
 #include <sycl/sycl.hpp>
 #include <dpct/dpct.hpp>
 #include <dpct/dpl_extras/dpcpp_extensions.h>
-#include "kernels.dp.hpp"
+#include "kernels.h"
 #include <dpct/dpl_utils.hpp>
 #include <mma.h>
 #include <cmath>
