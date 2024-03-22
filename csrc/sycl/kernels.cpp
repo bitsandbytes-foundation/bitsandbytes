@@ -551,7 +551,7 @@ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, cons
   sycl::buffer<T, 1>  buff_values(smem_max_values, sycl::range<1>(8*BLOCK_SIZE/32));
   sycl::buffer<T, 1>  buff_A(A,sycl::range<1>(8*BLOCK_SIZE/32));
   
-  dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+  dpct::get_in_order_queue().submit([&](sycl::handler &h) {
  
  
       using group_load = dpct::group::workgroup_load<BLOCK_SIZE/8,BLOCK_LOAD_DIRECT>;
@@ -677,7 +677,7 @@ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset
       DPCT1007:81: Migration of cub::BlockLoad::Load is not supported.
       */
       //LoadFloat(temp_storage.loadf).Load(&(A[i]), vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_ESTIMATE,BLOCK_LOAD_DIRECT,T>;
@@ -717,7 +717,7 @@ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset
       DPCT1007:82: Migration of cub::BlockRadixSort::SortBlockedToStriped is not supported.
       */
       //BlockRadixSort(temp_storage.sort).SortBlockedToStriped(vals);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_radix_sort = dpct::group::radix_sort<int, NUM_ESTIMATE>;
@@ -820,7 +820,7 @@ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, c
       */
       item_ct1.barrier(sycl::access::fence_space::local_space);
       
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::- &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM,BLOCK_LOAD_DIRECT,float>;
@@ -860,7 +860,7 @@ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, c
       item_ct1.barrier(sycl::access::fence_space::local_space);
       
       
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_store<NUM,BLOCK_STORE_DIRECT,unsigned char>;
@@ -937,7 +937,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, fl
     */
     //LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
 
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_TH,BLOCK_LOAD_DIRECT,float>;
@@ -1003,7 +1003,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, fl
       
       //LoadFloat(loadf).Load(&rand[local_rand_idx], rand_vals, BLOCK_SIZE, 0);
       
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_TH,BLOCK_LOAD_DIRECT,float>;
@@ -1071,7 +1071,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, fl
     DPCT1007:89: Migration of cub::BlockStore::Store is not supported.
     */
     
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_TH,BLOCK_STORE_DIRECT,float>;
@@ -1151,7 +1151,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
     DPCT1007:93: Migration of cub::BlockLoad::Load is not supported.
     */
     //LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_TH,BLOCK_LOAD_DIRECT,float>;
@@ -1218,7 +1218,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
     */
     //StoreT(storet).Store(&(out[(DATA_TYPE > 0) ? i*2 : i]), vals, valid_items_store);
     
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_TH,BLOCK_STORE_DIRECT,float>;
@@ -1320,7 +1320,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
       */
       //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, 0.0f);
       
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_VALS,BLOCK_LOAD_DIRECT,T>;
@@ -1353,7 +1353,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
       DPCT1007:102: Migration of cub::BlockLoad::Load is not supported.
       */
       //LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items, 0.0f);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_VALS,BLOCK_LOAD_DIRECT,float>;
@@ -1387,7 +1387,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
       DPCT1007:103: Migration of cub::BlockLoad::Load is not supported.
       */
       //LoadFloat(temp_storage.loadf).Load(&(state2[i]), s2_vals, valid_items, 0.0f);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_VALS,BLOCK_LOAD_DIRECT,float>;
@@ -1516,7 +1516,7 @@ void kOptimizer32bit2State(T* g, T* p,
       DPCT1007:111: Migration of cub::BlockLoad::Load is not supported.
       */
       //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD,BLOCK_LOAD_DIRECT,T>;
@@ -1549,7 +1549,7 @@ void kOptimizer32bit2State(T* g, T* p,
       DPCT1007:112: Migration of cub::BlockLoad::Load is not supported.
       */
       //LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD,BLOCK_LOAD_DIRECT,float>;
@@ -1583,7 +1583,7 @@ void kOptimizer32bit2State(T* g, T* p,
       */
       //LoadFloat(temp_storage.loadf).Load(&(state2[i]), s2_vals, valid_items);
       
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD,BLOCK_LOAD_DIRECT,float>;
@@ -1616,7 +1616,7 @@ void kOptimizer32bit2State(T* g, T* p,
       */
       //Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
       
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD,BLOCK_LOAD_DIRECT,T>;
@@ -1672,7 +1672,7 @@ void kOptimizer32bit2State(T* g, T* p,
       DPCT1007:115: Migration of cub::BlockStore::Store is not supported.
       */
       //Store(temp_storage.store).Store(&(p[i]), p_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD,BLOCK_STORE_DIRECT,T>;
@@ -1704,7 +1704,7 @@ void kOptimizer32bit2State(T* g, T* p,
       DPCT1007:116: Migration of cub::BlockStore::Store is not supported.
       */
       //StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD,BLOCK_STORE_DIRECT,float>;
@@ -1738,7 +1738,7 @@ void kOptimizer32bit2State(T* g, T* p,
       DPCT1007:117: Migration of cub::BlockStore::Store is not supported.
       */
       //StoreFloat(temp_storage.storef).Store(&(state2[i]), s2_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD,BLOCK_STORE_DIRECT,float>;
@@ -1809,7 +1809,7 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
       DPCT1007:121: Migration of cub::BlockLoad::Load is not supported.
       */
       //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, 0.0f);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_VALS,BLOCK_LOAD_DIRECT,T>;
@@ -1842,7 +1842,7 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
       DPCT1007:122: Migration of cub::BlockLoad::Load is not supported.
       */
       //LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items, 0.0f);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_VALS,BLOCK_LOAD_DIRECT,float>;
@@ -1978,7 +1978,7 @@ void kOptimizer32bit1State(T *g, T *p,
       DPCT1007:128: Migration of cub::BlockLoad::Load is not supported.
       */
       //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD,BLOCK_LOAD_DIRECT,T>;
@@ -2011,7 +2011,7 @@ void kOptimizer32bit1State(T *g, T *p,
       DPCT1007:129: Migration of cub::BlockLoad::Load is not supported.
       */
       //LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD,BLOCK_LOAD_DIRECT,float>;
@@ -2044,7 +2044,7 @@ void kOptimizer32bit1State(T *g, T *p,
       DPCT1007:130: Migration of cub::BlockLoad::Load is not supported.
       */
       //Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD,BLOCK_LOAD_DIRECT,T>;
@@ -2114,7 +2114,7 @@ void kOptimizer32bit1State(T *g, T *p,
       DPCT1007:131: Migration of cub::BlockStore::Store is not supported.
       */
       //Store(temp_storage.store).Store(&(p[i]), p_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD,BLOCK_STORE_DIRECT,T>;
@@ -2146,7 +2146,7 @@ void kOptimizer32bit1State(T *g, T *p,
       DPCT1007:132: Migration of cub::BlockStore::Store is not supported.
       */
       //StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD,BLOCK_STORE_DIRECT,float>;
@@ -2246,7 +2246,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
         DPCT1007:156: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_THREADS,BLOCK_LOAD_DIRECT,T>;
@@ -2277,7 +2277,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
         DPCT1007:157: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadUInt8(temp_storage.loadc).Load(&(state1[i]), m_c1, valid_items, 128);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_THREADS,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -2310,7 +2310,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
         DPCT1007:158: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadUInt8(temp_storage.loadc).Load(&(state2[i]), r_c2, valid_items, 128);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_THREADS,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -2498,7 +2498,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         DPCT1007:167: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD2,BLOCK_LOAD_DIRECT,T>;
@@ -2530,7 +2530,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         DPCT1007:168: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD2,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -2562,7 +2562,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         DPCT1007:169: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 0);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD2,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -2594,7 +2594,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         DPCT1007:170: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD2,BLOCK_LOAD_DIRECT,T>;
@@ -2659,7 +2659,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         DPCT1007:171: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD2,BLOCK_STORE_DIRECT,T>;
@@ -2691,7 +2691,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         DPCT1007:172: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD2,BLOCK_STORE_DIRECT,unsigned char>;
@@ -2723,7 +2723,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         DPCT1007:173: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreChar(temp_storage.storec).Store(&(state2[i]), c2s, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD2,BLOCK_STORE_DIRECT,unsigned char>;
@@ -2821,7 +2821,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
         DPCT1007:137: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_THREADS,BLOCK_LOAD_DIRECT,T>;
@@ -2852,7 +2852,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
         DPCT1007:138: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadUInt8(temp_storage.loadc).Load(&(state1[i]), m_c1, valid_items, 128);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_THREADS,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -3000,7 +3000,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         DPCT1007:145: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD2,BLOCK_LOAD_DIRECT,T>;
@@ -3033,7 +3033,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         DPCT1007:146: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD2,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -3065,7 +3065,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         DPCT1007:147: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_PER_THREAD2,BLOCK_LOAD_DIRECT, T>;
@@ -3146,7 +3146,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         DPCT1007:148: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD2,BLOCK_STORE_DIRECT, T>;
@@ -3178,7 +3178,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         DPCT1007:149: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<NUM_PER_THREAD2, BLOCK_STORE_DIRECT, unsigned char>;
@@ -3238,7 +3238,7 @@ SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int
       DPCT1007:203: Migration of cub::BlockLoad::Load is not supported.
       */
       //LoadT(loadT).Load(&(g[i]), vals, valid_items, (T)0.0f);
-      dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+      dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<NUM_VALS,BLOCK_LOAD_DIRECT, T>;
@@ -3389,7 +3389,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:183: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<N_PER_TH,BLOCK_LOAD_DIRECT,T>;
@@ -3421,7 +3421,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:184: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<N_PER_TH,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -3453,7 +3453,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:185: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 0);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<N_PER_TH,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -3542,7 +3542,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:186: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<N_PER_TH,BLOCK_LOAD_DIRECT,T>;
@@ -3590,7 +3590,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:187: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<N_PER_TH, BLOCK_STORE_DIRECT, T>;
@@ -3639,7 +3639,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:188: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<N_PER_TH, BLOCK_STORE_DIRECT, unsigned char>;
@@ -3671,7 +3671,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:189: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreChar(temp_storage.storec).Store(&(state2[i]), c2s, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<N_PER_TH, BLOCK_STORE_DIRECT, unsigned char>;
@@ -3784,7 +3784,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:197: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<N_PER_TH,BLOCK_LOAD_DIRECT,T>;
@@ -3815,7 +3815,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:198: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<N_PER_TH,BLOCK_LOAD_DIRECT,unsigned char>;
@@ -3846,7 +3846,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:199: Migration of cub::BlockLoad::Load is not supported.
         */
         //LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<N_PER_TH,BLOCK_LOAD_DIRECT,T>;
@@ -3971,7 +3971,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:200: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<N_PER_TH, BLOCK_STORE_DIRECT, T>;
@@ -4019,7 +4019,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         DPCT1007:201: Migration of cub::BlockStore::Store is not supported.
         */
         //StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
-        dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+        dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<N_PER_TH, BLOCK_STORE_DIRECT, unsigned char>;
@@ -4126,7 +4126,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     DPCT1007:213: Migration of cub::BlockLoad::Load is not supported.
     */
     //LoadT(temp_storage.loadt).Load(&(A[i]), local_data, valid_items, sycl::vec<float, 1>(0.0f).convert<sycl::half, sycl::rounding_mode::automatic>()[0]);
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,T>;
@@ -4222,7 +4222,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   DPCT1007:215: Migration of cub::BlockExchange::BlockedToStriped is not supported.
   */
   //BlockExchange(temp_storage.exchange).BlockedToStriped(local_col_absmax_values);
-  dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+  dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_exchange = dpct::group::exchange<float, ITEMS_PER_THREAD>;
@@ -4376,7 +4376,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
     DPCT1007:206: Migration of cub::BlockLoad::Load is not supported.
     */
     //LoadInt32(loadint32).Load(&(A[subtile_idx]), local_values, valid_items, 0);
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,int>;
@@ -4403,7 +4403,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
     DPCT1007:207: Migration of cub::BlockExchange::BlockedToWarpStriped is not supported.
     */
     //ExchangeInt32(exchangeint32).BlockedToWarpStriped(local_values, local_values);
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_exchange = dpct::group::exchange<int, ITEMS_PER_THREAD>;
@@ -4522,7 +4522,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     DPCT1007:218: Migration of cub::BlockLoad::Load is not supported.
     */
     //LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_load = dpct::group::workgroup_load<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,sycl::half>;
@@ -4579,7 +4579,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     DPCT1007:219: Migration of cub::BlockStore::Store is not supported.
     */
     //StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,char>;
@@ -4619,7 +4619,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     DPCT1007:220: Migration of cub::BlockStore::Store is not supported.
     */
     //StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
-    dpct::get_in_order_queue().submit([&](sycl::handler &cgh) {
+    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
      
      
           using group_store = dpct::group::workgroup_store<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,char>;
