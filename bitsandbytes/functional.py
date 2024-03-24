@@ -203,7 +203,11 @@ def prefetch_tensor(A: torch.Tensor, to_cpu=False):
 
 
 def elementwise_func(
-    func_name: str, A: torch.Tensor, B: Optional[torch.Tensor], value: Union[float, int], prefetch=True
+    func_name: str,
+    A: torch.Tensor,
+    B: Optional[torch.Tensor],
+    value: Union[float, int],
+    prefetch=True,
 ):
     func: Optional[Callable] = None
     if A.dtype == torch.float32:
@@ -470,7 +474,10 @@ TransformOrder = Literal["row", "col", "col32", "col_turing", "col_ampere"]
 
 
 def get_transform_func(
-    dtype: torch.dtype, orderA: TransformOrder, orderOut: TransformOrder, transpose=False
+    dtype: torch.dtype,
+    orderA: TransformOrder,
+    orderOut: TransformOrder,
+    transpose=False,
 ) -> Callable[[Any, Optional[ct.c_void_p], Optional[ct.c_void_p], ct.c_int32, ct.c_int32], None]:
     name = f'ctransform_{(8 if dtype == torch.int8 else 32)}_{orderA}_to_{orderOut}_{"t" if transpose else "n"}'
     if not hasattr(lib, name):
@@ -1030,7 +1037,11 @@ def dequantize_blockwise(
 DataType4Bit = Literal["nf4", "fp4", "int4", "af4"]
 
 
-def get_4bit_type(typename: DataType4Bit, device: Optional[Union[int, str, torch.device]] = None, blocksize=64):
+def get_4bit_type(
+    typename: DataType4Bit,
+    device: Optional[Union[int, str, torch.device]] = None,
+    blocksize=64,
+):
     if device is None:
         device = "cuda"
     data = None
@@ -2825,7 +2836,13 @@ def spmm_coo_very_sparse(
 C = 127.0
 
 VectorwiseQuantType = Literal[
-    "linear", "vector", "row", "zeropoint", "vector-zeropoint", "row-zeropoint", "truncated-vector"
+    "linear",
+    "vector",
+    "row",
+    "zeropoint",
+    "vector-zeropoint",
+    "row-zeropoint",
+    "truncated-vector",
 ]
 
 
@@ -2875,7 +2892,11 @@ def vectorwise_quant(
         return None
 
 
-def vectorwise_dequant(xq: torch.Tensor, max1, quant_type: VectorwiseQuantType = "vector") -> Optional[Tensor]:
+def vectorwise_dequant(
+    xq: torch.Tensor,
+    max1,
+    quant_type: VectorwiseQuantType = "vector",
+) -> Optional[Tensor]:
     if quant_type == "vector":
         x = (xq / C * max1).to(torch.float32)
         return x
@@ -2884,7 +2905,11 @@ def vectorwise_dequant(xq: torch.Tensor, max1, quant_type: VectorwiseQuantType =
 
 
 def vectorwise_mm_dequant(
-    xq: torch.Tensor, S1: torch.Tensor, S2: torch.Tensor, dtype=torch.half, quant_type: VectorwiseQuantType = "vector"
+    xq: torch.Tensor,
+    S1: torch.Tensor,
+    S2: torch.Tensor,
+    dtype=torch.half,
+    quant_type: VectorwiseQuantType = "vector",
 ):
     if quant_type == "linear":
         norm = S1 * S2 / (C * C)
@@ -2945,7 +2970,12 @@ def vectorwise_mm_dequant(
 
 
 def dequant_min_max(
-    xq: torch.Tensor, A: torch.Tensor, B: torch.Tensor, SA: torch.Tensor, SB: torch.Tensor, dtype=torch.half
+    xq: torch.Tensor,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    SA: torch.Tensor,
+    SB: torch.Tensor,
+    dtype=torch.half,
 ):
     offset = B.float().t().sum(0) * (SA[0] + SA[1])
     x = xq.float()
