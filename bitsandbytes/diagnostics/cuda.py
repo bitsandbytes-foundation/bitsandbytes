@@ -59,7 +59,7 @@ def find_cuda_libraries_in_path_list(paths_list_candidate: str) -> Iterable[Path
                 for pth in dir.glob(lib_pattern):
                     if pth.is_file():
                         yield pth
-        except PermissionError:
+        except (OSError, PermissionError):
             pass
 
 
