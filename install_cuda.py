@@ -17,6 +17,7 @@ cuda_versions = {
     "121": "https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux.run",
     "122": "https://developer.download.nvidia.com/compute/cuda/12.2.2/local_installers/cuda_12.2.2_535.104.05_linux.run",
     "123": "https://developer.download.nvidia.com/compute/cuda/12.3.2/local_installers/cuda_12.3.2_545.23.08_linux.run",
+    "124": "https://developer.download.nvidia.com/compute/cuda/12.4.0/local_installers/cuda_12.4.0_550.54.14_linux.run",
 }
 
 
@@ -76,7 +77,9 @@ def main():
     download_path = "/tmp"  # default download path
 
     if len(sys.argv) < 2:
-        print("Usage: python install_cuda.py <version/all> [user/system] [download_path]")
+        print(
+            "Usage: python install_cuda.py <version/all> [user/system] [download_path]"
+        )
         sys.exit(1)
 
     version = sys.argv[1]
@@ -97,7 +100,9 @@ def main():
     elif version in cuda_versions:
         install_cuda(version, base_path, download_path)
     else:
-        print(f"Invalid CUDA version: {version}. Available versions are: {', '.join(cuda_versions.keys())}")
+        print(
+            f"Invalid CUDA version: {version}. Available versions are: {', '.join(cuda_versions.keys())}"
+        )
         sys.exit(1)
 
 
