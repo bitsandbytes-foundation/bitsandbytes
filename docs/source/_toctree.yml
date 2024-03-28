@@ -1,34 +1,58 @@
 - title: Get started
   sections:
   - local: index
-    title: Index
+    title: bitsandbytes
   - local: quickstart
     title: Quickstart
   - local: installation
     title: Installation
-- title: Features & Integrations
+- title: Guides
   sections:
-  - local: quantization
-    title: Quantization
   - local: optimizers
-    title: Optimizers
-  - local: integrations
-    title: Integrations
+    title: 8-bit optimizers
   - local: algorithms
     title: Algorithms
-- title: Support & Learning
-  sections:
-  - local: resources
-    title: Papers, resources & how to cite
+  - local: integrations
+    title: Integrations
   - local: errors
-    title: Errors & Solutions
-  - local: nonpytorchcuda
-    title: Non-PyTorch CUDA
-  - local: compiling
-    title: Compilation from Source (extended)
-  - local: faqs
-    title: FAQs (Frequently Asked Questions)
-- title: Contributors Guidelines
-  sections:
+    title: Troubleshoot
   - local: contributing
-    title: Contributing
+    title: Contribute
+  - local: faqs
+    title: FAQs
+- title: Explanation
+  sections:
+  - local: explanations/optimizers
+    title: 8-bit optimizers
+  - local: explanations/resources
+    title: Papers, resources & how to cite
+- title: API reference
+  sections:
+  - title: Optimizers
+    sections:
+    - local: reference/optim/optim_overview
+      title: Overview
+    - local: reference/optim/adagrad
+      title: AdaGrad
+    - local: reference/optim/adam
+      title: Adam
+    - local: reference/optim/adamw
+      title: AdamW
+    - local: reference/optim/lamb
+      title: LAMB
+    - local: reference/optim/lars
+      title: LARS
+    - local: reference/optim/lion
+      title: Lion
+    - local: reference/optim/rmsprop
+      title: RMSprop
+    - local: reference/optim/sgd
+      title: SGD
+  - title: k-bit quantizers
+    sections:
+    - local: reference/nn/linear8bit
+      title: 8-bit quantizer
+    - local: reference/nn/linear4bit
+      title: 4-bit quantizer
+    - local: reference/nn/embeddings
+      title: Embedding

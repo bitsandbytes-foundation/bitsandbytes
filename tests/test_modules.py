@@ -19,12 +19,18 @@ class MLP8bit(torch.nn.Module):
     def __init__(self, dim1, dim2, has_fp16_weights=True, memory_efficient_backward=False, threshold=0.0):
         super().__init__()
         self.fc1 = bnb.nn.Linear8bitLt(
-            dim1, dim2, has_fp16_weights=has_fp16_weights, memory_efficient_backward=memory_efficient_backward,
-            threshold=threshold
+            dim1,
+            dim2,
+            has_fp16_weights=has_fp16_weights,
+            memory_efficient_backward=memory_efficient_backward,
+            threshold=threshold,
         )
         self.fc2 = bnb.nn.Linear8bitLt(
-            dim2, dim1, has_fp16_weights=has_fp16_weights, memory_efficient_backward=memory_efficient_backward,
-            threshold=threshold
+            dim2,
+            dim1,
+            has_fp16_weights=has_fp16_weights,
+            memory_efficient_backward=memory_efficient_backward,
+            threshold=threshold,
         )
 
     def forward(self, x):
@@ -42,19 +48,17 @@ def get_args():
 
 
 def assert_all_approx_close(a, b, atol=1e-8, rtol=1e-5, count=10):
-    idx = torch.isclose(a, b, rtol, atol)
+    idx = torch.isclose(a, b, rtol=rtol, atol=atol)
     sumval = (idx == 0).sum().item()
     if sumval > count:
         print(f"Too many values not close: assert {sumval} < {count}")
-        torch.testing.assert_close(a, b, rtol, atol)
+        torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
 
 class LinearFunction(torch.autograd.Function):
     @staticmethod
     def get_8bit_linear_trimmed(x, stochastic=False, trim_value=3.0):
-        round_func = (
-            LinearFunction.round_stoachastic if stochastic else torch.round
-        )
+        round_func = LinearFunction.round_stoachastic if stochastic else torch.round
         norm = math.sqrt(math.pi) / math.sqrt(2.0)
         # std = torch.abs(x).mean()*norm
         std = torch.std(x)
@@ -122,9 +126,7 @@ class LinearFunction(torch.autograd.Function):
         return x.to(dtype)
 
     def get_8bit_linear(x, stochastic=False):
-        round_func = (
-            LinearFunction.round_stoachastic if stochastic else torch.round
-        )
+        round_func = LinearFunction.round_stoachastic if stochastic else torch.round
         max1 = torch.abs(x).max()
         x = x / max1 * 127
         x = round_func(x) / 127 * max1
@@ -133,9 +135,7 @@ class LinearFunction(torch.autograd.Function):
 
     @staticmethod
     def get_8bit_vector_wise(x, dim, stochastic=False):
-        round_func = (
-            LinearFunction.round_stoachastic if stochastic else torch.round
-        )
+        round_func = LinearFunction.round_stoachastic if stochastic else torch.round
         max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
         max1[max1 == 0] = 1.0
         x = (x * 127) / max1
@@ -219,9 +219,7 @@ class LinearFunction(torch.autograd.Function):
             weight8, S1 = LinearFunction.quant(weight, args.quant_type, dim=1)
             x8, S2 = LinearFunction.quant(x, args.quant_type, dim=2)
             outputq = bnb.functional.igemm(x8, weight8.t())
-            output = LinearFunction.dequant(
-                outputq, S1, S2, x.dtype, args.quant_type
-            )
+            output = LinearFunction.dequant(outputq, S1, S2, x.dtype, args.quant_type)
             # if torch.rand(1) < 0.01:
             # output32 = torch.matmul(x, weight.t())
             # err = torch.abs(output-output32).float()
@@ -250,37 +248,25 @@ class LinearFunction(torch.autograd.Function):
         # weight and x are already 8bit
         # -> transform grad_output to 8-bit
         if args.use_8bit_training == "forward+wgrad":
-            grad_output8, S1 = LinearFunction.quant(
-                grad_output, args.quant_type, dim=[0, 1]
-            )
+            grad_output8, S1 = LinearFunction.quant(grad_output, args.quant_type, dim=[0, 1])
             x8, S2 = LinearFunction.quant(x, args.quant_type, dim=[0, 1])
             grad_weight8 = bnb.functional.igemm(grad_output8, x8)
-            grad_weight = LinearFunction.dequant(
-                grad_weight8, S1, S2, grad_output.dtype, args.quant_type
-            )
+            grad_weight = LinearFunction.dequant(grad_weight8, S1, S2, grad_output.dtype, args.quant_type)
 
             # grad_weight32 = torch.einsum('bso,bsi->oi', grad_output, x)
 
             grad_input = grad_output.matmul(weight)
         elif args.use_8bit_training == "full":
-            grad_output8, S1 = LinearFunction.quant(
-                grad_output, args.quant_type, dim=[0, 1]
-            )
+            grad_output8, S1 = LinearFunction.quant(grad_output, args.quant_type, dim=[0, 1])
             x8, S2 = LinearFunction.quant(x, args.quant_type, dim=[0, 1])
             grad_weight8 = torch.zeros_like(weight, dtype=torch.int32)
             bnb.functional.igemm(grad_output8, x8, out=grad_weight8)
-            grad_weight = LinearFunction.dequant(
-                grad_weight8, S1, S2, grad_output.dtype, args.quant_type
-            )
+            grad_weight = LinearFunction.dequant(grad_weight8, S1, S2, grad_output.dtype, args.quant_type)
 
-            grad_output8, S1 = LinearFunction.quant(
-                grad_output, args.quant_type, dim=2
-            )
+            grad_output8, S1 = LinearFunction.quant(grad_output, args.quant_type, dim=2)
             weight8, S3 = LinearFunction.quant(weight, args.quant_type, dim=0)
             grad_input8 = bnb.functional.igemm(grad_output8, weight8)
-            grad_input = LinearFunction.dequant(
-                grad_input8, S1, S3, grad_output.dtype, args.quant_type
-            )
+            grad_input = LinearFunction.dequant(grad_input8, S1, S3, grad_output.dtype, args.quant_type)
 
         else:
             grad_input = grad_output.matmul(weight)
@@ -356,12 +342,8 @@ def test_linear8bitlt_accumulated_gradient():
             opt1.zero_grad(True)
             opt2.step()
             opt2.zero_grad(True)
-            assert_all_approx_close(
-                l1[0].weight, l2[0].weight, rtol=1.05, atol=0.01, count=2
-            )
-            assert_all_approx_close(
-                l1[1].weight, l2[1].weight, rtol=1.05, atol=0.01, count=2
-            )
+            assert_all_approx_close(l1[0].weight, l2[0].weight, rtol=1.05, atol=0.01, count=2)
+            assert_all_approx_close(l1[1].weight, l2[1].weight, rtol=1.05, atol=0.01, count=2)
             # we do this copy because otherwise we have small divergences over time that add up
             l1[0].weight.data.copy_(l2[0].weight.data)
             l1[1].weight.data.copy_(l2[1].weight.data)
@@ -375,7 +357,17 @@ def test_linear8bitlt_accumulated_gradient():
 @pytest.mark.parametrize("threshold", [0.0, 2.0])
 @pytest.mark.parametrize("memory_efficient_backward", [False])
 def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
-    l1 = (bnb.nn.Linear8bitLt( 32, 64, threshold=threshold, has_fp16_weights=False, memory_efficient_backward=memory_efficient_backward).cuda().half())
+    l1 = (
+        bnb.nn.Linear8bitLt(
+            32,
+            64,
+            threshold=threshold,
+            has_fp16_weights=False,
+            memory_efficient_backward=memory_efficient_backward,
+        )
+        .cuda()
+        .half()
+    )
     assert l1.weight.dtype == torch.int8
 
     l1.eval()
@@ -397,11 +389,7 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         if threshold > 0:
             assert mlp.fc2.state.idx is not None
 
-    mlp = (
-        MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False)
-        .cuda()
-        .half()
-    )
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).cuda().half()
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
 
@@ -414,11 +402,7 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         if threshold > 0:
             assert mlp.fc2.state.idx is not None
 
-    mlp = (
-        MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False)
-        .half()
-        .cuda()
-    )
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).half().cuda()
 
     for i in range(100):
         b1 = torch.randn(16, 8, 32, device="cuda").half()
@@ -431,7 +415,17 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
 
-    mlp = ( MLP8bit( 32, 64, threshold=threshold, has_fp16_weights=False, memory_efficient_backward=memory_efficient_backward).half().to("cuda"))
+    mlp = (
+        MLP8bit(
+            32,
+            64,
+            threshold=threshold,
+            has_fp16_weights=False,
+            memory_efficient_backward=memory_efficient_backward,
+        )
+        .half()
+        .to("cuda")
+    )
 
     for i in range(100):
         b1 = torch.randn(16, 8, 32, device="cuda").half()
@@ -447,8 +441,12 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
     assert mlp.fc2.weight.device.type == "cuda"
 
     mlp = MLP8bit(
-            32, 64, threshold=threshold, has_fp16_weights=False, memory_efficient_backward=memory_efficient_backward
-        )
+        32,
+        64,
+        threshold=threshold,
+        has_fp16_weights=False,
+        memory_efficient_backward=memory_efficient_backward,
+    )
     w1, w2 = mlp.fc1.weight.clone().cuda(), mlp.fc2.weight.clone().cuda()  # grab weights before quantization,
     mlp = mlp.cuda().half()  # and this line triggers quantization
 
@@ -489,7 +487,7 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         lambda n_in, n_out, bias=True: bnb.nn.Linear8bitLt(n_in, n_out, bias=bias, has_fp16_weights=False),
         bnb.nn.LinearFP4,
     ],
-    ids=['Int8Lt', 'FP4'],
+    ids=["Int8Lt", "FP4"],
 )
 def test_linear_kbit_fp32_bias(module):
     # casts model to fp16 -> int8 automatically
@@ -544,7 +542,7 @@ def test_kbit_backprop(module):
     kbit[1].bias.detach().copy_(ref[1].bias)
     ref = ref.half().cuda()
     kbit = kbit.half().cuda()
-    kbit = kbit.half().to('cuda')
+    kbit = kbit.half().to("cuda")
 
     errs1 = []
     errs2 = []
@@ -562,10 +560,10 @@ def test_kbit_backprop(module):
         bgrad1 = ref[0].bias.grad
         bgrad2 = kbit[0].bias.grad
 
-        err1 = (out1-out2).abs().float()
-        err2 = (grad1-grad2).abs().float()
-        relerr1 = (err1/(out1.abs().float()+1e-9))
-        relerr2 = (err2/(grad1.abs().float()+1e-9))
+        err1 = (out1 - out2).abs().float()
+        err2 = (grad1 - grad2).abs().float()
+        relerr1 = err1 / (out1.abs().float() + 1e-9)
+        relerr2 = err2 / (grad1.abs().float() + 1e-9)
         errs1.append(err1.mean().item())
         errs2.append(err2.mean().item())
         relerrs1.append(relerr1.mean().item())
@@ -582,20 +580,20 @@ def test_kbit_backprop(module):
 
         assert kbit[0].weight.grad is None or kbit[0].weight.grad.sum().item() == 0
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
-    #print('out', sum(errs1)/len(errs1))
-    #print('grad', sum(errs2)/len(errs2))
-    #print('rel out', sum(relerrs1)/len(relerrs1))
-    #print('rel grad', sum(relerrs2)/len(relerrs2))
+    # print('out', sum(errs1)/len(errs1))
+    # print('grad', sum(errs2)/len(errs2))
+    # print('rel out', sum(relerrs1)/len(relerrs1))
+    # print('rel grad', sum(relerrs2)/len(relerrs2))
+
 
 def test_fp8linear():
-
     b = 10
     h = 1024
     inp = torch.randn(b, h).cuda()
-    fp32 = torch.nn.Linear(h, h*2).cuda()
-    fp8 = bnb.research.nn.LinearFP8Mixed(h, h*2).cuda()
-    fp32b = torch.nn.Linear(h*2, h).cuda()
-    fp8b = bnb.research.nn.LinearFP8Mixed(h*2, h).cuda()
+    fp32 = torch.nn.Linear(h, h * 2).cuda()
+    fp8 = bnb.research.nn.LinearFP8Mixed(h, h * 2).cuda()
+    fp32b = torch.nn.Linear(h * 2, h).cuda()
+    fp8b = bnb.research.nn.LinearFP8Mixed(h * 2, h).cuda()
 
     fp8.weight.data.copy_(fp32.weight.data)
     fp8.bias.data.copy_(fp32.bias.data)
@@ -605,34 +603,34 @@ def test_fp8linear():
     a = fp32b(torch.nn.functional.gelu(fp32(inp)))
     b = fp8b(torch.nn.functional.gelu(fp8(inp)))
 
-    err = (a-b).abs().mean()
+    err = (a - b).abs().mean()
 
     a.mean().backward()
     b.mean().backward()
 
-    graderr = (fp8.weight.grad-fp32.weight.grad).abs().mean()
-    bgraderr = (fp8.bias.grad-fp32.bias.grad).abs().mean()
+    graderr = (fp8.weight.grad - fp32.weight.grad).abs().mean()
+    bgraderr = (fp8.bias.grad - fp32.bias.grad).abs().mean()
 
     assert err < 0.05
     assert graderr < 0.00002
     assert bgraderr < 0.00002
 
+
 def test_4bit_warnings():
     dim1 = 64
 
-    with pytest.warns(UserWarning, match=r'inference or training'):
+    with pytest.warns(UserWarning, match=r"inference or training"):
         net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
         net = net.cuda()
         inp = torch.rand(10, dim1).cuda().half()
         net(inp)
-    with pytest.warns(UserWarning, match=r'inference.'):
+    with pytest.warns(UserWarning, match=r"inference."):
         net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
         net = net.cuda()
         inp = torch.rand(1, dim1).cuda().half()
         net(inp)
 
     with pytest.warns(UserWarning) as record:
-
         net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
         net = net.cuda()
         inp = torch.rand(10, dim1).cuda().half()

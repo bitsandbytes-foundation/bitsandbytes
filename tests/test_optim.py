@@ -16,6 +16,7 @@ from tests.helpers import describe_dtype, id_formatter
 
 k = 20
 
+
 def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
     idx = torch.isclose(a, b, rtol=rtol, atol=atol)
     error_count = (idx == 0).sum().item()
@@ -32,6 +33,7 @@ def get_temp_dir():
 
 def rm_path(path):
     shutil.rmtree(path)
+
 
 str2optimizers = {}
 str2optimizers["adam_pytorch"] = (None, torch.optim.Adam, bnb.optim.Adam)
@@ -66,8 +68,14 @@ str2optimizers["rmsprop8bit"] = (
 )
 
 str2optimizers["adam8bit_blockwise"] = (torch.optim.Adam, lambda pxx: bnb.optim.Adam8bit(pxx, block_wise=True))
-str2optimizers["paged_adamw8bit_blockwise"] = (torch.optim.AdamW, lambda pxx: bnb.optim.PagedAdamW8bit(pxx, block_wise=True))
-str2optimizers["paged_adam8bit_blockwise"] = (torch.optim.Adam, lambda pxx: bnb.optim.PagedAdam8bit(pxx, block_wise=True))
+str2optimizers["paged_adamw8bit_blockwise"] = (
+    torch.optim.AdamW,
+    lambda pxx: bnb.optim.PagedAdamW8bit(pxx, block_wise=True),
+)
+str2optimizers["paged_adam8bit_blockwise"] = (
+    torch.optim.Adam,
+    lambda pxx: bnb.optim.PagedAdam8bit(pxx, block_wise=True),
+)
 str2optimizers["lion8bit_blockwise"] = (Lion, lambda pxx: bnb.optim.Lion8bit(pxx, block_wise=True))
 str2optimizers["paged_lion8bit_blockwise"] = (Lion, lambda pxx: bnb.optim.PagedLion8bit(pxx, block_wise=True))
 str2optimizers["momentum8bit_blockwise"] = (
@@ -90,9 +98,18 @@ str2statenames["lamb"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["rmsprop"] = [("square_avg", "state1")]
 str2statenames["adam8bit"] = [("exp_avg", "state1", "qmap1", "max1"), ("exp_avg_sq", "state2", "qmap2", "max2")]
 str2statenames["lamb8bit"] = [("exp_avg", "state1", "qmap1", "max1"), ("exp_avg_sq", "state2", "qmap2", "max2")]
-str2statenames["adam8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1"), ("exp_avg_sq", "state2", "qmap2", "absmax2")]
-str2statenames["paged_adam8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1"), ("exp_avg_sq", "state2", "qmap2", "absmax2")]
-str2statenames["paged_adamw8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1"), ("exp_avg_sq", "state2", "qmap2", "absmax2")]
+str2statenames["adam8bit_blockwise"] = [
+    ("exp_avg", "state1", "qmap1", "absmax1"),
+    ("exp_avg_sq", "state2", "qmap2", "absmax2"),
+]
+str2statenames["paged_adam8bit_blockwise"] = [
+    ("exp_avg", "state1", "qmap1", "absmax1"),
+    ("exp_avg_sq", "state2", "qmap2", "absmax2"),
+]
+str2statenames["paged_adamw8bit_blockwise"] = [
+    ("exp_avg", "state1", "qmap1", "absmax1"),
+    ("exp_avg_sq", "state2", "qmap2", "absmax2"),
+]
 str2statenames["momentum8bit"] = [("momentum_buffer", "state1", "qmap1", "max1")]
 str2statenames["lion8bit"] = [("exp_avg", "state1", "qmap1", "max1")]
 str2statenames["momentum8bit_blockwise"] = [("momentum_buffer", "state1", "qmap1", "absmax1")]
@@ -101,7 +118,7 @@ str2statenames["rmsprop8bit_blockwise"] = [("square_avg", "state1", "qmap1", "ab
 str2statenames["lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 str2statenames["paged_lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 
-optimizer_names_32bit = ["adam", "momentum", "rmsprop", 'paged_adamw', 'paged_adam', 'lion', 'paged_lion']
+optimizer_names_32bit = ["adam", "momentum", "rmsprop", "paged_adamw", "paged_adam", "lion", "paged_lion"]
 
 
 @pytest.mark.parametrize("optim_name", optimizer_names_32bit, ids=id_formatter("opt"))
@@ -109,7 +126,7 @@ optimizer_names_32bit = ["adam", "momentum", "rmsprop", 'paged_adamw', 'paged_ad
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097, 1], ids=id_formatter("dim2"))
 def test_optimizer32bit(dim1, dim2, gtype, optim_name):
-    if gtype == torch.bfloat16 and optim_name in ['momentum', 'rmsprop']:
+    if gtype == torch.bfloat16 and optim_name in ["momentum", "rmsprop"]:
         pytest.skip()
     if dim1 == 1 and dim2 == 1:
         return
@@ -145,7 +162,7 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
 
         # since Lion can have pretty noisy updates where things lie at the boundary
         # allow up to 10 errors for Lion
-        assert_most_approx_close(p1, p2.float(), atol, rtol, max_error_count=10)
+        assert_most_approx_close(p1, p2.float(), atol=atol, rtol=rtol, max_error_count=10)
 
         if i % (k // 5) == 0 and i > 0:
             path = get_temp_dir()
@@ -157,13 +174,17 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name):
             rm_path(path)
             # since Lion can have pretty noisy updates where things lie at the boundary
             # allow up to 10 errors for Lion
-            assert_most_approx_close(p1, p2.float(), atol, rtol, max_error_count=10)
+            assert_most_approx_close(p1, p2.float(), atol=atol, rtol=rtol, max_error_count=10)
             for name1, name2 in str2statenames[optim_name]:
                 # since Lion can have pretty noisy updates where things lie at the boundary
                 # allow up to 10 errors for Lion
-                assert_most_approx_close(torch_optimizer.state[p1][name1], bnb_optimizer.state[p2][name2],
-                                         atol=atol, rtol=rtol,
-                                         max_error_count=10)
+                assert_most_approx_close(
+                    torch_optimizer.state[p1][name1],
+                    bnb_optimizer.state[p2][name2],
+                    atol=atol,
+                    rtol=rtol,
+                    max_error_count=10,
+                )
 
         if gtype != torch.float32:
             # the adam buffers should also be close because they are 32-bit
@@ -193,13 +214,9 @@ def test_global_config(dim1, dim2, gtype):
     eps = 1e-8
 
     bnb.optim.GlobalOptimManager.get_instance().initialize()
-    bnb.optim.GlobalOptimManager.get_instance().override_config(
-        p3, "optim_bits", 8
-    )
+    bnb.optim.GlobalOptimManager.get_instance().override_config(p3, "optim_bits", 8)
 
-    bnb.optim.GlobalOptimManager.get_instance().register_parameters(
-        [p1, p2, p3]
-    )
+    bnb.optim.GlobalOptimManager.get_instance().register_parameters([p1, p2, p3])
     p1 = p1.cuda()
     p2 = p2.cuda()
     p3 = p3.cuda()
@@ -242,7 +259,8 @@ optimizer_names_8bit = [
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 def test_optimizer8bit(dim1, dim2, gtype, optim_name):
-    if gtype == torch.bfloat16 and optim_name not in ['adam8bit_blockwise', 'lion8bit_blockwise']: pytest.skip()
+    if gtype == torch.bfloat16 and optim_name not in ["adam8bit_blockwise", "lion8bit_blockwise"]:
+        pytest.skip()
     if dim1 == 1 and dim2 == 1:
         return
     p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
@@ -294,17 +312,12 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
                     absmax=bnb_optimizer.state[p2][max_val],
                     A=bnb_optimizer.state[p2][name2],
                 )
-            num_not_close = (
-                torch.isclose(
-                    torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol
-                )
-                == 0
-            )
-            #assert num_not_close.sum().item() < 20
+            num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol) == 0
+            # assert num_not_close.sum().item() < 20
             dequant_states.append(s1.clone())
 
         err = torch.abs(p1 - p2)
-        relerr = err / (torch.abs(p1)+1e-9)
+        relerr = err / (torch.abs(p1) + 1e-9)
         if g.dtype == torch.bfloat16:
             assert err.mean() < 0.00015
             assert relerr.mean() < 0.0016
@@ -316,9 +329,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         relerrors.append(relerr.mean().item())
 
         if i % 10 == 0 and i > 0:
-            for (name1, name2, qmap, max_val), s in zip(
-                str2statenames[optim_name], dequant_states
-            ):
+            for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
                 s1cpy = s.clone()
                 raws1cpy = bnb_optimizer.state[p2][name2].clone()
                 qmap1 = bnb_optimizer.state[p2][qmap].clone()
@@ -348,7 +359,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
                     )
                 torch.testing.assert_close(s1cpy, s1)
 
-                num_not_close = (torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol) == 0)
+                num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol) == 0
                 assert num_not_close.sum().item() < 20
             # since Lion can have pretty noisy updates where things lie at the boundary
             # allow up to 5 errors for Lion
@@ -395,15 +406,11 @@ def test_adam_percentile_clipping(dim1, dim2, gtype, optim_bits):
 
     for i in range(50):
         step += 1
-        g1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1 + (
-            0.01 * i
-        )
+        g1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1 + (0.01 * i)
         g2 = g1.clone()
         p2.grad = g2
 
-        current_gnorm, clip_val, gnorm_scale = F.percentile_clipping(
-            g1, gnorm_vec, step, 5
-        )
+        current_gnorm, clip_val, gnorm_scale = F.percentile_clipping(g1, gnorm_vec, step, 5)
         g1 = (g1.float() * gnorm_scale).to(gtype)
         p1.grad = g1
 
@@ -497,8 +504,8 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
 
 @pytest.mark.parametrize("dim1", [2 * 1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("gtype", [torch.float16], ids=describe_dtype)
-@pytest.mark.parametrize("optim_name", ['paged_adamw'], ids=id_formatter("optim_name"))
-@pytest.mark.parametrize("mode", ['bnb'], ids=id_formatter("mode"))
+@pytest.mark.parametrize("optim_name", ["paged_adamw"], ids=id_formatter("optim_name"))
+@pytest.mark.parametrize("mode", ["bnb"], ids=id_formatter("mode"))
 @pytest.mark.benchmark
 def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
     layers1 = torch.nn.Sequential(*torch.nn.ModuleList([torch.nn.Linear(dim1, dim1) for i in range(10)]))
@@ -506,24 +513,24 @@ def test_stream_optimizer_bench(dim1, gtype, optim_name, mode):
     layers1 = layers1.cuda()
 
     large_tensor = None
-    if mode == 'torch':
+    if mode == "torch":
         optim = str2optimizers[optim_name][0](layers1.parameters())
     else:
         optim = str2optimizers[optim_name][1](layers1.parameters())
         # 12 GB
-        large_tensor = torch.empty((int(4.5e9),), device='cuda')
+        large_tensor = torch.empty((int(4.5e9),), device="cuda")
 
     torch.cuda.synchronize()
     time.sleep(5)
 
     num_batches = 5
-    batches = torch.randn(num_batches, 128, dim1, device='cuda').to(gtype)
-    lbls = torch.randint(0, 10, size=(num_batches,128)).cuda()
+    batches = torch.randn(num_batches, 128, dim1, device="cuda").to(gtype)
+    lbls = torch.randint(0, 10, size=(num_batches, 128)).cuda()
 
     for i in range(num_batches):
         print(i)
         b = batches[i]
-        if i ==2:
+        if i == 2:
             torch.cuda.synchronize()
             t0 = time.time()
 

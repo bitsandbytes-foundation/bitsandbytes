@@ -1,29 +1,14 @@
-# Introduction: 8-bit optimizers
+# 8-bit optimizers
 
-With 8-bit optimizers, larger models can be finetuned with the same GPU memory compared to standard 32-bit optimizer training. 8-bit optimizers are a drop-in replacement for regular optimizers, with the following properties:
+With 8-bit optimizers, large models can be finetuned with 75% less GPU memory without losing any accuracy compared to training with standard 32-bit optimizers. The reduced memory requirements means 8-bit optimizers are 4x faster than a standard optimizer, and no hyperparameter tuning is required.
 
-- Faster (e.g. 4x faster than regular Adam)
-- 75% less memory, same performance
-- No hyperparameter tuning needed
+This guide will show you how to use 8-bit optimizers.
 
-8-bit optimizers are mostly useful to finetune large models that did not fit into memory before. They also make it easier to pretrain larger models and have great synergy with sharded data parallelism. 8-bit Adam, for example, is already used across multiple teams in Facebook. This optimizer saves a ton of memory at no accuracy hit.
+> [!WARNING]
+> 8-bit optimizers reduce memory usage and accelerate optimization on a wide range of tasks. However, since 8-bit optimizers only reduce memory proportional to the number of parameters, models that use large amounts of activation memory, such as convolutional networks, don't really benefit from 8-bit optimizers. 8-bit optimizers are most beneficial for training or finetuning models with many parameters on highly memory-constrained GPUs.
 
-Generally, our 8-bit optimizers have three components:
-1. **block-wise quantization** isolates outliers and distributes the error more equally over all bits,
-2. **dynamic quantization** quantizes both small and large values with high precision,
-3. a **stable embedding layer** improves stability during optimization for models with word embeddings.
+8-bit optimizers are a drop-in replacement for regular optimizers which means they also accept the same arguments as a regular optimizer. For NLP models, it is recommended to use the [`~nn.StableEmbedding`] class to improve stability and results.
 
-With these components, performing an optimizer update with 8-bit states is straightforward and for GPUs, this makes 8-bit optimizers way faster than regular 32-bit optimizers. [Further details below](#research-background)
-
-We feature 8-bit `Adagrad`, `Adam`, `AdamW`, `LAMB`, `LARS`, `Lion`, `RMSprop` and `SGD` (momentum).
-
-## Caveats
-
-8-bit optimizers reduce the memory footprint and accelerate optimization on a wide range of tasks. However, since 8-bit optimizers reduce only the memory footprint proportional to the number of parameters, **models that use large amounts of activation memory, such as convolutional networks, have few benefits from using 8-bit optimizers**. Thus, 8-bit optimizers are most beneficial for training or finetuning models with many parameters on highly memory-constrained GPUs.
-
-## Usage
-
-It only requires a two-line code change to get started.
 ```diff
 import bitsandbytes as bnb
 
@@ -35,112 +20,29 @@ import bitsandbytes as bnb
 + bnb.nn.StableEmbedding(...)
 ```
 
-The arguments passed are the same as standard Adam. For NLP models we recommend to also use the StableEmbedding layers which improves results and helps with stable 8-bit optimization.
+By default, all parameter tensors with less than 4096 elements are kept at 32-bits even if you initialize those parameters with 8-bit optimizers. This is done because small tensors do not save much memory and often contain highly variable parameters (biases) or parameters that require high precision (batch norm, layer norm).
 
-Note that by default all parameter tensors with less than 4096 elements are kept at 32-bit even if you initialize those parameters with 8-bit optimizers. This is done since such small tensors do not save much memory and often contain highly variable parameters (biases) or parameters that require high precision (batch norm, layer norm). You can change this behavior like so:
+You can change this value with the `min_8bit_size` parameter. For example, if you want to optimize parameters to 8-bits only if the minimum size is 16384 values (it is recommended to use multiples of 4096):
 
 ```py
-# For parameter tensors with less than 16384 values are optimized in 32-bit
-# it is recommended to use multiplies of 4096:
+import bitsandbytes as bnb
+
 adam = bnb.optim.Adam8bit(model.parameters(), min_8bit_size=16384)
 ```
 
-Some more examples of how you can replace your old optimizer with the 8-bit optimizer:
+Other parameters you can configure include the learning rate (`lr`), the decay rates (`betas`), the number of bits of the optimizer state (`optim_bits`), and percentile clipping (`percentile_clipping`) which can increase stability. For example, to initialize a 32-bit [`~bitsandbytes.optim.Adam`] optimizer with 5th percentile clipping:
 
-```diff
+```py
 import bitsandbytes as bnb
 
-- adam = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # comment out old optimizer
-+ adam = bnb.optim.Adam8bit(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # add bnb optimizer
-
-# use 32-bit Adam with 5th percentile clipping
-+ adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995), optim_bits=32, percentile_clipping=5)
-- adam = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995)) # comment out old optimizer
+adam = bnb.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.995), optim_bits=32, percentile_clipping=5)
 ```
 
-## Overview of supported 8-bit optimizers
+## Optimize unstable parameters
 
-Currently, `bitsandbytes` supports the following optimizers:
+To optimize some unstable parameters with 32-bit Adam and others with 8-bit Adam, use the [`~bitsandbytes.optim.GlobalOptimManager`] class to override the specific hyperparameters for a particular layer. You'll need to:
 
-- `Adagrad`, `Adagrad8bit`, `Adagrad32bit`
-- `Adam`, `Adam8bit`, `Adam32bit`, `PagedAdam`, `PagedAdam8bit`, `PagedAdam32bit`
-- `AdamW`, `AdamW8bit`, `AdamW32bit`, `PagedAdamW`, `PagedAdamW8bit`, `PagedAdamW32bit`
-- `LAMB`, `LAMB8bit`, `LAMB32bit`
-- `LARS`, `LARS8bit`, `LARS32bit`, `PytorchLARS`
-- `Lion`, `Lion8bit`, `Lion32bit`, `PagedLion`, `PagedLion8bit`, `PagedLion32bit`
-- `RMSprop`, `RMSprop8bit`, `RMSprop32bit`
-- `SGD`, `SGD8bit`, `SGD32bit`
-
-Additionally, for cases in which you want to optimize some unstable parameters with 32-bit Adam and others with 8-bit Adam, you can use the `GlobalOptimManager`, [as explained in greater detail below](#optim_manager).
-
-Find the API docs [here](#optim_api_docs) (still under construction).
-
-## Overview of expected gains
-
-<div style="text-align: center">
-<img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bitsandbytes/optimizer_comparison.png", width="50%">
-</div>
-
-See here an overview of the biggest models that can be trained based on optimizer usage:
-
-<div style="text-align: center">
-<img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bitsandbytes/optimizer_largest_model.png", width="50%">
-</div>
-
-### Research Background
-
-Stateful optimizers maintain gradient statistics over time, e.g. the exponentially smoothed sum (SGD with momentum) or squared sum (Adam) of past gradient values. This state can be used to accelerate optimization compared to plain stochastic gradient descent but uses memory that might otherwise be allocated to model parameters, thereby limiting the maximum size of models trained in practice. `bitsandbytes` optimizers use 8-bit statistics, while maintaining the performance levels of using 32-bit optimizer states.
-
-To overcome the resulting computational, quantization and stability challenges, 8-bit optimizers have three components:
-
-1. **Block-wise quantization** divides input tensors into smaller blocks that are independently quantized, therein isolating outliers and distributing the error more equally over all bits. Each block is processed in parallel across cores, yielding faster optimization and high precision quantization.
-2. **Dynamic quantization**, which quantizes both small and large values with high precision and
-3. a **stable embedding layer** improves stability during optimization for models with word embeddings.
-
-With these components, performing an optimizer update with 8-bit states is straightforward. We dequantize the 8-bit optimizer states to 32-bit, perform the update and then quantize the states back to 8-bit for storage.
-
-We do this 8-bit to 32-bit conversion element-by-element in registers, which means no slow copies to GPU memory or additional temporary memory are needed to perform quantization and dequantization. For GPUs, this makes 8-bit optimizers much faster than regular 32-bit optimizers.
-
-For more details, please refer to the paper [8-bit Optimizers via Block-wise Quantization](https://arxiv.org/abs/2110.02861).
-
-## Stable Embedding Layer
-
-The Stable Embedding Layer enhances the standard word embedding layer for improved training stability in NLP tasks. It addresses the challenge of non-uniform input distributions and mitigates extreme gradient variations, ensuring smoother training processes.
-
-#### Features:
-
-- **Initialization**: Utilizes Xavier uniform initialization to maintain consistent variance, reducing the likelihood of large gradients.
-- **Normalization**: Incorporates layer normalization before adding positional embeddings, aiding in output stability.
-- **Optimizer States**: Employs 32-bit optimizer states exclusively for this layer to enhance stability, while the rest of the model may use standard 16-bit precision.
-
-#### Benefits:
-
-- Designed to support more aggressive quantization strategies without compromising training stability.
-- Helps in achieving stable training outcomes, particularly important for models dealing with diverse and complex language data.
-
-## Paged optimizers
-
-Paged optimizers are build on top of the [unified memory](https://developer.nvidia.com/blog/unified-memory-cuda-beginners/) feature of CUDA. This feature is not supported by PyTorch and we added it to `bitsandbytes`.
-
-It works like regular CPU paging, which means that it only becomes active _if one runs out of GPU memory_. Only then will the memory be transferred, page-by-page, from GPU to CPU. The memory is mapped, meaning that pages are preallocated on the CPU, but they are not updated automatically. They are only updated if the memory is accessed, or a swapping operation is launched.
-
-The unified memory feature is less efficient than regular asynchronous memory transfers. This means, one usually will not be able to get full PCIe memory bandwidth utilization. If one does a manual prefetch, transfer speeds can be high but still about half or worse than the full PCIe memory bandwidth (tested on 16x lanes PCIe 3.0).
-
-This all means performance depends highly on the particular use-case. If one evicts, say, 1 GB of memory per forward-backward-optimizer loop: One can expect about 50% of the PCIe bandwidth as time in the best case. So 1 GB for PCIe 3.0 with 16x lanes, which runs at 16 GB/s, is `1/(16*0.5) = 1/8 = 125ms` overhead per optimizer step. Other overhead can be estimated for the particular use-case given a PCIe interface, lanes, and the memory that is evicted in each iteration.
-
-Compared to CPU offloading, this has the advantage that there is zero overhead if all the memory fits into the device and only some overhead if some of memory needs to be evicted. For offloading, one would usually offload fixed parts of the model and need to off and onload all this memory with each iteration through the model (sometimes twice for both forward and backward pass).
-
-[Find more details in this discussion](https://github.com/TimDettmers/bitsandbytes/issues/962).
-
-
-## `GlobalOptimManager`: How to override config hyperparameters for particular weights/parameters[[optim_manager]]
-
-If you want to optimize some unstable parameters with 32-bit Adam and others with 8-bit Adam, you can use the `GlobalOptimManager`. With this, we can also configure specific hyperparameters for particular layers, such as embedding layers. To do that, we need two things:
-
-1. Register the parameter while they are still on the CPU.
-2. Override the config with the new desired hyperparameters (anytime, anywhere).
-
-For global overrides in many different places in your code you can do:
+1. Register the parameters while they're on the CPU.
 
 ```py
 import torch
@@ -149,23 +51,32 @@ import bitsandbytes as bnb
 mng = bnb.optim.GlobalOptimManager.get_instance()
 
 model = MyModel()
-mng.register_parameters(model.parameters()) # 1. register parameters while still on CPU
+mng.register_parameters(model.parameters())
+```
 
+2. Override the config with the new desired hyperparameters. For example, let's override the `model.fc1.weight` layer to use 32-bit Adam.
+
+> [!TIP]
+> Check the optimizer API documentation for more information about other hyperparameters you can override.
+
+```py
 model = model.cuda()
 # use 8-bit optimizer states for all parameters
 adam = bnb.optim.Adam(model.parameters(), lr=0.001, optim_bits=8)
 
-# 2a. override: the parameter model.fc1.weight now uses 32-bit Adam
-mng.override_config(model.fc1.weight, 'optim_bits', 32)
+# override the parameter model.fc1.weight now uses 32-bit Adam
+mng.override_config(model.fc1.weight, "optim_bits", 32)
+```
 
-# 2b. override: the two special layers use
-# sparse optimization + different learning rate + different Adam betas
+You can also override multiple layers at once by passing them as a list and the new hyperparameters as a dictionary. For example, let's override the `model.special.weight` and `model.also_special.weight` layers to use sparse optimization and a lower learning and decay rate.
+
+```py
 mng.override_config([model.special.weight, model.also_special.weight],
                     key_value_dict ={'is_sparse': True, 'lr': 1e-5, 'betas'=(0.9, 0.98)})
 ```
-Possible options for the config override are: `betas, eps, weight_decay, lr, optim_bits, min_8bit_size, percentile_clipping, block_wise, max_unorm`.
 
-For overrides for particular layers, we recommend overriding locally in each module. You can do this by passing the module, the parameter, and its attribute name to the GlobalOptimManager:
+For a specific layer, we recommend overriding locally in each module. Pass the module, the parameter, and its attribute name to the [`~bitsandbytes.optim.GlobalOptimManager`]:
+
 ```py
 class MyModule(torch.nn.Module):
   def __init__(d_in, d_out):
@@ -178,13 +89,6 @@ class MyModule(torch.nn.Module):
 
 ```
 
-## API Docs[[optim_api_docs]]
+## Next steps
 
-... under construction ...
-
-Here we'll provide further auto-generated API docs soon. Please feel free to contribute doc-strings for the respective optimizers, as `bitsandbytes` is a community effort.
-
-### StableEmbedding[[stable-emb-api]]
-
-[[autodoc]] bitsandbytes.nn.StableEmbedding
-    - __init__
+For more conceptual details and explanation about 8-bit optimizers, take a look at the [8-bit optimizers](./explanations/optimizers) guide.

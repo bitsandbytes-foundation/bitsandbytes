@@ -1,42 +1,137 @@
-# Transformers
+# Integrations
 
-With Transformers it's very easy to load any model in 4 or 8-bit, quantizing them on the fly with bitsandbytes primitives.
+bitsandbytes is widely integrated with many of the libraries in the Hugging Face and wider PyTorch ecosystem. This guide provides a brief overview of the integrations and how to use bitsandbytes with them. For more details, you should refer to the linked documentation for each library.
 
-Please review the [bitsandbytes section in the Accelerate docs](https://huggingface.co/docs/transformers/v4.37.2/en/quantization#bitsandbytes).
+## Transformers
 
-Details about the BitsAndBytesConfig can be found [here](https://huggingface.co/docs/transformers/v4.37.2/en/main_classes/quantization#transformers.BitsAndBytesConfig).
+> [!TIP]
+> Learn more in the bitsandbytes Transformers integration [guide](https://huggingface.co/docs/transformers/quantization#bitsandbytes).
 
-## Beware: bf16 is optional compute data type
-If your hardware supports it, `bf16` is the optimal compute dtype. The default is `float32` for backward compatibility and numerical stability. `float16` often leads to numerical instabilities, but `bfloat16` provides the benefits of both worlds: numerical stability and significant computation speedup. Therefore, be sure to check if your hardware supports `bf16` and configure it using the `bnb_4bit_compute_dtype` parameter in BitsAndBytesConfig:
+With Transformers, it's very easy to load any model in 4 or 8-bit and quantize them on the fly. To configure the quantization parameters, specify them in the [`~transformers.BitsAndBytesConfig`] class.
+
+For example, to load and quantize a model to 4-bits and use the bfloat16 data type for compute:
+
+> [!WARNING]
+> bfloat16 is the optimal compute data type if your hardware supports it. The default is float32 for backward compatibility and numerical stability, but it can often lead to numerical instabilities. bfloat16 provides the best of both worlds, numerical stability equivalent to float32, but combined with the memory footprint and significant computation speedup of a 16-bit data type. Make sure to check if your hardware supports bfloat16 and if it does, configure it using the `bnb_4bit_compute_dtype` parameter in [`~transformers.BitsAndBytesConfig`]!
 
 ```py
-import torch
-from transformers import BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
 quantization_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
+model_4bit = AutoModelForCausalLM.from_pretrained(
+    "bigscience/bloom-1b7",
+    device_map=device_map,
+    quantization_config=quantization_config,
+)
 ```
 
-# PEFT
-With `PEFT`, you can use QLoRA out of the box with `LoraConfig` and a 4-bit base model.
+### 8-bit optimizers
 
-Please review the [bitsandbytes section in the Accelerate docs](https://huggingface.co/docs/peft/developer_guides/quantization#quantize-a-model).
+You can use any of the 8-bit or paged optimizers with Transformers by passing them to the [`~transformers.Trainer`] class on initialization. All bitsandbytes optimizers are supported by passing the correct string in the [`~transformers.TrainingArguments`] `optim` parameter. For example, to load a [`~bitsandbytes.optim.PagedAdamW32bit`] optimizer:
 
-# Accelerate
+```py
+from transformers import TrainingArguments, Trainer
 
-Bitsandbytes is also easily usable from within Accelerate.
+training_args = TrainingArguments(
+    ...,
+    optim="paged_adamw_32bit",
+)
+trainer = Trainer(model, training_args, ...)
+trainer.train()
+```
 
-Please review the [bitsandbytes section in the Accelerate docs](https://huggingface.co/docs/accelerate/en/usage_guides/quantization).
+## PEFT
 
-# Trainer for the optimizers
+> [!TIP]
+> Learn more in the bitsandbytes PEFT integration [guide](https://huggingface.co/docs/peft/developer_guides/quantization#quantization).
 
-You can use any of the 8-bit and/or paged optimizers by simple passing them to the `transformers.Trainer` class on initialization.All bnb optimizers are supported by passing the correct string in `TrainingArguments`'s `optim` attribute - e.g. (`paged_adamw_32bit`).
+PEFT builds on the bitsandbytes Transformers integration, and extends it for training with a few more steps. Let's prepare the 4-bit model from the section above for training.
 
-See the [official API docs for reference](https://huggingface.co/docs/transformers/main_classes/trainer#transformers.Trainer).
+Call the [`~peft.prepare_model_for_kbit_training`] method to prepare the model for training. This only works for Transformers models!
 
-Here we point out to relevant doc sections in transformers / peft / Trainer + very briefly explain how these are integrated:
-e.g. for transformers state that you can load any model in 8-bit / 4-bit precision, for PEFT, you can use QLoRA out of the box with `LoraConfig` + 4-bit base model, for Trainer: all bnb optimizers are supported by passing the correct string in `TrainingArguments`'s `optim` attribute - e.g. (`paged_adamw_32bit`):
+```py
+from peft import prepare_model_for_kbit_training
 
-# Blog posts
+model_4bit = prepare_model_for_kbit_training(model_4bit)
+```
+
+Setup a [`~peft.LoraConfig`] to use QLoRA:
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(
+    r=16,
+    lora_alpha=8,
+    target_modules="all-linear",
+    lora_dropout=0.05
+    bias="none",
+    task_type="CAUSAL_LM"
+)
+```
+
+Now call the [`~peft.get_peft_model`] function on your model and config to create a trainable [`PeftModel`].
+
+```py
+from peft import get_peft_model
+
+model = get_peft_model(model_4bit, config)
+```
+
+## Accelerate
+
+> [!TIP]
+> Learn more in the bitsandbytes Accelerate integration [guide](https://huggingface.co/docs/accelerate/usage_guides/quantization).
+
+bitsandbytes is also easily usable from Accelerate and you can quantize any PyTorch model by passing a [`~accelerate.utils.BnbQuantizationConfig`] with your desired settings, and then calling the [`~accelerate.utils.load_and_quantize_model`] function to quantize it.
+
+```py
+from accelerate import init_empty_weights
+from accelerate.utils import BnbQuantizationConfig, load_and_quantize_model
+from mingpt.model import GPT
+
+model_config = GPT.get_default_config()
+model_config.model_type = 'gpt2-xl'
+model_config.vocab_size = 50257
+model_config.block_size = 1024
+
+with init_empty_weights():
+    empty_model = GPT(model_config)
+
+bnb_quantization_config = BnbQuantizationConfig(
+  load_in_4bit=True,
+  bnb_4bit_compute_dtype=torch.bfloat16,  # optional
+  bnb_4bit_use_double_quant=True,         # optional
+  bnb_4bit_quant_type="nf4"               # optional
+)
+
+quantized_model = load_and_quantize_model(
+  empty_model,
+  weights_location=weights_location,
+  bnb_quantization_config=bnb_quantization_config,
+  device_map = "auto"
+)
+```
+
+## PyTorch Lightning and Lightning Fabric
+
+bitsandbytes is available from:
+
+- [PyTorch Lightning](https://lightning.ai/docs/pytorch/stable/), a deep learning framework for professional AI researchers and machine learning engineers who need maximal flexibility without sacrificing performance at scale.
+- [Lightning Fabric](https://lightning.ai/docs/fabric/stable/), a fast and lightweight way to scale PyTorch models without boilerplate.
+
+Learn more in the bitsandbytes PyTorch Lightning integration [guide](https://lightning.ai/docs/pytorch/stable/common/precision_intermediate.html#quantization-via-bitsandbytes).
+
+
+## Lit-GPT
+
+bitsandbytes is integrated with [Lit-GPT](https://github.com/Lightning-AI/lit-gpt), a hackable implementation of state-of-the-art open-source large language models. Lit-GPT is based on Lightning Fabric, and it can be used for quantization during training, finetuning, and inference.
+
+Learn more in the bitsandbytes Lit-GPT integration [guide](https://github.com/Lightning-AI/lit-gpt/blob/main/tutorials/quantize.md).
+
+## Blog posts
+
+To learn in more detail about some of bitsandbytes integrations, take a look at the following blog posts:
 
 - [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes)
 - [A Gentle Introduction to 8-bit Matrix Multiplication for transformers at scale using Hugging Face Transformers, Accelerate and bitsandbytes](https://huggingface.co/blog/hf-bitsandbytes-integration)

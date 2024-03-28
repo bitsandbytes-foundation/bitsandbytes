@@ -654,6 +654,8 @@ __global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const f
       for(int j = threadIdx.x; j < BLOCK_ESTIMATE; j+=blockDim.x)
           temp_storage.smem_qidx[j] = -1;
 
+      __syncthreads();
+
       if(threadIdx.x < 256)
       {
           float q_interval = (1.0f-(2.0f*offset))/255.0f;
