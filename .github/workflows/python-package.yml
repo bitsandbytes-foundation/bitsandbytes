@@ -95,7 +95,7 @@ jobs:
     - name: Set CUDA version
       shell: bash
       run: |
-        cuda_version=$(scripts/get_docker_info.py -v docker/cuda.Dockerfile cuda${{ matrix.cuda_version }} | sed -e 's/-.*//')
+        cuda_version=$(scripts/get_docker_info.py -v docker/cuda.Dockerfile cuda${{ matrix.cuda_version }})
         echo "CUDA version to use is $cuda_version"
         echo "CUDA_VERSION=$cuda_version" >> $GITHUB_ENV
       # On Linux we use CMake within Docker
