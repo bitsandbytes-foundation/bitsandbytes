@@ -1305,7 +1305,7 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
 
 
 
-//=======================GEMM=================================
+//========================GEMM============================
 
 void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
  try {
@@ -1670,6 +1670,9 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, sycl::half 
   CUDA_CHECK_RETURN(0);
 }
 
+
+//===========================Row col stats=================================
+
 #define STATS_THREADS 64
 #define STATS_ITEMS 4
 #define STATS_ROWS 16
@@ -1887,7 +1890,7 @@ template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, 
         /*
         DPCT1101:311: 'SMEM_SIZE' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
         */
-        //sycl::local_accessor<sycl::half, 1> smem_dequant_stats_acc_ct1(sycl::range<1>(2048/*SMEM_SIZE*/), cgh);
+        sycl::local_accessor<sycl::half, 1> smem_dequant_stats_acc_ct1(sycl::range<1>(2048/*SMEM_SIZE*/), cgh);
 
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, nnz_rows) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
