@@ -671,7 +671,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       /*
       DPCT1010:239: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
       */
-      CUDA_CHECK_RETURN(0);
+      //CUDA_CHECK_RETURN(0);
 			break;
     case LION:
       // in lion, the momentum update after the parameter update
@@ -685,19 +685,38 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
             /*
             DPCT1054:298: The type of variable temp_storage is declared in device function with the name type_ct5. Adjust the code to make the type_ct5 declaration visible at the accessor declaration point.
             */
-            sycl::local_accessor<uint8_t[sizeof(type_ct5)], 0> temp_storage_ct1_acc_ct1(cgh);
-
+            //sycl::local_accessor<uint8_t[sizeof(type_ct5)], 0> temp_storage_ct1_acc_ct1(cgh);
+              using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+              using group_load_T1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+              using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+              size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
+              size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+              size_t load_temp_storage_size_T1 = group_load_T1::get_local_memory_size(NUM_BLOCK);
+  
+              sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+              sycl::local_accessor<uint8_t, 1> ltacc_T1(load_temp_storage_size_T1, cgh);
+              sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+              
+              
+              using group_store_T = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, T>;
+              using group_store_float1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
+              size_t store_temp_storage_size_float1 = group_store_float1::get_local_memory_size(NUM_BLOCK);
+              size_t store_temp_storage_size_T = group_store_T::get_local_memory_size(NUM_BLOCK);
+              
+              sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
+              sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
+              
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kOptimizer32bit1State<T, OPTIMIZER>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n, item_ct1, temp_storage_ct1_acc_ct1.get_pointer());
+                kOptimizer32bit1State<T, OPTIMIZER>(buff_g, buff_p, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n, item_ct1, ltacc_T, ltacc_T1, ltacc_float1, stacc_T,stacc_float1);
               });
           });
       }
       /*
       DPCT1010:240: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
       */
-      CUDA_CHECK_RETURN(0);
+      //CUDA_CHECK_RETURN(0);
 
       if(max_unorm > 0.0f)
       {
@@ -712,19 +731,26 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
               /*
               DPCT1054:299: The type of variable temp_storage is declared in device function with the name type_ct4. Adjust the code to make the type_ct4 declaration visible at the accessor declaration point.
               */
-              sycl::local_accessor<uint8_t[sizeof(type_ct4)], 0> temp_storage_ct1_acc_ct1(cgh);
-
+              //sycl::local_accessor<uint8_t[sizeof(type_ct4)], 0> temp_storage_ct1_acc_ct1(cgh);
+              using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+              using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+              size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
+              size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+              
+              sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+              sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+              
               cgh.parallel_for(
                 sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
                 [=](sycl::nd_item<3> item_ct1) {
-                  kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, temp_storage_ct1_acc_ct1.get_pointer());
+                  kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>(buff_g, buff_p, buff_state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float);
                 });
             });
         }
         /*
         DPCT1010:241: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
         */
-        CUDA_CHECK_RETURN(0);
+        //CUDA_CHECK_RETURN(0);
       }
       break;
 	}
@@ -734,8 +760,8 @@ catch (sycl::exception const &exc) {
   std::exit(1);
 }
 
-template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
-                unsigned char* state1, unsigned char* state2,
+template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_g,
+                unsigned char* buff_state1, unsigned char* buff_state2,
                 float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2,
                 float eps, int step, float lr,
@@ -744,10 +770,21 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
                 float weight_decay,
                 const float gnorm_scale, int n)
  try {
-    dpct::device_ext &dev_ct1 = dpct::get_current_device();
-    sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
   int num_blocks = n/4096;
   num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
+  sycl::context ctx = q_ct1.get_context();
+  
+  *((T **)&buff_g) = sycl::malloc_device(size, g, ctx);
+  *((T **)&buff_p) = sycl::malloc_device(size, p, ctx);
+  *((float **)&buff_state1 = sycl::malloc_device(size, state1, ctx);
+  *((float **)&buff_state2 = sycl::malloc_device(size, state2, ctx);
+  q_ct1.memcpy((T*)(buff_g), (T*)(g), size);
+  q_ct1.memcpy((T*)(buff_p), (T*)(p), size);
+  q_ct1.memcpy((float*)(buff_state1), (float*)(state1), size);
+  q_ct1.memcpy((float*)(buff_state2), (float*)(state2), size);
+  
 
   if(max_unorm > 0.0f){ CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait())); }
 
@@ -763,21 +800,33 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			      /*
 			      DPCT1054:300: The type of variable temp_storage is declared in device function with the name type_ct6. Adjust the code to make the type_ct6 declaration visible at the accessor declaration point.
 			      */
-			      sycl::local_accessor<uint8_t[sizeof(type_ct6)], 0> temp_storage_ct1_acc_ct1(cgh);
-			      sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-			      sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
+			      //sycl::local_accessor<uint8_t[sizeof(type_ct6)], 0> temp_storage_ct1_acc_ct1(cgh);
+			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+			      //sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
+                                              
+            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+            using group_load_float2 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_float2 = group_load_float2::get_local_memory_size(NUM_BLOCK);
+            
+            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_float2(load_temp_storage_size_float2, cgh);
+              
 
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>(p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n, item_ct1, temp_storage_ct1_acc_ct1.get_pointer(), smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer());
+			          kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, buff_state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float1, ltacc_float2);
 			        });
 			    });
 			}
 			/*
 			DPCT1010:242: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
 			*/
-			CUDA_CHECK_RETURN(0);
+			//CUDA_CHECK_RETURN(0);
 			/*
 			DPCT1049:65: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
 			*/
@@ -802,7 +851,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			/*
 			DPCT1010:243: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
 			*/
-			CUDA_CHECK_RETURN(0);
+			//CUDA_CHECK_RETURN(0);
 		break;
 		case MOMENTUM:
     case RMSPROP:
@@ -828,7 +877,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			/*
 			DPCT1010:244: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
 			*/
-			CUDA_CHECK_RETURN(0);
+			//CUDA_CHECK_RETURN(0);
 			/*
 			DPCT1049:66: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
 			*/
@@ -852,7 +901,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			/*
 			DPCT1010:245: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
 			*/
-			CUDA_CHECK_RETURN(0);
+			//CUDA_CHECK_RETURN(0);
 			break;
     case LION:
       // in lion, the momentum update happens after the parameter update
@@ -879,7 +928,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
       /*
       DPCT1010:246: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
       */
-      CUDA_CHECK_RETURN(0);
+      //CUDA_CHECK_RETURN(0);
 
       CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
       {
@@ -902,7 +951,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
       /*
       DPCT1010:247: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
       */
-      CUDA_CHECK_RETURN(0);
+      //CUDA_CHECK_RETURN(0);
       break;
 		default:
 			break;
@@ -942,6 +991,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 			      /*
 			      DPCT1101:307: 'LANES' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
 			      */
+                    
+                    
 			      sycl::local_accessor<float, 2> smem_quantiles2_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);
 			      sycl::local_accessor<float, 1> smem_exchange1_acc_ct1(sycl::range<1>(1), cgh);
 			      sycl::local_accessor<float, 1> smem_exchange2_acc_ct1(sycl::range<1>(1), cgh);
