@@ -127,10 +127,13 @@ void quantize(float *code, float *A, unsigned char *out, int n)
       sycl::local_accessor<uint8_t, 1> ltacc(load_temp_storage_size, cgh);
       sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
       
+      //__shared__ vars
+      sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+      
       cgh.parallel_for(
         sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
         [=](sycl::nd_item<3> item_ct1) {
-          kQuantize(code, buff_A, buff_out, n, item_ct1, ltacc, stacc);
+          kQuantize(code, buff_A, buff_out, n, item_ct1, smem_code_acc_ct1.get_pointer(), ltacc, stacc);
         });
     });
   }
@@ -165,10 +168,13 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
     q_ct1.submit(
       [&](sycl::handler &cgh) {
       
+      //__shared__ vars
+      sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+      
       cgh.parallel_for(
         sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
         [=](sycl::nd_item<3> item_ct1) {
-          kDequantize(code, buff_A, buff_out, n, item_ct1);
+          kDequantize(code, buff_A, buff_out, n, item_ct1, smem_code_acc_ct1.get_pointer());
         });
     });
    //q_ct1.wait();
@@ -209,8 +215,6 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
         [&](sycl::handler &cgh) {
-          //sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
-          //sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
           using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
           size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
           using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
@@ -221,11 +225,16 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
           sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
           sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
-      
+          
+          //__shared__ vars for funtions
+          sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+          sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
+          
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, 0>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1, ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, 0>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
             });
         });
     }
@@ -238,8 +247,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       q_ct1.submit(
         [&](sycl::handler &cgh) {
           
-          //sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
-          //sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
           size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
           using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
@@ -251,10 +259,14 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
           sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
       
+          //__shared__ vars
+          sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+          sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1, ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
             });
         });
     }
@@ -263,8 +275,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
         [&](sycl::handler &cgh) {
-          //sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
-          //sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
           size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
           using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
@@ -276,10 +287,14 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
           sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
       
+          //__shared__vars
+          sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+          sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 1024, 4, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1, ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 1024, 4, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
             });
         });
     }
@@ -288,8 +303,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
         [&](sycl::handler &cgh) {
-          //sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
-          //sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
           size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
           using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
@@ -301,10 +315,14 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
           sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
       
+          //__shared__ vars
+          sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+          sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 512, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1, ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 512, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
             });
         });
     }
@@ -313,8 +331,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
         [&](sycl::handler &cgh) {
-          //sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
-          //sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
           size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
           using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
@@ -326,10 +343,15 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
           sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
       
+          //__shared__ vars
+          sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+          sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+
+          
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 128), sycl::range<3>(1, 1, 128)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1, ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
             });
         });
     }
@@ -338,8 +360,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
         [&](sycl::handler &cgh) {
-          //sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
-          //sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
           size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
           using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
@@ -351,10 +372,13 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
           sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
       
+          //__shared__ vars
+          sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+          sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 64), sycl::range<3>(1, 1, 64)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1, ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
             });
         });
     }
@@ -363,8 +387,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
         [&](sycl::handler &cgh) {
-          //sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
-          //sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
           using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
           size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
           using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
@@ -375,11 +398,16 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
           sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
           sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
+          
+          //__shared__ vars
+          sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
+          sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
+          
       
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 32), sycl::range<3>(1, 1, 32)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1, ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
             });
         });
     }
@@ -822,12 +850,16 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
             sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
             sycl::local_accessor<uint8_t, 1> ltacc_float2(load_temp_storage_size_float2, cgh);
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);        
+			      sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
               
 
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, buff_state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float1, ltacc_float2);
+			          kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, buff_state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), ltacc_T, ltacc_float1, ltacc_float2);
 			        });
 			    });
 			}
@@ -842,8 +874,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
-			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-			      //sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
 			      /*
 			      DPCT1054:301: The type of variable temp_storage is declared in device function with the name type_ct7. Adjust the code to make the type_ct7 declaration visible at the accessor declaration point.
 			      */
@@ -876,10 +908,14 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
      
 			      //sycl::local_accessor<uint8_t[sizeof(type_ct7)], 0> temp_storage_ct1_acc_ct1(cgh);
 
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);        
+			      sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
+            
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit2State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, buff_state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n, item_ct1, ltacc_T, ltacc_T1, ltacc_float1, ltacc_float2, stacc_T, stacc_float1, stacc_float2);
+			          kOptimizerStatic8bit2State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, buff_state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, ltacc_float2, stacc_T, stacc_float1, stacc_float2);
 			        });
 			    });
 			}
@@ -900,7 +936,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 			      DPCT1054:302: The type of variable temp_storage is declared in device function with the name type_ct8. Adjust the code to make the type_ct8 declaration visible at the accessor declaration point.
 			      */
 			      //sycl::local_accessor<uint8_t[sizeof(type_ct8)], 0> temp_storage_ct1_acc_ct1(cgh);
-			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+			      ;
             using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
             using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
             size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
@@ -909,10 +945,13 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
             sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
             
-			      cgh.parallel_for(
+			      //__shared__ vars
+            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh)                   
+       
+            cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float1);
+			          kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_float1);
 			        });
 			    });
 			}
@@ -927,7 +966,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
-			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+			      
 			      /*
 			      DPCT1054:303: The type of variable temp_storage is declared in device function with the name type_ct9. Adjust the code to make the type_ct9 declaration visible at the accessor declaration point.
 			      */
@@ -953,11 +992,12 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
             
-
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1,ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
+			          kOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1,smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
 			        });
 			    });
 			}
@@ -975,7 +1015,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
         dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
           [&](sycl::handler &cgh) {
-            //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+            
             /*
             DPCT1054:304: The type of variable temp_storage is declared in device function with the name type_ct9. Adjust the code to make the type_ct9 declaration visible at the accessor declaration point.
             */
@@ -1001,10 +1041,13 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
             
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+            
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kOptimizerStatic8bit1State<T, OPTIMIZER>(`buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
+                kOptimizerStatic8bit1State<T, OPTIMIZER>(`buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
               });
           });
       }
@@ -1022,8 +1065,6 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             DPCT1054:305: The type of variable temp_storage is declared in device function with the name type_ct8. Adjust the code to make the type_ct8 declaration visible at the accessor declaration point.
             */
             //sycl::local_accessor<uint8_t[sizeof(type_ct8)], 0> temp_storage_ct1_acc_ct1(cgh);
-            //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
             using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
             size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
             size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
@@ -1031,10 +1072,13 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
             sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
               
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+            
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float1);
+                kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_float1);
               });
           });
       }
@@ -1097,16 +1141,11 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* buff_p,
 			      /*
 			      DPCT1101:306: 'LANES' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
 			      */
-			      sycl::local_accessor<float, 2> smem_quantiles1_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);
 			      /*
 			      DPCT1101:307: 'LANES' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
 			      */
                     
-                    
-			      //sycl::local_accessor<float, 2> smem_quantiles2_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);
-			      //sycl::local_accessor<float, 1> smem_exchange1_acc_ct1(sycl::range<1>(1), cgh);
-			      //sycl::local_accessor<float, 1> smem_exchange2_acc_ct1(sycl::range<1>(1), cgh);
-			      /*
+            /*
 			      DPCT1054:308: The type of variable temp_storage is declared in device function with the name type_ct10. Adjust the code to make the type_ct10 declaration visible at the accessor declaration point.
 			      */
 			      //sycl::local_accessor<uint8_t[sizeof(type_ct10)], 0> temp_storage_ct1_acc_ct1(cgh);
@@ -1135,11 +1174,19 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* buff_p,
             sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_float2(store_temp_storage_size_float2, cgh);
+            
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 2> smem_quantiles1_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);        
+			      sycl::local_accessor<float, 2> smem_quantiles2_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);
+			      sycl::local_accessor<float, 1> smem_exchange1_acc_ct1(sycl::range<1>(1), cgh);
+			      sycl::local_accessor<float, 1> smem_exchange2_acc_ct1(sycl::range<1>(1), cgh);
+			      
      
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, BLOCKSIZE_2STATE/NUM_2STATE), sycl::range<3>(1, 1, BLOCKSIZE_2STATE/NUM_2STATE)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>(buff_p, buff_g, buff_state1, buff_state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n, item_ct1, ltacc_T, ltacc_T1, ltacc_float1, ltacc_float2, stacc_T, stacc_float1, stacc_float2);
+			          kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>(buff_p, buff_g, buff_state1, buff_state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n,item_ct1,  smem_quantiles1_acc_ct1, smem_quantiles2_acc_ct1,smem_exchange1_acc_ct1.get_pointer(), smem_exchange2_acc_ct1.get_pointer(),ltacc_T, ltacc_T1, ltacc_float1, ltacc_float2, stacc_T, stacc_float1, stacc_float2);
 			        });
 			    });
 			}
@@ -1161,8 +1208,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* buff_p,
 			      /*
 			      DPCT1101:309: 'LANES' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
 			      */
-			      //sycl::local_accessor<float, 2> smem_quantiles1_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);
-			      //sycl::local_accessor<float, 1> smem_exchange1_acc_ct1(sycl::range<1>(1), cgh);
+			      
 			      /*
 			      DPCT1054:310: The type of variable temp_storage is declared in device function with the name type_ct11. Adjust the code to make the type_ct11 declaration visible at the accessor declaration point.
 			      */
@@ -1187,10 +1233,15 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* buff_p,
             sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
             
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 2> smem_quantiles1_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);
+			      sycl::local_accessor<float, 1> smem_exchange1_acc_ct1(sycl::range<1>(1), cgh);
+            
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE), sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE>(buff_p, buff_g, buff_state1, beta1, beta2, eps, step, lr, quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n, item_ct1, ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
+			          kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE>(buff_p, buff_g, buff_state1, beta1, beta2, eps, step, lr, quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n, item_ct1, smem_quantiles1_acc_ct1, smem_exchange1_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
 			        });
 			    });
 			}
@@ -1247,7 +1298,14 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
   DPCT1010:250: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
   //CUDA_CHECK_RETURN(0);
+  //back memcpy
+   q_ct1.memcpy((T*)(g), (T*)(buff_g), size);
 }
+
+
+
+
+//=======================GEMM=================================
 
 void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
  try {
@@ -1829,7 +1887,7 @@ template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, 
         /*
         DPCT1101:311: 'SMEM_SIZE' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
         */
-        sycl::local_accessor<sycl::half, 1> smem_dequant_stats_acc_ct1(sycl::range<1>(2048/*SMEM_SIZE*/), cgh);
+        //sycl::local_accessor<sycl::half, 1> smem_dequant_stats_acc_ct1(sycl::range<1>(2048/*SMEM_SIZE*/), cgh);
 
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, nnz_rows) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
