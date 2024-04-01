@@ -754,6 +754,13 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       }
       break;
 	}
+ 
+ //back memcpy
+ q_ct1.memcpy((T*)(g), (T*)(buff_g), size);
+ q_ct1.memcpy((T*)(p), (T*)(buff_p), size);
+ q_ct1.memcpy((float*)(state1), (float*)(buff_state1), size);
+ q_ct1.memcpy((float*)(state2), (float*)(buff_state2), size);
+  
 }
 catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
@@ -892,13 +899,20 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 			      /*
 			      DPCT1054:302: The type of variable temp_storage is declared in device function with the name type_ct8. Adjust the code to make the type_ct8 declaration visible at the accessor declaration point.
 			      */
-			      sycl::local_accessor<uint8_t[sizeof(type_ct8)], 0> temp_storage_ct1_acc_ct1(cgh);
-			      sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-
+			      //sycl::local_accessor<uint8_t[sizeof(type_ct8)], 0> temp_storage_ct1_acc_ct1(cgh);
+			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+            
+            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+            
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, temp_storage_ct1_acc_ct1.get_pointer(), smem_quantiles1_acc_ct1.get_pointer());
+			          kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float1);
 			        });
 			    });
 			}
@@ -913,16 +927,37 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
-			      sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
 			      /*
 			      DPCT1054:303: The type of variable temp_storage is declared in device function with the name type_ct9. Adjust the code to make the type_ct9 declaration visible at the accessor declaration point.
 			      */
-			      sycl::local_accessor<uint8_t[sizeof(type_ct9)], 0> temp_storage_ct1_acc_ct1(cgh);
+			      //sycl::local_accessor<uint8_t[sizeof(type_ct9)], 0> temp_storage_ct1_acc_ct1(cgh);
+                                                                    
+            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_T1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T1 = group_load_T1::get_local_memory_size(NUM_BLOCK);
+
+            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_T1(load_temp_storage_size_T1, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+            
+            
+            using group_store_T = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, T>;
+            using group_store_float1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
+            size_t store_temp_storage_size_float1 = group_store_float1::get_local_memory_size(NUM_BLOCK);
+            size_t store_temp_storage_size_T = group_store_T::get_local_memory_size(NUM_BLOCK);
+            
+            sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
+            
 
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), temp_storage_ct1_acc_ct1.get_pointer());
+			          kOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1,ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
 			        });
 			    });
 			}
@@ -940,16 +975,36 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
         dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
           [&](sycl::handler &cgh) {
-            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+            //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
             /*
             DPCT1054:304: The type of variable temp_storage is declared in device function with the name type_ct9. Adjust the code to make the type_ct9 declaration visible at the accessor declaration point.
             */
-            sycl::local_accessor<uint8_t[sizeof(type_ct9)], 0> temp_storage_ct1_acc_ct1(cgh);
+            //sycl::local_accessor<uint8_t[sizeof(type_ct9)], 0> temp_storage_ct1_acc_ct1(cgh);
+            
+            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_T1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T1 = group_load_T1::get_local_memory_size(NUM_BLOCK);
 
+            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_T1(load_temp_storage_size_T1, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+            
+            
+            using group_store_T = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, T>;
+            using group_store_float1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
+            size_t store_temp_storage_size_float1 = group_store_float1::get_local_memory_size(NUM_BLOCK);
+            size_t store_temp_storage_size_T = group_store_T::get_local_memory_size(NUM_BLOCK);
+            
+            sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
+            
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), temp_storage_ct1_acc_ct1.get_pointer());
+                kOptimizerStatic8bit1State<T, OPTIMIZER>(`buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
               });
           });
       }
@@ -966,13 +1021,20 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             /*
             DPCT1054:305: The type of variable temp_storage is declared in device function with the name type_ct8. Adjust the code to make the type_ct8 declaration visible at the accessor declaration point.
             */
-            sycl::local_accessor<uint8_t[sizeof(type_ct8)], 0> temp_storage_ct1_acc_ct1(cgh);
-            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-
+            //sycl::local_accessor<uint8_t[sizeof(type_ct8)], 0> temp_storage_ct1_acc_ct1(cgh);
+            //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+            
+            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+              
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, temp_storage_ct1_acc_ct1.get_pointer(), smem_quantiles1_acc_ct1.get_pointer());
+                kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float1);
               });
           });
       }
@@ -984,6 +1046,13 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 		default:
 			break;
 	}
+ 
+ //back memcpy
+ q_ct1.memcpy((T*)(buff_g), (T*)(g), size);
+ q_ct1.memcpy((T*)(buff_p), (T*)(p), size);
+ q_ct1.memcpy((float*)(buff_state1), (float*)(state1), size);
+ q_ct1.memcpy((float*)(buff_state2), (float*)(state2), size);
+ 
 }
 catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
