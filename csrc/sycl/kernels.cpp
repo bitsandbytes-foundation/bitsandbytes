@@ -843,9 +843,6 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
   int local_rand_idx = 0;
 
   
-  sycl::buffer<T, 1> buff_A(A,sycl::range<1>(NUM_PER_TH));
-  sycl::buffer<unsigned char, 1> buff_out(out,sycl::range<1>(NUM_PER_TH));
-  sycl::buffer<float, 1> buff_rand(rand,sycl::range<1>(NUM_PER_TH));
   
   
   //typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
@@ -4677,7 +4674,7 @@ DPCT1110:32: The total declared local variable size in device function kgemm_4bi
 template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize,
                                                              const sycl::nd_item<3> &item_ct1,
                                                              T *smem_A,
-                                                             T *smem_B,
+                                                             unsigned char *smem_B,
                                                              T *smem_C)
 {
 
@@ -4704,10 +4701,6 @@ template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M
 
   const int a_tile_offset = 16;
   const int b_tile_offset = (16*32 + 16);
-
-  
-  
-  
 
    /*
    DPCT1082:33: Migration of nvcuda::wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> type is not supported.
@@ -4946,17 +4939,13 @@ wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_o
 /*
 DPCT1110:49: The total declared local variable size in device function kgemm_4bit_inference_naive exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
 */
-template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize,
-                                                                             const sycl::nd_item<3> &item_ct1,
-                                                                             T *quant_map)
+template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *quant_map)
 {
 
   // per threadblock:
   // load step-by-step in chunks of [32,warps]: 1x32 * [32,warps] -> [1,warps]
   // 4 warps -> 4 loads per iter
   // 1x32 * 32x4 -> 1x4 outputs per thread block
-  
-  
 
   const int warp_idx = item_ct1.get_local_id(2) / 32;
   const int warp_lane = item_ct1.get_local_id(2) % 32;

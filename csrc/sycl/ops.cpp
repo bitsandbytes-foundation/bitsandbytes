@@ -1902,7 +1902,7 @@ template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, 
   /*
   DPCT1010:289: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
-  CUDA_CHECK_RETURN(0);
+  //CUDA_CHECK_RETURN(0);
 }
 
 
@@ -1935,7 +1935,7 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
   /*
   DPCT1010:290: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
-  CUDA_CHECK_RETURN(0);
+  //CUDA_CHECK_RETURN(0);
 }
 
 
@@ -1945,6 +1945,19 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
 {
 
 	int num_blocks = (m+31)/32;
+ 
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+    
+  int size = NUM_BLOCK;
+  *((T **)&buff_A) = sycl::malloc_device(size, A, ctx);
+  q_ct1.memcpy((T*)(buff_A), (T*)(A), size);
+  *((T **)&buff_B) = sycl::malloc_device(size, B, ctx);
+  q_ct1.memcpy((T*)(buff_B), (T*)(B), size);
+  *((T **)&buff_out) = sycl::malloc_device(size, out, ctx);
+  q_ct1.memcpy((T*)(buff_out), (T*)(out), size);
+  
 
 	//cout << num_blocks << endl;
 	//cout << lda << endl;
@@ -1966,16 +1979,18 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
           /*
           DPCT1101:312: '8*16 + (2*16*(batch_size_warps-1))' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
           */
-          sycl::local_accessor<T, 1> smem_A_acc_ct1(sycl::range<1>(224/*8*16 + (2*16*(batch_size_warps-1))*/), cgh);
+          //sycl::local_accessor<T, 1> smem_A_acc_ct1(sycl::range<1>(224/*8*16 + (2*16*(batch_size_warps-1))*/), cgh);
           /*
           DPCT1101:313: '2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
           */
+          //__shared__ vars
+          sycl::local_accessor<T, 1> smem_A_acc_ct1(sycl::range<1>(224/*8*16 + (2*16*(batch_size_warps-1))*/), cgh);
           sycl::local_accessor<T, 1> smem_B_acc_ct1(sycl::range<1>(4192/*2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))*/), cgh);
 
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 160), sycl::range<3>(1, 1, 160)), 
             [=](sycl::nd_item<3> item_ct1) {
-              gemm_device<T, 16, 160>(m, n, k, A, B, out, lda, ldb, ldc, item_ct1, smem_A_acc_ct1.get_pointer(), smem_B_acc_ct1.get_pointer());
+              gemm_device<T, 16, 160>(m, n, k, buff_A, buff_B, buff_out, lda, ldb, ldc, item_ct1, smem_A_acc_ct1.get_pointer(), smem_B_acc_ct1.get_pointer());
             });
         });
     }
@@ -1983,6 +1998,11 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
     //gemm_device<T, 16, 96><<< num_blocks, 96, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //gemm_device<T, 16, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //gemm_device<T, 16, 64><<< num_blocks, 64, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
+    //back memcpy
+    q_ct1.memcpy((T*)(A), (T*)(buff_A), size);
+    q_ct1.memcpy((T*)(B), (T*)(buff_B), size);
+    q_ct1.memcpy((T*)(out), (T*)(buff_out), size);
+  
 }
 
 template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
@@ -1998,6 +2018,19 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
 	//cout << m << endl;
 	//cout << n << endl;
 	//cout << k << endl;
+ 
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+    
+  int size = NUM_BLOCK;
+  *((T **)&buff_A) = sycl::malloc_device(size, A, ctx);
+  q_ct1.memcpy((T*)(buff_A), (T*)(A), size);
+  *(( unsigned char**)&buff_B) = sycl::malloc_device(size, B, ctx);
+  q_ct1.memcpy((unsigned char*)(buff_B), (unsigned char*)(B), size);
+  *((T **)&buff_out) = sycl::malloc_device(size, out, ctx);
+  q_ct1.memcpy((T*)(buff_out), (T*)(out), size);
+ 
   {
     dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
     dpct::get_in_order_queue().submit(
@@ -2005,29 +2038,48 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
         /*
         DPCT1101:314: '8*16 + (16*(batch_size_warps-1))' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
         */
-        sycl::local_accessor<T, 1> smem_A_acc_ct1(sycl::range<1>(176/*8*16 + (16*(batch_size_warps-1))*/), cgh);
+        
         /*
         DPCT1101:315: '2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
         */
+        
+        //__shared__ vars
+        sycl::local_accessor<T, 1> smem_A_acc_ct1(sycl::range<1>(176/*8*16 + (16*(batch_size_warps-1))*/), cgh);
         sycl::local_accessor<T, 1> smem_B_acc_ct1(sycl::range<1>(4192/*2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))*/), cgh);
         sycl::local_accessor<T, 1> smem_C_acc_ct1(sycl::range<1>(8*32), cgh);
 
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 96), sycl::range<3>(1, 1, 96)), 
           [=](sycl::nd_item<3> item_ct1) {
-            kgemm_4bit_inference<T, 96>(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize, item_ct1, smem_A_acc_ct1.get_pointer(), smem_B_acc_ct1.get_pointer(), smem_C_acc_ct1.get_pointer());
+            kgemm_4bit_inference<T, 96>(m, n, k, buff_A, buff_B, absmax, buff_out, lda, ldb, ldc, blocksize, item_ct1, smem_A_acc_ct1.get_pointer(), smem_B_acc_ct1.get_pointer(), smem_C_acc_ct1.get_pointer());
           });
       });
   }
   //kgemm_4bit_inference<T, 256><<< num_blocks, 256, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
   //kgemm_4bit_inference<T, 160><<< num_blocks, 160, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
   //kgemm_4bit_inference<T, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
+  //back memcpy
+  q_ct1.memcpy((T*)(A), (T*)(buff_A), size);
+  q_ct1.memcpy((unsigned char*)(B), (unsigned char*)(buff_B), size);
+  q_ct1.memcpy((T*)(out), (T*)(buff_out), size);
+  
 }
 
 template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
 	int num_blocks = (m+3)/4;
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+    
+  int size = NUM_BLOCK;
+  *((T **)&buff_A) = sycl::malloc_device(size, A, ctx);
+  q_ct1.memcpy((T*)(buff_A), (T*)(A), size);
+  *(( unsigned char**)&buff_B) = sycl::malloc_device(size, B, ctx);
+  q_ct1.memcpy((unsigned char*)(buff_B), (unsigned char*)(B), size);
+  *((T **)&buff_out) = sycl::malloc_device(size, out, ctx);
+  q_ct1.memcpy((T*)(buff_out), (T*)(out), size);
 
   {
     dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
@@ -2038,14 +2090,19 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 128), sycl::range<3>(1, 1, 128)), 
           [=](sycl::nd_item<3> item_ct1) [[intel::reqd_sub_group_size(32)]] {
-            kgemm_4bit_inference_naive<T, 128, BITS>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, item_ct1, quant_map_acc_ct1.get_pointer());
+            kgemm_4bit_inference_naive<T, 128, BITS>(m, n, k, buff_A, buff_B, absmax, datatype, buff_out, lda, ldb, ldc, blocksize, item_ct1, quant_map_acc_ct1.get_pointer());
           });
       });
   }
   /*
   DPCT1010:291: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
-  CUDA_CHECK_RETURN(0);
+  //CUDA_CHECK_RETURN(0);
+  q_ct1.memcpy((T*)(A), (T*)(buff_A), size);
+  q_ct1.memcpy((unsigned char*)(B), (unsigned char*)(buff_B), size);
+  q_ct1.memcpy((T*)(out), (T*)(buff_out), size);
+  
+  
 }
 
 template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
@@ -2065,7 +2122,7 @@ template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
   /*
   DPCT1010:292: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
-  CUDA_CHECK_RETURN(0);
+  //CUDA_CHECK_RETURN(0);
 }
 
 //==============================================================
