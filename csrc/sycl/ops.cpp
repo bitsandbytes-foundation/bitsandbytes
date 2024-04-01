@@ -775,6 +775,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
   int num_blocks = n/4096;
   num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
   sycl::context ctx = q_ct1.get_context();
+  int size = NUM_BLOCK;
   
   *((T **)&buff_g) = sycl::malloc_device(size, g, ctx);
   *((T **)&buff_p) = sycl::malloc_device(size, p, ctx);
@@ -834,17 +835,44 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
-			      sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-			      sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
+			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+			      //sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
 			      /*
 			      DPCT1054:301: The type of variable temp_storage is declared in device function with the name type_ct7. Adjust the code to make the type_ct7 declaration visible at the accessor declaration point.
 			      */
-			      sycl::local_accessor<uint8_t[sizeof(type_ct7)], 0> temp_storage_ct1_acc_ct1(cgh);
+                    
+            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_T1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+            using group_load_float2 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
+            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_float2 = group_load_float2::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+            size_t load_temp_storage_size_T1 = group_load_T1::get_local_memory_size(NUM_BLOCK);
+
+            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_T1(load_temp_storage_size_T1, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+            sycl::local_accessor<uint8_t, 1> ltacc_float2(load_temp_storage_size_float2, cgh);
+            
+            
+            using group_store_T = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, T>;
+            using group_store_float1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
+            using group_store_float2 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
+            size_t store_temp_storage_size_float1 = group_store_float1::get_local_memory_size(NUM_BLOCK);
+            size_t store_temp_storage_size_float2 = group_store_float2::get_local_memory_size(NUM_BLOCK);
+            size_t store_temp_storage_size_T = group_store_T::get_local_memory_size(NUM_BLOCK);
+            
+            sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
+            sycl::local_accessor<uint8_t, 1> stacc_float2(store_temp_storage_size_float2, cgh);
+     
+			      //sycl::local_accessor<uint8_t[sizeof(type_ct7)], 0> temp_storage_ct1_acc_ct1(cgh);
 
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit2State<T, OPTIMIZER>(p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), temp_storage_ct1_acc_ct1.get_pointer());
+			          kOptimizerStatic8bit2State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, buff_state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n, item_ct1, ltacc_T, ltacc_T1, ltacc_float1, ltacc_float2, stacc_T, stacc_float1, stacc_float2);
 			        });
 			    });
 			}
