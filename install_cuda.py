@@ -77,9 +77,7 @@ def main():
     download_path = "/tmp"  # default download path
 
     if len(sys.argv) < 2:
-        print(
-            "Usage: python install_cuda.py <version/all> [user/system] [download_path]"
-        )
+        print("Usage: python install_cuda.py <version/all> [user/system] [download_path]")
         sys.exit(1)
 
     version = sys.argv[1]
@@ -100,9 +98,7 @@ def main():
     elif version in cuda_versions:
         install_cuda(version, base_path, download_path)
     else:
-        print(
-            f"Invalid CUDA version: {version}. Available versions are: {', '.join(cuda_versions.keys())}"
-        )
+        print(f"Invalid CUDA version: {version}. Available versions are: {', '.join(cuda_versions.keys())}")
         sys.exit(1)
 
 

@@ -1087,11 +1087,12 @@ def get_4bit_type(typename, device=None, blocksize=64):
     if data is None:
         raise NotImplementedError(f"Typename {typename} not supported")
 
-    data = Tensor(data)
-    data /= data.abs().max()
+    data = torch.tensor(data, device=device)
+    data.div_(data.abs().max())
+
     assert data.numel() == 16
 
-    return data.to(device)
+    return data
 
 
 def quantize_fp4(
