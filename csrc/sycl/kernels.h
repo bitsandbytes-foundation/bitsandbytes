@@ -18,6 +18,7 @@ typedef sycl::accessor<T, 1, sycl::access::mode::read_write, sycl::access::targe
 typedef sycl::accessor<unsigned char, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_unsigned_char;
 typedef sycl::accessor<sycl::half, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_half;
 typedef sycl::accessor<unsigned, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_unsigned;
+typedef sycl::accessor<char , 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_char;
 
 //template <int QUANT_TYPE, typename INP_TYPE, typename COMP_TYPE, typename OUT_TYPE>__global__ void kMatmul_inference_4bit(INP_TYPE *A, unsigned char *B, OUT_TYPE *out, int lda, int ldb, int rowsA, int colsA, int colsB);
 
@@ -190,7 +191,8 @@ extern SYCL_EXTERNAL void kDoubleRowColQuant(sycl::half *__restrict__ const A,
                         int *__restrict__ nnz_block_ptr, float threshold,
                         int rows, int cols, int tiledCols,
                         const sycl::nd_item<3> &item_ct1,
-                        float *smem_row_stats, unsigned int *smem_nnz_row_idx);
+                        float *smem_row_stats, unsigned int *smem_nnz_row_idx,
+                        sycl_la_half ltacc_half, sycl_la_char stacc_char1, sycl_la_char stacc_char2);
 
 
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> extern SYCL_EXTERNAL void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,

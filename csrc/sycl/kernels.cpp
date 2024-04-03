@@ -637,7 +637,7 @@ typedef sycl::accessor<T, 1, sycl::access::mode::read_write, sycl::access::targe
 typedef sycl::accessor<unsigned char, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_unsigned_char;
 typedef sycl::accessor<sycl::half, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_half;
 typedef sycl::accessor<unsigned, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_unsigned;
-
+typedef sycl::accessor<char , 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_char;
 
 template<typename T>
 SYCL_EXTERNAL 
@@ -3608,7 +3608,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
 }
 
 
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kDoubleRowColQuant(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx)
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kDoubleRowColQuant(sycl::half *__restrict__ const buff_A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *buff_out_col_normed, char *buff_out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx, sycl_la_half ltacc_half, sycl_la_char stacc_char1, sycl_la_char stacc_char2 )
 {
   // assumes TILE_SIZE == THREADS*ITEMS_PER_THREAD
   // Each thread reads the same column but multiple rows
@@ -3632,11 +3632,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
   //typedef cub::BlockLoad<sycl::half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadHalf;
   
   //typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
-  
-  sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(ITEMS_PER_THREAD));
-  sycl::buffer<char, 1> buff_out_row_normed(out_row_normed,sycl::range<1>(ITEMS_PER_THREAD));
-  sycl::buffer<char, 1> buff_out_col_normed(out_col_normed,sycl::range<1>(ITEMS_PER_THREAD));
-  
   
 
   sycl::half local_data[ITEMS_PER_THREAD];
@@ -3678,30 +3673,16 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     DPCT1007:218: Migration of cub::BlockLoad::Load is not supported.
     */
     //LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
-    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
-     
-     
-          using group_load = dpct::group::workgroup_load<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,sycl::half>;
-          size_t temp_storage_size = group_load::get_local_memory_size(ITEMS_PER_THREAD);
-          sycl::local_accessor<uint8_t, 1> tacc(
-            temp_storage_size, h);
-          sycl::accessor dacc(buff_A[i], h, sycl::read_write);
-          
-          // 1. load 8 values per thread
-          // 2. compute 2-max in registers (64 max per warp)
-          // 3. do warp reduction + broadcast back
-          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
-          // 5. Repeat (3) 8 times for top 8 values in 256
-          // 6. store with byte index
-          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
-            [=](sycl::nd_item<3> item) {
-              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-              group_load(tmp).load(item,item.get_local_linear_id(), d, local_data);
-            });
-          
-     });
     
+    // 1. load 8 values per thread
+    // 2. compute 2-max in registers (64 max per warp)
+    // 3. do warp reduction + broadcast back
+    // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+    // 5. Repeat (3) 8 times for top 8 values in 256
+    // 6. store with byte index
+    auto *tmp = ltacc_half.get_multi_ptr<sycl::access::decorated::yes>().get();
+    group_load(tmp).load(item,item.get_local_linear_id(), &buff_A[0], local_data);
+
     float row_stat = 127.0f / smem_row_stats[row];
 
     // 2. quantize data with row/col stats
@@ -3735,29 +3716,16 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     DPCT1007:219: Migration of cub::BlockStore::Store is not supported.
     */
     //StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
-    dpct::get_in_order_queue().submit([&](sycl::handler &h) {
-     
-     
-          using group_store = dpct::group::workgroup_store<ITEMS_PER_THREAD,BLOCK_LOAD_DIRECT,char>;
-          size_t temp_storage_size = group_store::get_local_memory_size(ITEMS_PER_THREAD);
-          sycl::local_accessor<uint8_t, 1> tacc(
-            temp_storage_size, h);
-          sycl::accessor dacc(buff_out_row_normed[i], h, sycl::read_write);
-          
-          // 1. load 8 values per thread
-          // 2. compute 2-max in registers (64 max per warp)
-          // 3. do warp reduction + broadcast back
-          // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
-          // 5. Repeat (3) 8 times for top 8 values in 256
-          // 6. store with byte index
-          h.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)),
-            [=](sycl::nd_item<3> item) {
-              auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-              auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-              group_store(tmp).store(item,item.get_local_linear_id(), d, local_quantized_data);
-            });
-          
-     });
+
+    // 1. load 8 values per thread
+    // 2. compute 2-max in registers (64 max per warp)
+    // 3. do warp reduction + broadcast back
+    // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+    // 5. Repeat (3) 8 times for top 8 values in 256
+    // 6. store with byte index
+    auto *tmp = stacc_char1.get_multi_ptr<sycl::access::decorated::yes>().get();
+    group_store(tmp).store(item,item.get_local_linear_id(), &buff_out_row_normed[0], local_quantized_data);
+    
     // 2. quantize data with row/col stats
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
@@ -3882,7 +3850,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
       {
         int col_idx = warp_lane+(j*32);
         if(col_idx < valid_items)
-          local_data[j] = A[i+col_idx];
+          local_data[j] = buff_A[i+col_idx];
         else
           local_data[j] = 0;
       }
@@ -3956,7 +3924,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // each 32 columns we have new tile
                     // each tile has size outRows*32 and base_row is done in increments of 32
                     offset = base_row*outRows;
-                    out[offset + (base_col + jrow + subrow_loop_row)*32 + item_ct1.get_local_id(2)] = data;
+                    buff_out[offset + (base_col + jrow + subrow_loop_row)*32 + item_ct1.get_local_id(2)] = data;
                   }
                 }
                 else
@@ -3965,7 +3933,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   {
                     offset = (base_col/32)*(32*rows);
                     char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
-                    out[offset+(base_row+subrow)*32 + ((j)*rows*32)+warp_lane] = data;
+                    buff_out[offset+(base_row+subrow)*32 + ((j)*rows*32)+warp_lane] = data;
                   }
                 }
                 break;
@@ -4047,7 +4015,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                       // even
                       offset += 0   + (subcol/4)*16 + (subcol%4) + ((subrow%8)*2);
 
-                    out[offset] = data;
+                    buff_out[offset] = data;
                   }
                 }
                 break;
@@ -4099,7 +4067,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 											int ampere_row = ((local_row % 8)/2)*8 + (local_row/8)*2 + (local_row % 2);
 
 											// global offset + row with 32 cols each + 32 cols per j + col_idx=warp_lane
-											out[offset + (ampere_row*32) + warp_lane] = data;
+											buff_out[offset + (ampere_row*32) + warp_lane] = data;
 										}
 									}
 									else
@@ -4122,7 +4090,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 											int local_row = ((subrow % 8)/2)*8 + (subrow/8)*2 + (subrow % 2);
 
 											// global offset + row with 32 cols each + 32 cols per j + col_idx
-											out[offset + (local_row*32) + warp_lane] = data;
+											buff_out[offset + (local_row*32) + warp_lane] = data;
 										}
 									}
 								break;
