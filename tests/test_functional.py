@@ -1928,7 +1928,9 @@ def test_bench_dequantization():
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
-def test_fp4_quant(dtype):
+@pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+@pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
+def test_4bit_quant(dtype, quant_type, blocksize):
     vals = list(product([0, 1], repeat=4))
 
     code = {}
@@ -1953,8 +1955,8 @@ def test_fp4_quant(dtype):
         code[idx] = result
 
     A1 = torch.randn(1024, 1024, device="cuda", dtype=dtype)
-    qa, SA = F.quantize_fp4(A1, blocksize=64)
-    A2 = F.dequantize_fp4(qa, SA)
+    qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
+    A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
 
     err = (A1 - A2).abs().float()
     relerr = (err / (A1.abs().float() + 1e-8)).mean()
@@ -1962,8 +1964,24 @@ def test_fp4_quant(dtype):
     err = err.mean()
 
     assert A2.dtype == dtype
-    assert err.item() < 0.1
-    assert relerr.item() < 0.28
+
+    # With larger block sizes, we can expect this to blow up.
+    # At blocksize>=1024, don't even bother looking at relerr.
+    if blocksize <= 64:
+        assert err.item() < 0.1
+        assert relerr.item() < 0.28
+    elif blocksize <= 256:
+        assert err.item() < 0.11
+        assert relerr.item() < 0.30
+    elif blocksize <= 512:
+        assert err.item() < 0.12
+        assert relerr.item() < 0.31
+    elif quant_type == "fp4":
+        # 1024 => 0.48, 2048 => 0.52, 4096 => 0.56
+        assert err.item() < 0.08 + math.log2(blocksize) * 4e-2
+    else:
+        # 1024 => 0.8, 2048 => 0.88, 4096 => 0.96
+        assert err.item() < math.log2(blocksize) * 8e-2
 
 
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])

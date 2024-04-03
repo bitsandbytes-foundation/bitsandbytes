@@ -357,6 +357,10 @@ Bug fixes:
 - Addressed a race condition in kEstimateQuantiles, enhancing the reliability of quantile estimation in concurrent environments (@pnunna93, #1061).
 - Fixed various minor issues, including typos in code comments and documentation, to improve code clarity and prevent potential confusion (@Brian Vaughan, #1063).
 
+#### Backwards Compatibility
+- After upgrading from `v0.42` to `v0.43`, when using 4bit quantization, models may generate slightly different outputs (approximately up to the 2nd decimal place) due to a fix in the code. For anyone interested in the details, [see this comment](https://github.com/TimDettmers/bitsandbytes/discussions/1094#discussioncomment-8984069).
+
+
 #### Internal and Build System Enhancements:
 - Implemented several enhancements to the internal and build systems, including adjustments to the CI workflows, portability improvements, and build artifact management. These changes contribute to a more robust and flexible development process, ensuring the library's ongoing quality and maintainability (@rickardp, @akx, @wkpark, @matthewdouglas; #949, #1053, #1045, #1037).
 
