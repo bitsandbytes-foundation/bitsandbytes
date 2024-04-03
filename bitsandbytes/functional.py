@@ -14,6 +14,7 @@ from torch import Tensor
 
 from bitsandbytes.backends import backends, ensure_backend_is_available
 from bitsandbytes.utils import QuantState
+
 from .cextension import lib
 
 
@@ -617,8 +618,10 @@ def estimate_quantiles(
 
     return out
 
+
 # maintain the compatibility as F.QuantState
 QuantState = QuantState
+
 
 def quantize_blockwise(
     A: Tensor,
@@ -977,7 +980,15 @@ def quantize_4bit(
         The quantization state to undo the quantization.
     """
     ensure_backend_is_available(A.device.type)
-    return backends[A.device.type].quantize_4bit(A, absmax=absmax, out=out, blocksize=blocksize, compress_statistics=compress_statistics, quant_type=quant_type, quant_storage=quant_storage)
+    return backends[A.device.type].quantize_4bit(
+        A,
+        absmax=absmax,
+        out=out,
+        blocksize=blocksize,
+        compress_statistics=compress_statistics,
+        quant_type=quant_type,
+        quant_storage=quant_storage,
+    )
 
 
 def dequantize_fp4(
@@ -1035,7 +1046,9 @@ def dequantize_4bit(
         Dequantized tensor.
     """
     ensure_backend_is_available(A.device.type)
-    return backends[A.device.type].dequantize_4bit(A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type)
+    return backends[A.device.type].dequantize_4bit(
+        A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type
+    )
 
 
 def quantize(
@@ -1876,18 +1889,18 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     return backends[A.device.type].igemmlt(A, B, SA, SB, out=out, Sout=Sout, dtype=dtype)
 
 
-def mm_dequant(
-    A,
-    quant_state,
-    row_stats,
-    col_stats,
-    out=None,
-    new_row_stats=None,
-    new_col_stats=None,
-    bias=None
-):
+def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None, bias=None):
     ensure_backend_is_available(A.device.type)
-    return backends[A.device.type].mm_dequant(A, quant_state, row_stats, col_stats, out=out, new_row_stats=new_row_stats, new_col_stats=new_col_stats, bias=bias)
+    return backends[A.device.type].mm_dequant(
+        A,
+        quant_state,
+        row_stats,
+        col_stats,
+        out=out,
+        new_row_stats=new_row_stats,
+        new_col_stats=new_col_stats,
+        bias=bias,
+    )
 
 
 def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0):
@@ -2009,12 +2022,16 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
 
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
     ensure_backend_is_available(A.device.type)
-    return backends[A.device.type].double_quant(A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold)
+    return backends[A.device.type].double_quant(
+        A, col_stats=col_stats, row_stats=row_stats, out_col=out_col, out_row=out_row, threshold=threshold
+    )
 
 
-def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+def transform(A, to_order, from_order="row", out=None, transpose=False, state=None, ld=None):
     ensure_backend_is_available(A.device.type)
-    return backends[A.device.type].transform(A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld)
+    return backends[A.device.type].transform(
+        A, to_order, from_order=from_order, out=out, transpose=transpose, state=state, ld=ld
+    )
 
 
 def spmm_coo(cooA, B, out=None):
@@ -2278,7 +2295,6 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
 def extract_outliers(A, SA, idx):
     ensure_backend_is_available(A.device.type)
     return backends[A.device.type].extract_outliers(A, SA, idx)
-
 
 
 def pipeline_test(A, batch_size):

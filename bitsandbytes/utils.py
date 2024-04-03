@@ -199,6 +199,7 @@ def unpack_tensor_to_dict(tensor_data):
 
     return unpacked_dict
 
+
 class QuantState:
     """container for quantization state components to work with Params4bit and similar classes"""
 
