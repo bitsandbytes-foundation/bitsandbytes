@@ -1020,7 +1020,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
     /*
     DPCT1064:96: Migrated __ldg call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
     */
-    local_abs_max = absmax[(i+item_ct1.get_local_id(2)*NUM_PER_TH)/(blocksize)];
+    local_abs_max =  sycl::ext::oneapi::experimental::cuda::ldg(&absmax[(i+item_ct1.get_local_id(2)*NUM_PER_TH)/(blocksize)]);
 
     /*
     DPCT1065:90: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -1054,7 +1054,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
             /*
             DPCT1064:228: Migrated __ldg call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
             */
-            vals[j] = code[qvals[j]]*local_abs_max;
+            vals[j] =  sycl::ext::oneapi::experimental::cuda::ldg(&code[qvals[j]]*local_abs_max);
           break;
         case FP4:
           #pragma unroll NUM_PER_TH
@@ -4790,7 +4790,7 @@ template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M
         /*
         DPCT1098:222: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
         */
-        sycl::half local_absmax = absmax[absidx];
+        sycl::half local_absmax =  sycl::ext::oneapi::experimental::cuda::ldg(&absmax[absidx]);
 
         #pragma unroll 64
         for(int col = 0; col < 64; col+=2)
@@ -4941,7 +4941,7 @@ template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_infer
 	  /*
 	  DPCT1098:223: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
 	  */
-	  local_absmax = absmax[absidx];
+	  local_absmax =  sycl::ext::oneapi::experimental::cuda::ldg(&absmax[absidx]);
 
     if(row_B < M)
     {

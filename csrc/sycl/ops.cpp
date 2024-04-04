@@ -1925,13 +1925,16 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
 }
 
 void spmm_coo(sycl::queue* handle, int *A_rowidx, int *A_colidx, sycl::half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, sycl::half *B, int ldc, sycl::half* C, bool transposed_B)
-{
+{ 
+
+  try{
     dpct::device_ext &dev_ct1 = dpct::get_current_device();
     sycl::queue &q_ct1 = dev_ct1.in_order_queue();
 
-#ifdef NO_CUBLASLT
-#else
+//#ifdef NO_CUBLASLT
+//#else
 
+   
     dpct::sparse::sparse_matrix_desc_t descA;
     std::shared_ptr<dpct::sparse::dense_matrix_desc> descB, descC;
 
@@ -1943,12 +1946,13 @@ void spmm_coo(sycl::queue* handle, int *A_rowidx, int *A_colidx, sycl::half *A_v
     /*
     DPCT1007:287: Migration of cusparseCreateCoo is not supported.
     */
-    CHECK_CUSPARSE( cusparseCreateCoo(&descA, A_rows, A_cols, A_nnz,
-                                      A_rowidx, A_colidx, A_vals,
-                                      dpct::library_data_t::real_int32,
-                                      oneapi::mkl::index_base::zero, dpct::library_data_t::real_half) );
+    //CHECK_CUSPARSE( cusparseCreateCoo(&descA, A_rows, A_cols, A_nnz,
+    //                                  A_rowidx, A_colidx, A_vals,
+    //                                  dpct::library_data_t::real_int32,
+    //                                  oneapi::mkl::index_base::zero, dpct::library_data_t::real_half) );
     // Create dense matrix C
-    CHECK_CUSPARSE( DPCT_CHECK_ERROR(descC = std::make_shared<dpct::sparse::dense_matrix_desc>(A_rows, B_cols, ldc, C, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major)) );
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descC = std::make_shared<dpct::sparse::dense_matrix_desc>(A_rows, B_cols, ldc, C, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major)) );
+    descC = std::make_shared<dpct::sparse::dense_matrix_desc>(A_rows, B_cols, ldc, C, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major);
     // Create dense matrix B
     if(transposed_B)
     {
@@ -1957,20 +1961,33 @@ void spmm_coo(sycl::queue* handle, int *A_rowidx, int *A_colidx, sycl::half *A_v
       B_cols = tmp;
     }
 
-    CHECK_CUSPARSE( DPCT_CHECK_ERROR(descB = std::make_shared<dpct::sparse::dense_matrix_desc>(A_cols, B_cols, ldb, B, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major)) );
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descB = std::make_shared<dpct::sparse::dense_matrix_desc>(A_cols, B_cols, ldb, B, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major)) );
+    descB = std::make_shared<dpct::sparse::dense_matrix_desc>(A_cols, B_cols, ldb, B, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major);
     // allocate an external buffer if needed
-    CHECK_CUSPARSE( DPCT_CHECK_ERROR(bufferSize = 0) );
-    CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1)) );
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(bufferSize = 0) );
+    bufferSize = 0
+    //CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1)) );
+    dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1);
 
     // execute SpMM
-    CHECK_CUSPARSE( DPCT_CHECK_ERROR(dpct::sparse::spmm(*handle, oneapi::mkl::transpose::nontrans, transposed_B ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, &alpha, descA, descB, &beta, descC, dpct::library_data_t::real_float)));
-
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(dpct::sparse::spmm(*handle, oneapi::mkl::transpose::nontrans, transposed_B ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, &alpha, descA, descB, &beta, descC, dpct::library_data_t::real_float)));
+    dpct::sparse::spmm(*handle, oneapi::mkl::transpose::nontrans, transposed_B ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, &alpha, descA, descB, &beta, descC, dpct::library_data_t::real_float);
     // destroy matrix/vector descriptors
-    CHECK_CUSPARSE( DPCT_CHECK_ERROR(descA.reset()) );
-    CHECK_CUSPARSE( DPCT_CHECK_ERROR(descB.reset()) );
-    CHECK_CUSPARSE( DPCT_CHECK_ERROR(descC.reset()) );
-    CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(sycl::free(dBuffer, q_ct1)) );
-#endif
+    descA.reset();
+    descB.reset();
+    descC.reset();
+    sycl::free(dBuffer, q_ct1);
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descA.reset()) );
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descB.reset()) );
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descC.reset()) );
+    //CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(sycl::free(dBuffer, q_ct1)) );
+//#endif
+  }
+  catch (sycl::exception const &exc) {
+      std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+      std::exit(1);
+  }
+
 }
 
 template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
