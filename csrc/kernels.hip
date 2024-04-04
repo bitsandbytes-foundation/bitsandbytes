@@ -5,7 +5,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <kernels.hiph>
+#include <kernels_hip.cuh>
 #include <hip/hip_runtime.h>
 #include <hipcub/hipcub.hpp>
 #include <hip/hip_math_constants.h>

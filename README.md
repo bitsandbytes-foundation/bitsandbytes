@@ -1,9 +1,9 @@
 # bitsandbytes-rocm
 
 The bitsandbytes is a lightweight wrapper around CUDA custom functions, in particular 8-bit optimizers, matrix multiplication (LLM.int8()), and quantization functions.
-This fork is the ROCm adaptation of bitsandbytes 0.39.1. The repo is inspired by [agrocylo/bitsandbytes-rocm](https://github.com/agrocylo/bitsandbytes-rocm/tree/main/bitsandbytes), which is a ROCm version of bitsandbytes 0.37. While this fork incorporating the majority of features from bitsandbytes 0.39.1, including the crucial 4 bit quantization feature, certain features such as hipblaslt and hip_bfloat16 have been disabled. Enabling these features is listed as a task for the future.
+This fork is the ROCm adaptation of bitsandbytes. The repo is inspired by [agrocylo/bitsandbytes-rocm](https://github.com/agrocylo/bitsandbytes-rocm/tree/main/bitsandbytes), which is a ROCm version of bitsandbytes 0.37. This fork incorporates the majority of features from bitsandbytes 0.44, including the crucial 4 bit quantization feature.
 
-
+The library includes quantization primitives for 8-bit & 4-bit operations, through `bitsandbytes.nn.Linear8bitLt` and `bitsandbytes.nn.Linear4bit` and 8-bit optimizers through `bitsandbytes.optim` module.
 
 Resources:
 - [8-bit Optimizer Paper](https://arxiv.org/abs/2110.02861) --  [Video](https://www.youtube.com/watch?v=IxrlHAJtqKE) -- [Docs](https://bitsandbytes.readthedocs.io/en/latest/)
@@ -12,7 +12,7 @@ Resources:
 
 ## TL;DR
 **Requirements**
-Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + ROCm >= 5.4.2 or CUDA > 10.0
+Python >=3.8. Linux distribution (Ubuntu, MacOS, etc.) + ROCm >= 6.0 or CUDA > 10.0
 
 
 **Installation**:
@@ -23,30 +23,20 @@ You need to compile from source for ROCm.
 Compilation quickstart:
 ```bash
 # Run Docker
-docker run -it --network=host --device=/dev/kfd --device=/dev/dri --name=bnb_test --shm-size=8g --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --group-add video rocm/pytorch:rocm5.7_ubuntu22.04_py3.10_pytorch_2.0.1
-
-
-# Install Dependencies
-cd <workspace>
-git clone --recurse https://github.com/ROCmSoftwarePlatform/hipBLASLt
-cd hipBLASLt
-git checkout 4b3b34405e7e25cff404f69bfd0a832644430477
-./install.sh -idc
- 
-cd ..
-pip install einops lion_pytorch
-
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --name=bnb_test --shm-size=8g --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --group-add video rocm/pytorch:latest
 
 # Install BitsandBytes
-git clone --recurse https://github.com/ROCmSoftwarePlatform/bitsandbytes
+git clone --recurse https://github.com/ROCm/bitsandbytes
 cd bitsandbytes
 git checkout rocm_enabled
-make hip
-python setup.py install
+pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=hip -S .
+make
+pip install .
 
 
-# Run the unit test. If it runs successfully, the library has been installed successfully.
-pytest -vvv ./tests/ 2>&1 | tee BitsAndBytes_UT_summary.log
+# Run this script to check if its installed successfully 
+python check_bnb_install.py
 ```
 
 **Using Int8 inference with HuggingFace Transformers**
@@ -142,29 +132,6 @@ For upcoming features and changes and full history see [Patch Notes](CHANGELOG.m
 
 ## License
 
-The majority of bitsandbytes is licensed under MIT, however portions of the project are available under separate license terms: Pytorch is licensed under the BSD license.
+The majority of bitsandbytes is licensed under MIT, however small portions of the project are available under separate license terms, as the parts adapted from Pytorch are licensed under the BSD license.
 
 We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fabiocannizzo/FastBinarySearch) which we use for CPU quantization.
-
-## How to cite us
-If you found this library and found LLM.int8() useful, please consider citing our work:
-
-```bibtex
-@article{dettmers2022llmint8,
-  title={LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale},
-  author={Dettmers, Tim and Lewis, Mike and Belkada, Younes and Zettlemoyer, Luke},
-  journal={arXiv preprint arXiv:2208.07339},
-  year={2022}
-}
-```
-
-For 8-bit optimizers or quantization routines, please consider citing the following work:
-
-```bibtex
-@article{dettmers2022optimizers,
-  title={8-bit Optimizers via Block-wise Quantization},
-  author={Dettmers, Tim and Lewis, Mike and Shleifer, Sam and Zettlemoyer, Luke},
-  journal={9th International Conference on Learning Representations, ICLR},
-  year={2022}
-}
-```

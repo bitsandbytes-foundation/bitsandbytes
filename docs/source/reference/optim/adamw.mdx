@@ -1,0 +1,34 @@
+# AdamW
+
+[AdamW](https://hf.co/papers/1711.05101) is a variant of the [`Adam`] optimizer that separates weight decay from the gradient update based on the observation that the weight decay formulation is different when applied to [`SGD`] and [`Adam`].
+
+bitsandbytes also supports paged optimizers which take advantage of CUDAs unified memory to transfer memory from the GPU to the CPU when GPU memory is exhausted.
+
+## AdamW[[api-class]]
+
+[[autodoc]] bitsandbytes.optim.AdamW
+    - __init__
+
+## AdamW8bit
+
+[[autodoc]] bitsandbytes.optim.AdamW8bit
+    - __init__
+
+## AdamW32bit
+
+[[autodoc]] bitsandbytes.optim.AdamW32bit
+    - __init__
+
+## PagedAdamW
+
+[[autodoc]] bitsandbytes.optim.PagedAdamW
+    - __init__
+## PagedAdamW8bit
+
+[[autodoc]] bitsandbytes.optim.PagedAdamW8bit
+    - __init__
+
+## PagedAdamW32bit
+
+[[autodoc]] bitsandbytes.optim.PagedAdamW32bit
+    - __init__

@@ -1,0 +1,20 @@
+# SGD
+
+Stochastic gradient descent (SGD) is a basic gradient descent optimizer to minimize loss given a set of model parameters and updates the parameters in the opposite direction of the gradient. The update is performed on a randomly sampled mini-batch of data from the dataset.
+
+bitsandbytes also supports momentum and Nesterov momentum to accelerate SGD by adding a weighted average of past gradients to the current gradient.
+
+## SGD[[api-class]]
+
+[[autodoc]] bitsandbytes.optim.SGD
+    - __init__
+
+## SGD8bit
+
+[[autodoc]] bitsandbytes.optim.SGD8bit
+    - __init__
+
+## SGD32bit
+
+[[autodoc]] bitsandbytes.optim.SGD32bit
+    - __init__

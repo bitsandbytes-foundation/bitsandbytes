@@ -14,34 +14,370 @@ from bitsandbytes.optim.optimizer import Optimizer2State
 
 
 class Adam(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, optim_bits, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged)
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
+        """
+        Base Adam optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-3):
+                The learning rate.
+            betas (`tuple(float, float)`, defaults to (0.9, 0.999)):
+                The beta values are the decay rates of the first and second-order moment of the optimizer.
+            eps (`float`, defaults to 1e-8):
+                The epsilon value prevents division by zero in the optimizer.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            amsgrad (`bool`, defaults to `False`):
+                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            optim_bits,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
+
 
 class Adam8bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 8, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged)
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
+        """
+        8-bit Adam optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-3):
+                The learning rate.
+            betas (`tuple(float, float)`, defaults to (0.9, 0.999)):
+                The beta values are the decay rates of the first and second-order moment of the optimizer.
+            eps (`float`, defaults to 1e-8):
+                The epsilon value prevents division by zero in the optimizer.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            amsgrad (`bool`, defaults to `False`):
+                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            8,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
+
 
 class Adam32bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 32, args, min_8bit_size, percentile_clipping, block_wise, is_paged=is_paged)
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
+        """
+        32-bit Adam optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-3):
+                The learning rate.
+            betas (`tuple(float, float)`, defaults to (0.9, 0.999)):
+                The beta values are the decay rates of the first and second-order moment of the optimizer.
+            eps (`float`, defaults to 1e-8):
+                The epsilon value prevents division by zero in the optimizer.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            amsgrad (`bool`, defaults to `False`):
+                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            32,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=is_paged,
+        )
+
 
 class PagedAdam(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, optim_bits, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
+        """
+        Paged Adam optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-3):
+                The learning rate.
+            betas (`tuple(float, float)`, defaults to (0.9, 0.999)):
+                The beta values are the decay rates of the first and second-order moment of the optimizer.
+            eps (`float`, defaults to 1e-8):
+                The epsilon value prevents division by zero in the optimizer.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            amsgrad (`bool`, defaults to `False`):
+                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            optim_bits,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
+
 
 class PagedAdam8bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 8, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
+        """
+        8-bit paged Adam optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-3):
+                The learning rate.
+            betas (`tuple(float, float)`, defaults to (0.9, 0.999)):
+                The beta values are the decay rates of the first and second-order moment of the optimizer.
+            eps (`float`, defaults to 1e-8):
+                The epsilon value prevents division by zero in the optimizer.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            amsgrad (`bool`, defaults to `False`):
+                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            8,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
+
 
 class PagedAdam32bit(Optimizer2State):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False, optim_bits=32,
-                       args=None, min_8bit_size=4096, percentile_clipping=100, block_wise=True, is_paged=False):
-        super().__init__( "adam", params, lr, betas, eps, weight_decay, 32, args, min_8bit_size, percentile_clipping, block_wise, is_paged=True)
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        amsgrad=False,
+        optim_bits=32,
+        args=None,
+        min_8bit_size=4096,
+        percentile_clipping=100,
+        block_wise=True,
+        is_paged=False,
+    ):
+        """
+        Paged 32-bit Adam optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`, defaults to 1e-3):
+                The learning rate.
+            betas (`tuple(float, float)`, defaults to (0.9, 0.999)):
+                The beta values are the decay rates of the first and second-order moment of the optimizer.
+            eps (`float`, defaults to 1e-8):
+                The epsilon value prevents division by zero in the optimizer.
+            weight_decay (`float`, defaults to 0.0):
+                The weight decay value for the optimizer.
+            amsgrad (`bool`, defaults to `False`):
+                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            block_wise (`bool`, defaults to `True`):
+                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
+            is_paged (`bool`, defaults to `False`):
+                Whether the optimizer is a paged optimizer or not.
+        """
+        super().__init__(
+            "adam",
+            params,
+            lr,
+            betas,
+            eps,
+            weight_decay,
+            32,
+            args,
+            min_8bit_size,
+            percentile_clipping,
+            block_wise,
+            is_paged=True,
+        )
+
 
 class AnalysisAdam(torch.optim.Optimizer):
     """Adam that performs 8-bit vs 32-bit error analysis.
@@ -119,9 +455,7 @@ class AnalysisAdam(torch.optim.Optimizer):
                 if grad.dtype in {torch.float16, torch.bfloat16}:
                     grad = grad.float()
                 if grad.is_sparse:
-                    raise RuntimeError(
-                        "Adam does not support sparse gradients, please consider SparseAdam instead"
-                    )
+                    raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
                 amsgrad = group.get("amsgrad", False)
                 assert not amsgrad
 
@@ -138,15 +472,9 @@ class AnalysisAdam(torch.optim.Optimizer):
                     state["exp_avg"] = torch.zeros_like(p_data_fp32)
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(p_data_fp32)
-                    state["abserrors"] = torch.zeros(
-                        (256, 256), device=p_data_fp32.device
-                    )
-                    state["relerrors"] = torch.zeros(
-                        (256, 256), device=p_data_fp32.device
-                    )
-                    state["counts"] = torch.zeros(
-                        (256, 256), device=p_data_fp32.device
-                    )
+                    state["abserrors"] = torch.zeros((256, 256), device=p_data_fp32.device)
+                    state["relerrors"] = torch.zeros((256, 256), device=p_data_fp32.device)
+                    state["counts"] = torch.zeros((256, 256), device=p_data_fp32.device)
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state["max_exp_avg_sq"] = torch.zeros_like(p_data_fp32)
@@ -154,25 +482,19 @@ class AnalysisAdam(torch.optim.Optimizer):
                     state["exp_avg"] = state["exp_avg"].to(p_data_fp32)
                     state["exp_avg_sq"] = state["exp_avg_sq"].to(p_data_fp32)
                     if amsgrad:
-                        state["max_exp_avg_sq"] = state["max_exp_avg_sq"].to(
-                            p_data_fp32
-                        )
+                        state["max_exp_avg_sq"] = state["max_exp_avg_sq"].to(p_data_fp32)
 
                 state["step"] += 1
                 beta1, beta2 = group["betas"]
                 bias_correction1 = 1 - beta1 ** state["step"]
                 bias_correction2 = 1 - beta2 ** state["step"]
-                step_size = (
-                    group["lr"] * math.sqrt(bias_correction2) / bias_correction1
-                )
+                step_size = group["lr"] * math.sqrt(bias_correction2) / bias_correction1
                 e = state["abserrors"]
                 rele = state["relerrors"]
                 counts = state["counts"]
 
                 if group["weight_decay"] != 0:
-                    p_data_fp32.add_(
-                        p_data_fp32, alpha=-group["weight_decay"] * group["lr"]
-                    )
+                    p_data_fp32.add_(p_data_fp32, alpha=-group["weight_decay"] * group["lr"])
 
                 exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                 if amsgrad:
@@ -185,10 +507,7 @@ class AnalysisAdam(torch.optim.Optimizer):
                 denom = exp_avg_sq.sqrt().add_(group["eps"])
                 update_fp32 = exp_avg / denom
 
-                if (
-                    p_data_fp32.numel() <= 8192
-                    or p_data_fp32.numel() > 50000 * 1000
-                ):
+                if p_data_fp32.numel() <= 8192 or p_data_fp32.numel() > 50000 * 1000:
                     # embedding layer or too small
                     p_data_fp32 += -step_size * update_fp32
                 else:
@@ -227,9 +546,7 @@ class AnalysisAdam(torch.optim.Optimizer):
                         # 3. dequantize
                         # Error will be calculated automatically!
                     else:
-                        raise ValueError(
-                            f"Invalid analysis value: {self.analysis}!"
-                        )
+                        raise ValueError(f"Invalid analysis value: {self.analysis}!")
 
                     denom = state2.sqrt().add_(group["eps"])
                     update_8bit = state1 / denom
@@ -241,9 +558,7 @@ class AnalysisAdam(torch.optim.Optimizer):
 
                     F.histogram_scatter_add_2d(e, C1.int(), C2.int(), abserr)
                     F.histogram_scatter_add_2d(rele, C1.int(), C2.int(), relerr)
-                    F.histogram_scatter_add_2d(
-                        counts, C1.int(), C2.int(), torch.ones_like(abserr)
-                    )
+                    F.histogram_scatter_add_2d(counts, C1.int(), C2.int(), torch.ones_like(abserr))
 
                     p_data_fp32 += -step_size * update_fp32
 
@@ -251,18 +566,10 @@ class AnalysisAdam(torch.optim.Optimizer):
                         if self.savedir != "" and state["step"] % 100 == 0:
                             if not os.path.exists(self.savedir):
                                 os.makedirs(self.savedir)
-                            shapestr = "_".join(
-                                [str(dim) for dim in p_data_fp32.shape]
-                            )
-                            pathe = os.path.join(
-                                self.savedir, f"{p_id}_{shapestr}_abserr.pkl"
-                            )
-                            pathrele = os.path.join(
-                                self.savedir, f"{p_id}_{shapestr}_relerr.pkl"
-                            )
-                            pathcounts = os.path.join(
-                                self.savedir, f"{p_id}_{shapestr}_counts.pkl"
-                            )
+                            shapestr = "_".join([str(dim) for dim in p_data_fp32.shape])
+                            pathe = os.path.join(self.savedir, f"{p_id}_{shapestr}_abserr.pkl")
+                            pathrele = os.path.join(self.savedir, f"{p_id}_{shapestr}_relerr.pkl")
+                            pathcounts = os.path.join(self.savedir, f"{p_id}_{shapestr}_counts.pkl")
                             torch.save(e, pathe)
                             torch.save(rele, pathrele)
                             torch.save(counts, pathcounts)
