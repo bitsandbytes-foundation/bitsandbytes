@@ -199,9 +199,4 @@ def unpack_tensor_to_dict(tensor_data):
 
     return unpacked_dict
 
-LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING = {
-    "row": 0,
-    "col32": 1,
-    "col_turing": 2,
-    "col_ampere": 3
-}
+LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING = {"row": 0, "col32": 1, "col_turing": 2, "col_ampere": 3}
