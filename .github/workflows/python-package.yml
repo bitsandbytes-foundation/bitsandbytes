@@ -63,7 +63,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         arch: [x86_64, aarch64]
         cuda_version:
-          ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2"]
+          ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.0"]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
