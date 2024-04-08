@@ -1433,6 +1433,47 @@ template int get_leading_dim<COL32>(int dim1, int dim2);
 
 template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2)
 {
+
+  using namespace dnnl;
+  using tag = memory::format_tag;
+  using dt = memory::data_type;
+  auto dev = sycl::device(sycl::gpu_selector_v);
+  auto ctx = sycl::context(dev);
+  int ldA = get_leading_dim<SRC>(dim1, dim2);
+  int ldOut = get_leading_dim<TARGET>(dim1, dim2);
+  int ldAOut = get_leading_dim<TARGET>(dim1, dim2);
+  
+  dnnl::engine engine = sycL_interop::make_engine(dev, ctx);
+  // column major 
+  const memory::dims a_strides = memory::dims {1, ldA};
+  const auto a_md = DTYPE_OUT ==32 ? memory::desc({dim1, dim2}, dt::s32, a_strides) : memory::desc({dim1, dim2}, dt::s8, a_strides);
+  const memory::dims out_strides = memory::dims {ldOut, 1};
+  const auto out_md = DTYPE_OUT ==32 ? memory::desc({dim1, dim2}, dt::s32, out_strides) : memory::desc({dim1, dim2}, dt::s8, out_strides);
+  const memory::dims Aout_strides = memory::dims {ldAOut, 1};
+  const auto aout_md = DTYPE_OUT == 32 ? memory::desc({dim1, dim2}, dt::s32) : memory::desc({dim1, dim2}, dt::s8);
+  
+  //memory align
+  memory a_mem(a_md, engine A);
+  memory out_mem(out_md, engine, Out);
+  memory aout_mem(aout_md, engine, AOut);
+  
+  //create dnnl stream
+  auto q_ct1 = sycl::queue(ctx, dev);
+  dnnl::stream stream = sycl_interop::make_stream(q_ct1);
+  
+  primitive_attr attr;
+  
+  auto matmul_pd = matmul::primitive_desc(engine, a_md, out_md, aout_md, attr);
+  auto matmul_prim = matmul(matmul_pd);
+  std::unordered_map<int, memory> matmul_args;
+  matmul_args.insert({DNNL_ARG_SRC, a_mem});
+  matmul_args.insert({DNNL_ARG_WEIGHTS, out_mem});
+  matmul_args.insert({DNNL_ARG_DST, aout_mem});
+
+  matmul_prim.execute(stream, matmul_args);
+  stream.wait();
+
+/*  
 #ifdef NO_CUBLASLT
 #else
   cublasLtOrder_t orderA = get_order<SRC>();
@@ -1444,28 +1485,30 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   cublasLtMatrixTransformDesc_t A2Out_desc = NULL;
   oneapi::mkl::transpose opTranspose = oneapi::mkl::transpose::trans;
   float transformAlpha = 1.0f, transformBeta = 0.0f;
+  
+  
 
 
   if(DTYPE == 8)
   {
-    /*
+    
     DPCT1007:251: Migration of cublasLtMatrixLayoutCreate is not supported.
-    */
+    
     checkCublasStatus(cublasLtMatrixLayoutCreate(&A_desc, dpct::library_data_t::real_int8, dim1, dim2, ldA));
-    /*
+    
     DPCT1007:252: Migration of cublasLtMatrixLayoutCreate is not supported.
-    */
+    
     checkCublasStatus(cublasLtMatrixLayoutCreate(&out_desc, dpct::library_data_t::real_int8, dim1, dim2, ldOut));
   }
   else if(DTYPE == 32)
   {
-    /*
+    
     DPCT1007:253: Migration of cublasLtMatrixLayoutCreate is not supported.
-    */
+    
     checkCublasStatus(cublasLtMatrixLayoutCreate(&A_desc, dpct::library_data_t::real_int32, dim1, dim2, ldA));
-    /*
+    
     DPCT1007:254: Migration of cublasLtMatrixLayoutCreate is not supported.
-    */
+    
     checkCublasStatus(cublasLtMatrixLayoutCreate(&out_desc, dpct::library_data_t::real_int32, dim1, dim2, ldOut));
   }
   else
@@ -1473,40 +1516,41 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
     printf("ERROR WRONG TYPE FOR TRANSFORM: %i\n", DTYPE);
   }
 
-  /*
+  
   DPCT1007:255: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-  */
+  
   checkCublasStatus(cublasLtMatrixLayoutSetAttribute(A_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
-  /*
+  
   DPCT1007:256: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-  */
+  
   checkCublasStatus(cublasLtMatrixLayoutSetAttribute(out_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderOut, sizeof(orderOut)));
 
-  /*
+  
   DPCT1007:257: Migration of cublasLtMatrixTransformDescCreate is not supported.
-  */
+  
   checkCublasStatus(cublasLtMatrixTransformDescCreate(&A2Out_desc, dpct::library_data_t::real_float));
 
-  /*
+  
   DPCT1007:258: Migration of cublasLtMatrixTransformDescSetAttribute is not supported.
-  */
+  
   if(transpose){ checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(A2Out_desc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose))); }
 
   checkCublasStatus(cublasLtMatrixTransform(ltHandle, A2Out_desc, &transformAlpha, A, A_desc, &transformBeta, NULL, NULL, out, out_desc, 0));
 
-  /*
+  
   DPCT1007:259: Migration of cublasLtMatrixLayoutDestroy is not supported.
-  */
+  
   if (A_desc) checkCublasStatus(cublasLtMatrixLayoutDestroy(A_desc));
-  /*
+  
   DPCT1007:260: Migration of cublasLtMatrixLayoutDestroy is not supported.
-  */
+  
   if (out_desc) checkCublasStatus(cublasLtMatrixLayoutDestroy(out_desc));
-  /*
+  
   DPCT1007:261: Migration of cublasLtMatrixTransformDescDestroy is not supported.
-  */
+  
   if (A2Out_desc) checkCublasStatus(cublasLtMatrixTransformDescDestroy(A2Out_desc));
 #endif
+*/
 }
 
 template void transform<int8_t, ROW, COL, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
@@ -1533,7 +1577,7 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle
     const memory::dims b_strides = memory::dims {ldb, 1};
     const auto b_md = memory::desc({k, n}, dt::s8, b_strides);
     const memory::dims c_strides = memory::dims {ldc, 1};
-    const auto c_md = DTYPE_OUT == 32 ? memory::desc({m, n}, dt::s32 c_strides) : memory::desc({m, n}, dt::s8 c_strides);
+    const auto c_md = DTYPE_OUT == 32 ? memory::desc({m, n}, dt::s32, c_strides) : memory::desc({m, n}, dt::s8, c_strides);
     
     //memory align
     memory a_mem(a_md, engine A);
