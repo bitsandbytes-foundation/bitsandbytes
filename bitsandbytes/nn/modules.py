@@ -14,7 +14,7 @@ import bitsandbytes as bnb
 from bitsandbytes.autograd._functions import get_tile_inds, undo_layout
 from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
-from bitsandbytes.utils import OutlierTracer, LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING
+from bitsandbytes.utils import LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -622,14 +622,14 @@ def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_k
     if isinstance(weight_format, torch.Tensor):
         weight_format = weight_format.item()
 
-    # For new weights format storage type we expclicitly check 
+    # For new weights format storage type we expclicitly check
     # if weights_format is on the mapping
-    if isinstance(weight_format, int) and not weight_format in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.values():
-        raise ValueError(
-            f"Expected supported weight format - got {weight_format}"
-        )
+    if isinstance(weight_format, int) and weight_format not in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.values():
+        raise ValueError(f"Expected supported weight format - got {weight_format}")
     elif isinstance(weight_format, int) and weight_format in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.values():
-        weight_format = dict(zip(LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.values(), LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.keys()))[weight_format]
+        weight_format = dict(
+            zip(LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.values(), LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.keys())
+        )[weight_format]
 
     if weight_format != "row":
         tile_indices = get_tile_inds(weight_format, weight.device)
