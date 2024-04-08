@@ -16,6 +16,7 @@
 #include <common.h>
 #include <dpct/lib_common_utils.hpp>
 
+#include "oneapi/dnnl/dnnl.hpp"
 
 #define ERR_NOT_IMPLEMENTED 100
 
@@ -1519,129 +1520,170 @@ template void transform<int32_t, COL32, ROW, false, 32>(cublasLtHandle_t ltHandl
 
 template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
  try {
-    dpct::device_ext &dev_ct1 = dpct::get_current_device();
-    sycl::queue &q_ct1 = dev_ct1.in_order_queue();
-#ifdef NO_CUBLASLT
-	return ERR_NOT_IMPLEMENTED;
-#else
-    int has_error = 0;
-    cublasLtMatmulDesc_t matmulDesc = NULL;
-    cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
-    oneapi::mkl::transpose opT = oneapi::mkl::transpose::trans;
-    cublasLtPointerMode_t alphaVec = CUBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_ZERO;
-    cublasLtOrder_t col32 = CUBLASLT_ORDER_COL32;
-    cublasLtOrder_t col_turing = CUBLASLT_ORDER_COL4_4R2_8C;
-    cublasLtOrder_t col_ampere = CUBLASLT_ORDER_COL32_2R_4R4;
+    using namespace dnnl;
+    using tag = memory::format_tag;
+    using dt = memory::data_type;
+    auto dev = sycl::device(sycl::gpu_selector_v);
+    auto ctx = sycl::context(dev);
+    
+    dnnl::engine engine = sycL_interop::make_engine(dev, ctx);
+    // column major 
+    const memory::dims a_strides = memory::dims {1, lda};
+    const auto a_md = memory::desc({m, k}, dt::s8, a_strides);
+    const memory::dims b_strides = memory::dims {ldb, 1};
+    const auto b_md = memory::desc({k, n}, dt::s8, b_strides);
+    const memory::dims c_strides = memory::dims {ldc, 1};
+    const auto c_md = DTYPE_OUT == 32 ? memory::desc({m, n}, dt::s32 c_strides) : memory::desc({m, n}, dt::s8 c_strides);
+    
+    //memory align
+    memory a_mem(a_md, engine A);
+    memory b_mem(b_md, engine, B);
+    memory c_mem(c_md, engine, C);
+    memory scales_C_mem({{1}, dt::f32, {1}}, engine, row_scale);
+    
+    //create dnnl stream
+    auto q_ct1 = sycl::queue(ctx, dev);
+    dnnl::stream stream = sycl_interop::make_stream(q_ct1);
+    
+    primitive_attr attr;
+    if (SCALE_ROWS) {
+        attr.set_scales_mask(DNNL_ARG_DST, /* mask */ 1 << 1);
+    }
+    
+    auto matmul_pd = matmul::primitive_desc(engine, a_md, b_md, c_md, attr);
+    auto matmul_prim = matmul(matmul_pd);
+    std::unordered_map<int, memory> matmul_args;
+    matmul_args.insert({DNNL_ARG_SRC, a_mem});
+    matmul_args.insert({DNNL_ARG_WEIGHTS, b_mem});
+    matmul_args.insert({DNNL_ARG_DST, c_mem});
+
+    if (SCALE_ROWS) {
+      matmul_args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, scales_C_mem});
+    }
+    matmul_prim.execute(stream, matmul_args);
+    stream.wait();
+
+//#ifdef NO_CUBLASLT
+//	return ERR_NOT_IMPLEMENTED;
+//#else
+    //int has_error = 0;
+    //cublasLtMatmulDesc_t matmulDesc = NULL;
+    //cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
+    //oneapi::mkl::transpose opT = oneapi::mkl::transpose::trans;
+    //cublasLtPointerMode_t alphaVec = CUBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_ZERO;
+    //cublasLtOrder_t col32 = CUBLASLT_ORDER_COL32;
+    //cublasLtOrder_t col_turing = CUBLASLT_ORDER_COL4_4R2_8C;
+    //cublasLtOrder_t col_ampere = CUBLASLT_ORDER_COL32_2R_4R4;
 
     /*
     DPCT1007:262: Migration of cublasLtMatrixLayoutCreate is not supported.
     */
-    has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Adesc, dpct::library_data_t::real_int8, m, k, lda));
+    //has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Adesc, dpct::library_data_t::real_int8, m, k, lda));
     /*
     DPCT1007:263: Migration of cublasLtMatrixLayoutCreate is not supported.
     */
-    has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Bdesc, dpct::library_data_t::real_int8, n, k, ldb));
+    //has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Bdesc, dpct::library_data_t::real_int8, n, k, ldb));
 
     /*
     DPCT1007:264: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
     */
-    has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-    if(FORMATB == COL_TURING)
+    //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
+    //if(FORMATB == COL_TURING)
       /*
       DPCT1007:265: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_turing, sizeof(col_turing)));
-    else
+      //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_turing, sizeof(col_turing)));
+    //else
       /*
       DPCT1007:266: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_ampere, sizeof(col_ampere)));
-
-    if(DTYPE_OUT == 32)
-    {
+      //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_ampere, sizeof(col_ampere)));
+    
+    //if(DTYPE_OUT == 32)
+     //{
       /*
       DPCT1007:267: Migration of cublasLtMatmulDescCreate is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, dpct::library_data_t::real_int32));
+      //has_error |= checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, dpct::library_data_t::real_int32));
       /*
       DPCT1007:268: Migration of cublasLtMatmulDescSetAttribute is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
+      //has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
       /*
       DPCT1007:269: Migration of cublasLtMatrixLayoutCreate is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, dpct::library_data_t::real_int32, m, n, ldc));
+      //has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, dpct::library_data_t::real_int32, m, n, ldc));
       /*
       DPCT1007:270: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      int alpha = 1, beta = 0;
+      //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
+      //int alpha = 1, beta = 0;
       /*
       DPCT1007:271: Migration of cublasLtMatmul is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int32_t*)C, Cdesc, (int32_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
-    }
-    else
-    {
+      //has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int32_t*)C, Cdesc, (int32_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
+    //}
+    //else
+    //{
       /*
       DPCT1007:272: Migration of cublasLtMatmulDescCreate is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, dpct::library_data_t::real_float));
+      //has_error |= checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, dpct::library_data_t::real_float));
       /*
       DPCT1007:273: Migration of cublasLtMatmulDescSetAttribute is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
+      //has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
       /*
       DPCT1007:274: Migration of cublasLtMatrixLayoutCreate is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, dpct::library_data_t::real_int8, m, n, ldc));
+      //has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, dpct::library_data_t::real_int8, m, n, ldc));
       /*
       DPCT1007:275: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
       */
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      if(!SCALE_ROWS)
-      {
-        float alpha = 1.0f, beta = 0.0f;
+      //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
+      //if(!SCALE_ROWS)
+      //{
+        //float alpha = 1.0f, beta = 0.0f;
         /*
         DPCT1007:276: Migration of cublasLtMatmul is not supported.
         */
-        has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
-      }
-      else
-      {
+        //has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
+      //}
+      //else
+      //{
         /*
         DPCT1007:277: Migration of cublasLtMatmulDescSetAttribute is not supported.
         */
-        has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_POINTER_MODE, &alphaVec, sizeof(alphaVec)));
+        //has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_POINTER_MODE, &alphaVec, sizeof(alphaVec)));
         /*
         DPCT1007:278: Migration of cublasLtMatmul is not supported.
         */
-        has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc, row_scale, A, Adesc, B, Bdesc, NULL, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
-      }
-    }
+        //has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc, row_scale, A, Adesc, B, Bdesc, NULL, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
+      //}
+    //}
 
 
     /*
     DPCT1007:279: Migration of cublasLtMatrixLayoutDestroy is not supported.
     */
-    if (Cdesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Cdesc));
+    //if (Cdesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Cdesc));
     /*
     DPCT1007:280: Migration of cublasLtMatrixLayoutDestroy is not supported.
     */
-    if (Bdesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Bdesc));
+    //if (Bdesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Bdesc));
     /*
     DPCT1007:281: Migration of cublasLtMatrixLayoutDestroy is not supported.
     */
-    if (Adesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Adesc));
+    //if (Adesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Adesc));
     /*
     DPCT1007:282: Migration of cublasLtMatmulDescDestroy is not supported.
     */
-    if (matmulDesc) has_error |= checkCublasStatus(cublasLtMatmulDescDestroy(matmulDesc));
-    if(has_error == 1)
-      printf("error detected");
+    //if (matmulDesc) has_error |= checkCublasStatus(cublasLtMatmulDescDestroy(matmulDesc));
+    //if(has_error == 1)
+      //printf("error detected");
 
-    return has_error;
-#endif // NO_CUBLASLT
+    //return has_error;
+//#endif // NO_CUBLASLT
 }
 catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
@@ -2211,8 +2253,7 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
   q_ct1.memcpy((T*)(A), (T*)(buff_A), size);
   q_ct1.memcpy((unsigned char*)(B), (unsigned char*)(buff_B), size);
   q_ct1.memcpy((T*)(out), (T*)(buff_out), size);
-  
-  
+    
 }
 
 template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
