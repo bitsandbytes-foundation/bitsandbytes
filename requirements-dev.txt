@@ -6,4 +6,4 @@ wheel~=0.43.0
 lion-pytorch~=0.1.4
 scipy~=1.12.0
 pandas~=2.2.1
-matplotlib~=3.8.3
+matplotlib~=3.8.4
