@@ -6,9 +6,9 @@ import warnings
 import torch
 
 from bitsandbytes.autograd._functions import GlobalOutlierPooler, MatmulLtState
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 import bitsandbytes.functional as F
 
-from bitsandbytes.cextension import HIP_ENVIRONMENT
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):

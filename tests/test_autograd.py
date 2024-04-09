@@ -4,8 +4,6 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
-from bitsandbytes.cextension import HIP_ENVIRONMENT
-
 from tests.helpers import (
     BOOLEAN_TRIPLES,
     BOOLEAN_TUPLES,

@@ -10,7 +10,6 @@ import torch
 
 import bitsandbytes as bnb
 import bitsandbytes.functional as F
-from bitsandbytes.cextension import HIP_ENVIRONMENT
 from tests.helpers import describe_dtype, id_formatter
 
 # import apex

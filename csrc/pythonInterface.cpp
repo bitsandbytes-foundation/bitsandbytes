@@ -429,7 +429,7 @@ extern "C"
 	{ \
 		transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose((cublasLtHandle_t) context->m_handle, A, out, dim1, dim2); \
 	} \
-	
+
 #endif
 
 #if BUILD_HIP
@@ -572,7 +572,7 @@ extern "C"
 		int hasPrefetch = 0;
 		CUDA_CHECK_RETURN(hipDeviceGetAttribute(&hasPrefetch, hipDeviceAttributeConcurrentManagedAccess, device)); // 40ns overhead
 		if (hasPrefetch == 0) return;
- 
+
 		CUDA_CHECK_RETURN(hipMemPrefetchAsync(ptr, bytes, device, 0));
 		CUDA_CHECK_RETURN(hipPeekAtLastError());
 	}

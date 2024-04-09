@@ -4,10 +4,8 @@ import math
 import pytest
 import torch
 
-from tests.helpers import TRUE_FALSE, describe_dtype, id_formatter
-
-import bitsandbytes as bnb
 from bitsandbytes.cextension import HIP_ENVIRONMENT
+from tests.helpers import TRUE_FALSE, describe_dtype, id_formatter
 
 transformers = pytest.importorskip("transformers")
 

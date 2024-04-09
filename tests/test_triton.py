@@ -1,9 +1,8 @@
 import pytest
 import torch
 
-from bitsandbytes.nn import Linear8bitLt
 from bitsandbytes.cextension import HIP_ENVIRONMENT
-
+from bitsandbytes.nn import Linear8bitLt
 from bitsandbytes.nn.triton_based_modules import SwitchBackLinear
 from bitsandbytes.triton.triton_utils import is_triton_available
 from tests.helpers import TRUE_FALSE

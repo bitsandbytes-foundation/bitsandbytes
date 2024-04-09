@@ -14,7 +14,7 @@ from torch import Tensor
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import lib, HIP_ENVIRONMENT
+from .cextension import HIP_ENVIRONMENT, lib
 
 
 # math.prod not compatible with python < 3.8
@@ -160,7 +160,7 @@ class Cusparse_Context:
         raise RuntimeError("Call get_instance() instead")
 
     def initialize(self):
-        #self.context = ct.c_void_p(lib.get_cusparse())
+        # self.context = ct.c_void_p(lib.get_cusparse())
         if torch.version.cuda:
             self.context = ct.c_void_p(lib.get_cusparse())
         elif torch.version.hip:
@@ -528,8 +528,8 @@ def nvidia_transform(
     ld=None,
 ):
     if HIP_ENVIRONMENT:
-        to_order = "col" if to_order in ["col32","col_turing","col_ampere"] else to_order
-        from_order = "col" if from_order in ["col32","col_turing","col_ampere"] else from_order
+        to_order = "col" if to_order in ["col32", "col_turing", "col_ampere"] else to_order
+        from_order = "col" if from_order in ["col32", "col_turing", "col_ampere"] else from_order
 
     if state is None:
         state = (A.shape, from_order)
@@ -850,7 +850,7 @@ def quantize_blockwise(
     if out is None:
         out = torch.zeros_like(A, dtype=torch.uint8)
 
-    if A.device.type != 'cpu':
+    if A.device.type != "cpu":
         if not HIP_ENVIRONMENT:
             assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
         else:
@@ -1291,7 +1291,7 @@ def dequantize_fp4(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = None,
+    blocksize: Optional[int] = None,
 ) -> Tensor:
     if blocksize is None:
         blocksize = 64 if not HIP_ENVIRONMENT else 128
@@ -1304,7 +1304,7 @@ def dequantize_nf4(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = None,
+    blocksize: Optional[int] = None,
 ) -> Tensor:
     if blocksize is None:
         blocksize = 64 if not HIP_ENVIRONMENT else 128
@@ -1317,7 +1317,7 @@ def dequantize_4bit(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = None,
+    blocksize: Optional[int] = None,
     quant_type="fp4",
 ) -> Tensor:
     """
@@ -1348,7 +1348,7 @@ def dequantize_4bit(
     """
     if blocksize is None:
         blocksize = 64 if not HIP_ENVIRONMENT else 128
-    
+
     supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
     if HIP_ENVIRONMENT:
         supported_blocksizes = supported_blocksizes[:-1]
@@ -2368,7 +2368,7 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
     has_error = 0
     ptrRowScale = get_ptr(None)
     is_on_gpu([A, B, out])
-    if formatB == 'col_turing' or HIP_ENVIRONMENT:
+    if formatB == "col_turing" or HIP_ENVIRONMENT:
         if dtype == torch.int32:
             has_error = lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
         else:
@@ -2393,7 +2393,7 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
 
 def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None, bias=None):
     if HIP_ENVIRONMENT:
-        A, quant_state = nvidia_transform(A, "row", state = quant_state)
+        A, quant_state = nvidia_transform(A, "row", state=quant_state)
     assert A.dtype == torch.int32
     if bias is not None:
         assert bias.dtype == torch.float16
@@ -2645,9 +2645,9 @@ def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, 
     return out_row, out_col, row_stats, col_stats, coo_tensor
 
 
-def transform(A, to_order, from_order='row', out=None, transpose=False, state=None, ld=None):
+def transform(A, to_order, from_order="row", out=None, transpose=False, state=None, ld=None):
     if HIP_ENVIRONMENT:
-        return nvidia_transform(A,to_order,from_order,out,transpose,state,ld)
+        return nvidia_transform(A, to_order, from_order, out, transpose, state, ld)
 
     prev_device = pre_call(A.device)
     if state is None:
@@ -2973,7 +2973,7 @@ def extract_outliers(A, SA, idx):
     ptrOut = get_ptr(out)
 
     prev_device = pre_call(A.device)
-    if formatA == 'col_turing' or HIP_ENVIRONMENT:
+    if formatA == "col_turing" or HIP_ENVIRONMENT:
         lib.cextractOutliers_turing(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
     elif formatA == "col_ampere":
         lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)

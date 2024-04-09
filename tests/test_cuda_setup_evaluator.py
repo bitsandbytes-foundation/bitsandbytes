@@ -1,6 +1,6 @@
 import pytest
 
-from bitsandbytes.cextension import get_cuda_bnb_library_path, HIP_ENVIRONMENT
+from bitsandbytes.cextension import HIP_ENVIRONMENT, get_cuda_bnb_library_path
 from bitsandbytes.cuda_specs import CUDASpecs
 
 

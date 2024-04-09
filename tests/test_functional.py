@@ -12,14 +12,7 @@ import torch
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
 from bitsandbytes.cextension import HIP_ENVIRONMENT
-from tests.helpers import (
-    BOOLEAN_TUPLES,
-    TRUE_FALSE,
-    describe_dtype,
-    get_test_dims,
-    id_formatter,
-    get_blocksizes
-)
+from tests.helpers import BOOLEAN_TUPLES, TRUE_FALSE, describe_dtype, get_blocksizes, get_test_dims, id_formatter
 
 torch.set_printoptions(precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000)
 k = 20
@@ -114,6 +107,7 @@ def test_estimate_quantiles(dtype):
     quantiles = torch.quantile(A.float(), percs)
     diff = torch.abs(code - quantiles)
     assert (diff > 5e-02).sum().item() == 0
+
 
 def test_quantile_quantization():
     for i in range(100):
@@ -516,7 +510,9 @@ def test_vector_quant(dim1, dim2, dim3):
 @pytest.mark.parametrize("dim3", get_test_dims(2, 256, n=2), ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dtype", [torch.int8, torch.int32], ids=describe_dtype)
 @pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
-@pytest.mark.parametrize("orderOut", ["col", "row"] if HIP_ENVIRONMENT else ["col", "row", "col32"], ids=id_formatter("orderOut"))
+@pytest.mark.parametrize(
+    "orderOut", ["col", "row"] if HIP_ENVIRONMENT else ["col", "row", "col32"], ids=id_formatter("orderOut")
+)
 @pytest.mark.parametrize("transpose", [False], ids=id_formatter("transpose"))
 @pytest.mark.parametrize("dims", [2, 3], ids=id_formatter("dims"))
 def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
@@ -2058,7 +2054,9 @@ def test_normal_map_tree():
         # print(pivots)
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64")
+@pytest.mark.skipif(
+    HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64"
+)
 @pytest.mark.parametrize("double_quant", TRUE_FALSE, ids=lambda double_quant: f"DQ_{double_quant}")
 @pytest.mark.parametrize("storage_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
