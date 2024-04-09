@@ -761,7 +761,8 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 
       if(max_unorm > 0.0f)
       {
-        CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()));
+        //CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()));
+        DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait());
         /*
         DPCT1049:64: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
         */
@@ -1460,7 +1461,7 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   int ldOut = get_leading_dim<TARGET>(dim1, dim2);
   int ldAOut = get_leading_dim<TARGET>(dim1, dim2);
   
-  dnnl::engine engine = sycL_interop::make_engine(dev, ctx);
+  dnnl::engine engine = dnnl::sycl_interop::make_engine(dev, ctx);
   // column major 
   const memory::dims a_strides = memory::dims {1, ldA};
   const auto a_md = DTYPE_OUT ==32 ? memory::desc({dim1, dim2}, dt::s32, a_strides) : memory::desc({dim1, dim2}, dt::s8, a_strides);
@@ -1863,13 +1864,14 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
   sycl::context ctx = q_ct1.get_context();
 	int num_blocks = 0;
   int size = NUM_BLOCK;
-  
-  *((sycl::half **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  *((char **)&buff_out_row_normed) = sycl::malloc_device(size, out_row_normed, ctx);
-  *((char **)&buff_out_col_normed = sycl::malloc_device(size, out_col_normed, ctx);
-  q_ct1.memcpy((sycl::half*)(buff_A), (sycl::half*)(A), size);
-  q_ct1.memcpy((char*)(buff_out_row_normed), (char*)(out_row_normed), size);
-  q_ct1.memcpy((char*)(buff_out_col_normed), (char*)(out_col_normed), size);
+  sycl::half *buff_A,
+  char *buff_out_row_normed, *buff_out_col_normed;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_out_row_normed) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_out_col_normed) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
+  q_ct1.memcpy((void*)(buff_out_row_normed), (void*)(out_row_normed), size);
+  q_ct1.memcpy((void*)(buff_out_col_normed), (void*)(out_col_normed), size);
   
   int threads = 64;
   int items_per_thread = 4;
@@ -1940,9 +1942,9 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
   DPCT1010:285: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
   //CUDA_CHECK_RETURN(0);
-  q_ct1.memcpy((sycl::half*)(A), (sycl::half*)(buff_A), size);
-  q_ct1.memcpy((char*)(out_row_normed), (char*)(buff_out_row_normed), size);
-  q_ct1.memcpy((char*)(out_col_normed), (char*)(buff_out_col_normed), size);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
+  q_ct1.memcpy((void*)(out_row_normed), (void*)(buff_out_row_normed), size);
+  q_ct1.memcpy((void*)(out_col_normed), (void*)(buff_out_col_normed), size);
   
 }
 
@@ -1954,11 +1956,11 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
   sycl::context ctx = q_ct1.get_context();
 	int num_blocks = 0;
   int size = NUM_BLOCK;
-  
-  *((char **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  *((char **)&buff_out) = sycl::malloc_device(size, out, ctx);
-  q_ct1.memcpy((char*)(buff_A), (sycl::half*)(A), size);
-  q_ct1.memcpy((char*)(buff_out), (char*)(out), size);
+  char *buff_A, *buff_out;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
+  q_ct1.memcpy((void*)(buff_out), (void*)(out), size);
   
   
   int threads = 256;
@@ -2022,8 +2024,8 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
   
   //CUDA_CHECK_RETURN(0);
   
-  q_ct1.memcpy((char*)(A), (sycl::half*)(buff_A), size);
-  q_ct1.memcpy((char*)(out), (char*)(buff_out), size);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
+  q_ct1.memcpy((void*)(out), (void*)(buff_out), size);
   
 }
 
@@ -2068,7 +2070,7 @@ void spmm_coo(sycl::queue* handle, int *A_rowidx, int *A_colidx, sycl::half *A_v
     descB = std::make_shared<dpct::sparse::dense_matrix_desc>(A_cols, B_cols, ldb, B, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major);
     // allocate an external buffer if needed
     //CHECK_CUSPARSE( DPCT_CHECK_ERROR(bufferSize = 0) );
-    bufferSize = 0
+    bufferSize = 0;
     //CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1)) );
     dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1);
 
@@ -2164,13 +2166,14 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
   sycl::context ctx = q_ct1.get_context();
     
   int size = NUM_BLOCK;
-  *((T **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  q_ct1.memcpy((T*)(buff_A), (T*)(A), size);
-  *((T **)&buff_B) = sycl::malloc_device(size, B, ctx);
-  q_ct1.memcpy((T*)(buff_B), (T*)(B), size);
-  *((T **)&buff_out) = sycl::malloc_device(size, out, ctx);
-  q_ct1.memcpy((T*)(buff_out), (T*)(out), size);
-  
+  T *buff_A, *buff_B, *buff_out;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
+  *(( void**)&buff_B) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_B), (void*)(B), size);
+  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_out), (void*)(out), size);
+
 
 	//cout << num_blocks << endl;
 	//cout << lda << endl;
@@ -2212,9 +2215,9 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
     //gemm_device<T, 16, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //gemm_device<T, 16, 64><<< num_blocks, 64, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //back memcpy
-    q_ct1.memcpy((T*)(A), (T*)(buff_A), size);
-    q_ct1.memcpy((T*)(B), (T*)(buff_B), size);
-    q_ct1.memcpy((T*)(out), (T*)(buff_out), size);
+    q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
+    q_ct1.memcpy((void*)(B), (void*)(buff_B), size);
+    q_ct1.memcpy((void*)(out), (void*)(buff_out), size);
   
 }
 
@@ -2237,12 +2240,15 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
   sycl::context ctx = q_ct1.get_context();
     
   int size = NUM_BLOCK;
-  *((T **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  q_ct1.memcpy((T*)(buff_A), (T*)(A), size);
-  *(( unsigned char**)&buff_B) = sycl::malloc_device(size, B, ctx);
-  q_ct1.memcpy((unsigned char*)(buff_B), (unsigned char*)(B), size);
-  *((T **)&buff_out) = sycl::malloc_device(size, out, ctx);
-  q_ct1.memcpy((T*)(buff_out), (T*)(out), size);
+  T *buff_A, *buff_out;
+  unsigned char *buff_B;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
+  *(( void**)&buff_B) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_B), (void*)(B), size);
+  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_out), (void*)(out), size);
+
  
   {
     dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
@@ -2272,9 +2278,9 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
   //kgemm_4bit_inference<T, 160><<< num_blocks, 160, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
   //kgemm_4bit_inference<T, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
   //back memcpy
-  q_ct1.memcpy((T*)(A), (T*)(buff_A), size);
-  q_ct1.memcpy((unsigned char*)(B), (unsigned char*)(buff_B), size);
-  q_ct1.memcpy((T*)(out), (T*)(buff_out), size);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
+  q_ct1.memcpy((void*)(B), (void*)(buff_B), size);
+  q_ct1.memcpy((void*)(out), (void*)(buff_out), size);
   
 }
 
@@ -2287,12 +2293,14 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
   sycl::context ctx = q_ct1.get_context();
     
   int size = NUM_BLOCK;
-  *((T **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  q_ct1.memcpy((T*)(buff_A), (T*)(A), size);
-  *(( unsigned char**)&buff_B) = sycl::malloc_device(size, B, ctx);
-  q_ct1.memcpy((unsigned char*)(buff_B), (unsigned char*)(B), size);
-  *((T **)&buff_out) = sycl::malloc_device(size, out, ctx);
-  q_ct1.memcpy((T*)(buff_out), (T*)(out), size);
+  T *buff_A, *buff_out;
+  unsigned char *buff_B;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
+  *(( void**)&buff_B) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_B), (void*)(B), size);
+  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_out), (void*)(out), size);
 
   {
     dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
@@ -2311,9 +2319,9 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
   DPCT1010:291: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
   //CUDA_CHECK_RETURN(0);
-  q_ct1.memcpy((T*)(A), (T*)(buff_A), size);
-  q_ct1.memcpy((unsigned char*)(B), (unsigned char*)(buff_B), size);
-  q_ct1.memcpy((T*)(out), (T*)(buff_out), size);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
+  q_ct1.memcpy((void*)(B), (void*)(buff_B), size);
+  q_ct1.memcpy((void*)(out), (void*)(buff_out), size);
     
 }
 
@@ -2346,18 +2354,18 @@ template void func<unsigned char, FILL>(unsigned char *A, unsigned char *B, unsi
 template void func<float, ARANGE>(float *A, float *B, float value, long n);
 template void func<float, _MUL>(float *A, float *B, float value, long n);
 
-template void gemm_4bit_inference<half>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
-template void gemm_4bit_inference_naive<half, 16>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize);
-template void gemm_4bit_inference_naive<__nv_bfloat16, 16>(int m, int n, int k, __nv_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, __nv_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize);
+template void gemm_4bit_inference<sycl::half>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
+template void gemm_4bit_inference_naive<sycl::half, 16>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, sycl::half * out,  int lda, int ldb, int ldc, int blocksize);
+template void gemm_4bit_inference_naive<bfloat16, 16>(int m, int n, int k, bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, bfloat16 * out,  int lda, int ldb, int ldc, int blocksize);
 template void gemm_4bit_inference_naive<float, 32>(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize);
 
 //template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc, int bits);
-template void gemm_host<half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc, int bits);
+template void gemm_host<sycl::half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc, int bits);
 template void extractOutliers<COL_TURING>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 
-template void spmm_coo_very_sparse_naive<half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
-template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
+template void spmm_coo_very_sparse_naive<sycl::half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
+template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, ycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
 template int igemmlt<COL_TURING, 32, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
 template int igemmlt<COL_TURING, 8, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
@@ -2373,31 +2381,31 @@ template void transformRowToFormat<COL_TURING, 1>(char * A, char *out, int rows,
 template void transformRowToFormat<COL_AMPERE, 0>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL_AMPERE, 1>(char * A, char *out, int rows, int cols);
 
-template void estimateQuantiles(half *A, float *code, float offset, int n);
+template void estimateQuantiles(sycl::half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);
 
-template void quantizeBlockwise<half, 1, General8bit>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<half, 0, General8bit>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<half, 0, FP4>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<half, 0, NF4>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<sycl::half, 1, General8bit>(float * code, sycl::half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<sycl::half, 0, General8bit>(float * code, sycl::half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<sycl::half, 0, FP4>(float * code, sycl::half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<sycl::half, 0, NF4>(float * code, sycl::half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void quantizeBlockwise<float, 1, General8bit>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void quantizeBlockwise<float, 0, General8bit>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void quantizeBlockwise<float, 0, FP4>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void quantizeBlockwise<float, 0, NF4>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<__nv_bfloat16, 1, General8bit>(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<__nv_bfloat16, 0, General8bit>(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<__nv_bfloat16, 0, FP4>(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<__nv_bfloat16, 0, NF4>(float * code, __nv_bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<bfloat16, 1, General8bit>(float * code, bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<bfloat16, 0, General8bit>(float * code, bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<bfloat16, 0, FP4>(float * code, bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<bfloat16, 0, NF4>(float * code, bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 
 template void dequantizeBlockwise<float, General8bit>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
 template void dequantizeBlockwise<float, FP4>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
 template void dequantizeBlockwise<float, NF4>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
-template void dequantizeBlockwise<half, General8bit>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
-template void dequantizeBlockwise<half, FP4>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
-template void dequantizeBlockwise<half, NF4>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
-template void dequantizeBlockwise<__nv_bfloat16, General8bit>(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n);
-template void dequantizeBlockwise<__nv_bfloat16, FP4>(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n);
-template void dequantizeBlockwise<__nv_bfloat16, NF4>(float *code, unsigned char *A, float *absmax, __nv_bfloat16 *out, int blocksize, const int n);
+template void dequantizeBlockwise<sycl::half, General8bit>(float *code, unsigned char *A, float *absmax, sycl::half *out, int blocksize, const int n);
+template void dequantizeBlockwise<sycl::half, FP4>(float *code, unsigned char *A, float *absmax, sycl::half *out, int blocksize, const int n);
+template void dequantizeBlockwise<sycl::half, NF4>(float *code, unsigned char *A, float *absmax, sycl::half *out, int blocksize, const int n);
+template void dequantizeBlockwise<bfloat16, General8bit>(float *code, unsigned char *A, float *absmax, bfloat16 *out, int blocksize, const int n);
+template void dequantizeBlockwise<bfloat16, FP4>(float *code, unsigned char *A, float *absmax, bfloat16 *out, int blocksize, const int n);
+template void dequantizeBlockwise<bfloat16, NF4>(float *code, unsigned char *A, float *absmax, bfloat16 *out, int blocksize, const int n);
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
@@ -2405,17 +2413,17 @@ template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
 
-MAKE_optimizer32bit(ADAM, half)
+MAKE_optimizer32bit(ADAM, sycl::half)
 MAKE_optimizer32bit(ADAM, float)
-MAKE_optimizer32bit(ADAM, __nv_bfloat16)
-MAKE_optimizer32bit(MOMENTUM, half)
+MAKE_optimizer32bit(ADAM, bfloat16)
+MAKE_optimizer32bit(MOMENTUM, sycl::half)
 MAKE_optimizer32bit(MOMENTUM, float)
-MAKE_optimizer32bit(RMSPROP, half)
+MAKE_optimizer32bit(RMSPROP, sycl::half)
 MAKE_optimizer32bit(RMSPROP, float)
-MAKE_optimizer32bit(LION, half)
+MAKE_optimizer32bit(LION, sycl::half)
 MAKE_optimizer32bit(LION, float)
-MAKE_optimizer32bit(LION, __nv_bfloat16)
-MAKE_optimizer32bit(ADAGRAD, half)
+MAKE_optimizer32bit(LION, bfloat16)
+MAKE_optimizer32bit(ADAGRAD, sycl::half)
 MAKE_optimizer32bit(ADAGRAD, float)
 
 #define MAKE_optimizerStatic8bit(name, gtype) \
@@ -2428,13 +2436,13 @@ template void optimizerStatic8bit<gtype, name>(gtype* p, gtype* g, unsigned char
                 float weight_decay, \
                 const float gnorm_scale, int n); \
 
-MAKE_optimizerStatic8bit(ADAM, half)
+MAKE_optimizerStatic8bit(ADAM, sycl::half)
 MAKE_optimizerStatic8bit(ADAM, float)
-MAKE_optimizerStatic8bit(MOMENTUM, half)
+MAKE_optimizerStatic8bit(MOMENTUM, sycl::half)
 MAKE_optimizerStatic8bit(MOMENTUM, float)
-MAKE_optimizerStatic8bit(RMSPROP, half)
+MAKE_optimizerStatic8bit(RMSPROP, sycl::half)
 MAKE_optimizerStatic8bit(RMSPROP, float)
-MAKE_optimizerStatic8bit(LION, half)
+MAKE_optimizerStatic8bit(LION, sycl::half)
 MAKE_optimizerStatic8bit(LION, float)
 
 #define MAKE_optimizerStatic8bitBlockwise(gtype, optim_name) \
@@ -2444,17 +2452,17 @@ template void optimizerStatic8bitBlockwise<gtype, optim_name>(gtype* p, gtype* g
 
 MAKE_optimizerStatic8bitBlockwise(half, ADAM);
 MAKE_optimizerStatic8bitBlockwise(float, ADAM);
-MAKE_optimizerStatic8bitBlockwise(half, MOMENTUM);
+MAKE_optimizerStatic8bitBlockwise(sycl::half, MOMENTUM);
 MAKE_optimizerStatic8bitBlockwise(float, MOMENTUM);
-MAKE_optimizerStatic8bitBlockwise(half, RMSPROP);
+MAKE_optimizerStatic8bitBlockwise(sycl::half, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(float, RMSPROP);
-MAKE_optimizerStatic8bitBlockwise(half, LION);
+MAKE_optimizerStatic8bitBlockwise(sycl::half, LION);
 MAKE_optimizerStatic8bitBlockwise(float, LION);
-MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, LION);
-MAKE_optimizerStatic8bitBlockwise(half, ADAGRAD);
+MAKE_optimizerStatic8bitBlockwise(bfloat16, LION);
+MAKE_optimizerStatic8bitBlockwise(sycl::half, ADAGRAD);
 MAKE_optimizerStatic8bitBlockwise(float, ADAGRAD);
 
 template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
-template void percentileClipping(half * g, float *gnorm_vec, int step, const int n);
+template void percentileClipping(sycl::half * g, float *gnorm_vec, int step, const int n);
 
-MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, ADAM);
+MAKE_optimizerStatic8bitBlockwise(bfloat16, ADAM);
