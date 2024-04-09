@@ -632,12 +632,12 @@ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, cons
 #define THREADS_ESTIMATE 512
 #define NUM_ESTIMATE 8
 #define BLOCK_ESTIMATE 4096
-typedef sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_float;
-typedef sycl::accessor<T, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_T;
-typedef sycl::accessor<unsigned char, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_unsigned_char;
-typedef sycl::accessor<sycl::half, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_half;
-typedef sycl::accessor<unsigned, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_unsigned;
-typedef sycl::accessor<char , 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_char;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_float;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_T;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_unsigned_char;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_half;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_unsigned;
+typedef sycl::local_accessor<uint8_t ,1> sycl_la_char;
 
 template<typename T>
 SYCL_EXTERNAL 
@@ -686,7 +686,7 @@ void kEstimateQuantiles(const T *buff_A, float *code, const float offset, const 
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_A[0], vals);
+      group_load(tmp).load(item, &buff_A[0], vals);
       
       #pragma unroll 4
       for(int j = 0; j < NUM_ESTIMATE; j++)
@@ -793,7 +793,7 @@ void kQuantize(float * code, float * __restrict__ const buff_A, unsigned char *b
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_A[0], vals);
+      group_load(tmp).load(item, &buff_A[0], vals);
       
       //LoadFloat(loadf).Load(&(A[i]), vals, valid_items);
 
@@ -818,7 +818,7 @@ void kQuantize(float * code, float * __restrict__ const buff_A, unsigned char *b
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = stacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item,item.get_local_linear_id(), &buff_out[0], qvals);
+      group_store(tmp).store(item, &buff_out[0], qvals);
       //StoreChar(storec).Store(&(out[i]), qvals, valid_items);
   }
 }
@@ -876,7 +876,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
     auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_load(tmp).load(item,item.get_local_linear_id(), &buff_A[0], vals);
+    group_load(tmp).load(item, &buff_A[0], vals);
     
     // 1. compute local max
     // 2. broadcast local max
@@ -925,7 +925,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_float.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_rand[0], rand_vals);
+      group_load(tmp).load(item, &buff_rand[0], rand_vals);
           
     }
 
@@ -978,7 +978,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
     auto *tmp = stacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_store(tmp).store(item,item.get_local_linear_id(), &buff_out[0], qvals);
+    group_store(tmp).store(item, &buff_out[0], qvals);
       
     //StoreChar(storec).Store(&(out[(DATA_TYPE > 0) ? i/2 : i]), qvals, (DATA_TYPE > 0) ? (valid_items+1)/2 : valid_items);
   }
@@ -1037,7 +1037,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
     auto *tmp = ltacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_load(tmp).load(item,item.get_local_linear_id(), &buff_A[0], qvals);
+    group_load(tmp).load(item, &buff_A[0], qvals);
     
       
     
@@ -1092,7 +1092,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
     // 6. store with byte index
 
     auto *tmp = stacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_store(tmp).store(item,item.get_local_linear_id(), &buff_out[0], vals);
+    group_store(tmp).store(item, &buff_out[0], vals);
             
   }
 }
@@ -1178,7 +1178,7 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_A[0], g_vals);
+      group_load(tmp).load(item, &buff_A[0], g_vals);
       
       /*
       DPCT1065:98: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -1196,7 +1196,7 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_state[0], s1_vals);
+      group_load(tmp).load(item, &buff_state[0], s1_vals);
       
       
       /*
@@ -1215,7 +1215,7 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_state2[0], s2_vals);
+      group_load(tmp).load(item, &buff_state2[0], s2_vals);
       
       # pragma unroll NUM_VALS
       for(unsigned int j = 0; j < NUM_VALS; j++)
@@ -1325,7 +1325,7 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals);
+      group_load(tmp).load(item, &buff_g[0], g_vals);
   
       
       /*
@@ -1343,7 +1343,7 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_state1[0], s1_vals);
+      group_load(tmp).load(item, &buff_state1[0], s1_vals);
       
       /*
       DPCT1065:106: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -1362,7 +1362,7 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_state2[0], s2_vals);
+      group_load(tmp).load(item, &buff_state2[0], s2_vals);
       
       /*
       DPCT1065:107: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -1380,7 +1380,7 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+      group_load(tmp).load(item, &buff_p[0], p_vals);
       
 
 
@@ -1422,7 +1422,7 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+      group_store(tmp).store(item, &buff_p[0], p_vals);
 
     
       /*
@@ -1441,7 +1441,7 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item,item.get_local_linear_id(), &buff_state1[0], s1_vals);
+      group_store(tmp).store(item, &buff_state1[0], s1_vals);
 
       /*
       DPCT1065:110: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -1458,7 +1458,7 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = stacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item,item.get_local_linear_id(), &buff_state2[0], s2_vals);
+      group_store(tmp).store(item, &buff_state2[0], s2_vals);
 
     
   }
@@ -1513,7 +1513,7 @@ void kPreconditionOptimizer32bit1State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals);
+      group_load(tmp).load(item, &buff_g[0], g_vals);
       
       
       /*
@@ -1532,7 +1532,7 @@ void kPreconditionOptimizer32bit1State(T* buff_g, T* buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_stat1[0], s1_vals);
+      group_load(tmp).load(item, &buff_stat1[0], s1_vals);
       
 
       # pragma unroll NUM_VALS
@@ -1652,7 +1652,7 @@ void kOptimizer32bit1State(T *buff_g, T *buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals); 
+      group_load(tmp).load(item, &buff_g[0], g_vals); 
       
       
       /*
@@ -1671,7 +1671,7 @@ void kOptimizer32bit1State(T *buff_g, T *buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_state1[0], s1_vals);
+      group_load(tmp).load(item, &buff_state1[0], s1_vals);
   
       
       /*
@@ -1690,7 +1690,7 @@ void kOptimizer32bit1State(T *buff_g, T *buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+      group_load(tmp).load(item, &buff_p[0], p_vals);
       
       # pragma unroll 4
       for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
@@ -1747,7 +1747,7 @@ void kOptimizer32bit1State(T *buff_g, T *buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+      group_store(tmp).store(item, &buff_p[0], p_vals);
       
       /*
       DPCT1065:127: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -1765,7 +1765,7 @@ void kOptimizer32bit1State(T *buff_g, T *buff_p,
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item,item.get_local_linear_id(), &buff_state1[0], s1_vals);
+      group_store(tmp).store(item, &buff_state1[0], s1_vals);
       
   
   }
@@ -1850,7 +1850,7 @@ kPreconditionOptimizerStatic8bit2State(T* buff_p, T* __restrict__ const buff_g, 
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals);
+        group_load(tmp).load(item, &buff_g[0], g_vals);
         
         /*
         DPCT1065:153: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -1868,7 +1868,7 @@ kPreconditionOptimizerStatic8bit2State(T* buff_p, T* __restrict__ const buff_g, 
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state1[0], m_c1);    
+        group_load(tmp).load(item, &buff_state1[0], m_c1);    
         
         /*
         DPCT1065:154: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -1886,7 +1886,7 @@ kPreconditionOptimizerStatic8bit2State(T* buff_p, T* __restrict__ const buff_g, 
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ;ltacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state2[0], r_c2);
+        group_load(tmp).load(item, &buff_state2[0], r_c2);
         
         /*
         DPCT1065:155: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -2059,7 +2059,7 @@ kOptimizerStatic8bit2State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals);
+        group_load(tmp).load(item, &buff_g[0], g_vals);
         
         
         /*
@@ -2078,7 +2078,7 @@ kOptimizerStatic8bit2State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state1[0], c1s);
+        group_load(tmp).load(item, &buff_state1[0], c1s);
         
         
         /*
@@ -2097,7 +2097,7 @@ kOptimizerStatic8bit2State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state2[0], c2s);
+        group_load(tmp).load(item, &buff_state2[0], c2s);
         
         
         /*
@@ -2116,7 +2116,7 @@ kOptimizerStatic8bit2State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+        group_load(tmp).load(item, &buff_p[0], p_vals);
         
         if((i + (item_ct1.get_local_id(2)*NUM_PER_THREAD2) + NUM_PER_THREAD2) > n){ continue; }
 
@@ -2168,7 +2168,7 @@ kOptimizerStatic8bit2State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+        group_store(tmp).store(item, &buff_p[0], p_vals);
         
       
         /*
@@ -2187,7 +2187,7 @@ kOptimizerStatic8bit2State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_state1[0], c1s);
+        group_store(tmp).store(item, &buff_state1[0], c1s);
         
         
         /*
@@ -2206,7 +2206,7 @@ kOptimizerStatic8bit2State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_state2[0], c2s);
+        group_store(tmp).store(item, &buff_state2[0], c2s);
         
       
         /*
@@ -2289,7 +2289,7 @@ kPreconditionOptimizerStatic8bit1State(T* buff_p, T* __restrict__ const buff_g, 
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals);
+        group_load(tmp).load(item, &buff_g[0], g_vals);
         
         /*
         DPCT1065:136: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -2307,7 +2307,7 @@ kPreconditionOptimizerStatic8bit1State(T* buff_p, T* __restrict__ const buff_g, 
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state1[0], m_c1);
+        group_load(tmp).load(item, &buff_state1[0], m_c1);
         
         #pragma unroll 16
         for(int j = 0; j < NUM8BIT; j++)
@@ -2439,7 +2439,7 @@ kOptimizerStatic8bit1State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals);
+        group_load(tmp).load(item, &buff_g[0], g_vals);
         
         
         /*
@@ -2458,7 +2458,7 @@ kOptimizerStatic8bit1State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state1[0], c1s);
+        group_load(tmp).load(item, &buff_state1[0], c1s);
         
       
         /*
@@ -2477,7 +2477,7 @@ kOptimizerStatic8bit1State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+        group_load(tmp).load(item, &buff_p[0], p_vals);
         
         if((i + (item_ct1.get_local_id(2)*NUM_PER_THREAD2) + NUM_PER_THREAD2) > n){ continue; }
 
@@ -2545,7 +2545,7 @@ kOptimizerStatic8bit1State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+        group_store(tmp).store(item, &buff_p[0], p_vals);
         
         /*
         DPCT1065:143: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -2563,7 +2563,7 @@ kOptimizerStatic8bit1State(T* buff_p, T* const buff_g, unsigned char* buff_state
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_state1[0], c1s);
+        group_store(tmp).store(item, &buff_state1[0], c1s);
         
         /*
         DPCT1065:144: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -2610,7 +2610,7 @@ SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ buff_g, float *gnorm_vec
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], vals);
+      group_load(tmp).load(item, &buff_g[0], vals);
       
      #pragma unroll NUM_VALS
      for(int j = 0; j < NUM_VALS; j++)
@@ -2745,7 +2745,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals);
+        group_load(tmp).load(item, &buff_g[0], g_vals);
         
         /*
         DPCT1065:176: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -2763,7 +2763,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state1[0], c1s);
+        group_load(tmp).load(item, &buff_state1[0], c1s);
         
         /*
         DPCT1065:177: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -2781,7 +2781,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state2[0], c2s);
+        group_load(tmp).load(item, &buff_state2[0], c2s);
         
      
         new_local_abs_max1 = -FLT_MAX;
@@ -2857,7 +2857,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+        group_load(tmp).load(item, &buff_p[0], p_vals);
         
         //  reduce: 2.67/1.69 -> 2.67/1.70
         # pragma unroll N_PER_TH
@@ -2889,7 +2889,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+        group_store(tmp).store(item, &buff_p[0], p_vals);
         
         //  quantizaztion: 2.67/1.70  -> 3.4/3.3
         # pragma unroll N_PER_TH
@@ -2925,7 +2925,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_state1[0], c1s);
+        group_store(tmp).store(item, &buff_state1[0], c1s);
         
         
         /*
@@ -2944,7 +2944,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_state2[0], c2s);
+        group_store(tmp).store(item, &buff_state2[0], c2s);
         
     }
 }
@@ -3042,7 +3042,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_g[0], g_vals);
+        group_load(tmp).load(item, &buff_g[0], g_vals);
         
         /*
         DPCT1065:192: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -3060,7 +3060,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_state1[0], c1s);
+        group_load(tmp).load(item, &buff_state1[0], c1s);
         
         /*
         DPCT1065:193: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
@@ -3078,7 +3078,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+        group_load(tmp).load(item, &buff_p[0], p_vals);
         
         new_local_abs_max1 = -FLT_MAX;
 
@@ -3190,7 +3190,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_p[0], p_vals);
+        group_store(tmp).store(item, &buff_p[0], p_vals);
         
         //  quantizaztion: 2.67/1.70  -> 3.4/3.3
         # pragma unroll N_PER_TH
@@ -3225,7 +3225,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
         auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item,item.get_local_linear_id(), &buff_state1[0], c1s);
+        group_store(tmp).store(item, &buff_state1[0], c1s);
         
     }
 }
@@ -3316,7 +3316,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
     auto *tmp = ltacc_half.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_load(tmp).load(item,item.get_local_linear_id(), &buff_A[0], local_data);
+    group_load(tmp).load(item, &buff_A[0], local_data);
     
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
@@ -3551,7 +3551,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
             [=](sycl::nd_item<3> item) {
               auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
               auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-              group_load(tmp).load(item,item.get_local_linear_id(), d, local_values);
+              group_load(tmp).load(item, d, local_values);
             });
           
      });
@@ -3681,7 +3681,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
     auto *tmp = ltacc_half.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_load(tmp).load(item,item.get_local_linear_id(), &buff_A[0], local_data);
+    group_load(tmp).load(item, &buff_A[0], local_data);
 
     float row_stat = 127.0f / smem_row_stats[row];
 
@@ -3724,7 +3724,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
     auto *tmp = stacc_char1.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_store(tmp).store(item,item.get_local_linear_id(), &buff_out_row_normed[0], local_quantized_data);
+    group_store(tmp).store(item, &buff_out_row_normed[0], local_quantized_data);
     
     // 2. quantize data with row/col stats
     #pragma unroll ITEMS_PER_THREAD
@@ -3762,7 +3762,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
             [=](sycl::nd_item<3> item) {
               auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
               auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-              group_store(tmp).store(item,item.get_local_linear_id(), d, local_quantized_data);
+              group_store(tmp).store(item, d, local_quantized_data);
             });
           
      });

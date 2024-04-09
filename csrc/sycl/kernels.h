@@ -6,19 +6,19 @@
 #include <sycl/sycl.hpp>
 #include <dpct/dpct.hpp>
 #include <float.h>
-#include "ops.dp.hpp"
+#include "ops.h"
 
 #ifndef kernels
 #define kernels
 
 #pragma once
 
-typedef sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_float;
-typedef sycl::accessor<T, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_T;
-typedef sycl::accessor<unsigned char, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_unsigned_char;
-typedef sycl::accessor<sycl::half, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_half;
-typedef sycl::accessor<unsigned, 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_unsigned;
-typedef sycl::accessor<char , 1, sycl::access::mode::read_write, sycl::access::target::local> sycl_la_char;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_float;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_T;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_unsigned_char;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_half;
+typedef sycl::local_accessor<uint8_t, 1> sycl_la_unsigned;
+typedef sycl::local_accessor<uint8_t ,1> sycl_la_char;
 
 //template <int QUANT_TYPE, typename INP_TYPE, typename COMP_TYPE, typename OUT_TYPE>__global__ void kMatmul_inference_4bit(INP_TYPE *A, unsigned char *B, OUT_TYPE *out, int lda, int ldb, int rowsA, int colsA, int colsB);
 
@@ -26,7 +26,7 @@ template<typename T> extern SYCL_EXTERNAL void kEstimateQuantiles(T *__restrict_
                                             const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc);
 
 extern SYCL_EXTERNAL void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n,
-               const sycl::nd_item<3> &item_ct1, sycl_la_float ltacc, sycl_la_unsigned_char stacc);
+               const sycl::nd_item<3> &item_ct1, float* smem_code, sycl_la_float ltacc, sycl_la_unsigned_char stacc);
 extern SYCL_EXTERNAL void kDequantize(float *code, unsigned char *A, float *out, const int n,
                  const sycl::nd_item<3> &item_ct1, float *smem_code);
 
@@ -49,7 +49,7 @@ extern SYCL_EXTERNAL void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1,  sycl_la_T ltacc_T, sycl_la_T ltacc_T1, sycl_la_float ltacc_float1, sycl_la_float ltacc_float2
+                const sycl::nd_item<3> &item_ct1,  sycl_la_T ltacc_T, sycl_la_T ltacc_T1, sycl_la_float ltacc_float1, sycl_la_float ltacc_float2,
                 sycl_la_T stacc_T, sycl_la_float stacc_float1, sycl_la_float stacc_float2);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
@@ -65,7 +65,7 @@ extern SYCL_EXTERNAL void kOptimizer32bit1State(T* g, T* p,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
                 const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_T ltacc_T1, sycl_la_float ltacc_float1, 
-                sycl_la_T stacc_T, sycl_la_float, stacc_float1);
+                sycl_la_T stacc_T, sycl_la_float,sycl_la_float stacc_float1);
 
 template<typename T, int OPTIMIZER>
 extern SYCL_EXTERNAL void
@@ -138,7 +138,7 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EX
                 float *smem_exchange1, float *smem_exchange2,
                 sycl_la_T ltacc_T, sycl_la_T ltacc_T1,
                 sycl_la_float ltacc_float1, sycl_la_float ltacc_float2,
-                sycl_la_T stacc_T, sycl_la_float1 stacc_float1, sycl_la_float stacc_float2);
+                sycl_la_T stacc_T, sycl_la_float stacc_float1, sycl_la_float stacc_float2);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EXTERNAL void kOptimizerStatic8bit1StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1,

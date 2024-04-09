@@ -63,7 +63,8 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
   sycl::context ctx = q_ct1.get_context();
   int size = NUM_BLOCK;
   
-  *((T **)&buff_A) = sycl::malloc_device(size, A, ctx);
+  T *buff_A;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
   
   q_ct1.memcpy((T*)(buff_A), (T*)(A), NUM_BLOCK);
   //sycl::buffer<T, 1> buff_A(A,sycl::range<1>(num_blocks));
@@ -78,7 +79,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
         using group_load = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
         using group_radix_sort = dpct::group::radix_sort<int, NUM_BLOCK>;
         size_t sort_temp_storage_size = group_radix_sort::get_local_memory_size(NUM_BLOCK);  
-        sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+        sycl::local_accessor<uint8_t, 1> tacc(sort_temp_storage_size, cgh);
           
         /*
         DPCT1054:293: The type of variable temp_storage is declared in device function with the name type_ct1. Adjust the code to make the type_ct1 declaration visible at the accessor declaration point.
@@ -108,10 +109,12 @@ void quantize(float *code, float *A, unsigned char *out, int n)
   sycl::context ctx = q_ct1.get_context();
   int size = NUM_BLOCK;
   
-  *((float **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  *((unsigned char **)&buff_out = sycl::malloc_device(size, out, ctx);
-  q_ct1.memcpy((float*)(buff_A), (float*)(A), NUM_BLOCK);
-  q_ct1.memcpy((unsigned char*)(buff_out), (unsigned char*)(out), NUM_BLOCK);
+  float *buff_A;
+  unsigned char *buff_out;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), NUM_BLOCK);
+  q_ct1.memcpy((void*)(buff_out), (void*)(out), NUM_BLOCK);
 
   /*
   DPCT1049:55: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
@@ -139,8 +142,8 @@ void quantize(float *code, float *A, unsigned char *out, int n)
     });
   }
   //back memcpy
-  q_ct1.memcpy((float*)(A), (float*)(buff_A), NUM_BLOCK);
-  q_ct1.memcpy((unsigned char*)(out), (unsigned char*)(buff_out), NUM_BLOCK);
+  q_ct1.memcpy((void*)(A), (void *)(buff_A), NUM_BLOCK);
+  q_ct1.memcpy((void*)(out), (void*)(buff_out), NUM_BLOCK);
   /*
   DPCT1010:232: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
@@ -156,10 +159,12 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   sycl::context ctx = q_ct1.get_context();
   int size = NUM_BLOCK;
   
-  *((unsigned char **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  *((float **)&buff_out = sycl::malloc_device(size, out, ctx);
-  q_ct1.memcpy((float*)(buff_out), (float*)(out), NUM_BLOCK);
-  q_ct1.memcpy((unsigned char*)(buff_A), (unsigned char*)(A), NUM_BLOCK);
+  unsigned char *buff_A;
+  float *buff_out;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_out), (void*)(out), NUM_BLOCK);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), NUM_BLOCK);
 
   /*
   DPCT1049:56: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
@@ -182,8 +187,8 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
    
    } 
   //back memcpy
-  q_ct1.memcpy((float*)(out), (float*)(buff_out), NUM_BLOCK);
-  q_ct1.memcpy((unsigned char*)(A), (unsigned char*)(buff_A), NUM_BLOCK); 
+  q_ct1.memcpy((void *)(out), (void*)(buff_out), NUM_BLOCK);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), NUM_BLOCK); 
   /*
   DPCT1010:233: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
@@ -199,14 +204,17 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
   sycl::context ctx = q_ct1.get_context();
   int size= NUM_BLOCK;
   
-  *((T **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  *((unsigned char **)&buff_out = sycl::malloc_device(size, out, ctx);
-  *((float **)&buff_rand = sycl::malloc_device(size, rand, ctx);
+  T *buff_A;
+  unsigned char *buff_out;
+  float *buff_rand;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_rand) = sycl::malloc_device(size, dev_ct1, ctx);
   q_ct1.memcpy((T*)(buff_A), (T*)(A), NUM_BLOCK);
-  q_ct1.memcpy((unsigned char*)(buff_out), (unsigned char*)(out), NUM_BLOCK);
-  q_ct1.memcpy((float*)(buff_rand), (float*)(rand), NUM_BLOCK);
+  q_ct1.memcpy((void*)(buff_out), (void*)(out), NUM_BLOCK);
+  q_ct1.memcpy((void*)(buff_rand), (void*)(rand), NUM_BLOCK);
   
-  for(int i=0; i< NUM_BLOCK; i++){ buff_out[i]=buff_out[(DATA_TYPE > 0) ? i/2 : i]};
+  for(int i=0; i< NUM_BLOCK; i++){ buff_out[i]=buff_out[(DATA_TYPE > 0) ? i/2 : i];};
   
   if(blocksize == 4096)
     /*
@@ -418,9 +426,9 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
   DPCT1010:234: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
   //back memcpy
-  q_ct1.memcpy((T*)(A), (T*)(buff_A), NUM_BLOCK);
-  q_ct1.memcpy((unsigned char*)(out), (unsigned char*)(buff_out), NUM_BLOCK);
-  q_ct1.memcpy((float*)(rand), (float*)(buff_rand), NUM_BLOCK);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), NUM_BLOCK);
+  q_ct1.memcpy((void*)(out), (void*)(buff_out), NUM_BLOCK);
+  q_ct1.memcpy((void*)(rand), (void*)(buff_rand), NUM_BLOCK);
   //CUDA_CHECK_RETURN(0);
 }
 
@@ -433,9 +441,11 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
   int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
   sycl::context ctx = q_ct1.get_context();
   
-  *((unsigned char **)&buff_A) = sycl::malloc_device(tile_size, A, ctx);
-  *((T **)&buff_out = sycl::malloc_device(tile_size, out, ctx);
-  q_ct1.memcpy((unsigned char*)(buff_A), (unsigned char*)(A), tile_size);
+  unsigned char *buff_A;
+  T *buff_out;
+  *((void **)&buff_A) = sycl::malloc_device(tile_size, dev_ct1, ctx);
+  *((T **)&buff_out) = sycl::malloc_device(tile_size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), tile_size);
   q_ct1.memcpy((T*)(buff_out), (T*)(out), tile_size);
   
   if(DATA_TYPE > 0)
@@ -485,7 +495,7 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
   DPCT1010:235: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
   //back memcpy
-  q_ct1.memcpy((unsigned char*)(A), (unsigned char*)(buff_A), tile_size);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), tile_size);
   q_ct1.memcpy((T*)(out), (T*)(buff_out), tile_size);
   
   //CUDA_CHECK_RETURN(0);
@@ -512,14 +522,16 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
   num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
   int size= NUM_BLOCK;  
    
-  *((T **)&buff_g) = sycl::malloc_device(size, g, ctx);
-  *((T **)&buff_p) = sycl::malloc_device(size, p, ctx);
-  *((float **)&buff_state1 = sycl::malloc_device(size, state1, ctx);
-  *((float **)&buff_state2 = sycl::malloc_device(size, state2, ctx);
-  q_ct1.memcpy((T*)(buff_g), (T*)(g), size);
-  q_ct1.memcpy((T*)(buff_p), (T*)(p), size);
-  q_ct1.memcpy((float*)(buff_state1), (float*)(state1), size);
-  q_ct1.memcpy((float*)(buff_state2), (float*)(state2), size);
+  T *buff_g,*buff_p;
+  float *buff_state1,*buff_state2;
+  *((void **)&buff_g) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_p) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_state1) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_state2) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
+  q_ct1.memcpy((void*)(buff_p), (void*)(p), size);
+  q_ct1.memcpy((void*)(buff_state1), (void*)(state1), size);
+  q_ct1.memcpy((void*)(buff_state2), (void*)(state2), size);
   
   
 	switch(OPTIMIZER)
@@ -785,10 +797,10 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 	}
  
  //back memcpy
- q_ct1.memcpy((T*)(g), (T*)(buff_g), size);
- q_ct1.memcpy((T*)(p), (T*)(buff_p), size);
- q_ct1.memcpy((float*)(state1), (float*)(buff_state1), size);
- q_ct1.memcpy((float*)(state2), (float*)(buff_state2), size);
+ q_ct1.memcpy((void*)(g), (void*)(buff_g), size);
+ q_ct1.memcpy((void*)(p), (void*)(buff_p), size);
+ q_ct1.memcpy((void*)(state1), (void*)(buff_state1), size);
+ q_ct1.memcpy((void*)(state2), (void*)(buff_state2), size);
   
 }
 catch (sycl::exception const &exc) {
@@ -813,14 +825,16 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
   sycl::context ctx = q_ct1.get_context();
   int size = NUM_BLOCK;
   
-  *((T **)&buff_g) = sycl::malloc_device(size, g, ctx);
-  *((T **)&buff_p) = sycl::malloc_device(size, p, ctx);
-  *((float **)&buff_state1 = sycl::malloc_device(size, state1, ctx);
-  *((float **)&buff_state2 = sycl::malloc_device(size, state2, ctx);
-  q_ct1.memcpy((T*)(buff_g), (T*)(g), size);
-  q_ct1.memcpy((T*)(buff_p), (T*)(p), size);
-  q_ct1.memcpy((float*)(buff_state1), (float*)(state1), size);
-  q_ct1.memcpy((float*)(buff_state2), (float*)(state2), size);
+  T *buff_g,*buff_p;
+  float *buff_state1,*buff_state2;
+  *((void **)&buff_g) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_p) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_state1) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_state2) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
+  q_ct1.memcpy((void*)(buff_p), (void*)(p), size);
+  q_ct1.memcpy((void*)(buff_state1), (void*)(state1), size);
+  q_ct1.memcpy((void*)(buff_state2), (void*)(state2), size);
   
 
   if(max_unorm > 0.0f){ CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait())); }
@@ -1093,10 +1107,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 	}
  
  //back memcpy
- q_ct1.memcpy((T*)(buff_g), (T*)(g), size);
- q_ct1.memcpy((T*)(buff_p), (T*)(p), size);
- q_ct1.memcpy((float*)(buff_state1), (float*)(state1), size);
- q_ct1.memcpy((float*)(buff_state2), (float*)(state2), size);
+ q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
+ q_ct1.memcpy((void*)(buff_p), (void*)(p), size);
+ q_ct1.memcpy((void*)(buff_state1), (void*)(state1), size);
+ q_ct1.memcpy((void*)(buff_state2), (void*)(state2), size);
  
 }
 catch (sycl::exception const &exc) {
@@ -1120,14 +1134,16 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* buff_p,
 	int num_blocks = 0;
   int size = NUM_BLOCK;
   
-  *((T **)&buff_g) = sycl::malloc_device(size, g, ctx);
-  *((T **)&buff_p) = sycl::malloc_device(size, p, ctx);
-  *((float **)&buff_state1 = sycl::malloc_device(size, state1, ctx);
-  *((float **)&buff_state2 = sycl::malloc_device(size, state2, ctx);
-  q_ct1.memcpy((T*)(buff_g), (T*)(g), size);
-  q_ct1.memcpy((T*)(buff_p), (T*)(p), size);
-  q_ct1.memcpy((float*)(buff_state1), (float*)(state1), size);
-  q_ct1.memcpy((float*)(buff_state2), (float*)(state2), size);
+  T *buff_g,*buff_p;
+  float *buff_state1,*buff_state2;
+  *((void **)&buff_g) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_p) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_state1) = sycl::malloc_device(size, dev_ct1, ctx);
+  *((void **)&buff_state2) = sycl::malloc_device(size, dev_Ct1, ctx);
+  q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
+  q_ct1.memcpy((void*)(buff_p), (void*)(p), size);
+  q_ct1.memcpy((void*)(buff_state1), (void*)(state1), size);
+  q_ct1.memcpy((void*)(buff_state2), (void*)(state2), size);
   
    
 	switch(OPTIMIZER)
@@ -1252,10 +1268,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* buff_p,
 			//CUDA_CHECK_RETURN(0);
 		break;
 	}
- q_ct1.memcpy((T*)(g), (T*)(buff_g), size);
- q_ct1.memcpy((T*)(p), (T*)(buff_p), size);
- q_ct1.memcpy((float*)(state1), (float*)(buff_state1), size);
- q_ct1.memcpy((float*)(state2), (float*)(buff_state2), size);
+ q_ct1.memcpy((void*)(g), (void*)(buff_g), size);
+ q_ct1.memcpy((void*)(p), (void*)(buff_p), size);
+ q_ct1.memcpy((void*)(state1), (void*)(buff_state1), size);
+ q_ct1.memcpy((void*)(state2), (void*)(buff_state2), size);
   
 }
 catch (sycl::exception const &exc) {
@@ -1274,8 +1290,9 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
   int num_blocks = n/2048;
   num_blocks = n % 2048 == 0 ? num_blocks : num_blocks + 1;
   int size = NUM_BLOCK;
-  *((T **)&buff_g) = sycl::malloc_device(size, g, ctx);
-  q_ct1.memcpy((T*)(buff_g), (T*)(g), size);
+  T *buff_g;
+  *((void **)&buff_g) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
   
   
 	CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(&gnorm_vec[step % 100], 0, 1*sizeof(float)).wait()));
@@ -1302,7 +1319,7 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
   */
   //CUDA_CHECK_RETURN(0);
   //back memcpy
-   q_ct1.memcpy((T*)(g), (T*)(buff_g), size);
+   q_ct1.memcpy((void*)(g), (void*)(buff_g), size);
 }
 
 
@@ -1397,7 +1414,7 @@ template cublasLtOrder_t get_order<COL>();
 template cublasLtOrder_t get_order<COL32>();
 template cublasLtOrder_t get_order<COL_TURING>();
 template cublasLtOrder_t get_order<COL_AMPERE>();
-#endif
+//#endif
 
 
 template<int ORDER> int get_leading_dim(int dim1, int dim2)
