@@ -23,23 +23,23 @@ You need to compile from source for ROCm.
 Compilation quickstart:
 ```bash
 # Run Docker
-docker run -it --network=host --device=/dev/kfd --device=/dev/dri --name=bnb_test --shm-size=8g --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --group-add video rocm/pytorch:rocm5.7_ubuntu22.04_py3.10_pytorch_2.0.1
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --name=bnb_test --shm-size=8g --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --group-add video rocm/pytorch:latest
 
 
 # Install Dependencies
-cd <workspace>
-git clone --recurse https://github.com/ROCmSoftwarePlatform/hipBLASLt
-cd hipBLASLt
-git checkout 4b3b34405e7e25cff404f69bfd0a832644430477
-./install.sh -idc
- 
-cd ..
-pip install einops lion_pytorch
+apt install hipblaslt
+pip install --upgrade pip
+pip install einops lion_pytorch accelerate
+pip install git+https://github.com/ROCm/transformers.git
 
 
 # Install BitsandBytes
 git clone --recurse https://github.com/ROCmSoftwarePlatform/bitsandbytes
 cd bitsandbytes
+# Checkout branch as needed
+# for general use - rocm_enabled
+# for rocm 5.7 - rocm5.7_internal_testing
+# for rocm 6.2 - rocm6.2_internal_testing
 git checkout rocm_enabled
 make hip
 python setup.py install
