@@ -3,7 +3,7 @@
 #   For  GCC: `cmake -B build . && cmake --build build`
 #   For MSVC: `cmake -B build . && cmake --build build --config Release`
 # You can also use the following options and variables
-#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, or `mps` to select the backend
+#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, `mps`, or `sycl` to select the backend
 #  - NO_CUBLASLT: Default OFF, will skip building/linking CUBLASLT support
 #  - CUDA_VERSION: The expected CUDA version, for sanity checking. The actual version
 #                  is whatever CMake finds on your path.
@@ -28,11 +28,13 @@ set(CPP_FILES csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
 set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
 set(MPS_FILES csrc/mps_ops.mm)
 set(METAL_FILES csrc/mps_kernels.metal)
+set(SYCL_FILES csrc/sycl/ops.cpp csrc/sycl/kernels.cpp)
+
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, mps)")
-set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda mps)
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, mps, sycl)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda mps sycl)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
@@ -50,6 +52,7 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
     option(NO_CUBLASLT "Disable CUBLAS" OFF)
     set(BUILD_CUDA ON)
     set(BUILD_MPS OFF)
+    set(BUILD_SYCL OFF)
     message(STATUS "NO_CUBLASLT := ${NO_CUBLASLT}")
 elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     if(NOT APPLE)
@@ -57,9 +60,15 @@ elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     endif()
     set(BUILD_CUDA OFF)
     set(BUILD_MPS ON)
+    set(BUILD_SYCL OFF)
+elseif(${COMPUTE_BACKEND} STREQUAL "sycl")
+    set(BUILD_CUDA OFF)
+    set(BUILD_SYCL ON)
+    set(BUILD_MPS OFF)
 else()
     set(BUILD_CUDA OFF)
     set(BUILD_MPS OFF)
+    set(BUILD_SYCL OFF)
 endif()
 
 
@@ -177,12 +186,26 @@ elseif(BUILD_MPS)
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+elseif(BUILD_SYCL)
+    if ( NOT DEFINED ENV{ONEAPI_ROOT})
+        message(FATAL_ERROR "Not detect ENV {ONEAPI_ROOT}, please install oneAPI & source it, like: source /opt/intel/oneapi/setvars.sh")
+    endif()
+    find_package(IntelSYCL REQUIRED)
+    set(CMAKE_CXX_STANDARD 17)
+    add_compile_options(-I./) #include DPCT
+    add_compile_options(-I/${SYCL_INCLUDE_DIR})
+
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -L${MKLROOT}/lib")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl-targets=spir64 -L${MKLROOT}/lib")
+    set(SRC_FILES ${SYCL_FILES})
+    target_link_libraries(bitsandbytes PUBLIC OpenCL mkl_core pthread m dl mkl_sycl_blas mkl_intel_ilp64 mkl_tbb_thread oneDNN)
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
 endif()
-
-
+    
 if(WIN32)
     # Export all symbols
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)

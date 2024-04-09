@@ -1364,8 +1364,8 @@ int roundoff(int v, int d) {
 }
 
 
-#ifdef NO_CUBLASLT
-#else
+//#ifdef NO_CUBLASLT
+//#else
 template<int ORDER> cublasLtOrder_t get_order()
 {
 	switch(ORDER)
