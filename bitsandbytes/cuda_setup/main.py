@@ -4,7 +4,7 @@ extract factors the build is dependent on:
     [ ] TODO: Q - What if we have multiple GPUs of different makes?
 - CUDA version
 - Software:
-    - CPU-only: only CPU quantization functions (no optimizer, no matrix multipl)
+    - CPU-only: only CPU quantization functions (no optimizer, no matrix multiplication)
     - CuBLAS-LT: full-build 8-bit optimizer
     - no CuBLAS-LT: no 8-bit matrix multiplication (`nomatmul`)
 

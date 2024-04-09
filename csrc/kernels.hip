@@ -113,7 +113,7 @@ __device__ unsigned char dQuantizeFP4(float x)
   // since we assume input data is in [-1.0, 1.0]
 
   // !be careful here, its easy to make a mistake
-  // that is difficult to noice if you add an extra
+  // that is difficult to notice if you add an extra
   // zero somewhere!
 
   int sign = x < 0 ? 0b1000 : 0b0000;
@@ -2118,7 +2118,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   // 0. reset stats to -FLT_MAX
   // 1. load row-by-row ITEMS_PER_THREAD (TILE_SIZE==THREADS*ITEMS_PER_THREAD)
   // 2. compute col max (per thread); store in smem due to register pressure
-  // 3. compute row max (per block); store in smem to accumulate full global mem transation
+  // 3. compute row max (per block); store in smem to accumulate full global mem transaction
   // 4. store data via atomicMax
 
   // each block loads TILE_COLs columns and TILE_ROW rows
@@ -2207,7 +2207,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
       //smem_col_absmax_values[threadIdx.x + (j*THREADS)] = fmaxf(smem_col_absmax_values[threadIdx.x + (j*THREADS)], __half2float(local_data[j]));
       local_col_absmax_values[j] = fmaxf(local_col_absmax_values[j], __half2float(local_data[j]));
 
-    // 3. compute row max (per block); store in smem to accumulate full global mem transation
+    // 3. compute row max (per block); store in smem to accumulate full global mem transaction
 
     // this is slow as it uses extra registers, but we need this to be compatible with Kepler and Maxwell (no fp16 units)
     #pragma unroll ITEMS_PER_THREAD
