@@ -11,7 +11,7 @@
 #                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90`
 #                        Check your compute capability here: https://developer.nvidia.com/cuda-gpus
 #  - PTXAS_VERBOSE: Pass the `-v` option to the PTX Assembler
-cmake_minimum_required(VERSION 3.22.1)
+cmake_minimum_required(VERSION 3.20.4)
 
 project(bitsandbytes LANGUAGES CXX)
 
@@ -200,7 +200,7 @@ elseif(BUILD_SYCL)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -L${MKLROOT}/lib")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl-targets=spir64 -L${MKLROOT}/lib")
     set(SRC_FILES ${SYCL_FILES})
-    target_link_libraries(bitsandbytes PUBLIC OpenCL mkl_core pthread m dl mkl_sycl_blas mkl_intel_ilp64 mkl_tbb_thread oneDNN)
+    
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
@@ -218,9 +218,12 @@ endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
-target_compile_features(bitsandbytes PUBLIC cxx_std_14)
+if(BUILD_SYCL)
+    target_compile_features(bitsandbytes PUBLIC cxx_std_17)
+else()
+    target_compile_features(bitsandbytes PUBLIC cxx_std_14)
+endif()
 target_include_directories(bitsandbytes PUBLIC csrc include)
-
 
 if(BUILD_CUDA)
     target_include_directories(bitsandbytes PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
@@ -241,6 +244,9 @@ if(BUILD_MPS)
     target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
 endif()
 
+if(BUILD_SYCL)
+    target_link_libraries(bitsandbytes PUBLIC OpenCL mkl_core pthread m dl mkl_sycl_blas mkl_intel_ilp64 mkl_tbb_thread oneDNN)
+endif()
 if(WIN32)
     set_target_properties(bitsandbytes PROPERTIES PREFIX "lib")
 endif()
