@@ -731,7 +731,7 @@ class Linear8bitLt(nn.Linear):
                 destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
                 weights_format = self.state.formatB
                 # At this point `weights_format` is an str
-                if weights_format not in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.keys():
+                if weights_format not in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING:
                     raise ValueError(f"Unrecognized weights format {weights_format}")
 
                 weights_format = LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING[weights_format]
