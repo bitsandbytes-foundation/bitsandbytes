@@ -622,7 +622,7 @@ def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_k
     if isinstance(weight_format, torch.Tensor):
         weight_format = weight_format.item()
 
-    # For new weights format storage type we expclicitly check
+    # For new weights format storage type, we explicitly check
     # if weights_format is on the mapping
     if isinstance(weight_format, int) and weight_format not in INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING:
         raise ValueError(f"Expected supported weight format - got {weight_format}")
@@ -729,7 +729,7 @@ class Linear8bitLt(nn.Linear):
                 destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
                 weights_format = self.state.formatB
                 # At this point `weights_format` is an str
-                if weights_format not in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.keys():
+                if weights_format not in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING:
                     raise ValueError(f"Unrecognized weights format {weights_format}")
 
                 weights_format = LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING[weights_format]
