@@ -14,7 +14,11 @@ import bitsandbytes as bnb
 from bitsandbytes.autograd._functions import get_tile_inds, undo_layout
 from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
-from bitsandbytes.utils import LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
+from bitsandbytes.utils import (
+    INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
+    LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
+    OutlierTracer,
+)
 
 T = TypeVar("T", bound="torch.nn.Module")
 
