@@ -7,7 +7,9 @@ The `bitsandbytes` library is a lightweight Python wrapper around CUDA custom fu
 The library includes quantization primitives for 8-bit & 4-bit operations, through `bitsandbytes.nn.Linear8bitLt` and `bitsandbytes.nn.Linear4bit` and 8-bit optimizers through `bitsandbytes.optim` module.
 
 **Installation for ROCm:**
+
 To install latest bitsandbytes (supported on ROCm 6.2):
+```bash
 git clone --recurse https://github.com/ROCm/bitsandbytes
 cd bitsandbytes
 git checkout rocm_enabled
@@ -15,16 +17,20 @@ pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=hip -S .
 make
 pip install .
+```
 
 For ROCm specific versions:
+
 Install Dependencies:
-#hipblaslt installation needed only for rocm<6.0
+```bash
+# hipblaslt installation needed only for rocm<6.0
 apt install hipblaslt
 pip install --upgrade pip
 pip install einops lion_pytorch accelerate
 pip install git+https://github.com/ROCm/transformers.git
-
+```
 Install Bitsandbytes:
+```bash
 git clone --recurse https://github.com/ROCm/bitsandbytes
 cd bitsandbytes
 # Checkout branch as needed
@@ -33,6 +39,7 @@ cd bitsandbytes
 git checkout <branch>
 make hip
 python setup.py install
+```
 
 **For more details, please head to the official documentation page:**
 
