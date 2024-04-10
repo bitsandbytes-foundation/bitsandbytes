@@ -65,7 +65,7 @@ extern SYCL_EXTERNAL void kOptimizer32bit1State(T* g, T* p,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
                 const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_T ltacc_T1, sycl_la_float ltacc_float1, 
-                sycl_la_T stacc_T, sycl_la_float,sycl_la_float stacc_float1);
+                sycl_la_T stacc_T, sycl_la_float stacc_float1);
 
 template<typename T, int OPTIMIZER>
 extern SYCL_EXTERNAL void
@@ -159,7 +159,7 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EX
 template<typename T, int BLOCK_SIZE, int NUM_VALS> extern SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T);
 
 
-void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n,
+extern SYCL_EXTERNAL void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n,
                             const sycl::nd_item<3> &item_ct1);
 
 template <typename T, int SPMM_ITEMS, int BITS>
@@ -177,7 +177,7 @@ extern SYCL_EXTERNAL void kdequant_mm_int32_fp16(
     float *__restrict__ const colStats, sycl::half *out, float *newRowStats,
     float *newcolStats, sycl::half *__restrict__ const bias, const int numRows,
     const int numCols, const int tileCols, const int n,
-    const sycl::nd_item<3> &item_ct1, float *smem_rowStats);
+    const sycl::nd_item<3> &item_ct1, float *smem_rowStats, sycl_la_T ltacc_T, sycl_la_float exacc);
 
 template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> extern SYCL_EXTERNAL void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,
  const sycl::nd_item<3> &item_ct1,float *smem_row_absmax_values,int *smem_row_nnz_values, sycl_la_half ltacc_half, sycl_la_unsigned exacc);
@@ -202,8 +202,11 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 template <int FORMAT> extern SYCL_EXTERNAL  void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
                                             const sycl::nd_item<3> &item_ct1);
 
-template <typename T, int BITS, int THREADS> extern SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc);
-template <typename T, int THREADS>  extern SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize);
+template <typename T, int BITS, int THREADS> extern SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc, const sycl::nd_item<3> &item_ct1, sycl::half *smem_A, sycl::half *smem_B);
+template <typename T, int THREADS>  extern SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, 
+                                              sycl::half *smem_A,
+                                              sycl::half *smem_B,
+                                              sycl::half *smem_C);
 template <typename T, int THREADS, int BITS> extern SYCL_EXTERNAL  void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize,
                                                                              const sycl::nd_item<3> &item_ct1,
                                                                              T *quant_map);

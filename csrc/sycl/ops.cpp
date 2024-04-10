@@ -28,7 +28,9 @@
 #define THREADS_ESTIMATE 512
 #define NUM_ESTIMATE 8
 #define BLOCK_ESTIMATE 4096
+using namespace dnnl;
 
+typedef sycl::ext::oneapi::bfloat16 bf16;
 
 using namespace BinSearch;
 using std::cout;
@@ -59,7 +61,8 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
   sycl::queue &q_ct1 = dev_ct1.in_order_queue();
   int num_blocks = n/4096;
   num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
-  CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(code, 0, 256*sizeof(float)).wait()));
+  //CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(code, 0, 256*sizeof(float)).wait()));
+  DPCT_CHECK_ERROR(q_ct1.memset(code, 0, 256*sizeof(float)).wait());
   sycl::context ctx = q_ct1.get_context();
   int size = NUM_BLOCK;
   
@@ -444,7 +447,7 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
   unsigned char *buff_A;
   T *buff_out;
   *((void **)&buff_A) = sycl::malloc_device(tile_size, dev_ct1, ctx);
-  *((T **)&buff_out) = sycl::malloc_device(tile_size, dev_ct1, ctx);
+  *((void **)&buff_out) = sycl::malloc_device(tile_size, dev_ct1, ctx);
   q_ct1.memcpy((void*)(buff_A), (void*)(A), tile_size);
   q_ct1.memcpy((T*)(buff_out), (T*)(out), tile_size);
   
@@ -486,7 +489,7 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
       cgh.parallel_for(
         sycl::nd_range<3>(sycl::range<3>(1, 1, (n+tile_size-1)/tile_size) * sycl::range<3>(1, 1, 64), sycl::range<3>(1, 1, 64)), 
         [=](sycl::nd_item<3> item_ct1) {
-          kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>(code, buff_A, absmax, buff_out, blocksize, n, item_ct1);
+          kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>(code, buff_A, absmax, buff_out, blocksize, n, item_ct1, ltacc, stacc);
         });
       });
     }
@@ -539,7 +542,8 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 		case ADAM:
       if(max_unorm > 0.0f)
 			{
-				CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()));
+				//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()));
+        DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait());
         /*
         DPCT1049:61: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
         */
@@ -632,7 +636,8 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
     case ADAGRAD:
       if(max_unorm > 0.0f)
 			{
-				CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()));
+				//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()));
+        DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait());
 				/*
 				DPCT1049:62: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
 				*/
@@ -658,7 +663,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 				      cgh.parallel_for(
 				        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
 				        [=](sycl::nd_item<3> item_ct1) {
-				          kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>(buff_g, buff_p, buff_state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float);
+				          kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>(buff_g, buff_p, buff_state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, ltacc_T, ltacc_float1);
 				        });
 				    });
 				}
@@ -809,8 +814,8 @@ catch (sycl::exception const &exc) {
   std::exit(1);
 }
 
-template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_g,
-                unsigned char* buff_state1, unsigned char* buff_state2,
+template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
+                unsigned char* state1, unsigned char* state2,
                 float *unorm, float max_unorm, float param_norm,
                 float beta1, float beta2,
                 float eps, int step, float lr,
@@ -827,7 +832,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
   int size = NUM_BLOCK;
   
   T *buff_g,*buff_p;
-  float *buff_state1,*buff_state2;
+  unsigned char *buff_state1,*buff_state2;
   *((void **)&buff_g) = sycl::malloc_device(size, dev_ct1, ctx);
   *((void **)&buff_p) = sycl::malloc_device(size, dev_ct1, ctx);
   *((void **)&buff_state1) = sycl::malloc_device(size, dev_ct1, ctx);
@@ -838,13 +843,16 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
   q_ct1.memcpy((void*)(buff_state2), (void*)(state2), size);
   
 
-  if(max_unorm > 0.0f){ CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait())); }
+  if(max_unorm > 0.0f){ //CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()));
+    DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()); }
 
 	switch(OPTIMIZER)
 	{
 		case ADAM:
-			CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
-			CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max2, 0, 1*sizeof(float)).wait()));
+			//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
+			//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max2, 0, 1*sizeof(float)).wait()));
+      DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
+      DPCT_CHECK_ERROR(q_ct1.memset(new_max2, 0, 1*sizeof(float)).wait());
 			{
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
@@ -890,8 +898,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
-			      sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-			      sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
+			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
+			      //sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
 			      /*
 			      DPCT1054:301: The type of variable temp_storage is declared in device function with the name type_ct7. Adjust the code to make the type_ct7 declaration visible at the accessor declaration point.
 			      */
@@ -943,7 +951,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
 		case MOMENTUM:
     case RMSPROP:
     case ADAGRAD:
-			CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
+			//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
+      DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
 			{
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
@@ -962,7 +971,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
             
 			      //__shared__ vars
-            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh)                   
+            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);                   
        
             cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
@@ -1063,7 +1072,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kOptimizerStatic8bit1State<T, OPTIMIZER>(`buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
+                kOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
               });
           });
       }
@@ -1072,7 +1081,8 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* buff_p, T* buff_
       */
       //CUDA_CHECK_RETURN(0);
 
-      CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
+      //CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
+      DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
       {
         dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
@@ -1124,8 +1134,8 @@ catch (sycl::exception const &exc) {
 #define BLOCKSIZE_1STATE 2048
 #define NUM_1STATE 8
 
-template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* buff_p, T* buff_g,
-                unsigned char* buff_state1, unsigned char* buff_state2, float beta1, float beta2, float eps, int step, float lr,
+template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n)
  try {
     
@@ -1136,11 +1146,11 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* buff_p,
   int size = NUM_BLOCK;
   
   T *buff_g,*buff_p;
-  float *buff_state1,*buff_state2;
+  unsigned char *buff_state1,*buff_state2;
   *((void **)&buff_g) = sycl::malloc_device(size, dev_ct1, ctx);
   *((void **)&buff_p) = sycl::malloc_device(size, dev_ct1, ctx);
   *((void **)&buff_state1) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_state2) = sycl::malloc_device(size, dev_Ct1, ctx);
+  *((void **)&buff_state2) = sycl::malloc_device(size, dev_ct1, ctx);
   q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
   q_ct1.memcpy((void*)(buff_p), (void*)(p), size);
   q_ct1.memcpy((void*)(buff_state1), (void*)(state1), size);
@@ -1296,7 +1306,8 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
   q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
   
   
-	CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(&gnorm_vec[step % 100], 0, 1*sizeof(float)).wait()));
+	//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(&gnorm_vec[step % 100], 0, 1*sizeof(float)).wait()));
+  DPCT_CHECK_ERROR(q_ct1.memset(&gnorm_vec[step % 100], 0, 1*sizeof(float)).wait());
   /*
   DPCT1049:68: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
   */
@@ -1311,7 +1322,7 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
       cgh.parallel_for(    
        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
       [=](sycl::nd_item<3> item_ct1) {
-        kPercentileClipping<T, 2048, 4>(g, gnorm_vec, step, n, item_ct1, ltacc);
+        kPercentileClipping<T, 2048, 4>(g, gnorm_vec, step, n, item_ct1, ltacc_T);
       });
     });
   }
@@ -1336,12 +1347,8 @@ void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, in
   const void * beta = &fbeta;
 	int status;
 
-			status = DPCT_CHECK_ERROR(dpct::gemm(*context->m_handle, transposeA ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, transposeB ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, m, n, k, alpha, A, dpct::library_data_t::real_int8, lda, B, dpct::library_data_t::real_int8, ldb, beta, C, dpct::library_data_t::real_int32, ldc, dpct::library_data_t::real_int32));
+   DPCT_CHECK_ERROR(dpct::gemm(*context->m_handle, transposeA ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, transposeB ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, m, n, k, alpha, A, dpct::library_data_t::real_int8, lda, B, dpct::library_data_t::real_int8, ldb, beta, C, dpct::library_data_t::real_int32, ldc, dpct::library_data_t::real_int32));
 
-    if (status != 0)
-    {
-      std::cout << "CUBLAS ERROR: Status " << status << std::endl;
-    }
 
 }
 catch (sycl::exception const &exc) {
@@ -1364,12 +1371,7 @@ void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, i
   //printf("%i %i %i\n", strideA, strideB, strideC);
   //printf("%i\n", batchCount);
 
-			status = DPCT_CHECK_ERROR(dpct::gemm_batch(*context->m_handle, transposeA ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, transposeB ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, m, n, k, alpha, A, dpct::library_data_t::real_int8, lda, (long long int)strideA, B, dpct::library_data_t::real_int8, ldb, (long long int)strideB, beta, C, dpct::library_data_t::real_int32, ldc, (long long int)strideC, batchCount, dpct::library_data_t::real_int32));
-
-    if (status != 0)
-    {
-      std::cout << "CUBLAS ERROR: Status " << status << std::endl;
-    }
+   DPCT_CHECK_ERROR(dpct::gemm_batch(*context->m_handle, transposeA ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, transposeB ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, m, n, k, alpha, A, dpct::library_data_t::real_int8, lda, (long long int)strideA, B, dpct::library_data_t::real_int8, ldb, (long long int)strideB, beta, C, dpct::library_data_t::real_int32, ldc, (long long int)strideC, batchCount, dpct::library_data_t::real_int32));
 
 }
 catch (sycl::exception const &exc) {
@@ -1380,42 +1382,6 @@ catch (sycl::exception const &exc) {
 int roundoff(int v, int d) {
     return (v + d - 1) / d * d;
 }
-
-
-//#ifdef NO_CUBLASLT
-//#else
-template<int ORDER> cublasLtOrder_t get_order()
-{
-	switch(ORDER)
-	{
-		case ROW:
-      return CUBLASLT_ORDER_ROW;
-			break;
-    case COL:
-      return CUBLASLT_ORDER_COL;
-      break;
-    case COL32:
-      return CUBLASLT_ORDER_COL32;
-      break;
-    case COL_TURING:
-      return CUBLASLT_ORDER_COL4_4R2_8C;
-      break;
-    case COL_AMPERE:
-      return CUBLASLT_ORDER_COL32_2R_4R4;
-      break;
-		default:
-			break;
-  }
-
-	return CUBLASLT_ORDER_ROW;
-}
-
-template cublasLtOrder_t get_order<ROW>();
-template cublasLtOrder_t get_order<COL>();
-template cublasLtOrder_t get_order<COL32>();
-template cublasLtOrder_t get_order<COL_TURING>();
-template cublasLtOrder_t get_order<COL_AMPERE>();
-//#endif
 
 
 template<int ORDER> int get_leading_dim(int dim1, int dim2)
@@ -1449,12 +1415,13 @@ template int get_leading_dim<ROW>(int dim1, int dim2);
 template int get_leading_dim<COL>(int dim1, int dim2);
 template int get_leading_dim<COL32>(int dim1, int dim2);
 
-template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2)
+template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform( T *A, T *out, int dim1, int dim2)
 {
 
   using namespace dnnl;
   using tag = memory::format_tag;
   using dt = memory::data_type;
+  void *Aout;
   auto dev = sycl::device(sycl::gpu_selector_v);
   auto ctx = sycl::context(dev);
   int ldA = get_leading_dim<SRC>(dim1, dim2);
@@ -1464,16 +1431,16 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   dnnl::engine engine = dnnl::sycl_interop::make_engine(dev, ctx);
   // column major 
   const memory::dims a_strides = memory::dims {1, ldA};
-  const auto a_md = DTYPE_OUT ==32 ? memory::desc({dim1, dim2}, dt::s32, a_strides) : memory::desc({dim1, dim2}, dt::s8, a_strides);
+  const auto a_md = DTYPE ==32 ? memory::desc({dim1, dim2}, dt::s32, a_strides) : memory::desc({dim1, dim2}, dt::s8, a_strides);
   const memory::dims out_strides = memory::dims {ldOut, 1};
-  const auto out_md = DTYPE_OUT ==32 ? memory::desc({dim1, dim2}, dt::s32, out_strides) : memory::desc({dim1, dim2}, dt::s8, out_strides);
+  const auto out_md = DTYPE ==32 ? memory::desc({dim1, dim2}, dt::s32, out_strides) : memory::desc({dim1, dim2}, dt::s8, out_strides);
   const memory::dims Aout_strides = memory::dims {ldAOut, 1};
-  const auto aout_md = DTYPE_OUT == 32 ? memory::desc({dim1, dim2}, dt::s32) : memory::desc({dim1, dim2}, dt::s8);
+  const auto aout_md = DTYPE == 32 ? memory::desc({dim1, dim2}, dt::s32) : memory::desc({dim1, dim2}, dt::s8);
   
   //memory align
-  memory a_mem(a_md, engine A);
-  memory out_mem(out_md, engine, Out);
-  memory aout_mem(aout_md, engine, AOut);
+  memory a_mem(a_md, engine, A);
+  memory out_mem(out_md, engine, out);
+  memory aout_mem(aout_md, engine, Aout);
   
   //create dnnl stream
   auto q_ct1 = sycl::queue(ctx, dev);
@@ -1491,98 +1458,20 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   matmul_prim.execute(stream, matmul_args);
   stream.wait();
 
-/*  
-#ifdef NO_CUBLASLT
-#else
-  cublasLtOrder_t orderA = get_order<SRC>();
-  cublasLtOrder_t orderOut = get_order<TARGET>();
-  int ldA = get_leading_dim<SRC>(dim1, dim2);
-  int ldOut = get_leading_dim<TARGET>(dim1, dim2);
-
-  cublasLtMatrixLayout_t A_desc = NULL, out_desc = NULL;
-  cublasLtMatrixTransformDesc_t A2Out_desc = NULL;
-  oneapi::mkl::transpose opTranspose = oneapi::mkl::transpose::trans;
-  float transformAlpha = 1.0f, transformBeta = 0.0f;
-  
-  
-
-
-  if(DTYPE == 8)
-  {
-    
-    DPCT1007:251: Migration of cublasLtMatrixLayoutCreate is not supported.
-    
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&A_desc, dpct::library_data_t::real_int8, dim1, dim2, ldA));
-    
-    DPCT1007:252: Migration of cublasLtMatrixLayoutCreate is not supported.
-    
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&out_desc, dpct::library_data_t::real_int8, dim1, dim2, ldOut));
-  }
-  else if(DTYPE == 32)
-  {
-    
-    DPCT1007:253: Migration of cublasLtMatrixLayoutCreate is not supported.
-    
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&A_desc, dpct::library_data_t::real_int32, dim1, dim2, ldA));
-    
-    DPCT1007:254: Migration of cublasLtMatrixLayoutCreate is not supported.
-    
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&out_desc, dpct::library_data_t::real_int32, dim1, dim2, ldOut));
-  }
-  else
-  {
-    printf("ERROR WRONG TYPE FOR TRANSFORM: %i\n", DTYPE);
-  }
-
-  
-  DPCT1007:255: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-  
-  checkCublasStatus(cublasLtMatrixLayoutSetAttribute(A_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
-  
-  DPCT1007:256: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-  
-  checkCublasStatus(cublasLtMatrixLayoutSetAttribute(out_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderOut, sizeof(orderOut)));
-
-  
-  DPCT1007:257: Migration of cublasLtMatrixTransformDescCreate is not supported.
-  
-  checkCublasStatus(cublasLtMatrixTransformDescCreate(&A2Out_desc, dpct::library_data_t::real_float));
-
-  
-  DPCT1007:258: Migration of cublasLtMatrixTransformDescSetAttribute is not supported.
-  
-  if(transpose){ checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(A2Out_desc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose))); }
-
-  checkCublasStatus(cublasLtMatrixTransform(ltHandle, A2Out_desc, &transformAlpha, A, A_desc, &transformBeta, NULL, NULL, out, out_desc, 0));
-
-  
-  DPCT1007:259: Migration of cublasLtMatrixLayoutDestroy is not supported.
-  
-  if (A_desc) checkCublasStatus(cublasLtMatrixLayoutDestroy(A_desc));
-  
-  DPCT1007:260: Migration of cublasLtMatrixLayoutDestroy is not supported.
-  
-  if (out_desc) checkCublasStatus(cublasLtMatrixLayoutDestroy(out_desc));
-  
-  DPCT1007:261: Migration of cublasLtMatrixTransformDescDestroy is not supported.
-  
-  if (A2Out_desc) checkCublasStatus(cublasLtMatrixTransformDescDestroy(A2Out_desc));
-#endif
-*/
 }
 
-template void transform<int8_t, ROW, COL, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int8_t, ROW, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int8_t, ROW, COL32, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int32_t, ROW, COL32, false, 32>(cublasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
-template void transform<int8_t, ROW, COL_TURING, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int8_t, ROW, COL_AMPERE, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int8_t, COL32, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int32_t, COL32, ROW, false, 32>(cublasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
+template void transform<int8_t, ROW, COL, false, 8>(int8_t *A, int8_t *out, int dim1, int dim2);
+template void transform<int8_t, ROW, ROW, false, 8>( int8_t *A, int8_t *out, int dim1, int dim2);
+template void transform<int8_t, ROW, COL32, false, 8>(int8_t *A, int8_t *out, int dim1, int dim2);
+template void transform<int32_t, ROW, COL32, false, 32>( int32_t *A, int32_t *out, int dim1, int dim2);
+template void transform<int8_t, ROW, COL_TURING, false, 8>( int8_t *A, int8_t *out, int dim1, int dim2);
+template void transform<int8_t, ROW, COL_AMPERE, false, 8>( int8_t *A, int8_t *out, int dim1, int dim2);
+template void transform<int8_t, COL32, ROW, false, 8>( int8_t *A, int8_t *out, int dim1, int dim2);
+template void transform<int32_t, COL32, ROW, false, 32>( int32_t *A, int32_t *out, int dim1, int dim2);
 
-template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
+template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
  try {
-    using namespace dnnl;
+    
     using tag = memory::format_tag;
     using dt = memory::data_type;
     auto dev = sycl::device(sycl::gpu_selector_v);
@@ -1595,17 +1484,17 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle
     const memory::dims b_strides = memory::dims {ldb, 1};
     const auto b_md = memory::desc({k, n}, dt::s8, b_strides);
     const memory::dims c_strides = memory::dims {ldc, 1};
-    const auto c_md = DTYPE_OUT == 32 ? memory::desc({m, n}, dt::s32, c_strides) : memory::desc({m, n}, dt::s8, c_strides);
+    const auto c_md = DTYPE == 32 ? memory::desc({m, n}, dt::s32, c_strides) : memory::desc({m, n}, dt::s8, c_strides);
     
     //memory align
-    memory a_mem(a_md, engine A);
+    memory a_mem(a_md, engine, A);
     memory b_mem(b_md, engine, B);
     memory c_mem(c_md, engine, C);
     memory scales_C_mem({{1}, dt::f32, {1}}, engine, row_scale);
     
     //create dnnl stream
     auto q_ct1 = sycl::queue(ctx, dev);
-    dnnl::stream stream = sycl_interop::make_stream(q_ct1);
+    dnnl::stream stream = dnnl::sycl_interop::make_stream(q_ct1);
     
     primitive_attr attr;
     if (SCALE_ROWS) {
@@ -1625,127 +1514,6 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle
     matmul_prim.execute(stream, matmul_args);
     stream.wait();
 
-//#ifdef NO_CUBLASLT
-//	return ERR_NOT_IMPLEMENTED;
-//#else
-    //int has_error = 0;
-    //cublasLtMatmulDesc_t matmulDesc = NULL;
-    //cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
-    //oneapi::mkl::transpose opT = oneapi::mkl::transpose::trans;
-    //cublasLtPointerMode_t alphaVec = CUBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_ZERO;
-    //cublasLtOrder_t col32 = CUBLASLT_ORDER_COL32;
-    //cublasLtOrder_t col_turing = CUBLASLT_ORDER_COL4_4R2_8C;
-    //cublasLtOrder_t col_ampere = CUBLASLT_ORDER_COL32_2R_4R4;
-
-    /*
-    DPCT1007:262: Migration of cublasLtMatrixLayoutCreate is not supported.
-    */
-    //has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Adesc, dpct::library_data_t::real_int8, m, k, lda));
-    /*
-    DPCT1007:263: Migration of cublasLtMatrixLayoutCreate is not supported.
-    */
-    //has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Bdesc, dpct::library_data_t::real_int8, n, k, ldb));
-
-    /*
-    DPCT1007:264: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-    */
-    //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-    //if(FORMATB == COL_TURING)
-      /*
-      DPCT1007:265: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_turing, sizeof(col_turing)));
-    //else
-      /*
-      DPCT1007:266: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_ampere, sizeof(col_ampere)));
-    
-    //if(DTYPE_OUT == 32)
-     //{
-      /*
-      DPCT1007:267: Migration of cublasLtMatmulDescCreate is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, dpct::library_data_t::real_int32));
-      /*
-      DPCT1007:268: Migration of cublasLtMatmulDescSetAttribute is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
-      /*
-      DPCT1007:269: Migration of cublasLtMatrixLayoutCreate is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, dpct::library_data_t::real_int32, m, n, ldc));
-      /*
-      DPCT1007:270: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      //int alpha = 1, beta = 0;
-      /*
-      DPCT1007:271: Migration of cublasLtMatmul is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int32_t*)C, Cdesc, (int32_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
-    //}
-    //else
-    //{
-      /*
-      DPCT1007:272: Migration of cublasLtMatmulDescCreate is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, dpct::library_data_t::real_float));
-      /*
-      DPCT1007:273: Migration of cublasLtMatmulDescSetAttribute is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
-      /*
-      DPCT1007:274: Migration of cublasLtMatrixLayoutCreate is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, dpct::library_data_t::real_int8, m, n, ldc));
-      /*
-      DPCT1007:275: Migration of cublasLtMatrixLayoutSetAttribute is not supported.
-      */
-      //has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      //if(!SCALE_ROWS)
-      //{
-        //float alpha = 1.0f, beta = 0.0f;
-        /*
-        DPCT1007:276: Migration of cublasLtMatmul is not supported.
-        */
-        //has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
-      //}
-      //else
-      //{
-        /*
-        DPCT1007:277: Migration of cublasLtMatmulDescSetAttribute is not supported.
-        */
-        //has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_POINTER_MODE, &alphaVec, sizeof(alphaVec)));
-        /*
-        DPCT1007:278: Migration of cublasLtMatmul is not supported.
-        */
-        //has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc, row_scale, A, Adesc, B, Bdesc, NULL, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, &q_ct1));
-      //}
-    //}
-
-
-    /*
-    DPCT1007:279: Migration of cublasLtMatrixLayoutDestroy is not supported.
-    */
-    //if (Cdesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Cdesc));
-    /*
-    DPCT1007:280: Migration of cublasLtMatrixLayoutDestroy is not supported.
-    */
-    //if (Bdesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Bdesc));
-    /*
-    DPCT1007:281: Migration of cublasLtMatrixLayoutDestroy is not supported.
-    */
-    //if (Adesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Adesc));
-    /*
-    DPCT1007:282: Migration of cublasLtMatmulDescDestroy is not supported.
-    */
-    //if (matmulDesc) has_error |= checkCublasStatus(cublasLtMatmulDescDestroy(matmulDesc));
-    //if(has_error == 1)
-      //printf("error detected");
-
-    //return has_error;
-//#endif // NO_CUBLASLT
 }
 catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
@@ -1768,12 +1536,43 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, sycl::half 
   num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
   num_blocks = num_blocks*(tileCols/32);
   assert(threads <= tilesize);
+  
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
 
-  kdequant_mm_int32_fp16<4, 128, 512><<<num_blocks, threads>>>(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n);
+  int size= NUM_BLOCK;
+  int *buff_A;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
+  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+    q_ct1.submit(
+		[&](sycl::handler &cgh) {
+  
+            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
+            using group_exchange = dpct::group::exchange<float, ITEMS_PER_THREAD>;
+            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
+            size_t exchange_temp_storage_size = group_exchange::get_local_memory_size(NUM_BLOCK);
+            
+            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+            sycl::local_accessor<uint8_t, 1> exacc(exchange_temp_storage_size, cgh);
+            
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_rowStats_acc_ct1(sycl::range<1>(256), cgh);
+            
+			      cgh.parallel_for(
+			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE), sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE)), 
+			        [=](sycl::nd_item<3> item_ct1) {
+  kdequant_mm_int32_fp16<4, 128, 512>(buff_A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n, item_ct1,smem_rowStats_acc_ct1.get_pointer(), ltacc_T, exacc );
+           });
+  
+  });
   /*
   DPCT1010:283: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
-  CUDA_CHECK_RETURN(0);
+  //CUDA_CHECK_RETURN(0);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
 }
 
 
@@ -1800,8 +1599,9 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
   int num_blocks = row_tiles * col_tiles;
   
   int size = NUM_BLOCK;
-  *((sycl::half **)&buff_A) = sycl::malloc_device(size, A, ctx);
-  q_ct1.memcpy((sycl::half*)(buff_A), (sycl::half*)(A), size);
+  sycl::half *buff_A;
+  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
+  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
   
 
   if(nnz_threshold == 0.0)
@@ -1818,12 +1618,17 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
                 
             sycl::local_accessor<uint8_t, 1> exacc(exchange_temp_storage_size, cgh);
             sycl::local_accessor<uint8_t, 1> ltacc_half(load_temp_storage_size_half, cgh);
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<int, 1> smem_row_nnz_values_acc_ct1(sycl::range<1>(256), cgh);
+                        
                         
        cgh.parallel_for(      
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
             [=](sycl::nd_item<3> item_ct1) {
               kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats,
-               nnz_count_row,    nnz_threshold, rows, cols, tiledRows, tiledCols, ltacc_half, exacc);
+               nnz_count_row,    nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), ltacc_half, exacc);
             });
        });
     }
@@ -1840,12 +1645,17 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
                 
             sycl::local_accessor<uint8_t, 1> exacc(exchange_temp_storage_size, cgh);
             sycl::local_accessor<uint8_t, 1> ltacc_half(load_temp_storage_size_half, cgh);
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<int, 1> smem_row_nnz_values_acc_ct1(sycl::range<1>(256), cgh);
+               
                         
       cgh.parallel_for(      
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
           [=](sycl::nd_item<3> item_ct1) {
             kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats,
-             nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols, ltacc_half, exacc);
+             nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), ltacc_half, exacc);
       });
     });
     }
@@ -1854,6 +1664,8 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
   DPCT1010:284: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
   */
   //CUDA_CHECK_RETURN(0);
+  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
+  
 
 }
 
@@ -1864,7 +1676,7 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
   sycl::context ctx = q_ct1.get_context();
 	int num_blocks = 0;
   int size = NUM_BLOCK;
-  sycl::half *buff_A,
+  sycl::half *buff_A;
   char *buff_out_row_normed, *buff_out_col_normed;
   *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
   *((void **)&buff_out_row_normed) = sycl::malloc_device(size, dev_ct1, ctx);
@@ -1883,7 +1695,7 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
 	int col_tiles = (tiledCols/tile_cols);
 	row_tiles = row_tiles > 0 ? row_tiles : 1;
 	col_tiles = col_tiles > 0 ? col_tiles : 1;
-  int num_blocks = row_tiles * col_tiles;
+  num_blocks = row_tiles * col_tiles;
 
 
   if(threshold > 0.0f)
@@ -1902,12 +1714,16 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
             sycl::local_accessor<uint8_t, 1> ltacc_half(load_temp_storage_size_half, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_char1(store_temp_storage_size_char1, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_char2(store_temp_storage_size_char2, cgh);
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
                         
         cgh.parallel_for(      
            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
            [=](sycl::nd_item<3> item_ct1) {
           
-                kDoubleRowColQuant<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats, buff_out_col_normed, buff_out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, ltacc_half, stacc_char1, stacc_char2);
+                kDoubleRowColQuant<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats, buff_out_col_normed, buff_out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), ltacc_half, stacc_char1, stacc_char2);
           });
       });
     }
@@ -1933,7 +1749,7 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
            [=](sycl::nd_item<3> item_ct1) {
           
-                kDoubleRowColQuant<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, ltacc_half, stacc_char1, stacc_char2);
+                kDoubleRowColQuant<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), ltacc_half, stacc_char1, stacc_char2);
           });
       });
   
@@ -1974,7 +1790,7 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
 	int col_tiles = (tiledCols/tile_cols);
 	row_tiles = row_tiles > 0 ? row_tiles : 1;
 	col_tiles = col_tiles > 0 ? col_tiles : 1;
-  int num_blocks = row_tiles * col_tiles;
+  num_blocks = row_tiles * col_tiles;
 
   int outCols = fill_up_to_nearest_multiple(cols, 32);
   int outRows = fill_up_to_nearest_multiple(rows, 32);
@@ -2354,25 +2170,25 @@ template void func<unsigned char, FILL>(unsigned char *A, unsigned char *B, unsi
 template void func<float, ARANGE>(float *A, float *B, float value, long n);
 template void func<float, _MUL>(float *A, float *B, float value, long n);
 
-template void gemm_4bit_inference<sycl::half>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
-template void gemm_4bit_inference_naive<sycl::half, 16>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, sycl::half * out,  int lda, int ldb, int ldc, int blocksize);
-template void gemm_4bit_inference_naive<bfloat16, 16>(int m, int n, int k, bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, bfloat16 * out,  int lda, int ldb, int ldc, int blocksize);
+template void gemm_4bit_inference<sycl::half>(int m, int n, int k, sycl::half * A,  unsigned char* B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize);
+template void gemm_4bit_inference_naive<sycl::half, 16>(int m, int n, int k, sycl::half * A,  unsigned char* B,  float *absmax, float *datatype, sycl::half * out,  int lda, int ldb, int ldc, int blocksize);
+template void gemm_4bit_inference_naive<bf16, 16>(int m, int n, int k, bf16 * A,  unsigned char* B,  float *absmax, float *datatype, bf16 * out,  int lda, int ldb, int ldc, int blocksize);
 template void gemm_4bit_inference_naive<float, 32>(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize);
 
 //template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc, int bits);
-template void gemm_host<sycl::half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc, int bits);
+template void gemm_host<sycl::half>(int m, int n, int k, sycl::half * A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc, int bits);
 template void extractOutliers<COL_TURING>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 
 template void spmm_coo_very_sparse_naive<sycl::half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
-template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, ycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
+template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, sycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
-template int igemmlt<COL_TURING, 32, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_TURING, 8, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_TURING, 8, 1>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_AMPERE, 32, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_AMPERE, 8, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_AMPERE, 8, 1>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_TURING, 32, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_TURING, 8, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_TURING, 8, 1>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_AMPERE, 32, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_AMPERE, 8, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_AMPERE, 8, 1>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
 
 template void transformRowToFormat<COL32, 0>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL32, 1>(char * A, char *out, int rows, int cols);
@@ -2392,10 +2208,10 @@ template void quantizeBlockwise<float, 1, General8bit>(float * code, float *A, f
 template void quantizeBlockwise<float, 0, General8bit>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void quantizeBlockwise<float, 0, FP4>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void quantizeBlockwise<float, 0, NF4>(float * code, float *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<bfloat16, 1, General8bit>(float * code, bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<bfloat16, 0, General8bit>(float * code, bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<bfloat16, 0, FP4>(float * code, bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template void quantizeBlockwise<bfloat16, 0, NF4>(float * code, bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<bf16, 1, General8bit>(float * code, bf16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<bf16, 0, General8bit>(float * code, bf16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<bf16, 0, FP4>(float * code, bf16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
+template void quantizeBlockwise<bf16, 0, NF4>(float * code, bf16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 
 template void dequantizeBlockwise<float, General8bit>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
 template void dequantizeBlockwise<float, FP4>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
@@ -2403,9 +2219,9 @@ template void dequantizeBlockwise<float, NF4>(float *code, unsigned char *A, flo
 template void dequantizeBlockwise<sycl::half, General8bit>(float *code, unsigned char *A, float *absmax, sycl::half *out, int blocksize, const int n);
 template void dequantizeBlockwise<sycl::half, FP4>(float *code, unsigned char *A, float *absmax, sycl::half *out, int blocksize, const int n);
 template void dequantizeBlockwise<sycl::half, NF4>(float *code, unsigned char *A, float *absmax, sycl::half *out, int blocksize, const int n);
-template void dequantizeBlockwise<bfloat16, General8bit>(float *code, unsigned char *A, float *absmax, bfloat16 *out, int blocksize, const int n);
-template void dequantizeBlockwise<bfloat16, FP4>(float *code, unsigned char *A, float *absmax, bfloat16 *out, int blocksize, const int n);
-template void dequantizeBlockwise<bfloat16, NF4>(float *code, unsigned char *A, float *absmax, bfloat16 *out, int blocksize, const int n);
+template void dequantizeBlockwise<bf16, General8bit>(float *code, unsigned char *A, float *absmax, bf16 *out, int blocksize, const int n);
+template void dequantizeBlockwise<bf16, FP4>(float *code, unsigned char *A, float *absmax, bf16 *out, int blocksize, const int n);
+template void dequantizeBlockwise<bf16, NF4>(float *code, unsigned char *A, float *absmax, bf16 *out, int blocksize, const int n);
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
@@ -2415,14 +2231,14 @@ template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
 
 MAKE_optimizer32bit(ADAM, sycl::half)
 MAKE_optimizer32bit(ADAM, float)
-MAKE_optimizer32bit(ADAM, bfloat16)
+MAKE_optimizer32bit(ADAM, bf16)
 MAKE_optimizer32bit(MOMENTUM, sycl::half)
 MAKE_optimizer32bit(MOMENTUM, float)
 MAKE_optimizer32bit(RMSPROP, sycl::half)
 MAKE_optimizer32bit(RMSPROP, float)
 MAKE_optimizer32bit(LION, sycl::half)
 MAKE_optimizer32bit(LION, float)
-MAKE_optimizer32bit(LION, bfloat16)
+MAKE_optimizer32bit(LION, bf16)
 MAKE_optimizer32bit(ADAGRAD, sycl::half)
 MAKE_optimizer32bit(ADAGRAD, float)
 
@@ -2450,7 +2266,7 @@ template void optimizerStatic8bitBlockwise<gtype, optim_name>(gtype* p, gtype* g
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,  \
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n); \
 
-MAKE_optimizerStatic8bitBlockwise(half, ADAM);
+MAKE_optimizerStatic8bitBlockwise(sycl::half, ADAM);
 MAKE_optimizerStatic8bitBlockwise(float, ADAM);
 MAKE_optimizerStatic8bitBlockwise(sycl::half, MOMENTUM);
 MAKE_optimizerStatic8bitBlockwise(float, MOMENTUM);
@@ -2458,11 +2274,11 @@ MAKE_optimizerStatic8bitBlockwise(sycl::half, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(float, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(sycl::half, LION);
 MAKE_optimizerStatic8bitBlockwise(float, LION);
-MAKE_optimizerStatic8bitBlockwise(bfloat16, LION);
+MAKE_optimizerStatic8bitBlockwise(bf16, LION);
 MAKE_optimizerStatic8bitBlockwise(sycl::half, ADAGRAD);
 MAKE_optimizerStatic8bitBlockwise(float, ADAGRAD);
 
 template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
 template void percentileClipping(sycl::half * g, float *gnorm_vec, int step, const int n);
 
-MAKE_optimizerStatic8bitBlockwise(bfloat16, ADAM);
+MAKE_optimizerStatic8bitBlockwise(bf16, ADAM);
