@@ -1434,8 +1434,8 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   const auto a_md = DTYPE ==32 ? memory::desc({dim1, dim2}, dt::s32, a_strides) : memory::desc({dim1, dim2}, dt::s8, a_strides);
   const memory::dims out_strides = memory::dims {ldOut, 1};
   const auto out_md = DTYPE ==32 ? memory::desc({dim1, dim2}, dt::s32, out_strides) : memory::desc({dim1, dim2}, dt::s8, out_strides);
-  const memory::dims Aout_strides = memory::dims {ldAOut, 1};
-  const auto aout_md = DTYPE == 32 ? memory::desc({dim1, dim2}, dt::s32) : memory::desc({dim1, dim2}, dt::s8);
+  const memory::dims aout_strides = memory::dims {ldAOut, 1};
+  const auto aout_md = DTYPE == 32 ? memory::desc({dim1, dim2}, dt::s32, aout_strides) : memory::desc({dim1, dim2}, dt::s8, aout_strides);
   
   //memory align
   memory a_mem(a_md, engine, A);
@@ -1477,14 +1477,14 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt( int m, int n,
     auto dev = sycl::device(sycl::gpu_selector_v);
     auto ctx = sycl::context(dev);
     
-    dnnl::engine engine = sycL_interop::make_engine(dev, ctx);
+    dnnl::engine engine = dnnl::sycl_interop::make_engine(dev, ctx);
     // column major 
     const memory::dims a_strides = memory::dims {1, lda};
     const auto a_md = memory::desc({m, k}, dt::s8, a_strides);
     const memory::dims b_strides = memory::dims {ldb, 1};
     const auto b_md = memory::desc({k, n}, dt::s8, b_strides);
     const memory::dims c_strides = memory::dims {ldc, 1};
-    const auto c_md = DTYPE == 32 ? memory::desc({m, n}, dt::s32, c_strides) : memory::desc({m, n}, dt::s8, c_strides);
+    const auto c_md = DTYPE_OUT == 32 ? memory::desc({m, n}, dt::s32, c_strides) : memory::desc({m, n}, dt::s8, c_strides);
     
     //memory align
     memory a_mem(a_md, engine, A);
@@ -1723,7 +1723,7 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
            [=](sycl::nd_item<3> item_ct1) {
           
-                kDoubleRowColQuant<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats, buff_out_col_normed, buff_out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), ltacc_half, stacc_char1, stacc_char2);
+                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats, buff_out_col_normed, buff_out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), ltacc_half, stacc_char1, stacc_char2);
           });
       });
     }
@@ -1744,12 +1744,16 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
             sycl::local_accessor<uint8_t, 1> ltacc_half(load_temp_storage_size_half, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_char1(store_temp_storage_size_char1, cgh);
             sycl::local_accessor<uint8_t, 1> stacc_char2(store_temp_storage_size_char2, cgh);
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
+            
                         
         cgh.parallel_for(      
            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
            [=](sycl::nd_item<3> item_ct1) {
           
-                kDoubleRowColQuant<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), ltacc_half, stacc_char1, stacc_char2);
+                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), ltacc_half, stacc_char1, stacc_char2);
           });
       });
   
