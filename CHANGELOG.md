@@ -1,3 +1,23 @@
+### 0.43.1
+
+#### Improvements and New Features:
+
+- Improved the serialization format for 8-bit weights; this change is fully backwards compatible. (#1164, thanks to @younesbelkada for the contributions and @akx for the review).
+- Added CUDA 12.4 support to the Linux x86-64 build workflow, expanding the library's compatibility with the latest CUDA versions. (#1171, kudos to @matthewdouglas for this addition).
+- Docs enhancement: Improved the instructions for installing the library from source. (#1149, special thanks to @stevhliu for the enhancements).
+
+#### Bug Fixes
+
+- Fix 4bit quantization with blocksize = 4096, where an illegal memory access was encountered. (#1160, thanks @matthewdouglas for fixing and @YLGH for reporting)
+
+#### Internal Improvements:
+
+- Tests: improve memory usage (#1147, thanks @matthewdouglas)
+- Add CUDA 12.4 to docs/install helper (#1136, thanks @matthewdouglas)
+- Minor type/doc fixes (#1128, thanks @akx)
+- Reformat Python code with Ruff (#1081, thanks @akx)
+- Rework of CUDA/native-library setup and diagnostics (#1041, thanks @akx)
+
 ### 0.43.0
 
 #### Improvements and New Features:
