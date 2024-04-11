@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import torch
 from . import research, utils
 from .autograd._functions import (
     MatmulLtState,
@@ -14,13 +15,22 @@ from .autograd._functions import (
 )
 from .cextension import lib
 from .nn import modules
+from .backends import register_backend
 
 if lib and lib.compiled_with_cuda:
-    from .backends import register_backend
     from .backends.cuda import CUDABackend
     from .optim import adam
 
     register_backend("cuda", CUDABackend())
+
+elif torch.xpu.is_available():
+    from .backends.xpu import XPUBackend
+    register_backend("xpu", XPUBackend)
+
+else:
+    from .backends.cpu import CPUBackend
+    register_backend("cpu", CPUBackend)
+
 __pdoc__ = {
     "libbitsandbytes": False,
     "optim.optimizer.Optimizer8bit": False,
