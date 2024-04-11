@@ -1,6 +1,6 @@
 ### 0.43.1
 
-#### Improvements and New Features:
+#### Improvements:
 
 - Improved the serialization format for 8-bit weights; this change is fully backwards compatible. (#1164, thanks to @younesbelkada for the contributions and @akx for the review).
 - Added CUDA 12.4 support to the Linux x86-64 build workflow, expanding the library's compatibility with the latest CUDA versions. (#1171, kudos to @matthewdouglas for this addition).
