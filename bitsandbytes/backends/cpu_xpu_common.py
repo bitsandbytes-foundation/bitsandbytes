@@ -125,13 +125,9 @@ def igemmlt_impl(
         m = shapeA[0]
     elif dimsA == 3:
         m = shapeA[0] * shapeA[1]
-    if shapeA[-1] == shapeB[0]:
-        B = B.t()
-        shapeB = B.shape
-    else:
-        assert shapeA[-1] == shapeB[-1], f'Shapes of A and B do not match, got {shapeA} and {shapeB}'
     n = shapeB[0]
     k = shapeA[-1]
+    assert shapeA[-1] == shapeB[-1], f'Shapes of A and B do not match, got {shapeA} and {shapeB}'
 
     # if the tensor is empty, return a transformed empty tensor with the right dimensions
     if shapeA[0] == 0 and dimsA == 2:
