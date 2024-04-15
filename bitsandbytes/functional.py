@@ -2177,7 +2177,7 @@ def vectorwise_quant(x, dim=1, quant_type="vector"):
         return xq, max1
     elif quant_type in ["vector", "row"]:
         max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
-        xq = torch.round(x * (C / max1)).to(torch.int8)
+        xq = torch.clamp(torch.round(x * (C / max1)), -128, 127).to(torch.int8)
         return xq, max1
     elif quant_type == "zeropoint":
         dtype = x.dtype

@@ -17,19 +17,14 @@ from .cextension import lib
 from .nn import modules
 from .backends import register_backend
 
+from .backends.cpu import CPUBackend
+register_backend("cpu", CPUBackend)
+
 if lib and lib.compiled_with_cuda:
     from .backends.cuda import CUDABackend
     from .optim import adam
 
     register_backend("cuda", CUDABackend())
-
-elif torch.xpu.is_available():
-    from .backends.xpu import XPUBackend
-    register_backend("xpu", XPUBackend)
-
-else:
-    from .backends.cpu import CPUBackend
-    register_backend("cpu", CPUBackend)
 
 __pdoc__ = {
     "libbitsandbytes": False,
