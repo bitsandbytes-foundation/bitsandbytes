@@ -198,3 +198,7 @@ def unpack_tensor_to_dict(tensor_data):
     unpacked_dict = json.loads(json_str)
 
     return unpacked_dict
+
+
+LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING = {"row": 0, "col32": 1, "col_turing": 2, "col_ampere": 3}
+INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING = {val: name for (name, val) in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.items()}

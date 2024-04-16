@@ -12,4 +12,4 @@ class BinaryDistribution(Distribution):
         return True
 
 
-setup(version="0.44.0.dev0", packages=find_packages(), distclass=BinaryDistribution)
+setup(version="0.43.2.dev0", packages=find_packages(), distclass=BinaryDistribution)
