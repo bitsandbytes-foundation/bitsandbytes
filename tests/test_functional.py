@@ -1221,6 +1221,8 @@ def test_coo_double_quant(dim1, dim2, device, dtype):
         CA2, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
 
+        if idx.sum() > 0:
+            assert coo_tensor is not None
         if coo_tensor is not None:
             A1 = A * idx
             A2 = torch.zeros_like(A)
@@ -1229,7 +1231,7 @@ def test_coo_double_quant(dim1, dim2, device, dtype):
 
             A1 = A * (idx == 0)
             A2 = (CA.float() * statsA.unsqueeze(1) / 127).to(dtype)
-            torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
+            torch.testing.assert_close(A1, A2, rtol=0.05, atol=1.5e-2)
 
 
 @pytest.mark.parametrize("dim1", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim1"))

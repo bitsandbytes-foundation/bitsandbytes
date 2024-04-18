@@ -1,4 +1,5 @@
 import torch
+import warnings
 
 
 Tensor = torch.Tensor
@@ -66,7 +67,7 @@ def double_quant_impl(
         if row_stats is None or col_stats is None:
             row_stats, col_stats = get_row_col_stats(A)
     else:
-        outlier_indices = torch.abs(A) > threshold # find outliers
+        outlier_indices = torch.abs(A) >= threshold # find outliers
         outlier_coord = outlier_indices.nonzero() # get outlier coordinates
         outlier_rows = outlier_coord[:, 0] # outlier row for COO sparse tensor
         outlier_cols = outlier_coord[:, 1] # outlier column for COO sparse tensor
@@ -77,10 +78,13 @@ def double_quant_impl(
         if row_stats is None or col_stats is None:
             A[outlier_indices] = 0 # zero out outliers
             row_stats, col_stats = get_row_col_stats(A)
-            A[outlier_indices] = outlier_values # restore outliers for later use
 
     quant_by_row = quant_to_int8(A, row_stats.unsqueeze(-1))
     quant_by_col = quant_to_int8(A, col_stats.unsqueeze(0))
+
+    if coo_tensor is not None:
+        A[outlier_indices] = outlier_values # restore outliers for later use
+
     if out_row is not None:
         out_row.copy_(quant_by_row)
     else:
@@ -189,6 +193,9 @@ def mm_dequant_impl(
     if len(out_shape) == 3:
         out_shape = (out_shape[0] * out_shape[1], out_shape[2])
 
+    if compute_dtype not in [torch.float32, torch.bfloat16]:
+        warnings.warn(f"mm_dequant_{A.device}: compute_dtype {compute_dtype} is not supported, will use float instead")
+        compute_dtype = torch.float32
     A_reshaped = A.reshape(out_shape).to(compute_dtype)
     row_stats = row_stats.reshape(-1).unsqueeze(-1).to(compute_dtype)
     col_stats = col_stats.reshape(-1).unsqueeze(0).to(compute_dtype)

@@ -594,19 +594,6 @@ class Int8Params(torch.nn.Parameter):
         setattr(self, "SCB", SCB)
         return self
 
-    def xpu(self):
-        # we store the 8-bit rows-major weight
-        B = self.data.contiguous().half().cpu()
-        CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-        if CBt is not None:
-            del CBt
-        if SCBt is not None:
-            del SCBt
-        self.data = CB
-        setattr(self, "CB", CB)
-        setattr(self, "SCB", SCB)
-        return self
-
     @overload
     def to(
         self: T,
@@ -626,12 +613,6 @@ class Int8Params(torch.nn.Parameter):
 
         if device is not None and device.type == "cuda" and self.data.device.type == "cpu":
             return self.cuda(device)
-        elif (
-            device is not None
-            and device.type == "xpu"
-            and self.data.dtype != torch.int8
-        ):
-            return self.xpu()
         elif (
             device is not None
             and device.type == "cpu"

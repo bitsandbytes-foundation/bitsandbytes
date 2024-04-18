@@ -31,7 +31,7 @@ class CPUBackend:
         cls, A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
     ):
         assert_on_cpu([A, col_stats, row_stats, out_col, out_row])
-        return double_quant_impl(A, col_stats, row_stats, out_col, out_row)
+        return double_quant_impl(A, col_stats, row_stats, out_col, out_row, threshold)
 
     @classmethod
     def transform(cls, A, to_order=None, from_order='row', out=None, transpose=False, state=None, ld=None):
