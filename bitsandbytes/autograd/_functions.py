@@ -8,7 +8,7 @@ from warnings import warn
 import torch
 
 import bitsandbytes.functional as F
-
+from bitsandbytes.cextension import BNB_HIP_VERSION
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
@@ -218,7 +218,7 @@ matmul_cublas = MatMul8bit.apply
 def supports_igemmlt(device: torch.device) -> bool:
     """check if this device supports the optimized int8 kernel"""
     if torch.version.hip:
-        return True
+        return False if BNB_HIP_VERSION < 601 else True
     if torch.cuda.get_device_capability(device=device) < (7, 5):
         return False
     device_name = torch.cuda.get_device_name(device=device)
