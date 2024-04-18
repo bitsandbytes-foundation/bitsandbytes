@@ -7,8 +7,9 @@ from warnings import warn
 
 import torch
 
-import bitsandbytes.functional as F
 from bitsandbytes.cextension import BNB_HIP_VERSION
+import bitsandbytes.functional as F
+
 
 # math.prod not compatible with python < 3.8
 def prod(iterable):
