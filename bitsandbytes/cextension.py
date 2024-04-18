@@ -37,7 +37,10 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     The library is not guaranteed to exist at the returned path.
     """
     if torch.version.hip:
-        return PACKAGE_DIR / f"libbitsandbytes_hip{DYNAMIC_LIBRARY_SUFFIX}"
+        if BNB_HIP_VERSION < 601:
+            return PACKAGE_DIR / f"libbitsandbytes_hip_nohipblaslt{DYNAMIC_LIBRARY_SUFFIX}"
+        else:
+            return PACKAGE_DIR / f"libbitsandbytes_hip{DYNAMIC_LIBRARY_SUFFIX}"
     library_name = f"libbitsandbytes_cuda{cuda_specs.cuda_version_string}"
     if not cuda_specs.has_cublaslt:
         # if not has_cublaslt (CC < 7.5), then we have to choose _nocublaslt
@@ -111,8 +114,12 @@ def get_native_library() -> BNBNativeLibrary:
 
 
 try:
+    if torch.version.hip:
+        hip_major, hip_minor = map(int, torch.version.hip.split(".")[0:2])
+        HIP_ENVIRONMENT, BNB_HIP_VERSION = True, hip_major * 100 + hip_minor
+    else:
+        HIP_ENVIRONMENT, BNB_HIP_VERSION = False, 0
     lib = get_native_library()
-    HIP_ENVIRONMENT = True if torch.version.hip else False
 except Exception as e:
     lib = None
     logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
