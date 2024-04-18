@@ -25,7 +25,6 @@ if lib and lib.compiled_with_cuda:
     from .optim import adam
 
     register_backend("cuda", CUDABackend())
-
 __pdoc__ = {
     "libbitsandbytes": False,
     "optim.optimizer.Optimizer8bit": False,

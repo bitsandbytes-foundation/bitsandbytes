@@ -22,7 +22,7 @@ def _maybe_torch_compile(func):
     return func
 
 
-@_maybe_torch_compile
+# Don't use torch.compile for now due to PyTorch issue https://github.com/pytorch/pytorch/issues/124382
 def double_quant_impl(
     A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
 ):
