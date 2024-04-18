@@ -188,7 +188,12 @@ elseif(BUILD_HIP)
     list(APPEND SRC_FILES ${HIP_FILES})
 
     string(APPEND BNB_OUTPUT_NAME "_hip")
-    if(NO_CUBLASLT)
+
+    # get hip version
+    execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
+    string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
+
+    if(NO_CUBLASLT OR HIP_VERSION VERSION_LESS "6.1")
         string(APPEND BNB_OUTPUT_NAME "_nohipblaslt")
     endif()
     add_compile_definitions(__HIP_PLATFORM_AMD__)
@@ -277,7 +282,7 @@ if(BUILD_HIP)
     set_source_files_properties(${HIP_FILES} PROPERTIES LANGUAGE HIP)
     set_target_properties(bitsandbytes PROPERTIES LINKER_LANGUAGE CXX)
 
-    if(NO_CUBLASLT)
+    if(NO_CUBLASLT OR HIP_VERSION VERSION_LESS "6.1")
 	target_compile_definitions(bitsandbytes PUBLIC NO_HIPBLASLT)
     else()
 	find_package(hipblaslt)
