@@ -11,7 +11,7 @@ import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
-from bitsandbytes.cextension import HIP_ENVIRONMENT
+from bitsandbytes.cextension import HIP_ENVIRONMENT, BNB_HIP_VERSION
 from tests.helpers import BOOLEAN_TUPLES, TRUE_FALSE, describe_dtype, get_blocksizes, get_test_dims, id_formatter
 
 torch.set_printoptions(precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000)
@@ -505,6 +505,7 @@ def test_vector_quant(dim1, dim2, dim3):
         assert_all_approx_close(A1, A, atol=0.01, rtol=0.1, count=int(n * 0.002))
 
 
+@pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
 @pytest.mark.parametrize("dim1", get_test_dims(2, 256, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(2, 256, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", get_test_dims(2, 256, n=2), ids=id_formatter("dim3"))
@@ -1733,6 +1734,7 @@ def test_zeropoint():
     print(err1, err2, err3, err4, err5, err6)
 
 
+@pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
 def test_extract_outliers():
     for i in range(k):
         shapeA = (4096, 4096 * 4)
