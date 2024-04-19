@@ -932,7 +932,7 @@ def test_colrow_absmax(dim1, dim2, dims):
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
 def test_double_quant(dim1, dim2, device, dtype):
     if device == "cuda" and dtype == torch.bfloat16:
-        pytest.skip("BFloat16 not supported on CUDA")
+        pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
     for i in range(k):
         A = torch.randn(dim1, dim2, device=device).to(dtype)
         out_col1, Scol = F.vectorwise_quant(A, dim=0)
@@ -1212,7 +1212,7 @@ def test_overflow():
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
 def test_coo_double_quant(dim1, dim2, device, dtype):
     if device == "cuda" and dtype == torch.bfloat16:
-        pytest.skip("BFloat16 not supported on CUDA")
+        pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
     threshold = 3.00
     for i in range(k):
         A = torch.randn(dim1, dim2, device=device).to(dtype)
