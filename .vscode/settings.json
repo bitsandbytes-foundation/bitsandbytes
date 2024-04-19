@@ -1,0 +1,7 @@
+{
+    "ruff.fixAll": true,
+    "ruff.lint.run": "onType",
+    "editor.codeActionsOnSave": {
+        "source.fixAll": "always"
+    }
+}

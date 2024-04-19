@@ -1,8 +1,6 @@
 import torch
-import bitsandbytes as bnb
+
 from bitsandbytes import functional as F
-
-
 
 
 def debug_blocksize(block):
@@ -10,6 +8,7 @@ def debug_blocksize(block):
     qx, qstate = F.quantize_fp4(x, blocksize=block)
     dq = F.dequantize_fp4(qx, qstate)
     return torch.sum(torch.linalg.norm(x - dq, ord="fro"))
+
 
 def test_blocksize(block):
     x = torch.randn(10, 10).cuda()
@@ -20,10 +19,8 @@ def test_blocksize(block):
     print("---------------")
     print(qstate)
 
-    
-
 
 for block in [128, 256, 512, 1024, 2048]:
     print(debug_blocksize(block))
 
-#test_blocksize(2048)
+# test_blocksize(2048)

@@ -52,6 +52,7 @@ struct AlgoVecBase<I, T, A, typename std::enable_if<DirectAux::IsDirect2<A>::val
 private:
     typedef AlgoScalarBase<T, A> base_t;
 
+#ifdef USE_SSE2
     FORCE_INLINE
         //NO_INLINE
         void resolve(const FVec<SSE, float>& vz, const IVec<SSE, float>& bidx, uint32 *pr) const
@@ -135,6 +136,7 @@ private:
         pr[0] = u.ui32[0];
         pr[1] = u.ui32[2];
     }
+#endif // USE_SSE2
 
 #ifdef USE_AVX
 
@@ -157,7 +159,7 @@ private:
         FVec<AVX, float> vxp = _mm256_i32gather_ps(xi, idxp, sizeof(float));
         IVec<AVX, float> ip = idxm;
 
-#else // do not use gather instrucions
+#else // do not use gather instructions
 
         union U {
             __m256i vec;

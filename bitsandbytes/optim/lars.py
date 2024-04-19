@@ -23,10 +23,35 @@ class LARS(Optimizer1State):
         percentile_clipping=100,
         max_unorm=0.02,
     ):
+        """
+        Base LARS optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`):
+                The learning rate.
+            momentum (`float`, defaults to 0):
+                The momentum value speeds up the optimizer by taking bigger steps.
+            dampening (`float`, defaults to 0):
+                The dampening value reduces the momentum of the optimizer.
+            weight_decay (`float`, defaults to 1e-2):
+                The weight decay value for the optimizer.
+            nesterov (`bool`, defaults to `False`):
+                Whether to use Nesterov momentum.
+            optim_bits (`int`, defaults to 32):
+                The number of bits of the optimizer state.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            max_unorm (`float`, defaults to 0.02):
+                The maximum gradient norm.
+        """
         if momentum == 0:
-            raise NotImplementedError(
-                "LARS without momentum is not supported!"
-            )
+            raise NotImplementedError("LARS without momentum is not supported!")
         super().__init__(
             "lars",
             params,
@@ -57,10 +82,33 @@ class LARS8bit(Optimizer1State):
         percentile_clipping=100,
         max_unorm=0.02,
     ):
+        """
+        8-bit LARS optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`):
+                The learning rate.
+            momentum (`float`, defaults to 0):
+                The momentum value speeds up the optimizer by taking bigger steps.
+            dampening (`float`, defaults to 0):
+                The dampening value reduces the momentum of the optimizer.
+            weight_decay (`float`, defaults to 1e-2):
+                The weight decay value for the optimizer.
+            nesterov (`bool`, defaults to `False`):
+                Whether to use Nesterov momentum.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            max_unorm (`float`, defaults to 0.02):
+                The maximum gradient norm.
+        """
         if momentum == 0:
-            raise NotImplementedError(
-                "LARS without momentum is not supported!"
-            )
+            raise NotImplementedError("LARS without momentum is not supported!")
         super().__init__(
             "lars",
             params,
@@ -91,10 +139,33 @@ class LARS32bit(Optimizer1State):
         percentile_clipping=100,
         max_unorm=0.02,
     ):
+        """
+        32-bit LARS optimizer.
+
+        Arguments:
+            params (`torch.tensor`):
+                The input parameters to optimize.
+            lr (`float`):
+                The learning rate.
+            momentum (`float`, defaults to 0):
+                The momentum value speeds up the optimizer by taking bigger steps.
+            dampening (`float`, defaults to 0):
+                The dampening value reduces the momentum of the optimizer.
+            weight_decay (`float`, defaults to 1e-2):
+                The weight decay value for the optimizer.
+            nesterov (`bool`, defaults to `False`):
+                Whether to use Nesterov momentum.
+            args (`object`, defaults to `None`):
+                An object with additional arguments.
+            min_8bit_size (`int`, defaults to 4096):
+                The minimum number of elements of the parameter tensors for 8-bit optimization.
+            percentile_clipping (`int`, defaults to 100):
+                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
+            max_unorm (`float`, defaults to 0.02):
+                The maximum gradient norm.
+        """
         if momentum == 0:
-            raise NotImplementedError(
-                "LARS without momentum is not supported!"
-            )
+            raise NotImplementedError("LARS without momentum is not supported!")
         super().__init__(
             "lars",
             params,
@@ -127,9 +198,7 @@ class PytorchLARS(Optimizer):
         if momentum < 0.0:
             raise ValueError(f"Invalid momentum value: {momentum}")
         if weight_decay < 0.0:
-            raise ValueError(
-                f"Invalid weight_decay value: {weight_decay}"
-            )
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = dict(
             lr=lr,
@@ -140,9 +209,7 @@ class PytorchLARS(Optimizer):
             max_unorm=max_unorm,
         )
         if nesterov and (momentum <= 0 or dampening != 0):
-            raise ValueError(
-                "Nesterov momentum requires a momentum and zero dampening"
-            )
+            raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super().__init__(params, defaults)
 
     def __setstate__(self, state):

@@ -1,0 +1,21 @@
+# for cmake build
+name: bnb
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+
+dependencies:
+  - python
+  #- accelerate
+  #- einops
+  - scipy
+  #- transformers
+  - pytest
+  - pytest-cases
+  - ipython
+  - debugpy
+  - yapf
+  - monkeytype
+  - rich
+  - pytest-sugar

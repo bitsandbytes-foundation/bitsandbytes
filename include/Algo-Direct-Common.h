@@ -190,7 +190,7 @@ struct DirectInfo
                 xi = xws;
             }
             else {
-                myassert(Gap==1, "if Gap>1 then X workspace must be provided");
+                myassert((Gap==1), "if Gap>1 then X workspace must be provided");
                 xi = x;
             }
 

@@ -7,7 +7,10 @@
 #include <ops.cuh>
 #endif
 #if BUILD_HIP
-#include <ops.hiph>
+#include <ops_hip.cuh>
+#endif
+#if BUILD_MPS
+// #include <mps_ops.h>
 #endif
 #include <cpu_ops.h>
 
@@ -170,7 +173,6 @@ void dequantizeBlockwise_bf16_fp4(float *code, unsigned char *A, float *absmax, 
 void dequantizeBlockwise_bf16_nf4(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n){ dequantizeBlockwise<hip_bfloat16, NF4>(NULL, A, absmax, out, blocksize, n); }
 #endif
 
-#ifndef NO_HIPBLASLT
 #if BUILD_CUDA
 #define MAKE_FUNC_TRANSFORM(fbits, fsrc, ftrgt, ftranspose, dtype, src, target, transpose, bits) \
 void transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose(cublasLtHandle_t ltHandle, dtype *A, dtype *out, int dim1, int dim2) \
@@ -204,7 +206,6 @@ MAKE_FUNC_TRANSFORM(32, row, col, t, int32_t, ROW, COL, true, 32);
 MAKE_FUNC_TRANSFORM(8, col, row, n, int8_t, COL, ROW, false, 8);
 MAKE_FUNC_TRANSFORM(32, col, row, n, int32_t, COL, ROW, false, 32);
 #endif
-#endif
 
 void transform_row2col32(char * A, char *out, int rows, int cols){ transformRowToFormat<COL32, 0>(A, out, rows, cols); }
 void transform_row2col32T(char * A, char *out, int rows, int cols){ transformRowToFormat<COL32, 1>(A, out, rows, cols); }
@@ -215,8 +216,6 @@ void transform_row2ampereT(char * A, char *out, int rows, int cols){ transformRo
 
 void extractOutliers_turing(char * A, int *idx, char *out, int idx_size, int rows, int cols){ extractOutliers<COL_TURING>(A, idx, out, idx_size, rows, cols); }
 void extractOutliers_ampere(char * A, int *idx, char *out, int idx_size, int rows, int cols){ extractOutliers<COL_AMPERE>(A, idx, out, idx_size, rows, cols); }
-
-#ifndef NO_HIPBLASLT
 
 #if defined(BUILD_CUDA)
  int igemmlt_turing_32(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
@@ -256,8 +255,6 @@ void extractOutliers_ampere(char * A, int *idx, char *out, int idx_size, int row
 
  int igemmlt_ampere_8_rowscale(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
 	{ return igemmlt<COL_AMPERE, 8, 1>(ltHandle, m, n, k, A, B, C, row_scale, lda, ldb, ldc); }
-#endif
-
 #endif
 
 void spmm_coo_very_sparse_naive_fp16(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
@@ -406,8 +403,6 @@ extern "C"
 	ContextHipsparse *get_hipsparse(){ return new ContextHipsparse(); }
 #endif
 
-
-#ifndef NO_HIPBLASLT
 #if BUILD_CUDA
 	int cigemmlt_turing_32(Context *context, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
 	{ return igemmlt_turing_32((cublasLtHandle_t) context->m_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc); }
@@ -434,7 +429,7 @@ extern "C"
 	{ \
 		transform_##fbits##_##fsrc##_to_##ftrgt##_##ftranspose((cublasLtHandle_t) context->m_handle, A, out, dim1, dim2); \
 	} \
-	
+
 #endif
 
 #if BUILD_HIP
@@ -484,7 +479,7 @@ extern "C"
 	MAKE_FUNC_CTRANSFORM(8, col, row, n, int8_t, COL, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(32, col, row, n, int32_t, COL, ROW, false, 32)
 	#endif
-#endif
+
 	void cdequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, half* bias, int numRows, int numCols)
 	{ dequant_mm_int32_fp16(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols); }
 	void cget_col_row_stats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)
@@ -555,7 +550,7 @@ extern "C"
 		int hasPrefetch = 0;
 		CUDA_CHECK_RETURN(cudaDeviceGetAttribute(&hasPrefetch, cudaDevAttrConcurrentManagedAccess, device)); // 40ns overhead
 		if (hasPrefetch == 0) return;
- 
+
 		CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, device, 0));
 		CUDA_CHECK_RETURN(cudaPeekAtLastError());
 	}
@@ -577,7 +572,7 @@ extern "C"
 		int hasPrefetch = 0;
 		CUDA_CHECK_RETURN(hipDeviceGetAttribute(&hasPrefetch, hipDeviceAttributeConcurrentManagedAccess, device)); // 40ns overhead
 		if (hasPrefetch == 0) return;
- 
+
 		CUDA_CHECK_RETURN(hipMemPrefetchAsync(ptr, bytes, device, 0));
 		CUDA_CHECK_RETURN(hipPeekAtLastError());
 	}
@@ -605,6 +600,7 @@ extern "C"
 	{ gemm_4bit_inference_naive_fp32(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
 #endif
+
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }
 	void cdequantize_blockwise_cpu_fp32(float *code, unsigned char *A, float *absmax, float *out, long long blocksize, long long n){ dequantize_cpu(code, A, absmax, out, blocksize, n); }
 }
