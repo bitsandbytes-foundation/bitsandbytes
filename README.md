@@ -35,7 +35,7 @@ git clone --recurse https://github.com/ROCm/bitsandbytes
 cd bitsandbytes
 # Checkout branch as needed
 # for rocm 5.7 - rocm5.7_internal_testing
-# for rocm 6.2 - rocm6.2_internal_testing
+# for rocm 6.x - rocm6.2_internal_testing
 git checkout <branch>
 make hip
 python setup.py install
