@@ -116,6 +116,9 @@ class CUDABackend(Backend):
         return out_row, out_col, row_stats, col_stats, coo_tensor
 
     def transform(self, A, to_order, from_order="row", out=None, transpose=False, state=None, ld=None):
+        if HIP_ENVIRONMENT:
+            return nvidia_transform(A, to_order, from_order, out, transpose, state, ld)
+
         prev_device = pre_call(A.device)
         if state is None:
             state = (A.shape, from_order)
