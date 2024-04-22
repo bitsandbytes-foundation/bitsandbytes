@@ -13,6 +13,7 @@ from bitsandbytes.functional import (
     get_colrow_absmax,
     get_ptr,
     get_transform_buffer,
+    nvidia_transform,
     is_on_gpu,
     post_call,
     pre_call,
@@ -278,6 +279,8 @@ class CUDABackend(Backend):
     def mm_dequant(
         self, A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None, bias=None
     ):
+        if HIP_ENVIRONMENT:
+            A, quant_state = nvidia_transform(A, "row", state=quant_state)
         assert A.dtype == torch.int32
         if bias is not None:
             assert bias.dtype == torch.float16
