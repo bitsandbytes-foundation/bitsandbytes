@@ -12,9 +12,15 @@ from .autograd._functions import (
     matmul_cublas,
     mm_cublas,
 )
+from .cextension import lib
 from .nn import modules
-from .optim import adam
 
+if lib and lib.compiled_with_cuda:
+    from .backends import register_backend
+    from .backends.cuda import CUDABackend
+    from .optim import adam
+
+    register_backend("cuda", CUDABackend())
 __pdoc__ = {
     "libbitsandbytes": False,
     "optim.optimizer.Optimizer8bit": False,
