@@ -1,13 +1,13 @@
-import torch
 import warnings
 
+import torch
 
 Tensor = torch.Tensor
 
 
 def _torch_version_prereq(major, minor):
-    ver_major = int(torch.__version__.split('.')[0])
-    ver_minor = int(torch.__version__.split('.')[1])
+    ver_major = int(torch.__version__.split(".")[0])
+    ver_minor = int(torch.__version__.split(".")[1])
     return ver_major * 32 + ver_minor >= major * 32 + minor
 
 
@@ -23,14 +23,12 @@ def _maybe_torch_compile(func):
 
 
 # Don't use torch.compile for now due to PyTorch issue https://github.com/pytorch/pytorch/issues/124382
-def double_quant_impl(
-    A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0
-):
+def double_quant_impl(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
     """
     Find absolute max valus of each row/column of a tensor, and symmetrically quantize it to int8.
     If threshold > 0.0, only values <= threshold are counted. All outliers are zeroed out in
     the original tensor and they are kept in COO format: (rows, cols, valus)
-    If threashold == 0.0, there are no outliers.
+    If threshold == 0.0, there are no outliers.
     Args:
         A The tensor to be analyzed and quantized.
         col_stats Absolute max values of each column of A. If it is not None, use the values directly.
@@ -45,6 +43,7 @@ def double_quant_impl(
         each row of A, absolute max values of each column of A, outliers in COO format
     """
     from ..functional import COOSparseTensor
+
     cols = A.shape[-1]
     if len(A.shape) == 3:
         rows = A.shape[0] * A.shape[1]
@@ -56,8 +55,8 @@ def double_quant_impl(
     coo_tensor = None
 
     def get_row_col_stats(A):
-        row_stats = torch.max(torch.abs(A), 1).values # absolute max of each row
-        col_stats = torch.max(torch.abs(A), 0).values # absolute max of each col
+        row_stats = torch.max(torch.abs(A), 1).values  # absolute max of each row
+        col_stats = torch.max(torch.abs(A), 0).values  # absolute max of each col
         return row_stats, col_stats
 
     def quant_to_int8(A, stats):
@@ -67,23 +66,23 @@ def double_quant_impl(
         if row_stats is None or col_stats is None:
             row_stats, col_stats = get_row_col_stats(A)
     else:
-        outlier_indices = torch.abs(A) >= threshold # find outliers
-        outlier_coord = outlier_indices.nonzero() # get outlier coordinates
-        outlier_rows = outlier_coord[:, 0] # outlier row for COO sparse tensor
-        outlier_cols = outlier_coord[:, 1] # outlier column for COO sparse tensor
-        outlier_values = A[outlier_indices] # outlier values for COO sparse tensor
+        outlier_indices = torch.abs(A) >= threshold  # find outliers
+        outlier_coord = outlier_indices.nonzero()  # get outlier coordinates
+        outlier_rows = outlier_coord[:, 0]  # outlier row for COO sparse tensor
+        outlier_cols = outlier_coord[:, 1]  # outlier column for COO sparse tensor
+        outlier_values = A[outlier_indices]  # outlier values for COO sparse tensor
         coo_tensor = COOSparseTensor(
             A.shape[0], A.shape[1], outlier_values.numel(), outlier_rows.int(), outlier_cols.int(), outlier_values
         )
         if row_stats is None or col_stats is None:
-            A[outlier_indices] = 0 # zero out outliers
+            A[outlier_indices] = 0  # zero out outliers
             row_stats, col_stats = get_row_col_stats(A)
 
     quant_by_row = quant_to_int8(A, row_stats.unsqueeze(-1))
     quant_by_col = quant_to_int8(A, col_stats.unsqueeze(0))
 
     if coo_tensor is not None:
-        A[outlier_indices] = outlier_values # restore outliers for later use
+        A[outlier_indices] = outlier_values  # restore outliers for later use
 
     if out_row is not None:
         out_row.copy_(quant_by_row)
@@ -97,9 +96,7 @@ def double_quant_impl(
     return out_row, out_col, row_stats.float(), col_stats.float(), coo_tensor
 
 
-def igemmlt_impl(
-    A, B, SA=None, SB=None, out=None, Sout=None, dtype=torch.int32
-):
+def igemmlt_impl(A, B, SA=None, SB=None, out=None, Sout=None, dtype=torch.int32):
     """
     Do GEMMM computation. Data type: int8 * int8 -> int32.
     Args:
@@ -122,8 +119,8 @@ def igemmlt_impl(
     dimsB = B.ndim
     shapeA = A.shape
     shapeB = B.shape
-    assert dimsA in [2, 3], 'Only two or three dimensional matrices are supported for argument A'
-    assert dimsB == 2, 'Only two dimensional matrices are supported for argument B'
+    assert dimsA in [2, 3], "Only two or three dimensional matrices are supported for argument A"
+    assert dimsB == 2, "Only two dimensional matrices are supported for argument B"
 
     if dimsA == 2:
         m = shapeA[0]
@@ -131,7 +128,7 @@ def igemmlt_impl(
         m = shapeA[0] * shapeA[1]
     n = shapeB[0]
     k = shapeA[-1]
-    assert shapeA[-1] == shapeB[-1], f'Shapes of A and B do not match, got {shapeA} and {shapeB}'
+    assert shapeA[-1] == shapeB[-1], f"Shapes of A and B do not match, got {shapeA} and {shapeB}"
 
     # if the tensor is empty, return a transformed empty tensor with the right dimensions
     if shapeA[0] == 0 and dimsA == 2:
@@ -169,7 +166,7 @@ def mm_dequant_impl(
     new_col_stats=None,
     bias=None,
     compute_dtype=torch.float32,
-    output_dtype=torch.float32
+    output_dtype=torch.float32,
 ):
     """
     Dequant and add bias

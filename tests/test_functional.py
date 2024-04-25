@@ -928,7 +928,7 @@ def test_colrow_absmax(dim1, dim2, dims):
 
 @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("device", ["cuda","cpu"], ids=id_formatter("device"))
+@pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
 def test_double_quant(dim1, dim2, device, dtype):
     if device == "cuda" and dtype == torch.bfloat16:
@@ -1208,7 +1208,7 @@ def test_overflow():
 
 @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("device", ["cuda","cpu"], ids=id_formatter("device"))
+@pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
 def test_coo_double_quant(dim1, dim2, device, dtype):
     if device == "cuda" and dtype == torch.bfloat16:

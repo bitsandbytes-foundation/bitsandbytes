@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import torch
+
 from . import research, utils
 from .autograd._functions import (
     MatmulLtState,
@@ -13,11 +14,11 @@ from .autograd._functions import (
     matmul_cublas,
     mm_cublas,
 )
+from .backends import register_backend
+from .backends.cpu import CPUBackend
 from .cextension import lib
 from .nn import modules
-from .backends import register_backend
 
-from .backends.cpu import CPUBackend
 register_backend("cpu", CPUBackend)
 
 if lib and lib.compiled_with_cuda:

@@ -590,8 +590,8 @@ class Int8Params(torch.nn.Parameter):
         if SCBt is not None:
             del SCBt
         self.data = CB
-        setattr(self, "CB", CB)
-        setattr(self, "SCB", SCB)
+        self.CB = CB
+        self.SCB = SCB
         return self
 
     @overload
@@ -613,10 +613,7 @@ class Int8Params(torch.nn.Parameter):
 
         if device.type == "cuda" and self.data.device.type == "cpu":
             return self.cuda(device)
-        elif (
-            device.type == "cpu"
-            and self.data.dtype != torch.int8
-        ):
+        elif device.type == "cpu" and self.data.dtype != torch.int8:
             return self.cpu()
         else:
             new_param = Int8Params(
