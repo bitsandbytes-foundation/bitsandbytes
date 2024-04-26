@@ -94,6 +94,9 @@ def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -
     :param tile_indices: reverse transformation indices, from get_inverse_transform_indices
     :return: contiguous row-major tensor
     """
+    # CPU has no change on layout
+    if permuted_tensor.device.type == "cpu":
+        return permuted_tensor
     (rows, cols), (tile_rows, tile_cols) = permuted_tensor.shape, tile_indices.shape
     assert rows % tile_rows == cols % tile_cols == 0, "tensor must contain a whole number of tiles"
     tensor = permuted_tensor.reshape(-1, tile_indices.numel()).t()
