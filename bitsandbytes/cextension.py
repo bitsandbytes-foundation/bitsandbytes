@@ -19,6 +19,9 @@ evaluation:
 import ctypes as ct
 import logging
 import os
+import subprocess
+import re
+
 from pathlib import Path
 
 import torch
@@ -117,8 +120,14 @@ try:
     if torch.version.hip:
         hip_major, hip_minor = map(int, torch.version.hip.split(".")[0:2])
         HIP_ENVIRONMENT, BNB_HIP_VERSION = True, hip_major * 100 + hip_minor
+        result = subprocess.run(['rocminfo'], capture_output=True, text=True)
+        match = re.search(r'Name:\s+gfx(\d+)', result.stdout)
+        if match:
+            ROCM_GPU_ARCH = "gfx" + match.group(1)
+        else:
+            ROCM_GPU_ARCH = "unknown"
     else:
-        HIP_ENVIRONMENT, BNB_HIP_VERSION = False, 0
+        HIP_ENVIRONMENT, BNB_HIP_VERSION, ROCM_GPU_ARCH = False, 0, "unknown"
     lib = get_native_library()
 except Exception as e:
     lib = None
