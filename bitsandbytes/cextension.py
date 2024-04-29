@@ -27,7 +27,7 @@ from pathlib import Path
 import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
-from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs
+from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_rocm_gpu_arch
 
 logger = logging.getLogger(__name__)
 
@@ -116,18 +116,14 @@ def get_native_library() -> BNBNativeLibrary:
     return BNBNativeLibrary(dll)
 
 
+ROCM_GPU_ARCH = get_rocm_gpu_arch()
+
 try:
     if torch.version.hip:
         hip_major, hip_minor = map(int, torch.version.hip.split(".")[0:2])
         HIP_ENVIRONMENT, BNB_HIP_VERSION = True, hip_major * 100 + hip_minor
-        result = subprocess.run(['rocminfo'], capture_output=True, text=True)
-        match = re.search(r'Name:\s+gfx(\d+)', result.stdout)
-        if match:
-            ROCM_GPU_ARCH = "gfx" + match.group(1)
-        else:
-            ROCM_GPU_ARCH = "unknown"
     else:
-        HIP_ENVIRONMENT, BNB_HIP_VERSION, ROCM_GPU_ARCH = False, 0, "unknown"
+        HIP_ENVIRONMENT, BNB_HIP_VERSION = False, 0
     lib = get_native_library()
 except Exception as e:
     lib = None
