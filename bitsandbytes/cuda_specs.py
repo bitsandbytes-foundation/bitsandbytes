@@ -1,8 +1,8 @@
 import dataclasses
-from typing import List, Optional, Tuple
 import logging
-import subprocess
 import re
+import subprocess
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -62,9 +62,9 @@ def get_rocm_gpu_arch() -> str:
         logger.error(f"Could not detect ROCm GPU architecture: {e}")
         if torch.cuda.is_available():
             logger.warning(
-            """
+                """
 ROCm GPU architecture detection failed despite ROCm being available.
-            """,
+                """,
         )
         return "unknown"
 

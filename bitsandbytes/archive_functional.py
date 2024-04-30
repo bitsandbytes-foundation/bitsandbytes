@@ -6,7 +6,7 @@ import ctypes as ct
 from functools import reduce  # Required in Python 3
 import itertools
 import operator
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy.stats import norm

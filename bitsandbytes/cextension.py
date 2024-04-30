@@ -19,9 +19,6 @@ evaluation:
 import ctypes as ct
 import logging
 import os
-import subprocess
-import re
-
 from pathlib import Path
 
 import torch
