@@ -6,7 +6,7 @@ import ctypes as ct
 from functools import reduce  # Required in Python 3
 import itertools
 import operator
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 from scipy.stats import norm
@@ -170,9 +170,7 @@ dtype2bytes[torch.uint8] = 1
 dtype2bytes[torch.int8] = 1
 
 
-def get_paged(*shape, dtype=torch.float32, device=None):
-    if device is None:
-        torch.device("cuda", index=0)
+def get_paged(*shape, dtype=torch.float32, device=torch.device("cuda", index=0)):
     num_bytes = dtype2bytes[dtype] * prod(shape)
     cuda_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
     c_ptr = ct.cast(cuda_ptr, ct.POINTER(ct.c_int))
@@ -248,8 +246,8 @@ def create_linear_map(signed=True, total_bits=8, add_zero=True):
     if gap == 0:
         return values
     else:
-        l_var = values.numel() // 2
-        return torch.Tensor(values[:l_var].tolist() + [0] * gap + values[l_var:].tolist())
+        l = values.numel() // 2
+        return torch.Tensor(values[:l].tolist() + [0] * gap + values[l:].tolist())
 
 
 def create_normal_map(offset=0.9677083, use_extra_value=True):
@@ -681,7 +679,7 @@ def quantize_blockwise(
 
 def dequantize_blockwise(
     A: Tensor,
-    quant_state: Optional[Tuple[Tensor, Tensor]] = None,
+    quant_state: Tuple[Tensor, Tensor] = None,
     absmax: Tensor = None,
     code: Tensor = None,
     out: Tensor = None,
@@ -859,7 +857,7 @@ def quantize_4bit(
 
 def dequantize_fp4(
     A: Tensor,
-    quant_state: Optional[Tuple[Tensor, Tensor]] = None,
+    quant_state: Tuple[Tensor, Tensor] = None,
     absmax: Tensor = None,
     out: Tensor = None,
     blocksize: int = 64,
@@ -869,7 +867,7 @@ def dequantize_fp4(
 
 def dequantize_nf4(
     A: Tensor,
-    quant_state: Optional[Tuple[Tensor, Tensor]] = None,
+    quant_state: Tuple[Tensor, Tensor] = None,
     absmax: Tensor = None,
     out: Tensor = None,
     blocksize: int = 64,
@@ -879,7 +877,7 @@ def dequantize_nf4(
 
 def dequantize_4bit(
     A: Tensor,
-    quant_state: Optional[Tuple[Tensor, Tensor]] = None,
+    quant_state: Tuple[Tensor, Tensor] = None,
     absmax: Tensor = None,
     out: Tensor = None,
     blocksize: int = 64,
@@ -981,7 +979,7 @@ def quantize(A: Tensor, code: Tensor = None, out: Tensor = None) -> Tensor:
 
 def dequantize(
     A: Tensor,
-    quant_state: Optional[Tuple[Tensor, Tensor]] = None,
+    quant_state: Tuple[Tensor, Tensor] = None,
     absmax: Tensor = None,
     code: Tensor = None,
     out: Tensor = None,

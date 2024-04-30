@@ -2243,8 +2243,8 @@ def test_managed():
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
 @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
 @pytest.mark.skipif(
-        HIP_ENVIRONMENT and ROCM_GPU_ARCH == "gfx90a", 
-        reason="this test is not supported on ROCm with gfx90a architecture yet",
+    HIP_ENVIRONMENT and ROCM_GPU_ARCH == "gfx90a",
+    reason="this test is not supported on ROCm with gfx90a architecture yet",
 )
 def test_gemv_eye_4bit(storage_type, dtype, double_quant):
     dims = 10

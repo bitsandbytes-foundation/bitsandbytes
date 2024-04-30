@@ -46,12 +46,13 @@ def get_cuda_specs() -> Optional[CUDASpecs]:
         cuda_version_tuple=get_cuda_version_tuple(),
     )
 
+
 def get_rocm_gpu_arch() -> str:
     logger = logging.getLogger(__name__)
     try:
         if torch.version.hip:
-            result = subprocess.run(['rocminfo'], capture_output=True, text=True)
-            match = re.search(r'Name:\s+gfx(\d+)', result.stdout)
+            result = subprocess.run(["rocminfo"], capture_output=True, text=True)
+            match = re.search(r"Name:\s+gfx(\d+)", result.stdout)
             if match:
                 return "gfx" + match.group(1)
             else:
@@ -65,6 +66,5 @@ def get_rocm_gpu_arch() -> str:
                 """
 ROCm GPU architecture detection failed despite ROCm being available.
                 """,
-        )
+            )
         return "unknown"
-
