@@ -63,10 +63,12 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         arch: [x86_64, aarch64]
         cuda_version:
-          ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2"]
+          ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.0"]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
+          - os: windows-latest  # The Jimver/cuda-toolkit is action used for Windows builds is not updated for 12.4 yet.
+            cuda_version: "12.4.0"
           - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
             arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
