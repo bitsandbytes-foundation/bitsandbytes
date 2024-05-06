@@ -339,7 +339,7 @@ class CUDABackend(Backend):
 
         prev_device = pre_call(A.device)
 
-        if formatA == "col_turing" or HIP_ENVIRONMENT::
+        if formatA == "col_turing" or HIP_ENVIRONMENT:
             lib.cextractOutliers_turing(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
         elif formatA == "col_ampere":
             lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
