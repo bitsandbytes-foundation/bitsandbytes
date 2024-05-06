@@ -25,9 +25,9 @@ def _maybe_torch_compile(func):
 # Don't use torch.compile for now due to PyTorch issue https://github.com/pytorch/pytorch/issues/124382
 def double_quant_impl(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
     """
-    Find absolute max valus of each row/column of a tensor, and symmetrically quantize it to int8.
+    Find absolute max values of each row/column of a tensor, and symmetrically quantize it to int8.
     If threshold > 0.0, only values <= threshold are counted. All outliers are zeroed out in
-    the original tensor and they are kept in COO format: (rows, cols, valus)
+    the original tensor and they are kept in COO format: (rows, cols, values)
     If threshold == 0.0, there are no outliers.
     Args:
         A The tensor to be analyzed and quantized.
