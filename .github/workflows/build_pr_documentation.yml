@@ -16,3 +16,4 @@ jobs:
       pr_number: ${{ github.event.number }}
       package: bitsandbytes
       repo_owner: TimDettmers
+      custom_container: huggingface/transformers-doc-builder
