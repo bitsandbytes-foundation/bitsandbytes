@@ -353,13 +353,13 @@ class CUDABackend(Backend):
         A: torch.Tensor,
         absmax: Optional[torch.Tensor] = None,
         out: Optional[torch.Tensor] = None,
-        blocksize=64,
+        blocksize: Optional[int] = None,
         compress_statistics=False,
         quant_type="fp4",
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
-        if HIP_ENVIRONMENT:
-            blocksize = 128
+        if blocksize is None:
+            blocksize = 64 if not HIP_ENVIRONMENT else 128
         if A.device.type != "cuda":
             raise NotImplementedError(f"Device type not supported for FP4 quantization: {A.device.type}")
         if quant_type not in ["fp4", "nf4"]:
@@ -451,11 +451,11 @@ class CUDABackend(Backend):
         quant_state: Optional[QuantState] = None,
         absmax: Optional[torch.Tensor] = None,
         out: Optional[torch.Tensor] = None,
-        blocksize: int = 64,
+        blocksize: Optional[int] = None,
         quant_type="fp4",
     ) -> torch.Tensor:
-        if HIP_ENVIRONMENT:
-            blocksize = 128
+        if blocksize is None:
+            blocksize = 64 if not HIP_ENVIRONMENT else 128
         supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
         if HIP_ENVIRONMENT:
             supported_blocksizes = supported_blocksizes[:-1]
