@@ -585,6 +585,19 @@ class Int8Params(torch.nn.Parameter):
 
         return self
 
+    def cpu(self):
+        # we store the 8-bit rows-major weight
+        B = self.data.contiguous().bfloat16().cpu()
+        CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
+        if CBt is not None:
+            del CBt
+        if SCBt is not None:
+            del SCBt
+        self.data = CB
+        self.CB = CB
+        self.SCB = SCB
+        return self
+
     @overload
     def to(
         self: T,
@@ -602,8 +615,10 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None and device.type == "cuda" and self.data.device.type == "cpu":
+        if device.type == "cuda" and self.data.device.type == "cpu":
             return self.cuda(device)
+        elif device.type == "cpu" and self.data.dtype != torch.int8:
+            return self.cpu()
         else:
             new_param = Int8Params(
                 super().to(device=device, dtype=dtype, non_blocking=non_blocking),
