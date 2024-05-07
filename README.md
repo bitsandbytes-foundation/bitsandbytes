@@ -14,6 +14,6 @@ There are ongoing efforts to support further hardware backends, i.e. Intel CPU +
 
 ## License
 
-`bitsandbytes` MIT licensed.
+`bitsandbytes` is MIT licensed.
 
 We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fabiocannizzo/FastBinarySearch) which we use for CPU quantization.
