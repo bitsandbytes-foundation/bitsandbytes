@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 import torch
 
-from bitsandbytes.cextension import lib, HIP_ENVIRONMENT
+from bitsandbytes.cextension import HIP_ENVIRONMENT, lib
 from bitsandbytes.functional import (
     CUBLAS_Context,
     coo_zeros,
@@ -13,8 +13,8 @@ from bitsandbytes.functional import (
     get_colrow_absmax,
     get_ptr,
     get_transform_buffer,
-    nvidia_transform,
     is_on_gpu,
+    nvidia_transform,
     post_call,
     pre_call,
     prod,
@@ -254,7 +254,7 @@ class CUDABackend(Backend):
         ptrRowScale = get_ptr(None)
         is_on_gpu([A, B, out])
 
-        if formatB == "col_turing"  or HIP_ENVIRONMENT:
+        if formatB == "col_turing" or HIP_ENVIRONMENT:
             if dtype == torch.int32:
                 has_error = lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
             else:
