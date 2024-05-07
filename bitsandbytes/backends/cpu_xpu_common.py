@@ -5,6 +5,7 @@ import torch
 try:
     # to support Intel CPU/GPU (XPU) backend
     import intel_extension_for_pytorch as ipex
+
     ipex_cpu = ipex if ipex._C._has_cpu() else None
     ipex_xpu = ipex if ipex._C._has_xpu() else None
 except:

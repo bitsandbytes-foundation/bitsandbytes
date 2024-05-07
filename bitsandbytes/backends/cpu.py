@@ -5,7 +5,6 @@ import torch
 from bitsandbytes.utils import QuantState
 
 from .base import Backend
-
 from .cpu_xpu_common import (
     double_quant_impl,
     igemmlt_impl,
