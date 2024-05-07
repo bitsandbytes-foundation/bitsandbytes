@@ -8,7 +8,7 @@ try:
 
     ipex_cpu = ipex if ipex._C._has_cpu() else None
     ipex_xpu = ipex if ipex._C._has_xpu() else None
-except:
+except BaseException:
     ipex_cpu = None
     ipex_xpu = None
 
