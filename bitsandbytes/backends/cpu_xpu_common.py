@@ -2,6 +2,16 @@ import warnings
 
 import torch
 
+try:
+    # to support Intel CPU/GPU (XPU) backend
+    import intel_extension_for_pytorch as ipex
+    ipex_cpu = ipex if ipex._C._has_cpu() else None
+    ipex_xpu = ipex if ipex._C._has_xpu() else None
+except:
+    ipex_cpu = None
+    ipex_xpu = None
+
+
 Tensor = torch.Tensor
 
 
@@ -9,6 +19,22 @@ def _torch_version_prereq(major, minor):
     ver_major = int(torch.__version__.split(".")[0])
     ver_minor = int(torch.__version__.split(".")[1])
     return ver_major * 32 + ver_minor >= major * 32 + minor
+
+
+def _ipex_cpu_version_prereq(major, minor):
+    if ipex_cpu is not None:
+        ver_major = ipex_cpu.__version__.split(".")[0]
+        ver_minor = ipex_cpu.__version__.split(".")[1]
+        return int(ver_major) * 32 + int(ver_minor) >= major * 32 + minor
+    return False
+
+
+def _ipex_xpu_version_prereq(major, minor):
+    if ipex_xpu is not None:
+        ver_major = ipex_xpu.__version__.split(".")[0]
+        ver_minor = ipex_xpu.__version__.split(".")[1]
+        return int(ver_major) * 32 + int(ver_minor) >= major * 32 + minor
+    return False
 
 
 def _maybe_torch_compile(func):
