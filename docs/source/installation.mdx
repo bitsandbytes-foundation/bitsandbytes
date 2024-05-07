@@ -1,9 +1,17 @@
 # Installation
 
-bitsandbytes is only supported on CUDA GPUs for CUDA versions **11.0 - 12.3**. Select your operating system below to see the installation instructions.
+bitsandbytes is only supported on CUDA GPUs for CUDA versions **11.0 - 12.3**.
 
-<hfoptions id="OS system">
-<hfoption id="Linux">
+The latest version of bitsandbytes (v0.43.0) builds on:
+
+| OS | CUDA | Compiler |
+|---|---|---|
+| Linux | 11.7 - 12.3 | GCC 11.4 |
+|  | 12.4+ | GCC 13.2 |
+| Windows | 11.7 - 12.4 | MSVC 19.38+ (VS2022 17.8.0+) |
+
+> [!TIP]
+> MacOS support is still a work in progress! Subscribe to this [issue](https://github.com/TimDettmers/bitsandbytes/issues/1020) to get notified about discussions and to track the integration progress.
 
 For Linux systems, make sure your hardware meets the following requirements to use bitsandbytes features.
 
@@ -23,13 +31,26 @@ pip install bitsandbytes
 
 ## Compile from source
 
+For Linux and Windows systems, you can compile bitsandbytes from source. Installing from source allows for more build options with different CMake configurations.
+
+<hfoptions id="source">
+<hfoption id="Linux">
+
 To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. Make sure you have a compiler installed to compile C++ (gcc, make, headers, etc.). For example, to install a compiler and CMake on Ubuntu:
 
 ```bash
 apt-get install -y build-essential cmake
 ```
 
-You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide from NVIDIA.
+You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide from NVIDIA. The current expected CUDA Toolkit version is **11.1+** and it is recommended to install **GCC >= 7.3** and required to have at least **GCC >= 6**.
+
+Refer to the following table if you're using another CUDA Toolkit version.
+
+| CUDA Toolkit | GCC |
+|---|---|
+| >= 11.4.1 | >= 11 |
+| >= 12.0 | >= 12 |
+| >= 12.4 | >= 13 |
 
 Now to install the bitsandbytes package from source, run the following commands:
 
@@ -49,7 +70,13 @@ pip install .
 
 Windows systems require Visual Studio with C++ support as well as an installation of the CUDA SDK.
 
-You'll need to build bitsandbytes from source. To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA.
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA.
+
+Refer to the following table if you're using another CUDA Toolkit version.
+
+| CUDA Toolkit | MSVC |
+|---|---|
+| >= 11.6 | 19.30+ (VS2022) |
 
 ```bash
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
@@ -60,12 +87,6 @@ python -m build --wheel
 ```
 
 Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com/Jamezo97), [rickardp](https://github.com/rickardp), [akx](https://github.com/akx) for their amazing contributions to make bitsandbytes compatible with Windows.
-
-</hfoption>
-<hfoption id="MacOS">
-
-> [!TIP]
-> MacOS support is still a work in progress! Subscribe to this [issue](https://github.com/TimDettmers/bitsandbytes/issues/1020) to get notified about discussions and to track the integration progress.
 
 </hfoption>
 </hfoptions>

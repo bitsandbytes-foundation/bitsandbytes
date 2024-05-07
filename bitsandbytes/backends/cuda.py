@@ -1,5 +1,5 @@
 import ctypes as ct
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import torch
 
@@ -23,9 +23,69 @@ from bitsandbytes.utils import QuantState
 
 from .base import Backend
 
+if lib and lib.compiled_with_cuda:
+    """C FUNCTIONS FOR OPTIMIZERS"""
+    str2optimizer32bit = {
+        "adam": (
+            lib.cadam32bit_grad_fp32,
+            lib.cadam32bit_grad_fp16,
+            lib.cadam32bit_grad_bf16,
+        ),
+        "momentum": (
+            lib.cmomentum32bit_grad_32,
+            lib.cmomentum32bit_grad_16,
+        ),
+        "rmsprop": (
+            lib.crmsprop32bit_grad_32,
+            lib.crmsprop32bit_grad_16,
+        ),
+        "lion": (
+            lib.clion32bit_grad_fp32,
+            lib.clion32bit_grad_fp16,
+            lib.clion32bit_grad_bf16,
+        ),
+        "adagrad": (
+            lib.cadagrad32bit_grad_32,
+            lib.cadagrad32bit_grad_16,
+        ),
+    }
+
+    str2optimizer8bit_blockwise = {
+        "adam": (
+            lib.cadam_8bit_blockwise_grad_fp32,
+            lib.cadam_8bit_blockwise_grad_fp16,
+            lib.cadam_8bit_blockwise_grad_bf16,
+        ),
+        "momentum": (
+            lib.cmomentum_8bit_blockwise_grad_fp32,
+            lib.cmomentum_8bit_blockwise_grad_fp16,
+        ),
+        "rmsprop": (
+            lib.crmsprop_8bit_blockwise_grad_fp32,
+            lib.crmsprop_8bit_blockwise_grad_fp16,
+        ),
+        "lion": (
+            lib.clion_8bit_blockwise_grad_fp32,
+            lib.clion_8bit_blockwise_grad_fp16,
+            lib.clion_8bit_blockwise_grad_bf16,
+        ),
+        "adagrad": (
+            lib.cadagrad_8bit_blockwise_grad_fp32,
+            lib.cadagrad_8bit_blockwise_grad_fp16,
+        ),
+    }
+
 
 class CUDABackend(Backend):
-    def double_quant(self, A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
+    def double_quant(
+        self,
+        A: torch.Tensor,
+        col_stats: Optional[torch.Tensor] = None,
+        row_stats: Optional[torch.Tensor] = None,
+        out_col: Optional[torch.Tensor] = None,
+        out_row: Optional[torch.Tensor] = None,
+        threshold=0.0,
+    ):
         device = A.device
         assert A.dtype == torch.half
         assert device.type == "cuda"
@@ -114,7 +174,16 @@ class CUDABackend(Backend):
 
         return out_row, out_col, row_stats, col_stats, coo_tensor
 
-    def transform(self, A, to_order, from_order="row", out=None, transpose=False, state=None, ld=None):
+    def transform(
+        self,
+        A: torch.Tensor,
+        to_order: str,
+        from_order="row",
+        out: Optional[torch.Tensor] = None,
+        transpose=False,
+        state: Optional[Tuple[torch.Size, str]] = None,
+        ld=None,
+    ):
         prev_device = pre_call(A.device)
         if state is None:
             state = (A.shape, from_order)
@@ -166,7 +235,16 @@ class CUDABackend(Backend):
 
         return out, new_state
 
-    def igemmlt(self, A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
+    def igemmlt(
+        self,
+        A: torch.Tensor,
+        B: torch.Tensor,
+        SA: Tuple[torch.Size, str],
+        SB: Tuple[torch.Size, str],
+        out: Optional[torch.Tensor] = None,
+        Sout: Optional[Tuple[torch.Size, str]] = None,
+        dtype=torch.int32,
+    ):
         shapeA = SA[0]
         shapeB = SB[0]
         dimsA = len(shapeA)
@@ -260,7 +338,15 @@ class CUDABackend(Backend):
         return out, Sout
 
     def mm_dequant(
-        self, A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None, bias=None
+        self,
+        A: torch.Tensor,
+        quant_state: Tuple[torch.Size, str],
+        row_stats: torch.Tensor,
+        col_stats: torch.Tensor,
+        out: Optional[torch.Tensor] = None,
+        new_row_stats: Optional[torch.Tensor] = None,
+        new_col_stats: Optional[torch.Tensor] = None,
+        bias: Optional[torch.Tensor] = None,
     ):
         assert A.dtype == torch.int32
         if bias is not None:
@@ -297,7 +383,7 @@ class CUDABackend(Backend):
 
         return out
 
-    def extract_outliers(self, A, SA, idx):
+    def extract_outliers(self, A: torch.Tensor, SA: Tuple[torch.Size, str], idx: torch.Tensor):
         shapeA = SA[0]
         formatA = SA[1]
         assert formatA in ["col_turing", "col_ampere"]
@@ -330,7 +416,7 @@ class CUDABackend(Backend):
         out: Optional[torch.Tensor] = None,
         blocksize=64,
         compress_statistics=False,
-        quant_type="fp4",
+        quant_type: Literal["fp4", "nf4"] = "fp4",
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
         if A.device.type != "cuda":
@@ -395,7 +481,7 @@ class CUDABackend(Backend):
         if compress_statistics:
             offset = absmax.mean()
             absmax -= offset
-            qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
+            qabsmax, state2 = self.quantize_blockwise(absmax, blocksize=256)
             del absmax
             state = QuantState(
                 absmax=qabsmax,
@@ -422,7 +508,7 @@ class CUDABackend(Backend):
         absmax: Optional[torch.Tensor] = None,
         out: Optional[torch.Tensor] = None,
         blocksize: int = 64,
-        quant_type="fp4",
+        quant_type: Literal["fp4", "nf4"] = "fp4",
     ) -> torch.Tensor:
         if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
             raise ValueError(
@@ -442,7 +528,7 @@ class CUDABackend(Backend):
             absmax = quant_state.absmax
 
         if quant_state.nested:
-            absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+            absmax = self.dequantize_blockwise(quant_state.absmax, quant_state.state2)
             absmax += quant_state.offset
             if absmax.dtype != torch.float32:
                 absmax = absmax.float()
@@ -526,3 +612,240 @@ class CUDABackend(Backend):
             return out.t()
         else:
             return out
+
+    def gemv_4bit(
+        self,
+        A: torch.Tensor,
+        B: torch.Tensor,
+        out: Optional[torch.Tensor] = None,
+        transposed_A=False,
+        transposed_B=False,
+        state: QuantState = None,
+    ):
+        prev_device = pre_call(A.device)
+
+        if state is None:
+            raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
+
+        if A.numel() != A.shape[-1]:
+            raise ValueError(
+                'Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]',
+            )
+
+        Bshape = state.shape
+        bout = Bshape[0]
+        absmax = state.absmax
+        if state.nested:
+            absmax = self.dequantize_blockwise(state.absmax, state.state2)
+            absmax += state.offset
+
+        if out is None:
+            if len(A.shape) == 3:
+                out = torch.empty(size=(A.shape[0], A.shape[1], bout), dtype=A.dtype, device=A.device)
+            else:
+                out = torch.empty(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
+
+        n = 1
+        m = Bshape[0]
+        k = Bshape[1]
+        lda = Bshape[0]
+        ldc = Bshape[0]
+        ldb = (A.shape[-1] + 1) // 2
+        is_on_gpu([B, A, out, absmax, state.code])
+        m = ct.c_int32(m)
+        n = ct.c_int32(n)
+        k = ct.c_int32(k)
+        lda = ct.c_int32(lda)
+        ldb = ct.c_int32(ldb)
+        ldc = ct.c_int32(ldc)
+
+        inference_args = [
+            m,
+            n,
+            k,
+            get_ptr(A),
+            get_ptr(B),
+            get_ptr(absmax),
+            get_ptr(state.code),
+            get_ptr(out),
+            lda,
+            ldb,
+            ldc,
+            ct.c_int32(state.blocksize),
+        ]
+
+        if B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32]:
+            if A.dtype == torch.float16:
+                lib.cgemm_4bit_inference_naive_fp16(*inference_args)
+            elif A.dtype == torch.bfloat16:
+                lib.cgemm_4bit_inference_naive_bf16(*inference_args)
+            elif A.dtype == torch.float32:
+                lib.cgemm_4bit_inference_naive_fp32(*inference_args)
+            else:
+                raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
+
+        else:
+            raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
+
+        post_call(prev_device)
+
+        return out
+
+    def dequantize_blockwise(
+        self,
+        A: torch.Tensor,
+        quant_state: Optional[QuantState] = None,
+        absmax: Optional[torch.Tensor] = None,
+        code: Optional[torch.Tensor] = None,
+        out: Optional[torch.Tensor] = None,
+        blocksize: int = 4096,
+        nested=False,
+    ) -> torch.Tensor:
+        # TODO: Move from bnb.functional
+        return dequantize_blockwise(
+            A,
+            quant_state=quant_state,
+            absmax=absmax,
+            code=code,
+            out=out,
+            blocksize=blocksize,
+            nested=nested,
+        )
+
+    def quantize_blockwise(
+        self,
+        A: torch.Tensor,
+        code: Optional[torch.Tensor] = None,
+        absmax: Optional[torch.Tensor] = None,
+        out: Optional[torch.Tensor] = None,
+        blocksize=4096,
+        nested=False,
+    ) -> Tuple[torch.Tensor, QuantState]:
+        # TODO: Move from bnb.functional
+        return quantize_blockwise(
+            A,
+            absmax=absmax,
+            code=code,
+            out=out,
+            blocksize=blocksize,
+            nested=nested,
+        )
+
+    def optimizer_update_8bit_blockwise(
+        self,
+        optimizer_name: str,
+        g: torch.Tensor,
+        p: torch.Tensor,
+        state1: torch.Tensor,
+        state2: Optional[torch.Tensor],
+        beta1: float,
+        beta2: float,
+        eps: float,
+        step: int,
+        lr: float,
+        qmap1: torch.Tensor,
+        qmap2: Optional[torch.Tensor],
+        absmax1: torch.Tensor,
+        absmax2: Optional[torch.Tensor],
+        weight_decay: float = 0.0,
+        gnorm_scale: float = 1.0,
+        skip_zeros=False,
+    ) -> None:
+        optim_func = None
+        prev_device = pre_call(g.device)
+        is_on_gpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
+        if g.dtype == torch.float32 and state1.dtype == torch.uint8:
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
+        elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
+        elif (
+            g.dtype == torch.bfloat16
+            and state1.dtype == torch.uint8
+            and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
+        ):
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
+        else:
+            raise ValueError(
+                f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
+            )
+        post_call(prev_device)
+
+        is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
+
+        prev_device = pre_call(g.device)
+        optim_func(
+            get_ptr(p),
+            get_ptr(g),
+            get_ptr(state1),
+            get_ptr(state2),
+            ct.c_float(beta1),
+            ct.c_float(beta2),
+            ct.c_float(eps),
+            ct.c_int32(step),
+            ct.c_float(lr),
+            get_ptr(qmap1),
+            get_ptr(qmap2),
+            get_ptr(absmax1),
+            get_ptr(absmax2),
+            ct.c_float(weight_decay),
+            ct.c_float(gnorm_scale),
+            ct.c_bool(skip_zeros),
+            ct.c_int32(g.numel()),
+        )
+        post_call(prev_device)
+
+    def optimizer_update_32bit(
+        self,
+        optimizer_name: str,
+        g: torch.Tensor,
+        p: torch.Tensor,
+        state1: torch.Tensor,
+        beta1: float,
+        eps: float,
+        step: int,
+        lr: float,
+        state2: Optional[torch.Tensor] = None,
+        beta2: float = 0.0,
+        weight_decay: float = 0.0,
+        gnorm_scale: float = 1.0,
+        unorm_vec: Optional[torch.Tensor] = None,
+        max_unorm: float = 0.0,
+        skip_zeros=False,
+    ) -> None:
+        param_norm = 0.0
+        if max_unorm > 0.0:
+            param_norm = torch.norm(p.data.float())
+
+        optim_func = None
+        if g.dtype == torch.float32:
+            optim_func = str2optimizer32bit[optimizer_name][0]
+        elif g.dtype == torch.float16:
+            optim_func = str2optimizer32bit[optimizer_name][1]
+        elif g.dtype == torch.bfloat16 and len(str2optimizer32bit[optimizer_name]) == 3:
+            optim_func = str2optimizer32bit[optimizer_name][2]
+        else:
+            raise ValueError(
+                f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
+            )
+
+        is_on_gpu([g, p, state1, state2, unorm_vec])
+        prev_device = pre_call(g.device)
+        optim_func(
+            get_ptr(g),
+            get_ptr(p),
+            get_ptr(state1),
+            get_ptr(state2),
+            get_ptr(unorm_vec),
+            ct.c_float(max_unorm),
+            ct.c_float(param_norm),
+            ct.c_float(beta1),
+            ct.c_float(beta2),
+            ct.c_float(eps),
+            ct.c_float(weight_decay),
+            ct.c_int32(step),
+            ct.c_float(lr),
+            ct.c_float(gnorm_scale),
+            ct.c_bool(skip_zeros),
+            ct.c_int32(g.numel()),
+        )
+        post_call(prev_device)

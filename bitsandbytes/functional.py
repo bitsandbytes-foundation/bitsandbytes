@@ -27,31 +27,6 @@ name2qmap = {}
 
 if lib and lib.compiled_with_cuda:
     """C FUNCTIONS FOR OPTIMIZERS"""
-    str2optimizer32bit = {
-        "adam": (
-            lib.cadam32bit_grad_fp32,
-            lib.cadam32bit_grad_fp16,
-            lib.cadam32bit_grad_bf16,
-        ),
-        "momentum": (
-            lib.cmomentum32bit_grad_32,
-            lib.cmomentum32bit_grad_16,
-        ),
-        "rmsprop": (
-            lib.crmsprop32bit_grad_32,
-            lib.crmsprop32bit_grad_16,
-        ),
-        "lion": (
-            lib.clion32bit_grad_fp32,
-            lib.clion32bit_grad_fp16,
-            lib.clion32bit_grad_bf16,
-        ),
-        "adagrad": (
-            lib.cadagrad32bit_grad_32,
-            lib.cadagrad32bit_grad_16,
-        ),
-    }
-
     str2optimizer8bit = {
         "adam": (
             lib.cadam_static_8bit_grad_32,
@@ -76,31 +51,6 @@ if lib and lib.compiled_with_cuda:
         "lars": (
             lib.cmomentum_static_8bit_grad_32,
             lib.cmomentum_static_8bit_grad_16,
-        ),
-    }
-
-    str2optimizer8bit_blockwise = {
-        "adam": (
-            lib.cadam_8bit_blockwise_grad_fp32,
-            lib.cadam_8bit_blockwise_grad_fp16,
-            lib.cadam_8bit_blockwise_grad_bf16,
-        ),
-        "momentum": (
-            lib.cmomentum_8bit_blockwise_grad_fp32,
-            lib.cmomentum_8bit_blockwise_grad_fp16,
-        ),
-        "rmsprop": (
-            lib.crmsprop_8bit_blockwise_grad_fp32,
-            lib.crmsprop_8bit_blockwise_grad_fp16,
-        ),
-        "lion": (
-            lib.clion_8bit_blockwise_grad_fp32,
-            lib.clion_8bit_blockwise_grad_fp16,
-            lib.clion_8bit_blockwise_grad_bf16,
-        ),
-        "adagrad": (
-            lib.cadagrad_8bit_blockwise_grad_fp32,
-            lib.cadagrad_8bit_blockwise_grad_fp16,
         ),
     }
 
@@ -916,11 +866,12 @@ def get_4bit_type(typename, device=None, blocksize=64):
     if data is None:
         raise NotImplementedError(f"Typename {typename} not supported")
 
-    data = Tensor(data)
-    data /= data.abs().max()
+    data = torch.tensor(data, device=device)
+    data.div_(data.abs().max())
+
     assert data.numel() == 16
 
-    return data.to(device)
+    return data
 
 
 def quantize_fp4(
@@ -1167,82 +1118,24 @@ def optimizer_update_32bit(
     max_unorm: float = 0.0,
     skip_zeros=False,
 ) -> None:
-    """
-    Performs an inplace optimizer update with one or two optimizer states.
-
-    Universal optimizer update for 32-bit state and 32/16-bit gradients/weights.
-
-    Parameters
-    ----------
-    optimizer_name : str
-        The name of the optimizer: {adam}.
-    g : torch.Tensor
-        Gradient tensor.
-    p : torch.Tensor
-        Parameter tensor.
-    state1 : torch.Tensor
-        Optimizer state 1.
-    beta1 : float
-        Optimizer beta1.
-    eps : float
-        Optimizer epsilon.
-    weight_decay : float
-        Weight decay.
-    step : int
-        Current optimizer step.
-    lr : float
-        The learning rate.
-    state2 : torch.Tensor
-        Optimizer state 2.
-    beta2 : float
-        Optimizer beta2.
-    gnorm_scale : float
-        The factor to rescale the gradient to the max clip value.
-    unorm_vec : torch.Tensor
-        The tensor for the update norm.
-    max_unorm : float
-        The maximum update norm relative to the weight norm.
-    skip_zeros : bool
-        Whether to skip zero-valued gradients or not (default: False).
-    """
-
-    param_norm = 0.0
-    if max_unorm > 0.0:
-        param_norm = torch.norm(p.data.float())
-
-    optim_func = None
-    if g.dtype == torch.float32:
-        optim_func = str2optimizer32bit[optimizer_name][0]
-    elif g.dtype == torch.float16:
-        optim_func = str2optimizer32bit[optimizer_name][1]
-    elif g.dtype == torch.bfloat16 and len(str2optimizer32bit[optimizer_name]) == 3:
-        optim_func = str2optimizer32bit[optimizer_name][2]
-    else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
-
-    is_on_gpu([g, p, state1, state2, unorm_vec])
-    prev_device = pre_call(g.device)
-    optim_func(
-        get_ptr(g),
-        get_ptr(p),
-        get_ptr(state1),
-        get_ptr(state2),
-        get_ptr(unorm_vec),
-        ct.c_float(max_unorm),
-        ct.c_float(param_norm),
-        ct.c_float(beta1),
-        ct.c_float(beta2),
-        ct.c_float(eps),
-        ct.c_float(weight_decay),
-        ct.c_int32(step),
-        ct.c_float(lr),
-        ct.c_float(gnorm_scale),
-        ct.c_bool(skip_zeros),
-        ct.c_int32(g.numel()),
+    ensure_backend_is_available(g.device.type)
+    return backends[g.device.type].optimizer_update_32bit(
+        optimizer_name=optimizer_name,
+        g=g,
+        p=p,
+        state1=state1,
+        beta1=beta1,
+        eps=eps,
+        step=step,
+        lr=lr,
+        state2=state2,
+        beta2=beta2,
+        weight_decay=weight_decay,
+        gnorm_scale=gnorm_scale,
+        unorm_vec=unorm_vec,
+        max_unorm=max_unorm,
+        skip_zeros=skip_zeros,
     )
-    post_call(prev_device)
 
 
 def optimizer_update_8bit(
@@ -1397,48 +1290,26 @@ def optimizer_update_8bit_blockwise(
     gnorm_scale: float = 1.0,
     skip_zeros=False,
 ) -> None:
-    optim_func = None
-    prev_device = pre_call(g.device)
-    is_on_gpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
-    if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
-    elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
-    elif (
-        g.dtype == torch.bfloat16
-        and state1.dtype == torch.uint8
-        and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
-    ):
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
-    else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
-    post_call(prev_device)
-
-    is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
-
-    prev_device = pre_call(g.device)
-    optim_func(
-        get_ptr(p),
-        get_ptr(g),
-        get_ptr(state1),
-        get_ptr(state2),
-        ct.c_float(beta1),
-        ct.c_float(beta2),
-        ct.c_float(eps),
-        ct.c_int32(step),
-        ct.c_float(lr),
-        get_ptr(qmap1),
-        get_ptr(qmap2),
-        get_ptr(absmax1),
-        get_ptr(absmax2),
-        ct.c_float(weight_decay),
-        ct.c_float(gnorm_scale),
-        ct.c_bool(skip_zeros),
-        ct.c_int32(g.numel()),
+    ensure_backend_is_available(g.device.type)
+    return backends[g.device.type].optimizer_update_8bit_blockwise(
+        optimizer_name=optimizer_name,
+        g=g,
+        p=p,
+        state1=state1,
+        state2=state2,
+        beta1=beta1,
+        beta2=beta2,
+        eps=eps,
+        step=step,
+        lr=lr,
+        qmap1=qmap1,
+        qmap2=qmap2,
+        absmax1=absmax1,
+        absmax2=absmax2,
+        weight_decay=weight_decay,
+        gnorm_scale=gnorm_scale,
+        skip_zeros=skip_zeros,
     )
-    post_call(prev_device)
 
 
 def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: int = 5):
@@ -1593,98 +1464,15 @@ def gemv_4bit(
     transposed_B=False,
     state=None,
 ):
-    prev_device = pre_call(A.device)
-    # sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
-    if state is None:
-        raise ValueError("state cannot None. gem_4bit( ) requires the state from quantize_4bit( )")
-
-    if A.numel() != A.shape[-1]:
-        raise ValueError(
-            'Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]',
-        )
-
-    Bshape = state.shape
-    bout = Bshape[0]
-    absmax = state.absmax
-    if state.nested:
-        absmax = dequantize_blockwise(state.absmax, state.state2)
-        absmax += state.offset
-
-    if out is None:
-        if len(A.shape) == 3:
-            out = torch.empty(size=(A.shape[0], A.shape[1], bout), dtype=A.dtype, device=A.device)
-        else:
-            out = torch.empty(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
-
-    n = 1
-    m = Bshape[0]
-    k = Bshape[1]
-    lda = Bshape[0]
-    ldc = Bshape[0]
-    ldb = (A.shape[-1] + 1) // 2
-    is_on_gpu([B, A, out, absmax, state.code])
-    m = ct.c_int32(m)
-    n = ct.c_int32(n)
-    k = ct.c_int32(k)
-    lda = ct.c_int32(lda)
-    ldb = ct.c_int32(ldb)
-    ldc = ct.c_int32(ldc)
-
-    if B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32]:
-        if A.dtype == torch.float16:
-            lib.cgemm_4bit_inference_naive_fp16(
-                m,
-                n,
-                k,
-                get_ptr(A),
-                get_ptr(B),
-                get_ptr(absmax),
-                get_ptr(state.code),
-                get_ptr(out),
-                lda,
-                ldb,
-                ldc,
-                ct.c_int32(state.blocksize),
-            )
-        elif A.dtype == torch.bfloat16:
-            lib.cgemm_4bit_inference_naive_bf16(
-                m,
-                n,
-                k,
-                get_ptr(A),
-                get_ptr(B),
-                get_ptr(absmax),
-                get_ptr(state.code),
-                get_ptr(out),
-                lda,
-                ldb,
-                ldc,
-                ct.c_int32(state.blocksize),
-            )
-        elif A.dtype == torch.float32:
-            lib.cgemm_4bit_inference_naive_fp32(
-                m,
-                n,
-                k,
-                get_ptr(A),
-                get_ptr(B),
-                get_ptr(absmax),
-                get_ptr(state.code),
-                get_ptr(out),
-                lda,
-                ldb,
-                ldc,
-                ct.c_int32(state.blocksize),
-            )
-        else:
-            raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
-
-    else:
-        raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
-
-    post_call(prev_device)
-
-    return out
+    ensure_backend_is_available(A.device.type)
+    return backends[A.device.type].gemv_4bit(
+        A,
+        B,
+        out=out,
+        transposed_A=transposed_A,
+        transposed_B=transposed_B,
+        state=state,
+    )
 
 
 def igemm(
