@@ -9,6 +9,9 @@ from .cpu_xpu_common import (
     double_quant_impl,
     igemmlt_impl,
     mm_dequant_impl,
+    quantize_4bit_impl,
+    dequantize_4bit_impl,
+    gemm_4bit_impl,
 )
 
 Tensor = torch.Tensor
@@ -132,7 +135,8 @@ class CPUBackend(Backend):
         quant_type: Literal["fp4", "nf4"] = "fp4",
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
-        raise NotImplementedError("Not yet implemented for CPU backend")
+        assert_on_cpu([A, absmax, out])
+        return quantize_4bit_impl(A, absmax, out, blocksize, compress_statistics, quant_type)
 
     def dequantize_4bit(
         self,
@@ -143,7 +147,8 @@ class CPUBackend(Backend):
         blocksize: int = 64,
         quant_type: Literal["fp4", "nf4"] = "fp4",
     ) -> torch.Tensor:
-        raise NotImplementedError("Not yet implemented for CPU backend")
+        assert_on_cpu([A, absmax, out])
+        return dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
 
     def gemv_4bit(
         self,
@@ -154,7 +159,11 @@ class CPUBackend(Backend):
         transposed_B=False,
         state: QuantState = None,
     ) -> torch.Tensor:
-        raise NotImplementedError("Not yet implemented for CPU backend")
+        assert_on_cpu([A, B, out])
+        if state is None:
+            raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
+
+        return gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
 
     def dequantize_blockwise(
         self,
