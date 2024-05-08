@@ -52,7 +52,7 @@ def get_rocm_gpu_arch() -> str:
     try:
         if torch.version.hip:
             result = subprocess.run(["rocminfo"], capture_output=True, text=True)
-            match = re.search(r"Name:\s+gfx(\d+)", result.stdout)
+            match = re.search(r"Name:\s+gfx([a-zA-Z\d]+)", result.stdout)
             if match:
                 return "gfx" + match.group(1)
             else:
