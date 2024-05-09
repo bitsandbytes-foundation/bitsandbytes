@@ -307,7 +307,7 @@ FORCE_INLINE FVec<SSE,float> operator-   (const FVec<SSE,float>& a,  const FVec<
 FORCE_INLINE FVec<SSE,float> operator*   (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_mul_ps( a, b ); }
 FORCE_INLINE FVec<SSE,float> operator/   (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_div_ps( a, b ); }
 FORCE_INLINE IVec<SSE,float> ftoi        (const FVec<SSE,float>& a)                             { return _mm_cvttps_epi32(a); }
-#if !defined(__clang__) || defined(__HIP_PLATFORM_AMD__) // Conflicts with builtin operator
+#ifndef __clang__ // Conflicts with builtin operator
 FORCE_INLINE IVec<SSE,float> operator<=  (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_castps_si128( _mm_cmple_ps( a, b ) ); }
 FORCE_INLINE IVec<SSE,float> operator>=  (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_castps_si128( _mm_cmpge_ps( a, b ) ); }
 FORCE_INLINE IVec<SSE,float> operator<   (const FVec<SSE,float>& a,  const FVec<SSE,float>& b)  { return _mm_castps_si128(_mm_cmplt_ps(a, b)); }
@@ -363,7 +363,7 @@ FORCE_INLINE FVec<SSE,double> operator-   (const FVec<SSE,double>& a, const FVec
 FORCE_INLINE FVec<SSE,double> operator*   (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_mul_pd( a, b ); }
 FORCE_INLINE FVec<SSE,double> operator/   (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_div_pd( a, b ); }
 FORCE_INLINE IVec<SSE,float>  ftoi        (const FVec<SSE,double>& a)                               { return _mm_cvttpd_epi32(a); }
-#if !defined(__clang__) || defined(__HIP_PLATFORM_AMD__) // Conflicts with builtin operator
+#ifndef __clang__ // Conflicts with builtin operator
 FORCE_INLINE IVec<SSE,double> operator<=  (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_castpd_si128( _mm_cmple_pd( a, b ) ); }
 FORCE_INLINE IVec<SSE,double> operator<   (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_castpd_si128(_mm_cmplt_pd(a, b)); }
 FORCE_INLINE IVec<SSE,double> operator>=  (const FVec<SSE,double>& a, const FVec<SSE,double>& b)    { return _mm_castpd_si128( _mm_cmpge_pd( a, b ) ); }
