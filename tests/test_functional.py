@@ -575,28 +575,37 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
 @pytest.mark.parametrize("dim4", get_test_dims(32, 1024, n=1), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2, 3), ids=id_formatter("dims"))
 @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
-def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
+@pytest.mark.parametrize("device", ("cuda", "cpu"), ids=id_formatter("device"))
+def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb, device):
     for i in range(k):
         if dims == 2:
-            A = torch.randint(-128, 127, size=(dim1, dim3), device="cuda").to(torch.int8)
+            A = torch.randint(-128, 127, size=(dim1, dim3), device=device).to(torch.int8)
         elif dims == 3:
-            A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device="cuda").to(torch.int8)
-        B = torch.randint(-128, 127, size=(dim4, dim3), device="cuda").to(torch.int8)
+            A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device=device).to(torch.int8)
+        B = torch.randint(-128, 127, size=(dim4, dim3), device=device).to(torch.int8)
         C1 = torch.matmul(A.float(), B.t().float())
 
         A2, SA = F.transform(A, "col32")
         B2, SB = F.transform(B, "col_turing")
         C2, SC = F.igemmlt(A2, B2, SA, SB)
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
+        if device == "cpu":
+            assert SC is None
+        if device == "cuda":
+            C3, S = F.nvidia_transform(C2, "row", state=SC)
+        else:
+            C3, S = C2, None
         torch.testing.assert_close(C1, C3.float())
 
         # transpose
-        B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(torch.int8)
+        B = torch.randint(-128, 127, size=(dim3, dim4), device=device).to(torch.int8)
         C1 = torch.matmul(A.float(), B.float())
 
         B2t, SBt = F.transform(B, "col_turing", transpose=True)
         C2, SC = F.igemmlt(A2, B2t, SA, SBt)
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
+        if device == "cuda":
+            C3, S = F.nvidia_transform(C2, "row", state=SC)
+        else:
+            C3, S = C2, None
         torch.testing.assert_close(C1, C3.float())
 
 
@@ -845,6 +854,33 @@ def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
         assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01 * n))
 
 
+@pytest.mark.parametrize("dim1", get_test_dims(64, 256, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim4", get_test_dims(64, 1024, n=2), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
+@pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
+def test_dequant_mm_cpu(dim1, dim4, dims, has_bias):
+    inner = torch.randint(1, 128, size=(1,)).item()
+    bias = None
+    if has_bias:
+        bias = torch.randn(dim4, device="cpu", dtype=torch.bfloat16)
+    for i in range(1):
+        A = torch.randn(dim1, inner, device="cpu")
+        B = torch.randn(dim4, inner, device="cpu")
+
+        A1, maxA = F.vectorwise_quant(A, dim=1)
+        B1, maxB = F.vectorwise_quant(B, dim=1)
+
+        C2, SC = F.igemmlt(A1, B1, SA=None, SB=None)
+        assert SC is None
+
+        C3 = F.vectorwise_mm_dequant(C2.bfloat16(), maxA, maxB.t())
+        if has_bias:
+            C3 += bias
+
+        C4 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten(), bias=bias)
+        torch.testing.assert_close(C3.float(), C4.float(), atol=0.05, rtol=0.1)
+
+
 @pytest.mark.parametrize("dim1", [1 * 1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1 * 1024], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
@@ -891,9 +927,13 @@ def test_colrow_absmax(dim1, dim2, dims):
 
 @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
-def test_double_quant(dim1, dim2):
+@pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
+@pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
+def test_double_quant(dim1, dim2, device, dtype):
+    if device == "cuda" and dtype == torch.bfloat16:
+        pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
     for i in range(k):
-        A = torch.randn(dim1, dim2, device="cuda").half()
+        A = torch.randn(dim1, dim2, device=device).to(dtype)
         out_col1, Scol = F.vectorwise_quant(A, dim=0)
         out_row1, Srow = F.vectorwise_quant(A, dim=1)
 
@@ -1125,6 +1165,33 @@ def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
         torch.testing.assert_close(out1, out2)
 
 
+@pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dims", [2], ids=id_formatter("dims"))
+@pytest.mark.parametrize("dtype", [torch.int8], ids=describe_dtype)
+@pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
+@pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
+@pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
+def test_transform_cpu(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
+    for i in range(k):
+        if dims == 2:
+            A = torch.randint(10, 99, size=(dim1, dim2), device="cpu").to(dtype)
+        elif dims == 3:
+            A = torch.randint(10, 99, size=(dim1, dim2, dim3), device="cpu").to(dtype)
+
+        A.view(-1)[-1] = -1
+        if transpose:
+            out1 = A.t().contiguous()
+        else:
+            out1 = A
+        out2, S2 = F.transform(A, to_order=orderOut, transpose=transpose)
+
+        assert S2 is None
+
+        torch.testing.assert_close(out1, out2)
+
+
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_overflow():
     formatB = F.get_special_format_str()
@@ -1142,15 +1209,21 @@ def test_overflow():
 
 @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
-def test_coo_double_quant(dim1, dim2):
+@pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
+@pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
+def test_coo_double_quant(dim1, dim2, device, dtype):
+    if device == "cuda" and dtype == torch.bfloat16:
+        pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
     threshold = 3.00
     for i in range(k):
-        A = torch.randn(dim1, dim2, device="cuda").half()
+        A = torch.randn(dim1, dim2, device=device).to(dtype)
 
         idx = torch.abs(A) >= threshold
         CA2, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
 
+        if idx.sum() > 0:
+            assert coo_tensor is not None
         if coo_tensor is not None:
             A1 = A * idx
             A2 = torch.zeros_like(A)
@@ -1158,8 +1231,8 @@ def test_coo_double_quant(dim1, dim2):
             torch.testing.assert_close(A1, A2)
 
             A1 = A * (idx == 0)
-            A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
-            torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
+            A2 = (CA.float() * statsA.unsqueeze(1) / 127).to(dtype)
+            torch.testing.assert_close(A1, A2, rtol=0.05, atol=1.5e-2)
 
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
@@ -1735,12 +1808,12 @@ def test_zeropoint():
 
 
 @pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
-def test_extract_outliers():
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
+def test_extract_outliers(device):
     for i in range(k):
         shapeA = (4096, 4096 * 4)
-        idx = torch.unique(torch.randint(0, shapeA[1], size=(10,)).int()).cuda()
-        # idx = torch.Tensor([0]).int().cuda()
-        A = torch.randint(-128, 127, size=shapeA, device="cuda").to(torch.int8)
+        idx = torch.unique(torch.randint(0, shapeA[1], size=(10,)).int()).to(device=device)
+        A = torch.randint(-128, 127, size=shapeA, device=device).to(torch.int8)
         outliers1 = A[:, idx.long()]
 
         CA, SA = F.transform(A, "col_turing")
@@ -1935,7 +2008,9 @@ def test_bench_dequantization():
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
-def test_fp4_quant(dtype):
+@pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+@pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
+def test_4bit_quant(dtype, quant_type, blocksize):
     vals = list(product([0, 1], repeat=4))
 
     code = {}
@@ -1960,8 +2035,8 @@ def test_fp4_quant(dtype):
         code[idx] = result
 
     A1 = torch.randn(1024, 1024, device="cuda", dtype=dtype)
-    qa, SA = F.quantize_fp4(A1, blocksize=64)
-    A2 = F.dequantize_fp4(qa, SA)
+    qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
+    A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
 
     err = (A1 - A2).abs().float()
     relerr = (err / (A1.abs().float() + 1e-8)).mean()
@@ -1969,8 +2044,24 @@ def test_fp4_quant(dtype):
     err = err.mean()
 
     assert A2.dtype == dtype
-    assert err.item() < 0.1
-    assert relerr.item() < 0.28
+
+    # With larger block sizes, we can expect this to blow up.
+    # At blocksize>=1024, don't even bother looking at relerr.
+    if blocksize <= 64:
+        assert err.item() < 0.1
+        assert relerr.item() < 0.28
+    elif blocksize <= 256:
+        assert err.item() < 0.11
+        assert relerr.item() < 0.30
+    elif blocksize <= 512:
+        assert err.item() < 0.12
+        assert relerr.item() < 0.31
+    elif quant_type == "fp4":
+        # 1024 => 0.48, 2048 => 0.52, 4096 => 0.56
+        assert err.item() < 0.08 + math.log2(blocksize) * 4e-2
+    else:
+        # 1024 => 0.8, 2048 => 0.88, 4096 => 0.96
+        assert err.item() < math.log2(blocksize) * 8e-2
 
 
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
