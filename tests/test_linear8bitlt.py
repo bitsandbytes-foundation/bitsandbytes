@@ -40,6 +40,7 @@ def test_layout_exact_match():
         assert torch.all(torch.eq(restored_x, x))
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_linear_no_igemmlt():
     linear = torch.nn.Linear(1024, 3072)
     x = torch.randn(3, 1024, dtype=torch.half)
