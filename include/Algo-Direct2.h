@@ -94,8 +94,8 @@ private:
         __m128 vxp = _mm_shuffle_ps(xp01, xp23, (1) + (3 << 2) + (1 << 4) + (3 << 6));
 #endif
         IVec<SSE, float> i(u.vec);
-        IVec<SSE, float> vlem = operator< (vz, vxm);
-        IVec<SSE, float> vlep = operator< (vz, vxp);
+        IVec<SSE, float> vlem = vz < vxm;
+        IVec<SSE, float> vlep = vz < vxp;
         i = i + vlem + vlep;
         i.store(pr);
     }
@@ -124,8 +124,8 @@ private:
         __m128d vxp = _mm_shuffle_pd(vx0, vx1, 3);
 
         IVec<SSE, double> i(b1, b0);
-        IVec<SSE, double> vlem = operator< (vz, vxm);
-        IVec<SSE, double> vlep = operator< (vz, vxp);
+        IVec<SSE, double> vlem = (vz < vxm);
+        IVec<SSE, double> vlep = (vz < vxp);
         i = i + vlem + vlep;
 
         union {
@@ -229,8 +229,8 @@ private:
 
 #endif
 
-        IVec<SSE, float> vlem = operator< (vz, vxm);
-        IVec<SSE, float> vlep = operator< (vz, vxp);
+        IVec<AVX, float> vlem = vz < vxm;
+        IVec<AVX, float> vlep = vz < vxp;
         ip = ip + vlem + vlep;
 
         ip.store(pr);
@@ -279,8 +279,8 @@ private:
 //        FVec<AVX, double> vxp = _mm256_insertf128_pd(_mm256_castpd128_pd256(h01p), h23p, 1);
 
         IVec<AVX, double> i(u.vec);
-        IVec<SSE, float> vlem = operator< (vz, vxm);
-        IVec<SSE, float> vlep = operator< (vz, vxp);
+        IVec<AVX, double> vlem = vz < vxm;
+        IVec<AVX, double> vlep = vz < vxp;
         i = i + vlem + vlep;
         i.extractLo32s().store(pr);
     }

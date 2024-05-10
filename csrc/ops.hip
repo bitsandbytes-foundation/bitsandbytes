@@ -64,7 +64,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
   num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
 
   if(blocksize == 4096)
-   hipLaunchKernelGGL(( kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, 0>), dim3(num_blocks), dim3(1024), 0, 0, code, A, absmax, out, rand, rand_offset, n);
+   hipLaunchKernelGGL(( kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, DATA_TYPE>), dim3(num_blocks), dim3(1024), 0, 0, code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 2048)
    hipLaunchKernelGGL(( kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE>), dim3(num_blocks), dim3(512), 0, 0, code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 1024)
