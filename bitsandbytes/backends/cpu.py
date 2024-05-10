@@ -136,6 +136,7 @@ class CPUBackend(Backend):
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
         assert_on_cpu([A, absmax, out])
+        assert quant_storage == torch.uint8, "CPU backend only supports uint8 quant_storage"
         return quantize_4bit_impl(A, absmax, out, blocksize, compress_statistics, quant_type)
 
     def dequantize_4bit(

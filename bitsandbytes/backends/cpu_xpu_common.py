@@ -343,6 +343,8 @@ def quantize_4bit_impl(
         )
 
     if ipex_cpu and _ipex_cpu_version_prereq(2, 2) and input_shape[0] % blocksize == 0:
+        # lowp_mode: lowest precision for computation
+        lowp_mode = ipex_cpu.quantization.WoqLowpMode.BF16
         state.op_context = torch.ops.ipex_prepack.weight_only_qlinear_prepack(
             out.reshape([input_shape[0], input_shape[1] // 2]),
             ipex_cpu.quantization.WoqWeightDtype.NF4,
@@ -353,8 +355,8 @@ def quantize_4bit_impl(
             None, # g_idx
             None, # batch_size
             blocksize,
-            int(ipex_cpu.quantization.WoqLowpMode.BF16),
-            -1, # act_quant_mode
+            int(lowp_mode),
+            -1, # act_quant_mode. -1 means don't quant activation
         )
 
     return out, state
