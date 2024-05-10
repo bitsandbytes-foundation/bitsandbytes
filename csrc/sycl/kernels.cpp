@@ -632,35 +632,34 @@ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, cons
 #define THREADS_ESTIMATE 512
 #define NUM_ESTIMATE 8
 #define BLOCK_ESTIMATE 4096
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_float;
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_T;
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_unsigned_char;
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_half;
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_unsigned;
-typedef sycl::local_accessor<uint8_t ,1> sycl_la_char;
+
+
+//================typedefs===================================
+
+typedef sycl::local_accessor<uint8_t, 1> sycl_la;
+typedef sycl::accessor<int, 1> sycl_dacc;
+typedef sycl::accessor<float, 1> sycl_dacc_float;
+typedef sycl::accessor<unsigned char, 1> sycl_dacc_uc;
+
+//===========================================================
 
 template<typename T>
 SYCL_EXTERNAL 
-void kEstimateQuantiles(const T *buff_A, float *code, const float offset, const T max_val, const int n,
-                        const sycl::nd_item<3> &item_ct1, sycl_la_T tacc)
+void kEstimateQuantiles(const T *A, float *code, const float offset, const T max_val, const int n,
+                        const sycl::nd_item<3> &item_ct1, sycl_la tacc, sycl_dacc dacc)
 {
   const int n_full = (BLOCK_ESTIMATE*(n/BLOCK_ESTIMATE)) + (n % BLOCK_ESTIMATE == 0 ? 0 : BLOCK_ESTIMATE);
   int valid_items = (item_ct1.get_group(2)+1 == item_ct1.get_group_range(2)) ? n - (item_ct1.get_group(2)*BLOCK_ESTIMATE) : BLOCK_ESTIMATE;
   const int base_idx = (item_ct1.get_group(2) * BLOCK_ESTIMATE);
   const float reciprocal_num_blocks = 1.0f/(n < 4096 ? 1.0f : (n/BLOCK_ESTIMATE));
-
-  T vals[NUM_ESTIMATE];
   
-  //typedef cub::BlockRadixSort<T, THREADS_ESTIMATE, NUM_ESTIMATE, dpct::null_type, 4, true, cub::BLOCK_SCAN_RAKING> BlockRadixSort;
-  //typedef cub::BlockLoad<T, THREADS_ESTIMATE, NUM_ESTIMATE, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  /*
-  union  type_ct1{
-      typename LoadFloat::TempStorage loadf;
-      typename BlockRadixSort::TempStorage sort;
-      int smem_qidx[BLOCK_ESTIMATE];
-  };
-  type_ct1 &temp_storage = *(type_ct1 *)temp_storage_ct1;
-  */
+  using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
+  using group_radix_sort = dpct::group::radix_sort<int, NUM_ESTIMATE>;
+        
+  T vals[NUM_ESTIMATE];
+  auto *d = dacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+  
+  
   int smem_qidx[BLOCK_ESTIMATE];
   
   for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_ESTIMATE)
@@ -674,10 +673,8 @@ void kEstimateQuantiles(const T *buff_A, float *code, const float offset, const 
       for(int j = 0; j < NUM_ESTIMATE; j++)
           vals[j] = max_val;
 
-      /*
-      DPCT1065:76: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
+     
+      item_ct1.barrier(sycl::access::fence_space::local_space);
   
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
@@ -686,16 +683,14 @@ void kEstimateQuantiles(const T *buff_A, float *code, const float offset, const 
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_A[0], vals);
+      group_load(tmp).load(item_ct1, d, vals);
       
       #pragma unroll 4
       for(int j = 0; j < NUM_ESTIMATE; j++)
           vals[j] = ((float)vals[j]) * reciprocal_num_blocks;
 
 
-      /*
-      DPCT1065:77: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier();
       // sort into striped pattern to mitigate bank conflicts
       // striped pattern index for thread 0 [0, 1024, 2048, 3096]
@@ -709,41 +704,35 @@ void kEstimateQuantiles(const T *buff_A, float *code, const float offset, const 
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      group_radix_sort(tmp).sort_blocked_to_striped(item, vals);
+      group_radix_sort(tmp).sort_blocked_to_striped(item_ct1, vals);
 
-      /*
-      DPCT1065:78: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
       for(int j = item_ct1.get_local_id(2); j < BLOCK_ESTIMATE; j+=item_ct1.get_local_range(2))
-          temp_storage.smem_qidx[j] = -1;
+          smem_qidx[j] = -1;
 
-      /*
-      DPCT1065:79: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
 
       if(item_ct1.get_local_id(2) < 256)
       {
           float q_interval = (1.0f-(2.0f*offset))/255.0f;
-          /*
-          DPCT1064:83: Migrated round call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
-          */
+          
           int local_idx = sycl::round(((offset+(item_ct1.get_local_id(2)*q_interval))*(valid_items-1)));
           smem_qidx[local_idx] = item_ct1.get_local_id(2);
       }
 
-      /*
-      DPCT1065:80: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
 
       for(int i = item_ct1.get_local_id(2); i < BLOCK_ESTIMATE; i+=item_ct1.get_local_range(2))
       {
           if(smem_qidx[i] != -1)
               dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&code[smem_qidx[i]], vals[i/THREADS_ESTIMATE]);
       }
+      
   }
+ 
 }
 
 
@@ -841,15 +830,6 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
   //float local_abs_max = -FLT_MAX;
   float local_abs_max = 0.0f;
   int local_rand_idx = 0;
-
-  
-  
-  
-  //typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-  //typedef cub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, (DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-  
-  //typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-
   
   if(DATA_TYPE == General8bit)
     for(int i = item_ct1.get_local_id(2); i < 256; i+=item_ct1.get_local_range(2))
@@ -860,15 +840,9 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
     valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
     local_abs_max = -FLT_MAX;
 
-    /*
-    DPCT1065:84: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-    */
+    
     item_ct1.barrier(sycl::access::fence_space::local_space);
-    /*
-    DPCT1007:87: Migration of cub::BlockLoad::Load is not supported.
-    */
-    //LoadT(loadt).Load(&(A[i]), vals, valid_items, (T)0.0f);
-
+    
     // 1. load 8 values per thread
     // 2. compute 2-max in registers (64 max per warp)
     // 3. do warp reduction + broadcast back
@@ -962,9 +936,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
             break;
     }
 
-    /*
-    DPCT1065:86: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-    */
+    
     item_ct1.barrier(sycl::access::fence_space::local_space);
     /*
     DPCT1007:89: Migration of cub::BlockStore::Store is not supported.
@@ -985,8 +957,8 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
 }
 
 template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
-SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, float * absmax, T *buff_out, const int blocksize, const int n,
-                          const sycl::nd_item<3> &item_ct1, sycl_la_unsigned_char ltacc, sycl_la_T stacc)
+SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n,
+                          const sycl::nd_item<3> &item_ct1, sycl_la tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out )
 {
 
   const int n_load = (item_ct1.get_group_range(2) * TILE_SIZE);
@@ -998,10 +970,14 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
   unsigned char qvals[NUM_PER_TH];
   float local_abs_max = -FLT_MAX;
   
-  //typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
-  //typedef cub::BlockStore<T, THREADS, NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1), cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
-
-
+  using group_load_uc = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+  
+  using group_store = dpct::group::workgroup_store<NUM_PER_THREAD, dpct_::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
+  
+  
+  auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_out = dacc_out.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  
   for (unsigned int i = base_idx; i < n_load; i += item_ct1.get_group_range(2)*TILE_SIZE)
   {
     if(DATA_TYPE > 0)
@@ -1014,30 +990,20 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
       valid_items_load = n - i > TILE_SIZE ? TILE_SIZE : n - i;
       valid_items_store = n - i > TILE_SIZE ? TILE_SIZE : n - i;
     }
-    /*
-    DPCT1098:92: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
-    */
-    /*
-    DPCT1064:96: Migrated __ldg call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
-    */
+    
     local_abs_max =  sycl::ext::oneapi::experimental::cuda::ldg(&absmax[(i+item_ct1.get_local_id(2)*NUM_PER_TH)/(blocksize)]);
 
-    /*
-    DPCT1065:90: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-    */
+    
     item_ct1.barrier(sycl::access::fence_space::local_space);
-    /*
-    DPCT1007:93: Migration of cub::BlockLoad::Load is not supported.
-    */
-    //LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
+    
     // 1. load 8 values per thread
     // 2. compute 2-max in registers (64 max per warp)
     // 3. do warp reduction + broadcast back
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
-    auto *tmp = ltacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_load(tmp).load(item, &buff_A[0], qvals);
+    auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+    group_load_uc(tmp).load(item_ct1, d_A, qvals);
     
       
     
@@ -1048,12 +1014,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
           // load code through read-only cache via __ldg
           #pragma unroll NUM_PER_TH
           for(int j = 0; j < NUM_PER_TH; j++)
-            /*
-            DPCT1098:94: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
-            */
-            /*
-            DPCT1064:228: Migrated __ldg call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
-            */
+            
             vals[j] =  sycl::ext::oneapi::experimental::cuda::ldg(&code[qvals[j]]*local_abs_max);
           break;
         case FP4:
@@ -1074,16 +1035,9 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
           break;
     }
 
-    /*
-    DPCT1065:91: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-    */
+   
     item_ct1.barrier();
-    /*
-    DPCT1007:95: Migration of cub::BlockStore::Store is not supported.
-    */
-    //StoreT(storet).Store(&(out[(DATA_TYPE > 0) ? i*2 : i]), vals, valid_items_store);
-    
-  
+   
     // 1. load 8 values per thread
     // 2. compute 2-max in registers (64 max per warp)
     // 3. do warp reduction + broadcast back
@@ -1091,8 +1045,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * buff_A, flo
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
 
-    auto *tmp = stacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_store(tmp).store(item, &buff_out[0], vals);
+    group_store(tmp).store(item_ct1, d_out, vals);
             
   }
 }
@@ -1124,11 +1077,11 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 DPCT1110:1: The total declared local variable size in device function kPreconditionOptimizer32bit2State exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
 */
 SYCL_EXTERNAL 
-void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
-                float* buff_state1, float* buff_state2, float *unorm,
+void kPreconditionOptimizer32bit2State(T* g, T* p,
+                float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_float ltacc_float1, sycl_la_float ltacc_float2)
+                const sycl::nd_item<3> &item_ct1, sycl_la &tacc, sycl_dacc_float &dacc_state1, sycl_dacc_float &dacc_state2,sycl::accessor<T, 1> &dacc_g)
 {
 
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
@@ -1143,7 +1096,13 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
   const float correction1 = 1.0f/(1.0f - dpct::pow(beta1, step));
   const float correction2 = 1.0f/(1.0f - dpct::pow(beta2, step));
   
+  using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_load_float = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;  
+
   
+  auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state2 = dacc_state2.get_multi_ptr<sycl::access::decorated::yes>().get();
 
   //typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
   //typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
@@ -1161,13 +1120,9 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
   {
       valid_items = n - i >= (BLOCK_SIZE) ? (BLOCK_SIZE) : n - i;
 
-      /*
-      DPCT1065:97: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier(sycl::access::fence_space::local_space);
-      /*
-      DPCT1007:101: Migration of cub::BlockLoad::Load is not supported.
-      */
+      
       //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, 0.0f);
       
   
@@ -1177,17 +1132,11 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_A[0], g_vals);
+      auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+      group_load(tmp).load(item_ct1, d_g, g_vals);
       
-      /*
-      DPCT1065:98: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier(sycl::access::fence_space::local_space);
-      /*
-      DPCT1007:102: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items, 0.0f);
       
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
@@ -1195,18 +1144,11 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_state[0], s1_vals);
+      group_load_float(tmp).load(item_ct1, d_state1, s1_vals);
       
       
-      /*
-      DPCT1065:99: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier(sycl::access::fence_space::local_space);
-      /*
-      DPCT1007:103: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //LoadFloat(temp_storage.loadf).Load(&(state2[i]), s2_vals, valid_items, 0.0f);
       
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
@@ -1214,8 +1156,7 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_state2[0], s2_vals);
+      group_load_float(tmp).load(item_ct1, d_state2, s2_vals);
       
       # pragma unroll NUM_VALS
       for(unsigned int j = 0; j < NUM_VALS; j++)
@@ -1226,7 +1167,7 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
       {
           switch(OPTIMIZER)
           {
-              case ADAM:
+              case 1:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
                   s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
                   s1_vals[j] *= correction1;
@@ -1241,9 +1182,7 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
       for(unsigned int j = 1; j < NUM_VALS; j++)
           s1_vals[0] += s1_vals[j];
 
-      /*
-      DPCT1065:100: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+    
       item_ct1.barrier(sycl::access::fence_space::local_space);
       s1_vals[0] = sycl::reduce_over_group(item_ct1.get_group(), s1_vals[0], sycl::plus<>());
 
@@ -1254,18 +1193,15 @@ void kPreconditionOptimizer32bit2State(T* buff_g, T* p,
   }
 }
 
-
-
 #define NUM_PER_THREAD 4
 
 template<typename T, int OPTIMIZER>
 SYCL_EXTERNAL 
-void kOptimizer32bit2State(T* buff_g, T* buff_p,
-                float* buff_state1, float* buff_state2, float *unorm, const float max_unorm, const float param_norm,
+void kOptimizer32bit2State(T* g, T* p,
+                float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_T ltacc_T1, sycl_la_float ltacc_float1, sycl_la_float ltacc_float2
-                sycl_la_T stacc_T, sycl_la_float stacc_float1, sycl_la_float stacc_float2)
+                const sycl::nd_item<3> &item_ct1, sycl_la tacc, sycl::accessor<T, 1> &dacc_g, sycl::accessor<T, 1> &dacc_p, sycl_dacc_float &dacc_state1,                sycl_dacc_float &dacc_state2)
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
@@ -1289,98 +1225,72 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
     else{ update_scale = 1.0f; }
   }
   else{ update_scale = 1.0f; }
-
-  //typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-  //typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
-
-  //typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  //typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
-  /*
-  union  type_ct3{
-      typename Load::TempStorage load;
-      typename Store::TempStorage store;
-      typename LoadFloat::TempStorage loadf;
-      typename StoreFloat::TempStorage storef;
-  };
-  */
-  //type_ct3 &temp_storage = *(type_ct3 *)temp_storage_ct1;
-
+  
+  using group_load = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_load_float = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
+  
+  using group_store = dpct::group::workgroup_store<NUM_PER_THREAD, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_store_float = dpct::group::workgroup_store<NUM_PER_THREAD, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, float,  float *, sycl::nd_item<3>>;
+  
+  
+  auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_p = dacc_p.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state2 = dacc_state2.get_multi_ptr<sycl::access::decorated::yes>().get();
+  
+  
   for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*TH*NUM_PER_THREAD)
   {
       valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
-      /*
-      DPCT1065:104: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier(sycl::access::fence_space::local_space);
-      /*
-      DPCT1007:111: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
-  
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_g[0], g_vals);
+      auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+      group_load(tmp).load(item_ct1, d_g , g_vals);
   
       
-      /*
-      DPCT1065:105: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
-      /*
-      DPCT1007:112: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
+     
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_state1[0], s1_vals);
+      group_load_float(tmp).load(item_ct1, d_state1, s1_vals);
       
-      /*
-      DPCT1065:106: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
-      /*
-      DPCT1007:113: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //LoadFloat(temp_storage.loadf).Load(&(state2[i]), s2_vals, valid_items);
       
-  
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_state2[0], s2_vals);
       
-      /*
-      DPCT1065:107: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
-      /*
-      DPCT1007:114: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
-  
+      group_load_float(tmp).load(item_ct1, d_state2, s2_vals);
+      
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
+     
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_p[0], p_vals);
+      
+      group_load(tmp).load(item_ct1, d_p, p_vals);
       
 
 
@@ -1393,7 +1303,7 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
       {
           switch(OPTIMIZER)
           {
-              case ADAM:
+              case 1:
 									if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
 									{
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
@@ -1407,58 +1317,40 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
           }
       }
 
-      /*
-      DPCT1065:108: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
-      /*
-      DPCT1007:115: Migration of cub::BlockStore::Store is not supported.
-      */
-      //Store(temp_storage.store).Store(&(p[i]), p_vals, valid_items);
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item, &buff_p[0], p_vals);
+      group_store(tmp).store(item_ct1, d_p , p_vals);
 
     
-      /*
-      DPCT1065:109: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
-      /*
-      DPCT1007:116: Migration of cub::BlockStore::Store is not supported.
-      */
-      //StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
-   
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item, &buff_state1[0], s1_vals);
+      group_store_float(tmp).store(item_ct1, d_state1, s1_vals);
 
-      /*
-      DPCT1065:110: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
-      /*
-      DPCT1007:117: Migration of cub::BlockStore::Store is not supported.
-      */
-      //StoreFloat(temp_storage.storef).Store(&(state2[i]), s2_vals, valid_items);
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = stacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item, &buff_state2[0], s2_vals);
+      group_store_float(tmp).store(item_ct1, d_state2, s2_vals);
 
     
   }
@@ -1466,11 +1358,11 @@ void kOptimizer32bit2State(T* buff_g, T* buff_p,
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 SYCL_EXTERNAL 
-void kPreconditionOptimizer32bit1State(T* buff_g, T* buff_p,
+void kPreconditionOptimizer32bit1State(T* g, T* p,
                 float* buff_state1, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_float ltacc_float1)
+                const sycl::nd_item<3> &item_ct1, sycl_la &tacc, sycl::accessor<T, 1> &dacc_g, sycl_dacc_float &dacc_state1)
 {
 
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
@@ -1480,31 +1372,23 @@ void kPreconditionOptimizer32bit1State(T* buff_g, T* buff_p,
   T g_vals[NUM_VALS];
 
   float s1_vals[NUM_VALS];
-
-  //typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-  //typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  //typedef sycl::group<3> BlockReduce;
   
-   /*
-  union  type_ct4{
-      typename Load::TempStorage load;
-      typename LoadFloat::TempStorage loadf;
-      typename BlockReduce::TempStorage reduce;
-  };
-  type_ct4 &temp_storage = *(type_ct4 *)temp_storage_ct1;
-  */
+  
+  
+  
+  using group_load = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_load_float = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
+  
+  
+  auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
+  
+  
   for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
   {
       valid_items = n - i >= (BLOCK_SIZE) ? (BLOCK_SIZE) : n - i;
 
-      /*
-      DPCT1065:118: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
       item_ct1.barrier();
-      /*
-      DPCT1007:121: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, 0.0f);
       
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
@@ -1512,17 +1396,13 @@ void kPreconditionOptimizer32bit1State(T* buff_g, T* buff_p,
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_g[0], g_vals);
+      auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+      group_load(tmp).load(item_ct1, d_g, g_vals);
       
       
-      /*
-      DPCT1065:119: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
-      /*
-      DPCT1007:122: Migration of cub::BlockLoad::Load is not supported.
-      */
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+      
       //LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items, 0.0f);
       
       // 1. load 8 values per thread
@@ -1531,8 +1411,7 @@ void kPreconditionOptimizer32bit1State(T* buff_g, T* buff_p,
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_stat1[0], s1_vals);
+      group_load_float(tmp).load(item_ct1, d_state1, s1_vals);
       
 
       # pragma unroll NUM_VALS
@@ -1571,13 +1450,9 @@ void kPreconditionOptimizer32bit1State(T* buff_g, T* buff_p,
       for(unsigned int j = 1; j < NUM_VALS; j++)
         s1_vals[0] += s1_vals[j];
 
-      /*
-      DPCT1065:120: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
-      /*
-      DPCT1007:2: Migration of cub::Sum is not supported.
-      */
+     
+      item_ct1.barrier(sycl::access::fence_space::local_space);
+     
       //s1_vals[0] = BlockReduce(temp_storage.reduce).Sum(s1_vals[0], valid_items);
       s1_vals[0] = sycl::reduce_over_group(item_ct1.get_group(), s1_vals[0], sycl::plus<>());
       
@@ -1588,14 +1463,15 @@ void kPreconditionOptimizer32bit1State(T* buff_g, T* buff_p,
   }
 }
 
+
 template<typename T, int OPTIMIZER>
 SYCL_EXTERNAL 
 void kOptimizer32bit1State(T *buff_g, T *buff_p,
                 float *buff_state1, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_T ltacc_T1, sycl_la_float ltacc_float1, 
-                sycl_la_T stacc_T, sycl_la_float stacc_float1)
+                const sycl::nd_item<3> &item_ct1, sycl_la &tacc, sycl::accessor<T, 1> &dacc_g, sycl::accessor<T, 1> &dacc_p,
+                sycl_dacc_float &dacc_state1)
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
@@ -1615,82 +1491,57 @@ void kOptimizer32bit1State(T *buff_g, T *buff_p,
   T p_vals[NUM_PER_THREAD];
 
   float s1_vals[NUM_PER_THREAD];
-
-  //typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-  //typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
-
-  //typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  //typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
-
   
-  /*
-  union  type_ct5{
-      typename Load::TempStorage load;
-      typename Store::TempStorage store;
-      typename LoadFloat::TempStorage loadf;
-      typename StoreFloat::TempStorage storef;
-  };
-  type_ct5 &temp_storage = *(type_ct5 *)temp_storage_ct1;
-  */
+  using group_load = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_load_float = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
+  
+  using group_store = dpct::group::workgroup_store<NUM_PER_THREAD, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_store_float = dpct::group::workgroup_store<NUM_PER_THREAD, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, float,  float *, sycl::nd_item<3>>;
+  
+  
+  auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_p = dacc_p.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
+  
   for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*TH*NUM_PER_THREAD)
   {
       valid_items = n - i >= (TH*NUM_PER_THREAD) ? (TH*NUM_PER_THREAD) : n - i;
 
-      /*
-      DPCT1065:123: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier();
-      /*
-      DPCT1007:128: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items);
-  
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_g[0], g_vals); 
+      auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+      group_load(tmp).load(item_ct1, d_g, g_vals); 
       
       
-      /*
-      DPCT1065:124: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+     
       item_ct1.barrier();
-      /*
-      DPCT1007:129: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //LoadFloat(temp_storage.loadf).Load(&(state1[i]), s1_vals, valid_items);
-  
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_state1[0], s1_vals);
+      group_load_float(tmp).load(item_ct1, d_state1, s1_vals);
   
       
-      /*
-      DPCT1065:125: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+     
       item_ct1.barrier();
-      /*
-      DPCT1007:130: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
-  
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_p[0], p_vals);
+      group_load(tmp).load(item_ct1, d_p, p_vals);
       
       # pragma unroll 4
       for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
@@ -1735,37 +1586,25 @@ void kOptimizer32bit1State(T *buff_g, T *buff_p,
       DPCT1065:126: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
       */
       item_ct1.barrier();
-      /*
-      DPCT1007:131: Migration of cub::BlockStore::Store is not supported.
-      */
-      //Store(temp_storage.store).Store(&(p[i]), p_vals, valid_items);
-  
+     
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item, &buff_p[0], p_vals);
+      group_store(tmp).store(item_ct1, d_p, p_vals);
       
-      /*
-      DPCT1065:127: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier();
-      /*
-      DPCT1007:132: Migration of cub::BlockStore::Store is not supported.
-      */
-      //StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
-  
+      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item, &buff_state1[0], s1_vals);
+      group_store_float(tmp).store(item_ct1, d_state1, s1_vals);
       
   
   }
