@@ -11,6 +11,7 @@ import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
+from bitsandbytes.cextension import BNB_HIP_VERSION, HIP_ENVIRONMENT, ROCM_GPU_ARCH
 from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,
@@ -19,7 +20,6 @@ from tests.helpers import (
     get_test_dims,
     id_formatter,
 )
-from bitsandbytes.cextension import BNB_HIP_VERSION, HIP_ENVIRONMENT, ROCM_GPU_ARCH
 
 torch.set_printoptions(precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000)
 k = 20
