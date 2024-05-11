@@ -377,6 +377,7 @@ def quantize_4bit_impl(
             int(lowp_mode),
             -1,  # act_quant_mode. -1 means don't quant activation
         )
+        return torch.Tensor(), state
 
     return out, state
 
