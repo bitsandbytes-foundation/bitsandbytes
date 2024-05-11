@@ -440,6 +440,11 @@ def dequantize_4bit_impl(
     if quant_state.nested:
         raise NotImplementedError("bnb_4bit_use_double_quant is not supported yet for CPU/XPU")
 
+    if ipex_cpu and _ipex_cpu_version_prereq(2, 3) and hasattr(quant_state, "op_context"):
+        assert quant_state.op_context is not None
+        A = quant_state.op_context.to_public(quant_state.op_context.get_weight())
+        A = A.reshape(-1)
+
     if out is None:
         out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
 
@@ -503,7 +508,7 @@ def gemm_4bit_impl(
     torch.Tensor:
         GEMM output tensor.
     """
-    if ipex_cpu and _ipex_cpu_version_prereq(2, 2) and hasattr(state, "op_context"):
+    if ipex_cpu and _ipex_cpu_version_prereq(2, 3) and hasattr(state, "op_context"):
         assert state.op_context is not None
         output = torch.ops.torch_ipex.ipex_woq_linear(A, state.op_context.get_data_handle())
     else:
