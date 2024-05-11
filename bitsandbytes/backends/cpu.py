@@ -6,12 +6,12 @@ from bitsandbytes.utils import QuantState
 
 from .base import Backend
 from .cpu_xpu_common import (
+    dequantize_4bit_impl,
     double_quant_impl,
+    gemm_4bit_impl,
     igemmlt_impl,
     mm_dequant_impl,
     quantize_4bit_impl,
-    dequantize_4bit_impl,
-    gemm_4bit_impl,
 )
 
 Tensor = torch.Tensor
