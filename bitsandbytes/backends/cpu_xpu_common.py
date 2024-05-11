@@ -377,6 +377,7 @@ def quantize_4bit_impl(
             int(lowp_mode),
             -1,  # act_quant_mode. -1 means don't quant activation
         )
+        state.absmax = torch.Tensor()
         return torch.Tensor(), state
 
     return out, state
@@ -444,6 +445,7 @@ def dequantize_4bit_impl(
         assert quant_state.op_context is not None
         A = quant_state.op_context.to_public(quant_state.op_context.get_weight())
         A = A.reshape(-1)
+        absmax = quant_state.op_context.get_scales().reshape(-1)
 
     if out is None:
         out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
