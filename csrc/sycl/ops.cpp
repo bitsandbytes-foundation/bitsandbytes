@@ -28,6 +28,7 @@
 #define THREADS_ESTIMATE 512
 #define NUM_ESTIMATE 8
 #define BLOCK_ESTIMATE 4096
+#define NUM_PER_THREAD 4
 using namespace dnnl;
 
 typedef sycl::ext::oneapi::bfloat16 bf16;
@@ -679,6 +680,10 @@ catch (sycl::exception const &exc) {
   std::exit(1);
 }
 
+
+
+
+
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
                 unsigned char* state1, unsigned char* state2,
                 float *unorm, float max_unorm, float param_norm,
@@ -696,50 +701,35 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
   sycl::context ctx = q_ct1.get_context();
   int size = NUM_BLOCK;
   
-  T *buff_g,*buff_p;
-  unsigned char *buff_state1,*buff_state2;
-  *((void **)&buff_g) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_p) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_state1) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_state2) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
-  q_ct1.memcpy((void*)(buff_p), (void*)(p), size);
-  q_ct1.memcpy((void*)(buff_state1), (void*)(state1), size);
-  q_ct1.memcpy((void*)(buff_state2), (void*)(state2), size);
-  
+  sycl::buffer<T, 1> buff_g(g,sycl::range<1>(size));
+  sycl::buffer<T, 1> buff_p(p,sycl::range<1>(size));
+  sycl::buffer<unsigned char, 1> buff_state1(state1,sycl::range<1>(size));
+  sycl::buffer<unsigned char, 1> buff_state2(state2,sycl::range<1>(size));
 
-  if(max_unorm > 0.0f){ //CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()));
-    DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait()); }
+  if(max_unorm > 0.0f){ 
+    q_ct1.memset(unorm, 0, 1*sizeof(float)).wait(); }
 
 	switch(OPTIMIZER)
 	{
 		case ADAM:
-			//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
-			//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max2, 0, 1*sizeof(float)).wait()));
-      DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
-      DPCT_CHECK_ERROR(q_ct1.memset(new_max2, 0, 1*sizeof(float)).wait());
+			
+      //DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
+      //DPCT_CHECK_ERROR(q_ct1.memset(new_max2, 0, 1*sizeof(float)).wait());
 			{
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
-			      /*
-			      DPCT1054:300: The type of variable temp_storage is declared in device function with the name type_ct6. Adjust the code to make the type_ct6 declaration visible at the accessor declaration point.
-			      */
-			      //sycl::local_accessor<uint8_t[sizeof(type_ct6)], 0> temp_storage_ct1_acc_ct1(cgh);
-			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-			      //sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
+			      
                                               
-            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-            using group_load_float2 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_float2 = group_load_float2::get_local_memory_size(NUM_BLOCK);
+             using group_load = dpct::group::workgroup_load<NUM8BIT, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+             size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             
-            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_float2(load_temp_storage_size_float2, cgh);
-            
+             sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
+             sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
+             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             sycl::accessor dacc_state2(buff_state2, cgh, sycl::read_write);
+             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);        
 			      sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
@@ -748,54 +738,25 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, buff_state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), ltacc_T, ltacc_float1, ltacc_float2);
+			          kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>(p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1, dacc_state2);
 			        });
 			    });
 			}
-			/*
-			DPCT1010:242: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-			*/
-			//CUDA_CHECK_RETURN(0);
-			/*
-			DPCT1049:65: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-			*/
+			
 			{
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
-			      //sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
-			      //sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
-			      /*
-			      DPCT1054:301: The type of variable temp_storage is declared in device function with the name type_ct7. Adjust the code to make the type_ct7 declaration visible at the accessor declaration point.
-			      */
+			      
                     
-            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_load_T1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-            using group_load_float2 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_float2 = group_load_float2::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T1 = group_load_T1::get_local_memory_size(NUM_BLOCK);
-
-            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_T1(load_temp_storage_size_T1, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_float2(load_temp_storage_size_float2, cgh);
+            using group_load = dpct::group::workgroup_load<NUM8BIT, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+             size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             
-            
-            using group_store_T = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, T>;
-            using group_store_float1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
-            using group_store_float2 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
-            size_t store_temp_storage_size_float1 = group_store_float1::get_local_memory_size(NUM_BLOCK);
-            size_t store_temp_storage_size_float2 = group_store_float2::get_local_memory_size(NUM_BLOCK);
-            size_t store_temp_storage_size_T = group_store_T::get_local_memory_size(NUM_BLOCK);
-            
-            sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
-            sycl::local_accessor<uint8_t, 1> stacc_float2(store_temp_storage_size_float2, cgh);
-     
-			      //sycl::local_accessor<uint8_t[sizeof(type_ct7)], 0> temp_storage_ct1_acc_ct1(cgh);
+             sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
+             sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
+             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             sycl::accessor dacc_state2(buff_state2, cgh, sycl::read_write);
 
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);        
@@ -804,132 +765,79 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit2State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, buff_state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, ltacc_float2, stacc_T, stacc_float1, stacc_float2);
+			          kOptimizerStatic8bit2State<T, OPTIMIZER>(p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1, dacc_state2);
 			        });
 			    });
 			}
-			/*
-			DPCT1010:243: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-			*/
-			//CUDA_CHECK_RETURN(0);
+			
 		break;
 		case MOMENTUM:
     case RMSPROP:
     case ADAGRAD:
-			//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
-      DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
-			{
-			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
-			  q_ct1.submit(
-			    [&](sycl::handler &cgh) {
-			      /*
-			      DPCT1054:302: The type of variable temp_storage is declared in device function with the name type_ct8. Adjust the code to make the type_ct8 declaration visible at the accessor declaration point.
-			      */
-			      //sycl::local_accessor<uint8_t[sizeof(type_ct8)], 0> temp_storage_ct1_acc_ct1(cgh);
-			      ;
-            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-            
-            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
-            
-			      //__shared__ vars
-            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);                   
-       
-            cgh.parallel_for(
-			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
-			        [=](sycl::nd_item<3> item_ct1) {
-			          kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_float1);
-			        });
-			    });
-			}
-			/*
-			DPCT1010:244: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-			*/
-			//CUDA_CHECK_RETURN(0);
-			/*
-			DPCT1049:66: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-			*/
+			
+      //DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
 			{
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
 			      
-			      /*
-			      DPCT1054:303: The type of variable temp_storage is declared in device function with the name type_ct9. Adjust the code to make the type_ct9 declaration visible at the accessor declaration point.
-			      */
-			      //sycl::local_accessor<uint8_t[sizeof(type_ct9)], 0> temp_storage_ct1_acc_ct1(cgh);
-                                                                    
-            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_load_T1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T1 = group_load_T1::get_local_memory_size(NUM_BLOCK);
-
-            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_T1(load_temp_storage_size_T1, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
+             using group_load = dpct::group::workgroup_load<NUM8BIT, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+             size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             
+             sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
+             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             
+             //__shared__ vars
+            sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);                   
+       
+            cgh.parallel_for(
+			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
+			        [=](sycl::nd_item<3> item_ct1) {
+			          kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1);
+			        });
+			    });
+			}
+			
+			
+			{
+			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  q_ct1.submit(
+			    [&](sycl::handler &cgh) {
+             
+             using group_load = dpct::group::workgroup_load<NUM8BIT, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+             size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             
-            using group_store_T = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, T>;
-            using group_store_float1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
-            size_t store_temp_storage_size_float1 = group_store_float1::get_local_memory_size(NUM_BLOCK);
-            size_t store_temp_storage_size_T = group_store_T::get_local_memory_size(NUM_BLOCK);
-            
-            sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
+             sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
+             sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
+             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1,smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
+			          kOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1);
 			        });
 			    });
 			}
-			/*
-			DPCT1010:245: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-			*/
-			//CUDA_CHECK_RETURN(0);
+		
 			break;
     case LION:
-      // in lion, the momentum update happens after the parameter update
-      /*
-      DPCT1049:67: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-      */
+      
       {
         dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
           [&](sycl::handler &cgh) {
             
-            /*
-            DPCT1054:304: The type of variable temp_storage is declared in device function with the name type_ct9. Adjust the code to make the type_ct9 declaration visible at the accessor declaration point.
-            */
-            //sycl::local_accessor<uint8_t[sizeof(type_ct9)], 0> temp_storage_ct1_acc_ct1(cgh);
+            using group_load = dpct::group::workgroup_load<NUM8BIT, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+             size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             
-            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_load_T1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T1 = group_load_T1::get_local_memory_size(NUM_BLOCK);
-
-            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_T1(load_temp_storage_size_T1, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
-            
-            
-            using group_store_T = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, T>;
-            using group_store_float1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, float>;
-            size_t store_temp_storage_size_float1 = group_store_float1::get_local_memory_size(NUM_BLOCK);
-            size_t store_temp_storage_size_T = group_store_T::get_local_memory_size(NUM_BLOCK);
-            
-            sycl::local_accessor<uint8_t, 1> stacc_T(store_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> stacc_float1(store_temp_storage_size_float1, cgh);
+             sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
+             sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
+             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);            
             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
@@ -937,56 +845,38 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_T1, ltacc_float1, stacc_T, stacc_float1);
+                kOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1);
               });
           });
       }
-      /*
-      DPCT1010:246: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-      */
-      //CUDA_CHECK_RETURN(0);
-
-      //CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait()));
+     
       DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
       {
         dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
           [&](sycl::handler &cgh) {
-            /*
-            DPCT1054:305: The type of variable temp_storage is declared in device function with the name type_ct8. Adjust the code to make the type_ct8 declaration visible at the accessor declaration point.
-            */
-            //sycl::local_accessor<uint8_t[sizeof(type_ct8)], 0> temp_storage_ct1_acc_ct1(cgh);
-            using group_load_float1 = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-            size_t load_temp_storage_size_float1 = group_load_float1::get_local_memory_size(NUM_BLOCK);
-            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
             
-            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_float1(load_temp_storage_size_float1, cgh);
-              
+            using group_load = dpct::group::workgroup_load<NUM8BIT, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+             size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            
+             sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
+             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
             
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(buff_p, buff_g, buff_state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), ltacc_T, ltacc_float1);
+                kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1);
               });
           });
       }
-      /*
-      DPCT1010:247: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-      */
-      //CUDA_CHECK_RETURN(0);
+     
       break;
 		default:
 			break;
 	}
- 
- //back memcpy
- q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
- q_ct1.memcpy((void*)(buff_p), (void*)(p), size);
- q_ct1.memcpy((void*)(buff_state1), (void*)(state1), size);
- q_ct1.memcpy((void*)(buff_state2), (void*)(state2), size);
  
 }
 catch (sycl::exception const &exc) {
