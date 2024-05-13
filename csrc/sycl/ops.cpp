@@ -530,7 +530,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
               cgh.parallel_for(
                 sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
                 [=](sycl::nd_item<3> item_ct1) {
-                  kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8>(g, p, buff_state1, buff_state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, tacc, dacc_state1, dacc_state2, dacc_g);
+                  kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, tacc, dacc_state1, dacc_state2, dacc_g);
                 });
             });
         }
@@ -575,8 +575,8 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 				  q_ct1.submit(
 				    [&](sycl::handler &cgh) {
                                   
-             using group_load = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
-             using group_load_float = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
+             using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+             using group_load_float = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
               size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             
@@ -653,8 +653,8 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
           dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
           q_ct1.submit(
             [&](sycl::handler &cgh) {
-              using group_load = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
-             using group_load_float = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
+              using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+             using group_load_float = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
               size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             

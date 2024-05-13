@@ -972,7 +972,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
   
   using group_load_uc = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
   
-  using group_store = dpct::group::workgroup_store<NUM_PER_THREAD, dpct_::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_store = dpct::group::workgroup_store<NUM_PER_THREAD, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
   
   
   auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
@@ -1081,7 +1081,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la &tacc, sycl_dacc_float &dacc_state1, sycl_dacc_float &dacc_state2,sycl::accessor<T, 1> &dacc_g)
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_float &dacc_state1,const sycl_dacc_float &dacc_state2,const sycl::accessor<T, 1> &dacc_g)
 {
 
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
@@ -1122,9 +1122,6 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
 
       
       item_ct1.barrier(sycl::access::fence_space::local_space);
-      
-      //Load(temp_storage.load).Load(&(g[i]), g_vals, valid_items, 0.0f);
-      
   
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
@@ -1201,7 +1198,7 @@ void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la tacc, sycl::accessor<T, 1> &dacc_g, sycl::accessor<T, 1> &dacc_p, sycl_dacc_float &dacc_state1,                sycl_dacc_float &dacc_state2)
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2)
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
@@ -1362,7 +1359,7 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
                 float* buff_state1, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la &tacc, sycl::accessor<T, 1> &dacc_g, sycl_dacc_float &dacc_state1)
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl_dacc_float &dacc_state1)
 {
 
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
@@ -1376,8 +1373,8 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
   
   
   
-  using group_load = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
-  using group_load_float = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
+  using group_load = dpct::group::workgroup_load<NUM_VALS, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_load_float = dpct::group::workgroup_load<NUM_VALS, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;
   
   
   auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
@@ -1466,11 +1463,11 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
 
 template<typename T, int OPTIMIZER>
 SYCL_EXTERNAL 
-void kOptimizer32bit1State(T *buff_g, T *buff_p,
-                float *buff_state1, float *unorm, const float max_unorm, const float param_norm,
+void kOptimizer32bit1State(T *g, T *p,
+                float *state1, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la &tacc, sycl::accessor<T, 1> &dacc_g, sycl::accessor<T, 1> &dacc_p,
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const
                 sycl_dacc_float &dacc_state1)
 {
 
@@ -1582,10 +1579,8 @@ void kOptimizer32bit1State(T *buff_g, T *buff_p,
 					}
       }
 
-      /*
-      DPCT1065:126: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
-      item_ct1.barrier();
+      
+      item_ct1.barrier(sycl::access::fence_space::local_space);
      
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
@@ -1621,7 +1616,7 @@ DPCT1110:6: The total declared local variable size in device function kPrecondit
 */
 SYCL_EXTERNAL void
 
-kPreconditionOptimizerStatic8bit2State(T* buff_p, T* __restrict__ const buff_g, unsigned char*__restrict__  const buff_state1, unsigned char* __restrict__ const buff_state2,
+kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const buff_state2,
                 float *unorm,
                 const float beta1, const float beta2,
                 const float eps, const int step,
