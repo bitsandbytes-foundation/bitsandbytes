@@ -13,6 +13,8 @@
 #include <mma.h>
 #include <cmath>
 
+#define FLT_MAX std::numeric_limits<float>::max()
+#define FLT_MIN std::numeric_limits<float>::min()
 
 
 #define HLF_MAX 65504
@@ -404,7 +406,7 @@ unsigned char dQuantize(float* smem_code, const float rand, float x)
 }
 
 template <int SIGNED>
-__dpct_inline__ unsigned char quantize_2D(float *__restrict__ quadrants, float *__restrict__ const smem_code, float x)
+__dpct_inline__ unsigned char quantize_2D(float *__restrict__ quadrants, float x)
 {
     int pivot = 127;
     int upper_pivot = 255;
@@ -436,7 +438,7 @@ __dpct_inline__ unsigned char quantize_2D(float *__restrict__ quadrants, float *
             //val = i == 64 ? quadrants[0] : smem_code[pivot];
             local_pivot -= offset;
         }
-        val = i >= 64 ? quadrants[local_pivot] : smem_code[pivot];
+        val = i >= 64 ? quadrants[local_pivot] : 0;//smem_code[pivot];
         offset -= 1;
     }
 
@@ -2300,15 +2302,16 @@ SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ buff_g, float *gnorm_vec
 }
 
 
+//=========================8 bit blockwise====================================
+
+
 #define LANES 2
 #define QUAD 3
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
-/*
-DPCT1110:10: The total declared local variable size in device function kOptimizerStatic8bit2StateBlockwise exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
-*/
+
 SYCL_EXTERNAL 
 void
-kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, unsigned char* buff_state1, unsigned char* buff_state2,
+kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
@@ -2319,9 +2322,9 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
                 sycl::local_accessor<float, 2> smem_quantiles1,
                 sycl::local_accessor<float, 2> smem_quantiles2,
                 float *smem_exchange1, float *smem_exchange2,
-                sycl_la_T ltacc_T, sycl_la_T ltacc_T1,
-                sycl_la_float ltacc_float1, sycl_la_float ltacc_float2,
-                sycl_la_T stacc_T, sycl_la_float1 stacc_float1, sycl_la_float stacc_float2)
+                const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g,
+                const sycl::accessor<T, 1> &dacc_p,
+                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2)
 {
 
     //const int n_full = n + (n%BLOCK_SIZE);
@@ -2346,22 +2349,22 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
     T g_vals[N_PER_TH];
     T p_vals[N_PER_TH];
     
-    //typedef cub::BlockLoad<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    //typedef cub::BlockLoad<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
-
-    //typedef cub::BlockStore<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-    //typedef cub::BlockStore<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
-
     
-    /*
-    union  type_ct10{
-        typename LoadT::TempStorage loadh;
-        typename LoadChar::TempStorage loadc;
-        typename StoreChar::TempStorage storec;
-        typename StoreT::TempStorage storeh;
-    };
-    type_ct10 &temp_storage = *(type_ct10 *)temp_storage_ct1;
-    */
+    
+     using group_load = dpct::group::workgroup_load<N_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_load_uc = dpct::group::workgroup_load<N_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+  
+  using group_store = dpct::group::workgroup_store<N_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_store_uc = dpct::group::workgroup_store<N_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+  
+  
+  auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_p = dacc_p.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state2 = dacc_state2.get_multi_ptr<sycl::access::decorated::yes>().get();
+    
+    
+    
     // init: 0.2 -> 0.23
 
     // 0.23 -> 0.23
@@ -2374,9 +2377,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         smem_quantiles2[j][item_ct1.get_local_id(2)] = smem_quantiles2[0][item_ct1.get_local_id(2)];
       }
 
-    /*
-    DPCT1065:174: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-    */
+   
     item_ct1.barrier(sycl::access::fence_space::local_space);
 
     #pragma unroll
@@ -2391,32 +2392,8 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
     {
         // loads: 0.23 -> 0.85/1.44
         valid_items = n - i >= BLOCK_SIZE ? BLOCK_SIZE : n - i;
-        /*
-        DPCT1065:175: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
-        item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:183: Migration of cub::BlockLoad::Load is not supported.
-        */
-        //LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
-      
-        // 1. load 8 values per thread
-        // 2. compute 2-max in registers (64 max per warp)
-        // 3. do warp reduction + broadcast back
-        // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
-        // 5. Repeat (3) 8 times for top 8 values in 256
-        // 6. store with byte index
-        auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item, &buff_g[0], g_vals);
         
-        /*
-        DPCT1065:176: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:184: Migration of cub::BlockLoad::Load is not supported.
-        */
-        //LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
         
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2424,17 +2401,11 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item, &buff_state1[0], c1s);
+        auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+        group_load(tmp).load(item_ct1, d_g, g_vals);
         
-        /*
-        DPCT1065:177: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+        
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:185: Migration of cub::BlockLoad::Load is not supported.
-        */
-        //LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 0);
         
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2442,8 +2413,18 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = ltacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item, &buff_state2[0], c2s);
+        group_load_uc(tmp).load(item_ct1, d_state1, c1s);
+        
+        
+        item_ct1.barrier(sycl::access::fence_space::local_space);
+        
+        // 1. load 8 values per thread
+        // 2. compute 2-max in registers (64 max per warp)
+        // 3. do warp reduction + broadcast back
+        // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
+        // 5. Repeat (3) 8 times for top 8 values in 256
+        // 6. store with byte index
+        group_load_uc(tmp).load(item_ct1, d_state2, c2s);
         
      
         new_local_abs_max1 = -FLT_MAX;
@@ -2487,9 +2468,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
           smem_exchange2[0] = new_local_abs_max2;
         }
 
-        /*
-        DPCT1065:178: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+        
         item_ct1.barrier(sycl::access::fence_space::local_space);
 
         if(item_ct1.get_local_id(2) == 0)
@@ -2503,14 +2482,9 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
           new_local_abs_max2 = smem_exchange2[0];
         }
 
-        /*
-        DPCT1065:179: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+        
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:186: Migration of cub::BlockLoad::Load is not supported.
-        */
-        //LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
+        
           
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2518,8 +2492,7 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item, &buff_p[0], p_vals);
+        group_load(tmp).load(item_ct1, d_p, p_vals);
         
         //  reduce: 2.67/1.69 -> 2.67/1.70
         # pragma unroll N_PER_TH
@@ -2535,14 +2508,9 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         }
 
         //  store: 0.85/1.44 -> 2.48/1.57
-        /*
-        DPCT1065:180: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+        
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:187: Migration of cub::BlockStore::Store is not supported.
-        */
-        //StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
+        
         
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2550,15 +2518,17 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item, &buff_p[0], p_vals);
+        group_store(tmp).store(item_ct1, d_p, p_vals);
         
         //  quantizaztion: 2.67/1.70  -> 3.4/3.3
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], s1_vals[j] / new_local_abs_max1);
-            c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id], s2_vals[j] / new_local_abs_max2);
+            //c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], s1_vals[j] / new_local_abs_max1);
+            //c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id], s2_vals[j] / new_local_abs_max2);
+            
+            c1s[j] = quantize_2D<1>(quadrants1, s1_vals[j] / new_local_abs_max1);
+            c2s[j] = quantize_2D<0>(quadrants2, s2_vals[j] / new_local_abs_max2);
 
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
@@ -2571,14 +2541,8 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
             }
         }
 
-        /*
-        DPCT1065:181: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+        
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:188: Migration of cub::BlockStore::Store is not supported.
-        */
-        //StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
         
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2586,18 +2550,10 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item, &buff_state1[0], c1s);
+        group_store_uc(tmp).store(item_ct1, d_state1, c1s);
         
-        
-        /*
-        DPCT1065:182: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+       
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:189: Migration of cub::BlockStore::Store is not supported.
-        */
-        //StoreChar(temp_storage.storec).Store(&(state2[i]), c2s, valid_items);
           
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2605,8 +2561,9 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = stacc_float2.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item, &buff_state2[0], c2s);
+        group_store_uc(tmp).store(item_ct1, d_state2, c2s);
+        
+        item_ct1.barrier(sycl::access::fence_space::local_space);
         
     }
 }
@@ -2615,12 +2572,9 @@ kOptimizerStatic8bit2StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
 #define LANES 2
 #define QUAD 3
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
-/*
-DPCT1110:11: The total declared local variable size in device function kOptimizerStatic8bit1StateBlockwise exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
-*/
 SYCL_EXTERNAL 
 void
-kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, unsigned char* buff_state1,
+kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char* state1,
                 const float beta1, const float beta2,
                 const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1,
@@ -2630,9 +2584,10 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
                 const sycl::nd_item<3> &item_ct1,
                 sycl::local_accessor<float, 2> smem_quantiles1,
                 float *smem_exchange1,
-                sycl_la_T ltacc_T, sycl_la_T ltacc_T1,
-                sycl_la_float ltacc_float1,sycl_la_T stacc_T,
-                sycl_la_float stacc_float1
+                const sycl_la &tacc,
+                const sycl::accessor<T, 1> &dacc_g,
+                const sycl::accessor<T, 1> &dacc_p,
+                const sycl_dacc_uc &dacc_state1
                 )
 {
 
@@ -2651,22 +2606,18 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
     T g_vals[N_PER_TH];
 		T p_vals[N_PER_TH];
 
-    //typedef cub::BlockLoad<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    //typedef cub::BlockLoad<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
-
-    //typedef cub::BlockStore<unsigned char, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-    //typedef cub::BlockStore<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
-     
-    /*
-    union  type_ct11{
-        typename LoadT::TempStorage loadh;
-        typename LoadChar::TempStorage loadc;
-        typename StoreChar::TempStorage storec;
-        typename StoreT::TempStorage storeh;
-    };
+     using group_load = dpct::group::workgroup_load<N_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_load_uc = dpct::group::workgroup_load<N_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+  
+  using group_store = dpct::group::workgroup_store<N_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_store_uc = dpct::group::workgroup_store<N_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+  
+  
+  auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_p = dacc_p.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
     
-    type_ct11 &temp_storage = *(type_ct11 *)temp_storage_ct1;
-    */
+   
     // init: 0.2 -> 0.23
 
     // 0.23 -> 0.23
@@ -2675,9 +2626,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
 		for(unsigned int j = 1; j < LANES; j++)
 			smem_quantiles1[j][item_ct1.get_local_id(2)] = smem_quantiles1[0][item_ct1.get_local_id(2)];
 
-    /*
-    DPCT1065:190: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-    */
+    
     item_ct1.barrier(sycl::access::fence_space::local_space);
 
     #pragma unroll
@@ -2688,32 +2637,22 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
     {
         // loads: 0.23 -> 0.85/1.44
         valid_items = n - i >= BLOCK_SIZE ? BLOCK_SIZE : n - i;
-        /*
-        DPCT1065:191: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+        
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:197: Migration of cub::BlockLoad::Load is not supported.
-        */
-        //LoadT(temp_storage.loadh).Load(&(g[i]), g_vals, valid_items, (T)0.0f);
-          
+        
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
         // 3. do warp reduction + broadcast back
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item, &buff_g[0], g_vals);
+        auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+        group_load(tmp).load(item_ct1, d_g, g_vals);
         
         /*
         DPCT1065:192: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
         */
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:198: Migration of cub::BlockLoad::Load is not supported.
-        */
-        //LoadChar(temp_storage.loadc).Load(&(state1[i]), c1s, valid_items, 128);
         
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2721,17 +2660,10 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = ltacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item, &buff_state1[0], c1s);
+        group_load_uc(tmp).load(item_ct1, d_state1, c1s);
         
-        /*
-        DPCT1065:193: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+        
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:199: Migration of cub::BlockLoad::Load is not supported.
-        */
-        //LoadT(temp_storage.loadh).Load(&(p[i]), p_vals, valid_items, (T)0.0f);
         
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2739,8 +2671,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = ltacc_T1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_load(tmp).load(item, &buff_p[0], p_vals);
+        group_load(tmp).load(item_ct1, d_p, p_vals);
         
         new_local_abs_max1 = -FLT_MAX;
 
@@ -2799,9 +2730,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         if(item_ct1.get_local_id(2) == 0)
           smem_exchange1[0] = new_local_abs_max1;
 
-        /*
-        DPCT1065:194: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+       
         item_ct1.barrier(sycl::access::fence_space::local_space);
 
         if(item_ct1.get_local_id(2) == 0)
@@ -2836,30 +2765,23 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
 				}
 
         //  store: 0.85/1.44 -> 2.48/1.57
-        /*
-        DPCT1065:195: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+        
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:200: Migration of cub::BlockStore::Store is not supported.
-        */
-        //StoreT(temp_storage.storeh).Store(&(p[i]), p_vals, valid_items);
-      
+        
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
         // 3. do warp reduction + broadcast back
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = stacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item, &buff_p[0], p_vals);
+        group_store(tmp).store(item_ct1, d_p, p_vals);
         
         //  quantizaztion: 2.67/1.70  -> 3.4/3.3
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], s1_vals[j] / new_local_abs_max1);
-
+            //c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], s1_vals[j] / new_local_abs_max1);
+            c1s[j] = quantize_2D<1>(quadrants1, s1_vals[j] / new_local_abs_max1);
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
             if(sycl::signbit(smem_quantiles1[lane_id][c1s[j]]) != sycl::signbit(s1_vals[j]))
@@ -2871,14 +2793,8 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
             }
         }
 
-        /*
-        DPCT1065:196: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-        */
+       
         item_ct1.barrier(sycl::access::fence_space::local_space);
-        /*
-        DPCT1007:201: Migration of cub::BlockStore::Store is not supported.
-        */
-        //StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
         
         // 1. load 8 values per thread
         // 2. compute 2-max in registers (64 max per warp)
@@ -2886,8 +2802,7 @@ kOptimizerStatic8bit1StateBlockwise(T* buff_p, T* __restrict__ const buff_g, uns
         // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
         // 5. Repeat (3) 8 times for top 8 values in 256
         // 6. store with byte index
-        auto *tmp = stacc_float1.get_multi_ptr<sycl::access::decorated::yes>().get();
-        group_store(tmp).store(item, &buff_state1[0], c1s);
+        group_store_uc(tmp).store(item_ct1, d_state1, c1s);
         
     }
 }
