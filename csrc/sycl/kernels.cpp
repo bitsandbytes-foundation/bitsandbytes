@@ -814,11 +814,15 @@ void kQuantize(float * code, float * __restrict__ const buff_A, unsigned char *b
   }
 }
 
+
+//===========================k quantize blockwise================================
+
 template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TYPE>
 //__launch_bounds__(TH, 4)
-SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n,
+SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n,
                         const sycl::nd_item<3> &item_ct1, float *smem_code,
-                        float *smem_absmax_value, sycl_la_T ltacc_T, sycl_la_float ltacc_float, sycl_la_unsigned_char stacc)
+                        float *smem_absmax_value,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_A,
+                        const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out)
 {
   
   
@@ -832,6 +836,16 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
   //float local_abs_max = -FLT_MAX;
   float local_abs_max = 0.0f;
   int local_rand_idx = 0;
+  
+  using group_load = dpct::group::workgroup_load<NUM_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_load_float = dpct::group::workgroup_load<NUM_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;  
+  using group_store_uc = dpct::group::workgroup_store<NUM_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;  
+
+  auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_rand = dacc_rand.get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_out = dacc_out.get_multi_ptr<sycl::access::decorated::yes>().get();
+
+  
   
   if(DATA_TYPE == General8bit)
     for(int i = item_ct1.get_local_id(2); i < 256; i+=item_ct1.get_local_range(2))
@@ -851,8 +865,8 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
-    auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_load(tmp).load(item, &buff_A[0], vals);
+    auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+    group_load(tmp).load(item_ct1, d_A, vals);
     
     // 1. compute local max
     // 2. broadcast local max
@@ -862,18 +876,12 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
     for(int j = 0; j < NUM_PER_TH; j++)
        local_abs_max = sycl::fmax(local_abs_max, sycl::fabs((float)vals[j]));
 
-    /*
-    DPCT1007:0: Migration of cub::Reduce is not supported.
-    */
-    //local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, sycl::maximum<>(), valid_items);
-    local_abs_max = dpct::group::reduce(item_ct1, local_abs_max, sycl::maximum<>());
+    local_abs_max = sycl::reduce_over_group(item_ct1.get_group(), local_abs_max, sycl::maximum<>());
 
     if(item_ct1.get_local_id(2) == 0)
       smem_absmax_value[0] = local_abs_max;
 
-    /*
-    DPCT1065:85: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-    */
+    
     item_ct1.barrier(sycl::access::fence_space::local_space);
 
     if(item_ct1.get_local_id(2) == 0)
@@ -888,11 +896,6 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
     if(STOCHASTIC)
     {
       local_rand_idx = ((item_ct1.get_group(2)*NUM_BLOCK) + (item_ct1.get_local_id(2)*NUM) + rand_offset) % (1024-4);
-      /*
-      DPCT1007:88: Migration of cub::BlockLoad::Load is not supported.
-      */
-      
-      //LoadFloat(loadf).Load(&rand[local_rand_idx], rand_vals, BLOCK_SIZE, 0);
       
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
@@ -900,8 +903,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_float.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_rand[0], rand_vals);
+      group_load_float(tmp).load(item_ct1, d_rand, rand_vals);
           
     }
 
@@ -940,23 +942,19 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const buff_
 
     
     item_ct1.barrier(sycl::access::fence_space::local_space);
-    /*
-    DPCT1007:89: Migration of cub::BlockStore::Store is not supported.
-    */
     
-
     // 1. load 8 values per thread
     // 2. compute 2-max in registers (64 max per warp)
     // 3. do warp reduction + broadcast back
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
-    auto *tmp = stacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_store(tmp).store(item, &buff_out[0], qvals);
-      
-    //StoreChar(storec).Store(&(out[(DATA_TYPE > 0) ? i/2 : i]), qvals, (DATA_TYPE > 0) ? (valid_items+1)/2 : valid_items);
+    group_store_uc(tmp).store(item_ct1, d_out, qvals);
+    
   }
 }
+
+//===========================k dequantize================================
 
 template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
 SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n,
@@ -1108,18 +1106,6 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
   auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_state2 = dacc_state2.get_multi_ptr<sycl::access::decorated::yes>().get();
-
-  //typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-  //typedef cub::BlockLoad<float, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  //typedef sycl::group<3> BlockReduce;
-  /*
-  union  type_ct2{
-      typename Load::TempStorage load;
-      typename LoadFloat::TempStorage loadf;
-      typename BlockReduce::TempStorage reduce;
-  };
-  */
-  //type_ct2 &temp_storage = *(type_ct2 *)temp_storage_ct1;
 
   for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
   {

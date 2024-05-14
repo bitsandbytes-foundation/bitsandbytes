@@ -192,37 +192,30 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
   num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
   sycl::context ctx = q_ct1.get_context();
   int size= NUM_BLOCK;
+  for(int i=0; i< NUM_BLOCK; i++){ out[i]=out[(DATA_TYPE > 0) ? i/2 : i];};
   
-  T *buff_A;
-  unsigned char *buff_out;
-  float *buff_rand;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_rand) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((T*)(buff_A), (T*)(A), NUM_BLOCK);
-  q_ct1.memcpy((void*)(buff_out), (void*)(out), NUM_BLOCK);
-  q_ct1.memcpy((void*)(buff_rand), (void*)(rand), NUM_BLOCK);
-  
-  for(int i=0; i< NUM_BLOCK; i++){ buff_out[i]=buff_out[(DATA_TYPE > 0) ? i/2 : i];};
+  sycl::buffer<T, 1> buff_A(A,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_rand(rand,sycl::range<1>(size));
+  sycl::buffer<unsigned char, 1> buff_out(out,sycl::range<1>(size));
   
   if(blocksize == 4096)
-    /*
-    DPCT1049:57: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-    */
+    
+    
     {
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
         [&](sycl::handler &cgh) {
-          using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-          size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-          using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
-          size_t store_temp_storage_size = group_store::get_local_memory_size(NUM_BLOCK);
-          using group_load_float = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-          size_t load_temp_storage_size_float = group_load_float::get_local_memory_size(NUM_BLOCK);
           
-          sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-          sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
-          sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
+          
+           using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+              
+          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
+          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+          
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
+          
           
           //__shared__ vars for funtions
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
@@ -232,31 +225,26 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, 0>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, 0>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
             });
         });
     }
   else if(blocksize == 2048)
-    /*
-    DPCT1049:58: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-    */
+    
     {
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
         [&](sycl::handler &cgh) {
           
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+              
+          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
+          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
           
-          using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-          size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-          using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
-          size_t store_temp_storage_size = group_store::get_local_memory_size(NUM_BLOCK);
-          using group_load_float = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-          size_t load_temp_storage_size_float = group_load_float::get_local_memory_size(NUM_BLOCK);
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
           
-          sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-          sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
-          sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
-      
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
           sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
@@ -264,7 +252,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
             });
         });
     }
@@ -274,16 +262,14 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       q_ct1.submit(
         [&](sycl::handler &cgh) {
           
-          using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-          size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-          using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
-          size_t store_temp_storage_size = group_store::get_local_memory_size(NUM_BLOCK);
-          using group_load_float = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-          size_t load_temp_storage_size_float = group_load_float::get_local_memory_size(NUM_BLOCK);
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+              
+          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
+          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
           
-          sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-          sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
-          sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
       
           //__shared__vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
@@ -292,7 +278,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 1024, 4, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 1024, 4, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
             });
         });
     }
@@ -302,17 +288,16 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       q_ct1.submit(
         [&](sycl::handler &cgh) {
           
-          using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-          size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-          using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
-          size_t store_temp_storage_size = group_store::get_local_memory_size(NUM_BLOCK);
-          using group_load_float = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-          size_t load_temp_storage_size_float = group_load_float::get_local_memory_size(NUM_BLOCK);
+         
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+              
+          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
+          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
           
-          sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-          sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
-          sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
-      
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
+          
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
           sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
@@ -320,7 +305,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 512, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 512, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
             });
         });
     }
@@ -330,16 +315,14 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       q_ct1.submit(
         [&](sycl::handler &cgh) {
           
-          using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-          size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-          using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
-          size_t store_temp_storage_size = group_store::get_local_memory_size(NUM_BLOCK);
-          using group_load_float = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-          size_t load_temp_storage_size_float = group_load_float::get_local_memory_size(NUM_BLOCK);
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+              
+          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
+          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
           
-          sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-          sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
-          sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
       
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
@@ -349,7 +332,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 128), sycl::range<3>(1, 1, 128)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
             });
         });
     }
@@ -359,24 +342,22 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       q_ct1.submit(
         [&](sycl::handler &cgh) {
           
-          using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-          size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-          using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
-          size_t store_temp_storage_size = group_store::get_local_memory_size(NUM_BLOCK);
-          using group_load_float = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-          size_t load_temp_storage_size_float = group_load_float::get_local_memory_size(NUM_BLOCK);
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+              
+          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
+          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
           
-          sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-          sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
-          sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
-      
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
+           
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
           sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 64), sycl::range<3>(1, 1, 64)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
             });
         });
     }
@@ -386,17 +367,15 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
       q_ct1.submit(
         [&](sycl::handler &cgh) {
           
-          using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-          size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-          using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
-          size_t store_temp_storage_size = group_store::get_local_memory_size(NUM_BLOCK);
-          using group_load_float = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, float>;
-          size_t load_temp_storage_size_float = group_load_float::get_local_memory_size(NUM_BLOCK);
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+              
+          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
+          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
           
-          sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-          sycl::local_accessor<uint8_t, 1> ltacc_float(load_temp_storage_size_float, cgh);
-          sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
-          
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
+         
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
           sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
@@ -405,17 +384,10 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 32), sycl::range<3>(1, 1, 32)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>(code, buff_A, absmax, buff_out, buff_rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), ltacc_T, ltacc_float, stacc);
+              kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
             });
         });
     }
-
-
-  
-  //back memcpy
-  q_ct1.memcpy((void*)(A), (void*)(buff_A), NUM_BLOCK);
-  q_ct1.memcpy((void*)(out), (void*)(buff_out), NUM_BLOCK);
-  q_ct1.memcpy((void*)(rand), (void*)(buff_rand), NUM_BLOCK);
   
 }
 
