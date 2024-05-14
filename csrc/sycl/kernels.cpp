@@ -2208,22 +2208,19 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
 }
 
 
-//===========================================================================
+//===============================k percentile clipping============================================
 
 
 
 template<typename T, int BLOCK_SIZE, int NUM_VALS>
-SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ buff_g, float *gnorm_vec, int step, const int n,
-                         const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T)
+SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,
+                         const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g)
 {
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
   int valid_items = 0;
 
-  
-  //typedef cub::BlockLoad<T, BLOCK_SIZE/NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-
-  //sycl::buffer<T, 1> buff_g(g, sycl::range<1>(NUM_VALS));
-
+   using group_load = dpct::group::workgroup_load<NUM_VALS, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+   auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
   
   T vals[NUM_VALS];
   float local_sum = 0.0f;
@@ -2233,33 +2230,25 @@ SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ buff_g, float *gnorm_vec
       valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
       local_sum = 0.0f;
 
-      /*
-      DPCT1065:202: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+     
       item_ct1.barrier(sycl::access::fence_space::local_space);
-      /*
-      DPCT1007:203: Migration of cub::BlockLoad::Load is not supported.
-      */
-      //LoadT(loadT).Load(&(g[i]), vals, valid_items, (T)0.0f);
-      
+     
       // 1. load 8 values per thread
       // 2. compute 2-max in registers (64 max per warp)
       // 3. do warp reduction + broadcast back
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_g[0], vals);
+      auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+      group_load(tmp).load(item_ct1, d_g, vals);
       
      #pragma unroll NUM_VALS
      for(int j = 0; j < NUM_VALS; j++)
        local_sum += ((float)vals[j])*((float)vals[j]);
 
-    /*
-    DPCT1007:12: Migration of cub::Sum is not supported.
-    */
-    locacl_sum = sycl::reduce_over_group(item_ct1.get_group(), local_sum, sycl::plus<>());
-    //local_sum = BlockReduce(reduce).Sum(local_sum, valid_items);
+    
+    local_sum = sycl::reduce_over_group(item_ct1.get_group(), local_sum, sycl::plus<>());
+    
     if(item_ct1.get_local_id(2) == 0)
     {
       if(step == 1)

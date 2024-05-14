@@ -966,44 +966,33 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
     sycl::queue &q_ct1 = dev_ct1.in_order_queue();
     sycl::context ctx = q_ct1.get_context();
     
-  int num_blocks = n/2048;
-  num_blocks = n % 2048 == 0 ? num_blocks : num_blocks + 1;
-  int size = NUM_BLOCK;
-  T *buff_g;
-  *((void **)&buff_g) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_g), (void*)(g), size);
+    int num_blocks = n/2048;
+    num_blocks = n % 2048 == 0 ? num_blocks : num_blocks + 1;
+    int size = NUM_BLOCK;
   
+    sycl::buffer<T, 1> buff_g(g,sycl::range<1>(size));
+    q_ct1.memset(&gnorm_vec[step % 100], 0, 1*sizeof(float)).wait();
   
-	//CUDA_CHECK_RETURN(DPCT_CHECK_ERROR(q_ct1.memset(&gnorm_vec[step % 100], 0, 1*sizeof(float)).wait()));
-  DPCT_CHECK_ERROR(q_ct1.memset(&gnorm_vec[step % 100], 0, 1*sizeof(float)).wait());
-  /*
-  DPCT1049:68: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-  */
   {
     dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
     q_ct1.submit(
       [&](sycl::handler &cgh) {
-        using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-        size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-        sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
+        
+         using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+         size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+         sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            
+         sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
                   
       cgh.parallel_for(    
        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
       [=](sycl::nd_item<3> item_ct1) {
-        kPercentileClipping<T, 2048, 4>(g, gnorm_vec, step, n, item_ct1, ltacc_T);
+        kPercentileClipping<T, 2048, 4>(g, gnorm_vec, step, n, item_ct1, tacc, dacc_g);
       });
     });
   }
-  /*
-  DPCT1010:250: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
-  //back memcpy
-   q_ct1.memcpy((void*)(g), (void*)(buff_g), size);
+ 
 }
-
-
-
 
 //========================GEMM============================
 
