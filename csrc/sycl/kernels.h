@@ -13,20 +13,21 @@
 
 #pragma once
 
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_float;
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_T;
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_unsigned_char;
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_half;
-typedef sycl::local_accessor<uint8_t, 1> sycl_la_unsigned;
-typedef sycl::local_accessor<uint8_t ,1> sycl_la_char;
+//================typedefs===================================
+
+typedef sycl::local_accessor<uint8_t, 1> sycl_la;
+typedef sycl::accessor<int, 1> sycl_dacc;
+typedef sycl::accessor<float, 1> sycl_dacc_float;
+typedef sycl::accessor<unsigned char, 1> sycl_dacc_uc;
 
 //template <int QUANT_TYPE, typename INP_TYPE, typename COMP_TYPE, typename OUT_TYPE>__global__ void kMatmul_inference_4bit(INP_TYPE *A, unsigned char *B, OUT_TYPE *out, int lda, int ldb, int rowsA, int colsA, int colsB);
 
 template<typename T> extern SYCL_EXTERNAL void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset, const T max_val, const int n,
-                                            const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc);
+                                            const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A);
 
 extern SYCL_EXTERNAL void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n,
-               const sycl::nd_item<3> &item_ct1, float* smem_code, sycl_la_float ltacc, sycl_la_unsigned_char stacc);
+               const sycl::nd_item<3> &item_ct1, float* smem_code, const sycl_la &tacc, const sycl_dacc_float &dacc_A,
+               const sycl_dacc_uc &dacc_out);
 extern SYCL_EXTERNAL void kDequantize(float *code, unsigned char *A, float *out, const int n,
                  const sycl::nd_item<3> &item_ct1, float *smem_code);
 
@@ -34,38 +35,38 @@ template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TY
                                                                                                             const sycl::nd_item<3> &item_ct1,
                                                                                                             float *smem_code,
                                                                                                             float *smem_absmax_value,
-                                                                                                            sycl_la_T ltacc_T,                           sycl_la_float ltacc_float,sycl_la_unsigned_char stacc);
-template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE> extern SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,  sycl_la_unsigned_char ltacc, sycl_la_T stacc);
+                                                                                                            const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_A,
+                        const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out);
+template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE> extern SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_uc &dacc_A,const sycl::accessor<T, 1> &dacc_out);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 extern SYCL_EXTERNAL void kPreconditionOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_float ltacc_float1, sycl_la_float ltacc_float2);
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_float &dacc_state1,const sycl_dacc_float &dacc_state2,const sycl::accessor<T, 1> &dacc_g);
 
 template<typename T, int OPTIMIZER>
 extern SYCL_EXTERNAL void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1,  sycl_la_T ltacc_T, sycl_la_T ltacc_T1, sycl_la_float ltacc_float1, sycl_la_float ltacc_float2,
-                sycl_la_T stacc_T, sycl_la_float stacc_float1, sycl_la_float stacc_float2);
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 extern SYCL_EXTERNAL void kPreconditionOptimizer32bit1State(T* g, T* p,
                 float* state1, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_float ltacc_float1);
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl_dacc_float &dacc_state1);
 
 template<typename T, int OPTIMIZER>
 extern SYCL_EXTERNAL void kOptimizer32bit1State(T* g, T* p,
                 float* state1,  float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T, sycl_la_T ltacc_T1, sycl_la_float ltacc_float1, 
-                sycl_la_T stacc_T, sycl_la_float stacc_float1);
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const
+                sycl_dacc_float &dacc_state1);
 
 template<typename T, int OPTIMIZER>
 extern SYCL_EXTERNAL void
@@ -79,7 +80,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                 const float gnorm_scale, const int n,
                 const sycl::nd_item<3> &item_ct1,
                 float *smem_quantiles1,
-                sycl_la_T ltacc_T, sycl_la_float ltacc_float1);
+                const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1);
 
 
 template<typename T, int OPTIMIZER>
@@ -92,9 +93,9 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 float* max1, float* new_max1,
                 float weight_decay, const float gnorm_scale, const int n,
                 const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,
-                sycl_la_T ltacc_T, sycl_la_T ltacc_T1,
-                sycl_la_float ltacc_float1, sycl_la_T stacc_T,
-                sycl_la_float stacc_float1);
+                const sycl_la &tacc,
+                const sycl::accessor<T, 1> &dacc_g, const sycl::accessor<T, 1> &dacc_p,
+                const sycl_dacc_uc &dacc_state11);
 
 
 
@@ -109,8 +110,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
                 const float gnorm_scale, const int n,
                 const sycl::nd_item<3> &item_ct1, 
                 float *smem_quantiles1, float *smem_quantiles2,
-                sycl_la_T ltacc_T,
-                sycl_la_float ltacc_float1, sycl_la_float ltacc_float2);
+                const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2);
 
 
 template<typename T, int OPTIMIZER>
@@ -123,9 +123,8 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 float* max1, float* max2, float* new_max1, float* new_max2,
                 float weight_decay, const float gnorm_scale, const int n,
                 const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,
-                float *smem_quantiles2, sycl_la_T ltacc_T, sycl_la_T ltacc_T1,
-                sycl_la_float ltacc_float1, sycl_la_float ltacc_float2,
-                sycl_la_T stacc_T, sycl_la_float stacc_float1, sycl_la_float stacc_float2);
+                float *smem_quantiles2,const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl::accessor<T, 1> &dacc_p,
+                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EXTERNAL void kOptimizerStatic8bit2StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,
@@ -136,9 +135,9 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EX
                 sycl::local_accessor<float, 2> smem_quantiles1,
                 sycl::local_accessor<float, 2> smem_quantiles2,
                 float *smem_exchange1, float *smem_exchange2,
-                sycl_la_T ltacc_T, sycl_la_T ltacc_T1,
-                sycl_la_float ltacc_float1, sycl_la_float ltacc_float2,
-                sycl_la_T stacc_T, sycl_la_float stacc_float1, sycl_la_float stacc_float2);
+                const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g,
+                const sycl::accessor<T, 1> &dacc_p,
+                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EXTERNAL void kOptimizerStatic8bit1StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1,
@@ -151,12 +150,13 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EX
                 const sycl::nd_item<3> &item_ct1,
                 sycl::local_accessor<float, 2> smem_quantiles1,
                 float *smem_exchange1,
-                sycl_la_T ltacc_T, sycl_la_T ltacc_T1,
-                sycl_la_float ltacc_float1,sycl_la_T stacc_T,
-                sycl_la_float stacc_float1);
+                const sycl_la &tacc,
+                const sycl::accessor<T, 1> &dacc_g,
+                const sycl::accessor<T, 1> &dacc_p,
+                const sycl_dacc_uc &dacc_state1);
 
 
-template<typename T, int BLOCK_SIZE, int NUM_VALS> extern SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,const sycl::nd_item<3> &item_ct1, sycl_la_T ltacc_T);
+template<typename T, int BLOCK_SIZE, int NUM_VALS> extern SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g);
 
 
 extern SYCL_EXTERNAL void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n,

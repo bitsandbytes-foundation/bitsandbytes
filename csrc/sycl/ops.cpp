@@ -29,6 +29,7 @@
 #define NUM_ESTIMATE 8
 #define BLOCK_ESTIMATE 4096
 #define NUM_PER_THREAD 4
+
 using namespace dnnl;
 
 typedef sycl::ext::oneapi::bfloat16 bf16;
@@ -42,18 +43,13 @@ void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *sr
   int threads = 512;
   int num_blocks = n/threads;
   num_blocks = n % threads == 0 ? num_blocks : num_blocks + 1;
-  /*
-  DPCT1049:53: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-  */
+  
   dpct::get_in_order_queue().parallel_for(
     sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
     [=](sycl::nd_item<3> item_ct1) {
       kHistogramScatterAdd2D(histogram, index1, index2, src, maxidx1, n, item_ct1);
     });
-  /*
-  DPCT1010:229: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
+
 }
 
 
@@ -77,10 +73,9 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
       [&](sycl::handler &cgh) {
       
         using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
-        using group_radix_sort = dpct::group::radix_sort<int, NUM_ESTIMATE>;
         size_t temp_storage_size = group_radix_sort::get_local_memory_size(THREADS_ESTIMATE);  
         sycl::local_accessor<uint8_t, 1> tacc(sycl::range<1>(temp_storage_size), cgh);
-        sycl::accessor dacc(buff_A, cgh, sycl::read_write);
+        sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
           
         
         auto std_numeric_limits_T_max_ct3 = std::numeric_limits<T>::max();
@@ -88,7 +83,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
           [=](sycl::nd_item<3> item_ct1) {
-            kEstimateQuantiles<T>(A, code, offset, std_numeric_limits_T_max_ct3, n, item_ct1, tacc, dacc);
+            kEstimateQuantiles<T>(A, code, offset, std_numeric_limits_T_max_ct3, n, item_ct1, tacc, dacc_A);
             
           });
       });
@@ -438,7 +433,7 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
       cgh.parallel_for(
         sycl::nd_range<3>(sycl::range<3>(1, 1, (n+tile_size-1)/tile_size) * sycl::range<3>(1, 1, 64), sycl::range<3>(1, 1, 64)), 
         [=](sycl::nd_item<3> item_ct1) {
-          kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>(code, buff_A, absmax, buff_out, blocksize, n, item_ct1, tacc, dacc_A, dacc_out);
+          kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>(code, A, absmax, out, blocksize, n, item_ct1, tacc, dacc_A, dacc_out);
         });
       });
     }
@@ -654,6 +649,11 @@ catch (sycl::exception const &exc) {
 
 
 //============================8 bit optimizer===============================
+
+#define NUM8BIT 16
+#define NUM_THREADS 256
+#define NUM_PER_BLOCK 4096
+
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
                 unsigned char* state1, unsigned char* state2,

@@ -28,7 +28,7 @@ set(CPP_FILES csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
 set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
 set(MPS_FILES csrc/mps_ops.mm)
 set(METAL_FILES csrc/mps_kernels.metal)
-set(SYCL_FILES csrc/sycl/ops.cpp csrc/sycl/kernels.cpp)
+set(SYCL_FILES csrc/sycl/ops.cpp csrc/sycl/kernels.cpp) 
 
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
@@ -199,7 +199,7 @@ elseif(BUILD_SYCL)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -L${MKLROOT}/lib")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl-targets=spir64 -L${MKLROOT}/lib")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ferror-limit=590")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ferror-limit=80")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
     list(APPEND SRC_FILES ${SYCL_FILES})
     
