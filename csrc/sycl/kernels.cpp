@@ -737,10 +737,11 @@ void kEstimateQuantiles(const T *A, float *code, const float offset, const T max
  
 }
 
-
+//====================================k quantize===========================================
 SYCL_EXTERNAL 
-void kQuantize(float * code, float * __restrict__ const buff_A, unsigned char *buff_out, const int n,
-               const sycl::nd_item<3> &item_ct1, float* smem_code, sycl_la_float ltacc, sycl_la_unsigned_char stacc)
+void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n,
+               const sycl::nd_item<3> &item_ct1, float* smem_code, const sycl_la &tacc, const sycl_dacc_float &dacc_A,
+               const sycl_dacc_uc &dacc_out)
 {
   const int n_full = (NUM_BLOCK*(n/NUM_BLOCK)) + (n % NUM_BLOCK == 0 ? 0 : NUM_BLOCK);
   int valid_items = (item_ct1.get_group(2)+1 == item_ct1.get_group_range(2)) ? n - (item_ct1.get_group(2)*NUM_BLOCK) : NUM_BLOCK;
@@ -750,9 +751,11 @@ void kQuantize(float * code, float * __restrict__ const buff_A, unsigned char *b
   unsigned char qvals[NUM];
   //const int lane_id = threadIdx.x % 2;
 
-  //typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-  //typedef cub::BlockStore<unsigned char, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-  //__shared__ float smem_code[2][257];
+  using group_load_float = dpct::group::workgroup_load<NUM, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;  
+  using group_store_uc = dpct::group::workgroup_store<NUM, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;  
+
+  auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_out = dacc_out.get_multi_ptr<sycl::access::decorated::yes>().get();
 
   if(item_ct1.get_local_id(2) < 256)
   {
@@ -769,12 +772,7 @@ void kQuantize(float * code, float * __restrict__ const buff_A, unsigned char *b
       // rand_offset % mod value
       valid_items = n - i > NUM_BLOCK ? NUM_BLOCK : n - i;
 
-      /*
-      DPCT1118:50: SYCL group functions and algorithms must be encountered in converged control flow. You may need to adjust the code.
-      */
-      /*
-      DPCT1065:224: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+     
       item_ct1.barrier(sycl::access::fence_space::local_space);
   
       // 1. load 8 values per thread
@@ -783,22 +781,14 @@ void kQuantize(float * code, float * __restrict__ const buff_A, unsigned char *b
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = ltacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_load(tmp).load(item, &buff_A[0], vals);
+      auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+      group_load_float(tmp).load(item_ct1, d_A, vals);
       
-      //LoadFloat(loadf).Load(&(A[i]), vals, valid_items);
-
-
       #pragma unroll 4
       for(int j = 0; j < NUM; j++)
           qvals[j] = dQuantize<0>(smem_code, 0.0f, vals[j]);
 
-      /*
-      DPCT1118:51: SYCL group functions and algorithms must be encountered in converged control flow. You may need to adjust the code.
-      */
-      /*
-      DPCT1065:225: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier(sycl::access::fence_space::local_space);
       
       
@@ -808,10 +798,9 @@ void kQuantize(float * code, float * __restrict__ const buff_A, unsigned char *b
       // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
-      auto *tmp = stacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-      group_store(tmp).store(item, &buff_out[0], qvals);
-      //StoreChar(storec).Store(&(out[i]), qvals, valid_items);
-  }
+      group_store_uc(tmp).store(item_ct1, d_out, qvals);
+      }
+      
 }
 
 

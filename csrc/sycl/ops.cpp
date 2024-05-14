@@ -56,6 +56,8 @@ void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *sr
   //CUDA_CHECK_RETURN(0);
 }
 
+
+//============================estimate quantiles===============================
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
 {
   dpct::device_ext &dev_ct1 = dpct::get_current_device();
@@ -94,6 +96,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
   
 }
 
+//============================k quantize ===============================
 void quantize(float *code, float *A, unsigned char *out, int n)
 {
   int num_blocks = n/1024;
@@ -103,47 +106,36 @@ void quantize(float *code, float *A, unsigned char *out, int n)
   sycl::context ctx = q_ct1.get_context();
   int size = NUM_BLOCK;
   
-  float *buff_A;
-  unsigned char *buff_out;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_A), (void*)(A), NUM_BLOCK);
-  q_ct1.memcpy((void*)(buff_out), (void*)(out), NUM_BLOCK);
-
-  /*
-  DPCT1049:55: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-  */
+  sycl::buffer<float, 1> buff_A(A,sycl::range<1>(size));
+  sycl::buffer<unsigned char, 1> buff_out(out,sycl::range<1>(size));
+ 
+  
   {
     dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
     q_ct1.submit(
       [&](sycl::handler &cgh) {
-      using group_load = dpct::group::workgroup_load<NUM_BLOCK,BLOCK_LOAD_DIRECT,float>;
-      size_t load_temp_storage_size = group_load::get_local_memory_size(NUM_BLOCK);
-      using group_store = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT,unsigned char>;
-      size_t store_temp_storage_size = group_store::get_local_memory_size(NUM_BLOCK);
-      
-      sycl::local_accessor<uint8_t, 1> ltacc(load_temp_storage_size, cgh);
-      sycl::local_accessor<uint8_t, 1> stacc(store_temp_storage_size, cgh);
-      
+      using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+              
+      size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
+      sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+          
+      sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+      sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
       //__shared__ vars
       sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
       
       cgh.parallel_for(
         sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
         [=](sycl::nd_item<3> item_ct1) {
-          kQuantize(code, buff_A, buff_out, n, item_ct1, smem_code_acc_ct1.get_pointer(), ltacc, stacc);
+          kQuantize(code, A, out, n, item_ct1, smem_code_acc_ct1.get_pointer(), tacc, dacc_A, dacc_out);
         });
     });
   }
-  //back memcpy
-  q_ct1.memcpy((void*)(A), (void *)(buff_A), NUM_BLOCK);
-  q_ct1.memcpy((void*)(out), (void*)(buff_out), NUM_BLOCK);
-  /*
-  DPCT1010:232: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
+  
 }
 
+
+//============================k dequantize===============================
 void dequantize(float *code, unsigned char *A, float *out, int n)
 {
   int num_blocks = n/1024;
@@ -183,6 +175,8 @@ void dequantize(float *code, unsigned char *A, float *out, int n)
   q_ct1.memcpy((void*)(A), (void*)(buff_A), NUM_BLOCK); 
   
 }
+
+//============================quantize blockwise===============================
 
 template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float *rand, int rand_offset, int blocksize, const int n)
 {
@@ -391,6 +385,8 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
   
 }
 
+
+//============================k dequantize blockwise===============================
 template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int blocksize, const int n)
 {
   dpct::device_ext &dev_ct1 = dpct::get_current_device();
@@ -458,6 +454,8 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
 //}
 
 
+
+//============================32 bit optimizer===============================
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
@@ -655,6 +653,7 @@ catch (sycl::exception const &exc) {
 
 
 
+//============================8 bit optimizer===============================
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
                 unsigned char* state1, unsigned char* state2,
@@ -859,6 +858,7 @@ catch (sycl::exception const &exc) {
 
 
 
+//============================8 bit blockwise optimizer===============================
 
 #define BLOCKSIZE_2STATE 2048
 #define NUM_2STATE 8
@@ -958,6 +958,7 @@ catch (sycl::exception const &exc) {
 }
 
 
+//============================percentile clipping===============================
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n)
 {
