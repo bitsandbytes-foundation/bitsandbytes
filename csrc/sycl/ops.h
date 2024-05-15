@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-
+#pragma once
 #ifndef ops_H
 #define ops_H
 
@@ -15,6 +15,7 @@
 #include <iostream>
 #include <unistd.h>
 #include <assert.h>
+#include <dpct/dpl_extras/dpcpp_extensions.h>
 #include <dpct/blas_utils.hpp>
 
 #include <dpct/sparse_utils.hpp>
@@ -164,7 +165,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);
 
-extern SYCL_EXTERNAL void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n);
+void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n);
 
 void gemmex(Context * context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
 void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc,

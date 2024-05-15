@@ -504,7 +504,7 @@ __dpct_inline__ unsigned char quantize_quadrant(int QUADRANT, float *__restrict_
         return pivot;
     }
 }
-
+//=====================================histogram 2d====================
 SYCL_EXTERNAL void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n,
                             const sycl::nd_item<3> &item_ct1)
 {
@@ -517,6 +517,8 @@ SYCL_EXTERNAL void kHistogramScatterAdd2D(float* histogram, int *index1, int *in
       dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&histogram[idx], src[i]);
   }
 }
+
+//===========================k compress max==========================
 
 template<typename T, int BLOCK_SIZE, int NUM_MAX>
 void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, const int n,

@@ -38,20 +38,31 @@ using namespace BinSearch;
 using std::cout;
 using std::endl;
 
+//================================histogram 2d==============================================
+
 void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n)
 {
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  
   int threads = 512;
   int num_blocks = n/threads;
   num_blocks = n % threads == 0 ? num_blocks : num_blocks + 1;
   
-  dpct::get_in_order_queue().parallel_for(
+  {
+  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+    q_ct1.submit(
+    [&](sycl::handler &cgh) {
+    
+    cgh.parallel_for(
     sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
     [=](sycl::nd_item<3> item_ct1) {
       kHistogramScatterAdd2D(histogram, index1, index2, src, maxidx1, n, item_ct1);
+      });
     });
+  }
 
 }
-
 
 //============================estimate quantiles===============================
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
