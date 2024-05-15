@@ -545,7 +545,7 @@ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, cons
  
       using group_load = dpct::group::workgroup_load<8, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
       size_t temp_storage_size = group_load::get_local_memory_size(8*BLOCK_SIZE/32);
-      sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, h);
+      sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
       sycl::accessor dacc_A(buff_A[(item_ct1.get_local_id(2)*BLOCK_SIZE)], cgh, sycl::read_write);
       
       // 1. load 8 values per thread
@@ -556,7 +556,7 @@ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, cons
       // 6. store with byte index
       cgh.parallel_for(sycl::nd_range<3>(sycl::range<3>(1, 1, 128), sycl::range<3>(1, 1, 128)),
         [=](sycl::nd_item<3> item) {
-          auto *d_A = dacc_A.get_multi_ptr<sycl::access::decorated::yes>().get();
+          auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
           auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
           group_load(tmp).load(item_ct1, d_A, values);
         
@@ -589,7 +589,7 @@ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, cons
   {
     // 3. do warp reduction + broadcast back
     
-    output = sycl::reduce_over_group(item_ct1.get_sub_group(), max1, sycl::maximum<>());
+    auto output = sycl::reduce_over_group(item_ct1.get_sub_group(), max1, sycl::maximum<>());
     warp_max = item_ct1.get_sub_group().shuffle(warp_max, 0);
 
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
@@ -597,7 +597,7 @@ void kCompressMax(T * __restrict__ const A, T* out, unsigned char* out_idx, cons
     {
 	
       hacc_values[warp_idx*8 + i] = sign1 != 0 ? -max1 : max1;
-      hacc_indices_indices[warp_idx*8 + i] = max_idx1;
+      hacc_indices[warp_idx*8 + i] = max_idx1;
 
       sign1 = sign2;
       max1 = max2;
@@ -943,9 +943,9 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
   unsigned char qvals[NUM_PER_TH];
   float local_abs_max = -FLT_MAX;
   
-  using group_load_uc = dpct::group::workgroup_load<NUM_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+  using group_load_uc = dpct::group::workgroup_load<NUM_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
   
-  using group_store = dpct::group::workgroup_store<NUM_PER_THREAD, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_store = dpct::group::workgroup_store<NUM_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
   
   
   auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
