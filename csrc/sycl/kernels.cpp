@@ -812,7 +812,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, fl
   
   using group_load = dpct::group::workgroup_load<NUM_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
   using group_load_float = dpct::group::workgroup_load<NUM_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;  
-  using group_store_uc = dpct::group::workgroup_store<NUM_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;  
+  using group_store_uc = dpct::group::workgroup_store<(DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;  
 
   auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_rand = dacc_rand.get_multi_ptr<sycl::access::decorated::yes>().get();
@@ -945,7 +945,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
   
   using group_load_uc = dpct::group::workgroup_load<NUM_PER_TH, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
   
-  using group_store = dpct::group::workgroup_store<NUM_PER_TH, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
+  using group_store = dpct::group::workgroup_store<NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1), dpct::group::store_algorithm::BLOCK_STORE_DIRECT, T,  T *, sycl::nd_item<3>>;
   
   
   auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
@@ -4795,66 +4795,73 @@ template void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(sycl::half *__restrict__ co
                                                      float *smem_row_stats,
                                                      unsigned int *smem_nnz_row_idx);
 
+
+//==================supported template decls=======================================================
+
+
 template unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
 
-template SYCL_EXTERNAL void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n,
+template<typename T> SYCL_EXTERNAL void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n,
                                  const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A);
-template SYCL_EXTERNAL void kEstimateQuantiles(sycl::half *__restrict__ const A, float *code, const float offset, const sycl::half max_val, const int n,
+template<typename T> SYCL_EXTERNAL void kEstimateQuantiles(sycl::half *__restrict__ const A, float *code, const float offset, const sycl::half max_val, const int n,
                                  const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A);
 
 #define MAKE_PreconditionOptimizer32bit1State(oname, gtype) \
-template void kPreconditionOptimizer32bit1State<gtype, oname, 4096, 8>(gtype* g, gtype* p, \
+template SYCL_EXTERNAL void kPreconditionOptimizer32bit1State<gtype, oname, 4096, 8>(gtype* g, gtype* p, \
                 float* state1, float *unorm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl_dacc_float &dacc_state1); \
+                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<gtype, 1> &dacc_g,const sycl_dacc_float &dacc_state1); \
 
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(MOMENTUM, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(MOMENTUM, float)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(RMSPROP, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(RMSPROP, float)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(LION, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(LION, float)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(LION, sycl::ext::oneapi::bfloat16)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(ADAGRAD, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit1State(ADAGRAD, float)
+MAKE_PreconditionOptimizer32bit1State(MOMENTUM, sycl::half)
+MAKE_PreconditionOptimizer32bit1State(MOMENTUM, float)
+MAKE_PreconditionOptimizer32bit1State(RMSPROP, sycl::half)
+MAKE_PreconditionOptimizer32bit1State(RMSPROP, float)
+MAKE_PreconditionOptimizer32bit1State(LION, sycl::half)
+MAKE_PreconditionOptimizer32bit1State(LION, float)
+MAKE_PreconditionOptimizer32bit1State(LION, sycl::ext::oneapi::bfloat16)
+MAKE_PreconditionOptimizer32bit1State(ADAGRAD, sycl::half)
+MAKE_PreconditionOptimizer32bit1State(ADAGRAD, float)
 
 #define MAKE_Optimizer32bit1State(oname, gtype) \
-template void kOptimizer32bit1State<gtype, oname>(gtype* g, gtype* p, float* state1, float *unorm, const float max_unorm, const float param_norm, \
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const sycl_dacc_float &dacc_state1); \
+template SYCL_EXTERNAL void kOptimizer32bit1State<gtype, oname>(gtype* g, gtype* p, float* state1, float *unorm, const float max_unorm, const float param_norm, \
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<gtype, 1> &dacc_g,const sycl::accessor<gtype, 1> &dacc_p,const sycl_dacc_float &dacc_state1); \
 
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(MOMENTUM, sycl::half)
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(MOMENTUM, float)
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(RMSPROP, sycl::half)
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(RMSPROP, float)
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(LION, sycl::half)
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(LION, float)
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(LION, sycl::ext::oneapi::bfloat16)
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(ADAGRAD, sycl::half)
-SYCL_EXTERNAL MAKE_Optimizer32bit1State(ADAGRAD, float)
+MAKE_Optimizer32bit1State(MOMENTUM, sycl::half)
+MAKE_Optimizer32bit1State(MOMENTUM, float)
+MAKE_Optimizer32bit1State(RMSPROP, sycl::half)
+MAKE_Optimizer32bit1State(RMSPROP, float)
+MAKE_Optimizer32bit1State(LION, sycl::half)
+MAKE_Optimizer32bit1State(LION, float)
+MAKE_Optimizer32bit1State(LION, sycl::ext::oneapi::bfloat16)
+MAKE_Optimizer32bit1State(ADAGRAD, sycl::half)
+MAKE_Optimizer32bit1State(ADAGRAD, float)
 
 #define MAKE_PreconditionOptimizer32bit2State(oname, gtype) \
-template void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 8>(gtype* g, gtype* p,  \
+template SYCL_EXTERNAL void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 8>(gtype* g, gtype* p,  \
                 float* state1, float* state2, float *unorm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_float &dacc_state1,const sycl_dacc_float &dacc_state2,const sycl::accessor<T, 1> &dacc_g); \
+                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_float &dacc_state1,const sycl_dacc_float &dacc_state2,const sycl::accessor<gtype, 1> &dacc_g); \
 
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, float)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::ext::oneapi::bfloat16)
+MAKE_PreconditionOptimizer32bit2State(ADAM, float)
+MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::half)
+MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::ext::oneapi::bfloat16)
+
 
 template SYCL_EXTERNAL void kOptimizer32bit2State<float, ADAM>(float* g, float* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2);
+    const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<float, 1> &dacc_g, const sycl::accessor<float, 1> &dacc_p, const sycl_dacc_float &dacc_state1, const  sycl_dacc_float &dacc_state2);
+
 template SYCL_EXTERNAL void kOptimizer32bit2State<sycl::half, ADAM>(sycl::half* g, sycl::half* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2);
+    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<sycl::half, 1> &dacc_g,const sycl::accessor<sycl::half, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2);
+    
 template SYCL_EXTERNAL void kOptimizer32bit2State<sycl::ext::oneapi::bfloat16, ADAM>(sycl::ext::oneapi::bfloat16* g, sycl::ext::oneapi::bfloat16* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2);
+    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_g,const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2);
 
 #define MAKE_PreconditionStatic8bit1State(oname, gtype) \
-template void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1,  \
+template SYCL_EXTERNAL void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1,  \
                 float *unorm,  \
                 const float beta1,  \
                 const float beta2,  \
@@ -4863,14 +4870,14 @@ template void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gty
                 float* max1, float* new_max1,  \
                 const float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1); \
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl_dacc_uc &dacc_state1); \
 
-SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(MOMENTUM, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(MOMENTUM, float)
-SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(RMSPROP, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(RMSPROP, float)
-SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(LION, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionStatic8bit1State(LION, float)
+MAKE_PreconditionStatic8bit1State(MOMENTUM, sycl::half)
+MAKE_PreconditionStatic8bit1State(MOMENTUM, float)
+MAKE_PreconditionStatic8bit1State(RMSPROP, sycl::half)
+MAKE_PreconditionStatic8bit1State(RMSPROP, float)
+MAKE_PreconditionStatic8bit1State(LION, sycl::half)
+MAKE_PreconditionStatic8bit1State(LION, float)
 
 #define MAKE_optimizerStatic8bit1State(oname, gtype) \
 template void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1,  \
@@ -4883,15 +4890,15 @@ template void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g,
                 float weight_decay, \
                 const float gnorm_scale,  \
                 const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, const sycl_la &tacc, \
-                const sycl::accessor<T, 1> &dacc_g, const sycl::accessor<T, 1> &dacc_p, \
+                const sycl::accessor<gtype, 1> &dacc_g, const sycl::accessor<gtype, 1> &dacc_p, \
                 const sycl_dacc_uc &dacc_state1); \
 
-SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(MOMENTUM, sycl::half)
-SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(MOMENTUM, float)
-SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(RMSPROP, sycl::half)
-SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(RMSPROP, float)
-SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(LION, sycl::half)
-SYCL_EXTERNAL MAKE_optimizerStatic8bit1State(LION, float)
+MAKE_optimizerStatic8bit1State(MOMENTUM, sycl::half)
+MAKE_optimizerStatic8bit1State(MOMENTUM, float)
+MAKE_optimizerStatic8bit1State(RMSPROP, sycl::half)
+MAKE_optimizerStatic8bit1State(RMSPROP, float)
+MAKE_optimizerStatic8bit1State(LION, sycl::half)
+MAKE_optimizerStatic8bit1State(LION, float)
 
 #define MAKE_PreconditionStatic8bit2State(oname, gtype) \
 template void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2, \
@@ -4901,10 +4908,10 @@ template void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gty
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1,  float *smem_quantiles1, float *smem_quantiles2const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2); \
+                const int n, const sycl::nd_item<3> &item_ct1,  float *smem_quantiles1, float *smem_quantiles2, const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2); \
 
-SYCL_EXTERNAL MAKE_PreconditionStatic8bit2State(ADAM, sycl::half)
-SYCL_EXTERNAL MAKE_PreconditionStatic8bit2State(ADAM, float)
+MAKE_PreconditionStatic8bit2State(ADAM, sycl::half)
+MAKE_PreconditionStatic8bit2State(ADAM, float)
 
 #define MAKE_optimizerStatic8bit2State(oname, gtype) \
 template void kOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1, unsigned char* state2, \
@@ -4915,97 +4922,103 @@ template void kOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* const g,
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, float *smem_quantiles2,const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2); \
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, float *smem_quantiles2, const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl::accessor<gtype, 1> &dacc_p, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2); \
 
-SYCL_EXTERNAL MAKE_optimizerStatic8bit2State(ADAM, sycl::half)
-SYCL_EXTERNAL MAKE_optimizerStatic8bit2State(ADAM, float)
+MAKE_optimizerStatic8bit2State(ADAM, sycl::half)
+MAKE_optimizerStatic8bit2State(ADAM, float)
 
 template SYCL_EXTERNAL void kPercentileClipping<float, 2048, 4>(float * __restrict__ g, float *gnorm_vec, int step, const int n,
-                                                  const sycl::nd_item<3> &item_ct1, const sycl_la &tacc);
+                                                  const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<float, 1> &dacc_g);
 template SYCL_EXTERNAL void kPercentileClipping<sycl::half, 2048, 4>(sycl::half * __restrict__ g, float *gnorm_vec, int step, const int n,
-                                                 const sycl::nd_item<3> &item_ct1, const sycl_la &tacc);
+                                                 const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_g);
+
 
 #define MAKE_kQuantizeBlockwise(dtype, blocksize, num_per_thread, stochastic, data_type_name) \
-template void kQuantizeBlockwise<dtype, blocksize, num_per_thread, stochastic, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n, const sycl::nd_item<3> &item_ct1, float *smem_code, float *smem_absmax_value,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out); \
+template void kQuantizeBlockwise<dtype, blocksize, num_per_thread, stochastic, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n, const sycl::nd_item<3> &item_ct1, float *smem_code, float *smem_absmax_value,const sycl_la &tacc,const sycl::accessor<dtype, 1> &dacc_A, const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out); 
 
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 1, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 2048, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 1024, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  512, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  256, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  128, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,   64, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 4096, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 2048, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 1024, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  512, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  256, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  128, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,   64, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 4096, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 2048, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float, 1024, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  512, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  256, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,  128, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(float,   64, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 1, General8bit)
+MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::half,  2048, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::half,  1024, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::half,   512, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::half,   256, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::half,   128, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::half,    64, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
+MAKE_kQuantizeBlockwise(float, 2048, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(float, 1024, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(float,  512, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(float,  256, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(float,  128, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(float,   64, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(float, 4096, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(float, 2048, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(float, 1024, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(float,  512, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(float,  256, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(float,  128, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(float,   64, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(float, 4096, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(float, 2048, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(float, 1024, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(float,  512, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(float,  256, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(float,  128, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(float,   64, 2, 0, NF4)
 
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 1, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, General8bit)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, FP4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, NF4)
-SYCL_EXTERNAL MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 1, General8bit)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 4096, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 2048, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16, 1024, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  512, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, NF4)
 
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_uc &dacc_A,const sycl::accessor<sycl::half, 1> &dacc_out);
 
-template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, sycl_dacc_uc &dacc_A, sycl::accessor<T, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::half, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::half, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out);
+
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out);
+
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out);
+
+
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out);
+
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out);
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \
 template void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_per_thread>(gtype* p, gtype* __restrict__ const g, unsigned char* state1, unsigned char* state2, \
@@ -5015,13 +5028,13 @@ template void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_
                 float* absmax1, float* absmax2,  \
                 float weight_decay, \
                 const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, sycl::local_accessor<float, 2> smem_quantiles2, float *smem_exchange1, float *smem_exchange2,const sycl_la &tacc, \
-                const sycl::accessor<T, 1> &dacc_g, \
-                const sycl::accessor<T, 1> &dacc_p, \
+                const sycl::accessor<gtype, 1> &dacc_g, \
+                const sycl::accessor<gtype, 1> &dacc_p, \
                 const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2); \
 
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::half, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::ext::oneapi::bfloat16, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::half, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::ext::oneapi::bfloat16, 2048, 8)
 
 
 #define MAKE_OptimizerStatic8bit1StateBlockwise(oname, gtype, block_size, num_per_thread) \
@@ -5033,17 +5046,17 @@ template void kOptimizerStatic8bit1StateBlockwise<gtype, oname, block_size, num_
                 float* absmax1, \
                 float weight_decay, \
                 const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, float *smem_exchange1,const sycl_la &tacc, \
-                const sycl::accessor<T, 1> &dacc_g, \
-                const sycl::accessor<T, 1> &dacc_p, \
+                const sycl::accessor<gtype, 1> &dacc_g, \
+                const sycl::accessor<gtype, 1> &dacc_p, \
                 const sycl_dacc_uc &dacc_state1); \
 
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, sycl::half, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, sycl::half, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(LION, float, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(LION, sycl::half, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(LION, sycl::ext::oneapi::bfloat16, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 2048, 8)
-SYCL_EXTERNAL MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, sycl::half, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, sycl::half, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, sycl::half, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, float, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, sycl::half, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, sycl::ext::oneapi::bfloat16, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 2048, 8)
+MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, sycl::half, 2048, 8)
 
