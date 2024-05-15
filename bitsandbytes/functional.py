@@ -479,6 +479,8 @@ def nvidia_transform(
     ld=None,
 ):
     if HIP_ENVIRONMENT:
+        # col32/col_turing/col_ampere are not applicable to ROCm
+        # Use col format instead
         to_order = "col" if to_order in ["col32", "col_turing", "col_ampere"] else to_order
         from_order = "col" if from_order in ["col32", "col_turing", "col_ampere"] else from_order
 
@@ -630,6 +632,8 @@ def quantize_blockwise(
         out = torch.zeros_like(A, dtype=torch.uint8)
 
     if A.device.type != "cpu":
+        # Some AMD GPUs have warpsize 64
+        # Set min blocksize to 128 (~warpsize 64 in kernel) for HIP
         if not HIP_ENVIRONMENT:
             assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
         else:
@@ -755,6 +759,8 @@ def dequantize_blockwise(
         device = pre_call(A.device)
         code = quant_state.code.to(A.device)
         supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
+        # Some AMD GPUs have warpsize 64
+        # Set min blocksize to 128 (~warpsize 64 in kernel) for HIP
         if HIP_ENVIRONMENT:
             supported_blocksizes = supported_blocksizes[:-1]
         if quant_state.blocksize not in supported_blocksizes:
@@ -897,6 +903,8 @@ def quantize_fp4(
     quant_storage=torch.uint8,
 ):
     if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
         blocksize = 64 if not HIP_ENVIRONMENT else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "fp4", quant_storage)
 
@@ -910,6 +918,8 @@ def quantize_nf4(
     quant_storage=torch.uint8,
 ):
     if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
         blocksize = 64 if not HIP_ENVIRONMENT else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "nf4", quant_storage)
 
@@ -968,6 +978,8 @@ def dequantize_fp4(
     blocksize: Optional[int] = None,
 ) -> Tensor:
     if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
         blocksize = 64 if not HIP_ENVIRONMENT else 128
 
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
@@ -981,6 +993,8 @@ def dequantize_nf4(
     blocksize: Optional[int] = None,
 ) -> Tensor:
     if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
         blocksize = 64 if not HIP_ENVIRONMENT else 128
 
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")

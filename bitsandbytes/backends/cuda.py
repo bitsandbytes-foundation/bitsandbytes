@@ -186,6 +186,8 @@ class CUDABackend(Backend):
         ld=None,
     ):
         if HIP_ENVIRONMENT:
+            # transform kernel formats (col32/col_turing/col_ampere) are not applicable to ROCm
+            # Use nvidia_transform instead
             return nvidia_transform(A, to_order, from_order, out, transpose, state, ld)
 
         prev_device = pre_call(A.device)
@@ -271,11 +273,13 @@ class CUDABackend(Backend):
 
         if dimsA == 2 and out is None:
             if HIP_ENVIRONMENT:
+                # Use col format for HIP
                 out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, "col", "row")
             else:
                 out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, "col32", "row")
         elif dimsA == 3 and out is None:
             if HIP_ENVIRONMENT:
+                # Use col format for HIP
                 out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col", "row")
             else:
                 out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row")
@@ -287,6 +291,7 @@ class CUDABackend(Backend):
         assert B.dtype == torch.int8
         assert out.dtype == dtype
         if HIP_ENVIRONMENT:
+            # Use col format for HIP
             assert SA[1] == "col"
             assert SB[1] == "col"
             assert Sout[1] == "col"
@@ -309,6 +314,7 @@ class CUDABackend(Backend):
 
         k = shapeA[-1]
         if HIP_ENVIRONMENT:
+            # Set ld values for col format
             lda = ct.c_int32(m)
             ldb = ct.c_int32(shapeB[0])
             ldc = ct.c_int32(m)
@@ -369,6 +375,7 @@ class CUDABackend(Backend):
         bias: Optional[torch.Tensor] = None,
     ):
         if HIP_ENVIRONMENT:
+            # HIP kernel requires 'row' format
             A, quant_state = nvidia_transform(A, "row", state=quant_state)
         assert A.dtype == torch.int32
         if bias is not None:
@@ -411,6 +418,7 @@ class CUDABackend(Backend):
         if not HIP_ENVIRONMENT:
             assert formatA in ["col_turing", "col_ampere"]
         else:
+            # HIP uses col format
             assert formatA in ["col"]
         assert A.device.type == "cuda"
 
@@ -445,6 +453,8 @@ class CUDABackend(Backend):
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
         if blocksize is None:
+            # Some AMD GPUs have warpsize 64
+            # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
             blocksize = 64 if not HIP_ENVIRONMENT else 128
         if A.device.type != "cuda":
             raise NotImplementedError(f"Device type not supported for FP4 quantization: {A.device.type}")
@@ -463,6 +473,8 @@ class CUDABackend(Backend):
             mod = dtype2bytes[quant_storage] * 2
             out = torch.zeros(((n + 1) // mod, 1), dtype=quant_storage, device=A.device)
 
+        # Some AMD GPUs have warpsize 64
+        # Set min blocksize to 128 (~warpsize 64 in kernel) for HIP
         if not HIP_ENVIRONMENT:
             assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
         else:
@@ -540,6 +552,8 @@ class CUDABackend(Backend):
         blocksize: Optional[int] = None,
         quant_type: Literal["fp4", "nf4"] = "fp4",
     ) -> torch.Tensor:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
         if blocksize is None:
             blocksize = 64 if not HIP_ENVIRONMENT else 128
         supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
