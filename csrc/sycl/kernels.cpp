@@ -10,7 +10,7 @@
 #include <dpct/dpl_extras/dpcpp_extensions.h>
 #include "kernels.h"
 #include <dpct/dpl_utils.hpp>
-#include <mma.h>
+//#include <mma.h>
 #include <cmath>
 
 #define FLT_MAX std::numeric_limits<float>::max()
@@ -634,7 +634,7 @@ typedef sycl::accessor<unsigned char, 1> sycl_dacc_uc;
 template<typename T>
 SYCL_EXTERNAL 
 void kEstimateQuantiles(const T *A, float *code, const float offset, const T max_val, const int n,
-                        const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_A)
+                        const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A)
 {
   const int n_full = (BLOCK_ESTIMATE*(n/BLOCK_ESTIMATE)) + (n % BLOCK_ESTIMATE == 0 ? 0 : BLOCK_ESTIMATE);
   int valid_items = (item_ct1.get_group(2)+1 == item_ct1.get_group_range(2)) ? n - (item_ct1.get_group(2)*BLOCK_ESTIMATE) : BLOCK_ESTIMATE;
@@ -931,7 +931,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, fl
 
 template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
 SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n,
-                          const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_uc &dacc_A,const sycl::accessor<T, 1> &dacc_out )
+                          const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<T, 1> &dacc_out )
 {
 
   const int n_load = (item_ct1.get_group_range(2) * TILE_SIZE);
