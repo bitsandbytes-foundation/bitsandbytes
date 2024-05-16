@@ -1267,10 +1267,8 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
   int num_blocks = row_tiles * col_tiles;
   
   int size = NUM_BLOCK;
-  sycl::half *buff_A;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
   
+  sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(size));
 
   if(nnz_threshold == 0.0)
     {
@@ -1278,14 +1276,11 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
-            using group_load_half = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, sycl::half>;
-            using group_exchange = dpct::group::exchange<float, ITEMS_PER_THREAD>;
             
-            size_t load_temp_storage_size_half = group_load_half::get_local_memory_size(NUM_BLOCK);
-            size_t exchange_temp_storage_size = group_exchange::get_local_memory_size(NUM_BLOCK);
-                
-            sycl::local_accessor<uint8_t, 1> exacc(exchange_temp_storage_size, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_half(load_temp_storage_size_half, cgh);
+            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
@@ -1295,8 +1290,8 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
        cgh.parallel_for(      
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats,
-               nnz_count_row,    nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), ltacc_half, exacc);
+              kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
+               nnz_count_row,    nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, dacc_A);
             });
        });
     }
@@ -1305,14 +1300,11 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
 		    [&](sycl::handler &cgh) {
-            using group_load_half = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, sycl::half>;
-            using group_exchange = dpct::group::exchange<float, ITEMS_PER_THREAD>;
             
-            size_t load_temp_storage_size_half = group_load_half::get_local_memory_size(NUM_BLOCK);
-            size_t exchange_temp_storage_size = group_exchange::get_local_memory_size(NUM_BLOCK);
-                
-            sycl::local_accessor<uint8_t, 1> exacc(exchange_temp_storage_size, cgh);
-            sycl::local_accessor<uint8_t, 1> ltacc_half(load_temp_storage_size_half, cgh);
+            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
@@ -1322,20 +1314,16 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
       cgh.parallel_for(      
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
           [=](sycl::nd_item<3> item_ct1) {
-            kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats,
-             nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), ltacc_half, exacc);
+            kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
+             nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, dacc_A);
       });
     });
     }
-    
-  /*
-  DPCT1010:284: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
-  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
-  
 
 }
+
+
+//===================================double row col quant======================
 
 void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int *nnz_block_ptr, float threshold, int rows, int cols)
 {
