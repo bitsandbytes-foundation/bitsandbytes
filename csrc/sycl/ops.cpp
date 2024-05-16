@@ -1332,14 +1332,10 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
   sycl::context ctx = q_ct1.get_context();
 	int num_blocks = 0;
   int size = NUM_BLOCK;
-  sycl::half *buff_A;
-  char *buff_out_row_normed, *buff_out_col_normed;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_out_row_normed) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_out_col_normed) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
-  q_ct1.memcpy((void*)(buff_out_row_normed), (void*)(out_row_normed), size);
-  q_ct1.memcpy((void*)(buff_out_col_normed), (void*)(out_col_normed), size);
+  
+  sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(size));
+  sycl::buffer<char, 1> buff_out_col_normed(out_col_normed,sycl::range<1>(size));
+  sycl::buffer<char, 1> buff_out_row_normed(out_row_normed,sycl::range<1>(size));
   
   int threads = 64;
   int items_per_thread = 4;
@@ -1359,18 +1355,14 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
 		    [&](sycl::handler &cgh) {
-            using group_load_half = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, sycl::half>;
-            using group_store_char1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, char>;
-            using group_store_char2 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, char>;
             
-            size_t load_temp_storage_size_half = group_load_half::get_local_memory_size(NUM_BLOCK);
-            size_t store_temp_storage_size_char1 = group_store_char1::get_local_memory_size(NUM_BLOCK);
-            size_t store_temp_storage_size_char2 = group_store_char2::get_local_memory_size(NUM_BLOCK);
-            
-            sycl::local_accessor<uint8_t, 1> ltacc_half(load_temp_storage_size_half, cgh);
-            sycl::local_accessor<uint8_t, 1> stacc_char1(store_temp_storage_size_char1, cgh);
-            sycl::local_accessor<uint8_t, 1> stacc_char2(store_temp_storage_size_char2, cgh);
-            
+            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+            sycl::accessor dacc_out_col_normed(buff_out_col_normed, cgh, sycl::read_write);
+            sycl::accessor dacc_out_row_normed(buff_out_row_normed, cgh, sycl::read_write);
+
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
 			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
@@ -1379,7 +1371,7 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
            [=](sycl::nd_item<3> item_ct1) {
           
-                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(buff_A, rowStats, colStats, buff_out_col_normed, buff_out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), ltacc_half, stacc_char1, stacc_char2);
+                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed);
           });
       });
     }
@@ -1389,17 +1381,14 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
 		    [&](sycl::handler &cgh) {
-            using group_load_half = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, sycl::half>;
-            using group_store_char1 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, char>;
-            using group_store_char2 = dpct::group::workgroup_store<NUM_BLOCK, BLOCK_STORE_DIRECT, char>;
             
-            size_t load_temp_storage_size_half = group_load_half::get_local_memory_size(NUM_BLOCK);
-            size_t store_temp_storage_size_char1 = group_store_char1::get_local_memory_size(NUM_BLOCK);
-            size_t store_temp_storage_size_char2 = group_store_char2::get_local_memory_size(NUM_BLOCK);
+            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+            sycl::accessor dacc_out_col_normed(buff_out_col_normed, cgh, sycl::read_write);
+            sycl::accessor dacc_out_row_normed(buff_out_row_normed, cgh, sycl::read_write);
             
-            sycl::local_accessor<uint8_t, 1> ltacc_half(load_temp_storage_size_half, cgh);
-            sycl::local_accessor<uint8_t, 1> stacc_char1(store_temp_storage_size_char1, cgh);
-            sycl::local_accessor<uint8_t, 1> stacc_char2(store_temp_storage_size_char2, cgh);
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
 			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
@@ -1409,20 +1398,14 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
            [=](sycl::nd_item<3> item_ct1) {
           
-                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), ltacc_half, stacc_char1, stacc_char2);
+                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(),  tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed);
           });
       });
   
   }
-  /*
-  DPCT1010:285: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
-  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
-  q_ct1.memcpy((void*)(out_row_normed), (void*)(buff_out_row_normed), size);
-  q_ct1.memcpy((void*)(out_col_normed), (void*)(buff_out_col_normed), size);
   
 }
+//======================================= transform row to format===============================================
 
 template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *out, int rows, int cols)
 {

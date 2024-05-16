@@ -630,6 +630,7 @@ typedef sycl::local_accessor<uint8_t, 1> sycl_la;
 typedef sycl::accessor<int, 1> sycl_dacc;
 typedef sycl::accessor<float, 1> sycl_dacc_float;
 typedef sycl::accessor<unsigned char, 1> sycl_dacc_uc;
+typedef sycl::accessor<char, 1> sycl_dacc_char;
 
 //======================estimte quantiles=====================================
 
@@ -3079,8 +3080,9 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
   }
 }
 
+//=====================================k double row col quant============================
 
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kDoubleRowColQuant(sycl::half *__restrict__ const buff_A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *buff_out_col_normed, char *buff_out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx, sycl_la_half ltacc_half, sycl_la_char stacc_char1, sycl_la_char stacc_char2 )
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kDoubleRowColQuant(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed)
 {
   // assumes TILE_SIZE == THREADS*ITEMS_PER_THREAD
   // Each thread reads the same column but multiple rows
@@ -3100,12 +3102,14 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
   const int base_idx = (base_row*cols) + base_col;
   const int items_per_load = ITEMS_PER_THREAD*THREADS;
   
-
-  //typedef cub::BlockLoad<sycl::half, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadHalf;
+  using group_load_half = dpct::group::workgroup_load<ITEMS_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+  using group_store_char = dpct::group::workgroup_store<ITEMS_PER_THREAD, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, char,  char *, sycl::nd_item<3>>;
   
-  //typedef cub::BlockStore<char, THREADS, ITEMS_PER_THREAD, cub::BLOCK_STORE_VECTORIZE> StoreInt8;
+  auto *d_A = dacc_A.get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_out_col_normed = dacc_out_col_normed.get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *d_out_row_normed = dacc_out_row_normed.get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
   
-
   sycl::half local_data[ITEMS_PER_THREAD];
   float local_col_stats[ITEMS_PER_THREAD];
   char local_quantized_data[ITEMS_PER_THREAD];
@@ -3115,7 +3119,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
     if(base_col+(item_ct1.get_local_id(2)*ITEMS_PER_THREAD) + j < cols)
       /*
-      DPCT1064:221: Migrated __fdividef call is used in a macro/template definition and may not be valid for all macro/template uses. Adjust the code.
+       To-do: __fdividef call is used in a macro/template definition and may not be valid for all macro/template uses.
       */
       local_col_stats[j] = 127.0f / colStats[base_col+(item_ct1.get_local_id(2)*ITEMS_PER_THREAD)+j];
 
@@ -3127,9 +3131,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     if(SPARSE_DECOMP)
       smem_nnz_row_idx[i] = nnz_block_ptr[(TILE_ROWS*item_ct1.get_group(2)) + i];
   }
-  /*
-  DPCT1065:216: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-  */
+  
   item_ct1.barrier(sycl::access::fence_space::local_space);
 
   // we load row after row from the base_position
@@ -3140,20 +3142,13 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     int i = base_idx + (row*cols);
     int valid_items = cols - base_col > items_per_load ? items_per_load : cols - base_col;
 
-
-    /*
-    DPCT1007:218: Migration of cub::BlockLoad::Load is not supported.
-    */
-    //LoadHalf(loadhalf).Load(&(A[i]), local_data, valid_items, 0.0f);
-    
     // 1. load 8 values per thread
     // 2. compute 2-max in registers (64 max per warp)
     // 3. do warp reduction + broadcast back
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
-    auto *tmp = ltacc_half.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_load(tmp).load(item, &buff_A[0], local_data);
+    group_load_half(tmp).load(item_ct1, d_A, local_data);
 
     float row_stat = 127.0f / smem_row_stats[row];
 
@@ -3184,19 +3179,13 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
         local_quantized_data[j] = (char)(sycl::rint(sycl::vec<sycl::half, 1>(local_data[j]).convert<float, sycl::rounding_mode::automatic>()[0]*row_stat));
     }
 
-    /*
-    DPCT1007:219: Migration of cub::BlockStore::Store is not supported.
-    */
-    //StoreInt8(storeint8).Store(&(out_row_normed[i]), local_quantized_data, valid_items);
-
     // 1. load 8 values per thread
     // 2. compute 2-max in registers (64 max per warp)
     // 3. do warp reduction + broadcast back
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
-    auto *tmp = stacc_char1.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_store(tmp).store(item, &buff_out_row_normed[0], local_quantized_data);
+    group_store_char(tmp).store(item_ct1, d_out_row_normed, local_quantized_data);
     
     // 2. quantize data with row/col stats
     #pragma unroll ITEMS_PER_THREAD
@@ -3207,13 +3196,9 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
 			local_quantized_data[j] = (char)(sycl::rint(sycl::vec<sycl::half, 1>(local_data[j]).convert<float, sycl::rounding_mode::automatic>()[0]*local_col_stats[j]));
     }
 
-    /*
-    DPCT1065:217: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-    */
+    
     item_ct1.barrier(sycl::access::fence_space::local_space);
-    /*
-    DPCT1007:220: Migration of cub::BlockStore::Store is not supported.
-    */
+   
     //StoreInt8(storeint8).Store(&(out_col_normed[i]), local_quantized_data, valid_items);
     // 1. load 8 values per thread
     // 2. compute 2-max in registers (64 max per warp)
@@ -3221,13 +3206,13 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
-    
-    auto *tmp = stacc_char2.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_store(tmp).store(item, &buff_out_col_normed[0], local_quantized_data);
+    group_store_char(tmp).store(item_ct1, d_out_col_normed, local_quantized_data);
       
   }
 }
 
+
+//=================================================================================================
 /*
 DPCT1110:14: The total declared local variable size in device function kTransformRowToFormat exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
 */
@@ -4759,17 +4744,13 @@ template void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, flo
                                                   const sycl::nd_item<3> &item_ct1,
                                                   float *smem_rowStats);
 
-template void kDoubleRowColQuant<64, 4, 16, 64*4, 0>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols,
-                                                     const sycl::nd_item<3> &item_ct1,
-                                                     float *smem_row_stats,
-                                                     unsigned int *smem_nnz_row_idx);
-template void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols,
-                                                     const sycl::nd_item<3> &item_ct1,
-                                                     float *smem_row_stats,
-                                                     unsigned int *smem_nnz_row_idx);
-
-
 //==================supported template decls=======================================================
+
+
+template void kDoubleRowColQuant<64, 4, 16, 64*4, 0>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1,  float *smem_row_stats, unsigned int *smem_nnz_row_idx, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed);
+
+template void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols,  const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed);
+
 
 
 template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 0>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_absmax_values, int *smem_row_nnz_values, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A);
