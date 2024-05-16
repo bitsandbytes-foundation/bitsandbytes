@@ -3212,11 +3212,10 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int S
 }
 
 
-//=================================================================================================
-/*
-DPCT1110:14: The total declared local variable size in device function kTransformRowToFormat exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
-*/
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> SYCL_EXTERNAL void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,  const sycl::nd_item<3> &item_ct1, char *smem_data)
+//============================================k transform row format=====================================================
+
+template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> SYCL_EXTERNAL void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,  const sycl::nd_item<3> &item_ct1, char *smem_data,
+const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out)
 {
 
   // 0. Load data into 32*32 shared memory tiles
@@ -3267,9 +3266,6 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   // so that we can have contiguous stores
   
   char local_data[ITEMS_PER_THREAD];
-  //typedef cub::BlockExchange<char, THREADS, ITEMS_PER_THREAD> BlockExchange;
-
-  
   
   // we load row after row from the base_position
   // Load data row by row
@@ -3294,7 +3290,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
       {
         int col_idx = warp_lane+(j*32);
         if(col_idx < valid_items)
-          local_data[j] = buff_A[i+col_idx];
+          local_data[j] = dacc_A[i+col_idx];
         else
           local_data[j] = 0;
       }
@@ -3368,7 +3364,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                     // each 32 columns we have new tile
                     // each tile has size outRows*32 and base_row is done in increments of 32
                     offset = base_row*outRows;
-                    buff_out[offset + (base_col + jrow + subrow_loop_row)*32 + item_ct1.get_local_id(2)] = data;
+                    dacc_out[offset + (base_col + jrow + subrow_loop_row)*32 + item_ct1.get_local_id(2)] = data;
                   }
                 }
                 else
@@ -3377,7 +3373,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   {
                     offset = (base_col/32)*(32*rows);
                     char data = smem_data[(subrow*32*ITEMS_PER_THREAD) + (j*32) + warp_lane];
-                    buff_out[offset+(base_row+subrow)*32 + ((j)*rows*32)+warp_lane] = data;
+                    dacc_out[offset+(base_row+subrow)*32 + ((j)*rows*32)+warp_lane] = data;
                   }
                 }
                 break;
@@ -3430,7 +3426,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                       // even
                       offset += 0   + (warp_lane/4)*16 + (warp_lane%4) + ((warp_id%8)*2);
 
-                    out[offset] = data;
+                    dacc_out[offset] = data;
                   }
                 }
                 else
@@ -3459,7 +3455,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                       // even
                       offset += 0   + (subcol/4)*16 + (subcol%4) + ((subrow%8)*2);
 
-                    buff_out[offset] = data;
+                    dacc_out[offset] = data;
                   }
                 }
                 break;
@@ -3511,7 +3507,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 											int ampere_row = ((local_row % 8)/2)*8 + (local_row/8)*2 + (local_row % 2);
 
 											// global offset + row with 32 cols each + 32 cols per j + col_idx=warp_lane
-											buff_out[offset + (ampere_row*32) + warp_lane] = data;
+											dacc_out[offset + (ampere_row*32) + warp_lane] = data;
 										}
 									}
 									else
@@ -3534,7 +3530,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 											int local_row = ((subrow % 8)/2)*8 + (subrow/8)*2 + (subrow % 2);
 
 											// global offset + row with 32 cols each + 32 cols per j + col_idx
-											buff_out[offset + (local_row*32) + warp_lane] = data;
+											dacc_out[offset + (local_row*32) + warp_lane] = data;
 										}
 									}
 								break;
@@ -3545,6 +3541,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
   }
 }
 
+//============================================k spmm sparse coo===============================================
 #define DENORM 1.0f/127.0f
 #define MAX_SPARSE_COUNT 32
 #define SMEM_SIZE 8*256
@@ -3699,7 +3696,9 @@ SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int
   }
 }
 
-template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1)
+//========================================k extract outliers======================
+
+template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out)
 {
 	int local_colidx = idx[item_ct1.get_group(2)];
 
@@ -3733,10 +3732,10 @@ template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, cha
 
 			offset += tile_offset_rows + tile_offset_cols;
 
-			char val = A[offset];
+			char val = dacc_A[offset];
 
 			int out_idx = (row*idx_size) + item_ct1.get_group(2);
-			out[out_idx] = val;
+			dacc_out[out_idx] = val;
 		}
 	}
 	else if(FORMAT == COL_AMPERE)
@@ -3757,11 +3756,10 @@ template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, cha
 
 			char val = A[offset];
 			int out_idx = (row*idx_size) + item_ct1.get_group(2);
-			out[out_idx] = val;
+			dacc_out[out_idx] = val;
 		}
 	}
 }
-
 
 //template <int QUANT_TYPE, typename INPT, typename COMPT, typename OUTT> __global__ void kMatmul_inference_4bit(INPT *A, unsigned char *B, OUTT *out, int lda, int ldb, int rowsA, int colsA, int colsB)
 //{
@@ -4696,12 +4694,7 @@ template SYCL_EXTERNAL void kgemm_4bit_inference_naive<sycl::ext::oneapi::bfloat
 template SYCL_EXTERNAL void kgemm_4bit_inference_naive<float, 128, 32>(int M, int N, int K, float * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize,
                                                          const sycl::nd_item<3> &item_ct1,
                                                          float *quant_map);
-
-template SYCL_EXTERNAL void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
-                                           const sycl::nd_item<3> &item_ct1);
-template SYCL_EXTERNAL void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,
-                                           const sycl::nd_item<3> &item_ct1);
-
+                                                         
 template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<sycl::half, 8, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                                        const sycl::nd_item<3> &item_ct1,
                                                        sycl::half *smem_dequant_stats);
@@ -4721,30 +4714,33 @@ template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int 
                                                               const sycl::nd_item<3> &item_ct1,
                                                               sycl::half *smem_dequant_stats);
 
-template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
-                                                                const sycl::nd_item<3> &item_ct1,
-                                                                char *smem_data);
-template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
-                                                                const sycl::nd_item<3> &item_ct1,
-                                                                char *smem_data);
-template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
-                                                                     const sycl::nd_item<3> &item_ct1,
-                                                                     char *smem_data);
-template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
-                                                                     const sycl::nd_item<3> &item_ct1,
-                                                                     char *smem_data);
-template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
-                                                                     const sycl::nd_item<3> &item_ct1,
-                                                                     char *smem_data);
-template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,
-                                                                     const sycl::nd_item<3> &item_ct1,
-                                                                     char *smem_data);
 
 template void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half * __restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,
                                                   const sycl::nd_item<3> &item_ct1,
                                                   float *smem_rowStats);
 
 //==================supported template decls=======================================================
+
+
+template SYCL_EXTERNAL void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,   const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+
+template SYCL_EXTERNAL void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,  const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+
+
+
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,  const sycl::nd_item<3> &item_ct1,   char *smem_data, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL32>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,  const sycl::nd_item<3> &item_ct1,   char *smem_data, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,  const sycl::nd_item<3> &item_ct1,  char *smem_data, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_TURING>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols,  const sycl::nd_item<3> &item_ct1, char *smem_data, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 0, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols, const sycl::nd_item<3> &item_ct1, char *smem_data, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+
+template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_AMPERE>(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols, const sycl::nd_item<3> &item_ct1, char *smem_data, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+
+
 
 
 template void kDoubleRowColQuant<64, 4, 16, 64*4, 0>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1,  float *smem_row_stats, unsigned int *smem_nnz_row_idx, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed);

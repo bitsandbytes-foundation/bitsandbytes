@@ -1241,379 +1241,8 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, sycl::half 
   */
   //CUDA_CHECK_RETURN(0);
   q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
-}
-
-
-//===========================Row col stats=================================
-
-#define STATS_THREADS 64
-#define STATS_ITEMS 4
-#define STATS_ROWS 16
-void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)
-{
-  
-  dpct::device_ext &dev_ct1 = dpct::get_current_device();
-  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
-  sycl::context ctx = q_ct1.get_context();
-    
-  
-  int tile_cols = STATS_THREADS*STATS_ITEMS;
-  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
-  int tiledRows = fill_up_to_nearest_multiple(rows, STATS_ROWS);
-	int row_tiles = (tiledRows/STATS_ROWS);
-	int col_tiles = (tiledCols/tile_cols);
-	row_tiles = row_tiles > 0 ? row_tiles : 1;
-	col_tiles = col_tiles > 0 ? col_tiles : 1;
-  int num_blocks = row_tiles * col_tiles;
-  
-  int size = NUM_BLOCK;
-  
-  sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(size));
-
-  if(nnz_threshold == 0.0)
-    {
-    
-			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
-			  q_ct1.submit(
-			    [&](sycl::handler &cgh) {
-            
-            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
-            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
-            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
-            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
-            
-            //__shared__ vars
-            sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
-			      sycl::local_accessor<int, 1> smem_row_nnz_values_acc_ct1(sycl::range<1>(256), cgh);
-                        
-                        
-       cgh.parallel_for(      
-            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
-            [=](sycl::nd_item<3> item_ct1) {
-              kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
-               nnz_count_row,    nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, dacc_A);
-            });
-       });
-    }
-  else if(nnz_threshold != 0.0)
-    {
-      dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
-      q_ct1.submit(
-		    [&](sycl::handler &cgh) {
-            
-            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
-            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
-            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
-            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
-            
-            //__shared__ vars
-            sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
-			      sycl::local_accessor<int, 1> smem_row_nnz_values_acc_ct1(sycl::range<1>(256), cgh);
-               
-                        
-      cgh.parallel_for(      
-          sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
-          [=](sycl::nd_item<3> item_ct1) {
-            kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
-             nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, dacc_A);
-      });
-    });
-    }
-
-}
-
-
-//===================================double row col quant======================
-
-void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int *nnz_block_ptr, float threshold, int rows, int cols)
-{
-  dpct::device_ext &dev_ct1 = dpct::get_current_device();
-  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
-  sycl::context ctx = q_ct1.get_context();
-	int num_blocks = 0;
-  int size = NUM_BLOCK;
-  
-  sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(size));
-  sycl::buffer<char, 1> buff_out_col_normed(out_col_normed,sycl::range<1>(size));
-  sycl::buffer<char, 1> buff_out_row_normed(out_row_normed,sycl::range<1>(size));
-  
-  int threads = 64;
-  int items_per_thread = 4;
-  int tile_cols = threads*items_per_thread;
-  int tile_rows = 16;
-  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
-  int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
-	int row_tiles = (tiledRows/tile_rows);
-	int col_tiles = (tiledCols/tile_cols);
-	row_tiles = row_tiles > 0 ? row_tiles : 1;
-	col_tiles = col_tiles > 0 ? col_tiles : 1;
-  num_blocks = row_tiles * col_tiles;
-
-
-  if(threshold > 0.0f)
-    {
-      dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
-      q_ct1.submit(
-		    [&](sycl::handler &cgh) {
-            
-            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
-            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
-            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
-            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
-            sycl::accessor dacc_out_col_normed(buff_out_col_normed, cgh, sycl::read_write);
-            sycl::accessor dacc_out_row_normed(buff_out_row_normed, cgh, sycl::read_write);
-
-            //__shared__ vars
-            sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
-			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
-                        
-        cgh.parallel_for(      
-           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
-           [=](sycl::nd_item<3> item_ct1) {
-          
-                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed);
-          });
-      });
-    }
-  else
-    {
-  
-      dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
-      q_ct1.submit(
-		    [&](sycl::handler &cgh) {
-            
-            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
-            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
-            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
-            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
-            sycl::accessor dacc_out_col_normed(buff_out_col_normed, cgh, sycl::read_write);
-            sycl::accessor dacc_out_row_normed(buff_out_row_normed, cgh, sycl::read_write);
-            
-            //__shared__ vars
-            sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
-			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
-            
-                        
-        cgh.parallel_for(      
-           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
-           [=](sycl::nd_item<3> item_ct1) {
-          
-                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(),  tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed);
-          });
-      });
-  
-  }
   
 }
-//======================================= transform row to format===============================================
-
-template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *out, int rows, int cols)
-{
-  
-  dpct::device_ext &dev_ct1 = dpct::get_current_device();
-  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
-  sycl::context ctx = q_ct1.get_context();
-	int num_blocks = 0;
-  int size = NUM_BLOCK;
-  char *buff_A, *buff_out;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
-  q_ct1.memcpy((void*)(buff_out), (void*)(out), size);
-  
-  
-  int threads = 256;
-  int items_per_thread = 8;
-  // we load 128 column values per warp
-  int tile_cols = 32*items_per_thread;
-  int tile_rows = 32;
-  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
-  int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
-	int row_tiles = (tiledRows/tile_rows);
-	int col_tiles = (tiledCols/tile_cols);
-	row_tiles = row_tiles > 0 ? row_tiles : 1;
-	col_tiles = col_tiles > 0 ? col_tiles : 1;
-  num_blocks = row_tiles * col_tiles;
-
-  int outCols = fill_up_to_nearest_multiple(cols, 32);
-  int outRows = fill_up_to_nearest_multiple(rows, 32);
-  if(FORMAT == COL_TURING)
-  {
-    if(TRANSPOSE)
-      outRows = fill_up_to_nearest_multiple(cols, 8);
-    else
-      outRows = fill_up_to_nearest_multiple(rows, 8);
-  }
-  else if(FORMAT == COL_AMPERE)
-  {
-    if(TRANSPOSE)
-      outRows = fill_up_to_nearest_multiple(cols, 32);
-    else
-      outRows = fill_up_to_nearest_multiple(rows, 32);
-  }
-  else
-  {
-    if(TRANSPOSE)
-    {
-      outCols = fill_up_to_nearest_multiple(rows, 32);
-      outRows = cols;
-    }
-  }
-
-  /*
-  DPCT1049:69: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-  */
-  dpct::get_in_order_queue().submit(
-    [&](sycl::handler &cgh) {
-    
-    
-    
-    //__shared__ vars
-      sycl::local_accessor<char, 1> smem_data_acc_ct1(sycl::range<1>(32*33*8), cgh);
-
-      cgh.parallel_for(
-        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, threads), sycl::range<3>(1, 1, threads)), 
-        [=](sycl::nd_item<3> item_ct1) {
-          kTransformRowToFormat<256, 8, 32, 32*8, TRANSPOSE, FORMAT>(buff_A, buff_out, rows, cols, tiledCols, outRows, outCols, item_ct1, smem_data_acc_ct1.get_pointer());
-        });
-    });
-  /*
-  DPCT1010:286: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  
-  //CUDA_CHECK_RETURN(0);
-  
-  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
-  q_ct1.memcpy((void*)(out), (void*)(buff_out), size);
-  
-}
-
-void spmm_coo(sycl::queue* handle, int *A_rowidx, int *A_colidx, sycl::half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, sycl::half *B, int ldc, sycl::half* C, bool transposed_B)
-{ 
-
-  try{
-    dpct::device_ext &dev_ct1 = dpct::get_current_device();
-    sycl::queue &q_ct1 = dev_ct1.in_order_queue();
-
-//#ifdef NO_CUBLASLT
-//#else
-
-   
-    dpct::sparse::sparse_matrix_desc_t descA;
-    std::shared_ptr<dpct::sparse::dense_matrix_desc> descB, descC;
-
-    float alpha = 1.0f;
-    float beta = 0.0f;
-    void *dBuffer = NULL;
-    size_t bufferSize = 0;
-
-    /*
-    DPCT1007:287: Migration of cusparseCreateCoo is not supported.
-    */
-    //CHECK_CUSPARSE( cusparseCreateCoo(&descA, A_rows, A_cols, A_nnz,
-    //                                  A_rowidx, A_colidx, A_vals,
-    //                                  dpct::library_data_t::real_int32,
-    //                                  oneapi::mkl::index_base::zero, dpct::library_data_t::real_half) );
-    // Create dense matrix C
-    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descC = std::make_shared<dpct::sparse::dense_matrix_desc>(A_rows, B_cols, ldc, C, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major)) );
-    descC = std::make_shared<dpct::sparse::dense_matrix_desc>(A_rows, B_cols, ldc, C, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major);
-    // Create dense matrix B
-    if(transposed_B)
-    {
-      int tmp = A_cols;
-      A_cols = B_cols;
-      B_cols = tmp;
-    }
-
-    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descB = std::make_shared<dpct::sparse::dense_matrix_desc>(A_cols, B_cols, ldb, B, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major)) );
-    descB = std::make_shared<dpct::sparse::dense_matrix_desc>(A_cols, B_cols, ldb, B, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major);
-    // allocate an external buffer if needed
-    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(bufferSize = 0) );
-    bufferSize = 0;
-    //CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1)) );
-    dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1);
-
-    // execute SpMM
-    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(dpct::sparse::spmm(*handle, oneapi::mkl::transpose::nontrans, transposed_B ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, &alpha, descA, descB, &beta, descC, dpct::library_data_t::real_float)));
-    dpct::sparse::spmm(*handle, oneapi::mkl::transpose::nontrans, transposed_B ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, &alpha, descA, descB, &beta, descC, dpct::library_data_t::real_float);
-    // destroy matrix/vector descriptors
-    descA.reset();
-    descB.reset();
-    descC.reset();
-    sycl::free(dBuffer, q_ct1);
-    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descA.reset()) );
-    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descB.reset()) );
-    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descC.reset()) );
-    //CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(sycl::free(dBuffer, q_ct1)) );
-//#endif
-  }
-  catch (sycl::exception const &exc) {
-      std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
-      std::exit(1);
-  }
-
-}
-
-template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
-{
-
-  {
-    dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
-    dpct::get_in_order_queue().submit(
-      [&](sycl::handler &cgh) {
-        /*
-        DPCT1101:311: 'SMEM_SIZE' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
-        */
-        sycl::local_accessor<sycl::half, 1> smem_dequant_stats_acc_ct1(sycl::range<1>(2048/*SMEM_SIZE*/), cgh);
-
-        cgh.parallel_for(
-          sycl::nd_range<3>(sycl::range<3>(1, 1, nnz_rows) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
-          [=](sycl::nd_item<3> item_ct1) {
-            kspmm_coo_very_sparse_naive<T, 8, BITS>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB, item_ct1, smem_dequant_stats_acc_ct1.get_pointer());
-          });
-      });
-  }
-  /*
-  DPCT1010:289: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
-}
-
-
-template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int idx_size, int rows, int cols)
-{
-  int threads = 256;
-  // we load 128 column values per warp
-  int tiledCols = tiledCols = fill_up_to_nearest_multiple(cols, 32);
-  int tiledRows = 0;
-
-	int num_blocks = idx_size;
-
-  if(FORMAT == COL_TURING)
-  {
-      tiledRows = fill_up_to_nearest_multiple(rows, 8);
-  }
-  else if(FORMAT == COL_AMPERE)
-  {
-      tiledRows = fill_up_to_nearest_multiple(rows, 32);
-	}
-
-  /*
-  DPCT1049:70: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-  */
-  dpct::get_in_order_queue().parallel_for(
-    sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, threads), sycl::range<3>(1, 1, threads)), 
-    [=](sycl::nd_item<3> item_ct1) {
-      kExtractOutliers<FORMAT>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols, item_ct1);
-    });
-  /*
-  DPCT1010:290: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
-}
-
-
-
 
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
 {
@@ -1784,6 +1413,373 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
     
 }
 
+//================================spm coo==================================
+
+void spmm_coo(sycl::queue* handle, int *A_rowidx, int *A_colidx, sycl::half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, sycl::half *B, int ldc, sycl::half* C, bool transposed_B)
+{ 
+
+  try{
+    dpct::device_ext &dev_ct1 = dpct::get_current_device();
+    sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+
+//#ifdef NO_CUBLASLT
+//#else
+
+   
+    dpct::sparse::sparse_matrix_desc_t descA;
+    std::shared_ptr<dpct::sparse::dense_matrix_desc> descB, descC;
+
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    void *dBuffer = NULL;
+    size_t bufferSize = 0;
+
+    /*
+    DPCT1007:287: Migration of cusparseCreateCoo is not supported.
+    */
+    //CHECK_CUSPARSE( cusparseCreateCoo(&descA, A_rows, A_cols, A_nnz,
+    //                                  A_rowidx, A_colidx, A_vals,
+    //                                  dpct::library_data_t::real_int32,
+    //                                  oneapi::mkl::index_base::zero, dpct::library_data_t::real_half) );
+    // Create dense matrix C
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descC = std::make_shared<dpct::sparse::dense_matrix_desc>(A_rows, B_cols, ldc, C, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major)) );
+    descC = std::make_shared<dpct::sparse::dense_matrix_desc>(A_rows, B_cols, ldc, C, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major);
+    // Create dense matrix B
+    if(transposed_B)
+    {
+      int tmp = A_cols;
+      A_cols = B_cols;
+      B_cols = tmp;
+    }
+
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descB = std::make_shared<dpct::sparse::dense_matrix_desc>(A_cols, B_cols, ldb, B, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major)) );
+    descB = std::make_shared<dpct::sparse::dense_matrix_desc>(A_cols, B_cols, ldb, B, dpct::library_data_t::real_half, oneapi::mkl::layout::row_major);
+    // allocate an external buffer if needed
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(bufferSize = 0) );
+    bufferSize = 0;
+    //CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1)) );
+    dBuffer = (void *)sycl::malloc_device(bufferSize, q_ct1);
+
+    // execute SpMM
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(dpct::sparse::spmm(*handle, oneapi::mkl::transpose::nontrans, transposed_B ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, &alpha, descA, descB, &beta, descC, dpct::library_data_t::real_float)));
+    dpct::sparse::spmm(*handle, oneapi::mkl::transpose::nontrans, transposed_B ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, &alpha, descA, descB, &beta, descC, dpct::library_data_t::real_float);
+    // destroy matrix/vector descriptors
+    descA.reset();
+    descB.reset();
+    descC.reset();
+    sycl::free(dBuffer, q_ct1);
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descA.reset()) );
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descB.reset()) );
+    //CHECK_CUSPARSE( DPCT_CHECK_ERROR(descC.reset()) );
+    //CUDA_CHECK_RETURN( DPCT_CHECK_ERROR(sycl::free(dBuffer, q_ct1)) );
+//#endif
+  }
+  catch (sycl::exception const &exc) {
+      std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+      std::exit(1);
+  }
+
+}
+
+template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
+{
+
+  {
+    dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
+    dpct::get_in_order_queue().submit(
+      [&](sycl::handler &cgh) {
+        /*
+        DPCT1101:311: 'SMEM_SIZE' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
+        */
+        sycl::local_accessor<sycl::half, 1> smem_dequant_stats_acc_ct1(sycl::range<1>(2048/*SMEM_SIZE*/), cgh);
+
+        cgh.parallel_for(
+          sycl::nd_range<3>(sycl::range<3>(1, 1, nnz_rows) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
+          [=](sycl::nd_item<3> item_ct1) {
+            kspmm_coo_very_sparse_naive<T, 8, BITS>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB, item_ct1, smem_dequant_stats_acc_ct1.get_pointer());
+          });
+      });
+  }
+  /*
+  DPCT1010:289: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
+  */
+  //CUDA_CHECK_RETURN(0);
+}
+
+
+//======================================non gemm 2d quants============================================
+
+//===========================Row col stats=================================
+
+#define STATS_THREADS 64
+#define STATS_ITEMS 4
+#define STATS_ROWS 16
+void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)
+{
+  
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+    
+  
+  int tile_cols = STATS_THREADS*STATS_ITEMS;
+  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
+  int tiledRows = fill_up_to_nearest_multiple(rows, STATS_ROWS);
+	int row_tiles = (tiledRows/STATS_ROWS);
+	int col_tiles = (tiledCols/tile_cols);
+	row_tiles = row_tiles > 0 ? row_tiles : 1;
+	col_tiles = col_tiles > 0 ? col_tiles : 1;
+  int num_blocks = row_tiles * col_tiles;
+  
+  int size = NUM_BLOCK;
+  
+  sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(size));
+
+  if(nnz_threshold == 0.0)
+    {
+    
+			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  q_ct1.submit(
+			    [&](sycl::handler &cgh) {
+            
+            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<int, 1> smem_row_nnz_values_acc_ct1(sycl::range<1>(256), cgh);
+                        
+                        
+       cgh.parallel_for(      
+            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
+            [=](sycl::nd_item<3> item_ct1) {
+              kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
+               nnz_count_row,    nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, dacc_A);
+            });
+       });
+    }
+  else if(nnz_threshold != 0.0)
+    {
+      dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+      q_ct1.submit(
+		    [&](sycl::handler &cgh) {
+            
+            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<int, 1> smem_row_nnz_values_acc_ct1(sycl::range<1>(256), cgh);
+               
+                        
+      cgh.parallel_for(      
+          sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
+          [=](sycl::nd_item<3> item_ct1) {
+            kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
+             nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, dacc_A);
+      });
+    });
+    }
+
+}
+
+
+//===================================double row col quant======================
+
+void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int *nnz_block_ptr, float threshold, int rows, int cols)
+{
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+	int num_blocks = 0;
+  int size = NUM_BLOCK;
+  
+  sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(size));
+  sycl::buffer<char, 1> buff_out_col_normed(out_col_normed,sycl::range<1>(size));
+  sycl::buffer<char, 1> buff_out_row_normed(out_row_normed,sycl::range<1>(size));
+  
+  int threads = 64;
+  int items_per_thread = 4;
+  int tile_cols = threads*items_per_thread;
+  int tile_rows = 16;
+  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
+  int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
+	int row_tiles = (tiledRows/tile_rows);
+	int col_tiles = (tiledCols/tile_cols);
+	row_tiles = row_tiles > 0 ? row_tiles : 1;
+	col_tiles = col_tiles > 0 ? col_tiles : 1;
+  num_blocks = row_tiles * col_tiles;
+
+
+  if(threshold > 0.0f)
+    {
+      dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+      q_ct1.submit(
+		    [&](sycl::handler &cgh) {
+            
+            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+            sycl::accessor dacc_out_col_normed(buff_out_col_normed, cgh, sycl::read_write);
+            sycl::accessor dacc_out_row_normed(buff_out_row_normed, cgh, sycl::read_write);
+
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
+                        
+        cgh.parallel_for(      
+           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
+           [=](sycl::nd_item<3> item_ct1) {
+          
+                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed);
+          });
+      });
+    }
+  else
+    {
+  
+      dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+      q_ct1.submit(
+		    [&](sycl::handler &cgh) {
+            
+            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
+            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+            sycl::accessor dacc_out_col_normed(buff_out_col_normed, cgh, sycl::read_write);
+            sycl::accessor dacc_out_row_normed(buff_out_row_normed, cgh, sycl::read_write);
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
+			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
+            
+                        
+        cgh.parallel_for(      
+           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
+           [=](sycl::nd_item<3> item_ct1) {
+          
+                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(),  tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed);
+          });
+      });
+  
+  }
+  
+}
+//========================== transform row to format================================
+template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *out, int rows, int cols)
+{
+  
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+	int num_blocks = 0;
+  int size = NUM_BLOCK;
+  
+  sycl::buffer<char, 1> buff_A(A,sycl::range<1>(size));
+  sycl::buffer<char, 1> buff_out(out,sycl::range<1>(size));
+  
+  
+  int threads = 256;
+  int items_per_thread = 8;
+  // we load 128 column values per warp
+  int tile_cols = 32*items_per_thread;
+  int tile_rows = 32;
+  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
+  int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
+	int row_tiles = (tiledRows/tile_rows);
+	int col_tiles = (tiledCols/tile_cols);
+	row_tiles = row_tiles > 0 ? row_tiles : 1;
+	col_tiles = col_tiles > 0 ? col_tiles : 1;
+  num_blocks = row_tiles * col_tiles;
+
+  int outCols = fill_up_to_nearest_multiple(cols, 32);
+  int outRows = fill_up_to_nearest_multiple(rows, 32);
+  if(FORMAT == COL_TURING)
+  {
+    if(TRANSPOSE)
+      outRows = fill_up_to_nearest_multiple(cols, 8);
+    else
+      outRows = fill_up_to_nearest_multiple(rows, 8);
+  }
+  else if(FORMAT == COL_AMPERE)
+  {
+    if(TRANSPOSE)
+      outRows = fill_up_to_nearest_multiple(cols, 32);
+    else
+      outRows = fill_up_to_nearest_multiple(rows, 32);
+  }
+  else
+  {
+    if(TRANSPOSE)
+    {
+      outCols = fill_up_to_nearest_multiple(rows, 32);
+      outRows = cols;
+    }
+  }
+
+  
+  dpct::get_in_order_queue().submit(
+    [&](sycl::handler &cgh) {
+     
+     sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+     sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+            
+      
+    //__shared__ vars
+      sycl::local_accessor<char, 1> smem_data_acc_ct1(sycl::range<1>(32*33*8), cgh);
+
+      cgh.parallel_for(
+        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, threads), sycl::range<3>(1, 1, threads)), 
+        [=](sycl::nd_item<3> item_ct1) {
+          kTransformRowToFormat<256, 8, 32, 32*8, TRANSPOSE, FORMAT>(A, out, rows, cols, tiledCols, outRows, outCols, item_ct1, smem_data_acc_ct1.get_pointer(), dacc_A, dacc_out);
+        });
+    });
+  
+}
+
+//===========================extract outliers===========================
+
+template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int idx_size, int rows, int cols)
+{
+  int threads = 256;
+  // we load 128 column values per warp
+  int tiledCols = tiledCols = fill_up_to_nearest_multiple(cols, 32);
+  int tiledRows = 0;
+
+	int num_blocks = idx_size;
+
+  if(FORMAT == COL_TURING)
+  {
+      tiledRows = fill_up_to_nearest_multiple(rows, 8);
+  }
+  else if(FORMAT == COL_AMPERE)
+  {
+      tiledRows = fill_up_to_nearest_multiple(rows, 32);
+	}
+
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+  
+  dpct::get_in_order_queue().submit(
+    [&](sycl::handler &cgh) {
+    
+    cgh.parallel_for(
+      sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, threads), sycl::range<3>(1, 1, threads)), 
+      [=](sycl::nd_item<3> item_ct1) {
+           kExtractOutliers<FORMAT>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols, item_ct1);
+    });
+   });
+ 
+}
+
+//==================================func===========================
+
 template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
 {
   int threads = 512;
@@ -1793,7 +1789,10 @@ template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
   /*
   DPCT1049:71: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
   */
-  dpct::get_in_order_queue().parallel_for(
+  dpct::get_in_order_queue().submit(
+    [&](sycl::handler &cgh) {
+    
+  cgh.parallel_for(
     sycl::nd_range<3>(sycl::range<3>(1, 1, blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
     [=](sycl::nd_item<3> item_ct1) {
       kfunc<T, FUNC>(A, B, value, n, item_ct1);
