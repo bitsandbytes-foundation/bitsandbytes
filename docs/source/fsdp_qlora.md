@@ -37,16 +37,18 @@ Check out this [section](https://hf.co/docs/peft/main/en/accelerate/fsdp#use-pef
 
 ## Training
 
+> [!TIP]
+> FSDP is a distributed training framework that needs to be launched as a distributed training job with a library like [Accelerate](https://hf.co/docs/accelerate/index) or [torchrun](https://pytorch.org/docs/stable/elastic/run.html). The launch command provided in this section uses Accelerate to launch the training script.
+
 bitsandbytes is deeply integrated with the Hugging Face ecosystem, making it easy to use with libraries like [Transformers](https://hf.co/docs/transformers), [PEFT](https://hf.co/docs/peft), and [TRL](https://hf.co/docs/trl).
+
+PEFT provides a configuration file ([fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml)), launch command ([run_peft_qlora_fsdp.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_qlora_fsdp.sh)), and training script ([train.py](https://github.com/huggingface/peft/blob/main/examples/sft/train.py)) for running FSDP-QLoRA. To learn more, check out the [Use PEFT QLoRA and FSDP for finetuning large models on multiple GPUs](https://huggingface.co/docs/peft/main/en/accelerate/fsdp#use-peft-qlora-and-fsdp-for-finetuning-large-models-on-multiple-gpus) documentation. This section briefly covers the steps to run FSDP-QLoRA training.
 
 Before you begin, make sure you have the latest libraries installed.
 
 ```bash
 pip install -U bitsandbytes accelerate transformers peft trl
 ```
-
-> [!TIP]
-> PEFT provides a configuration file ([fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml)), launch command ([run_peft_qlora_fsdp.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_qlora_fsdp.sh)), and training script ([train.py](https://github.com/huggingface/peft/blob/main/examples/sft/train.py)) for FSDP-QLoRA. To learn more, check out the [Use PEFT QLoRA and FSDP for finetuning large models on multiple GPUs](https://huggingface.co/docs/peft/main/en/accelerate/fsdp#use-peft-qlora-and-fsdp-for-finetuning-large-models-on-multiple-gpus) documentation.
 
 The important change that enables FSDP-QLoRA training is the `bnb_4bit_quant_storage` parameter in the [`~transformers.BitsAndBytesConfig`] class. This allows you to set the storage data type of the quantized weights to a float data type.
 
