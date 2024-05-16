@@ -1744,7 +1744,7 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
   // we load 128 column values per warp
   int tiledCols = tiledCols = fill_up_to_nearest_multiple(cols, 32);
   int tiledRows = 0;
-
+  int size = NUM_BLOCK;
 	int num_blocks = idx_size;
 
   if(FORMAT == COL_TURING)
@@ -1760,13 +1760,19 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
   sycl::queue &q_ct1 = dev_ct1.in_order_queue();
   sycl::context ctx = q_ct1.get_context();
   
+  sycl::buffer<char, 1> buff_A(A,sycl::range<1>(size));
+  sycl::buffer<char, 1> buff_out(out,sycl::range<1>(size));
+  
+  
   dpct::get_in_order_queue().submit(
     [&](sycl::handler &cgh) {
+     sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+     sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
     
     cgh.parallel_for(
       sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, threads), sycl::range<3>(1, 1, threads)), 
       [=](sycl::nd_item<3> item_ct1) {
-           kExtractOutliers<FORMAT>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols, item_ct1);
+           kExtractOutliers<FORMAT>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols, item_ct1, dacc_A, dacc_out);
     });
    });
  
