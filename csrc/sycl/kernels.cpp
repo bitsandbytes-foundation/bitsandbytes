@@ -504,6 +504,8 @@ __dpct_inline__ unsigned char quantize_quadrant(int QUADRANT, float *__restrict_
         return pivot;
     }
 }
+//=====================================================NON GEMMS================================
+
 //=====================================histogram 2d====================
 SYCL_EXTERNAL void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n,
                             const sycl::nd_item<3> &item_ct1)
@@ -2932,7 +2934,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
-template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_int32_fp16(int *__restrict__ const buff_A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *__restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,  const sycl::nd_item<3> &item_ct1, float *smem_rowStats, sycl_la_T ltacc_T, sycl_la_float exacc)
+template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *__restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,  const sycl::nd_item<3> &item_ct1, float *smem_rowStats, const sycl_la &tacc, const sycl_dacc &dacc_A)
 {
 
   // Strategy: To dequantize we need to load col/row statistics. This can be very expensive
@@ -2985,11 +2987,12 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
   sycl::half local_output[ITEMS_PER_THREAD];
   float local_rowStats[ITEMS_PER_THREAD];
   
-
-  //typedef cub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_DIRECT> LoadInt32;
-  //typedef cub::BlockExchange<int, THREADS, ITEMS_PER_THREAD> ExchangeInt32;
+  using group_load_int = dpct::group::workgroup_load<ITEMS_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
+  using group_exchange = dpct::group::exchange<int, ITEMS_PER_THREAD>;
   
-  
+  auto *d_A = dacc_A.get_multi_ptr<sycl::access::decorated::yes>().get();
+  auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+    
 
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
   float colStat = col >= numCols ? 0.0f : colStats[col];
@@ -3004,9 +3007,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
     // rowidx: [0, 1, 2, 3...] and each warp reads ITEMS_PER_THREAD consequitive elements
     smem_rowStats[j] = rowStats[row];
   }
-  /*
-  DPCT1065:205: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-  */
+  
   item_ct1.barrier(sycl::access::fence_space::local_space);
 
 
@@ -3026,9 +3027,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
       break;
 
     // L2. Load data in warp-striped arrangement (t0 holds colidx [0, 0, 0, 0], rowidx [0, 1, 2, 3])
-    /*
-    DPCT1007:206: Migration of cub::BlockLoad::Load is not supported.
-    */
+    
     //LoadInt32(loadint32).Load(&(A[subtile_idx]), local_values, valid_items, 0);
     
     // 1. load 8 values per thread
@@ -3037,12 +3036,9 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
-    auto *tmp = ltacc_T.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_load(tmp).load(item, &buff_A[0], local_values);
+    auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
+    group_load_int(tmp).load(item_ct1, d_A, local_values);
     
- /*
-    DPCT1007:207: Migration of cub::BlockExchange::BlockedToWarpStriped is not supported.
-    */
     //ExchangeInt32(exchangeint32).BlockedToWarpStriped(local_values, local_values);
     
     // 1. load 8 values per thread
@@ -3051,8 +3047,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
     // 4. Up-shift maxed value, write index into shared memory, replace with 2nd largest
     // 5. Repeat (3) 8 times for top 8 values in 256
     // 6. store with byte index
-    auto *tmp = exacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-    group_exchange(tmp).blocked_to_warpstriped(item, local_values);
+    group_exchange(tmp).blocked_to_striped(item_ct1, local_values);
     
     #pragma unroll ITEMS_PER_THREAD
     for(int j = 0; j < ITEMS_PER_THREAD; j++)
@@ -3541,6 +3536,96 @@ const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out)
   }
 }
 
+
+//========================================k extract outliers======================
+
+template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out)
+{
+	int local_colidx = idx[item_ct1.get_group(2)];
+
+	if(FORMAT==COL_TURING)
+	{
+		// TURING FORMAT:
+		// 8*32 tiles with 4*4 subtiles
+		// the 8*32 subtile has first all 4*4 subtiles of even rows (max 4*4*8 = 128 elements)
+		// the subsequent 4*4 subtiles are for all odd rows if some rows columns are empty the values are zero
+		// the tile repeats again after the 8*32 tile in a major column order, meaning: (next 8 rows are A[8:16, 0:32])
+		// the next tile is the next 8 rows for the same 32 columns. Once all rows are finished, the column
+		// index increases by 32
+		// columns are grouped in increments of 4, meaning that one has the following rows and columns
+		// rows: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
+		// cols: [0 1 2 3, 0 1 2 4, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
+
+		// each thread reads 1 element = 1 row
+		for(int row = item_ct1.get_local_id(2); row < rowsA; row+= item_ct1.get_local_range(2))
+		{
+			int offset_per_col_tile = ((rowsA+7)/8)*32*8;
+			int tile_offset_rows = (row/8)*32*8;
+			int tile_offset_cols = (local_colidx/32)*offset_per_col_tile;
+			int offset = 0;
+			int subtile_col_idx = local_colidx%32;
+			int subtile_row_idx = row % 8;
+			if(row % 2 == 1)
+				offset += 128 + (subtile_col_idx/4)*16 + (subtile_col_idx%4) + ((subtile_row_idx-1)*2);
+			else
+				// even
+				offset += 0   + (subtile_col_idx/4)*16 + (subtile_col_idx%4) + (subtile_row_idx*2);
+
+			offset += tile_offset_rows + tile_offset_cols;
+
+			char val = dacc_A[offset];
+
+			int out_idx = (row*idx_size) + item_ct1.get_group(2);
+			dacc_out[out_idx] = val;
+		}
+	}
+	else if(FORMAT == COL_AMPERE)
+	{
+
+		for(int row = item_ct1.get_local_id(2); row < rowsA; row+= item_ct1.get_local_range(2))
+		{
+			// we got 32x32 tiles and we use the magic equation from the cublasLt doc to get the element
+			// within each tile.
+			int offset_per_col_tile = ((rowsA+31)/32)*32*32;
+			int tile_offset_rows = (row/32)*32*32;
+			int tile_offset_cols = (local_colidx/32)*offset_per_col_tile;
+			int subtile_col_idx = local_colidx%32;
+			int subtile_row_idx = row % 32;
+			// this magic is taken from the cublasLt doc (search for COL32)
+			int offset = (((subtile_row_idx%8)/2*4+subtile_row_idx/8)*2+subtile_row_idx%2)*32+subtile_col_idx;
+			offset += tile_offset_cols + tile_offset_rows;
+
+			char val = A[offset];
+			int out_idx = (row*idx_size) + item_ct1.get_group(2);
+			dacc_out[out_idx] = val;
+		}
+	}
+}
+
+//=======================kfunc======================
+
+template <typename T, int FUNC> SYCL_EXTERNAL void kfunc(T *A, T *B, T value, long n, const sycl::nd_item<3> &item_ct1)
+{
+  for(long i = (item_ct1.get_local_range(2)*item_ct1.get_group(2)) + item_ct1.get_local_id(2); i < n; i+=(item_ct1.get_local_range(2)*item_ct1.get_group_range(2)))
+  {
+    switch(FUNC)
+    {
+      case FILL:
+        A[i] = (T)value;
+        break;
+      case ARANGE:
+        A[i] = (T)i;
+        break;
+      case _MUL:
+        A[i] = A[i]*B[i];
+        break;
+    }
+  }
+}
+
+//=============================GEMMS===============================================================
+
+
 //============================================k spmm sparse coo===============================================
 #define DENORM 1.0f/127.0f
 #define MAX_SPARSE_COUNT 32
@@ -3696,70 +3781,6 @@ SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int
   }
 }
 
-//========================================k extract outliers======================
-
-template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out)
-{
-	int local_colidx = idx[item_ct1.get_group(2)];
-
-	if(FORMAT==COL_TURING)
-	{
-		// TURING FORMAT:
-		// 8*32 tiles with 4*4 subtiles
-		// the 8*32 subtile has first all 4*4 subtiles of even rows (max 4*4*8 = 128 elements)
-		// the subsequent 4*4 subtiles are for all odd rows if some rows columns are empty the values are zero
-		// the tile repeats again after the 8*32 tile in a major column order, meaning: (next 8 rows are A[8:16, 0:32])
-		// the next tile is the next 8 rows for the same 32 columns. Once all rows are finished, the column
-		// index increases by 32
-		// columns are grouped in increments of 4, meaning that one has the following rows and columns
-		// rows: [0 0 0 0, 2 2 2 2, 4 4 4 4, 6 6 6 6, 0 0 0 0 ...]
-		// cols: [0 1 2 3, 0 1 2 4, 0 1 2 3, 0 1 2 3, 4 5 6 7 ...]
-
-		// each thread reads 1 element = 1 row
-		for(int row = item_ct1.get_local_id(2); row < rowsA; row+= item_ct1.get_local_range(2))
-		{
-			int offset_per_col_tile = ((rowsA+7)/8)*32*8;
-			int tile_offset_rows = (row/8)*32*8;
-			int tile_offset_cols = (local_colidx/32)*offset_per_col_tile;
-			int offset = 0;
-			int subtile_col_idx = local_colidx%32;
-			int subtile_row_idx = row % 8;
-			if(row % 2 == 1)
-				offset += 128 + (subtile_col_idx/4)*16 + (subtile_col_idx%4) + ((subtile_row_idx-1)*2);
-			else
-				// even
-				offset += 0   + (subtile_col_idx/4)*16 + (subtile_col_idx%4) + (subtile_row_idx*2);
-
-			offset += tile_offset_rows + tile_offset_cols;
-
-			char val = dacc_A[offset];
-
-			int out_idx = (row*idx_size) + item_ct1.get_group(2);
-			dacc_out[out_idx] = val;
-		}
-	}
-	else if(FORMAT == COL_AMPERE)
-	{
-
-		for(int row = item_ct1.get_local_id(2); row < rowsA; row+= item_ct1.get_local_range(2))
-		{
-			// we got 32x32 tiles and we use the magic equation from the cublasLt doc to get the element
-			// within each tile.
-			int offset_per_col_tile = ((rowsA+31)/32)*32*32;
-			int tile_offset_rows = (row/32)*32*32;
-			int tile_offset_cols = (local_colidx/32)*offset_per_col_tile;
-			int subtile_col_idx = local_colidx%32;
-			int subtile_row_idx = row % 32;
-			// this magic is taken from the cublasLt doc (search for COL32)
-			int offset = (((subtile_row_idx%8)/2*4+subtile_row_idx/8)*2+subtile_row_idx%2)*32+subtile_col_idx;
-			offset += tile_offset_cols + tile_offset_rows;
-
-			char val = A[offset];
-			int out_idx = (row*idx_size) + item_ct1.get_group(2);
-			dacc_out[out_idx] = val;
-		}
-	}
-}
 
 //template <int QUANT_TYPE, typename INPT, typename COMPT, typename OUTT> __global__ void kMatmul_inference_4bit(INPT *A, unsigned char *B, OUTT *out, int lda, int ldb, int rowsA, int colsA, int colsB)
 //{
@@ -4469,137 +4490,6 @@ template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_infer
 }
 
 
-//#define ROWS 2
-//template <typename T, int ITEMS, int THREADS> __global__ void gemm_device(int M, int N, int K, T const* A,  T* B,  T * out,  int lda, int ldb, int ldc)
-//{
-//// 0. We want to fill a 8x128 tile for a thread block so we have 8x16 tile for each warp
-//// 1. Load dataB into register
-//// 2. Dequantize B
-//// 3. Fetch data from A and multiply
-//
-//  typedef cub::BlockLoad<T, THREADS , ITEMS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadA;
-//  //__shared__ typename LoadA::TempStorage loada;
-//  typedef cub::BlockLoad<T, THREADS , ITEMS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadB;
-//  //__shared__ typename LoadB::TempStorage loadb;
-//  typedef cub::BlockReduce<T, THREADS> BlockReduce;
-//  // Allocate shared memory for BlockReduce
-//  //__shared__ typename BlockReduce::TempStorage reduce;
-//
-//  __shared__ union {
-//    typename BlockReduce::TempStorage reduce;
-//    typename LoadB::TempStorage loadb;
-//    typename LoadA::TempStorage loada;
-//  } temp_storage;
-//
-//
-//	T dataA[ITEMS];
-//  T local_B[ITEMS];
-//  T local_accC[ROWS];
-//	int valid_items = 0;
-//  const int col_offset = blockIdx.x * 8;
-//
-//	__shared__ T tileA[ROWS*THREADS*ITEMS];
-//	__shared__ T accumulatorC[ROWS*8];
-//
-//  //#pragma unroll 8
-//  //for(int i = 0; i < 8; i++)
-//  //  tileA[threadIdx.x + (i*256)] = 0.0f;
-//  //__syncthreads();
-//  if(threadIdx.x < 64)
-//    accumulatorC[threadIdx.x] = 0.0f;
-//  __syncthreads();
-//
-//
-//	for(int inner_idx = 0; inner_idx < K; inner_idx+= THREADS*ITEMS)
-//	{
-//		valid_items = K - inner_idx > THREADS*ITEMS ? THREADS*ITEMS : K - inner_idx;
-//		int baserow = 0;
-//		for(int row = baserow; row < (baserow+ROWS) && row < N; row++)
-//		{
-//			LoadA(temp_storage.loada).Load(&(A[(row*K) + inner_idx]), dataA, valid_items, 0.0f);
-//
-//      #pragma unroll ITEMS
-//      for(int k = 0; k < ITEMS; k++)
-//          tileA[row*THREADS*ITEMS + threadIdx.x + (k*THREADS)] = dataA[k];
-//
-//		__syncthreads();
-//		}
-//		baserow += ROWS;
-//
-//    // load 16 columns from B at a time. B is transposed, so its like loading rows
-//    // each warp loads one row
-//    // each thread loads 128 byte
-//
-//    // col: inner_idx + warp_lane
-//    // row: ldb*(offset + warp_id)
-//    for(int col = 0; col < 8 && (col_offset + col) < M; col++)
-//    {
-//      int colB = col_offset + col;
-//
-//      for(int k = 0; k < ROWS; k++)
-//        local_accC[k] = 0.0f;
-//
-//      int base_idxB = ldb*colB;
-//      valid_items = K - inner_idx > THREADS*ITEMS ? THREADS*ITEMS : K - inner_idx;
-//      LoadB(temp_storage.loadb).Load(&(B[base_idxB + inner_idx]), local_B, valid_items, 0.0f);
-//      __syncthreads();
-//
-//      for(int row = 0; row < ROWS && row < N; row++)
-//      {
-//        #pragma unroll ITEMS
-//        for(int k = 0; k < ITEMS; k++)
-//        {
-//          int idxA = row*THREADS*ITEMS + threadIdx.x + (THREADS*k);
-//          local_accC[row] += tileA[idxA]*local_B[k];
-//        }
-//
-//        local_accC[row] = BlockReduce(temp_storage.reduce).Reduce(local_accC[row], cub::Sum());
-//        if(threadIdx.x == 0)
-//          atomicAdd(&accumulatorC[row*8 + col], local_accC[row]);
-//      }
-//    }
-//	}
-//
-//  for(int row = 0; row < ROWS && row < N; row++)
-//  {
-//    int out_idx = ldc*row + col_offset;
-//
-//    //if(threadIdx.x < 8)
-//    //  if(accumulatorC[row*8 + threadIdx.x] != 0.0)
-//    //    printf("%i %i %i %i %f idx %i %i %i\n", row, col_offset, threadIdx.x, N, accumulatorC[row*8 + threadIdx.x], ldc, out_idx, blockIdx.x);
-//
-//    if(threadIdx.x < 8 && (col_offset + threadIdx.x) < M)
-//    {
-//      //printf("%i %i %i %i %f idx %i %i\n", row, col_offset, threadIdx.x, N, accumulatorC[row*8 + threadIdx.x], ldc, out_idx);
-//      out[out_idx + threadIdx.x] = accumulatorC[row*8 + threadIdx.x];
-//    }
-//  }
-//
-//
-//
-//}
-
-
-template <typename T, int FUNC> SYCL_EXTERNAL void kfunc(T *A, T *B, T value, long n,
-                                           const sycl::nd_item<3> &item_ct1)
-{
-  for(long i = (item_ct1.get_local_range(2)*item_ct1.get_group(2)) + item_ct1.get_local_id(2); i < n; i+=(item_ct1.get_local_range(2)*item_ct1.get_group_range(2)))
-  {
-    switch(FUNC)
-    {
-      case FILL:
-        A[i] = (T)value;
-        break;
-      case ARANGE:
-        A[i] = (T)i;
-        break;
-      case _MUL:
-        A[i] = A[i]*B[i];
-        break;
-    }
-  }
-}
-
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS
@@ -4715,11 +4605,10 @@ template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int 
                                                               sycl::half *smem_dequant_stats);
 
 
-template void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half * __restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,
-                                                  const sycl::nd_item<3> &item_ct1,
-                                                  float *smem_rowStats);
 
 //==================supported template decls=======================================================
+
+template void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half * __restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n, const sycl::nd_item<3> &item_ct1,  float *smem_rowStats, const sycl_la &tacc, const sycl_dacc &dacc_A);
 
 
 template SYCL_EXTERNAL void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,   const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);

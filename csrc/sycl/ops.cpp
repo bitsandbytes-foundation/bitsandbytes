@@ -38,6 +38,11 @@ using namespace BinSearch;
 using std::cout;
 using std::endl;
 
+int fill_up_to_nearest_multiple(int value, int multiple)
+{
+  return value + (value % multiple == 0 ? 0 : (multiple - (value % multiple)));
+}
+
 //================================histogram 2d==============================================
 
 void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n)
@@ -1005,6 +1010,50 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
  
 }
 
+//==========================dequant mm int 32 fp16==========================
+
+void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *bias, int numRows, int numCols)
+{
+  int threads = 512;
+  int tileCols = fill_up_to_nearest_multiple(numCols, 32);
+  int n = numRows*tileCols;
+  int subtile_rows = 128;
+  int tilesize = 32*subtile_rows;
+  int num_blocks = numRows/subtile_rows;
+  num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
+  num_blocks = num_blocks*(tileCols/32);
+  assert(threads <= tilesize);
+  int size = NUM_BLOCK;
+  
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+
+  
+  sycl::buffer<int, 1> buff_A (A, sycl::range<1>(size));
+  
+  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+    q_ct1.submit(
+		[&](sycl::handler &cgh) {
+            
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
+          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);  
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+            
+            //__shared__ vars
+            sycl::local_accessor<float, 1> smem_rowStats_acc_ct1(sycl::range<1>(256), cgh);
+            
+			      cgh.parallel_for(
+			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE), sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE)), 
+			        [=](sycl::nd_item<3> item_ct1) {
+  kdequant_mm_int32_fp16<4, 128, 512>(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n, item_ct1,smem_rowStats_acc_ct1.get_pointer(), tacc, dacc_A );
+           });
+  
+  });
+  
+}
+
 //========================GEMM============================
 
 void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc)
@@ -1188,61 +1237,6 @@ catch (sycl::exception const &exc) {
   std::exit(1);
 }
 
-int fill_up_to_nearest_multiple(int value, int multiple)
-{
-  return value + (value % multiple == 0 ? 0 : (multiple - (value % multiple)));
-}
-
-void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *bias, int numRows, int numCols)
-{
-  int threads = 512;
-  int tileCols = fill_up_to_nearest_multiple(numCols, 32);
-  int n = numRows*tileCols;
-  int subtile_rows = 128;
-  int tilesize = 32*subtile_rows;
-  int num_blocks = numRows/subtile_rows;
-  num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
-  num_blocks = num_blocks*(tileCols/32);
-  assert(threads <= tilesize);
-  
-  dpct::device_ext &dev_ct1 = dpct::get_current_device();
-  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
-  sycl::context ctx = q_ct1.get_context();
-
-  int size= NUM_BLOCK;
-  int *buff_A;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
-  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
-    q_ct1.submit(
-		[&](sycl::handler &cgh) {
-  
-            using group_load_T = dpct::group::workgroup_load<NUM_BLOCK, BLOCK_LOAD_DIRECT, T>;
-            using group_exchange = dpct::group::exchange<float, ITEMS_PER_THREAD>;
-            size_t load_temp_storage_size_T = group_load_T::get_local_memory_size(NUM_BLOCK);
-            size_t exchange_temp_storage_size = group_exchange::get_local_memory_size(NUM_BLOCK);
-            
-            sycl::local_accessor<uint8_t, 1> ltacc_T(load_temp_storage_size_T, cgh);
-            sycl::local_accessor<uint8_t, 1> exacc(exchange_temp_storage_size, cgh);
-            
-            
-            //__shared__ vars
-            sycl::local_accessor<float, 1> smem_rowStats_acc_ct1(sycl::range<1>(256), cgh);
-            
-			      cgh.parallel_for(
-			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE), sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE)), 
-			        [=](sycl::nd_item<3> item_ct1) {
-  kdequant_mm_int32_fp16<4, 128, 512>(buff_A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n, item_ct1,smem_rowStats_acc_ct1.get_pointer(), ltacc_T, exacc );
-           });
-  
-  });
-  /*
-  DPCT1010:283: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
-  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
-  
-}
 
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
 {
@@ -1786,9 +1780,7 @@ template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
   int blocks = n/threads;
   blocks = n % threads == 0 ? blocks : blocks + 1;
   blocks = blocks > 65535 ? 65535 : blocks;
-  /*
-  DPCT1049:71: The work-group size passed to the SYCL kernel may exceed the limit. To get the device limit, query info::device::max_work_group_size. Adjust the work-group size if needed.
-  */
+  
   dpct::get_in_order_queue().submit(
     [&](sycl::handler &cgh) {
     
@@ -1797,10 +1789,8 @@ template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
     [=](sycl::nd_item<3> item_ct1) {
       kfunc<T, FUNC>(A, B, value, n, item_ct1);
     });
-  /*
-  DPCT1010:292: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
+  });
+  
 }
 
 //==============================================================
