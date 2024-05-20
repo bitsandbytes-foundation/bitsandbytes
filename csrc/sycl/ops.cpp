@@ -16,7 +16,9 @@
 #include <common.h>
 #include <dpct/lib_common_utils.hpp>
 
-#include "oneapi/dnnl/dnnl.hpp"
+#include <oneapi/dnnl/dnnl.hpp>
+#include <oneapi/dnnl/dnnl_sycl.hpp>
+
 
 #define ERR_NOT_IMPLEMENTED 100
 
@@ -1132,6 +1134,8 @@ template int get_leading_dim<ROW>(int dim1, int dim2);
 template int get_leading_dim<COL>(int dim1, int dim2);
 template int get_leading_dim<COL32>(int dim1, int dim2);
 
+//=================================transform GEMM==============================
+
 template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform( T *A, T *out, int dim1, int dim2)
 {
 
@@ -1145,7 +1149,7 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   int ldOut = get_leading_dim<TARGET>(dim1, dim2);
   int ldAOut = get_leading_dim<TARGET>(dim1, dim2);
   
-  dnnl::engine engine = dnnl::sycl_interop::make_engine(dev, ctx);
+  dnnl::engine engine = sycl_interop::make_engine(dev, ctx);
   // column major 
   const memory::dims a_strides = memory::dims {1, ldA};
   const auto a_md = DTYPE ==32 ? memory::desc({dim1, dim2}, dt::s32, a_strides) : memory::desc({dim1, dim2}, dt::s8, a_strides);
@@ -1161,7 +1165,7 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
   
   //create dnnl stream
   auto q_ct1 = sycl::queue(ctx, dev);
-  dnnl::stream stream = sycl_interop::make_stream(q_ct1);
+  dnnl::stream stream = sycl_interop::make_stream(engine, q_ct1);
   
   primitive_attr attr;
   
@@ -1186,6 +1190,9 @@ template void transform<int8_t, ROW, COL_AMPERE, false, 8>( int8_t *A, int8_t *o
 template void transform<int8_t, COL32, ROW, false, 8>( int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int32_t, COL32, ROW, false, 32>( int32_t *A, int32_t *out, int dim1, int dim2);
 
+
+//========================igemmlt============================================
+
 template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
  try {
     
@@ -1194,7 +1201,7 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt( int m, int n,
     auto dev = sycl::device(sycl::gpu_selector_v);
     auto ctx = sycl::context(dev);
     
-    dnnl::engine engine = dnnl::sycl_interop::make_engine(dev, ctx);
+    dnnl::engine engine = sycl_interop::make_engine(dev, ctx);
     // column major 
     const memory::dims a_strides = memory::dims {1, lda};
     const auto a_md = memory::desc({m, k}, dt::s8, a_strides);
@@ -1204,14 +1211,14 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt( int m, int n,
     const auto c_md = DTYPE_OUT == 32 ? memory::desc({m, n}, dt::s32, c_strides) : memory::desc({m, n}, dt::s8, c_strides);
     
     //memory align
-    memory a_mem(a_md, engine, A);
-    memory b_mem(b_md, engine, B);
-    memory c_mem(c_md, engine, C);
+    memory a_mem(a_md, engine);
+    memory b_mem(b_md, engine);
+    memory c_mem(c_md, engine);
     memory scales_C_mem({{1}, dt::f32, {1}}, engine, row_scale);
     
     //create dnnl stream
     auto q_ct1 = sycl::queue(ctx, dev);
-    dnnl::stream stream = dnnl::sycl_interop::make_stream(q_ct1);
+    dnnl::stream stream = sycl_interop::make_stream(engine, q_ct1);
     
     primitive_attr attr;
     if (SCALE_ROWS) {
@@ -1236,6 +1243,8 @@ catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
   std::exit(1);
 }
+
+//===========================gemm_host============================================
 
 
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
