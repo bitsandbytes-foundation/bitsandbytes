@@ -3820,11 +3820,11 @@ template <typename T, typename TCAST, int ITEMS> inline void vector_load(T *loca
     }
 }
 
+//=======================================gemm_device===================
+
 #define WARPS 3
-/*
-DPCT1110:15: The total declared local variable size in device function gemm_device exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
-*/
-template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc, const sycl::nd_item<3> &item_ct1, T *smem_A, T *smem_B)
+
+template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc, const sycl::nd_item<3> &item_ct1, T *smem_A, T *smem_B, const sycl::accessor<T, 1> &dacc_A, const sycl::accessor<T, 1> &dacc_B, const sycl::accessor<T, 1> &dacc_out)
 {
 
 #if DPCT_COMPATIBILITY_TEMP >= 750
@@ -3842,22 +3842,14 @@ template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int 
   const int a_tile_offset = 16;
   const int b_tile_offset = (16*32 + 16);
 
+  auto d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>();
+  auto d_B = dacc_B.template get_multi_ptr<sycl::access::decorated::yes>();
+  auto sg_size = item_ct1.get_sub_group();
   
-  
-  //__shared__ T smem_C[8*32];
-
-   /*
-   DPCT1082:16: Migration of nvcuda::wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> type is not supported.
-   */
-   /*
-   DPCT1082:17: Migration of nvcuda::wmma::matrix_a type is not supported.
-   */
-   /*
-   DPCT1082:18: Migration of nvcuda::wmma::row_major type is not supported.
-   */
-   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, sycl::half, sycl::ext::oneapi::experimental::matrix::use::a, 8, 16, sycl::ext::oneapi::experimental::matrix::layout::row_major> a_frag;
-   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, sycl::half, sycl::ext::oneapi::experimental::matrix::use::b, 32, 16, sycl::ext::oneapi::experimental::matrix::layout::col_major> b_frag;
-   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, sycl::half, sycl::ext::oneapi::experimental::matrix::use::accumulator, 8, 32> c_frag;
+   
+   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, T, sycl::ext::oneapi::experimental::matrix::use::a, 8, 16, sycl::ext::oneapi::experimental::matrix::layout::row_major> a_frag{};
+   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, T, sycl::ext::oneapi::experimental::matrix::use::b, 16, 32, sycl::ext::oneapi::experimental::matrix::layout::col_major> b_frag{};
+   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, T, sycl::ext::oneapi::experimental::matrix::use::accumulator, 8, 32> c_frag{};
    sycl::ext::oneapi::experimental::matrix::joint_matrix_fill(item_ct1.get_sub_group(), c_frag, 0.0f);
 
   //wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> a_frag;
@@ -3873,18 +3865,18 @@ template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int 
   {
     if(loaded_values == 0)
     {
-      local_A[0] = A[idx];
-      local_A[1] = A[idx+(1*val_per_iter)];
-      local_A[2] = A[idx+(2*val_per_iter)];
-      local_A[3] = A[idx+(3*val_per_iter)];
+      local_A[0] = dacc_A[idx];
+      local_A[1] = dacc_A[idx+(1*val_per_iter)];
+      local_A[2] = dacc_A[idx+(2*val_per_iter)];
+      local_A[3] = dacc_A[idx+(3*val_per_iter)];
 
       #pragma unroll 32
       for(int col = 0; col < 32; col++)
       {
-        local_B[col] = B[(col_offset+col)*ldb+idx];
-        local_B[col+32] = B[(col_offset+col)*ldb+idx+(1*val_per_iter)];
-        local_B[col+64] = B[(col_offset+col)*ldb+idx+(2*val_per_iter)];
-        local_B[col+96] = B[(col_offset+col)*ldb+idx+(3*val_per_iter)];
+        local_B[col] = dacc_B[(col_offset+col)*ldb+idx];
+        local_B[col+32] = dacc_B[(col_offset+col)*ldb+idx+(1*val_per_iter)];
+        local_B[col+64] = dacc_B[(col_offset+col)*ldb+idx+(2*val_per_iter)];
+        local_B[col+96] = dacc_B[(col_offset+col)*ldb+idx+(3*val_per_iter)];
       }
       loaded_values = 3;
     }
@@ -3951,18 +3943,18 @@ template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int 
       //  local_B[col] = B[(col_offset+col)*ldb+idx];
       if(loaded_values == 0)
       {
-        local_A[0] = A[idx];
-        local_A[1] = A[idx+(1*val_per_iter)];
-        local_A[2] = A[idx+(2*val_per_iter)];
-        local_A[3] = A[idx+(3*val_per_iter)];
+        local_A[0] = dacc_A[idx];
+        local_A[1] = dacc_A[idx+(1*val_per_iter)];
+        local_A[2] = dacc_A[idx+(2*val_per_iter)];
+        local_A[3] = dacc_A[idx+(3*val_per_iter)];
 
         #pragma unroll 32
         for(int col = 0; col < 32; col++)
         {
-          local_B[col] = B[(col_offset+col)*ldb+idx];
-          local_B[col+32] = B[(col_offset+col)*ldb+idx+(1*val_per_iter)];
-          local_B[col+64] = B[(col_offset+col)*ldb+idx+(2*val_per_iter)];
-          local_B[col+96] = B[(col_offset+col)*ldb+idx+(3*val_per_iter)];
+          local_B[col] = dacc_B[(col_offset+col)*ldb+idx];
+          local_B[col+32] = dacc_B[(col_offset+col)*ldb+idx+(1*val_per_iter)];
+          local_B[col+64] = dacc_B[(col_offset+col)*ldb+idx+(2*val_per_iter)];
+          local_B[col+96] = dacc_B[(col_offset+col)*ldb+idx+(3*val_per_iter)];
         }
         loaded_values = 3;
 
@@ -4014,33 +4006,31 @@ template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int 
         smem_B[half_warp_lane + (((batch_size_warps*ticktock)+half_warp_id)*b_tile_offset) + (col*16)] = 0.0f;
     }
     ticktock = ticktock == 0 ? 1 : 0;
-
+    
+    
     if(warp_id == (WARPS-1))
       for(int k = 0; k < batch_size_warps; k++)
       {
-        /*
-        DPCT1007:25: Migration of nvcuda::wmma::load_matrix_sync is not supported.
-        */
+        
         //wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
         
-        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(item_ct1.get_sub_group(), a_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, const sycl::half>&(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16);
+        dacc_A[(ticktock*batch_size_warps + k)*a_tile_offset] = smem_A[(ticktock*batch_size_warps + k)*a_tile_offset];
+        dacc_B[(ticktock*batch_size_warps + k)*b_tile_offset] = smem_B[(ticktock*batch_size_warps + k)*b_tile_offset];
+        d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>();
+        d_B = dacc_B.template get_multi_ptr<sycl::access::decorated::yes>();
     
-        /*
-        DPCT1007:26: Migration of nvcuda::wmma::load_matrix_sync is not supported.
-        */
+        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, a_frag, d_A, 16);
+    
+        
         //wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
-        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(item_ct1.get_sub_group(), a_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, const sycl::half>&(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16);
+        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, a_frag,  d_B, 16);
     
-        /*
-        DPCT1007:27: Migration of nvcuda::wmma::mma_sync is not supported.
-        */
         //wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-         sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(item_ct1.get_sub_group(), c_frag, a_frag, b_frag, c_frag);
+        sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(sg_size, c_frag, a_frag, b_frag, c_frag);
     }
+   
   }
-      }
-  }
-
+  
   item_ct1.barrier(sycl::access::fence_space::local_space);
   if(warp_id != (WARPS-1)){ return; }
   // only warp_id == (WARPS-1) from here
@@ -4049,38 +4039,33 @@ template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int 
   ticktock = ticktock == 0 ? 1 : 0;
   for(int k = 0; k < batch_size_warps; k++)
   {
-    /*
-    DPCT1007:28: Migration of nvcuda::wmma::load_matrix_sync is not supported.
-    */
-    //wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
-    sycl::ext::oneapi::experimental::matrix::joint_matrix_load(item_ct1.get_sub_group(), a_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, const sycl::half>&(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16);
-    
-    /*
-    DPCT1007:29: Migration of nvcuda::wmma::load_matrix_sync is not supported.
-    */
-    //wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
-    sycl::ext::oneapi::experimental::matrix::joint_matrix_load(item_ct1.get_sub_group(), a_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, const sycl::half>&(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16);
-    
-    /*
-    DPCT1007:30: Migration of nvcuda::wmma::mma_sync is not supported.
-    */
-    //wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-    sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(item_ct1.get_sub_group(), c_frag, a_frag, b_frag, c_frag);
+      dacc_A[(ticktock*batch_size_warps + k)*a_tile_offset] = smem_A[(ticktock*batch_size_warps + k)*a_tile_offset];
+      dacc_B[(ticktock*batch_size_warps + k)*b_tile_offset] = smem_B[(ticktock*batch_size_warps + k)*b_tile_offset];
+      d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>();
+      d_B = dacc_B.template get_multi_ptr<sycl::access::decorated::yes>();
+      
+     //wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+     sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, a_frag, d_A, 16);
+     
+     //wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
+     sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, b_frag, d_B, 16);                
+      
+     //wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+     sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(sg_size, c_frag, a_frag, b_frag, c_frag);
   }
 
   // 129 mu
   if(warp_id == (WARPS-1))
-    /*
-    DPCT1007:31: Migration of nvcuda::wmma::store_matrix_sync is not supported.
-    */
+     
     //wmma::store_matrix_sync(&(smem_A[0]), c_frag, 32, wmma::mem_row_major);
-    sycl::ext::oneapi::experimental::matrix::joint_matrix_store(item_ct1.get_sub_group(), c_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, float>&(smem_A[0]), 32, sycl::ext::oneapi::experimental::matrix::layout::row_major);
+    sycl::ext::oneapi::experimental::matrix::joint_matrix_store(sg_size, c_frag, d_A, (size_t)32, sycl::ext::oneapi::experimental::matrix::layout::row_major);
     
   if(col_offset + warp_lane < M)
-    out[col_offset + warp_lane] = smem_A[warp_lane];
+    dacc_out[col_offset + warp_lane] = dacc_A[warp_lane];
 #endif
 }
 
+//===============================print===========================================
 
 template <typename T> void printnonzero(T *A, int num_values, const char * strval,
                                         const sycl::stream &stream_ct1)
@@ -4098,15 +4083,14 @@ template void printnonzero<float>(float *A, int num_values, const char*strval,
 template void printnonzero<sycl::half>(sycl::half *A, int num_values, const char*strval,
                                  const sycl::stream &stream_ct1);
 
-static dpct::global_memory<float, 1> nf4_data(sycl::range<1>(16), {-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0});
-/*
-DPCT1110:32: The total declared local variable size in device function kgemm_4bit_inference exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
-*/
-template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize,
-                                                             const sycl::nd_item<3> &item_ct1,
-                                                             T *smem_A,
-                                                             unsigned char *smem_B,
-                                                             T *smem_C)
+//=======================================4 bit gemm===============================
+
+const float nf4_data[16] = {-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0};
+
+
+
+template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *smem_A, unsigned char *smem_B, T *smem_C,
+const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out)
 {
 
 #if DPCT_COMPATIBILITY_TEMP >= 750
@@ -4133,20 +4117,17 @@ template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M
   const int a_tile_offset = 16;
   const int b_tile_offset = (16*32 + 16);
 
-   /*
-   DPCT1082:33: Migration of nvcuda::wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> type is not supported.
-   */
-   /*
-   DPCT1082:34: Migration of nvcuda::wmma::matrix_a type is not supported.
-   */
-   /*
-   DPCT1082:35: Migration of nvcuda::wmma::row_major type is not supported.
-   */
+  auto d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>();
+  auto d_B = dacc_B.get_multi_ptr<sycl::access::decorated::yes>();
+  auto sg_size = item_ct1.get_sub_group();
+  
    
-   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, sycl::half, sycl::ext::oneapi::experimental::matrix::use::a, 8, 16, sycl::ext::oneapi::experimental::matrix::layout::row_major> a_frag;
-   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, sycl::half, sycl::ext::oneapi::experimental::matrix::use::b, 32, 16, sycl::ext::oneapi::experimental::matrix::layout::col_major> b_frag;
-   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, sycl::half, sycl::ext::oneapi::experimental::matrix::use::accumulator, 8, 32> c_frag;
-   sycl::ext::oneapi::experimental::matrix::joint_matrix_fill(item_ct1.get_sub_group(), c_frag, 0.0f);
+   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, T, sycl::ext::oneapi::experimental::matrix::use::a, 8, 16, sycl::ext::oneapi::experimental::matrix::layout::row_major> a_frag{};
+   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, unsigned char, sycl::ext::oneapi::experimental::matrix::use::b, 16, 32, sycl::ext::oneapi::experimental::matrix::layout::col_major> b_frag{};
+   sycl::ext::oneapi::experimental::matrix::joint_matrix<sycl::sub_group, T, sycl::ext::oneapi::experimental::matrix::use::accumulator, 8, 32> c_frag{};
+   sycl::ext::oneapi::experimental::matrix::joint_matrix_fill(sg_size, c_frag, 0.0f); 
+   
+  
 
   //wmma::fragment<wmma::matrix_a, 8, 32, 16, half, wmma::row_major> a_frag;
   //wmma::fragment<wmma::matrix_b, 8, 32, 16, half, wmma::col_major> b_frag;
@@ -4250,10 +4231,8 @@ template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M
         loaded_values--;
 
         int absidx = (idx + col_offset)/blocksize;
-        /*
-        DPCT1098:222: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
-        */
-        sycl::half local_absmax =  sycl::ext::oneapi::experimental::cuda::ldg(&absmax[absidx]);
+        
+        sycl::half local_absmax =  absmax[absidx];
 
         #pragma unroll 64
         for(int col = 0; col < 64; col+=2)
@@ -4295,23 +4274,22 @@ template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M
     if(warp_id == (WARPS-1))
       for(int k = 0; k < batch_size_warps; k++)
       {
-        /*
-        DPCT1007:42: Migration of nvcuda::wmma::load_matrix_sync is not supported.
-        */
+        
+        dacc_A[(ticktock*batch_size_warps + k)*a_tile_offset] = smem_A[(ticktock*batch_size_warps + k)*a_tile_offset];
+        dacc_B[(ticktock*batch_size_warps + k)*b_tile_offset] = smem_B[(ticktock*batch_size_warps + k)*b_tile_offset];
+        d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>();
+        d_B = dacc_B.get_multi_ptr<sycl::access::decorated::yes>();
+        
         //wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
-        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(item_ct1.get_sub_group(), a_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, const sycl::half>&(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16);
+        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, a_frag, d_A, 16);
     
-        /*
-        DPCT1007:43: Migration of nvcuda::wmma::load_matrix_sync is not supported.
-        */
+        
         //wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
-        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(item_ct1.get_sub_group(), a_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, const sycl::half>&(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16);
+        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, b_frag, d_B, 16);
     
-        /*
-        DPCT1007:44: Migration of nvcuda::wmma::mma_sync is not supported.
-        */
+        
         //wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-        sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(item_ct1.get_sub_group(), c_frag, a_frag, b_frag, c_frag);
+        sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(sg_size, c_frag, a_frag, b_frag, c_frag);
         
       }
   }
@@ -4331,46 +4309,45 @@ template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M
   {
     //if(warp_lane == 0)
       //printf("%i %i %i %i\n", (ticktock*batch_size_warps + k)*a_tile_offset, k, ticktock, threadIdx.x);
-    /*
-    DPCT1007:45: Migration of nvcuda::wmma::load_matrix_sync is not supported.
-    */
-    sycl::ext::oneapi::experimental::matrix::joint_matrix_load(item_ct1.get_sub_group(), a_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, const sycl::half>&(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16);
+    
+    dacc_A[(ticktock*batch_size_warps + k)*a_tile_offset] = smem_A[(ticktock*batch_size_warps + k)*a_tile_offset];
+    dacc_B[(ticktock*batch_size_warps + k)*b_tile_offset] = smem_B[(ticktock*batch_size_warps + k)*b_tile_offset];
+    d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>();
+    d_B = dacc_B.get_multi_ptr<sycl::access::decorated::yes>();
+    
+    //wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+    sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, a_frag, d_A, 16);
 
-    /*
-    DPCT1007:46: Migration of nvcuda::wmma::load_matrix_sync is not supported.
-    */
     //wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
-    sycl::ext::oneapi::experimental::matrix::joint_matrix_load(item_ct1.get_sub_group(), a_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, const sycl::half>&(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16);
+    sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, b_frag, d_B, 16);
 
-    /*
-    DPCT1007:47: Migration of nvcuda::wmma::mma_sync is not supported.
-    */
+    
     //wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-    sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(item_ct1.get_sub_group(), c_frag, a_frag, b_frag, c_frag);
-wmma::load_matrix_sync(a_frag, &(smem_A[(ticktock*batch_size_warps + k)*a_tile_offset]), 16); //  111 mu
+    sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(sg_size, c_frag, a_frag, b_frag, c_frag);
     
   }
 
   // 129 mu
   if(warp_id == (WARPS-1))
-    /*
-    DPCT1007:48: Migration of nvcuda::wmma::store_matrix_sync is not supported.
-    */
+    
     //wmma::store_matrix_sync(&(smem_C[0]), c_frag, 32, wmma::mem_row_major);
-    sycl::ext::oneapi::experimental::matrix::joint_matrix_store(item_ct1.get_sub_group(), c_frag, sycl::address_space_cast<sycl::access::address_space::generic_space, sycl::access::decorated::no, float>&(smem_A[0]), 32, sycl::ext::oneapi::experimental::matrix::layout::row_major);
+    sycl::ext::oneapi::experimental::matrix::joint_matrix_store(sg_size, c_frag, d_A, 32, sycl::ext::oneapi::experimental::matrix::layout::row_major);
 
   //printnonzero<T>(smem_C, 32, "");  
   
   if(col_offset + warp_lane < M)
-    out[col_offset + warp_lane] = smem_C[warp_lane];
+    // use smem_A itself
+    dacc_out[col_offset + warp_lane] = dacc_A[warp_lane];
 #endif
 }
 
+
+//=========================================4 bit gemm naive===============
+
+
 #define num_values_4bit 32
-/*
-DPCT1110:49: The total declared local variable size in device function kgemm_4bit_inference_naive exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
-*/
-template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *quant_map)
+
+template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *quant_map, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out)
 {
 
   // per threadblock:
@@ -4401,10 +4378,8 @@ template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_infer
     int inner_idx_halved = inner_idx/2;
     int offset_B = ldb*row_B;
     int absidx = ((2*offset_B)+inner_idx)/blocksize;
-	  /*
-	  DPCT1098:223: The '*' expression is used instead of the __ldg call. These two expressions do not provide the exact same functionality. Check the generated code for potential precision and/or performance issues.
-	  */
-	  local_absmax =  sycl::ext::oneapi::experimental::cuda::ldg(&absmax[absidx]);
+	  
+	  local_absmax =  absmax[absidx];
 
     if(row_B < M)
     {
@@ -4418,7 +4393,7 @@ template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_infer
         #pragma unroll
         for(int j = 0; j < (num_values_8bit); j++)
           if((inner_idx_halved) + j < (K/2))
-            local_B_4bit[j] = B[offset_B+inner_idx_halved + j];
+            local_B_4bit[j] = dacc_B[offset_B+inner_idx_halved + j];
           else
             local_B_4bit[j] = 0b01110111;
       }
@@ -4463,7 +4438,7 @@ template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_infer
         #pragma unroll
         for(int k = 0; k < num_values_4bit/4; k++)
           if(inner_idx + (i*num_values_4bit/4) + k < K)
-            local_A[k] = A[inner_idx + k + (i*num_values_4bit/4)];
+            local_A[k] = dacc_A[inner_idx + k + (i*num_values_4bit/4)];
           else
             local_A[k] = T(0.0f);
 
@@ -4485,11 +4460,9 @@ template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_infer
   local_C = sycl::reduce_over_group(item_ct1.get_sub_group(), local_C, sycl::plus<>());
 
   if(row_B < M && warp_lane == 0)
-    out[row_B] = T(local_C);
+    dacc_out[row_B] = T(local_C);
 
 }
-
-
 
 //==============================================================
 //                   TEMPLATE DEFINITIONS

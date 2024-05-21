@@ -1066,7 +1066,7 @@ void gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, in
   const void * beta = &fbeta;
 	int status;
 
-   DPCT_CHECK_ERROR(dpct::gemm(*context->m_handle, transposeA ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, transposeB ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, m, n, k, alpha, A, dpct::library_data_t::real_int8, lda, B, dpct::library_data_t::real_int8, ldb, beta, C, dpct::library_data_t::real_int32, ldc, dpct::library_data_t::real_int32));
+   dpct::gemm(*context->m_handle, transposeA ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, transposeB ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, m, n, k, alpha, A, dpct::library_data_t::real_int8, lda, B, dpct::library_data_t::real_int8, ldb, beta, C, dpct::library_data_t::real_int32, ldc, dpct::library_data_t::real_int32);
 
 
 }
@@ -1090,7 +1090,7 @@ void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, i
   //printf("%i %i %i\n", strideA, strideB, strideC);
   //printf("%i\n", batchCount);
 
-   DPCT_CHECK_ERROR(dpct::gemm_batch(*context->m_handle, transposeA ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, transposeB ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, m, n, k, alpha, A, dpct::library_data_t::real_int8, lda, (long long int)strideA, B, dpct::library_data_t::real_int8, ldb, (long long int)strideB, beta, C, dpct::library_data_t::real_int32, ldc, (long long int)strideC, batchCount, dpct::library_data_t::real_int32));
+   dpct::gemm_batch(*context->m_handle, transposeA ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, transposeB ? oneapi::mkl::transpose::trans : oneapi::mkl::transpose::nontrans, m, n, k, alpha, A, dpct::library_data_t::real_int8, lda, (long long int)strideA, B, dpct::library_data_t::real_int8, ldb, (long long int)strideB, beta, C, dpct::library_data_t::real_int32, ldc, (long long int)strideC, batchCount, dpct::library_data_t::real_int32);
 
 }
 catch (sycl::exception const &exc) {
@@ -1246,7 +1246,6 @@ catch (sycl::exception const &exc) {
 
 //===========================gemm_host============================================
 
-
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
 {
 
@@ -1257,15 +1256,11 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
   sycl::context ctx = q_ct1.get_context();
     
   int size = NUM_BLOCK;
-  T *buff_A, *buff_B, *buff_out;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
-  *(( void**)&buff_B) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_B), (void*)(B), size);
-  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_out), (void*)(out), size);
-
-
+  
+  sycl::buffer<T, 1> buff_A (A, sycl::range<1>(size));
+  sycl::buffer<T, 1> buff_B (B, sycl::range<1>(size));
+  sycl::buffer<T, 1> buff_out (out, sycl::range<1>(size));
+  
 	//cout << num_blocks << endl;
 	//cout << lda << endl;
 	//cout << ldb << endl;
@@ -1283,13 +1278,11 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
       dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
       dpct::get_in_order_queue().submit(
         [&](sycl::handler &cgh) {
-          /*
-          DPCT1101:312: '8*16 + (2*16*(batch_size_warps-1))' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
-          */
-          //sycl::local_accessor<T, 1> smem_A_acc_ct1(sycl::range<1>(224/*8*16 + (2*16*(batch_size_warps-1))*/), cgh);
-          /*
-          DPCT1101:313: '2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
-          */
+          
+          sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          sycl::accessor dacc_B(buff_B, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          
           //__shared__ vars
           sycl::local_accessor<T, 1> smem_A_acc_ct1(sycl::range<1>(224/*8*16 + (2*16*(batch_size_warps-1))*/), cgh);
           sycl::local_accessor<T, 1> smem_B_acc_ct1(sycl::range<1>(4192/*2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))*/), cgh);
@@ -1297,7 +1290,8 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 160), sycl::range<3>(1, 1, 160)), 
             [=](sycl::nd_item<3> item_ct1) {
-              gemm_device<T, 16, 160>(m, n, k, buff_A, buff_B, buff_out, lda, ldb, ldc, item_ct1, smem_A_acc_ct1.get_pointer(), smem_B_acc_ct1.get_pointer());
+              gemm_device<T, 16, 160>(m, n, k, A, B, out, lda, ldb, ldc, item_ct1, smem_A_acc_ct1.get_pointer(), smem_B_acc_ct1.get_pointer(),
+              dacc_A, dacc_B, dacc_out);
             });
         });
     }
@@ -1305,12 +1299,10 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
     //gemm_device<T, 16, 96><<< num_blocks, 96, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //gemm_device<T, 16, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //gemm_device<T, 16, 64><<< num_blocks, 64, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-    //back memcpy
-    q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
-    q_ct1.memcpy((void*)(B), (void*)(buff_B), size);
-    q_ct1.memcpy((void*)(out), (void*)(buff_out), size);
-  
+    
 }
+
+//============================gemm 4bit inference ================================
 
 template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
@@ -1331,49 +1323,35 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
   sycl::context ctx = q_ct1.get_context();
     
   int size = NUM_BLOCK;
-  T *buff_A, *buff_out;
-  unsigned char *buff_B;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
-  *(( void**)&buff_B) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_B), (void*)(B), size);
-  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_out), (void*)(out), size);
-
+  
+  sycl::buffer<T, 1> buff_A (A, sycl::range<1>(size));
+  sycl::buffer<unsigned char, 1> buff_B (B, sycl::range<1>(size));
+  sycl::buffer<T, 1> buff_out (out, sycl::range<1>(size));
  
   {
     dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
     dpct::get_in_order_queue().submit(
       [&](sycl::handler &cgh) {
-        /*
-        DPCT1101:314: '8*16 + (16*(batch_size_warps-1))' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
-        */
         
-        /*
-        DPCT1101:315: '2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))' expression was replaced with a value. Modify the code to use the original expression, provided in comments, if it is correct.
-        */
+        sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+        sycl::accessor dacc_B(buff_B, cgh, sycl::read_write);
+        sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);  
         
         //__shared__ vars
         sycl::local_accessor<T, 1> smem_A_acc_ct1(sycl::range<1>(176/*8*16 + (16*(batch_size_warps-1))*/), cgh);
-        sycl::local_accessor<T, 1> smem_B_acc_ct1(sycl::range<1>(4192/*2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))*/), cgh);
+        sycl::local_accessor<unsigned char, 1> smem_B_acc_ct1(sycl::range<1>(4192/*2*batch_size_warps*16*32 + (2*16*(batch_size_warps-1))*/), cgh);
         sycl::local_accessor<T, 1> smem_C_acc_ct1(sycl::range<1>(8*32), cgh);
 
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 96), sycl::range<3>(1, 1, 96)), 
           [=](sycl::nd_item<3> item_ct1) {
-            kgemm_4bit_inference<T, 96>(m, n, k, buff_A, buff_B, absmax, buff_out, lda, ldb, ldc, blocksize, item_ct1, smem_A_acc_ct1.get_pointer(), smem_B_acc_ct1.get_pointer(), smem_C_acc_ct1.get_pointer());
+            kgemm_4bit_inference<T, 96>(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize, item_ct1, smem_A_acc_ct1.get_pointer(), smem_B_acc_ct1.get_pointer(), smem_C_acc_ct1.get_pointer(), dacc_A, dacc_B, dacc_out);
           });
       });
   }
-  //kgemm_4bit_inference<T, 256><<< num_blocks, 256, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
-  //kgemm_4bit_inference<T, 160><<< num_blocks, 160, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
-  //kgemm_4bit_inference<T, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
-  //back memcpy
-  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
-  q_ct1.memcpy((void*)(B), (void*)(buff_B), size);
-  q_ct1.memcpy((void*)(out), (void*)(buff_out), size);
   
 }
+//============================gemm 4 bit inference naive =================
 
 template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
@@ -1384,36 +1362,31 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
   sycl::context ctx = q_ct1.get_context();
     
   int size = NUM_BLOCK;
-  T *buff_A, *buff_out;
-  unsigned char *buff_B;
-  *((void **)&buff_A) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_A), (void*)(A), size);
-  *(( void**)&buff_B) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_B), (void*)(B), size);
-  *((void **)&buff_out) = sycl::malloc_device(size, dev_ct1, ctx);
-  q_ct1.memcpy((void*)(buff_out), (void*)(out), size);
-
+  
+  sycl::buffer<T, 1> buff_A (A, sycl::range<1>(size));
+  sycl::buffer<unsigned char, 1> buff_B (B, sycl::range<1>(size));
+  sycl::buffer<T, 1> buff_out (out, sycl::range<1>(size));
+ 
+  
   {
     dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
     dpct::get_in_order_queue().submit(
       [&](sycl::handler &cgh) {
+        
+        sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+        sycl::accessor dacc_B(buff_B, cgh, sycl::read_write);
+        sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);  
+        
         sycl::local_accessor<T, 1> quant_map_acc_ct1(sycl::range<1>(16), cgh);
 
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 128), sycl::range<3>(1, 1, 128)), 
           [=](sycl::nd_item<3> item_ct1) [[intel::reqd_sub_group_size(32)]] {
-            kgemm_4bit_inference_naive<T, 128, BITS>(m, n, k, buff_A, buff_B, absmax, datatype, buff_out, lda, ldb, ldc, blocksize, item_ct1, quant_map_acc_ct1.get_pointer());
+            kgemm_4bit_inference_naive<T, 128, BITS>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, item_ct1, quant_map_acc_ct1.get_pointer(), dacc_A, dacc_B, dacc_out);
           });
       });
   }
-  /*
-  DPCT1010:291: SYCL uses exceptions to report errors and does not use the error codes. The call was replaced with 0. You need to rewrite this code.
-  */
-  //CUDA_CHECK_RETURN(0);
-  q_ct1.memcpy((void*)(A), (void*)(buff_A), size);
-  q_ct1.memcpy((void*)(B), (void*)(buff_B), size);
-  q_ct1.memcpy((void*)(out), (void*)(buff_out), size);
-    
+ 
 }
 
 //================================spm coo==================================
