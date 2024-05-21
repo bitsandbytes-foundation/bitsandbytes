@@ -3631,9 +3631,7 @@ template <typename T, int FUNC> SYCL_EXTERNAL void kfunc(T *A, T *B, T value, lo
 #define MAX_SPARSE_COUNT 32
 #define SMEM_SIZE 8*256
 template <typename T, int SPMM_ITEMS, int BITS>
-/*
-DPCT1110:13: The total declared local variable size in device function kspmm_coo_very_sparse_naive exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
-*/
+
 SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
  sycl::half *smem_dequant_stats)
 {
