@@ -1,5 +1,5 @@
 # Requirements used for GitHub actions
-pytest==8.2.0
+pytest==8.2.1
 einops==0.8.0
 lion-pytorch==0.1.4
 scipy==1.10.1; python_version < "3.9"
