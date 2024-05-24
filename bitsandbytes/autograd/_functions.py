@@ -7,6 +7,7 @@ from warnings import warn
 
 import torch
 
+from bitsandbytes.cextension import BNB_HIP_VERSION
 import bitsandbytes.functional as F
 
 
@@ -222,6 +223,8 @@ def supports_igemmlt(device: torch.device) -> bool:
     """check if this device supports the optimized int8 kernel"""
     if device == torch.device("cpu"):
         return True
+    if torch.version.hip:
+        return False if BNB_HIP_VERSION < 601 else True
     if torch.cuda.get_device_capability(device=device) < (7, 5):
         return False
     device_name = torch.cuda.get_device_name(device=device)

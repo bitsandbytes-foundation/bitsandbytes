@@ -3,7 +3,7 @@ from typing import Literal, Optional, Tuple
 
 import torch
 
-from bitsandbytes.cextension import lib
+from bitsandbytes.cextension import HIP_ENVIRONMENT, lib
 from bitsandbytes.functional import (
     CUBLAS_Context,
     coo_zeros,
@@ -14,6 +14,7 @@ from bitsandbytes.functional import (
     get_ptr,
     get_transform_buffer,
     is_on_gpu,
+    nvidia_transform,
     post_call,
     pre_call,
     prod,
@@ -184,6 +185,11 @@ class CUDABackend(Backend):
         state: Optional[Tuple[torch.Size, str]] = None,
         ld=None,
     ):
+        if HIP_ENVIRONMENT:
+            # transform kernel formats (col32/col_turing/col_ampere) are not applicable to ROCm
+            # Use nvidia_transform instead
+            return nvidia_transform(A, to_order, from_order, out, transpose, state, ld)
+
         prev_device = pre_call(A.device)
         if state is None:
             state = (A.shape, from_order)
@@ -266,9 +272,17 @@ class CUDABackend(Backend):
             return torch.empty(tuple(shapeA[:2] + [shapeB[0]]), device=A.device, dtype=torch.float16)
 
         if dimsA == 2 and out is None:
-            out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, "col32", "row")
+            if HIP_ENVIRONMENT:
+                # Use col format for HIP
+                out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, "col", "row")
+            else:
+                out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, "col32", "row")
         elif dimsA == 3 and out is None:
-            out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row")
+            if HIP_ENVIRONMENT:
+                # Use col format for HIP
+                out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col", "row")
+            else:
+                out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row")
 
         assert dimsB != 3, "len(B.shape)==3 not supported"
         assert A.device.type == "cuda"
@@ -276,9 +290,15 @@ class CUDABackend(Backend):
         assert A.dtype == torch.int8
         assert B.dtype == torch.int8
         assert out.dtype == dtype
-        assert SA[1] == "col32"
-        assert SB[1] in ["col_turing", "col_ampere"]
-        assert Sout[1] == "col32"
+        if HIP_ENVIRONMENT:
+            # Use col format for HIP
+            assert SA[1] == "col"
+            assert SB[1] == "col"
+            assert Sout[1] == "col"
+        else:
+            assert SA[1] == "col32"
+            assert SB[1] in ["col_turing", "col_ampere"]
+            assert Sout[1] == "col32"
         assert (
             shapeA[-1] == shapeB[-1]
         ), f"Matmullt only supports A @ B^T. Inner matrix dimensions do not match: A @ B = {shapeA} @ {shapeB}"
@@ -293,17 +313,23 @@ class CUDABackend(Backend):
         ptrC = get_ptr(out)
 
         k = shapeA[-1]
-        lda = ct.c_int32(m * 32)
-        if formatB == "col_turing":
-            # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
-            # n = rows
-            ldb = ct.c_int32(((rows + 7) // 8) * 8 * 32)
+        if HIP_ENVIRONMENT:
+            # Set ld values for col format
+            lda = ct.c_int32(m)
+            ldb = ct.c_int32(shapeB[0])
+            ldc = ct.c_int32(m)
         else:
-            # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
-            # n = rows
-            ldb = ct.c_int32(((rows + 31) // 32) * 32 * 32)
+            lda = ct.c_int32(m * 32)
+            if formatB == "col_turing":
+                # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
+                # n = rows
+                ldb = ct.c_int32(((rows + 7) // 8) * 8 * 32)
+            else:
+                # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
+                # n = rows
+                ldb = ct.c_int32(((rows + 31) // 32) * 32 * 32)
 
-        ldc = ct.c_int32(m * 32)
+            ldc = ct.c_int32(m * 32)
         m = ct.c_int32(m)
         n = ct.c_int32(n)
         k = ct.c_int32(k)
@@ -312,7 +338,7 @@ class CUDABackend(Backend):
         ptrRowScale = get_ptr(None)
         is_on_gpu([A, B, out])
 
-        if formatB == "col_turing":
+        if formatB == "col_turing" or HIP_ENVIRONMENT:
             if dtype == torch.int32:
                 has_error = lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
             else:
@@ -324,7 +350,7 @@ class CUDABackend(Backend):
             else:
                 has_error = lib.cigemmlt_ampere_8(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
 
-        if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
+        if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`, `ops.hip`
             raise NotImplementedError("igemmlt not available (probably built with NO_CUBLASLT)")
 
         if has_error:
@@ -348,6 +374,9 @@ class CUDABackend(Backend):
         new_col_stats: Optional[torch.Tensor] = None,
         bias: Optional[torch.Tensor] = None,
     ):
+        if HIP_ENVIRONMENT:
+            # HIP kernel requires 'row' format
+            A, quant_state = nvidia_transform(A, "row", state=quant_state)
         assert A.dtype == torch.int32
         if bias is not None:
             assert bias.dtype == torch.float16
@@ -386,7 +415,11 @@ class CUDABackend(Backend):
     def extract_outliers(self, A: torch.Tensor, SA: Tuple[torch.Size, str], idx: torch.Tensor):
         shapeA = SA[0]
         formatA = SA[1]
-        assert formatA in ["col_turing", "col_ampere"]
+        if not HIP_ENVIRONMENT:
+            assert formatA in ["col_turing", "col_ampere"]
+        else:
+            # HIP uses col format
+            assert formatA in ["col"]
         assert A.device.type == "cuda"
 
         out = torch.zeros((shapeA[0], idx.numel()), dtype=torch.int8, device=A.device)
@@ -400,7 +433,7 @@ class CUDABackend(Backend):
 
         prev_device = pre_call(A.device)
 
-        if formatA == "col_turing":
+        if formatA == "col_turing" or HIP_ENVIRONMENT:
             lib.cextractOutliers_turing(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
         elif formatA == "col_ampere":
             lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
@@ -414,11 +447,15 @@ class CUDABackend(Backend):
         A: torch.Tensor,
         absmax: Optional[torch.Tensor] = None,
         out: Optional[torch.Tensor] = None,
-        blocksize=64,
+        blocksize: Optional[int] = None,
         compress_statistics=False,
         quant_type: Literal["fp4", "nf4"] = "fp4",
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
+        if blocksize is None:
+            # Some AMD GPUs have warpsize 64
+            # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
+            blocksize = 64 if not HIP_ENVIRONMENT else 128
         if A.device.type != "cuda":
             raise NotImplementedError(f"Device type not supported for FP4 quantization: {A.device.type}")
         if quant_type not in ["fp4", "nf4"]:
@@ -436,7 +473,12 @@ class CUDABackend(Backend):
             mod = dtype2bytes[quant_storage] * 2
             out = torch.zeros(((n + 1) // mod, 1), dtype=quant_storage, device=A.device)
 
-        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+        # Some AMD GPUs have warpsize 64
+        # Set min blocksize to 128 (~warpsize 64 in kernel) for HIP
+        if not HIP_ENVIRONMENT:
+            assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+        else:
+            assert blocksize in [4096, 2048, 1024, 512, 256, 128]
 
         prev_device = pre_call(A.device)
         is_on_gpu([A, out, absmax])
@@ -507,12 +549,19 @@ class CUDABackend(Backend):
         quant_state: Optional[QuantState] = None,
         absmax: Optional[torch.Tensor] = None,
         out: Optional[torch.Tensor] = None,
-        blocksize: int = 64,
+        blocksize: Optional[int] = None,
         quant_type: Literal["fp4", "nf4"] = "fp4",
     ) -> torch.Tensor:
-        if blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
+        if blocksize is None:
+            blocksize = 64 if not HIP_ENVIRONMENT else 128
+        supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
+        if HIP_ENVIRONMENT:
+            supported_blocksizes = supported_blocksizes[:-1]
+        if blocksize not in supported_blocksizes:
             raise ValueError(
-                f"The blockwise of {blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]"
+                f"The blockwise of {blocksize} is not supported. Supported values: {supported_blocksizes}"
             )
 
         if quant_type not in ["fp4", "nf4"]:

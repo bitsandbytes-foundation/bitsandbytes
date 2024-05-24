@@ -15,7 +15,7 @@ from torch import Tensor
 from bitsandbytes.backends import backends, ensure_backend_is_available
 from bitsandbytes.utils import QuantState
 
-from .cextension import lib
+from .cextension import HIP_ENVIRONMENT, lib
 
 
 # math.prod not compatible with python < 3.8
@@ -111,7 +111,11 @@ class Cusparse_Context:
         raise RuntimeError("Call get_instance() instead")
 
     def initialize(self):
-        self.context = ct.c_void_p(lib.get_cusparse())
+        # self.context = ct.c_void_p(lib.get_cusparse())
+        if torch.version.cuda:
+            self.context = ct.c_void_p(lib.get_cusparse())
+        elif torch.version.hip:
+            self.context = ct.c_void_p(lib.get_hipsparse())
 
     @classmethod
     def get_instance(cls):
@@ -437,13 +441,13 @@ def get_transform_buffer(shape, dtype, device, to_order, from_order="row", trans
         rows = shape[0] * shape[1]
     cols = shape[-1]
 
-    state = (shape, to_order)
     if transpose:
         # swap dims
         tmp = rows
         rows = cols
         cols = tmp
-        state = (shape[::-1], to_order)
+        shape = shape[::-1]
+    state = (shape, to_order)
 
     if to_order == "row" or to_order == "col":
         return init_func(shape, dtype=dtype, device=device), state
@@ -474,12 +478,18 @@ def nvidia_transform(
     state=None,
     ld=None,
 ):
+    if HIP_ENVIRONMENT:
+        # col32/col_turing/col_ampere are not applicable to ROCm
+        # Use col format instead
+        to_order = "col" if to_order in ["col32", "col_turing", "col_ampere"] else to_order
+        from_order = "col" if from_order in ["col32", "col_turing", "col_ampere"] else from_order
+
     if state is None:
         state = (A.shape, from_order)
     else:
         from_order = state[1]
     if out is None:
-        out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1])
+        out, new_state = get_transform_buffer(state[0], A.dtype, A.device, to_order, state[1], transpose)
     else:
         new_state = (state[1], to_order)
     func = get_transform_func(A.dtype, from_order, to_order, transpose)
@@ -622,7 +632,12 @@ def quantize_blockwise(
         out = torch.zeros_like(A, dtype=torch.uint8)
 
     if A.device.type != "cpu":
-        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+        # Some AMD GPUs have warpsize 64
+        # Set min blocksize to 128 (~warpsize 64 in kernel) for HIP
+        if not HIP_ENVIRONMENT:
+            assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+        else:
+            assert blocksize in [4096, 2048, 1024, 512, 256, 128]
         cblocksize = ct.c_int32(blocksize)
         prev_device = pre_call(A.device)
         code = code.to(A.device)
@@ -743,9 +758,14 @@ def dequantize_blockwise(
     if A.device.type != "cpu":
         device = pre_call(A.device)
         code = quant_state.code.to(A.device)
-        if quant_state.blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
+        supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
+        # Some AMD GPUs have warpsize 64
+        # Set min blocksize to 128 (~warpsize 64 in kernel) for HIP
+        if HIP_ENVIRONMENT:
+            supported_blocksizes = supported_blocksizes[:-1]
+        if quant_state.blocksize not in supported_blocksizes:
             raise ValueError(
-                f"The blockwise of {quant_state.blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]",
+                f"The blockwise of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}",
             )
         is_on_gpu([A, absmax, out])
         if out.dtype == torch.float32:
@@ -878,10 +898,14 @@ def quantize_fp4(
     A: Tensor,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=64,
+    blocksize=None,
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
+    if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "fp4", quant_storage)
 
 
@@ -889,10 +913,14 @@ def quantize_nf4(
     A: Tensor,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=64,
+    blocksize=None,
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
+    if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "nf4", quant_storage)
 
 
@@ -900,7 +928,7 @@ def quantize_4bit(
     A: Tensor,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=64,
+    blocksize=None,
     compress_statistics=False,
     quant_type="fp4",
     quant_storage=torch.uint8,
@@ -947,8 +975,13 @@ def dequantize_fp4(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
+    blocksize: Optional[int] = None,
 ) -> Tensor:
+    if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
+
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -957,8 +990,13 @@ def dequantize_nf4(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
+    blocksize: Optional[int] = None,
 ) -> Tensor:
+    if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
+
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 
@@ -967,7 +1005,7 @@ def dequantize_4bit(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
+    blocksize: Optional[int] = None,
     quant_type="fp4",
 ) -> Tensor:
     """

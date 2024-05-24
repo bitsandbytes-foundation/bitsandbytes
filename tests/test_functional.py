@@ -11,10 +11,12 @@ import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
+from bitsandbytes.cextension import BNB_HIP_VERSION, HIP_ENVIRONMENT, ROCM_GPU_ARCH
 from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,
     describe_dtype,
+    get_blocksizes,
     get_test_dims,
     id_formatter,
 )
@@ -158,7 +160,7 @@ def test_dynamic_quantization():
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
-@pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
+@pytest.mark.parametrize("blocksize", get_blocksizes(HIP_ENVIRONMENT))
 @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
 def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
     # print('')
@@ -495,6 +497,7 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
         torch.testing.assert_close(out.float(), out2.float())
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=1), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=1), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=1), ids=id_formatter("dim3"))
@@ -509,12 +512,15 @@ def test_vector_quant(dim1, dim2, dim3):
         assert_all_approx_close(A1, A, atol=0.01, rtol=0.1, count=int(n * 0.002))
 
 
+@pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
 @pytest.mark.parametrize("dim1", get_test_dims(2, 256, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(2, 256, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", get_test_dims(2, 256, n=2), ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dtype", [torch.int8, torch.int32], ids=describe_dtype)
 @pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
-@pytest.mark.parametrize("orderOut", ["col", "row", "col32"], ids=id_formatter("orderOut"))
+@pytest.mark.parametrize(
+    "orderOut", ["col", "row"] if HIP_ENVIRONMENT else ["col", "row", "col32"], ids=id_formatter("orderOut")
+)
 @pytest.mark.parametrize("transpose", [False], ids=id_formatter("transpose"))
 @pytest.mark.parametrize("dims", [2, 3], ids=id_formatter("dims"))
 def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
@@ -961,6 +967,7 @@ def test_double_quant(dim1, dim2, device, dtype):
         torch.testing.assert_close(Scol.flatten().float(), statsAt)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize(
     ("dim1", "dim4", "inner"),
     (
@@ -1192,6 +1199,7 @@ def test_transform_cpu(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpos
         torch.testing.assert_close(out1, out2)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_overflow():
     formatB = F.get_special_format_str()
     print(formatB)
@@ -1234,6 +1242,7 @@ def test_coo_double_quant(dim1, dim2, device, dtype):
             torch.testing.assert_close(A1, A2, rtol=0.05, atol=1.5e-2)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("transposed_B", TRUE_FALSE, ids=id_formatter("transposed_B"))
@@ -1265,6 +1274,7 @@ def test_spmm_coo(dim1, dim2, transposed_B):
         assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=30)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.benchmark
 def test_spmm_bench():
     batch = 2
@@ -1307,6 +1317,7 @@ def test_spmm_bench():
     print(tsp / t8)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", get_test_dims(256, 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(256, 1024, n=2), ids=id_formatter("dim2"))
 def test_integrated_sparse_decomp(dim1, dim2):
@@ -1454,6 +1465,7 @@ def test_coo2csc():
     torch.testing.assert_close(A2.t()[idx], cscA.values)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", [1 * 2048])
 @pytest.mark.parametrize("dim2", [2048])
 @pytest.mark.parametrize("dtype", [torch.int8])
@@ -1802,6 +1814,7 @@ def test_zeropoint():
     print(err1, err2, err3, err4, err5, err6)
 
 
+@pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
 @pytest.mark.parametrize("device", ["cuda", "cpu"])
 def test_extract_outliers(device):
     for i in range(k):
@@ -2000,6 +2013,7 @@ def test_bench_dequantization():
     # print((time.time()-t0)/1e6)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
 @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
@@ -2062,7 +2076,8 @@ def test_4bit_quant(dtype, quant_type, blocksize, device):
 
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
 def test_4bit_compressed_stats(quant_type):
-    for blocksize in [128, 64]:
+    blocksizes = [128, 64] if not HIP_ENVIRONMENT else [128]
+    for blocksize in blocksizes:
         errs1 = []
         errs2 = []
         for i in range(10):
@@ -2142,6 +2157,9 @@ def test_normal_map_tree():
         # print(pivots)
 
 
+@pytest.mark.skipif(
+    HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64"
+)
 @pytest.mark.parametrize("double_quant", TRUE_FALSE, ids=lambda double_quant: f"DQ_{double_quant}")
 @pytest.mark.parametrize("storage_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
@@ -2368,6 +2386,10 @@ def test_managed():
 @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
 @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
+@pytest.mark.skipif(
+    HIP_ENVIRONMENT and ROCM_GPU_ARCH == "gfx90a",
+    reason="this test is not supported on ROCm with gfx90a architecture yet",
+)
 def test_gemv_eye_4bit(storage_type, dtype, double_quant):
     dims = 10
     torch.random.manual_seed(np.random.randint(0, 412424242))
