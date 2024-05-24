@@ -2003,7 +2003,8 @@ def test_bench_dequantization():
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
 @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
-def test_4bit_quant(dtype, quant_type, blocksize):
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
+def test_4bit_quant(dtype, quant_type, blocksize, device):
     vals = list(product([0, 1], repeat=4))
 
     code = {}
@@ -2027,9 +2028,11 @@ def test_4bit_quant(dtype, quant_type, blocksize):
             result = sign * exp * frac
         code[idx] = result
 
-    A1 = torch.randn(1024, 1024, device="cuda", dtype=dtype)
+    A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
     qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
     A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
+    if device == "cpu":
+        A2 = A2.t()
 
     err = (A1 - A2).abs().float()
     relerr = (err / (A1.abs().float() + 1e-8)).mean()
@@ -2277,6 +2280,49 @@ def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.04 and relratio > 0.96
             assert maxratio < 1.02 and maxratio > 0.98
+
+
+@pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+def test_gemv_4bit_cpu(dtype, quant_type, kind):
+    """
+    Test 4bit GEMV for CPU. It is simplified a lot from the cuda version, since
+    the CPU backend does not support double_quant or quant_storage other than uint8.
+    Also, the CPU backend has different numeric accuracy from that of CUDA
+    """
+    for dim in [128, 256, 512, 1024]:
+        for i in range(10):
+            if kind == "fc1":
+                A = torch.randn(1, dim, dtype=dtype, device="cpu")
+                B = torch.randn(dim * 4, dim, dtype=dtype, device="cpu") / math.sqrt(dim)
+            elif kind == "fc2":
+                A = torch.randn(1, 4 * dim, dtype=dtype, device="cpu")
+                B = torch.randn(dim, 4 * dim, dtype=dtype, device="cpu") / math.sqrt(dim)
+            elif kind == "attn":
+                A = torch.randn(1, dim, dtype=dtype, device="cpu")
+                B = torch.randn(dim, dim, dtype=dtype, device="cpu") / math.sqrt(dim)
+            elif kind == "attn_packed":
+                A = torch.randn(1, dim, dtype=dtype, device="cpu")
+                B = torch.randn(dim * 3, dim, dtype=dtype, device="cpu") / math.sqrt(dim)
+
+            qB, state = F.quantize_4bit(
+                B,
+                quant_type=quant_type,
+                compress_statistics=False,
+                quant_storage=torch.uint8,
+            )
+            dqB = F.dequantize_4bit(qB, state)
+            C3 = torch.matmul(A, dqB)
+            C2 = F.gemv_4bit(A, qB.t(), state=state)
+            A.requires_grad = True
+            C1 = bnb.matmul_4bit(A, qB.t(), state)
+
+            c = int(C1.numel() * 0.0014 * (dim / 256)) + 1
+            rtol = 1e-3 if dtype != torch.bfloat16 else 1e-2
+            atol = 1e-2 if dtype != torch.bfloat16 else 5e-2
+            assert_all_approx_close(C1, C2, rtol, atol, count=c)
+            assert_all_approx_close(C3, C2, rtol, atol, count=c)
 
 
 @pytest.mark.skip("Row scale has some bugs for ampere")
