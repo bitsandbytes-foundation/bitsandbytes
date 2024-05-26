@@ -121,32 +121,33 @@ void quantize(float *code, float *A, unsigned char *out, int n)
   
   sycl::buffer<float, 1> buff_A(A,sycl::range<1>(size));
   sycl::buffer<unsigned char, 1> buff_out(out,sycl::range<1>(size));
- 
+  sycl::buffer<float, 1> buff_code(code,sycl::range<1>(size));
   
   {
     dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
     q_ct1.submit(
       [&](sycl::handler &cgh) {
-      using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+      using group_load = dpct_::group::workgroup_load<NUM_ESTIMATE, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
               
       size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
       sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
           
       sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
       sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+      sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+      
       //__shared__ vars
       sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
       
       cgh.parallel_for(
         sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
         [=](sycl::nd_item<3> item_ct1) {
-          kQuantize(code, A, out, n, item_ct1, smem_code_acc_ct1.get_pointer(), tacc, dacc_A, dacc_out);
+          kQuantize(code, A, out, n, item_ct1, smem_code_acc_ct1.get_pointer(), tacc, dacc_A, dacc_out, dacc_code);
         });
     });
   }
   
 }
-
 
 //============================k dequantize===============================
 void dequantize(float *code, unsigned char *A, float *out, int n)
@@ -1033,15 +1034,27 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, sycl::half 
 
   
   sycl::buffer<int, 1> buff_A (A, sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_rowStats (rowStats, sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_colStats (colStats, sycl::range<1>(size));
+  sycl::buffer<sycl::half, 1> buff_out (out, sycl::range<1>(size));
+  sycl::buffer<sycl::half, 1> buff_bias (bias, sycl::range<1>(size));
+  
+  
   
   dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
     q_ct1.submit(
 		[&](sycl::handler &cgh) {
             
-          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
+          using group_load = dpct_::group::workgroup_load<NUM_ESTIMATE, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
           size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
           sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);  
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+          
+          sycl::accessor dacc_rowStats(buff_rowStats, cgh, sycl::read_write);
+          sycl::accessor dacc_colStats(buff_colStats, cgh, sycl::read_write);
+          sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+          sycl::accessor dacc_bias(buff_bias, cgh, sycl::read_write);
+          
             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_rowStats_acc_ct1(sycl::range<1>(256), cgh);
@@ -1049,7 +1062,7 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, sycl::half 
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE), sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-  kdequant_mm_int32_fp16<4, 128, 512>(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n, item_ct1,smem_rowStats_acc_ct1.get_pointer(), tacc, dacc_A );
+  kdequant_mm_int32_fp16<4, 128, 512>(A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n, item_ct1,smem_rowStats_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rowStats, dacc_colStats, dacc_out, dacc_bias);
            });
   
   });

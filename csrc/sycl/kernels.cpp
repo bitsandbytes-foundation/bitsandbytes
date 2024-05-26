@@ -730,7 +730,7 @@ void kEstimateQuantiles(const T *A, float *code, const float offset, const T max
 SYCL_EXTERNAL 
 void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n,
                const sycl::nd_item<3> &item_ct1, float* smem_code, const sycl_la &tacc, const sycl_dacc_float &dacc_A,
-               const sycl_dacc_uc &dacc_out)
+               const sycl_dacc_uc &dacc_out, const sycl_dacc_float &dacc_code)
 {
   const int n_full = (NUM_BLOCK*(n/NUM_BLOCK)) + (n % NUM_BLOCK == 0 ? 0 : NUM_BLOCK);
   int valid_items = (item_ct1.get_group(2)+1 == item_ct1.get_group_range(2)) ? n - (item_ct1.get_group(2)*NUM_BLOCK) : NUM_BLOCK;
@@ -740,15 +740,15 @@ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, c
   unsigned char qvals[NUM];
   //const int lane_id = threadIdx.x % 2;
 
-  using group_load_float = dpct::group::workgroup_load<NUM, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;  
-  using group_store_uc = dpct::group::workgroup_store<NUM, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;  
+  using group_load_float = dpct_::group::workgroup_load<NUM, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;  
+  using group_store_uc = dpct_::group::workgroup_store<NUM, dpct_::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;  
 
   auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_out = dacc_out.get_multi_ptr<sycl::access::decorated::yes>().get();
 
   if(item_ct1.get_local_id(2) < 256)
   {
-    smem_code[item_ct1.get_local_id(2)] = code[item_ct1.get_local_id(2)];
+    smem_code[item_ct1.get_local_id(2)] = dacc_code[item_ct1.get_local_id(2)];
     //smem_code[0][threadIdx.x] = code[threadIdx.x];
     //smem_code[1][threadIdx.x] = smem_code[0][threadIdx.x];
   }
@@ -788,9 +788,9 @@ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, c
       // 5. Repeat (3) 8 times for top 8 values in 256
       // 6. store with byte index
       group_store_uc(tmp).store(item_ct1, d_out, qvals);
-      }
-      
+ }     
 }
+
 
 
 //===========================k quantize blockwise================================
@@ -2934,7 +2934,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
 
 #define MM_DEQUANT_CONST 6.200012e-05f //1.0f/(127.0f*127.0f)
 
-template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *__restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,  const sycl::nd_item<3> &item_ct1, float *smem_rowStats, const sycl_la &tacc, const sycl_dacc &dacc_A)
+template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_int32_fp16(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half *__restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n,  const sycl::nd_item<3> &item_ct1, float *smem_rowStats, const sycl_la &tacc, const sycl_dacc &dacc_A, const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl::accessor<sycl::half, 1> &dacc_out, const sycl::accessor<sycl::half, 1> &dacc_bias )
 {
 
   // Strategy: To dequantize we need to load col/row statistics. This can be very expensive
@@ -2987,16 +2987,16 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
   sycl::half local_output[ITEMS_PER_THREAD];
   float local_rowStats[ITEMS_PER_THREAD];
   
-  using group_load_int = dpct::group::workgroup_load<ITEMS_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
-  using group_exchange = dpct::group::exchange<int, ITEMS_PER_THREAD>;
+  using group_load_int = dpct_::group::workgroup_load<ITEMS_PER_THREAD, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
+  using group_exchange = exchange<int, ITEMS_PER_THREAD>;
   
   auto *d_A = dacc_A.get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *tmp = tacc.get_multi_ptr<sycl::access::decorated::yes>().get();
-    
+   //dacc_colStats //dacc_bias //dacc_rowStats
 
   // L1. Load sub-tile row/col statistics. Each thread only holds 1 col, load rows into shared memory.
-  float colStat = col >= numCols ? 0.0f : colStats[col];
-  float local_biasValue = ((bias == NULL) || (col >= numCols)) ? 0.0f : sycl::vec<sycl::half, 1>(bias[col]).convert<float, sycl::rounding_mode::automatic>()[0];
+  float colStat = col >= numCols ? 0.0f : dacc_colStats[col];
+  float local_biasValue = ((bias == NULL) || (col >= numCols)) ? 0.0f : sycl::vec<sycl::half, 1>(dacc_bias[col]).convert<float, sycl::rounding_mode::automatic>()[0];
   // no block loads for rows for now -- keep it simple
   for(int j = item_ct1.get_local_id(2); j < SUBTILE_ROWS; j+=item_ct1.get_local_range(2))
   {
@@ -3005,7 +3005,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
     // each warp accesses the same element, for four consequitive elements
     // todo: update description about striped shared memory, it is not needed
     // rowidx: [0, 1, 2, 3...] and each warp reads ITEMS_PER_THREAD consequitive elements
-    smem_rowStats[j] = rowStats[row];
+    smem_rowStats[j] = dacc_rowStats[row];
   }
   
   item_ct1.barrier(sycl::access::fence_space::local_space);
@@ -3068,13 +3068,12 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
     {
       int outIdx = col + ((base_row+subtile_base_row+row_offset+j)*numCols);
       if(outIdx< n_out && col < numCols)
-        out[outIdx] = local_output[j];
+        dacc_out[outIdx] = local_output[j];
     }
 
     row_offset += rows_per_load;
   }
 }
-
 //=====================================k double row col quant============================
 
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kDoubleRowColQuant(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed)
@@ -4579,7 +4578,7 @@ template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int 
 
 //==================supported template decls=======================================================
 
-template void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half * __restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n, const sycl::nd_item<3> &item_ct1,  float *smem_rowStats, const sycl_la &tacc, const sycl_dacc &dacc_A);
+template void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half * __restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n, const sycl::nd_item<3> &item_ct1,  float *smem_rowStats, const sycl_la &tacc, const sycl_dacc &dacc_A,  const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl::accessor<sycl::half, 1> &dacc_out, const sycl::accessor<sycl::half, 1> &dacc_bias);
 
 
 template SYCL_EXTERNAL void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,   const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
@@ -4747,7 +4746,7 @@ template SYCL_EXTERNAL void kPercentileClipping<sycl::half, 2048, 4>(sycl::half 
 
 
 #define MAKE_kQuantizeBlockwise(dtype, blocksize, num_per_thread, stochastic, data_type_name) \
-template void kQuantizeBlockwise<dtype, blocksize, num_per_thread, stochastic, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n, const sycl::nd_item<3> &item_ct1, float *smem_code, float *smem_absmax_value,const sycl_la &tacc,const sycl::accessor<dtype, 1> &dacc_A, const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out); 
+template void kQuantizeBlockwise<dtype, blocksize, num_per_thread, stochastic, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n, const sycl::nd_item<3> &item_ct1, float *smem_code, float *smem_absmax_value,const sycl_la &tacc,const sycl::accessor<dtype, 1> &dacc_A, const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out, const sycl_dacc_float &dacc_code); 
 
 MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 1, General8bit)
