@@ -16,6 +16,7 @@ from .autograd._functions import (
 )
 from .backends import register_backend
 from .backends.cpu import CPUBackend
+from .backends.npu import NPUBackend
 from .cextension import lib
 from .nn import modules
 
@@ -49,11 +50,14 @@ if hasattr(torch, "xpu") and torch.xpu.is_available():
 
     register_backend("xpu", XPUBackend())
 
+# Register Ascend NPU backend, if available.
+if hasattr(torch, "npu") and torch.npu.is_available():
+    register_backend("npu", NPUBackend())
+
 # TODO: Other potential backends:
 # XLA - Google TPU / PJRT runtime
 # HPU - Habana / Intel Gaudi
 # IPU - Graphcore
-# NPU - Ascend
 # Note that we may not map 1:1 with a device type, e.g. SYCL, XLA
 # In this case, it will be up to each backend to dispatch as needed
 
