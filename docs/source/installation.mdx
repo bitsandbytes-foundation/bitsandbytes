@@ -62,6 +62,16 @@ make
 pip install .
 ```
 
+If you want to install bitsandbytes with CPU backend, please run the fowllowing commands:
+```bash
+pip install intel_extention_for_pytorch
+git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/ && git checkout multi-backend-refactor
+pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=cpu -S .
+make
+pip install .
+```
+
 > [!TIP]
 > If you have multiple versions of CUDA installed or installed it in a non-standard location, please refer to CMake CUDA documentation for how to configure the CUDA compiler.
 
