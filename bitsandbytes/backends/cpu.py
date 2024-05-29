@@ -135,6 +135,8 @@ class CPUBackend(Backend):
         quant_type: Literal["fp4", "nf4"] = "fp4",
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
+        if blocksize is None:
+            blocksize = 64
         assert_on_cpu([A, absmax, out])
         assert quant_storage == torch.uint8, "CPU backend only supports uint8 quant_storage"
         return quantize_4bit_impl(A, absmax, out, blocksize, compress_statistics, quant_type)
@@ -148,6 +150,8 @@ class CPUBackend(Backend):
         blocksize: int = 64,
         quant_type: Literal["fp4", "nf4"] = "fp4",
     ) -> torch.Tensor:
+        if blocksize is None:
+            blocksize = 64
         assert_on_cpu([A, absmax, out])
         return dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
 
