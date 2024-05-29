@@ -236,7 +236,7 @@ class Params4bit(torch.nn.Parameter):
         return self
 
     def __getstate__(self):
-        state = self.__dict__
+        state = self.__dict__.copy()
         state["data"] = self.data
         state["requires_grad"] = self.requires_grad
         return state
