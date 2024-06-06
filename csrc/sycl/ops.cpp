@@ -127,7 +127,7 @@ void quantize(float *code, float *A, unsigned char *out, int n)
     dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
     q_ct1.submit(
       [&](sycl::handler &cgh) {
-      using group_load = dpct_::group::workgroup_load<NUM_ESTIMATE, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
+      using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
               
       size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
       sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
@@ -1045,7 +1045,7 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, sycl::half 
     q_ct1.submit(
 		[&](sycl::handler &cgh) {
             
-          using group_load = dpct_::group::workgroup_load<NUM_ESTIMATE, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
+          using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
           size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
           sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);  
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);

@@ -740,8 +740,8 @@ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, c
   unsigned char qvals[NUM];
   //const int lane_id = threadIdx.x % 2;
 
-  using group_load_float = dpct_::group::workgroup_load<NUM, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;  
-  using group_store_uc = dpct_::group::workgroup_store<NUM, dpct_::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;  
+  using group_load_float = dpct::group::workgroup_load<NUM, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, float,  float *, sycl::nd_item<3>>;  
+  using group_store_uc = dpct::group::workgroup_store<NUM, dpct::group::store_algorithm::BLOCK_STORE_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;  
 
   auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_out = dacc_out.get_multi_ptr<sycl::access::decorated::yes>().get();
@@ -2987,7 +2987,7 @@ template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>void kdequant_mm_i
   sycl::half local_output[ITEMS_PER_THREAD];
   float local_rowStats[ITEMS_PER_THREAD];
   
-  using group_load_int = dpct_::group::workgroup_load<ITEMS_PER_THREAD, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
+  using group_load_int = dpct::group::workgroup_load<ITEMS_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
   using group_exchange = exchange<int, ITEMS_PER_THREAD>;
   
   auto *d_A = dacc_A.get_multi_ptr<sycl::access::decorated::yes>().get();
