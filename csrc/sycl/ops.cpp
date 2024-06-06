@@ -1602,6 +1602,15 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
   sycl::buffer<char, 1> buff_out_col_normed(out_col_normed,sycl::range<1>(size));
   sycl::buffer<char, 1> buff_out_row_normed(out_row_normed,sycl::range<1>(size));
   
+  sycl::buffer<float, 1> buff_rowStats(rowStats,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_colStats(colStats,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_rowidx(rowidx,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_colidx(colidx,sycl::range<1>(size));
+  sycl::buffer<sycl::half, 1> buff_val(val,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_nnz_block_ptr(nnz_block_ptr,sycl::range<1>(size));
+  
+  
+  
   int threads = 64;
   int items_per_thread = 4;
   int tile_cols = threads*items_per_thread;
@@ -1628,6 +1637,14 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
             sycl::accessor dacc_out_col_normed(buff_out_col_normed, cgh, sycl::read_write);
             sycl::accessor dacc_out_row_normed(buff_out_row_normed, cgh, sycl::read_write);
 
+            sycl::accessor dacc_rowStats(buff_rowStats, cgh, sycl::read_write);
+            sycl::accessor dacc_colStats(buff_colStats, cgh, sycl::read_write);
+            sycl::accessor dacc_rowidx(buff_rowidx, cgh, sycl::read_write);
+            sycl::accessor dacc_colidx(buff_colidx, cgh, sycl::read_write);
+            sycl::accessor dacc_val(buff_val, cgh, sycl::read_write);
+            sycl::accessor dacc_nnz_block_ptr(buff_nnz_block_ptr, cgh, sycl::read_write);
+
+
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
 			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
@@ -1636,7 +1653,7 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
            [=](sycl::nd_item<3> item_ct1) {
           
-                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed);
+                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols, item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(), tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed, dacc_rowStats, dacc_colStats, dacc_rowidx, dacc_colidx, dacc_val, dacc_nnz_block_ptr);
           });
       });
     }
@@ -1654,6 +1671,14 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
             sycl::accessor dacc_out_col_normed(buff_out_col_normed, cgh, sycl::read_write);
             sycl::accessor dacc_out_row_normed(buff_out_row_normed, cgh, sycl::read_write);
             
+            sycl::accessor dacc_rowStats(buff_rowStats, cgh, sycl::read_write);
+            sycl::accessor dacc_colStats(buff_colStats, cgh, sycl::read_write);
+            sycl::accessor dacc_rowidx(buff_rowidx, cgh, sycl::read_write);
+            sycl::accessor dacc_colidx(buff_colidx, cgh, sycl::read_write);
+            sycl::accessor dacc_val(buff_val, cgh, sycl::read_write);
+            sycl::accessor dacc_nnz_block_ptr(buff_nnz_block_ptr, cgh, sycl::read_write);
+
+            
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_row_stats_acc_ct1(sycl::range<1>(256), cgh);
 			      sycl::local_accessor<unsigned int, 1> smem_nnz_row_idx_acc_ct1(sycl::range<1>(256), cgh);
@@ -1663,7 +1688,7 @@ void doubleRowColQuant(sycl::half * A, float *rowStats, float *colStats, char *o
            sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
            [=](sycl::nd_item<3> item_ct1) {
           
-                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(),  tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed);
+                kDoubleRowColQuant<STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols,item_ct1, smem_row_stats_acc_ct1.get_pointer(), smem_nnz_row_idx_acc_ct1.get_pointer(),  tacc, dacc_A, dacc_out_col_normed, dacc_out_row_normed, dacc_rowStats, dacc_colStats, dacc_rowidx, dacc_colidx, dacc_val, dacc_nnz_block_ptr);
           });
       });
   

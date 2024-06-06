@@ -206,7 +206,10 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS,
                         const sycl::nd_item<3> &item_ct1,
                         float *smem_row_stats, unsigned int *smem_nnz_row_idx,
                         const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A,
-                        const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed);
+                        const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed,
+                        const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, 
+                        const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+                        const sycl::accessor<sycl::half, 1> &dacc_val, const sycl_dacc &dacc_nnz_block_ptr);
 
 
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> extern SYCL_EXTERNAL void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols, const sycl::nd_item<3> &item_ct1, char *smem_data,
