@@ -800,7 +800,8 @@ template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TY
 SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n,
                         const sycl::nd_item<3> &item_ct1, float *smem_code,
                         float *smem_absmax_value,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_A,
-                        const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out)
+                        const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out,
+                        const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax)
 {
   
   
@@ -823,11 +824,11 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, fl
   auto *d_rand = dacc_rand.get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_out = dacc_out.get_multi_ptr<sycl::access::decorated::yes>().get();
 
-  
+  //code //absmax
   
   if(DATA_TYPE == General8bit)
     for(int i = item_ct1.get_local_id(2); i < 256; i+=item_ct1.get_local_range(2))
-      smem_code[i] = code[i];
+      smem_code[i] = dacc_code[i];
 
   for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
   {
@@ -863,7 +864,7 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, fl
     item_ct1.barrier(sycl::access::fence_space::local_space);
 
     if(item_ct1.get_local_id(2) == 0)
-      absmax[i/BLOCK_SIZE] = local_abs_max;
+      dacc_absmax[i/BLOCK_SIZE] = local_abs_max;
     else
       local_abs_max = smem_absmax_value[0];
 
@@ -2639,12 +2640,12 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
             {
               if(weight_decay > 0.0f) {
                 switch(OPTIMIZER) {
-                  case 1:
-                  case 3:
-                  case 2:
+                  case MOMENTUM:
+                  case ADAGRAD:
+                  case RMSPROP:
                     g_val += ((float)p_vals[j])*weight_decay;
                     break;
-                  case 4:
+                  case LION:
                     p_vals[j] = ((float)p_vals[j])*(1.0f-lr*weight_decay);
                     break;
                 }
@@ -2654,21 +2655,21 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
 							switch(OPTIMIZER)
 							{
-									case 1:
+									case MOMENTUM:
 										if(step == 1)
 											s1_vals[j] = g_val;
 										else
 											s1_vals[j] = (s1_vals[j]*beta1) + g_val;
 										break;
-									case 4:
+									case LION:
 										// here, using gvals[j] to store the gradient smoothed by beta1 for the following parameter update, before the momentum is updated by beta2
 										g_vals[j] = lr*sgn(((float)s1_vals[j])*beta1 + ((1.0f-beta1)*g_val));
 										s1_vals[j] = s1_vals[j]*beta2 + ((1.0f-beta2)*g_val);
 										break;
-									case 2:
+									case RMSPROP:
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
 										break;
-									case 3:
+									case ADAGRAD:
 										s1_vals[j] = s1_vals[j] + (g_val*g_val);
 										break;
 							}
@@ -2700,17 +2701,17 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 						{
 							switch(OPTIMIZER)
 							{
-									case 1:
+									case MOMENTUM:
 										p_vals[j] = ((float)p_vals[j]) - lr*(s1_vals[j]);
 										break;
-									case 4:
+									case LION:
 										p_vals[j] = ((float)p_vals[j]) - ((float)g_vals[j]);
 										break;
-									case 2:
+									case RMSPROP:
 										g_val = g_vals[j];
 										p_vals[j] = ((float)p_vals[j]) - lr*(g_val / (sycl::sqrt(s1_vals[j])+eps));
 										break;
-									case 3:
+									case ADAGRAD:
 										g_val = g_vals[j];
 										p_vals[j] = ((float)p_vals[j]) - lr*(g_val / (sycl::sqrt(s1_vals[j])+eps));
 										break;
@@ -4747,7 +4748,7 @@ template SYCL_EXTERNAL void kPercentileClipping<sycl::half, 2048, 4>(sycl::half 
 
 
 #define MAKE_kQuantizeBlockwise(dtype, blocksize, num_per_thread, stochastic, data_type_name) \
-template void kQuantizeBlockwise<dtype, blocksize, num_per_thread, stochastic, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n, const sycl::nd_item<3> &item_ct1, float *smem_code, float *smem_absmax_value,const sycl_la &tacc,const sycl::accessor<dtype, 1> &dacc_A, const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out, const sycl_dacc_float &dacc_code); 
+template void kQuantizeBlockwise<dtype, blocksize, num_per_thread, stochastic, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n, const sycl::nd_item<3> &item_ct1, float *smem_code, float *smem_absmax_value,const sycl_la &tacc,const sycl::accessor<dtype, 1> &dacc_A, const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax); 
 
 MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(sycl::half,  4096, 4, 1, General8bit)

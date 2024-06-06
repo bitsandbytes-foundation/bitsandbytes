@@ -38,7 +38,8 @@ template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TY
                                                                                                             float *smem_code,
                                                                                                             float *smem_absmax_value,
                                                                                                             const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_A,
-                        const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out);
+                        const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out,
+                        const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
 template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE> extern SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_uc &dacc_A,const sycl::accessor<T, 1> &dacc_out);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>

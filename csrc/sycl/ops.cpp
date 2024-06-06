@@ -202,9 +202,14 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
   int size= NUM_BLOCK;
   for(int i=0; i< NUM_BLOCK; i++){ out[i]=out[(DATA_TYPE > 0) ? i/2 : i];};
   
+  
   sycl::buffer<T, 1> buff_A(A,sycl::range<1>(size));
   sycl::buffer<float, 1> buff_rand(rand,sycl::range<1>(size));
   sycl::buffer<unsigned char, 1> buff_out(out,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_code(code,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_absmax(absmax,sycl::range<1>(size));
+  
+  
   
   if(blocksize == 4096)
     
@@ -223,6 +228,8 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
           sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
           sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
+          sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+          sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
           
           
           //__shared__ vars for funtions
@@ -233,7 +240,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, 0>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
+              kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, 0>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out, dacc_code, dacc_absmax);
             });
         });
     }
@@ -252,6 +259,8 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
           sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
           sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
+          sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+          sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
           
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
@@ -260,7 +269,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
+              kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out, dacc_code, dacc_absmax);
             });
         });
     }
@@ -278,7 +287,9 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
           sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
           sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
-      
+          sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+          sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
+          
           //__shared__vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
           sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
@@ -286,7 +297,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 1024, 4, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
+              kQuantizeBlockwise<T, 1024, 4, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out, dacc_code, dacc_absmax);
             });
         });
     }
@@ -305,6 +316,8 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
           sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
           sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
+          sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+          sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
           
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
@@ -313,7 +326,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 512, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
+              kQuantizeBlockwise<T, 512, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out, dacc_code, dacc_absmax);
             });
         });
     }
@@ -331,7 +344,9 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
           sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
           sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
-      
+          sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+          sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
+          
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
           sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
@@ -340,7 +355,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 128), sycl::range<3>(1, 1, 128)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
+              kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out, dacc_code, dacc_absmax);
             });
         });
     }
@@ -358,14 +373,16 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
           sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
           sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
-           
+          sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+          sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
+          
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
           sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 64), sycl::range<3>(1, 1, 64)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
+              kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out, dacc_code, dacc_absmax);
             });
         });
     }
@@ -383,7 +400,9 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
           sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
           sycl::accessor dacc_rand(buff_rand, cgh, sycl::read_write);
-         
+           sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+          sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
+          
           //__shared__ vars
           sycl::local_accessor<float, 1> smem_code_acc_ct1(sycl::range<1>(256), cgh);
           sycl::local_accessor<float, 1> smem_absmax_value_acc_ct1(sycl::range<1>(1), cgh);
@@ -392,7 +411,7 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
           cgh.parallel_for(
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 32), sycl::range<3>(1, 1, 32)), 
             [=](sycl::nd_item<3> item_ct1) {
-              kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out);
+              kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>(code, A, absmax, out, rand, rand_offset, n, item_ct1,  smem_code_acc_ct1.get_pointer(), smem_absmax_value_acc_ct1.get_pointer(), tacc, dacc_A, dacc_rand, dacc_out, dacc_code, dacc_absmax);
             });
         });
     }
@@ -893,7 +912,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
   sycl::queue &q_ct1 = dev_ct1.in_order_queue();
   sycl::context ctx = q_ct1.get_context();
 	int num_blocks = 0;
-  int size = NUM_BLOCK;
+  int size = BLOCKSIZE_2STATE;
   
   sycl::buffer<T, 1> buff_g(g,sycl::range<1>(size));
   sycl::buffer<T, 1> buff_p(p,sycl::range<1>(size));
@@ -907,7 +926,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
    
 	switch(OPTIMIZER)
 	{
-		case 0:
+		case ADAM:
 			num_blocks = n/BLOCKSIZE_2STATE;
 			num_blocks = n % BLOCKSIZE_2STATE == 0 ? num_blocks : num_blocks + 1;
 			{
@@ -944,10 +963,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 			}
 		
 		break;
-		case 1:
-		case 2:
-    case 3:
-    case 4:
+		case MOMENTUM:
+    case RMSPROP:
+    case ADAGRAD:
+		case LION:
 			num_blocks = n/BLOCKSIZE_1STATE;
 			num_blocks = n % BLOCKSIZE_1STATE == 0 ? num_blocks : num_blocks + 1;
 			{
