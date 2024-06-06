@@ -91,6 +91,42 @@ Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com
 </hfoption>
 </hfoptions>
 
+## Multi-backend preview release (+ compilation)
+
+Please follow these steps to install bitsandbytes with device-specific backend support other than CUDA:
+
+<hfoptions id="backend">
+<hfoption id="AMD ROCm">
+
+For a ROCm specific install:
+
+```bash
+git clone --depth 1 https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
+git checkout multi-backend-refactor
+
+# Install dependencies
+apt install hipblaslt
+pip install -r requirements-dev.txt
+
+# Compile & install
+cmake -DCOMPUTE_BACKEND=hip -S .  # Use -DBNB_ROCM_ARCH="gfx90a;gfx942" to target specific gpu arch
+make
+pip install .
+```
+
+</hfoption>
+<hfoption id="Intel CPU + GPU">
+
+WIP
+
+</hfoption>
+<hfoption id="Apple Silicon (MPS)">
+
+WIP
+
+</hfoption>
+</hfoptions>
+
 ## PyTorch CUDA versions
 
 Some bitsandbytes features may need a newer CUDA version than the one currently supported by PyTorch binaries from Conda and pip. In this case, you should follow these instructions to load a precompiled bitsandbytes binary.
