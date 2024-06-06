@@ -2277,7 +2277,9 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
                 float *smem_exchange1, float *smem_exchange2,
                 const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g,
                 const sycl::accessor<T, 1> &dacc_p,
-                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2)
+                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2,
+                const sycl_dacc_float &dacc_quantiles1, const sycl_dacc_float &dacc_quantiles2,
+                const sycl_dacc_float &dacc_absmax1, const sycl_dacc_float &dacc_absmax2)
 {
 
     //const int n_full = n + (n%BLOCK_SIZE);
@@ -2316,13 +2318,13 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
   auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_state2 = dacc_state2.get_multi_ptr<sycl::access::decorated::yes>().get();
     
-    
+    //quantiles1 //quantiles2 //absmax1 //absmax2
     
     // init: 0.2 -> 0.23
 
     // 0.23 -> 0.23
-      smem_quantiles1[0][item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
-      smem_quantiles2[0][item_ct1.get_local_id(2)] = quantiles2[item_ct1.get_local_id(2)];
+      smem_quantiles1[0][item_ct1.get_local_id(2)] = dacc_quantiles1[item_ct1.get_local_id(2)];
+      smem_quantiles2[0][item_ct1.get_local_id(2)] = dacc_quantiles2[item_ct1.get_local_id(2)];
       # pragma unroll
       for(unsigned int j = 1; j < LANES; j++)
       {
@@ -2389,7 +2391,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         {
             if(!sycl::isnan((float)g_vals[j]) && !sycl::isinf((float)g_vals[j]))
 						{
-							s2_vals[j] = smem_quantiles2[lane_id][c2s[j]]*absmax2[i/BLOCK_SIZE];
+							s2_vals[j] = smem_quantiles2[lane_id][c2s[j]]*dacc_absmax2[i/BLOCK_SIZE];
               g_val = g_vals[j];
               //float ratio = (g_val*g_val)/fmaxf(s2_vals[j], eps*eps);
               //g_val = ratio > 2.0f ? 2.0f*g_val/ratio : g_val;
@@ -2397,7 +2399,7 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
 							s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
 
-							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
+							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*dacc_absmax1[i/BLOCK_SIZE];
 							s1_vals[j] = (s1_vals[j]*beta1) + (((1.0f-beta1)*g_val));
 						}
             else
@@ -2426,8 +2428,8 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
         if(item_ct1.get_local_id(2) == 0)
         {
-          absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
-          absmax2[i/BLOCK_SIZE] = new_local_abs_max2;
+          dacc_absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
+          dacc_absmax2[i/BLOCK_SIZE] = new_local_abs_max2;
         }
         else
         {
@@ -2477,9 +2479,6 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            //c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], s1_vals[j] / new_local_abs_max1);
-            //c2s[j] = quantize_2D<0>(quadrants2, smem_quantiles2[lane_id], s2_vals[j] / new_local_abs_max2);
-            
             c1s[j] = quantize_2D<1>(quadrants1, s1_vals[j] / new_local_abs_max1);
             c2s[j] = quantize_2D<0>(quadrants2, s2_vals[j] / new_local_abs_max2);
 
@@ -2540,7 +2539,9 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
                 const sycl_la &tacc,
                 const sycl::accessor<T, 1> &dacc_g,
                 const sycl::accessor<T, 1> &dacc_p,
-                const sycl_dacc_uc &dacc_state1
+                const sycl_dacc_uc &dacc_state1,
+                const sycl_dacc_float &dacc_quantiles1,
+                const sycl_dacc_float &dacc_absmax1
                 )
 {
 
@@ -2574,7 +2575,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     // init: 0.2 -> 0.23
 
     // 0.23 -> 0.23
-		smem_quantiles1[0][item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
+		smem_quantiles1[0][item_ct1.get_local_id(2)] = dacc_quantiles1[item_ct1.get_local_id(2)];
 		# pragma unroll
 		for(unsigned int j = 1; j < LANES; j++)
 			smem_quantiles1[j][item_ct1.get_local_id(2)] = smem_quantiles1[0][item_ct1.get_local_id(2)];
@@ -2638,36 +2639,36 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
             {
               if(weight_decay > 0.0f) {
                 switch(OPTIMIZER) {
-                  case MOMENTUM:
-                  case ADAGRAD:
-                  case RMSPROP:
+                  case 1:
+                  case 3:
+                  case 2:
                     g_val += ((float)p_vals[j])*weight_decay;
                     break;
-                  case LION:
+                  case 4:
                     p_vals[j] = ((float)p_vals[j])*(1.0f-lr*weight_decay);
                     break;
                 }
               }
 
-							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
+							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*dacc_absmax1[i/BLOCK_SIZE];
 
 							switch(OPTIMIZER)
 							{
-									case MOMENTUM:
+									case 1:
 										if(step == 1)
 											s1_vals[j] = g_val;
 										else
 											s1_vals[j] = (s1_vals[j]*beta1) + g_val;
 										break;
-									case LION:
+									case 4:
 										// here, using gvals[j] to store the gradient smoothed by beta1 for the following parameter update, before the momentum is updated by beta2
 										g_vals[j] = lr*sgn(((float)s1_vals[j])*beta1 + ((1.0f-beta1)*g_val));
 										s1_vals[j] = s1_vals[j]*beta2 + ((1.0f-beta2)*g_val);
 										break;
-									case RMSPROP:
+									case 2:
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f-beta1)*(g_val*g_val));
 										break;
-									case ADAGRAD:
+									case 3:
 										s1_vals[j] = s1_vals[j] + (g_val*g_val);
 										break;
 							}
@@ -2687,7 +2688,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         item_ct1.barrier(sycl::access::fence_space::local_space);
 
         if(item_ct1.get_local_id(2) == 0)
-          absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
+          dacc_absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
         else
           new_local_abs_max1 = smem_exchange1[0];
 
@@ -2699,17 +2700,17 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 						{
 							switch(OPTIMIZER)
 							{
-									case MOMENTUM:
+									case 1:
 										p_vals[j] = ((float)p_vals[j]) - lr*(s1_vals[j]);
 										break;
-									case LION:
+									case 4:
 										p_vals[j] = ((float)p_vals[j]) - ((float)g_vals[j]);
 										break;
-									case RMSPROP:
+									case 2:
 										g_val = g_vals[j];
 										p_vals[j] = ((float)p_vals[j]) - lr*(g_val / (sycl::sqrt(s1_vals[j])+eps));
 										break;
-									case ADAGRAD:
+									case 3:
 										g_val = g_vals[j];
 										p_vals[j] = ((float)p_vals[j]) - lr*(g_val / (sycl::sqrt(s1_vals[j])+eps));
 										break;
@@ -2733,8 +2734,8 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         # pragma unroll N_PER_TH
         for(unsigned int j = 0; j < N_PER_TH; j++)
         {
-            //c1s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], s1_vals[j] / new_local_abs_max1);
             c1s[j] = quantize_2D<1>(quadrants1, s1_vals[j] / new_local_abs_max1);
+
             // make sure state1 term has still the same sign after quantization
             // (not needed for state2 term which has only positive values)
             if(sycl::signbit(smem_quantiles1[lane_id][c1s[j]]) != sycl::signbit(s1_vals[j]))
@@ -4842,7 +4843,9 @@ template void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_
                 const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, sycl::local_accessor<float, 2> smem_quantiles2, float *smem_exchange1, float *smem_exchange2,const sycl_la &tacc, \
                 const sycl::accessor<gtype, 1> &dacc_g, \
                 const sycl::accessor<gtype, 1> &dacc_p, \
-                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2); \
+                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2, \
+                const sycl_dacc_float &dacc_quantiles1, const sycl_dacc_float &dacc_quantiles2, \
+                const sycl_dacc_float &dacc_absmax1, const sycl_dacc_float &dacc_absmax2); \
 
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, sycl::half, 2048, 8)
@@ -4860,7 +4863,9 @@ template void kOptimizerStatic8bit1StateBlockwise<gtype, oname, block_size, num_
                 const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1, sycl::local_accessor<float, 2> smem_quantiles1, float *smem_exchange1,const sycl_la &tacc, \
                 const sycl::accessor<gtype, 1> &dacc_g, \
                 const sycl::accessor<gtype, 1> &dacc_p, \
-                const sycl_dacc_uc &dacc_state1); \
+                const sycl_dacc_uc &dacc_state1,        \
+                const sycl_dacc_float &dacc_quantiles1, \
+                const sycl_dacc_float &dacc_absmax1);   \
 
 MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, sycl::half, 2048, 8)

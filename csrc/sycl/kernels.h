@@ -130,16 +130,21 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EXTERNAL void kOptimizerStatic8bit2StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,
-                const float beta1, const float beta2, const float eps, const int step, const float lr,
+                const float beta1, const float beta2,
+                const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, const bool skip_zeros, const int n,
+                float* absmax1, float* absmax2,
+                float weight_decay,
+                const float gnorm_scale, const bool skip_zeros, const int n,
                 const sycl::nd_item<3> &item_ct1,
                 sycl::local_accessor<float, 2> smem_quantiles1,
                 sycl::local_accessor<float, 2> smem_quantiles2,
                 float *smem_exchange1, float *smem_exchange2,
                 const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g,
                 const sycl::accessor<T, 1> &dacc_p,
-                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2);
+                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2,
+                const sycl_dacc_float &dacc_quantiles1, const sycl_dacc_float &dacc_quantiles2,
+                const sycl_dacc_float &dacc_absmax1, const sycl_dacc_float &dacc_absmax2);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EXTERNAL void kOptimizerStatic8bit1StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1,
@@ -155,7 +160,9 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EX
                 const sycl_la &tacc,
                 const sycl::accessor<T, 1> &dacc_g,
                 const sycl::accessor<T, 1> &dacc_p,
-                const sycl_dacc_uc &dacc_state1);
+                const sycl_dacc_uc &dacc_state1,
+                const sycl_dacc_float &dacc_quantiles1,
+                const sycl_dacc_float &dacc_absmax1);
 
 
 template<typename T, int BLOCK_SIZE, int NUM_VALS> extern SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g);

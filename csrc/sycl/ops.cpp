@@ -893,17 +893,21 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
   sycl::queue &q_ct1 = dev_ct1.in_order_queue();
   sycl::context ctx = q_ct1.get_context();
 	int num_blocks = 0;
-  int size = BLOCKSIZE_2STATE;
+  int size = NUM_BLOCK;
   
   sycl::buffer<T, 1> buff_g(g,sycl::range<1>(size));
   sycl::buffer<T, 1> buff_p(p,sycl::range<1>(size));
   sycl::buffer<unsigned char, 1> buff_state1(state1,sycl::range<1>(size));
   sycl::buffer<unsigned char, 1> buff_state2(state2,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_quantiles1(quantiles1,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_quantiles2(quantiles2,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_absmax1(absmax1,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_absmax2(absmax2,sycl::range<1>(size));
   
    
 	switch(OPTIMIZER)
 	{
-		case ADAM:
+		case 0:
 			num_blocks = n/BLOCKSIZE_2STATE;
 			num_blocks = n % BLOCKSIZE_2STATE == 0 ? num_blocks : num_blocks + 1;
 			{
@@ -919,6 +923,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
              sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
              sycl::accessor dacc_state2(buff_state2, cgh, sycl::read_write);
+             sycl::accessor dacc_quantiles1(buff_quantiles1, cgh, sycl::read_write);
+             sycl::accessor dacc_quantiles2(buff_quantiles2, cgh, sycl::read_write);
+             sycl::accessor dacc_absmax1(buff_absmax1, cgh, sycl::read_write);
+             sycl::accessor dacc_absmax2(buff_absmax2, cgh, sycl::read_write);
             
             //__shared__ vars
             sycl::local_accessor<float, 2> smem_quantiles1_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);        
@@ -930,16 +938,16 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, BLOCKSIZE_2STATE/NUM_2STATE), sycl::range<3>(1, 1, BLOCKSIZE_2STATE/NUM_2STATE)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>(p, g, state1, state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n,item_ct1,  smem_quantiles1_acc_ct1, smem_quantiles2_acc_ct1,smem_exchange1_acc_ct1.get_pointer(), smem_exchange2_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1, dacc_state2);
+			          kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>(p, g, state1, state2, beta1, beta2, eps, step, lr, quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n,item_ct1,  smem_quantiles1_acc_ct1, smem_quantiles2_acc_ct1,smem_exchange1_acc_ct1.get_pointer(), smem_exchange2_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1, dacc_state2, dacc_quantiles1, dacc_quantiles2, dacc_absmax1, dacc_absmax2);
 			        });
 			    });
 			}
 		
 		break;
-		case MOMENTUM:
-		case RMSPROP:
-    case ADAGRAD:
-    case LION:
+		case 1:
+		case 2:
+    case 3:
+    case 4:
 			num_blocks = n/BLOCKSIZE_1STATE;
 			num_blocks = n % BLOCKSIZE_1STATE == 0 ? num_blocks : num_blocks + 1;
 			{
@@ -954,6 +962,9 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
              sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
              sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             sycl::accessor dacc_quantiles1(buff_quantiles1, cgh, sycl::read_write);
+             sycl::accessor dacc_absmax1(buff_absmax1, cgh, sycl::read_write);
+             
              
             //__shared__ vars
             sycl::local_accessor<float, 2> smem_quantiles1_acc_ct1(sycl::range<2>(2/*LANES*/, 257), cgh);
@@ -962,7 +973,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE), sycl::range<3>(1, 1, BLOCKSIZE_1STATE/NUM_1STATE)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE>(p, g, state1, beta1, beta2, eps, step, lr, quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n, item_ct1, smem_quantiles1_acc_ct1, smem_exchange1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1);
+			          kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE>(p, g, state1, beta1, beta2, eps, step, lr, quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n, item_ct1, smem_quantiles1_acc_ct1, smem_exchange1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1,  dacc_quantiles1, dacc_absmax1);
 			        });
 			    });
 			}
@@ -975,7 +986,6 @@ catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
   std::exit(1);
 }
-
 
 //============================percentile clipping===============================
 
