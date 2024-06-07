@@ -94,7 +94,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
   std::memset(code, 0, 256*sizeof(float));
   //DPCT_CHECK_ERROR(q_ct1.memset(code, 0, 256*sizeof(float)).wait());
   sycl::context ctx = q_ct1.get_context();
-  int size = 512;
+  int size = NUM_BLOCK;
   
   
   sycl::buffer<T, 1> buff_A(A,sycl::range<1>(size));
@@ -751,7 +751,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
       //DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
       //DPCT_CHECK_ERROR(q_ct1.memset(new_max2, 0, 1*sizeof(float)).wait());
 			{
-			  //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
 			      
@@ -788,7 +788,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			}
 			
 			{
-			  //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
 			      
@@ -830,7 +830,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
       std::memset(new_max1, 0, 1*sizeof(float));
       //DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
 			{
-			  //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
 			      
@@ -859,7 +859,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			
 			
 			{
-			  //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
              
@@ -891,7 +891,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
     case LION:
       
       {
-        //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+        dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
           [&](sycl::handler &cgh) {
             
@@ -922,7 +922,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
        std::memset(new_max1, 0, 1*sizeof(float));
       //DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
       {
-        //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+        dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
           [&](sycl::handler &cgh) {
             
