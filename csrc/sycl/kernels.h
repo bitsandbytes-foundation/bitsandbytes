@@ -34,13 +34,15 @@ extern SYCL_EXTERNAL void kDequantize(float *code, unsigned char *A, float *out,
                  const sycl::nd_item<3> &item_ct1, float *smem_code);
 
 template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TYPE> extern SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n,
-                                                                                                            const sycl::nd_item<3> &item_ct1,
-                                                                                                            float *smem_code,
-                                                                                                            float *smem_absmax_value,
-                                                                                                            const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_A,
+                        const sycl::nd_item<3> &item_ct1,
+                        float *smem_code,
+                        float *smem_absmax_value,
+                        const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_A,
                         const sycl_dacc_float &dacc_rand, const sycl_dacc_uc &dacc_out,
                         const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
-template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE> extern SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_uc &dacc_A,const sycl::accessor<T, 1> &dacc_out);
+                        
+//=========================k-dequant blockwise ======================                        
+template<typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE> extern SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_uc &dacc_A,const sycl::accessor<T, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
 
 //====================32 bit headers=============================
 
@@ -133,6 +135,8 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,
                 float *smem_quantiles2,const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl::accessor<T, 1> &dacc_p,
                 const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2);
+                
+//====================8 bit blockwise=========================
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EXTERNAL void kOptimizerStatic8bit2StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,

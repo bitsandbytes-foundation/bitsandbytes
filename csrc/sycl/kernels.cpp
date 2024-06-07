@@ -933,11 +933,12 @@ SYCL_EXTERNAL void kQuantizeBlockwise(float * code, T * __restrict__ const A, fl
   }
 }
 
-//===========================k dequantize================================
+//===========================k dequantize blockwise================================
+
 
 template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
 SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n,
-                          const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<T, 1> &dacc_out )
+                          const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const  sycl_dacc_uc &dacc_A,const sycl::accessor<T, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax )
 {
 
   const int n_load = (item_ct1.get_group_range(2) * TILE_SIZE);
@@ -956,7 +957,12 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
   
   auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_out = dacc_out.template get_multi_ptr<sycl::access::decorated::yes>().get();
+  //A //out //code //absmax
   
+  //typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+  //typedef cub::BlockStore<T, THREADS, NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1), cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+
+
   for (unsigned int i = base_idx; i < n_load; i += item_ct1.get_group_range(2)*TILE_SIZE)
   {
     if(DATA_TYPE > 0)
@@ -970,7 +976,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
       valid_items_store = n - i > TILE_SIZE ? TILE_SIZE : n - i;
     }
     
-    local_abs_max =  sycl::ext::oneapi::experimental::cuda::ldg(&absmax[(i+item_ct1.get_local_id(2)*NUM_PER_TH)/(blocksize)]);
+    local_abs_max =  dacc_absmax[(i+item_ct1.get_local_id(2)*NUM_PER_TH)/(blocksize)];//sycl::ext::oneapi::experimental::cuda::ldg(&absmax[(i+item_ct1.get_local_id(2)*NUM_PER_TH)/(blocksize)]);
 
     
     item_ct1.barrier(sycl::access::fence_space::local_space);
@@ -994,7 +1000,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
           #pragma unroll NUM_PER_TH
           for(int j = 0; j < NUM_PER_TH; j++)
             
-            vals[j] =  sycl::ext::oneapi::experimental::cuda::ldg(&code[qvals[j]]*local_abs_max);
+            vals[j] =  dacc_code[qvals[j]]*local_abs_max;//sycl::ext::oneapi::experimental::cuda::ldg(&code[qvals[j]]*local_abs_max);
           break;
         case FP4:
           #pragma unroll NUM_PER_TH
@@ -1017,6 +1023,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
    
     item_ct1.barrier();
    
+    
     // 1. load 8 values per thread
     // 2. compute 2-max in registers (64 max per warp)
     // 3. do warp reduction + broadcast back
@@ -1028,6 +1035,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise(float *code, unsigned char * A, float * 
             
   }
 }
+//=========================k dequantize======================
 
 SYCL_EXTERNAL void kDequantize(float *code, unsigned char *buff_A, float *buff_out, const int n,
                  const sycl::nd_item<3> &item_ct1, float *smem_code)
@@ -4823,21 +4831,24 @@ MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,  128, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(sycl::ext::oneapi::bfloat16,   64, 2, 0, NF4)
 
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_uc &dacc_A,const sycl::accessor<sycl::half, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_uc &dacc_A,const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
 
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::half, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::half, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
 
-template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::half, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::half *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
 
-template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
+
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
+
+template SYCL_EXTERNAL void kDequantizeBlockwise<float, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, float *out, const int blocksize, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<float, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
 
 
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
 
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out);
-template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out);
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
+
+template SYCL_EXTERNAL void kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 64, 8, NF4>(float *code, unsigned char * A, float * absmax, sycl::ext::oneapi::bfloat16 *out, const int blocksize, const int n,const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl_dacc_uc &dacc_A, const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_out, const sycl_dacc_float &dacc_code, const sycl_dacc_float &dacc_absmax);
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \
 template void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_per_thread>(gtype* p, gtype* __restrict__ const g, unsigned char* state1, unsigned char* state2, \

@@ -432,9 +432,12 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
   
   sycl::buffer<unsigned char, 1> buff_A(A,sycl::range<1>(size));
   sycl::buffer<T, 1> buff_out(out,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_code(code,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_absmax(absmax,sycl::range<1>(size));
   
-  if(DATA_TYPE > 0)
-    {
+  
+  
+    
       dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
       q_ct1.submit(
       [&](sycl::handler &cgh){
@@ -446,36 +449,21 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
               
               sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
               sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
-        
-      q_ct1.parallel_for(
-        sycl::nd_range<3>(sycl::range<3>(1, 1, (n+tile_size-1)/tile_size) * sycl::range<3>(1, 1, 64), sycl::range<3>(1, 1, 64)), 
-        [=](sycl::nd_item<3> item_ct1) {
-          kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>(code, A, absmax, out, blocksize/2, n, item_ct1, tacc, dacc_A, dacc_out);
-        });
-      });
-    }
-  else
-    {
-      dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
-      q_ct1.submit(
-      [&](sycl::handler &cgh){
-      
-              using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, unsigned char,  unsigned char *, sycl::nd_item<3>>;
-              
-              size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
-              sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
-              
-              sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
-              sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
-        
+              sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
+              sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
+  
       cgh.parallel_for(
         sycl::nd_range<3>(sycl::range<3>(1, 1, (n+tile_size-1)/tile_size) * sycl::range<3>(1, 1, 64), sycl::range<3>(1, 1, 64)), 
         [=](sycl::nd_item<3> item_ct1) {
-          kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>(code, A, absmax, out, blocksize, n, item_ct1, tacc, dacc_A, dacc_out);
+          if(DATA_TYPE > 0){
+          kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>(code, A, absmax, out, blocksize/2, n, item_ct1, tacc, dacc_A, dacc_out, dacc_code, dacc_absmax); }
+          else{
+          kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>(code, A, absmax, out, blocksize, n, item_ct1, tacc, dacc_A, dacc_out, dacc_code, dacc_absmax);
+          }
         });
+        
       });
-    }
-
+ 
 }
 
 
