@@ -1644,11 +1644,10 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
   int size = NUM_BLOCK;
   
   sycl::buffer<sycl::half, 1> buff_A(A,sycl::range<1>(size));
-
-  if(nnz_threshold == 0.0)
-    {
-    
-			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+  sycl::buffer<int, 1> buff_nnz_count_row(nnz_count_row,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_rowStats(rowStats,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_colStats(colStats,sycl::range<1>(size));
+  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
             
@@ -1656,7 +1655,9 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
             size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
             sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
-            
+            sycl::accessor dacc_rowStats(buff_rowStats, cgh, sycl::read_write);
+            sycl::accessor dacc_colStats(buff_colStats, cgh, sycl::read_write);
+            sycl::accessor dacc_nnz_count_row(buff_nnz_count_row, cgh, sycl::read_write);
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
 			      sycl::local_accessor<int, 1> smem_row_nnz_values_acc_ct1(sycl::range<1>(256), cgh);
@@ -1665,35 +1666,20 @@ void getColRowStats(sycl::half * A, float *rowStats, float *colStats, int *nnz_c
        cgh.parallel_for(      
             sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
             [=](sycl::nd_item<3> item_ct1) {
+            if(nnz_threshold == 0.0){
               kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
-               nnz_count_row,    nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, dacc_A);
+               nnz_count_row,    nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, 
+               smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, 
+               dacc_A, dacc_rowStats, dacc_colStats, dacc_nnz_count_row);
+               }
+            else if(nnz_threshold != 0.0){
+              kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
+             nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, 
+             smem_row_absmax_values_acc_ct1.get_pointer(),smem_row_nnz_values_acc_ct1.get_pointer(), 
+             tacc, dacc_A, dacc_rowStats, dacc_colStats, dacc_nnz_count_row);
+            }
             });
        });
-    }
-  else if(nnz_threshold != 0.0)
-    {
-      dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
-      q_ct1.submit(
-		    [&](sycl::handler &cgh) {
-            
-            using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, sycl::half,  sycl::half *, sycl::nd_item<3>>;
-            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
-            sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
-            sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
-            
-            //__shared__ vars
-            sycl::local_accessor<float, 1> smem_row_absmax_values_acc_ct1(sycl::range<1>(256), cgh);
-			      sycl::local_accessor<int, 1> smem_row_nnz_values_acc_ct1(sycl::range<1>(256), cgh);
-               
-                        
-      cgh.parallel_for(      
-          sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
-          [=](sycl::nd_item<3> item_ct1) {
-            kgetColRowStats<sycl::half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0>(A, rowStats, colStats,
-             nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols,item_ct1, smem_row_absmax_values_acc_ct1.get_pointer(), smem_row_nnz_values_acc_ct1.get_pointer(), tacc, dacc_A);
-      });
-    });
-    }
 
 }
 

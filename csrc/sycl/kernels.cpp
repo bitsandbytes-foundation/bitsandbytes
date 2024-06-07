@@ -2787,7 +2787,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
 //==========================k get row col stats==========================================
 
-template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,  const sycl::nd_item<3> &item_ct1, float *smem_row_absmax_values, int *smem_row_nnz_values, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A)
+template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,  const sycl::nd_item<3> &item_ct1, float *smem_row_absmax_values, int *smem_row_nnz_values, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl_dacc &dacc_nnz_count_row)
 {
   // 0. reset stats to -FLT_MAX
   // 1. load row-by-row ITEMS_PER_THREAD (TILE_SIZE==THREADS*ITEMS_PER_THREAD)
@@ -2803,7 +2803,7 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   const int base_col = (item_ct1.get_group(2)*TILE_COLS) % tiledCols;
   const int base_idx = (base_row*cols) + base_col;
   const int items_per_load = ITEMS_PER_THREAD*THREADS;
-
+  //rowStats //colStats // nnz
   
   using group_load = dpct::group::workgroup_load<ITEMS_PER_THREAD, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
   using group_exchange = dpct::group::exchange<float, ITEMS_PER_THREAD>;
@@ -2934,22 +2934,22 @@ template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
     if(base_col+item_ct1.get_local_id(2)+(j*THREADS) < cols)
     {
-      float val = colStats[base_col+(item_ct1.get_local_id(2)+(j*THREADS))];
+      float val = dacc_colStats[base_col+(item_ct1.get_local_id(2)+(j*THREADS))];
       if(val < local_col_absmax_values[j])
-        atomicMax(&colStats[base_col+(item_ct1.get_local_id(2)+(j*THREADS))], local_col_absmax_values[j]);
+        atomicMax(&dacc_colStats[base_col+(item_ct1.get_local_id(2)+(j*THREADS))], local_col_absmax_values[j]);
     }
 
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
     if(base_row+item_ct1.get_local_id(2)+(j*THREADS) < rows)
     {
-      float val = rowStats[base_row+(item_ct1.get_local_id(2)+(j*THREADS))];
+      float val = dacc_rowStats[base_row+(item_ct1.get_local_id(2)+(j*THREADS))];
       if(val < smem_row_absmax_values[item_ct1.get_local_id(2)+(j*THREADS)])
-        atomicMax(&rowStats[base_row+(item_ct1.get_local_id(2)+(j*THREADS))], smem_row_absmax_values[item_ct1.get_local_id(2)+(j*THREADS)]);
+        atomicMax(&dacc_rowStats[base_row+(item_ct1.get_local_id(2)+(j*THREADS))], smem_row_absmax_values[item_ct1.get_local_id(2)+(j*THREADS)]);
     }
 
     if(SPARSE_DECOMP)
       if(item_ct1.get_local_id(2) < TILE_ROWS)
-        nnz_count_row[item_ct1.get_group(2)*TILE_ROWS+item_ct1.get_local_id(2)+1] = smem_row_nnz_values[item_ct1.get_local_id(2)];
+        dacc_nnz_count_row[item_ct1.get_group(2)*TILE_ROWS+item_ct1.get_local_id(2)+1] = smem_row_nnz_values[item_ct1.get_local_id(2)];
 
 }
 
@@ -4752,8 +4752,8 @@ template void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(sycl::half *__restrict__ co
 
 
 
-template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 0>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_absmax_values, int *smem_row_nnz_values, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A);
-template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 1>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_absmax_values, int *smem_row_nnz_values, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A);
+template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 0>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_absmax_values, int *smem_row_nnz_values, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl_dacc &dacc_nnz_count_row);
+template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 1>(sycl::half * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_absmax_values, int *smem_row_nnz_values, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl_dacc &dacc_nnz_count_row);
 
 template unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
