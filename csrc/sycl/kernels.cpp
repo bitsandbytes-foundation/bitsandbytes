@@ -508,17 +508,20 @@ __dpct_inline__ unsigned char quantize_quadrant(int QUADRANT, float *__restrict_
 
 //=====================================histogram 2d====================
 SYCL_EXTERNAL void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n,
-                            const sycl::nd_item<3> &item_ct1)
+                            const sycl::nd_item<3> &item_ct1, const sycl_dacc_float &dacc_histogram, const sycl_dacc &dacc_index1, 
+                            const sycl_dacc &dacc_index2, const sycl_dacc_float &dacc_src)
 {
   const int tid = item_ct1.get_local_id(2) + (item_ct1.get_local_range(2)*item_ct1.get_group(2));
   const int numThreads = item_ct1.get_local_range(2)*item_ct1.get_group_range(2);
 
   for(int i = tid; i < n; i+=numThreads)
   {
-      int idx = (index1[i]*maxidx1) + index2[i];
-      dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&histogram[idx], src[i]);
+      int idx = (dacc_index1[i]*maxidx1) + dacc_index2[i];
+      dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&dacc_histogram[idx], dacc_src[i]);
   }
 }
+
+
 
 //===========================k compress max==========================
 
@@ -639,7 +642,7 @@ typedef sycl::accessor<char, 1> sycl_dacc_char;
 template<typename T>
 SYCL_EXTERNAL 
 void kEstimateQuantiles(const T *A, float *code, const float offset, const T max_val, const int n,
-                        const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A)
+                        const sycl::nd_item<3> &item_ct1, sycl_la tacc, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_float &dacc_code)
 {
   const int n_full = (BLOCK_ESTIMATE*(n/BLOCK_ESTIMATE)) + (n % BLOCK_ESTIMATE == 0 ? 0 : BLOCK_ESTIMATE);
   int valid_items = (item_ct1.get_group(2)+1 == item_ct1.get_group_range(2)) ? n - (item_ct1.get_group(2)*BLOCK_ESTIMATE) : BLOCK_ESTIMATE;
@@ -647,7 +650,7 @@ void kEstimateQuantiles(const T *A, float *code, const float offset, const T max
   const float reciprocal_num_blocks = 1.0f/(n < 4096 ? 1.0f : (n/BLOCK_ESTIMATE));
   
   using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
-  using group_radix_sort = dpct::group::radix_sort<int, NUM_ESTIMATE>;
+  //using group_radix_sort = dpct::group::radix_sort<int, NUM_ESTIMATE>;
         
   T vals[NUM_ESTIMATE];
   auto *d_A = dacc_A.template get_multi_ptr<sycl::access::decorated::yes>().get();
@@ -719,7 +722,7 @@ void kEstimateQuantiles(const T *A, float *code, const float offset, const T max
       for(int i = item_ct1.get_local_id(2); i < BLOCK_ESTIMATE; i+=item_ct1.get_local_range(2))
       {
           if(smem_qidx[i] != -1)
-              dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&code[smem_qidx[i]], vals[i/THREADS_ESTIMATE]);
+              dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&dacc_code[smem_qidx[i]], vals[i/THREADS_ESTIMATE]);
       }
       
   }
@@ -1606,7 +1609,10 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
                 const float gnorm_scale, const int n,
                 const sycl::nd_item<3> &item_ct1, 
                 float* smem_quantiles1, float* smem_quantiles2,
-                const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2)
+                const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2,
+                const sycl_dacc_float &dacc_unorm, const sycl_dacc_float &dacc_quantiles1, const sycl_dacc_float &dacc_quantiles2,
+                const sycl_dacc_float &dacc_max1, const sycl_dacc_float &dacc_max2, const sycl_dacc_float &dacc_new_max1, 
+                const sycl_dacc_float &dacc_new_max2)
 {
     const int n_full = item_ct1.get_group_range(2) * NUM_PER_BLOCK;
     const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
@@ -1631,8 +1637,8 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
   
     if(item_ct1.get_local_id(2) < 256)
     {
-        smem_quantiles1[item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
-        smem_quantiles2[item_ct1.get_local_id(2)] = quantiles2[item_ct1.get_local_id(2)];
+        smem_quantiles1[item_ct1.get_local_id(2)] = dacc_quantiles1[item_ct1.get_local_id(2)];
+        smem_quantiles2[item_ct1.get_local_id(2)] = dacc_quantiles2[item_ct1.get_local_id(2)];
     }
 
    
@@ -1681,7 +1687,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
         {
             g_val = g_vals[j];
             g_val *= gnorm_scale;
-            s1_vals[j] = smem_quantiles1[m_c1[j]]*max1[0]*beta1;
+            s1_vals[j] = smem_quantiles1[m_c1[j]]*dacc_max1[0]*beta1;
             s1_vals[j] += (1.0f-beta1)*g_val;
             local_max_s1 = sycl::fmax(local_max_s1, sycl::fabs(s1_vals[j]));
         }
@@ -1691,7 +1697,7 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
         {
             g_val = g_vals[j];
             g_val *= gnorm_scale;
-            s2_vals[j] = smem_quantiles2[r_c2[j]]*max2[0]*beta2;
+            s2_vals[j] = smem_quantiles2[r_c2[j]]*dacc_max2[0]*beta2;
             s2_vals[j] += (1.0f-beta2)*g_val*g_val;
             local_max_s2 = sycl::fmax(local_max_s2, sycl::fabs(s2_vals[j]));
         }
@@ -1729,15 +1735,16 @@ kPreconditionOptimizerStatic8bit2State(T* p, T* __restrict__ const g, unsigned c
 
     if(item_ct1.get_local_id(2) == 0)
     {
-        atomicMax(&new_max1[0], local_max_s1);
-        atomicMax(&new_max2[0], local_max_s2);
-        if(unorm != NULL){ dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&unorm[0], local_unorm); }
+        atomicMax(&dacc_new_max1[0], local_max_s1);
+        atomicMax(&dacc_new_max2[0], local_max_s2);
+        if(unorm != NULL){ dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&dacc_unorm[0], local_unorm); }
     }
 }
 
 #define NUM_PER_THREAD2 4
 #define NUM_THREADS2 1024
 #define NUM_PER_BLOCK2 4096
+
 
 template<typename T, int OPTIMIZER>
 SYCL_EXTERNAL void
@@ -1752,7 +1759,10 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
                 const float gnorm_scale, const int n,
                 const sycl::nd_item<3> &item_ct1, float* smem_quantiles1, float* smem_quantiles2,
                 const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl::accessor<T, 1> &dacc_p,
-                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2
+                const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2, const sycl_dacc_float &dacc_unorm,
+                const sycl_dacc_float &dacc_quantiles1, const sycl_dacc_float &dacc_quantiles2,
+                const sycl_dacc_float &dacc_max1, const sycl_dacc_float &dacc_max2, const sycl_dacc_float &dacc_new_max1, 
+                const sycl_dacc_float &dacc_new_max2
                 )
 {
 
@@ -1766,13 +1776,13 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
     const float correction2 = sycl::sqrt(1.0f - dpct::pow(beta2, step));
     const float step_size = -lr*correction2/correction1;
     //const float step_size = -lr*correction2/correction1;
-    float new_max_val1 = 1.0f/new_max1[0];
-    float new_max_val2 = 1.0f/new_max2[0];
+    float new_max_val1 = 1.0f/dacc_new_max1[0];
+    float new_max_val2 = 1.0f/dacc_new_max2[0];
     float update_scale = 1.0f;
 
     if(max_unorm > 0.0f)
     {
-      update_scale = max_unorm > 0.0f ? sycl::sqrt((float)(unorm[0])) : 1.0f;
+      update_scale = max_unorm > 0.0f ? sycl::sqrt((float)(dacc_unorm[0])) : 1.0f;
       if(update_scale > max_unorm*param_norm){ update_scale = (max_unorm*param_norm)/update_scale; }
       else{ update_scale = 1.0f; }
     }
@@ -1799,9 +1809,9 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
     if(item_ct1.get_local_id(2) < 512)
     {
         if(item_ct1.get_local_id(2) < 256)
-            smem_quantiles1[item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
+            smem_quantiles1[item_ct1.get_local_id(2)] = dacc_quantiles1[item_ct1.get_local_id(2)];
         else
-            smem_quantiles2[item_ct1.get_local_id(2)-256] = quantiles2[item_ct1.get_local_id(2)-256];
+            smem_quantiles2[item_ct1.get_local_id(2)-256] = dacc_quantiles2[item_ct1.get_local_id(2)-256];
     }
 
    
@@ -1863,7 +1873,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
             g_val = float(g_vals[j]);
             g_val *= gnorm_scale;
             s1_vals[j] = smem_quantiles1[c1s[j]];
-            s1_vals[j] = s1_vals[j]*max1[0];
+            s1_vals[j] = s1_vals[j]*dacc_max1[0];
 
             s1_vals[j] = (s1_vals[j]*beta1) + (((1.0f-beta1)*g_val));
 
@@ -1880,7 +1890,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
             }
 
             s2_vals[j] = smem_quantiles2[c2s[j]];
-            s2_vals[j] = s2_vals[j]*max2[0];
+            s2_vals[j] = s2_vals[j]*dacc_max2[0];
             s2_vals[j] = (s2_vals[j]*beta2) + (((1.0f-beta2)*g_val*g_val));
             c2s[j] = dQuantize<0>(smem_quantiles2, 0.0f, s2_vals[j]*new_max_val2);
         }
@@ -1940,7 +1950,9 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
                 const float gnorm_scale, const int n,
                 const sycl::nd_item<3> &item_ct1,
                 float* smem_quantiles1,
-                const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1)
+                const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_uc &dacc_state1,
+                const sycl_dacc_float &dacc_unorm, const sycl_dacc_float &dacc_quantiles1, 
+                const sycl_dacc_float &dacc_max1, const sycl_dacc_float &dacc_new_max1)
 {
     const int n_full = item_ct1.get_group_range(2) * NUM_PER_BLOCK;
     const int base_idx = (item_ct1.get_group(2) * item_ct1.get_local_range(2) * NUM_PER_THREAD);
@@ -1960,7 +1972,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
   auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
   
   if(item_ct1.get_local_id(2) < 256)
-      smem_quantiles1[item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
+      smem_quantiles1[item_ct1.get_local_id(2)] = dacc_quantiles1[item_ct1.get_local_id(2)];
 
     
     item_ct1.barrier(sycl::access::fence_space::local_space);
@@ -1996,7 +2008,7 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
         {
             g_val = g_vals[j];
             g_val *= gnorm_scale;
-            s1_vals[j] = smem_quantiles1[m_c1[j]]*max1[0];
+            s1_vals[j] = smem_quantiles1[m_c1[j]]*dacc_max1[0];
             switch(OPTIMIZER)
             {
                 case MOMENTUM:
@@ -2023,14 +2035,14 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
     item_ct1.barrier(sycl::access::fence_space::local_space);
     
     local_max_s1 = sycl::reduce_over_group(item_ct1.get_group(), local_max_s1, sycl::maximum<>());
-    if(item_ct1.get_local_id(2) == 0){ atomicMax(&new_max1[0], local_max_s1); }
+    if(item_ct1.get_local_id(2) == 0){ atomicMax(&dacc_new_max1[0], local_max_s1); }
     if(unorm != NULL)
     {
       
       item_ct1.barrier(sycl::access::fence_space::local_space);
       
       local_unorm = sycl::reduce_over_group(item_ct1.get_group(), local_unorm, sycl::plus<>());
-      if(item_ct1.get_local_id(2) == 0){ dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&unorm[0], local_unorm); }
+      if(item_ct1.get_local_id(2) == 0){ dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&dacc_unorm[0], local_unorm); }
     }
 
 }
@@ -2046,9 +2058,11 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 float* max1, float* new_max1,
                 float weight_decay,
                 const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1,float *smem_quantiles1, const sycl_la &tacc,
+                const sycl::nd_item<3> &item_ct1,float *smem_quantiles1, const sycl_la tacc,
                 const sycl::accessor<T, 1> &dacc_g, const sycl::accessor<T, 1> &dacc_p,
-                const sycl_dacc_uc &dacc_state1)
+                const sycl_dacc_uc &dacc_state1, 
+                const sycl_dacc_float &dacc_unorm, const sycl_dacc_float &dacc_quantiles1, 
+                const sycl_dacc_float &dacc_max1, const sycl_dacc_float &dacc_new_max1)
 {
 
     const int n_full = (item_ct1.get_local_range(2) * item_ct1.get_group_range(2))*NUM_PER_THREAD2;
@@ -2056,12 +2070,12 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
     int valid_items = 0;
     float g_val = 0.0f;
     float s1_vals[NUM_PER_THREAD2];
-    float new_max_val1 = 1.0f/new_max1[0];
+    float new_max_val1 = 1.0f/dacc_new_max1[0];
     float update_scale = 1.0f;
 
     if(max_unorm > 0.0f)
     {
-      update_scale = max_unorm > 0.0f ? sycl::sqrt((float)(unorm[0])) : 1.0f;
+      update_scale = max_unorm > 0.0f ? sycl::sqrt((float)(dacc_unorm[0])) : 1.0f;
       if(update_scale > max_unorm*param_norm){ update_scale = (max_unorm*param_norm)/update_scale; }
       else{ update_scale = 1.0f; }
     }
@@ -2087,7 +2101,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
     
     
     if(item_ct1.get_local_id(2) < 256)
-        smem_quantiles1[item_ct1.get_local_id(2)] = quantiles1[item_ct1.get_local_id(2)];
+        smem_quantiles1[item_ct1.get_local_id(2)] = dacc_quantiles1[item_ct1.get_local_id(2)];
 
     
     item_ct1.barrier(sycl::access::fence_space::local_space);
@@ -2149,7 +2163,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
               }
             }
 
-            s1_vals[j] = smem_quantiles1[c1s[j]]*max1[0];
+            s1_vals[j] = smem_quantiles1[c1s[j]]*dacc_max1[0];
 
             switch(OPTIMIZER)
             {
@@ -3835,6 +3849,7 @@ template <typename T, typename TCAST, int ITEMS> inline void vector_load(T *loca
 
 #define WARPS 3
 
+
 template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc, const sycl::nd_item<3> &item_ct1, T *smem_A, T *smem_B, const sycl::accessor<T, 1> &dacc_A, const sycl::accessor<T, 1> &dacc_B, const sycl::accessor<T, 1> &dacc_out)
 {
 
@@ -4034,7 +4049,7 @@ template <typename T, int BITS, int THREADS> SYCL_EXTERNAL void gemm_device(int 
     
         
         //wmma::load_matrix_sync(b_frag, &(smem_B[(ticktock*batch_size_warps + k)*b_tile_offset]), 16); // 35 mu
-        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, a_frag,  d_B, 16);
+        sycl::ext::oneapi::experimental::matrix::joint_matrix_load(sg_size, b_frag,  d_B, 16);
     
         //wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
         sycl::ext::oneapi::experimental::matrix::joint_matrix_mad(sg_size, c_frag, a_frag, b_frag, c_frag);
@@ -4099,7 +4114,6 @@ template void printnonzero<sycl::half>(sycl::half *A, int num_values, const char
 const float nf4_data[16] = {-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0};
 
 
-
 template <typename T, int THREADS> SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *smem_A, unsigned char *smem_B, T *smem_C,
 const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out)
 {
@@ -4158,12 +4172,12 @@ const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::acce
   {
     if(loaded_values == 0)
     {
-      local_A[0] = A[idx];
-      local_A[1] = A[idx+item_ct1.get_local_range(2)-32];
+      local_A[0] = dacc_A[idx];
+      local_A[1] = dacc_A[idx+item_ct1.get_local_range(2)-32];
 
       #pragma unroll 32
       for(int col = 0; col < 32; col++)
-        local_B_4bit[col] = B[(col_offset+col)*ldb+idx];
+        local_B_4bit[col] = dacc_B[(col_offset+col)*ldb+idx];
 
       loaded_values = 1;
     }
@@ -4224,14 +4238,14 @@ const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::acce
     {
       if(loaded_values == 0)
       {
-        local_A[0] = A[idx];
-        local_A[1] = A[idx+item_ct1.get_local_range(2)-32];
+        local_A[0] = dacc_A[idx];
+        local_A[1] = dacc_A[idx+item_ct1.get_local_range(2)-32];
 
         #pragma unroll 32
         for(int col = 0; col < 32; col++)
         {
-          local_B_4bit[col] = B[(col_offset+col)*ldb+idx];
-          local_B_4bit[col+16] = B[(col_offset+col)*ldb+idx];
+          local_B_4bit[col] = dacc_B[(col_offset+col)*ldb+idx];
+          local_B_4bit[col+16] = dacc_B[(col_offset+col)*ldb+idx];
         }
 
         loaded_values = 1;
@@ -4353,19 +4367,21 @@ const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::acce
 }
 
 
+
+
 //=========================================4 bit gemm naive===============
 
 
 #define num_values_4bit 32
 
-template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *quant_map, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out)
+template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *quant_map, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out, const sycl_dacc_float &dacc_absmax, const sycl_dacc_float &dacc_datatype)
 {
 
   // per threadblock:
   // load step-by-step in chunks of [32,warps]: 1x32 * [32,warps] -> [1,warps]
   // 4 warps -> 4 loads per iter
   // 1x32 * 32x4 -> 1x4 outputs per thread block
-
+   // datatype absmax 
   const int warp_idx = item_ct1.get_local_id(2) / 32;
   const int warp_lane = item_ct1.get_local_id(2) % 32;
   const int row_B = (THREADS/32)*item_ct1.get_group(2) + warp_idx;
@@ -4379,7 +4395,7 @@ template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_infer
 	T local_absmax = T(0.0f);
 
   for(int i = item_ct1.get_local_id(2); i < 16; i++)
-    quant_map[i] = T(datatype[i]);
+    quant_map[i] = T(dacc_datatype[i]);
   item_ct1.barrier(sycl::access::fence_space::local_space);
 
   // A: [1, K]
@@ -4390,7 +4406,7 @@ template <typename T, int THREADS, int BITS> SYCL_EXTERNAL void kgemm_4bit_infer
     int offset_B = ldb*row_B;
     int absidx = ((2*offset_B)+inner_idx)/blocksize;
 	  
-	  local_absmax =  absmax[absidx];
+	  local_absmax =  dacc_absmax[absidx];
 
     if(row_B < M)
     {
@@ -4492,82 +4508,162 @@ template SYCL_EXTERNAL void kfunc<float, _MUL>(float *A, float *B, float value, 
 //template __global__ void gemm_device<float, 16, 128>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
 template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 256>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                          const sycl::nd_item<3> &item_ct1,
-                                         sycl::half *smem_A, sycl::half *smem_B);
+                                         sycl::half *smem_A, sycl::half *smem_B,
+                                         const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
+                                         
 template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 192>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                          const sycl::nd_item<3> &item_ct1,
-                                         sycl::half *smem_A, sycl::half *smem_B);
+                                         sycl::half *smem_A, sycl::half *smem_B,
+                                         const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
+                                         
 template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 160>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                          const sycl::nd_item<3> &item_ct1,
                                          sycl::half *smem_A, sycl::half *smem_B);
 template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 128>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                          const sycl::nd_item<3> &item_ct1,
-                                         sycl::half *smem_A, sycl::half *smem_B);
+                                         sycl::half *smem_A, sycl::half *smem_B,
+                                         const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
+                                         
 //template __global__ void gemm_device<float, 16, 32>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
 template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 32>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                         const sycl::nd_item<3> &item_ct1,
-                                        sycl::half *smem_A, sycl::half *smem_B);
+                                        sycl::half *smem_A, sycl::half *smem_B,
+                                        const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
+                                         
 template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 64>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                         const sycl::nd_item<3> &item_ct1,
-                                        sycl::half *smem_A, sycl::half *smem_B);
+                                        sycl::half *smem_A, sycl::half *smem_B,
+                                        const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
+                                         
 template SYCL_EXTERNAL void gemm_device<sycl::half, 32, 96>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                         const sycl::nd_item<3> &item_ct1,
-                                        sycl::half *smem_A, sycl::half *smem_B);
+                                        sycl::half *smem_A, sycl::half *smem_B,
+                                        const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
 // these are not used and make no sense, but the compiler needs them
 
 //template __global__ void gemm_device<float, 32, 128>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
 template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 256>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                          const sycl::nd_item<3> &item_ct1,
-                                         sycl::half *smem_A, sycl::half *smem_B);
+                                         sycl::half *smem_A, sycl::half *smem_B,
+                                         const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
+                                         
 template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 192>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                          const sycl::nd_item<3> &item_ct1,
-                                         sycl::half *smem_A, sycl::half *smem_B);
+                                         sycl::half *smem_A, sycl::half *smem_B,
+                                         const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
 template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 160>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                          const sycl::nd_item<3> &item_ct1,
-                                         sycl::half *smem_A, sycl::half *smem_B);
+                                         sycl::half *smem_A, sycl::half *smem_B,
+                                         const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);;
 template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 128>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                          const sycl::nd_item<3> &item_ct1,
-                                         sycl::half *smem_A, sycl::half *smem_B);
+                                         sycl::half *smem_A, sycl::half *smem_B,
+                                         const sycl::accessor<T, 1> &dacc_A, 
+                                         const sycl::accessor<T, 1> &dacc_B, 
+                                         const sycl::accessor<T, 1> &dacc_out);
 //template __global__ void gemm_device<float, 32, 32>(int M, int N, int K, float * __restrict__ const A,  float* B,  float * out,  int lda, int ldb, int ldc);
 template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 32>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                         const sycl::nd_item<3> &item_ct1,
-                                        sycl::half *smem_A, sycl::half *smem_B);
+                                        sycl::half *smem_A, sycl::half *smem_B,
+                                        const sycl::accessor<T, 1> &dacc_A, 
+                                        const sycl::accessor<T, 1> &dacc_B, 
+                                        const sycl::accessor<T, 1> &dacc_out);
+                                        
 template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 64>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                         const sycl::nd_item<3> &item_ct1,
-                                        sycl::half *smem_A, sycl::half *smem_B);
+                                        sycl::half *smem_A, sycl::half *smem_B,
+                                        const sycl::accessor<T, 1> &dacc_A, 
+                                        const sycl::accessor<T, 1> &dacc_B, 
+                                        const sycl::accessor<T, 1> &dacc_out);
+                                        
 template SYCL_EXTERNAL void gemm_device<sycl::half, 16, 96>(int M, int N, int K, sycl::half * __restrict__ const A,  sycl::half* B,  sycl::half * out,  int lda, int ldb, int ldc,
                                         const sycl::nd_item<3> &item_ct1,
-                                        sycl::half *smem_A, sycl::half *smem_B);
+                                        sycl::half *smem_A, sycl::half *smem_B,
+                                        const sycl::accessor<T, 1> &dacc_A, 
+                                        const sycl::accessor<T, 1> &dacc_B, 
+                                        const sycl::accessor<T, 1> &dacc_out);
 
 template SYCL_EXTERNAL void kgemm_4bit_inference<sycl::half, 96>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
                                              const sycl::nd_item<3> &item_ct1,
                                              sycl::half *smem_A,
                                              sycl::half *smem_B,
-                                             sycl::half *smem_C);
+                                             sycl::half *smem_C,
+                                             const sycl::accessor<T, 1> &dacc_A,
+                                             const sycl_dacc_uc &dacc_B, 
+                                             const sycl::accessor<T, 1> &dacc_out);
+                                             
 template SYCL_EXTERNAL void kgemm_4bit_inference<sycl::half, 128>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
                                               const sycl::nd_item<3> &item_ct1,
                                               sycl::half *smem_A,
                                               sycl::half *smem_B,
-                                              sycl::half *smem_C);
+                                              sycl::half *smem_C,
+                                              const sycl::accessor<T, 1> &dacc_A,
+                                              const sycl_dacc_uc &dacc_B, 
+                                              const sycl::accessor<T, 1> &dacc_out);
+                                              
 template SYCL_EXTERNAL void kgemm_4bit_inference<sycl::half, 160>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
                                               const sycl::nd_item<3> &item_ct1,
                                               sycl::half *smem_A,
                                               sycl::half *smem_B,
-                                              sycl::half *smem_C);
+                                              sycl::half *smem_C,
+                                              const sycl::accessor<T, 1> &dacc_A,
+                                              const sycl_dacc_uc &dacc_B, 
+                                              const sycl::accessor<T, 1> &dacc_out);
+                                              
 template SYCL_EXTERNAL void kgemm_4bit_inference<sycl::half, 256>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
                                               const sycl::nd_item<3> &item_ct1,
                                               sycl::half *smem_A,
                                               sycl::half *smem_B,
-                                              sycl::half *smem_C);
+                                              sycl::half *smem_C,
+                                              const sycl::accessor<T, 1> &dacc_A,
+                                              const sycl_dacc_uc &dacc_B, 
+                                              const sycl::accessor<T, 1> &dacc_out);
 
 template SYCL_EXTERNAL void kgemm_4bit_inference_naive<sycl::half, 128, 16>(int M, int N, int K, sycl::half * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, sycl::half * out,  int lda, int ldb, int ldc, int blocksize,
                                                         const sycl::nd_item<3> &item_ct1,
-                                                        sycl::half *quant_map);
+                                                        sycl::half *quant_map,
+                                                        const sycl::accessor<T, 1> &dacc_A, 
+                                                        const sycl_dacc_uc &dacc_B, 
+                                                        const sycl::accessor<T, 1> &dacc_out,
+                                                        const sycl_dacc_float &dacc_absmax,
+                                                        const sycl_dacc_float &dacc_datatype);
+                                                        
 template SYCL_EXTERNAL void kgemm_4bit_inference_naive<sycl::ext::oneapi::bfloat16, 128, 16>(int M, int N, int K, sycl::ext::oneapi::bfloat16 * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, sycl::ext::oneapi::bfloat16 * out,  int lda, int ldb, int ldc, int blocksize,
-                                                                 const sycl::nd_item<3> &item_ct1,
-                                                                 sycl::ext::oneapi::bfloat16 *quant_map);
+                                                       const sycl::nd_item<3> &item_ct1,
+                                                       sycl::ext::oneapi::bfloat16 *quant_map,
+                                                       const sycl::accessor<T, 1> &dacc_A, 
+                                                        const sycl_dacc_uc &dacc_B, 
+                                                        const sycl::accessor<T, 1> &dacc_out,
+                                                        const sycl_dacc_float &dacc_absmax,
+                                                        const sycl_dacc_float &dacc_datatype);
+                                                        
 template SYCL_EXTERNAL void kgemm_4bit_inference_naive<float, 128, 32>(int M, int N, int K, float * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize,
                                                          const sycl::nd_item<3> &item_ct1,
-                                                         float *quant_map);
+                                                         float *quant_map,
+                                                         const sycl::accessor<T, 1> &dacc_A, 
+                                                        const sycl_dacc_uc &dacc_B, 
+                                                        const sycl::accessor<T, 1> &dacc_out,
+                                                        const sycl_dacc_float &dacc_absmax,
+                                                        const sycl_dacc_float &dacc_datatype);
+                                                        
                                                          
 template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<sycl::half, 8, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                                        const sycl::nd_item<3> &item_ct1,
@@ -4629,10 +4725,8 @@ template void kgetColRowStats<sycl::half, 64, 4, 16, 64*4, 1>(sycl::half * __res
 template unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
 
-template<typename T> SYCL_EXTERNAL void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n,
-                                 const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A);
-template<typename T> SYCL_EXTERNAL void kEstimateQuantiles(sycl::half *__restrict__ const A, float *code, const float offset, const sycl::half max_val, const int n,
-                                 const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A);
+template<typename T> SYCL_EXTERNAL void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n, const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_float &dacc_code);
+template<typename T> SYCL_EXTERNAL void kEstimateQuantiles(sycl::half *__restrict__ const A, float *code, const float offset, const sycl::half max_val, const int n, const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_float &dacc_code);
 
 #define MAKE_PreconditionOptimizer32bit1State(oname, gtype) \
 template SYCL_EXTERNAL void kPreconditionOptimizer32bit1State<gtype, oname, 4096, 8>(gtype* g, gtype* p, \
@@ -4697,7 +4791,8 @@ template SYCL_EXTERNAL void kPreconditionOptimizerStatic8bit1State<gtype, oname>
                 float* max1, float* new_max1,  \
                 const float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl_dacc_uc &dacc_state1); \
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1,const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_float &dacc_unorm, const sycl_dacc_float &dacc_quantiles1, \
+                const sycl_dacc_float &dacc_max1, const sycl_dacc_float &dacc_new_max1); \
 
 MAKE_PreconditionStatic8bit1State(MOMENTUM, sycl::half)
 MAKE_PreconditionStatic8bit1State(MOMENTUM, float)
@@ -4718,7 +4813,8 @@ template void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g,
                 const float gnorm_scale,  \
                 const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, const sycl_la &tacc, \
                 const sycl::accessor<gtype, 1> &dacc_g, const sycl::accessor<gtype, 1> &dacc_p, \
-                const sycl_dacc_uc &dacc_state1); \
+                const sycl_dacc_uc &dacc_state1, const sycl_dacc_float &dacc_unorm, const sycl_dacc_float &dacc_quantiles1, \
+                const sycl_dacc_float &dacc_max1, const sycl_dacc_float &dacc_new_max1); \
 
 MAKE_optimizerStatic8bit1State(MOMENTUM, sycl::half)
 MAKE_optimizerStatic8bit1State(MOMENTUM, float)
@@ -4735,7 +4831,9 @@ template void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gty
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1,  float *smem_quantiles1, float *smem_quantiles2, const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2); \
+                const int n, const sycl::nd_item<3> &item_ct1,  float *smem_quantiles1, float *smem_quantiles2, const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2,const sycl_dacc_float &dacc_unorm, const sycl_dacc_float &dacc_quantiles1, const sycl_dacc_float &dacc_quantiles2, \
+                const sycl_dacc_float &dacc_max1, const sycl_dacc_float &dacc_max2, const sycl_dacc_float &dacc_new_max1, \
+                const sycl_dacc_float &dacc_new_max2); \
 
 MAKE_PreconditionStatic8bit2State(ADAM, sycl::half)
 MAKE_PreconditionStatic8bit2State(ADAM, float)
@@ -4749,7 +4847,10 @@ template void kOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* const g,
                 float* max1, float* max2, float* new_max1, float* new_max2, \
                 float weight_decay, \
                 const float gnorm_scale,  \
-                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, float *smem_quantiles2, const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl::accessor<gtype, 1> &dacc_p, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2); \
+                const int n, const sycl::nd_item<3> &item_ct1, float *smem_quantiles1, float *smem_quantiles2, const sycl_la &tacc, const sycl::accessor<gtype, 1> &dacc_g, const sycl::accessor<gtype, 1> &dacc_p, const sycl_dacc_uc &dacc_state1, const sycl_dacc_uc &dacc_state2, const sycl_dacc_float &dacc_unorm, \
+                const sycl_dacc_float &dacc_quantiles1, const sycl_dacc_float &dacc_quantiles2, \
+                const sycl_dacc_float &dacc_max1, const sycl_dacc_float &dacc_max2, const sycl_dacc_float &dacc_new_max1, \
+                const sycl_dacc_float &dacc_new_max2); \
 
 MAKE_optimizerStatic8bit2State(ADAM, sycl::half)
 MAKE_optimizerStatic8bit2State(ADAM, float)

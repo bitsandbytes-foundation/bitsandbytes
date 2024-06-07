@@ -55,22 +55,35 @@ void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *sr
   int threads = 512;
   int num_blocks = n/threads;
   num_blocks = n % threads == 0 ? num_blocks : num_blocks + 1;
+  int size = NUM_BLOCK;
+	
+  
+  sycl::buffer<float, 1> buff_histogram(histogram,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_index1(index1,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_index2(index2,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_src(src,sycl::range<1>(size));
+  
   
   {
   dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
     q_ct1.submit(
     [&](sycl::handler &cgh) {
     
+     sycl::accessor dacc_histogram(buff_histogram, cgh, sycl::read_write);
+     sycl::accessor dacc_index1(buff_index1, cgh, sycl::read_write);
+     sycl::accessor dacc_index2(buff_index2, cgh, sycl::read_write);
+     sycl::accessor dacc_src(buff_src, cgh, sycl::read_write);
+     
+    
     cgh.parallel_for(
     sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
     [=](sycl::nd_item<3> item_ct1) {
-      kHistogramScatterAdd2D(histogram, index1, index2, src, maxidx1, n, item_ct1);
+      kHistogramScatterAdd2D(histogram, index1, index2, src, maxidx1, n, item_ct1, dacc_histogram, dacc_index1, dacc_index2, dacc_src);
       });
     });
   }
 
 }
-
 //============================estimate quantiles===============================
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
 {
@@ -78,22 +91,25 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
   sycl::queue &q_ct1 = dev_ct1.in_order_queue();
   int num_blocks = n/4096;
   num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
+  std::memset(code, 0, 256*sizeof(float));
   //DPCT_CHECK_ERROR(q_ct1.memset(code, 0, 256*sizeof(float)).wait());
   sycl::context ctx = q_ct1.get_context();
-  int size = NUM_BLOCK;
+  int size = 512;
   
   
   sycl::buffer<T, 1> buff_A(A,sycl::range<1>(size));
-  
+  sycl::buffer<float, 1> buff_code(code,sycl::range<1>(size));
   {
     dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
     q_ct1.submit(
       [&](sycl::handler &cgh) {
       
         using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, int,  int *, sycl::nd_item<3>>;
-        size_t temp_storage_size = group_radix_sort::get_local_memory_size(THREADS_ESTIMATE);  
+        //using group_radix_sort = dpct::group::radix_sort<int, NUM_ESTIMATE>;
+        size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);  
         sycl::local_accessor<uint8_t, 1> tacc(sycl::range<1>(temp_storage_size), cgh);
         sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+        sycl::accessor dacc_code(buff_code, cgh, sycl::read_write);
           
         
         auto std_numeric_limits_T_max_ct3 = std::numeric_limits<T>::max();
@@ -101,7 +117,7 @@ template <typename T> void estimateQuantiles(T *A, float *code, float offset, in
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
           [=](sycl::nd_item<3> item_ct1) {
-            kEstimateQuantiles<T>(A, code, offset, std_numeric_limits_T_max_ct3, n, item_ct1, tacc, dacc_A);
+            kEstimateQuantiles<T>(A, code, offset, std_numeric_limits_T_max_ct3, n, item_ct1, tacc, dacc_A, dacc_code);
             
           });
       });
@@ -713,18 +729,29 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
   sycl::buffer<T, 1> buff_p(p,sycl::range<1>(size));
   sycl::buffer<unsigned char, 1> buff_state1(state1,sycl::range<1>(size));
   sycl::buffer<unsigned char, 1> buff_state2(state2,sycl::range<1>(size));
+  
+  sycl::buffer<float, 1> buff_quantiles1(quantiles1,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_quantiles2(quantiles2,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_max1(max1,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_max2(max2,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_new_max1(new_max1,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_new_max2(new_max2,sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_unorm(unorm,sycl::range<1>(size));
+  
 
   if(max_unorm > 0.0f){ 
-    q_ct1.memset(unorm, 0, 1*sizeof(float)).wait(); }
+  std::memset(unorm, 0, 1*sizeof(float)); }
 
 	switch(OPTIMIZER)
 	{
 		case ADAM:
+      std::memset(new_max1, 0, 1*sizeof(float));
+      std::memset(new_max2, 0, 1*sizeof(float));
 			
       //DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
       //DPCT_CHECK_ERROR(q_ct1.memset(new_max2, 0, 1*sizeof(float)).wait());
 			{
-			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
 			      
@@ -738,6 +765,15 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
              sycl::accessor dacc_state2(buff_state2, cgh, sycl::read_write);
              
+             sycl::accessor dacc_quantiles1(buff_quantiles1, cgh, sycl::read_write);
+             sycl::accessor dacc_quantiles2(buff_quantiles2, cgh, sycl::read_write);
+             sycl::accessor dacc_max1(buff_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_max2(buff_max2, cgh, sycl::read_write);
+             sycl::accessor dacc_new_max1(buff_new_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_new_max2(buff_new_max2, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+                         
+             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);        
 			      sycl::local_accessor<float, 1> smem_quantiles2_acc_ct1(sycl::range<1>(256), cgh);
@@ -746,13 +782,13 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>(p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1, dacc_state2);
+			          kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>(p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1, dacc_state2, dacc_unorm, dacc_quantiles1, dacc_quantiles2, dacc_max1, dacc_max2, dacc_new_max1 , dacc_new_max2);
 			        });
 			    });
 			}
 			
 			{
-			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
 			      
@@ -765,6 +801,14 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
              sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
              sycl::accessor dacc_state2(buff_state2, cgh, sycl::read_write);
+             
+             sycl::accessor dacc_quantiles1(buff_quantiles1, cgh, sycl::read_write);
+             sycl::accessor dacc_quantiles2(buff_quantiles2, cgh, sycl::read_write);
+             sycl::accessor dacc_max1(buff_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_max2(buff_max2, cgh, sycl::read_write);
+             sycl::accessor dacc_new_max1(buff_new_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_new_max2(buff_new_max2, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
 
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);        
@@ -773,7 +817,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit2State<T, OPTIMIZER>(p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1, dacc_state2);
+			          kOptimizerStatic8bit2State<T, OPTIMIZER>(p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), smem_quantiles2_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1, dacc_state2, dacc_unorm, dacc_quantiles1, dacc_quantiles2, dacc_max1, dacc_max2, dacc_new_max1 , dacc_new_max2);
 			        });
 			    });
 			}
@@ -783,9 +827,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
     case RMSPROP:
     case ADAGRAD:
 			
+      std::memset(new_max1, 0, 1*sizeof(float));
       //DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
 			{
-			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
 			      
@@ -796,20 +841,25 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
              sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
              
+             sycl::accessor dacc_quantiles1(buff_quantiles1, cgh, sycl::read_write);
+             sycl::accessor dacc_max1(buff_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_new_max1(buff_new_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+             
              //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);                   
        
             cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1);
+			          kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1, dacc_unorm, dacc_quantiles1, dacc_max1, dacc_new_max1);
 			        });
 			    });
 			}
 			
 			
 			{
-			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+			  //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
 			    [&](sycl::handler &cgh) {
              
@@ -820,13 +870,19 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
              sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
              sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             
+             sycl::accessor dacc_quantiles1(buff_quantiles1, cgh, sycl::read_write);
+             sycl::accessor dacc_max1(buff_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_new_max1(buff_new_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+             
             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1);
+			          kOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1,smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1, dacc_unorm, dacc_quantiles1, dacc_max1, dacc_new_max1);
 			        });
 			    });
 			}
@@ -835,7 +891,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
     case LION:
       
       {
-        dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+        //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
           [&](sycl::handler &cgh) {
             
@@ -845,7 +901,13 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
             
              sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
              sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
-             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);            
+             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write); 
+             
+             sycl::accessor dacc_quantiles1(buff_quantiles1, cgh, sycl::read_write);
+             sycl::accessor dacc_max1(buff_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_new_max1(buff_new_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+                        
             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
@@ -853,30 +915,37 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1);
+                kOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_p, dacc_state1, dacc_unorm, dacc_quantiles1, dacc_max1, dacc_new_max1);
               });
           });
       }
-     
-      DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
+       std::memset(new_max1, 0, 1*sizeof(float));
+      //DPCT_CHECK_ERROR(q_ct1.memset(new_max1, 0, 1*sizeof(float)).wait());
       {
-        dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
+        //dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
         q_ct1.submit(
           [&](sycl::handler &cgh) {
             
             using group_load = dpct::group::workgroup_load<NUM8BIT, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
-             size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
+            size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
              sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             
              sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             
+             sycl::accessor dacc_quantiles1(buff_quantiles1, cgh, sycl::read_write);
+             sycl::accessor dacc_max1(buff_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_new_max1(buff_new_max1, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+             
+             
             //__shared__ vars
             sycl::local_accessor<float, 1> smem_quantiles1_acc_ct1(sycl::range<1>(256), cgh);
             
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1);
+                kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n, item_ct1, smem_quantiles1_acc_ct1.get_pointer(), tacc, dacc_g, dacc_state1, dacc_unorm, dacc_quantiles1, dacc_max1, dacc_new_max1);
               });
           });
       }
@@ -886,13 +955,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			break;
 	}
  
-}
-catch (sycl::exception const &exc) {
+}catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
   std::exit(1);
 }
-
-
 
 
 //============================8 bit blockwise optimizer===============================
@@ -1285,6 +1351,18 @@ catch (sycl::exception const &exc) {
   std::exit(1);
 }
 
+/*
+template int igemmlt<COL_TURING, 32, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_TURING, 8, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_TURING, 8, 1>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_AMPERE, 32, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_AMPERE, 8, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<COL_AMPERE, 8, 1>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+*/
+
+
+
+
 //===========================gemm_host============================================
 
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
@@ -1340,8 +1418,10 @@ template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out
     //gemm_device<T, 16, 96><<< num_blocks, 96, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //gemm_device<T, 16, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
     //gemm_device<T, 16, 64><<< num_blocks, 64, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-    
+   
+  
 }
+
 
 //============================gemm 4bit inference ================================
 
@@ -1392,6 +1472,8 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
   }
   
 }
+
+
 //============================gemm 4 bit inference naive =================
 
 template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize)
@@ -1407,7 +1489,8 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
   sycl::buffer<T, 1> buff_A (A, sycl::range<1>(size));
   sycl::buffer<unsigned char, 1> buff_B (B, sycl::range<1>(size));
   sycl::buffer<T, 1> buff_out (out, sycl::range<1>(size));
- 
+  sycl::buffer<float, 1> buff_absmax(absmax, sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_datatype(datatype, sycl::range<1>(size));
   
   {
     dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
@@ -1417,19 +1500,19 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
         sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
         sycl::accessor dacc_B(buff_B, cgh, sycl::read_write);
         sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);  
-        
+        sycl::accessor dacc_absmax(buff_absmax, cgh, sycl::read_write);
+        sycl::accessor dacc_datatype(buff_datatype, cgh, sycl::read_write);
         sycl::local_accessor<T, 1> quant_map_acc_ct1(sycl::range<1>(16), cgh);
 
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 128), sycl::range<3>(1, 1, 128)), 
           [=](sycl::nd_item<3> item_ct1) [[intel::reqd_sub_group_size(32)]] {
-            kgemm_4bit_inference_naive<T, 128, BITS>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, item_ct1, quant_map_acc_ct1.get_pointer(), dacc_A, dacc_B, dacc_out);
+            kgemm_4bit_inference_naive<T, 128, BITS>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, item_ct1, quant_map_acc_ct1.get_pointer(), dacc_A, dacc_B, dacc_out, dacc_absmax, dacc_datatype);
           });
       });
   }
  
 }
-
 //================================spm coo==================================
 
 void spmm_coo(int *A_rowidx, int *A_colidx, sycl::half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, sycl::half *B, int ldc, sycl::half* C, bool transposed_B)
