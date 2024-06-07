@@ -1053,17 +1053,16 @@ SYCL_EXTERNAL void kDequantize(float *code, unsigned char *buff_A, float *buff_o
 
 //===================32 bit optimizer========================
 
-
-template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 /*
 DPCT1110:1: The total declared local variable size in device function kPreconditionOptimizer32bit2State exceeds 128 bytes and may cause high register pressure. Consult with your hardware vendor to find the total register size available and adjust the code, or use smaller sub-group size to avoid high register pressure.
 */
+template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 SYCL_EXTERNAL 
 void kPreconditionOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_float &dacc_state1,const sycl_dacc_float &dacc_state2,const sycl::accessor<T, 1> &dacc_g)
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_float &dacc_state1,const sycl_dacc_float &dacc_state2,const sycl::accessor<T, 1> &dacc_g, const sycl_dacc_float &dacc_unorm)
 {
 
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
@@ -1085,7 +1084,10 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
   auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_state1 = dacc_state1.get_multi_ptr<sycl::access::decorated::yes>().get();
   auto *d_state2 = dacc_state2.get_multi_ptr<sycl::access::decorated::yes>().get();
-
+  
+  
+  
+  
   for (unsigned int i = base_idx; i < n_full; i += item_ct1.get_group_range(2)*BLOCK_SIZE)
   {
       valid_items = n - i >= (BLOCK_SIZE) ? (BLOCK_SIZE) : n - i;
@@ -1134,7 +1136,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
       {
           switch(OPTIMIZER)
           {
-              case 1:
+              case ADAM:
                   s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
                   s2_vals[j] = s2_vals[j]*beta2 + ((1.0f -beta2)*(((float)g_vals[j])*((float)g_vals[j])));
                   s1_vals[j] *= correction1;
@@ -1154,7 +1156,7 @@ void kPreconditionOptimizer32bit2State(T* g, T* p,
       s1_vals[0] = sycl::reduce_over_group(item_ct1.get_group(), s1_vals[0], sycl::plus<>());
 
       if(item_ct1.get_local_id(2) == 0)
-        dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&unorm[0], s1_vals[0]);
+        dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&dacc_unorm[0], s1_vals[0]);
 
       sycl::group_barrier(item_ct1.get_sub_group());
   }
@@ -1168,7 +1170,7 @@ void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2)
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2, const sycl_dacc_float &dacc_unorm)
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
@@ -1187,7 +1189,7 @@ void kOptimizer32bit2State(T* g, T* p,
 
   if(max_unorm > 0.0f)
   {
-    update_scale = max_unorm > 0.0f ? sycl::sqrt(unorm[0]) : 1.0f;
+    update_scale = max_unorm > 0.0f ? sycl::sqrt(dacc_unorm[0]) : 1.0f;
     if(update_scale > max_unorm*param_norm){ update_scale = (max_unorm*param_norm)/update_scale; }
     else{ update_scale = 1.0f; }
   }
@@ -1270,7 +1272,7 @@ void kOptimizer32bit2State(T* g, T* p,
       {
           switch(OPTIMIZER)
           {
-              case 1:
+              case ADAM:
 									if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
 									{
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
@@ -1329,7 +1331,8 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
                 float* buff_state1, float *unorm,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const int n,
-                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl_dacc_float &dacc_state1)
+                const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl_dacc_float &dacc_state1,
+                const sycl_dacc_float &dacc_unorm)
 {
 
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
@@ -1424,7 +1427,7 @@ void kPreconditionOptimizer32bit1State(T* g, T* p,
       s1_vals[0] = sycl::reduce_over_group(item_ct1.get_group(), s1_vals[0], sycl::plus<>());
       
       if(item_ct1.get_local_id(2) == 0)
-        dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&unorm[0], s1_vals[0]);
+        dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&dacc_unorm[0], s1_vals[0]);
 
       sycl::group_barrier(item_ct1.get_sub_group());
   }
@@ -1438,7 +1441,7 @@ void kOptimizer32bit1State(T *g, T *p,
                 const float beta1, const float beta2, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
                 const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<T, 1> &dacc_g,const sycl::accessor<T, 1> &dacc_p,const
-                sycl_dacc_float &dacc_state1)
+                sycl_dacc_float &dacc_state1, const sycl_dacc_float &dacc_unorm)
 {
 
   const int n_full = ((TH*NUM_PER_THREAD)*(n/(TH*NUM_PER_THREAD))) + (n % (TH*NUM_PER_THREAD) == 0 ? 0 : (TH*NUM_PER_THREAD));
@@ -1448,7 +1451,7 @@ void kOptimizer32bit1State(T *g, T *p,
 
   if(max_unorm > 0.0f)
   {
-    update_scale = max_unorm > 0.0f ? sycl::sqrt(unorm[0]) : 1.0f;
+    update_scale = max_unorm > 0.0f ? sycl::sqrt(dacc_unorm[0]) : 1.0f;
     if(update_scale > max_unorm*param_norm+eps){ update_scale = (max_unorm*param_norm+eps)/update_scale; }
     else{ update_scale = 1.0f; }
   }
@@ -1574,7 +1577,6 @@ void kOptimizer32bit1State(T *g, T *p,
   
   }
 }
-
 
 //===================8 bit optimizer========================
 
@@ -4608,7 +4610,8 @@ template SYCL_EXTERNAL void kTransformRowToFormat<256, 8, 32, 32*8, 1, COL_AMPER
 
 template void kDoubleRowColQuant<64, 4, 16, 64*4, 0>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed, const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, const sycl::accessor<sycl::half, 1> &dacc_val, const sycl_dacc &dacc_nnz_block_ptr);
 
-template void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols, const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normed, const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, const sycl::accessor<sycl::half, 1> &dacc_val, const sycl_dacc &dacc_nnz_block_ptr);
+template void kDoubleRowColQuant<64, 4, 16, 64*4, 1>(sycl::half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, sycl::half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols,  const sycl::nd_item<3> &item_ct1, float *smem_row_stats, unsigned int *smem_nnz_row_idx, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_A, const sycl_dacc_char &dacc_out_col_normed, const sycl_dacc_char &dacc_out_row_normedconst sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+ const sycl::accessor<sycl::half, 1> &dacc_val, const sycl_dacc &dacc_nnz_block_ptr);
 
 
 
@@ -4627,7 +4630,7 @@ template<typename T> SYCL_EXTERNAL void kEstimateQuantiles(sycl::half *__restric
 template SYCL_EXTERNAL void kPreconditionOptimizer32bit1State<gtype, oname, 4096, 8>(gtype* g, gtype* p, \
                 float* state1, float *unorm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<gtype, 1> &dacc_g,const sycl_dacc_float &dacc_state1); \
+                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<gtype, 1> &dacc_g,const sycl_dacc_float &dacc_state1, const sycl_dacc_float &dacc_unorm); \
 
 MAKE_PreconditionOptimizer32bit1State(MOMENTUM, sycl::half)
 MAKE_PreconditionOptimizer32bit1State(MOMENTUM, float)
@@ -4641,7 +4644,7 @@ MAKE_PreconditionOptimizer32bit1State(ADAGRAD, float)
 
 #define MAKE_Optimizer32bit1State(oname, gtype) \
 template SYCL_EXTERNAL void kOptimizer32bit1State<gtype, oname>(gtype* g, gtype* p, float* state1, float *unorm, const float max_unorm, const float param_norm, \
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<gtype, 1> &dacc_g,const sycl::accessor<gtype, 1> &dacc_p,const sycl_dacc_float &dacc_state1); \
+    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<gtype, 1> &dacc_g,const sycl::accessor<gtype, 1> &dacc_p,const sycl_dacc_float &dacc_state1, const sycl_dacc_float &dacc_unorm); \
 
 MAKE_Optimizer32bit1State(MOMENTUM, sycl::half)
 MAKE_Optimizer32bit1State(MOMENTUM, float)
@@ -4657,7 +4660,7 @@ MAKE_Optimizer32bit1State(ADAGRAD, float)
 template SYCL_EXTERNAL void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 8>(gtype* g, gtype* p,  \
                 float* state1, float* state2, float *unorm, \
                 const float beta1, const float beta2, const float eps, const float weight_decay, \
-                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_float &dacc_state1,const sycl_dacc_float &dacc_state2,const sycl::accessor<gtype, 1> &dacc_g); \
+                const int step, const float lr, const float gnorm_scale, const int n, const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl_dacc_float &dacc_state1,const sycl_dacc_float &dacc_state2,const sycl::accessor<gtype, 1> &dacc_g, const sycl_dacc_float &dacc_unorm); \
 
 MAKE_PreconditionOptimizer32bit2State(ADAM, float)
 MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::half)
@@ -4666,15 +4669,15 @@ MAKE_PreconditionOptimizer32bit2State(ADAM, sycl::ext::oneapi::bfloat16)
 
 template SYCL_EXTERNAL void kOptimizer32bit2State<float, ADAM>(float* g, float* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<float, 1> &dacc_g, const sycl::accessor<float, 1> &dacc_p, const sycl_dacc_float &dacc_state1, const  sycl_dacc_float &dacc_state2);
+    const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<float, 1> &dacc_g, const sycl::accessor<float, 1> &dacc_p, const sycl_dacc_float &dacc_state1, const  sycl_dacc_float &dacc_state2, const sycl_dacc_float &dacc_unorm);
 
 template SYCL_EXTERNAL void kOptimizer32bit2State<sycl::half, ADAM>(sycl::half* g, sycl::half* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<sycl::half, 1> &dacc_g,const sycl::accessor<sycl::half, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2);
+    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<sycl::half, 1> &dacc_g,const sycl::accessor<sycl::half, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2, const sycl_dacc_float &dacc_unorm);
     
 template SYCL_EXTERNAL void kOptimizer32bit2State<sycl::ext::oneapi::bfloat16, ADAM>(sycl::ext::oneapi::bfloat16* g, sycl::ext::oneapi::bfloat16* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
     const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n,
-    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_g,const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2);
+    const sycl::nd_item<3> &item_ct1,const sycl_la &tacc,const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_g,const sycl::accessor<sycl::ext::oneapi::bfloat16, 1> &dacc_p,const sycl_dacc_float &dacc_state1,const  sycl_dacc_float &dacc_state2, const sycl_dacc_float &dacc_unorm);
 
 #define MAKE_PreconditionStatic8bit1State(oname, gtype) \
 template SYCL_EXTERNAL void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1,  \

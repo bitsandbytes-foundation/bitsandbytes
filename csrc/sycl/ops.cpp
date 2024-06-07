@@ -505,14 +505,14 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
   sycl::buffer<T, 1> buff_p(p,sycl::range<1>(size));
   sycl::buffer<float, 1> buff_state1(state1,sycl::range<1>(size));
   sycl::buffer<float, 1> buff_state2(state2,sycl::range<1>(size));
-  
+  sycl::buffer<float, 1> buff_unorm(unorm, sycl::range<1>(size));
   
 	switch(OPTIMIZER)
 	{
 		case ADAM:
       if(max_unorm > 0.0f)
 			{
-				
+				std::memset(unorm, 0, 1*sizeof(float));
         //DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait());
        
         {
@@ -530,11 +530,13 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
               sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
               sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
               sycl::accessor dacc_state2(buff_state2, cgh, sycl::read_write);
+              sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+              
               
               cgh.parallel_for(
                 sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
                 [=](sycl::nd_item<3> item_ct1) {
-                  kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, tacc, dacc_state1, dacc_state2, dacc_g);
+                  kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, tacc, dacc_state1, dacc_state2, dacc_g, dacc_unorm);
                 });
             });
         }
@@ -556,12 +558,14 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
             sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
             sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
             sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
-            sycl::accessor dacc_state2(buff_state2, cgh, sycl::read_write);     
+            sycl::accessor dacc_state2(buff_state2, cgh, sycl::read_write);   
+            sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+                
            
 			      cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizer32bit2State<T, OPTIMIZER>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n, item_ct1, tacc, dacc_g, dacc_p, dacc_state1, dacc_state2);
+			          kOptimizer32bit2State<T, OPTIMIZER>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n, item_ct1, tacc, dacc_g, dacc_p, dacc_state1, dacc_state2, dacc_unorm);
 			        });
 			    });
 			}
@@ -572,6 +576,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
     case ADAGRAD:
       if(max_unorm > 0.0f)
 			{
+        std::memset(unorm, 0, 1*sizeof(float));
 				//DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait());
 				
 				{
@@ -586,19 +591,19 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
             
              sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
-            
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+              
                                 
 				      
 		         cgh.parallel_for(
 				        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
 				        [=](sycl::nd_item<3> item_ct1) {
-				          kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, tacc, dacc_g, dacc_state1);
+				          kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, tacc, dacc_g, dacc_state1, dacc_unorm);
 				        });
 				    });
 				}
       }  
 
-			
 			{
 			  dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
 			  q_ct1.submit(
@@ -612,11 +617,13 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
              sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
        
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+              
          
 			       cgh.parallel_for(
 			        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
 			        [=](sycl::nd_item<3> item_ct1) {
-			          kOptimizer32bit1State<T, OPTIMIZER>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n, item_ct1, tacc, dacc_g, dacc_p, dacc_state1);
+			          kOptimizer32bit1State<T, OPTIMIZER>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n, item_ct1, tacc, dacc_g, dacc_p, dacc_state1, dacc_unorm);
 			        });
 			    });
 			}
@@ -639,11 +646,13 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
              sycl::accessor dacc_p(buff_p, cgh, sycl::read_write);
        
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+              
               
             cgh.parallel_for(
               sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 1024), sycl::range<3>(1, 1, 1024)), 
               [=](sycl::nd_item<3> item_ct1) {
-                kOptimizer32bit1State<T, OPTIMIZER>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n, item_ct1, tacc, dacc_g, dacc_p, dacc_state1);
+                kOptimizer32bit1State<T, OPTIMIZER>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n, item_ct1, tacc, dacc_g, dacc_p, dacc_state1, dacc_unorm);
               });
           });
       }
@@ -651,6 +660,7 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
 
       if(max_unorm > 0.0f)
       {
+        std::memset(unorm, 0, 1*sizeof(float));
         //DPCT_CHECK_ERROR(q_ct1.memset(unorm, 0, 1*sizeof(float)).wait());
         
         {
@@ -664,11 +674,13 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
             
              sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
              sycl::accessor dacc_state1(buff_state1, cgh, sycl::read_write);
+             sycl::accessor dacc_unorm(buff_unorm, cgh, sycl::read_write);
+              
                          
               cgh.parallel_for(
                 sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
                 [=](sycl::nd_item<3> item_ct1) {
-                  kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, tacc, dacc_g, dacc_state1);
+                  kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n, item_ct1, tacc, dacc_g, dacc_state1, dacc_unorm);
                 });
             });
         }
@@ -682,7 +694,6 @@ catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
   std::exit(1);
 }
-
 
 
 
