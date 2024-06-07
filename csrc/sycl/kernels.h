@@ -184,8 +184,8 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> extern SYCL_EX
                 const sycl_dacc_float &dacc_quantiles1,
                 const sycl_dacc_float &dacc_absmax1);
 
-
-template<typename T, int BLOCK_SIZE, int NUM_VALS> extern SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g);
+//=======================percentile clipping============================
+template<typename T, int BLOCK_SIZE, int NUM_VALS> extern SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, float *dacc_gnorm_vec);
 
 
 //===============histogram========================
@@ -194,6 +194,7 @@ extern SYCL_EXTERNAL void kHistogramScatterAdd2D(float* histogram, int *index1, 
                             const sycl::nd_item<3> &item_ct1, const sycl_dacc_float &dacc_histogram, const sycl_dacc &dacc_index1, 
                             const sycl_dacc &dacc_index2, const sycl_dacc_float &dacc_src);
 
+//====================spm=======================
 template <typename T, int SPMM_ITEMS, int BITS>
 extern SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx,
                                  int *offset_rowidx, int *rowidx, int *colidx,
@@ -201,8 +202,14 @@ extern SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_i
                                  float *__restrict__ const dequant_stats,
                                  int nnz, int rowsA, int rowsB, int colsB,
                                  const sycl::nd_item<3> &item_ct1,
-                                 sycl::half *smem_dequant_stats);
+                                 sycl::half *smem_dequant_stats,
+                                 const sycl_dacc &dacc_max_count, const sycl_dacc &dacc_max_idx,
+                                 const sycl_dacc &dacc_offset_rowidx, 
+                                 const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+                                 const sycl::accessor<sycl::half, 1> &dacc_values, const sycl::accessor<T, 1> &dacc_B, 
+                                 const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_dequant_stats);
 
+//=====================mm dequant ====================================
 template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>
 extern SYCL_EXTERNAL void kdequant_mm_int32_fp16(
     int *__restrict__ const A, float *__restrict__ const rowStats,
@@ -213,6 +220,7 @@ extern SYCL_EXTERNAL void kdequant_mm_int32_fp16(
     const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl::accessor<sycl::half, 1> &dacc_out, 
     const sycl::accessor<sycl::half, 1> &dacc_bias 
 );
+//==================k row col stats=====================
 
 template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> extern SYCL_EXTERNAL void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols,
  const sycl::nd_item<3> &item_ct1, float *smem_row_absmax_values, int *smem_row_nnz_values, const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_A);
@@ -234,20 +242,22 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS,
                         const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
                         const sycl::accessor<sycl::half, 1> &dacc_val, const sycl_dacc &dacc_nnz_block_ptr);
 
-
+//==============================k transfrom row col=====================
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT> extern SYCL_EXTERNAL void kTransformRowToFormat(char *__restrict__ const A, char *out, int rows, int cols, int tiledCols, int outRows, int outCols, const sycl::nd_item<3> &item_ct1, char *smem_data,
 const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
 
-template <int FORMAT> extern SYCL_EXTERNAL  void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+//========================k extract outliers=========================
+template <int FORMAT> extern SYCL_EXTERNAL  void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out, const sycl_dacc &dacc_idx);
 
+//=========================gemm device============================
 template <typename T, int BITS, int THREADS> extern SYCL_EXTERNAL void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc, const sycl::nd_item<3> &item_ct1, T *smem_A, T *smem_B, const sycl::accessor<T, 1> &dacc_A, const sycl::accessor<T, 1> &dacc_B, const sycl::accessor<T, 1> &dacc_out);
 
-
+//=========================gemm 4 bit inf================================
 template <typename T, int THREADS>  extern SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1,  T *smem_A, unsigned char *smem_B,
  T *smem_C, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out, const sycl::accessor<T, 1> &dacc_A,
   const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out);
  
- 
+//====================gemm 4 bit naive inf============================
 template <typename T, int THREADS, int BITS> extern SYCL_EXTERNAL  void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *quant_map, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out, const sycl_dacc_float &dacc_absmax, const sycl_dacc_float &dacc_datatype);
 
 template <typename T, int FUNC> extern SYCL_EXTERNAL void kfunc(T *A, T *B, T value, long n,

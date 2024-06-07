@@ -1084,23 +1084,27 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
     int size = NUM_BLOCK;
   
     sycl::buffer<T, 1> buff_g(g,sycl::range<1>(size));
-    q_ct1.memset(&gnorm_vec[step % 100], 0, 1*sizeof(float)).wait();
+    std::memset(&gnorm_vec[step % 100], 0, 1*sizeof(float));
+    sycl::buffer<float, 1> buff_gnorm_vec(gnorm_vec, sycl::range<1>(size));
   
   {
     dpct::has_capability_or_fail(q_ct1.get_device(), {sycl::aspect::fp16});
     q_ct1.submit(
       [&](sycl::handler &cgh) {
         
-         using group_load = dpct::group::workgroup_load<NUM_ESTIMATE, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+         using group_load = dpct_::group::workgroup_load<NUM_ESTIMATE, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
          size_t temp_storage_size = group_load::get_local_memory_size(THREADS_ESTIMATE);
          sycl::local_accessor<uint8_t, 1> tacc(temp_storage_size, cgh);
             
          sycl::accessor dacc_g(buff_g, cgh, sycl::read_write);
-                  
+         sycl::accessor dacc_gnorm_vec(buff_gnorm_vec, cgh, sycl::read_write);
+           
+          //sycl::local_accessor<float, 1> dacc_gnorm_vec(sycl::range<1>(size), cgh);
+                   
       cgh.parallel_for(    
        sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, 512), sycl::range<3>(1, 1, 512)), 
       [=](sycl::nd_item<3> item_ct1) {
-        kPercentileClipping<T, 2048, 4>(g, gnorm_vec, step, n, item_ct1, tacc, dacc_g);
+        kPercentileClipping<T, 2048, 4>(g, gnorm_vec, step, n, item_ct1, tacc, dacc_g, dacc_gnorm_vec.get_pointer());
       });
     });
   }
@@ -1288,6 +1292,7 @@ template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void trans
 
 }
 
+
 template void transform<int8_t, ROW, COL, false, 8>(int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int8_t, ROW, ROW, false, 8>( int8_t *A, int8_t *out, int dim1, int dim2);
 template void transform<int8_t, ROW, COL32, false, 8>(int8_t *A, int8_t *out, int dim1, int dim2);
@@ -1351,17 +1356,13 @@ catch (sycl::exception const &exc) {
   std::exit(1);
 }
 
-/*
+
 template int igemmlt<COL_TURING, 32, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
 template int igemmlt<COL_TURING, 8, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
 template int igemmlt<COL_TURING, 8, 1>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
 template int igemmlt<COL_AMPERE, 32, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
 template int igemmlt<COL_AMPERE, 8, 0>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
 template int igemmlt<COL_AMPERE, 8, 1>( int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-*/
-
-
-
 
 //===========================gemm_host============================================
 
@@ -1571,23 +1572,50 @@ void spmm_coo(int *A_rowidx, int *A_colidx, sycl::half *A_vals, int A_nnz, int A
 template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
 {
 
+  dpct::device_ext &dev_ct1 = dpct::get_current_device();
+  sycl::queue &q_ct1 = dev_ct1.in_order_queue();
+  sycl::context ctx = q_ct1.get_context();
+	int size = NUM_BLOCK;
+  
+  sycl::buffer<int, 1> buff_max_count(max_count,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_max_idx(max_idx,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_offset_rowidx(offset_rowidx,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_rowidx(rowidx,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_colidx(colidx,sycl::range<1>(size));
+  sycl::buffer<sycl::half, 1> buff_values(values,sycl::range<1>(size));
+  sycl::buffer<sycl::half, 1> buff_out(out,sycl::range<1>(size));
+  sycl::buffer<T, 1> buff_B(B, sycl::range<1>(size));
+  sycl::buffer<float, 1> buff_dequant_stats(dequant_stats,sycl::range<1>(size));
+  
+
   {
     dpct::has_capability_or_fail(dpct::get_in_order_queue().get_device(), {sycl::aspect::fp16});
-    dpct::get_in_order_queue().submit(
+    q_ct1.submit(
       [&](sycl::handler &cgh) {
         
+         sycl::accessor dacc_max_count(buff_max_count, cgh, sycl::read_write);
+         sycl::accessor dacc_max_idx(buff_max_idx, cgh, sycl::read_write);
+         sycl::accessor dacc_offset_rowidx(buff_offset_rowidx, cgh, sycl::read_write);
+         sycl::accessor dacc_colidx(buff_colidx, cgh, sycl::read_write);
+         sycl::accessor dacc_rowidx(buff_rowidx, cgh, sycl::read_write);
+         sycl::accessor dacc_values(buff_values, cgh, sycl::read_write);
+         sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+         sycl::accessor dacc_dequant_stats(buff_dequant_stats, cgh, sycl::read_write);
+         sycl::accessor dacc_B(buff_B, cgh, sycl::read_write);
+         
+        
+        //smem
         sycl::local_accessor<sycl::half, 1> smem_dequant_stats_acc_ct1(sycl::range<1>(2048/*SMEM_SIZE*/), cgh);
-
+   
         cgh.parallel_for(
           sycl::nd_range<3>(sycl::range<3>(1, 1, nnz_rows) * sycl::range<3>(1, 1, 256), sycl::range<3>(1, 1, 256)), 
           [=](sycl::nd_item<3> item_ct1) {
-            kspmm_coo_very_sparse_naive<T, 8, BITS>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB, item_ct1, smem_dequant_stats_acc_ct1.get_pointer());
+            kspmm_coo_very_sparse_naive<T, 8, BITS>(max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB, item_ct1, smem_dequant_stats_acc_ct1.get_pointer(), dacc_max_count, dacc_max_idx, dacc_offset_rowidx, dacc_rowidx, dacc_colidx, dacc_values, dacc_B, dacc_out, dacc_dequant_stats);
           });
       });
   }
   
 }
-
 
 //======================================non gemm 2d quants============================================
 
@@ -1853,7 +1881,7 @@ template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *o
 
 template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int idx_size, int rows, int cols)
 {
-  int threads = 256;
+  int threads = 512;
   // we load 128 column values per warp
   int tiledCols = tiledCols = fill_up_to_nearest_multiple(cols, 32);
   int tiledRows = 0;
@@ -1875,17 +1903,21 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
   
   sycl::buffer<char, 1> buff_A(A,sycl::range<1>(size));
   sycl::buffer<char, 1> buff_out(out,sycl::range<1>(size));
+  sycl::buffer<int, 1> buff_idx(idx,sycl::range<1>(size));
   
   
   dpct::get_in_order_queue().submit(
     [&](sycl::handler &cgh) {
-     sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
+    
+      sycl::accessor dacc_A(buff_A, cgh, sycl::read_write);
      sycl::accessor dacc_out(buff_out, cgh, sycl::read_write);
+     sycl::accessor dacc_idx(buff_idx, cgh, sycl::read_write);
+     
     
     cgh.parallel_for(
       sycl::nd_range<3>(sycl::range<3>(1, 1, num_blocks) * sycl::range<3>(1, 1, threads), sycl::range<3>(1, 1, threads)), 
       [=](sycl::nd_item<3> item_ct1) {
-           kExtractOutliers<FORMAT>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols, item_ct1, dacc_A, dacc_out);
+           kExtractOutliers<FORMAT>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols, item_ct1, dacc_A, dacc_out, dacc_idx);
     });
    });
  

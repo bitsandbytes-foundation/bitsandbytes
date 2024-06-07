@@ -2225,15 +2225,14 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
 //===============================k percentile clipping============================================
 
 
-
 template<typename T, int BLOCK_SIZE, int NUM_VALS>
 SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n,
-                         const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g)
+                         const sycl::nd_item<3> &item_ct1,const sycl_la &tacc, const sycl::accessor<T, 1> &dacc_g, float *dacc_gnorm_vec)
 {
   const int n_full = (BLOCK_SIZE*(n/BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
   int valid_items = 0;
 
-   using group_load = dpct::group::workgroup_load<NUM_VALS, dpct::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
+   using group_load = dpct_::group::workgroup_load<NUM_VALS, dpct_::group::load_algorithm::BLOCK_LOAD_DIRECT, T,  T *, sycl::nd_item<3>>;
    auto *d_g = dacc_g.template get_multi_ptr<sycl::access::decorated::yes>().get();
   
   T vals[NUM_VALS];
@@ -2270,10 +2269,10 @@ SYCL_EXTERNAL void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int
         // initialize with the same norm for all positions
         //#pragma unroll 10
         for(int j = 0; j < 100; j++)
-          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&gnorm_vec[j], local_sum);
+          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&dacc_gnorm_vec[j], local_sum);
       }
       else
-          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&gnorm_vec[step % 100], local_sum);
+          dpct::atomic_fetch_add<sycl::access::address_space::generic_space>(&dacc_gnorm_vec[step % 100], local_sum);
     }
 
   }
@@ -3566,11 +3565,11 @@ const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out)
 
 //========================================k extract outliers======================
 
-template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out)
+template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA, const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out, const sycl_dacc &dacc_idx)
 {
-	int local_colidx = idx[item_ct1.get_group(2)];
+	int local_colidx = dacc_idx[item_ct1.get_group(2)];
 
-	if(FORMAT==COL_TURING)
+	if(FORMAT== COL_TURING)
 	{
 		// TURING FORMAT:
 		// 8*32 tiles with 4*4 subtiles
@@ -3622,7 +3621,7 @@ template <int FORMAT> SYCL_EXTERNAL void kExtractOutliers(char *A, int *idx, cha
 			int offset = (((subtile_row_idx%8)/2*4+subtile_row_idx/8)*2+subtile_row_idx%2)*32+subtile_col_idx;
 			offset += tile_offset_cols + tile_offset_rows;
 
-			char val = A[offset];
+			char val = dacc_A[offset];
 			int out_idx = (row*idx_size) + item_ct1.get_group(2);
 			dacc_out[out_idx] = val;
 		}
@@ -3660,7 +3659,7 @@ template <typename T, int FUNC> SYCL_EXTERNAL void kfunc(T *A, T *B, T value, lo
 template <typename T, int SPMM_ITEMS, int BITS>
 
 SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, T *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB, const sycl::nd_item<3> &item_ct1,
- sycl::half *smem_dequant_stats)
+ sycl::half *smem_dequant_stats, const sycl_dacc &dacc_max_count, const sycl_dacc &dacc_max_idx, const sycl_dacc &dacc_offset_rowidx, const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, const sycl::accessor<sycl::half, 1> &dacc_values, const sycl::accessor<T, 1> &dacc_B, const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_dequant_stats)
 {
 
   // 0. load balancing: We process rows with most columns first (count_vec)and we process one row per block
@@ -3674,10 +3673,11 @@ SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int
   // 4. Do mma operations that accumulate into registers
   // 5. Each warp stores its output row into matrix C
 
-  const int count = max_count[item_ct1.get_group(2)];
-  const int local_max_idx = max_idx[item_ct1.get_group(2)];
-  const int offset = local_max_idx == 0 ? 0 : offset_rowidx[local_max_idx-1];
-  const int local_row_idx = rowidx[offset];
+  
+  const int count = dacc_max_count[item_ct1.get_group(2)];
+  const int local_max_idx = dacc_max_idx[item_ct1.get_group(2)];
+  const int offset = local_max_idx == 0 ? 0 : dacc_offset_rowidx[local_max_idx-1];
+  const int local_row_idx = dacc_rowidx[offset];
 
   const int warp_id = item_ct1.get_local_id(2) / 32;
   const int warp_idx = item_ct1.get_local_id(2) % 32;
@@ -3696,8 +3696,8 @@ SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int
   // 2. Load A into registers
   for(int j = 0; j < MAX_SPARSE_COUNT; j++)
   {
-    local_valA[j] = j < count ? values[offset+j] : sycl::vec<float, 1>(0.0f).convert<sycl::half, sycl::rounding_mode::automatic>()[0];
-    local_colidxA[j] = j < count ? colidx[offset+j] : 0;
+    local_valA[j] = j < count ? dacc_values[offset+j] : sycl::vec<float, 1>(0.0f).convert<sycl::half, sycl::rounding_mode::automatic>()[0];
+    local_colidxA[j] = j < count ? dacc_colidx[offset+j] : 0;
   }
 
   // each thread processes SPMM_ITEMS=32 per iteration. We have 256 threads. 32*256=x192
@@ -3714,11 +3714,9 @@ SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int
     {
       for(int i = item_ct1.get_local_id(2); i < SMEM_SIZE; i+=item_ct1.get_local_range(2))
         if((idx_col_B+i-local_idx_col_B_offset) < colsB)
-          smem_dequant_stats[i] = dequant_stats[idx_col_B+i-local_idx_col_B_offset];
+          smem_dequant_stats[i] = dacc_dequant_stats[idx_col_B+i-local_idx_col_B_offset];
 
-      /*
-      DPCT1065:204: Consider replacing sycl::nd_item::barrier() with sycl::nd_item::barrier(sycl::access::fence_space::local_space) for better performance if there is no access to global memory.
-      */
+      
       item_ct1.barrier(sycl::access::fence_space::local_space);
     }
 
@@ -3750,7 +3748,7 @@ SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int
             #pragma unroll num_items
             for(int k = 0; k < num_items; k++)
               if(idx+k < colsB)
-                local_valsB[k] = B[row_offset+idx+k];
+                local_valsB[k] = dacc_B[row_offset+idx+k];
               else
                 local_valsB[k] = 0.0f;
           }
@@ -3797,7 +3795,7 @@ SYCL_EXTERNAL void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int
         #pragma unroll num_items
         for(int k = 0; k < num_items; k++)
          if(idx_col_C + k < colsB)
-           out[idx_val+k] = (float)out[idx_val+k]+(float)local_valC[j+k];
+           dacc_out[idx_val+k] = (float)out[idx_val+k]+(float)local_valC[j+k];
       }
     }
 
@@ -4667,22 +4665,57 @@ template SYCL_EXTERNAL void kgemm_4bit_inference_naive<float, 128, 32>(int M, in
                                                          
 template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<sycl::half, 8, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                                        const sycl::nd_item<3> &item_ct1,
-                                                       sycl::half *smem_dequant_stats);
+                                                       sycl::half *smem_dequant_stats,
+                                                       const sycl_dacc &dacc_max_count, const sycl_dacc &dacc_max_idx,
+                                                       const sycl_dacc &dacc_offset_rowidx, 
+                                                       const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_values, const sycl::accessor<T, 1> &dacc_B, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_dequant_stats);
+                                                       
 template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<sycl::half, 16, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                                         const sycl::nd_item<3> &item_ct1,
-                                                        sycl::half *smem_dequant_stats);
+                                                        sycl::half *smem_dequant_stats,
+                                                        const sycl_dacc &dacc_max_count, const sycl_dacc &dacc_max_idx,
+                                                       const sycl_dacc &dacc_offset_rowidx, 
+                                                       const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_values, const sycl::accessor<T, 1> &dacc_B, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_dequant_stats);
+                                                       
 template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<sycl::half, 32, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, sycl::half *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                                         const sycl::nd_item<3> &item_ct1,
-                                                        sycl::half *smem_dequant_stats);
+                                                        sycl::half *smem_dequant_stats,
+                                                        const sycl_dacc &dacc_max_count, const sycl_dacc &dacc_max_idx,
+                                                       const sycl_dacc &dacc_offset_rowidx, 
+                                                       const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_values, const sycl::accessor<T, 1> &dacc_B, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_dequant_stats);
+                                                       
 template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 8, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                                              const sycl::nd_item<3> &item_ct1,
-                                                             sycl::half *smem_dequant_stats);
+                                                             sycl::half *smem_dequant_stats,
+                                                             const sycl_dacc &dacc_max_count, const sycl_dacc &dacc_max_idx,
+                                                       const sycl_dacc &dacc_offset_rowidx, 
+                                                       const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_values, const sycl::accessor<T, 1> &dacc_B, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_dequant_stats);
+                                                       
 template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 16, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                                               const sycl::nd_item<3> &item_ct1,
-                                                              sycl::half *smem_dequant_stats);
+                                                              sycl::half *smem_dequant_stats,
+                                                              const sycl_dacc &dacc_max_count, const sycl_dacc &dacc_max_idx,
+                                                       const sycl_dacc &dacc_offset_rowidx, 
+                                                       const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_values, const sycl::accessor<T, 1> &dacc_B, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_dequant_stats);
+                                                       
 template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, sycl::half *values, signed char *B, sycl::half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB,
                                                               const sycl::nd_item<3> &item_ct1,
-                                                              sycl::half *smem_dequant_stats);
+                                                              sycl::half *smem_dequant_stats,
+                                                              const sycl_dacc &dacc_max_count, const sycl_dacc &dacc_max_idx,
+                                                       const sycl_dacc &dacc_offset_rowidx, 
+                                                       const sycl_dacc &dacc_rowidx, const sycl_dacc &dacc_colidx, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_values, const sycl::accessor<T, 1> &dacc_B, 
+                                                       const sycl::accessor<sycl::half, 1> &dacc_out, const sycl_dacc_float &dacc_dequant_stats);
 
 
 
@@ -4691,9 +4724,9 @@ template SYCL_EXTERNAL void kspmm_coo_very_sparse_naive<signed char, 32, 8>(int 
 template void kdequant_mm_int32_fp16<4, 128, 512>(int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats, sycl::half *out, float* newRowStats, float* newcolStats, sycl::half * __restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n, const sycl::nd_item<3> &item_ct1,  float *smem_rowStats, const sycl_la &tacc, const sycl_dacc &dacc_A,  const sycl_dacc_float &dacc_rowStats, const sycl_dacc_float &dacc_colStats, const sycl::accessor<sycl::half, 1> &dacc_out, const sycl::accessor<sycl::half, 1> &dacc_bias);
 
 
-template SYCL_EXTERNAL void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,   const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+template SYCL_EXTERNAL void kExtractOutliers<COL_TURING>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,   const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out,  const sycl_dacc &dacc_idx);
 
-template SYCL_EXTERNAL void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,  const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out);
+template SYCL_EXTERNAL void kExtractOutliers<COL_AMPERE>(char *A, int *idx, char *out, int idx_size, int rowsA, int colsA, int tiledRowsA, int tiledColsA,  const sycl::nd_item<3> &item_ct1, const sycl_dacc_char &dacc_A, const sycl_dacc_char &dacc_out, const sycl_dacc &dacc_idx);
 
 
 
@@ -4856,9 +4889,10 @@ MAKE_optimizerStatic8bit2State(ADAM, sycl::half)
 MAKE_optimizerStatic8bit2State(ADAM, float)
 
 template SYCL_EXTERNAL void kPercentileClipping<float, 2048, 4>(float * __restrict__ g, float *gnorm_vec, int step, const int n,
-                                                  const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<float, 1> &dacc_g);
+                                                  const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<float, 1> &dacc_g,
+                                                  float *dacc_gnorm_vec);
 template SYCL_EXTERNAL void kPercentileClipping<sycl::half, 2048, 4>(sycl::half * __restrict__ g, float *gnorm_vec, int step, const int n,
-                                                 const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_g);
+                                                 const sycl::nd_item<3> &item_ct1, const sycl_la &tacc, const sycl::accessor<sycl::half, 1> &dacc_g,                                                   float *dacc_gnorm_vec);
 
 
 #define MAKE_kQuantizeBlockwise(dtype, blocksize, num_per_thread, stochastic, data_type_name) \
