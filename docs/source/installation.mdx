@@ -1,5 +1,7 @@
 # Installation
 
+## CUDA
+
 bitsandbytes is only supported on CUDA GPUs for CUDA versions **11.0 - 12.3**.
 
 The latest version of bitsandbytes (v0.43.0) builds on:
@@ -29,7 +31,7 @@ To install from PyPI.
 pip install bitsandbytes
 ```
 
-## Compile from source
+### Compile from source
 
 For Linux and Windows systems, you can compile bitsandbytes from source. Installing from source allows for more build options with different CMake configurations.
 
@@ -58,16 +60,6 @@ Now to install the bitsandbytes package from source, run the following commands:
 git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cuda -S .
-make
-pip install .
-```
-
-If you want to install bitsandbytes with CPU backend, please run the fowllowing commands:
-```bash
-pip install intel_extention_for_pytorch
-git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/ && git checkout multi-backend-refactor
-pip install -r requirements-dev.txt
-cmake -DCOMPUTE_BACKEND=cpu -S .
 make
 pip install .
 ```
@@ -101,7 +93,7 @@ Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com
 </hfoption>
 </hfoptions>
 
-## PyTorch CUDA versions
+### PyTorch CUDA versions
 
 Some bitsandbytes features may need a newer CUDA version than the one currently supported by PyTorch binaries from Conda and pip. In this case, you should follow these instructions to load a precompiled bitsandbytes binary.
 
@@ -141,3 +133,15 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/tim/local/cuda-11.7
 ```
 
 3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 11.7) and a different bitsandbytes library is loaded.
+
+
+## Intel CPU
+To install bitsandbytes on a Intel CPU backend:
+```bash
+pip install intel_extention_for_pytorch
+git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/ && git checkout multi-backend-refactor
+pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=cpu -S .
+make
+pip install .
+```
