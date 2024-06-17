@@ -1,6 +1,6 @@
+import subprocess
 from typing import Optional
 import warnings
-import subprocess
 
 import torch
 
@@ -25,7 +25,7 @@ try:
     subprocess.run(["g++", "--version"])
     gxx_available = True
 except BaseException:
-    warnings.warn(f"g++ not found, torch.compile disabled for CPU/XPU.")
+    warnings.warn("g++ not found, torch.compile disabled for CPU/XPU.")
 
 
 Tensor = torch.Tensor
