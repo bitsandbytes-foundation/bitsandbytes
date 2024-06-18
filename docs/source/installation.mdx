@@ -176,7 +176,7 @@ git clone --branch multi-backend-refactor https://github.com/TimDettmers/bitsand
 pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cpu -S .
 cmake --build . --config Release
-python -m build --wheel
+pip install .
 ```
 
 </hfoption>
