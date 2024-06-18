@@ -137,13 +137,47 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/tim/local/cuda-11.7
 
 ## Intel CPU
 
-To install bitsandbytes on a Intel CPU backend:
+> [!TIP]
+> Intel CPU backend only supports build from source for now, please following the instruction below.
+
+Same as cuda, you can compile bitsandbytes from source for Linux and Windows systems. Installing from source allows for more build options with different CMake configurations.
+
+<hfoptions id="source">
+<hfoption id="Linux">
+
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. Make sure you have a compiler installed to compile C++ (gcc, make, headers, etc.). For example, to install a compiler and CMake on Ubuntu:
 
 ```bash
-pip install intel_extension_for_pytorch
-git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/ && git checkout multi-backend-refactor
+apt-get install -y build-essential cmake
+```
+
+We recommended you to install **GCC >= 11** and required to have at least **GCC >= 6**.
+
+Now to install the bitsandbytes package from source, run the following commands:
+
+```bash
+git clone --branch multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 pip install -r requirements-dev.txt
+pip install intel_extension_for_pytorch
 cmake -DCOMPUTE_BACKEND=cpu -S .
 make
 pip install .
 ```
+
+</hfoption>
+<hfoption id="Windows">
+
+Windows systems require Visual Studio with C++ support.
+
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed.
+
+```bash
+git clone --branch multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
+pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=cpu -S .
+cmake --build . --config Release
+python -m build --wheel
+```
+
+</hfoption>
+</hfoptions>
