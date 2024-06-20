@@ -14,6 +14,6 @@ if [ "${build_os:0:6}" == ubuntu ]; then
       && cmake --build ."
 fi
 
-#output_dir="output/${build_os}/${build_arch}"
-#mkdir -p "${output_dir}"
-#(shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} "${output_dir}")
+output_dir="output/${build_os}/${build_arch}"
+mkdir -p "${output_dir}"
+(shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} "${output_dir}")
