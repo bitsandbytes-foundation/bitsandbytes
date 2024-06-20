@@ -125,10 +125,17 @@ jobs:
         env:
           build_os: ${{ matrix.os }}
           build_arch: ${{ matrix.arch }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}
+          path: output/*
+          retention-days: 7
   build-wheels:
     needs:
       - build-shared-libs
       - build-shared-libs-cuda
+      - build-shared-libs-rocm
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
