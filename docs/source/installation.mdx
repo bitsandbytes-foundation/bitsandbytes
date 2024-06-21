@@ -100,12 +100,19 @@ Please follow these steps to install bitsandbytes with device-specific backend s
 
 For a ROCm specific install:
 
+bitsandbytes is fully supported from ROCm 6.1.
+
+**Note:** If you already installed ROCm and PyTorch, skip docker steps below and please check that the torch version matches your ROCm install. To install torch for a specific ROCm version, please refer to step 3 of wheels install in [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) guide.
+
 ```bash
-git clone --depth 1 https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
-git checkout multi-backend-refactor
+# Create a docker container with latest pytorch. It comes with ROCm and pytorch preinstalled
+docker pull rocm/pytorch:latest
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video rocm/pytorch:latest
+
+# Clone bitsandbytes repo, ROCm backend is currently enabled on multi-backend-refactor branch
+git clone --depth 1 -b multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 
 # Install dependencies
-apt install hipblaslt
 pip install -r requirements-dev.txt
 
 # Compile & install
