@@ -20,6 +20,13 @@ from .backends.npu import NPUBackend
 from .cextension import lib
 from .nn import modules
 
+# NOTE: this is a temporary flag to allow outside libraries to employ conditional logic while the refactor is still in
+# alpha/beta: sth like `if getattr(bitsandbytes, "is_multi_backend_refactor_preview", False): do sth`
+# the getattr() call above would default to False and any string evaluates to True. This way we have temporary thing
+# that we can remove in Transformers with the next release after the official BNB multi-platform release; then
+# eventually making it the new default (e.g. just remove if statement and dedent in Transformers)
+is_multi_backend_refactor_preview = "TO BE REMOVED ONCE MERGED TO `main`"  # bool evals to True for str
+
 # Always register the CPU backend.
 register_backend("cpu", CPUBackend())
 
