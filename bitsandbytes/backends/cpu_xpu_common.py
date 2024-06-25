@@ -15,6 +15,7 @@ try:
 
     ipex_cpu = ipex if ipex._C._has_cpu() else None
     ipex_xpu = ipex if ipex._C._has_xpu() else None
+    ipex_cpu_only = ipex._C._has_cpu() and (not ipex._C._has_xpu())
 except BaseException:
     ipex_cpu = None
     ipex_xpu = None
@@ -342,7 +343,7 @@ def quantize_4bit_impl(
         scaled_A_rem = torch.clamp(A_reshaped[n - rem :] * (1 / absmax[-1]), -1, 1)
         scaled_A = torch.cat([scaled_A, scaled_A_rem], dim=0)
     # map [-1, 1] to nf4/fp4
-    out_uint8 = torch.empty(scaled_A.shape, dtype=torch.uint8)
+    out_uint8 = torch.empty(scaled_A.shape, dtype=torch.uint8, device=A.device)
     if quant_type == "nf4":
         for i in range(len(NF4_QUANT_TABLE)):
             out_uint8[scaled_A > NF4_QUANT_TABLE[i]] = i
@@ -452,8 +453,10 @@ def dequantize_4bit_impl(
     out_uint8 = torch.empty(A.size(0) * 2, dtype=torch.uint8, device=A.device)
     out_uint8[::2] = A.bitwise_and(0xF)
     out_uint8[1::2] = A.bitwise_right_shift(4)
-    out_dq = torch.empty(out_uint8.shape).to(quant_state.dtype)
+    out_dq = torch.empty(out_uint8.shape).to(quant_state.dtype).to(A.device)
     for i in range(len(quant_state.code)):
+        # quant_state.code is fp32, cast to quant_state dtype to avoid the mismatch issue
+        quant_state.code = quant_state.code.to(quant_state.dtype)
         out_dq[out_uint8 == i] = quant_state.code[i]
 
     # Apply scales
