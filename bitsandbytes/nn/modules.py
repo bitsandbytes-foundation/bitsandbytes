@@ -657,7 +657,7 @@ class Int8Params(torch.nn.Parameter):
 
     def xpu(self):
         # we store the 8-bit rows-major weight
-        B = self.data.contiguous().bfloat16().cpu()
+        B = self.data.contiguous().bfloat16().xpu()
         CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
         if CBt is not None:
             del CBt
@@ -693,6 +693,12 @@ class Int8Params(torch.nn.Parameter):
                 return self
             else:
                 return self.cpu()
+        elif device.type == "xpu":
+            if self.data.dtype == torch.int8:
+                self.CB = self.data
+                return self
+            else:
+                return self.xpu()
         else:
             new_param = Int8Params(
                 super().to(device=device, dtype=dtype, non_blocking=non_blocking),
