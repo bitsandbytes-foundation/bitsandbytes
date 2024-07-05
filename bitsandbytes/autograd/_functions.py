@@ -526,7 +526,7 @@ class MatMul4Bit(torch.autograd.Function):
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
         req_gradA, _, _, req_gradBias, _ = ctx.needs_input_grad
-        None, B = ctx.tensors
+        _, B = ctx.tensors
 
         grad_A, grad_B, grad_bias = None, None, None
 
