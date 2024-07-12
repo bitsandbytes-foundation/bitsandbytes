@@ -188,9 +188,15 @@ if(WIN32)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
-# Weird MSVC hacks
 if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
+
+    # NVCC normally will only work with MSVC up to 1939.
+    # At this time, VS2022 17.10 starts using 1940.
+    # Workaround: use --allow-unsupported-compiler
+    if(BUILD_CUDA AND MSVC_VERSION VERSION_GREATER_EQUAL 1940)
+        string(APPEND CMAKE_CUDA_FLAGS " --allow-unsupported-compiler")
+    endif()
 endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
