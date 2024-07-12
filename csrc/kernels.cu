@@ -12,8 +12,6 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 #include <math_constants.h>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
 #include <mma.h>
 
 

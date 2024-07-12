@@ -9,11 +9,13 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'TimDettmers/bitsandbytes'
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     uses: huggingface/doc-builder/.github/workflows/build_pr_documentation.yml@main
     with:
       commit_sha: ${{ github.event.pull_request.head.sha }}
       pr_number: ${{ github.event.number }}
       package: bitsandbytes
-      repo_owner: TimDettmers
+      repo_owner: bitsandbytes-foundation
+      # avoid /src suffix leading to wrong links, like bitsandbytes/blob/main/src/bitsandbytes/nn/
+      version_tag_suffix: ''  # defaults to '/src'
       custom_container: huggingface/transformers-doc-builder

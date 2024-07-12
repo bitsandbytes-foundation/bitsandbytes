@@ -236,7 +236,7 @@ class Params4bit(torch.nn.Parameter):
         return self
 
     def __getstate__(self):
-        state = self.__dict__
+        state = self.__dict__.copy()
         state["data"] = self.data
         state["requires_grad"] = self.requires_grad
         return state
@@ -560,13 +560,12 @@ class Int8Params(torch.nn.Parameter):
         CB=None,
         SCB=None,
     ):
-        cls.has_fp16_weights = has_fp16_weights
-        cls.CB = None
-        cls.SCB = None
         if data is None:
             data = torch.empty(0)
         obj = torch.Tensor._make_subclass(cls, data, requires_grad)
-        obj.CB, obj.SCB = cls.CB, cls.SCB
+        obj.CB = CB
+        obj.SCB = SCB
+        obj.has_fp16_weights = has_fp16_weights
         return obj
 
     def cuda(self, device):
@@ -584,6 +583,18 @@ class Int8Params(torch.nn.Parameter):
             self.SCB = SCB
 
         return self
+
+    def __deepcopy__(self, memo):
+        # adjust this if new arguments are added to the constructor
+        new_instance = type(self).__new__(
+            type(self),
+            data=copy.deepcopy(self.data, memo),
+            requires_grad=self.requires_grad,
+            has_fp16_weights=self.has_fp16_weights,
+            CB=copy.deepcopy(self.CB, memo),
+            SCB=copy.deepcopy(self.SCB, memo),
+        )
+        return new_instance
 
     @overload
     def to(
