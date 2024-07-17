@@ -154,6 +154,49 @@ jobs:
           path: dist/bitsandbytes-*.whl
           retention-days: 7
 
+  upload-pre-release-wheels:
+    name: Create release and upload artifacts
+    runs-on: ubuntu-latest
+    needs:
+      - build-wheels
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "bdist_wheel_*/*.whl"
+          path: wheels/
+          merge-multiple: true
+      - name: Inspect directory after downloading artifacts
+        run: ls -alFR
+      - name: Rename wheels
+        run: |
+          for wheel in wheels/*.whl; do
+            if [[ $wheel == *linux*x86_64* ]]; then
+              mv "$wheel" wheels/bnb-linux-x86_64.whl
+            elif [[ $wheel == *linux*aarch64* ]]; then
+              mv "$wheel" wheels/bnb-linux-aarch64.whl
+            elif [[ $wheel == *macosx*x86_64* ]]; then
+              mv "$wheel" wheels/bnb-macos-x86_64.whl
+            elif [[ $wheel == *macosx*arm64* ]]; then
+              mv "$wheel" wheels/bnb-macos-arm64.whl
+            elif [[ $wheel == *win*amd64* ]]; then
+              mv "$wheel" wheels/bnb-windows-x86_64.whl
+            else
+              echo "Unknown wheel format: $wheel"
+              # job should fail to alert maintainers to account for new wheel formats
+              exit 1
+            fi
+          done
+      - name: Create release and upload artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_CONTINUOUS_RELEASE_TYPE: prerelease
+          GITHUB_CONTINUOUS_RELEASE_TAG: continuous-release_main
+        run: |
+            wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
+            chmod +x pyuploadtool-x86_64.AppImage
+            ./pyuploadtool-x86_64.AppImage wheels/*
+
   audit-wheels:
     needs: build-wheels
     runs-on: ubuntu-latest
