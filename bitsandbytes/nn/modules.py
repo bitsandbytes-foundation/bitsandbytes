@@ -282,7 +282,10 @@ class Params4bit(torch.nn.Parameter):
         self.compress_statistics = self.quant_state.nested
         self.quant_type = self.quant_state.quant_type
         self.bnb_quantized = True
-        self.quant_storage = torch.uint8  # We only support serialization with uint8 at the moment.
+
+        # Note: uint8 is the default. TBD: Should this be in QuantState?
+        self.quant_storage = torch.uint8
+
         return self
 
     def _quantize(self, device):
