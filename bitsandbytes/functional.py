@@ -49,6 +49,10 @@ if lib and lib.compiled_with_cuda:
             lib.cadagrad32bit_grad_32,
             lib.cadagrad32bit_grad_16,
         ),
+        "lamb": (
+            lib.cadam32bit_grad_fp32,
+            lib.cadam32bit_grad_fp16,
+        ),
     }
 
     str2optimizer8bit = {

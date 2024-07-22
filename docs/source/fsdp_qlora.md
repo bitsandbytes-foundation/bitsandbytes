@@ -9,34 +9,46 @@ This guide provides a brief guide on how bitsandbytes supports storing quantized
 
 ## Quantized data storage
 
-FSDP only supports sharding float data types which can be problematic because quantized weights are typically stored as integer data types (uint8). bitsandbytes doesn't have this problem because it uses `StoreChar` to read and write quantized weights regardless of the data type storage. This makes it simple to add a `quant_storage` parameter to the [`~nn.Linear4bit`] and [`~nn.Params4bit`] classes and set it to `torch.uint8` to maintain backward compatibility with the codebase.
+FSDP only supports sharding float data types which can be problematic because quantized weights are typically stored as integer data types (uint8). bitsandbytes doesn't have this problem because it uses `StoreChar` to read and write quantized weights regardless of the data type storage. This makes it simple to add a `quant_storage` parameter to the [`~nn.Linear4bit`] and [`~nn.Params4bit`] classes and set it to `torch.uint8` to maintain backward compatibility with the codebase. With the `quant_storage` parameter, you can select any of the FSDP supported data types to shard [`~nn.Linear4bit`] with such as bfloat16, float16 or float32.
+
+You'll typically access and configure this option from [`transformers.BitsAndBytesConfig`] by setting the `bnb_4bit_quant_storage` parameter. It is very **important** the `quant_storage` data type matches the data types used throughout the model because FSDP can only wrap layers and modules that have the *same floating data type*. Making sure the data types are aligned will ensure the model is correctly sharded.
+
+> [!TIP]
+> The `compute_dtype` is the data type used for computation inside the CUDA kernel, where the 4-bit quantized weights are unpacked from the data type in `quant_storage` and dequantized to `compute_dtype`. We recommend using torch.bfloat16 (if available on your hardware) for better numerical stability.
 
 ```py
-import torch
-import bitsandbytes as bnb
+from transformers import BitsAndBytesConfig, AutoModelForCausalLM
 
-model = bnb.nn.Linear4bit(
-    input_features,
-    output_features,
-    quant_type="fp4",
-    quant_storage=torch.uint8,
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_quant_storage=torch.bfloat16,
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-70b",
+    quantization_config=bnb_config,
+    torch_dtype=torch.bfloat16,
 )
 ```
 
-With the `quant_storage` parameter, you can select any of the FSDP supported data types to shard [`~nn.Linear4bit`] with such as bfloat16, float16 or float32.
+Check out this [section](https://hf.co/docs/peft/main/en/accelerate/fsdp#use-peft-qlora-and-fsdp-for-finetuning-large-models-on-multiple-gpus) of the PEFT documentation for the config file and training code to run FSDP-QLoRA training.
 
 ## Training
 
-bitsandbytes is deeply integrated with the Hugging Face ecosystem, making it easy to use with libraries like [Transformers](https://hf/co/docs/transformers), [PEFT](https://hf/co/docs/peft), and [TRL](https://hf/co/docs/trl).
+> [!TIP]
+> FSDP is a distributed training framework that needs to be launched as a distributed training job with a library like [Accelerate](https://hf.co/docs/accelerate/index) or [torchrun](https://pytorch.org/docs/stable/elastic/run.html). The launch command provided in this section uses Accelerate to launch the training script.
+
+bitsandbytes is deeply integrated with the Hugging Face ecosystem, making it easy to use with libraries like [Transformers](https://hf.co/docs/transformers), [PEFT](https://hf.co/docs/peft), and [TRL](https://hf.co/docs/trl).
+
+PEFT provides a configuration file ([fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml)), launch command ([run_peft_qlora_fsdp.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_qlora_fsdp.sh)), and training script ([train.py](https://github.com/huggingface/peft/blob/main/examples/sft/train.py)) for running FSDP-QLoRA. To learn more, check out the [Use PEFT QLoRA and FSDP for finetuning large models on multiple GPUs](https://huggingface.co/docs/peft/main/en/accelerate/fsdp#use-peft-qlora-and-fsdp-for-finetuning-large-models-on-multiple-gpus) documentation. This section briefly covers the steps to run FSDP-QLoRA training.
 
 Before you begin, make sure you have the latest libraries installed.
 
 ```bash
 pip install -U bitsandbytes accelerate transformers peft trl
 ```
-
-> [!TIP]
-> PEFT provides a configuration file ([fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml)), launch command ([run_peft_qlora_fsdp.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_qlora_fsdp.sh)), and training script ([train.py](https://github.com/huggingface/peft/blob/main/examples/sft/train.py)) for FSDP-QLoRA. To learn more, check out the [Use PEFT QLoRA and FSDP for finetuning large models on multiple GPUs](https://huggingface.co/docs/peft/main/en/accelerate/fsdp#use-peft-qlora-and-fsdp-for-finetuning-large-models-on-multiple-gpus) documentation.
 
 The important change that enables FSDP-QLoRA training is the `bnb_4bit_quant_storage` parameter in the [`~transformers.BitsAndBytesConfig`] class. This allows you to set the storage data type of the quantized weights to a float data type.
 
