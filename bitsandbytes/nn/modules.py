@@ -283,7 +283,6 @@ class Params4bit(torch.nn.Parameter):
         self.quant_type = self.quant_state.quant_type
         self.bnb_quantized = True
 
-        # Note: uint8 is the default. TBD: Should this be in QuantState?
         self.quant_storage = data.dtype
 
         return self
