@@ -1,3 +1,21 @@
+### 0.43.2
+
+#### Improvements:
+
+- docs: FSDP+QLoRA and CPU install guide (#1211 #1227, thanks @stevhliu)
+- Add CUDA 12.5 and update 12.4 builds (#1284)
+
+#### Bug Fixes
+
+- 4bit getstate and 8bit deepcopy (#1230 #1231, thanks @BenjaminBossan)
+- missing optimizers in `str2optimizer32bit` (#1222, thanks @EtienneDosSantos)
+- CUDA 12.5 build issue (#1273, thanks @HennerM)
+- fix for min_8bit_size functionality in Optimizer base classes (#1286, thanks @Edenzzzz)
+- QLoRA mem bug (#1270, thanks @Ther-nullptr)
+- tests for cpu only platforms (#1259, thanks @galqiwi)
+- restoration of quant_storage for CPU offloading (#1279)
+- optim update error with non-contiguous grads/params (deepspeed) (#1187)
+
 ### 0.43.1
 
 #### Improvements:
