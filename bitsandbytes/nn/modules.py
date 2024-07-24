@@ -467,7 +467,7 @@ class Linear4bit(nn.Linear):
 
     def forward(self, x: torch.Tensor):
         fix_4bit_weight_quant_state_from_module(self)
-        
+
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:
             self.bias.data = self.bias.data.to(x.dtype)
@@ -684,6 +684,7 @@ class Embedding8bit(nn.Embedding):
     int8_module = int8_module.to(0) # Quantization happens here
     ```
     """
+
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
         super().__init__(num_embeddings, embedding_dim, device=device, dtype=dtype)
         self.dtype = self.weight.data.dtype
@@ -694,10 +695,8 @@ class Embedding8bit(nn.Embedding):
         raise NotImplementedError("saving Embedding4bit module is not implemented")
 
     def forward(self, input: Tensor) -> Tensor:
-        if not hasattr(self.weight, 'SCB'):
-            raise RuntimeError(
-                "Embedding layer is not quantized. Please call .cuda() or .to(device) first."
-            )
+        if not hasattr(self.weight, "SCB"):
+            raise RuntimeError("Embedding layer is not quantized. Please call .cuda() or .to(device) first.")
 
         rows = self.weight.data
         row_stats = self.weight.SCB
@@ -733,6 +732,7 @@ class Embedding4bit(nn.Embedding):
     quantized_module = quantized_module.to(0) # Quantization happens here
     ```
     """
+
     def __init__(
         self,
         num_embeddings,
@@ -762,21 +762,16 @@ class Embedding4bit(nn.Embedding):
                 "This will lead to slow inference.",
             )
 
-
     def _forward_with_partial_dequantize(self, input: Tensor):
         assert self.embedding_dim % self.weight.quant_state.blocksize == 0
 
-        w_4bit_uint8 = (
-            self.weight.data.view(torch.uint8)
-            .view(self.num_embeddings * self.embedding_dim // 2, 1)
-        )
+        w_4bit_uint8 = self.weight.data.view(torch.uint8).view(self.num_embeddings * self.embedding_dim // 2, 1)
 
         output_4bit = torch.nn.functional.embedding(
             weight=w_4bit_uint8.view(self.num_embeddings, self.embedding_dim // 2),
             input=input,
         ).view(-1, 1)
         assert output_4bit.shape == (input.numel() * self.embedding_dim // 2, 1)
-
 
         blocks_per_emb = self.embedding_dim // self.weight.blocksize
 
@@ -786,16 +781,16 @@ class Embedding4bit(nn.Embedding):
         output_absmax = torch.nn.functional.embedding(
             weight=absmax.view(self.num_embeddings, blocks_per_emb),
             input=input,
-        ).view(-1,)
+        ).view(
+            -1,
+        )
         assert output_absmax.shape == (input.numel() * blocks_per_emb,)
 
         output_quant_state = copy.deepcopy(self.weight.quant_state)
         output_quant_state.absmax = output_absmax
         output_quant_state.shape = torch.Size((*input.shape, self.embedding_dim))
 
-        output = bnb.functional.dequantize_4bit(
-            output_4bit, output_quant_state
-        )
+        output = bnb.functional.dequantize_4bit(output_4bit, output_quant_state)
         assert output.shape == (*input.shape, self.embedding_dim)
 
         return output.to(self.dtype)
@@ -808,10 +803,8 @@ class Embedding4bit(nn.Embedding):
 
         if self.embedding_dim % self.weight.quant_state.blocksize == 0:
             return self._forward_with_partial_dequantize(input)
-        
-        dequantized_weight = bnb.functional.dequantize_4bit(
-            self.weight.data, self.weight.quant_state
-        )
+
+        dequantized_weight = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state)
 
         return torch.nn.functional.embedding(
             weight=dequantized_weight,
@@ -829,13 +822,13 @@ class EmbeddingFP4(Embedding4bit):
         device=None,
     ):
         super().__init__(
-        num_embeddings,
-        embedding_dim,
-        dtype=dtype,
-        quant_type="fp4",
-        quant_storage=quant_storage,
-        device=device,
-    )
+            num_embeddings,
+            embedding_dim,
+            dtype=dtype,
+            quant_type="fp4",
+            quant_storage=quant_storage,
+            device=device,
+        )
 
 
 class EmbeddingNF4(Embedding4bit):
@@ -848,13 +841,13 @@ class EmbeddingNF4(Embedding4bit):
         device=None,
     ):
         super().__init__(
-        num_embeddings,
-        embedding_dim,
-        dtype=dtype,
-        quant_type="nf4",
-        quant_storage=quant_storage,
-        device=device,
-    )
+            num_embeddings,
+            embedding_dim,
+            dtype=dtype,
+            quant_type="nf4",
+            quant_storage=quant_storage,
+            device=device,
+        )
 
 
 class Linear8bitLt(nn.Linear):

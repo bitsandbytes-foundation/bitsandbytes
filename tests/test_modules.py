@@ -1,9 +1,9 @@
+import inspect
 import math
 
 import einops
 import pytest
 import torch
-import inspect
 from torch import nn
 
 import bitsandbytes as bnb
@@ -620,7 +620,8 @@ def test_fp8linear():
 @pytest.mark.parametrize("embedding_dim", [64, 65])
 @pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
 @pytest.mark.parametrize(
-    "embedding_class,quant_storage", [
+    "embedding_class,quant_storage",
+    [
         (bnb.nn.Embedding8bit, None),
         (bnb.nn.EmbeddingFP4, torch.uint8),
         (bnb.nn.EmbeddingFP4, torch.float32),
@@ -632,9 +633,9 @@ def test_fp8linear():
 def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_storage):
     num_embeddings = 128
 
-    src_weight = (
-        (torch.randn((num_embeddings, embedding_dim), dtype=torch.float32) > 0).to(torch.float32) * 2 - 1
-    ) # Embeddings filled with {-1, 1} values. It should compress losslessly 
+    src_weight = (torch.randn((num_embeddings, embedding_dim), dtype=torch.float32) > 0).to(
+        torch.float32
+    ) * 2 - 1  # Embeddings filled with {-1, 1} values. It should compress losslessly
 
     emb_base = nn.Embedding(
         num_embeddings=num_embeddings,
@@ -652,7 +653,7 @@ def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_s
     emb_base.cuda()
     e.cuda()
 
-    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device='cuda')
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device="cuda")
 
     torch.testing.assert_close(
         actual=e(input_tokens),
@@ -663,7 +664,8 @@ def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_s
 @pytest.mark.parametrize("embedding_dim", [64, 65])
 @pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
 @pytest.mark.parametrize(
-    "embedding_class,quant_storage", [
+    "embedding_class,quant_storage",
+    [
         (bnb.nn.Embedding8bit, None),
         (bnb.nn.EmbeddingFP4, torch.uint8),
         (bnb.nn.EmbeddingFP4, torch.float32),
@@ -695,7 +697,7 @@ def test_embedding_error(embedding_class, input_shape, embedding_dim, quant_stor
     emb_base.cuda()
     e.cuda()
 
-    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device='cuda')
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device="cuda")
 
     torch.testing.assert_close(
         actual=e(input_tokens),
@@ -740,7 +742,7 @@ def test_4bit_embedding_warnings():
     with pytest.warns(UserWarning, match=r"inference."):
         net = bnb.nn.Embedding4bit(num_embeddings=num_embeddings, embedding_dim=default_block_size + 1)
         net.cuda()
-        inp = torch.randint(low=0, high=num_embeddings, size=(1,), device='cuda')
+        inp = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
         net(inp)
 
 
@@ -752,9 +754,9 @@ def test_4bit_embedding_weight_fsdp_fix():
 
     module.cuda()
 
-    setattr(module.weight, "quant_state", None)
+    module.weight.quant_state = None
 
-    input_tokens = torch.randint(low=0, high=num_embeddings, size=(1,), device='cuda')
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
 
     module(input_tokens)
 
@@ -769,9 +771,9 @@ def test_4bit_linear_weight_fsdp_fix():
 
     module.cuda()
 
-    setattr(module.weight, "quant_state", None)
+    module.weight.quant_state = None
 
-    input_tensor = torch.randn((1, inp_size), device='cuda')
+    input_tensor = torch.randn((1, inp_size), device="cuda")
 
     module(input_tensor)
 
