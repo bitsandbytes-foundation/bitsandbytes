@@ -77,6 +77,13 @@ endif()
 
 
 if(BUILD_CUDA)
+    # NVCC normally will only work with MSVC up to 1939. VS2022 17.10+ starts using versions 1940+.
+    # Workaround: use --allow-unsupported-compiler
+    # This needs to be added *before* we try to enable the CUDA language so CMake's compiler check passes.
+    if(MSVC AND MSVC_VERSION VERSION_GREATER_EQUAL 1940)
+        string(APPEND CMAKE_CUDA_FLAGS " --allow-unsupported-compiler")
+    endif()
+
     enable_language(CUDA) # This will fail if CUDA is not found
     find_package(CUDAToolkit REQUIRED)
 
@@ -229,7 +236,6 @@ if(WIN32)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
-# Weird MSVC hacks
 if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
 endif()
