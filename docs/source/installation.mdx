@@ -31,7 +31,7 @@ To install from PyPI.
 pip install bitsandbytes
 ```
 
-### Compile from source
+### Compile from source[[compile]]
 
 For Linux and Windows systems, you can compile bitsandbytes from source. Installing from source allows for more build options with different CMake configurations.
 
@@ -174,7 +174,18 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 > [!TIP]
 > Intel CPU backend only supports building from source; for now, please follow the instructions below.
 
-Like CUDA, you can compile bitsandbytes from source for Linux and Windows systems. Installing from source allows for more build options with different CMake configurations.
+Similar to the CUDA case, you can compile bitsandbytes from source for Linux and Windows systems.
+
+The below commands are for Linux. For installing on Windows, please adapt the below commands according to the same pattern as described [the section above on compiling from source under the Windows tab](#compile).
+
+```
+git clone --branch multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
+pip install intel_extension_for_pytorch
+pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=cpu -S .
+make
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
+```
 
 </hfoption>
 <hfoption id="Apple Silicon (MPS)">
