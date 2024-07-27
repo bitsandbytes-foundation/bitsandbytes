@@ -103,6 +103,7 @@ jobs:
           name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
           path: output/*
           retention-days: 7
+
   build-wheels:
     needs:
       - build-shared-libs
@@ -123,7 +124,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download build artifact
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -163,27 +164,26 @@ jobs:
       - name: Download wheels
         uses: actions/download-artifact@v4
         with:
-          pattern: "bdist_wheel_*/*.whl"
           path: wheels/
           merge-multiple: true
       - name: Inspect directory after downloading artifacts
-        run: ls -alFR
+        run: ls -alFR wheels/
       - name: Rename wheels
         run: |
-          for wheel in wheels/*.whl; do
-            if [[ $wheel == *linux*x86_64* ]]; then
+          find wheels/ -name '*.whl' -print0 | while IFS= read -r -d '' wheel; do
+            wheel_filename=$(basename "$wheel")
+            if [[ $wheel_filename == *linux*x86_64* ]]; then
               mv "$wheel" wheels/bnb-linux-x86_64.whl
-            elif [[ $wheel == *linux*aarch64* ]]; then
+            elif [[ $wheel_filename == *linux*aarch64* ]]; then
               mv "$wheel" wheels/bnb-linux-aarch64.whl
-            elif [[ $wheel == *macosx*x86_64* ]]; then
+            elif [[ $wheel_filename == *macosx*x86_64* ]]; then
               mv "$wheel" wheels/bnb-macos-x86_64.whl
-            elif [[ $wheel == *macosx*arm64* ]]; then
+            elif [[ $wheel_filename == *macosx*arm64* ]]; then
               mv "$wheel" wheels/bnb-macos-arm64.whl
-            elif [[ $wheel == *win*amd64* ]]; then
+            elif [[ $wheel_filename == *win*amd64* ]]; then
               mv "$wheel" wheels/bnb-windows-x86_64.whl
             else
-              echo "Unknown wheel format: $wheel"
-              # job should fail to alert maintainers to account for new wheel formats
+              echo "Unknown wheel format: $wheel_filename"
               exit 1
             fi
           done
