@@ -3,8 +3,8 @@
 This release is quite significant as the QLoRA bug fix big implications for higher `seqlen` and batch sizes.
 
 For each sequence (i.e. batch size increase of one) we expect memory savings of:
-- 405B: 39GB for seqlen 1024, and 4888GB for 128k
-- 70B: 20.1GB for 1024 and 2516GB for 128k
+- 405B: 39GB for `seqlen=1024`, and 4888GB for `seqlen=128,00`
+- 70B: 10.1GB for `seqlen=1024` and  1258GB for `seqlen=128,00`
 
 This was due to activations being unnecessary for frozen parameters, yet the memory for them was still erroneously allocated due to the now fixed bug.
 
