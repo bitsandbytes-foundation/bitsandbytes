@@ -2,7 +2,7 @@
 
 ## CUDA
 
-bitsandbytes is only supported on CUDA GPUs for CUDA versions **11.0 - 12.5**.
+bitsandbytes is only supported on CUDA GPUs for CUDA versions **11.0 - 12.5**. However, there's a multi-backend effort under way which is currently in alpha release, check [the respective section below in case you're interested to help us with early feedback](#multi-backend).
 
 The latest version of bitsandbytes builds on:
 
@@ -31,7 +31,7 @@ To install from PyPI.
 pip install bitsandbytes
 ```
 
-### Compile from source
+### Compile from source[[compile]]
 
 For Linux and Windows systems, you can compile bitsandbytes from source. Installing from source allows for more build options with different CMake configurations.
 
@@ -61,7 +61,7 @@ git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cuda -S .
 make
-pip install .
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
 > [!TIP]
@@ -85,7 +85,7 @@ git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cuda -S .
 cmake --build . --config Release
-python -m build --wheel
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
 Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com/Jamezo97), [rickardp](https://github.com/rickardp), [akx](https://github.com/akx) for their amazing contributions to make bitsandbytes compatible with Windows.
@@ -129,55 +129,68 @@ For example, to use a local install path:
 
 ```bash
 export BNB_CUDA_VERSION=117
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/tim/local/cuda-11.7
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 ```
 
 3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 11.7) and a different bitsandbytes library is loaded.
 
+## Multi-backend preview release compilation[[multi-backend]]
 
-## Intel CPU
+Please follow these steps to install bitsandbytes with device-specific backend support other than CUDA:
+
+<hfoptions id="backend">
+<hfoption id="AMD ROCm">
+
+### AMD GPU
+
+bitsandbytes is fully supported from ROCm 6.1 onwards (currently in alpha release).
+
+> [!TIP]
+> If you already installed ROCm and PyTorch, skip Docker steps below and please check that the torch version matches your ROCm install. To install torch for a specific ROCm version, please refer to step 3 of wheels install in [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) guide.
+
+```bash
+# Create a docker container with latest pytorch. It comes with ROCm and pytorch preinstalled
+docker pull rocm/pytorch:latest
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video rocm/pytorch:latest
+
+# Clone bitsandbytes repo, ROCm backend is currently enabled on multi-backend-refactor branch
+git clone --depth 1 -b multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
+
+# Install dependencies
+pip install -r requirements-dev.txt
+
+# Compile & install
+apt-get install -y build-essential cmake  # install build tools dependencies, unless present
+cmake -DCOMPUTE_BACKEND=hip -S .  # Use -DBNB_ROCM_ARCH="gfx90a;gfx942" to target specific gpu arch
+make
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
+```
+
+</hfoption>
+<hfoption id="Intel CPU + GPU">
+
+### Intel CPU
 
 > [!TIP]
 > Intel CPU backend only supports building from source; for now, please follow the instructions below.
 
-Like CUDA, you can compile bitsandbytes from source for Linux and Windows systems. Installing from source allows for more build options with different CMake configurations.
+Similar to the CUDA case, you can compile bitsandbytes from source for Linux and Windows systems.
 
-<hfoptions id="source">
-<hfoption id="Linux">
+The below commands are for Linux. For installing on Windows, please adapt the below commands according to the same pattern as described [the section above on compiling from source under the Windows tab](#compile).
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. Make sure you have a compiler installed to compile C++ (gcc, make, headers, etc.). For example, to install a compiler and CMake on Ubuntu:
-
-```bash
-apt-get install -y build-essential cmake
 ```
-
-We recommend installing **GCC >= 11** and have at least **GCC >= 6**.
-
-Now to install the bitsandbytes package from source, run the following commands:
-
-```bash
-git clone --branch multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
-pip install -r requirements-dev.txt
+git clone --depth 1 -b multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 pip install intel_extension_for_pytorch
+pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cpu -S .
 make
-pip install .
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
 </hfoption>
-<hfoption id="Windows">
+<hfoption id="Apple Silicon (MPS)">
 
-Windows systems require Visual Studio with C++ support.
-
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed.
-
-```bash
-git clone --branch multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
-pip install -r requirements-dev.txt
-cmake -DCOMPUTE_BACKEND=cpu -S .
-cmake --build . --config Release
-pip install .
-```
+WIP
 
 </hfoption>
 </hfoptions>
