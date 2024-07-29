@@ -1,10 +1,11 @@
 #!/bin/bash
 declare build_arch
 declare build_os
+declare rocm_version
 
 set -xeuo pipefail
 if [ "${build_os:0:6}" == ubuntu ]; then
-	image=rocm/dev-ubuntu-22.04:6.1-complete
+	image=rocm/dev-ubuntu-22.04:${rocm_version}-complete
 	echo "Using image $image"
 	docker run --rm --platform "linux/$build_arch" -i \
 		-w /src -v "$PWD:/src" "$image" sh -c \
