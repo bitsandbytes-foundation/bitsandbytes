@@ -192,7 +192,9 @@ elseif(BUILD_HIP)
     # get hip version
     execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
     string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
+    string(REPLACE "." "" HIP_VERSION_SHORT "${HIP_VERSION}")
 
+    string(APPEND BNB_OUTPUT_NAME "${HIP_VERSION_SHORT}")
     if(NO_CUBLASLT OR HIP_VERSION VERSION_LESS "6.1")
         string(APPEND BNB_OUTPUT_NAME "_nohipblaslt")
     endif()
