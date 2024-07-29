@@ -136,6 +136,7 @@ jobs:
   build-wheels:
     needs:
       - build-shared-libs
+      - build-shared-libs-cuda
       - build-shared-libs-rocm
     strategy:
       matrix:
