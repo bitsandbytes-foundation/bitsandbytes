@@ -14,5 +14,6 @@ jobs:
       commit_sha: ${{ github.sha }}
       package: bitsandbytes
       repo_owner: TimDettmers
+      custom_container: huggingface/transformers-doc-builder
     secrets:
       hf_token: ${{ secrets.HUGGINGFACE_PUSH }}
