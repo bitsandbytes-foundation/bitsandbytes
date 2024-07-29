@@ -1,5 +1,10 @@
 [files]
 
+[default]
+extend-ignore-re = [
+    "@Ther-nul",  # valid Github user
+]
+
 [default.extend-identifiers]
 
 [type.py.extend-words]

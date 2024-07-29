@@ -273,6 +273,7 @@ class Params4bit(torch.nn.Parameter):
         quantized_stats: Dict[str, Any],
         requires_grad: bool = False,
         device="cuda",
+        module: Optional["Linear4bit"] = None,
         **kwargs,
     ) -> "Params4bit":
         self = torch.Tensor._make_subclass(cls, data.to(device))
@@ -282,10 +283,17 @@ class Params4bit(torch.nn.Parameter):
         self.compress_statistics = self.quant_state.nested
         self.quant_type = self.quant_state.quant_type
         self.bnb_quantized = True
+
+        self.quant_storage = data.dtype
+        self.module = module
+
+        if self.module is not None:
+            self.module.quant_state = self.quant_state
+
         return self
 
     def _quantize(self, device):
-        w = self.data.contiguous().cuda(device)
+        w = self.data.contiguous().to(device)
         w_4bit, quant_state = bnb.functional.quantize_4bit(
             w,
             blocksize=self.blocksize,
@@ -333,6 +341,7 @@ class Params4bit(torch.nn.Parameter):
                 blocksize=self.blocksize,
                 compress_statistics=self.compress_statistics,
                 quant_type=self.quant_type,
+                quant_storage=self.quant_storage,
             )
 
             return new_param
@@ -450,7 +459,7 @@ class Linear4bit(nn.Linear):
                 # since we registered the module, we can recover the state here
                 assert self.weight.shape[1] == 1
                 if not isinstance(self.weight, Params4bit):
-                    self.weight = Params4bit(self.weight, quant_storage=self.quant_storage)
+                    self.weight = Params4bit(self.weight, quant_storage=self.quant_storage, bnb_quantized=True)
                 self.weight.quant_state = self.quant_state
             else:
                 print(
