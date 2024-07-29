@@ -161,16 +161,18 @@ jobs:
     needs:
       - build-wheels
     steps:
-      - name: Download wheels
+      - name: Download artifacts to tmp directory
         uses: actions/download-artifact@v4
         with:
-          path: wheels/
+          path: tmp/
+          pattern: "bdist_wheel_*"
           merge-multiple: true
-      - name: Inspect directory after downloading artifacts
-        run: ls -alFR wheels/
-      - name: Rename wheels
+      - name: Inspect tmp directory after downloading artifacts
+        run: ls -alFR tmp/
+      - name: Move and rename wheel files
         run: |
-          find wheels/ -name '*.whl' -print0 | while IFS= read -r -d '' wheel; do
+          mkdir -p wheels/
+          find tmp/ -type f -name '*.whl' -print0 | while IFS= read -r -d '' wheel; do
             wheel_filename=$(basename "$wheel")
             if [[ $wheel_filename == *linux*x86_64* ]]; then
               mv "$wheel" wheels/bnb-linux-x86_64.whl
@@ -187,15 +189,17 @@ jobs:
               exit 1
             fi
           done
+      - name: Inspect wheels directory after renaming files
+        run: ls -alFR wheels/
       - name: Create release and upload artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_CONTINUOUS_RELEASE_TYPE: prerelease
           GITHUB_CONTINUOUS_RELEASE_TAG: continuous-release_main
         run: |
-            wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
-            chmod +x pyuploadtool-x86_64.AppImage
-            ./pyuploadtool-x86_64.AppImage wheels/*
+          wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
+          chmod +x pyuploadtool-x86_64.AppImage
+          ./pyuploadtool-x86_64.AppImage --appimage-extract-and-run wheels/*.whl
 
   audit-wheels:
     needs: build-wheels
