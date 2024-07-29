@@ -273,6 +273,7 @@ class Params4bit(torch.nn.Parameter):
         quantized_stats: Dict[str, Any],
         requires_grad: bool = False,
         device="cuda",
+        module: Optional["Linear4bit"] = None,
         **kwargs,
     ) -> "Params4bit":
         self = torch.Tensor._make_subclass(cls, data.to(device))
@@ -284,6 +285,10 @@ class Params4bit(torch.nn.Parameter):
         self.bnb_quantized = True
 
         self.quant_storage = data.dtype
+        self.module = module
+
+        if self.module is not None:
+            self.module.quant_state = self.quant_state
 
         return self
 
