@@ -127,6 +127,7 @@ jobs:
         env:
           build_os: ${{ matrix.os }}
           build_arch: ${{ matrix.arch }}
+          rocm_version: ${{ matrix.rocm_version }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
