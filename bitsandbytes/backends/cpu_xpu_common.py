@@ -1,3 +1,4 @@
+import subprocess
 from typing import Optional
 import warnings
 
@@ -17,6 +18,14 @@ try:
 except BaseException:
     ipex_cpu = None
     ipex_xpu = None
+
+
+gxx_available = False
+try:
+    subprocess.run(["g++", "--version"])
+    gxx_available = True
+except BaseException:
+    warnings.warn("g++ not found, torch.compile disabled for CPU/XPU.")
 
 
 Tensor = torch.Tensor
@@ -45,8 +54,8 @@ def _ipex_xpu_version_prereq(major, minor):
 
 
 def _maybe_torch_compile(func):
-    # torch.compile requires pytorch >= 2.0
-    if _torch_version_prereq(2, 0):
+    # torch.compile requires g++ and pytorch >= 2.0
+    if gxx_available and _torch_version_prereq(2, 0):
         options = {}
         # fx_graph_cache requires pytorch >= 2.2
         if _torch_version_prereq(2, 2):
@@ -515,7 +524,7 @@ def gemm_4bit_impl(
         output = torch.ops.torch_ipex.ipex_woq_linear(A, state.op_context.get_data_handle())
     else:
         dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize)
-        output = torch.matmul(A, dqB)
+        output = torch.matmul(A, dqB.to(A.dtype))
     if out is not None:
         out.copy_(output)
     else:

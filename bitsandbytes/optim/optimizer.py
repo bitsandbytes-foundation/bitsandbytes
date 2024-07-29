@@ -437,7 +437,7 @@ class Optimizer2State(Optimizer8bit):
         state = self.state[p]
         state["step"] = 0
 
-        if dtype == torch.float32 or (dtype == torch.uint8 and p.numel() < 4096):
+        if dtype == torch.float32:
             state["state1"] = self.get_state_buffer(p, dtype=torch.float32)
             state["state2"] = self.get_state_buffer(p, dtype=torch.float32)
         elif dtype == torch.uint8:
@@ -474,6 +474,10 @@ class Optimizer2State(Optimizer8bit):
 
     @torch.no_grad()
     def update_step(self, group, p, gindex, pindex):
+        # avoid update error from non-contiguous memory layout
+        p.data = p.data.contiguous()
+        p.grad = p.grad.contiguous()
+
         state = self.state[p]
         grad = p.grad
 
@@ -656,7 +660,7 @@ class Optimizer1State(Optimizer8bit):
         state = self.state[p]
         state["step"] = 0
 
-        if dtype == torch.float32 or (dtype == torch.uint8 and p.numel() < 4096):
+        if dtype == torch.float32:
             state["state1"] = self.get_state_buffer(p, dtype=torch.float32)
         elif dtype == torch.uint8:
             if state["step"] == 0:
@@ -685,6 +689,10 @@ class Optimizer1State(Optimizer8bit):
 
     @torch.no_grad()
     def update_step(self, group, p, gindex, pindex):
+        # avoid update error from non-contiguous memory layout
+        p.data = p.data.contiguous()
+        p.grad = p.grad.contiguous()
+
         state = self.state[p]
         grad = p.grad
 
