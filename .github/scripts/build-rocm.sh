@@ -11,7 +11,7 @@ if [ "${build_os:0:6}" == ubuntu ]; then
 		-w /src -v "$PWD:/src" "$image" sh -c \
 		"apt-get update \
       && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-      && rocminfo && cmake -DCOMPUTE_BACKEND=hip . \
+      && cmake -DCOMPUTE_BACKEND=hip . \
       && cmake --build ."
 fi
 
