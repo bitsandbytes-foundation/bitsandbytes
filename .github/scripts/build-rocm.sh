@@ -4,6 +4,7 @@ declare build_os
 declare rocm_version
 
 set -xeuo pipefail
+bnb_rocm_arch="gfx906;gfx908;gfx90a;gfx942;gfx1100;gfx1030"
 if [ "${build_os:0:6}" == ubuntu ]; then
 	image=rocm/dev-ubuntu-22.04:${rocm_version}-complete
 	echo "Using image $image"
@@ -11,7 +12,7 @@ if [ "${build_os:0:6}" == ubuntu ]; then
 		-w /src -v "$PWD:/src" "$image" sh -c \
 		"apt-get update \
       && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-      && cmake -DCOMPUTE_BACKEND=hip . \
+      && cmake -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH=\"${bnb_rocm_arch}\" . \
       && cmake --build ."
 fi
 
