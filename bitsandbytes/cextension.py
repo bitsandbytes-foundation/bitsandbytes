@@ -38,9 +38,9 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     """
     if torch.version.hip:
         if BNB_HIP_VERSION < 601:
-            return PACKAGE_DIR / f"libbitsandbytes_hip{BNB_HIP_VERSION_SHORT}_nohipblaslt{DYNAMIC_LIBRARY_SUFFIX}"
+            return PACKAGE_DIR / f"libbitsandbytes_rocm{BNB_HIP_VERSION_SHORT}_nohipblaslt{DYNAMIC_LIBRARY_SUFFIX}"
         else:
-            return PACKAGE_DIR / f"libbitsandbytes_hip{BNB_HIP_VERSION_SHORT}{DYNAMIC_LIBRARY_SUFFIX}"
+            return PACKAGE_DIR / f"libbitsandbytes_rocm{BNB_HIP_VERSION_SHORT}{DYNAMIC_LIBRARY_SUFFIX}"
     library_name = f"libbitsandbytes_cuda{cuda_specs.cuda_version_string}"
     if not cuda_specs.has_cublaslt:
         # if not has_cublaslt (CC < 7.5), then we have to choose _nocublaslt

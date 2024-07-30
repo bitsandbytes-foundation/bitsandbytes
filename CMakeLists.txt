@@ -194,7 +194,7 @@ elseif(BUILD_HIP)
 
     list(APPEND SRC_FILES ${HIP_FILES})
 
-    string(APPEND BNB_OUTPUT_NAME "_hip")
+    string(APPEND BNB_OUTPUT_NAME "_rocm")
 
     # get hip version
     execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
