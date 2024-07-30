@@ -15,7 +15,7 @@ for NO_CUBLASLT in ON OFF; do
 		docker run --platform "linux/$build_arch" -i -w /src -v "$PWD:/src" "$image" sh -c \
 			"apt-get update \
       && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-      && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" -DNO_CUBLASLT=${NO_CUBLASLT} . \
+      && nvidia-smi && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" -DNO_CUBLASLT=${NO_CUBLASLT} . \
       && cmake --build ."
 	else
 		pip install cmake==3.28.3
