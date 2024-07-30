@@ -4,7 +4,7 @@ declare build_os
 declare rocm_version
 
 set -xeuo pipefail
-bnb_rocm_arch="gfx906;gfx908;gfx90a;gfx942;gfx1100;gfx1030"
+bnb_rocm_arch="gfx90a;gfx942;gfx1100"
 if [ "${build_os:0:6}" == ubuntu ]; then
 	image=rocm/dev-ubuntu-22.04:${rocm_version}-complete
 	echo "Using image $image"
