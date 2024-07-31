@@ -156,6 +156,8 @@ jobs:
   upload-pre-release-wheels:
     name: Create release and upload artifacts
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - build-wheels
     steps:
