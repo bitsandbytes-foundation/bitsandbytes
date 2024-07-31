@@ -77,6 +77,13 @@ endif()
 
 
 if(BUILD_CUDA)
+    # NVCC normally will only work with MSVC up to 1939. VS2022 17.10+ starts using versions 1940+.
+    # Workaround: use --allow-unsupported-compiler
+    # This needs to be added *before* we try to enable the CUDA language so CMake's compiler check passes.
+    if(MSVC AND MSVC_VERSION VERSION_GREATER_EQUAL 1940)
+        string(APPEND CMAKE_CUDA_FLAGS " --allow-unsupported-compiler")
+    endif()
+
     enable_language(CUDA) # This will fail if CUDA is not found
     find_package(CUDAToolkit REQUIRED)
 
@@ -178,7 +185,7 @@ elseif(BUILD_HIP)
       set(CMAKE_HIP_ARCHITECTURES ${BNB_ROCM_ARCH})
     else()
       if (NOT AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
-        set(CMAKE_HIP_ARCHITECTURES "gfx908;gfx90a;gfx940;gfx941;gfx942")
+        set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100")
       elseif (AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
         set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
       endif()
@@ -187,12 +194,14 @@ elseif(BUILD_HIP)
 
     list(APPEND SRC_FILES ${HIP_FILES})
 
-    string(APPEND BNB_OUTPUT_NAME "_hip")
+    string(APPEND BNB_OUTPUT_NAME "_rocm")
 
     # get hip version
     execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
     string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
+    string(REPLACE "." "" HIP_VERSION_SHORT "${HIP_VERSION}")
 
+    string(APPEND BNB_OUTPUT_NAME "${HIP_VERSION_SHORT}")
     if(NO_CUBLASLT OR HIP_VERSION VERSION_LESS "6.1")
         string(APPEND BNB_OUTPUT_NAME "_nohipblaslt")
     endif()
@@ -229,7 +238,6 @@ if(WIN32)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
-# Weird MSVC hacks
 if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
 endif()

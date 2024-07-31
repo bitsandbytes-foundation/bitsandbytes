@@ -1,8 +1,10 @@
 # Installation
 
-bitsandbytes is only supported on CUDA GPUs for CUDA versions **11.0 - 12.3**.
+## CUDA
 
-The latest version of bitsandbytes (v0.43.0) builds on:
+bitsandbytes is only supported on CUDA GPUs for CUDA versions **11.0 - 12.5**. However, there's a multi-backend effort under way which is currently in alpha release, check [the respective section below in case you're interested to help us with early feedback](#multi-backend).
+
+The latest version of bitsandbytes builds on:
 
 | OS | CUDA | Compiler |
 |---|---|---|
@@ -29,7 +31,7 @@ To install from PyPI.
 pip install bitsandbytes
 ```
 
-## Compile from source
+### Compile from source[[compile]]
 
 For Linux and Windows systems, you can compile bitsandbytes from source. Installing from source allows for more build options with different CMake configurations.
 
@@ -59,7 +61,7 @@ git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cuda -S .
 make
-pip install .
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
 > [!TIP]
@@ -83,7 +85,7 @@ git clone https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
 pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cuda -S .
 cmake --build . --config Release
-python -m build --wheel
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
 Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com/Jamezo97), [rickardp](https://github.com/rickardp), [akx](https://github.com/akx) for their amazing contributions to make bitsandbytes compatible with Windows.
@@ -91,7 +93,7 @@ Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com
 </hfoption>
 </hfoptions>
 
-## PyTorch CUDA versions
+### PyTorch CUDA versions
 
 Some bitsandbytes features may need a newer CUDA version than the one currently supported by PyTorch binaries from Conda and pip. In this case, you should follow these instructions to load a precompiled bitsandbytes binary.
 
@@ -105,7 +107,7 @@ Then locally install the CUDA version you need with this script from bitsandbyte
 ```bash
 wget https://raw.githubusercontent.com/TimDettmers/bitsandbytes/main/install_cuda.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
-#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122, 123, 124}
+#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122, 123, 124, 125}
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True
 
 # For example, the following installs CUDA 11.7 to ~/local/cuda-11.7 and exports the path to your .bashrc
@@ -127,7 +129,78 @@ For example, to use a local install path:
 
 ```bash
 export BNB_CUDA_VERSION=117
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/tim/local/cuda-11.7
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 ```
 
 3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 11.7) and a different bitsandbytes library is loaded.
+
+## Multi-backend preview release compilation[[multi-backend]]
+
+Please follow these steps to install bitsandbytes with device-specific backend support other than CUDA:
+
+<hfoptions id="backend">
+<hfoption id="AMD ROCm">
+
+### AMD GPU
+
+bitsandbytes is fully supported from ROCm 6.1 onwards (currently in alpha release).
+
+> [!TIP]
+> If you would like to install ROCm and PyTorch on bare metal, skip Docker steps and refer to our official guides at [ROCm installation overview](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/tutorial/install-overview.html#rocm-install-overview) and [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) (Step 3 of wheels build for quick installation). Please make sure to get PyTorch wheel for the installed ROCm version.
+
+```bash
+# Create a docker container with latest ROCm image, which includes ROCm libraries
+docker pull rocm/dev-ubuntu-22.04:6.1.2-complete
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video rocm/dev-ubuntu-22.04:6.1.2-complete
+apt-get update && apt-get install -y git && cd home
+
+# Install pytorch compatible with above ROCm version
+pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/rocm6.1/
+
+# Install bitsandbytes from PyPI
+# (This is supported on Ubuntu 22.04, Python 3.10, ROCm 6.1.0/6.1.1/6.1.2 and gpu arch - gfx90a, gfx942, gfx1100
+# Please install from source if your configuration doesn't match with these)
+pip install bitsandbytes
+
+# Install bitsandbytes from source
+# Clone bitsandbytes repo, ROCm backend is currently enabled on multi-backend-refactor branch
+git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+
+# Install dependencies
+pip install -r requirements-dev.txt
+
+# Compile & install
+apt-get install -y build-essential cmake  # install build tools dependencies, unless present
+cmake -DCOMPUTE_BACKEND=hip -S .  # Use -DBNB_ROCM_ARCH="gfx90a;gfx942" to target specific gpu arch
+make
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
+```
+
+</hfoption>
+<hfoption id="Intel CPU + GPU">
+
+### Intel CPU
+
+> [!TIP]
+> Intel CPU backend only supports building from source; for now, please follow the instructions below.
+
+Similar to the CUDA case, you can compile bitsandbytes from source for Linux and Windows systems.
+
+The below commands are for Linux. For installing on Windows, please adapt the below commands according to the same pattern as described [the section above on compiling from source under the Windows tab](#compile).
+
+```
+git clone --depth 1 -b multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
+pip install intel_extension_for_pytorch
+pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=cpu -S .
+make
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
+```
+
+</hfoption>
+<hfoption id="Apple Silicon (MPS)">
+
+WIP
+
+</hfoption>
+</hfoptions>

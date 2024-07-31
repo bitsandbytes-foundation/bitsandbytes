@@ -10,8 +10,6 @@
 #include <hipcub/hipcub.hpp>
 #include <hip/hip_math_constants.h>
 
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
 //#include <mma.h>
 
 

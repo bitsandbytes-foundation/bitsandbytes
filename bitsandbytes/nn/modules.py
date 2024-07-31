@@ -240,7 +240,7 @@ class Params4bit(torch.nn.Parameter):
         return self
 
     def __getstate__(self):
-        state = self.__dict__
+        state = self.__dict__.copy()
         state["data"] = self.data
         state["requires_grad"] = self.requires_grad
         return state
@@ -286,6 +286,9 @@ class Params4bit(torch.nn.Parameter):
         self.compress_statistics = self.quant_state.nested
         self.quant_type = self.quant_state.quant_type
         self.bnb_quantized = True
+
+        self.quant_storage = data.dtype
+
         return self
 
     def _quantize(self, device):
@@ -340,6 +343,7 @@ class Params4bit(torch.nn.Parameter):
                 blocksize=self.blocksize,
                 compress_statistics=self.compress_statistics,
                 quant_type=self.quant_type,
+                quant_storage=self.quant_storage,
             )
 
             return new_param
@@ -457,7 +461,7 @@ class Linear4bit(nn.Linear):
                 # since we registered the module, we can recover the state here
                 assert self.weight.shape[1] == 1
                 if not isinstance(self.weight, Params4bit):
-                    self.weight = Params4bit(self.weight, quant_storage=self.quant_storage)
+                    self.weight = Params4bit(self.weight, quant_storage=self.quant_storage, bnb_quantized=True)
                 self.weight.quant_state = self.quant_state
             else:
                 print(
@@ -567,13 +571,12 @@ class Int8Params(torch.nn.Parameter):
         CB=None,
         SCB=None,
     ):
-        cls.has_fp16_weights = has_fp16_weights
-        cls.CB = None
-        cls.SCB = None
         if data is None:
             data = torch.empty(0)
         obj = torch.Tensor._make_subclass(cls, data, requires_grad)
-        obj.CB, obj.SCB = cls.CB, cls.SCB
+        obj.CB = CB
+        obj.SCB = SCB
+        obj.has_fp16_weights = has_fp16_weights
         return obj
 
     def cuda(self, device):
@@ -591,6 +594,18 @@ class Int8Params(torch.nn.Parameter):
             self.SCB = SCB
 
         return self
+
+    def __deepcopy__(self, memo):
+        # adjust this if new arguments are added to the constructor
+        new_instance = type(self).__new__(
+            type(self),
+            data=copy.deepcopy(self.data, memo),
+            requires_grad=self.requires_grad,
+            has_fp16_weights=self.has_fp16_weights,
+            CB=copy.deepcopy(self.CB, memo),
+            SCB=copy.deepcopy(self.SCB, memo),
+        )
+        return new_instance
 
     def cpu(self):
         # we store the 8-bit rows-major weight

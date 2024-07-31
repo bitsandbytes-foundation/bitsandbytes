@@ -524,7 +524,7 @@ class MatMul4Bit(torch.autograd.Function):
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
         if any(ctx.needs_input_grad[:2]):
-            ctx.tensors = (A, B)
+            ctx.tensors = (None, B)
         else:
             ctx.tensors = (None, None)
 
@@ -537,7 +537,7 @@ class MatMul4Bit(torch.autograd.Function):
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
         req_gradA, _, _, req_gradBias, _ = ctx.needs_input_grad
-        A, B = ctx.tensors
+        _, B = ctx.tensors
 
         grad_A, grad_B, grad_bias = None, None, None
 

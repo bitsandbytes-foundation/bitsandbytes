@@ -13,7 +13,9 @@ jobs:
     with:
       commit_sha: ${{ github.sha }}
       package: bitsandbytes
-      repo_owner: TimDettmers
+      repo_owner: bitsandbytes-foundation
+      # avoid /src suffix leading to wrong links, like bitsandbytes/blob/main/src/bitsandbytes/nn/
+      version_tag_suffix: ''  # defaults to '/src'
       custom_container: huggingface/transformers-doc-builder
     secrets:
       hf_token: ${{ secrets.HUGGINGFACE_PUSH }}

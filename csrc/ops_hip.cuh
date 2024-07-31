@@ -21,12 +21,6 @@
 #include <vector>
 #include <functional>
 
-/*
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-*/
-
-
 #define CUDA_CHECK_RETURN(value) {                      \
   hipError_t _m_cudaStat = value;                    \
   if (_m_cudaStat != hipSuccess) {                   \
