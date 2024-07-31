@@ -155,7 +155,7 @@ docker run -it --device=/dev/kfd --device=/dev/dri --group-add video rocm/dev-ub
 apt-get update && apt-get install -y git && cd home
 
 # Install pytorch compatible with above ROCm version
-pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/rocm6.1/
+pip install torch --index-url https://download.pytorch.org/whl/nightly/rocm6.1/
 
 # Install bitsandbytes from PyPI
 # (This is supported on Ubuntu 22.04, Python 3.10, ROCm 6.1.0/6.1.1/6.1.2 and gpu arch - gfx90a, gfx942, gfx1100
