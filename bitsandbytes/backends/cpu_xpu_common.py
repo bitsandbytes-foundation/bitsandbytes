@@ -484,7 +484,7 @@ def dequantize_4bit_impl(
         out_reshaped[n - rem :] = out_dq[n - rem :] * absmax[-1]
 
     # take transpose here because weight is transposed (again) for computation
-    return out.t()
+    return out
 
 
 # Do not need torch.compile here as we are calling torch/ipex kernel
