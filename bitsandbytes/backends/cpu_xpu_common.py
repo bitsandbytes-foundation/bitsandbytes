@@ -484,7 +484,7 @@ def dequantize_4bit_impl(
         out_reshaped[n - rem :] = out_dq[n - rem :] * absmax[-1]
 
     # take transpose here because weight is transposed (again) for computation
-    return out.t()
+    return out
 
 
 # Do not need torch.compile here as we are calling torch/ipex kernel
@@ -523,7 +523,7 @@ def gemm_4bit_impl(
         assert state.op_context is not None
         output = torch.ops.torch_ipex.ipex_woq_linear(A, state.op_context.get_data_handle())
     else:
-        dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize)
+        dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize).t()
         output = torch.matmul(A, dqB.to(A.dtype))
     if out is not None:
         out.copy_(output)
