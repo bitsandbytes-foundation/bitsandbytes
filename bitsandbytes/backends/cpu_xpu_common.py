@@ -389,7 +389,7 @@ def quantize_4bit_impl(
         state.absmax = torch.Tensor()
         return torch.Tensor(), state
 
-    return out, state
+    return out.unsqueeze(0), state
 
 
 @_maybe_torch_compile
@@ -427,6 +427,13 @@ def dequantize_4bit_impl(
     torch.Tensor:
         Dequantized tensor.
     """
+
+    if A.shape[0] == 1:
+        transpose = False
+        A = A.squeeze(0)
+    elif A.shape[1] == 1:
+        transpose = True
+        A = A.squeeze(1)
 
     if quant_state is None:
         assert absmax is not None and out is not None
@@ -484,6 +491,9 @@ def dequantize_4bit_impl(
         out_reshaped[n - rem :] = out_dq[n - rem :] * absmax[-1]
 
     # take transpose here because weight is transposed (again) for computation
+    if transpose:
+        out = out.t()
+
     return out
 
 
