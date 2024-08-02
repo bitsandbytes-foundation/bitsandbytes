@@ -185,7 +185,7 @@ elseif(BUILD_HIP)
       set(CMAKE_HIP_ARCHITECTURES ${BNB_ROCM_ARCH})
     else()
       if (NOT AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
-        set(CMAKE_HIP_ARCHITECTURES "gfx908;gfx90a;gfx940;gfx941;gfx942")
+        set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100")
       elseif (AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
         set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
       endif()
@@ -194,12 +194,14 @@ elseif(BUILD_HIP)
 
     list(APPEND SRC_FILES ${HIP_FILES})
 
-    string(APPEND BNB_OUTPUT_NAME "_hip")
+    string(APPEND BNB_OUTPUT_NAME "_rocm")
 
     # get hip version
     execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
     string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
+    string(REPLACE "." "" HIP_VERSION_SHORT "${HIP_VERSION}")
 
+    string(APPEND BNB_OUTPUT_NAME "${HIP_VERSION_SHORT}")
     if(NO_CUBLASLT OR HIP_VERSION VERSION_LESS "6.1")
         string(APPEND BNB_OUTPUT_NAME "_nohipblaslt")
     endif()

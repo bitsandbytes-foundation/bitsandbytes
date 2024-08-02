@@ -146,15 +146,25 @@ Please follow these steps to install bitsandbytes with device-specific backend s
 bitsandbytes is fully supported from ROCm 6.1 onwards (currently in alpha release).
 
 > [!TIP]
-> If you already installed ROCm and PyTorch, skip Docker steps below and please check that the torch version matches your ROCm install. To install torch for a specific ROCm version, please refer to step 3 of wheels install in [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) guide.
+> If you would like to install ROCm and PyTorch on bare metal, skip Docker steps and refer to our official guides at [ROCm installation overview](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/tutorial/install-overview.html#rocm-install-overview) and [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) (Step 3 of wheels build for quick installation). Please make sure to get PyTorch wheel for the installed ROCm version.
 
 ```bash
-# Create a docker container with latest pytorch. It comes with ROCm and pytorch preinstalled
-docker pull rocm/pytorch:latest
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video rocm/pytorch:latest
+# Create a docker container with latest ROCm image, which includes ROCm libraries
+docker pull rocm/dev-ubuntu-22.04:6.1.2-complete
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video rocm/dev-ubuntu-22.04:6.1.2-complete
+apt-get update && apt-get install -y git && cd home
 
+# Install pytorch compatible with above ROCm version
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.1/
+
+# Install bitsandbytes from PyPI
+# (This is supported on Ubuntu 22.04, Python 3.10, ROCm 6.1.0/6.1.1/6.1.2 and gpu arch - gfx90a, gfx942, gfx1100
+# Please install from source if your configuration doesn't match with these)
+pip install bitsandbytes
+
+# Install bitsandbytes from source
 # Clone bitsandbytes repo, ROCm backend is currently enabled on multi-backend-refactor branch
-git clone --depth 1 -b multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
+git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 
 # Install dependencies
 pip install -r requirements-dev.txt

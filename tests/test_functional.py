@@ -584,6 +584,9 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
 @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
 @pytest.mark.parametrize("device", ("cuda", "cpu"), ids=id_formatter("device"))
 def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb, device):
+    if HIP_ENVIRONMENT and device == "cpu":
+        pytest.skip("this test is not supported on ROCm yet")
+
     for i in range(k):
         if dims == 2:
             A = torch.randint(-128, 127, size=(dim1, dim3), device=device).to(torch.int8)

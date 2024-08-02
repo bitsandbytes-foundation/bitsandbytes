@@ -106,6 +106,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         arch: [x86_64]
+        rocm_version:
+          ["6.1.2"]
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
       - uses: actions/checkout@v4
@@ -123,10 +125,18 @@ jobs:
         env:
           build_os: ${{ matrix.os }}
           build_arch: ${{ matrix.arch }}
+          rocm_version: ${{ matrix.rocm_version }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}
+          path: output/*
+          retention-days: 7
   build-wheels:
     needs:
       - build-shared-libs
       - build-shared-libs-cuda
+      - build-shared-libs-rocm
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
