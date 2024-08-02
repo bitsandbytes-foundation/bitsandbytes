@@ -639,8 +639,12 @@ class Int8Params(torch.nn.Parameter):
 
         if device.type == "cuda" and self.data.device.type == "cpu":
             return self.cuda(device)
-        elif device.type == "cpu" and self.data.dtype != torch.int8:
-            return self.cpu()
+        elif device.type == "cpu":
+            if self.data.dtype == torch.int8:
+                self.CB = self.data
+                return self
+            else:
+                return self.cpu()
         else:
             new_param = Int8Params(
                 super().to(device=device, dtype=dtype, non_blocking=non_blocking),
