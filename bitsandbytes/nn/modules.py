@@ -722,7 +722,7 @@ class Embedding4bit(nn.Embedding):
     import torch
     import torch.nn as nn
 
-    from bitsandbytes.nn import Embedding8bit
+    from bitsandbytes.nn import Embedding4bit
 
     fp16_module = nn.Embedding(128, 64)
     quantized_module = Embedding4bit(128, 64)
