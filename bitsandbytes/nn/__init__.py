@@ -4,6 +4,10 @@
 # LICENSE file in the root directory of this source tree.
 from .modules import (
     Embedding,
+    Embedding4bit,
+    Embedding8bit,
+    EmbeddingFP4,
+    EmbeddingNF4,
     Int8Params,
     Linear4bit,
     Linear8bitLt,

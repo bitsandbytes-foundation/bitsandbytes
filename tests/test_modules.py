@@ -1,3 +1,4 @@
+import inspect
 import math
 
 import einops
@@ -616,7 +617,97 @@ def test_fp8linear():
     assert bgraderr < 0.00002
 
 
-def test_4bit_warnings(requires_cuda):
+@pytest.mark.parametrize("embedding_dim", [64, 65])
+@pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
+@pytest.mark.parametrize(
+    "embedding_class,quant_storage",
+    [
+        (bnb.nn.Embedding8bit, None),
+        (bnb.nn.EmbeddingFP4, torch.uint8),
+        (bnb.nn.EmbeddingFP4, torch.float32),
+        (bnb.nn.EmbeddingNF4, torch.uint8),
+        (bnb.nn.EmbeddingNF4, torch.float32),
+    ],
+    ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
+)
+def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_storage):
+    num_embeddings = 128
+
+    src_weight = (torch.randn((num_embeddings, embedding_dim), dtype=torch.float32) > 0).to(
+        torch.float32
+    ) * 2 - 1  # Embeddings filled with {-1, 1} values. It should compress losslessly
+
+    emb_base = nn.Embedding(
+        num_embeddings=num_embeddings,
+        embedding_dim=embedding_dim,
+        _freeze=True,
+        _weight=src_weight,
+    )
+    if embedding_class is bnb.nn.Embedding8bit:
+        e = embedding_class(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+    else:
+        e = embedding_class(num_embeddings=num_embeddings, embedding_dim=embedding_dim, quant_storage=quant_storage)
+
+    e.load_state_dict(emb_base.state_dict())
+
+    emb_base.cuda()
+    e.cuda()
+
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device="cuda")
+
+    torch.testing.assert_close(
+        actual=e(input_tokens),
+        expected=emb_base(input_tokens),
+    )
+
+
+@pytest.mark.parametrize("embedding_dim", [64, 65])
+@pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
+@pytest.mark.parametrize(
+    "embedding_class,quant_storage",
+    [
+        (bnb.nn.Embedding8bit, None),
+        (bnb.nn.EmbeddingFP4, torch.uint8),
+        (bnb.nn.EmbeddingFP4, torch.float32),
+        (bnb.nn.EmbeddingNF4, torch.uint8),
+        (bnb.nn.EmbeddingNF4, torch.float32),
+    ],
+    ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
+)
+def test_embedding_error(embedding_class, input_shape, embedding_dim, quant_storage):
+    is_8bit = embedding_class is bnb.nn.Embedding8bit
+
+    num_embeddings = 128
+
+    src_weight = torch.rand((num_embeddings, embedding_dim), dtype=torch.float32)
+
+    emb_base = nn.Embedding(
+        num_embeddings=num_embeddings,
+        embedding_dim=embedding_dim,
+        _freeze=True,
+        _weight=src_weight,
+    )
+    if is_8bit:
+        e = embedding_class(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+    else:
+        e = embedding_class(num_embeddings=num_embeddings, embedding_dim=embedding_dim, quant_storage=quant_storage)
+
+    e.load_state_dict(emb_base.state_dict())
+
+    emb_base.cuda()
+    e.cuda()
+
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device="cuda")
+
+    torch.testing.assert_close(
+        actual=e(input_tokens),
+        expected=emb_base(input_tokens),
+        atol=0.05 if is_8bit else 0.20,
+        rtol=0.0,
+    )
+
+
+def test_4bit_linear_warnings():
     dim1 = 64
 
     with pytest.warns(UserWarning, match=r"inference or training"):
@@ -642,3 +733,58 @@ def test_4bit_warnings(requires_cuda):
         net(inp)
 
     assert len(record) == 2
+
+
+def test_4bit_embedding_warnings():
+    num_embeddings = 128
+    default_block_size = 64
+
+    with pytest.warns(UserWarning, match=r"inference."):
+        net = bnb.nn.Embedding4bit(num_embeddings=num_embeddings, embedding_dim=default_block_size + 1)
+        net.cuda()
+        inp = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
+        net(inp)
+
+
+def test_4bit_embedding_weight_fsdp_fix():
+    num_embeddings = 64
+    embedding_dim = 32
+
+    module = bnb.nn.Embedding4bit(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+
+    module.cuda()
+
+    module.weight.quant_state = None
+
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
+
+    module(input_tokens)
+
+    assert module.weight.quant_state is not None
+
+
+def test_4bit_linear_weight_fsdp_fix():
+    inp_size = 64
+    out_size = 32
+
+    module = bnb.nn.Linear4bit(inp_size, out_size)
+
+    module.cuda()
+
+    module.weight.quant_state = None
+
+    input_tensor = torch.randn((1, inp_size), device="cuda")
+
+    module(input_tensor)
+
+    assert module.weight.quant_state is not None
+
+
+def test_embedding_not_implemented_error():
+    with pytest.raises(NotImplementedError):
+        emb = bnb.nn.Embedding4bit(32, 32)
+        emb.state_dict()
+
+    with pytest.raises(NotImplementedError):
+        emb = bnb.nn.Embedding8bit(32, 32)
+        emb.state_dict()
