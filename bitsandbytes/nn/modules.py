@@ -714,7 +714,7 @@ class Embedding8bit(nn.Embedding):
 
 class Embedding4bit(nn.Embedding):
     """
-    This is the base class similar to Linear4bit. It implements 4 bit 4-bit quantization algorithm presented in
+    This is the base class similar to Linear4bit. It implements the 4-bit quantization algorithm presented in
     [QLoRA](https://arxiv.org/abs/2305.14314) for embeddings.
 
     Quantization API is similar to Linear4bit:
