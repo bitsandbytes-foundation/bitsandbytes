@@ -27,34 +27,6 @@
 
 #define THREADS_PER_BLOCKS (512)
 
-inline void checkCudaStatus(int status) {
-    /*
-    DPCT1000:93: Error handling if-stmt was detected but could not be rewritten.
-    */
-    if (status != 0) {
-        /*
-        DPCT1009:94: SYCL uses exceptions to report errors and does not use the
-        error codes. The original code was commented out and a warning string
-        was inserted. You need to rewrite this code.
-        */
-        printf(
-            "cuda API failed with status %d: %s\n", status,
-            "cudaGetErrorString is not supported" /*cudaGetErrorString(status)*/);
-        /*
-        DPCT1001:92: The statement could not be removed.
-        */
-        throw std::logic_error("cuda API failed");
-    }
-}
-
-inline int checkCublasStatus(int status) {
-    if (status != 0) {
-        printf("cuBLAS API failed with status %d\n", status);
-        //throw std::logic_error("cuBLAS API failed");
-        return 1;
-    }
-    return 0;
-}
 
 typedef enum Operations_t
 {
@@ -135,7 +107,6 @@ class ContextCusparse
 				}
 
 };
-
 
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
 

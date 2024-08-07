@@ -254,8 +254,7 @@ template <typename T, int BITS, int THREADS> extern SYCL_EXTERNAL void gemm_devi
 
 //=========================gemm 4 bit inf================================
 template <typename T, int THREADS>  extern SYCL_EXTERNAL void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1,  T *smem_A, unsigned char *smem_B,
- T *smem_C, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out, const sycl::accessor<T, 1> &dacc_A,
-  const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out);
+ T *smem_C,  const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out);
  
 //====================gemm 4 bit naive inf============================
 template <typename T, int THREADS, int BITS> extern SYCL_EXTERNAL  void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, const sycl::nd_item<3> &item_ct1, T *quant_map, const sycl::accessor<T, 1> &dacc_A, const sycl_dacc_uc &dacc_B, const sycl::accessor<T, 1> &dacc_out, const sycl_dacc_float &dacc_absmax, const sycl_dacc_float &dacc_datatype);
