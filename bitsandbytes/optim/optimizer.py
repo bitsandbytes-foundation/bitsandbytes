@@ -297,6 +297,7 @@ class Optimizer8bit(torch.optim.Optimizer):
         config = {}
         config["betas"] = group["betas"]
         config["eps"] = group["eps"]
+        config["lasso"] = group["lasso"]
         config["weight_decay"] = group["weight_decay"]
         config["lr"] = group["lr"]
         config["optim_bits"] = self.args.optim_bits
@@ -345,6 +346,7 @@ class Optimizer2State(Optimizer8bit):
         lr=1e-3,
         betas=(0.9, 0.999),
         eps=1e-8,
+        lasso=0.0,
         weight_decay=0.0,
         optim_bits=32,
         args=None,
@@ -369,6 +371,8 @@ class Optimizer2State(Optimizer8bit):
                 The beta values for the optimizer.
             eps (`float`, defaults to 1e-8):
                 The epsilon value for the optimizer.
+            lasso (`float`, defaults to 0.0):
+                The lasso regularization coefficient value for the optimizer.
             weight_decay (`float`, defaults to 0.0):
                 The weight decay value for the optimizer.
             optim_bits (`int`, defaults to 32):
@@ -399,9 +403,11 @@ class Optimizer2State(Optimizer8bit):
         for i in range(len(betas)):
             if not 0.0 <= betas[i] < 1.0:
                 raise ValueError(f"Invalid beta parameter at index {i}: {betas[i]}")
+        if not 0.0 <= lasso:
+            raise ValueError(f"Invalid lasso regularization coefficient value: {lasso}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        defaults = dict(lr=lr, betas=betas, eps=eps, lasso=lasso, weight_decay=weight_decay)
         super().__init__(params, defaults, optim_bits, is_paged)
 
         if args is None:
@@ -508,6 +514,7 @@ class Optimizer2State(Optimizer8bit):
                 config["lr"],
                 state["state2"],
                 config["betas"][1],
+                config["lasso"],
                 config["weight_decay"],
                 gnorm_scale,
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
@@ -533,6 +540,7 @@ class Optimizer2State(Optimizer8bit):
                 state["max2"],
                 state["new_max1"],
                 state["new_max2"],
+                config["lasso"],
                 config["weight_decay"],
                 gnorm_scale=gnorm_scale,
                 unorm_vec=state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
@@ -558,6 +566,7 @@ class Optimizer2State(Optimizer8bit):
                 state["qmap2"],
                 state["absmax1"],
                 state["absmax2"],
+                config["lasso"],
                 config["weight_decay"],
                 gnorm_scale=gnorm_scale,
                 skip_zeros=config["skip_zeros"],
@@ -572,6 +581,7 @@ class Optimizer1State(Optimizer8bit):
         lr=1e-3,
         betas=(0.9, 0.0),
         eps=1e-8,
+        lasso=0.0,
         weight_decay=0.0,
         optim_bits=32,
         args=None,
@@ -596,6 +606,8 @@ class Optimizer1State(Optimizer8bit):
                 The beta values for the optimizer.
             eps (`float`, defaults to 1e-8):
                 The epsilon value for the optimizer.
+            lasso (`float`, defaults to 0.0):
+                The lasso regularization coefficient value for the optimizer.
             weight_decay (`float`, defaults to 0.0):
                 The weight decay value for the optimizer.
             optim_bits (`int`, defaults to 32):
@@ -622,9 +634,11 @@ class Optimizer1State(Optimizer8bit):
         for i in range(len(betas)):
             if not 0.0 <= betas[i] < 1.0:
                 raise ValueError(f"Invalid beta parameter at index {i}: {betas[i]}")
+        if not 0.0 <= lasso:
+            raise ValueError(f"Invalid lasso regularization coefficient value: {lasso}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        defaults = dict(lr=lr, betas=betas, eps=eps, lasso=lasso, weight_decay=weight_decay)
         super().__init__(params, defaults, optim_bits, is_paged)
 
         if args is None:
@@ -723,6 +737,7 @@ class Optimizer1State(Optimizer8bit):
                 config["lr"],
                 None,
                 config["betas"][1],
+                config["lasso"],
                 config["weight_decay"],
                 gnorm_scale,
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
@@ -748,6 +763,7 @@ class Optimizer1State(Optimizer8bit):
                 None,
                 state["new_max1"],
                 None,
+                config["lasso"],
                 config["weight_decay"],
                 gnorm_scale,
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
@@ -771,6 +787,7 @@ class Optimizer1State(Optimizer8bit):
                 None,
                 state["absmax1"],
                 None,
+                config["lasso"],
                 config["weight_decay"],
                 gnorm_scale=gnorm_scale,
                 skip_zeros=config["skip_zeros"],
