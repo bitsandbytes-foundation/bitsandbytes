@@ -148,7 +148,7 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
-                float beta1, float beta2, float eps, float weight_decay,
+                float beta1, float beta2, float eps, float lasso, float weight_decay,
                 int step, float lr, const float gnorm_scale, bool skip_zeros, int n);
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g, unsigned char* state1, unsigned char* state2,
@@ -157,12 +157,12 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g, unsigne
                 float eps, int step, float lr,
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                float weight_decay,
+                float lasso, float weight_decay,
                 const float gnorm_scale, int n);
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,
-                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale,
+                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float lasso, float weight_decay, const float gnorm_scale,
 								bool skip_zeros, int n);
 
 template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, const int n);

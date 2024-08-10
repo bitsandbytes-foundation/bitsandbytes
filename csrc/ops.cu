@@ -101,7 +101,7 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
-                const float beta1, const float beta2, const float eps, const float weight_decay,
+                const float beta1, const float beta2, const float eps, const float lasso, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, bool skip_zeros, const int n)
 {
   int num_blocks = n/4096;
@@ -112,10 +112,10 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       if(max_unorm > 0.0f)
 			{
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
-        kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+        kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, state2, unorm, beta1, beta2, eps, lasso, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
       }
-			kOptimizer32bit2State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+			kOptimizer32bit2State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, lasso, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
 		case MOMENTUM:
@@ -124,22 +124,22 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       if(max_unorm > 0.0f)
 			{
 				CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
-				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+				kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, lasso, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			}
 
-			kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+			kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, lasso, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
     case LION:
       // in lion, the momentum update after the parameter update
-      kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+      kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, lasso, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 
       if(max_unorm > 0.0f)
       {
         CUDA_CHECK_RETURN(cudaMemset(unorm, 0, 1*sizeof(float)));
-        kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+        kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, lasso, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
       }
       break;
@@ -153,7 +153,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
                 float eps, int step, float lr,
                 float* quantiles1, float* quantiles2,
                 float* max1, float* max2, float* new_max1, float* new_max2,
-                float weight_decay,
+                float lasso, float weight_decay,
                 const float gnorm_scale, int n)
 {
   int num_blocks = n/4096;
@@ -169,27 +169,27 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 			kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			kOptimizerStatic8bit2State<T, OPTIMIZER><<<num_blocks, 1024>>>(p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
-																														quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
+																														quantiles1, quantiles2, max1, max2, new_max1, new_max2, lasso, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
 		case MOMENTUM:
     case RMSPROP:
     case ADAGRAD:
 			CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
-			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+			kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, lasso, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			kOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
-																														quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+																														quantiles1, max1, new_max1, lasso, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 			break;
     case LION:
       // in lion, the momentum update happens after the parameter update
       kOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
-                                                            quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+                                                            quantiles1, max1, new_max1, lasso, weight_decay, gnorm_scale, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
 
       CUDA_CHECK_RETURN(cudaMemset(new_max1, 0, 1*sizeof(float)));
-      kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+      kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, lasso, weight_decay, gnorm_scale, n);
       CUDA_CHECK_RETURN(cudaPeekAtLastError());
       break;
 		default:
@@ -204,7 +204,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,
-                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n)
+                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float lasso, float weight_decay, const float gnorm_scale, bool skip_zeros, int n)
 {
 
 	int num_blocks = 0;
@@ -214,7 +214,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 			num_blocks = n/BLOCKSIZE_2STATE;
 			num_blocks = n % BLOCKSIZE_2STATE == 0 ? num_blocks : num_blocks + 1;
 			kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE><<<num_blocks, BLOCKSIZE_2STATE/NUM_2STATE>>>(p, g, state1, state2, beta1, beta2, eps, step, lr,
-																														quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n);
+																														quantiles1, quantiles2, absmax1, absmax2, lasso, weight_decay, gnorm_scale, skip_zeros, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
 		case MOMENTUM:
@@ -224,7 +224,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 			num_blocks = n/BLOCKSIZE_1STATE;
 			num_blocks = n % BLOCKSIZE_1STATE == 0 ? num_blocks : num_blocks + 1;
 			kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE><<<num_blocks, BLOCKSIZE_1STATE/NUM_1STATE>>>(p, g, state1, beta1, beta2, eps, step, lr,
-																														quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n);
+																														quantiles1, absmax1, lasso, weight_decay, gnorm_scale, skip_zeros, n);
 			CUDA_CHECK_RETURN(cudaPeekAtLastError());
 		break;
 	}
@@ -808,7 +808,7 @@ template void dequantizeBlockwise<__nv_bfloat16, NF4>(float *code, unsigned char
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
                 float* state1, float* state2, float* unorm, float max_unorm, float param_norm, \
-                const float beta1, const float beta2, const float eps, const float weight_decay, \
+                const float beta1, const float beta2, const float eps, const float lasso, const float weight_decay, \
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
 
 MAKE_optimizer32bit(ADAM, half)
@@ -831,7 +831,7 @@ template void optimizerStatic8bit<gtype, name>(gtype* p, gtype* g, unsigned char
                 float eps, int step, float lr,  \
                 float* quantiles1, float* quantiles2, \
                 float* max1, float* max2, float* new_max1, float* new_max2, \
-                float weight_decay, \
+                float lasso, float weight_decay, \
                 const float gnorm_scale, int n); \
 
 MAKE_optimizerStatic8bit(ADAM, half)
@@ -846,7 +846,7 @@ MAKE_optimizerStatic8bit(LION, float)
 #define MAKE_optimizerStatic8bitBlockwise(gtype, optim_name) \
 template void optimizerStatic8bitBlockwise<gtype, optim_name>(gtype* p, gtype* g, \
                 unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,  \
-                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n); \
+                float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float lasso, float weight_decay, const float gnorm_scale, bool skip_zeros, int n); \
 
 MAKE_optimizerStatic8bitBlockwise(half, ADAM);
 MAKE_optimizerStatic8bitBlockwise(float, ADAM);
