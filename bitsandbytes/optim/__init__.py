@@ -5,6 +5,14 @@
 
 from .adagrad import Adagrad, Adagrad8bit, Adagrad32bit
 from .adam import Adam, Adam8bit, Adam32bit, PagedAdam, PagedAdam8bit, PagedAdam32bit
+from .adame import (
+    AdamE,
+    AdamE8bit,
+    AdamE32bit,
+    PagedAdamE,
+    PagedAdamE8bit,
+    PagedAdamE32bit,
+)
 from .adamw import (
     AdamW,
     AdamW8bit,
