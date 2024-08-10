@@ -1067,9 +1067,9 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
 
 
                     if(lasso > 0.0f && weight_decay > 0.0f)
-                        p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay)) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso));
+                        p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay)) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso));
                     else if(lasso > 0.0f)
-                        p_vals[j] = ((float)p_vals[j]) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso));
+                        p_vals[j] = ((float)p_vals[j]) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso));
                     else if(weight_decay > 0.0f)
                         p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
 									}
@@ -1222,9 +1222,9 @@ __global__ void kOptimizer32bit1State(T *g, T *p,
       {
         g_vals[j] = gnorm_scale*((float)g_vals[j]);
         if(lasso > 0.0f && weight_decay > 0.0f)
-            p_vals[j] = (float)g_vals[j] + (((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*lasso) + (((float)p_vals[j])*weight_decay);
+            p_vals[j] = (float)g_vals[j] + (((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*lasso) + (((float)p_vals[j])*weight_decay);
         else if(lasso > 0.0f)
-            g_vals[j] = (float)g_vals[j] + (((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*lasso);
+            g_vals[j] = (float)g_vals[j] + (((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*lasso);
         else if(weight_decay > 0.0f)
             g_vals[j] = (float)g_vals[j] + (((float)p_vals[j])*weight_decay);
       }
@@ -1498,9 +1498,9 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
         {
             p_vals[j] = (T)(((float)p_vals[j]) + ((update_scale*step_size*(s1_vals[j]/(sqrtf(s2_vals[j])+(correction2*eps))))));
             if(lasso > 0.0f && weight_decay > 0.0f)
-                p_vals[j] = update_scale*(((float)p_vals[j])*(1.0f-(lr*weight_decay)) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso)));
+                p_vals[j] = update_scale*(((float)p_vals[j])*(1.0f-(lr*weight_decay)) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso)));
             else if(lasso > 0.0f)
-                p_vals[j] = update_scale*(((float)p_vals[j]) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso)));
+                p_vals[j] = update_scale*(((float)p_vals[j]) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso)));
             else if(weight_decay > 0.0f)
                 p_vals[j] = update_scale*((float)p_vals[j])*(1.0f-(lr*weight_decay));
         }
@@ -1678,20 +1678,20 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
                 switch(OPTIMIZER) {
                 case MOMENTUM:
                 case RMSPROP:
-                  g_val += ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*lasso + ((float)p_vals[j])*weight_decay;
+                  g_val += ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*lasso + ((float)p_vals[j])*weight_decay;
                   break;
                 case LION:
-                  p_vals[j] = ((float)p_vals[j])*(1.0f-lr*weight_decay) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso));
+                  p_vals[j] = ((float)p_vals[j])*(1.0f-lr*weight_decay) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso));
                   break;
               }
             else if(lasso > 0.0f)
                 switch(OPTIMIZER) {
                 case MOMENTUM:
                 case RMSPROP:
-                  g_val += ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*lasso;
+                  g_val += ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*lasso;
                   break;
                 case LION:
-                  p_vals[j] = ((float)p_vals[j]) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso));
+                  p_vals[j] = ((float)p_vals[j]) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso));
                   break;
               }
             else if(weight_decay > 0.0f) {
@@ -1947,9 +1947,9 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 						{
 							p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(__fdividef(s1_vals[j],(sqrtf(s2_vals[j])+(correction2*eps)))))));
 							if(lasso > 0.0f && weight_decay > 0.0f)
-                                p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay)) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso));
+                                p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay)) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso));
                             else if(lasso > 0.0f)
-                                p_vals[j] = ((float)p_vals[j]) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso));
+                                p_vals[j] = ((float)p_vals[j]) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso));
                             else if(weight_decay > 0.0f)
                                 p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
 						}
@@ -2070,20 +2070,20 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
                 switch(OPTIMIZER) {
                 case MOMENTUM:
                 case RMSPROP:
-                  g_val += ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*lasso + ((float)p_vals[j])*weight_decay;
+                  g_val += ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*lasso + ((float)p_vals[j])*weight_decay;
                   break;
                 case LION:
-                  p_vals[j] = ((float)p_vals[j])*(1.0f-lr*weight_decay) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso));
+                  p_vals[j] = ((float)p_vals[j])*(1.0f-lr*weight_decay) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso));
                   break;
               }
             else if(lasso > 0.0f)
                 switch(OPTIMIZER) {
                 case MOMENTUM:
                 case RMSPROP:
-                  g_val += ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*lasso;
+                  g_val += ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*lasso;
                   break;
                 case LION:
-                  p_vals[j] = ((float)p_vals[j]) - ((float)((p_vals[j] > 0) - (p_vals[j] < 0)))*((float)(lr*lasso));
+                  p_vals[j] = ((float)p_vals[j]) - ((float)(((float)p_vals[j] > 0) - ((float)p_vals[j] < 0)))*((float)(lr*lasso));
                   break;
               }
             else if(weight_decay > 0.0f) {
