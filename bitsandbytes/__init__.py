@@ -21,6 +21,11 @@ from .cextension import lib
 from .nn import modules
 
 features = {"multi_backend"}
+supported_torch_devices = {
+    "cuda",  # includes ROCm
+    "xpu",  # Intel GPU
+    "cpu",
+}
 
 # Always register the CPU backend.
 register_backend("cpu", CPUBackend())
