@@ -20,6 +20,7 @@ import ctypes as ct
 import logging
 import os
 from pathlib import Path
+import re
 
 import torch
 
@@ -44,13 +45,7 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
 
     override_value = os.environ.get("BNB_CUDA_VERSION")
     if override_value:
-        library_name_stem, _, library_name_ext = library_name.rpartition(".")
-        # `library_name_stem` will now be e.g. `libbitsandbytes_cuda118`;
-        # let's remove any trailing numbers:
-        library_name_stem = library_name_stem.rstrip("0123456789")
-        # `library_name_stem` will now be e.g. `libbitsandbytes_cuda`;
-        # let's tack the new version number and the original extension back on.
-        library_name = f"{library_name_stem}{override_value}.{library_name_ext}"
+        library_name = re.sub("cuda\d+", f"cuda{override_value}", library_name, count=1)
         logger.warning(
             f"WARNING: BNB_CUDA_VERSION={override_value} environment variable detected; loading {library_name}.\n"
             "This can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n"
