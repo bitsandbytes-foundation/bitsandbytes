@@ -123,6 +123,7 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           sudo rm -rf /opt/hostedtoolcache
           sudo df -h
+      - name: Clean up disk space Ubuntu
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo rm -rf /swapfile
