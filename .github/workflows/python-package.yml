@@ -120,6 +120,7 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo rm -rf "/usr/local/share/boost"
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /opt/hostedtoolcache
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
