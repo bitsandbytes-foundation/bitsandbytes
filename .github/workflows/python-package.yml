@@ -116,7 +116,6 @@ jobs:
         uses: docker/setup-qemu-action@v2
       - name: Clean up disk space
         run: |
-          sudo df -h
           sudo rm -rf \
               /usr/share/dotnet \
               /opt/ghc \
@@ -134,7 +133,6 @@ jobs:
               /usr/local/share/chromium \
               /usr/local/share/powershell \
               /usr/share/swift
-          sudo df -h
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
