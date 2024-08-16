@@ -123,6 +123,11 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           sudo rm -rf /opt/hostedtoolcache
           sudo df -h
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo rm -rf /swapfile
+          apt-get clean
+          sudo df -h
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
