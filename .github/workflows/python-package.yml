@@ -127,7 +127,7 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo rm -rf /swapfile
-          apt-get clean
+          sudo apt-get clean
           sudo df -h
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
