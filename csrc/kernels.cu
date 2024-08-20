@@ -1480,7 +1480,8 @@ kPreconditionOptimizerStatic8bit1State(T* p, T* __restrict__ const g, unsigned c
             s1_vals[j] = smem_quantiles1[m_c1[j]]*max1[0];
             switch(OPTIMIZER)
             {
-                case MOMENTUM:
+                case ADAGRAD:
+		case MOMENTUM:
                     if(step == 1)
                       s1_vals[j] = (float)g_vals[j];
                     else
@@ -1583,6 +1584,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
 
             if(weight_decay > 0.0f) {
               switch(OPTIMIZER) {
+		case ADAGRAD:
                 case MOMENTUM:
                 case RMSPROP:
                   g_val += ((float)p_vals[j])*weight_decay;
@@ -1596,7 +1598,8 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
             s1_vals[j] = smem_quantiles1[c1s[j]]*max1[0];
 
             switch(OPTIMIZER)
-            {
+            {	
+		case ADAGRAD:
                 case MOMENTUM:
                   if(step == 1)
                     s1_vals[j] = g_vals[j];
@@ -3831,6 +3834,8 @@ MAKE_PreconditionStatic8bit1State(RMSPROP, half)
 MAKE_PreconditionStatic8bit1State(RMSPROP, float)
 MAKE_PreconditionStatic8bit1State(LION, half)
 MAKE_PreconditionStatic8bit1State(LION, float)
+MAKE_PreconditionStatic8bit1State(ADAGRAD, half)
+MAKE_PreconditionStatic8bit1State(ADAGRAD, float)
 
 #define MAKE_optimizerStatic8bit1State(oname, gtype) \
 template __global__ void kOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* const g, unsigned char* state1,  \
@@ -3850,6 +3855,9 @@ MAKE_optimizerStatic8bit1State(RMSPROP, half)
 MAKE_optimizerStatic8bit1State(RMSPROP, float)
 MAKE_optimizerStatic8bit1State(LION, half)
 MAKE_optimizerStatic8bit1State(LION, float)
+MAKE_PreconditionStatic8bit1State(ADAGRAD, half)
+MAKE_PreconditionStatic8bit1State(ADAGRAD, float)
+
 
 #define MAKE_PreconditionStatic8bit2State(oname, gtype) \
 template __global__ void kPreconditionOptimizerStatic8bit2State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1, unsigned char* __restrict__ const state2, \
