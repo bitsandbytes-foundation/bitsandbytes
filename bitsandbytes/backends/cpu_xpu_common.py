@@ -387,7 +387,7 @@ def quantize_4bit_impl(
             -1,  # act_quant_mode. -1 means don't quant activation
         )
         state.absmax = torch.Tensor()
-        return torch.Tensor(), state
+        return torch.empty([1, 0], dtype=torch.uint8), state
 
     return out.unsqueeze(0), state
 

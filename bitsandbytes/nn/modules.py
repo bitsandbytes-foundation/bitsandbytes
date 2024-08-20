@@ -449,6 +449,10 @@ class Linear4bit(nn.Linear):
         if getattr(self.weight, "quant_state", None) is not None:
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
+            if getattr(self.weight.quant_state, "op_context", None) is not None:
+                context = self.weight.quant_state.op_context
+                destination[prefix + "weight." + "absmax"] = context.get_scales().reshape(-1)
+                self.weight.data = context.to_public(context.get_weight()).reshape([1, -1])
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
