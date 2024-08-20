@@ -1,3 +1,12 @@
+### 0.43.3
+
+#### Improvements:
+
+- FSDP: Enable loading prequantized weights with bf16/fp16/fp32 quant_storage
+    - Background: This update, linked to [Transformer PR #32276](https://github.com/huggingface/transformers/pull/32276), allows loading prequantized weights with alternative storage formats. Metadata is tracked similarly to `Params4bit.__new__` post PR #970. It supports models exported with non-default `quant_storage`, such as [this NF4 model with BF16 storage](https://huggingface.co/hugging-quants/Meta-Llama-3.1-405B-BNB-NF4-BF16).
+    - Special thanks to @winglian and @matthewdouglas for enabling FSDP+QLoRA finetuning of Llama 3.1 405B on a single 8xH100 or 8xA100 node with as little as 256GB system RAM.
+
+
 ### 0.43.2
 
 This release is quite significant as the QLoRA bug fix big implications for higher `seqlen` and batch sizes.
