@@ -26,6 +26,7 @@ import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
 from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_rocm_gpu_arch
+from bitsandbytes.mps_specs import get_mps_specs
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,25 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
         lib.cget_managed_ptr.restype = ct.c_void_p
 
 
+class MPSBNBNativeLibrary(BNBNativeLibrary):
+    # The defs that this is looking for are in ../csrc/mps_ops.mm
+    compiled_with_cuda = False # right?
+
+    def __init__(self, lib: ct.CDLL):
+        super().__init__(lib)
+        if not torch.backends.mps.is_available() or not torch.backends.mps.is_built():
+            raise RuntimeError("The `torch` MPS backend is not available.")
+        lib.quantize_mps.argtypes = [
+            ct.POINTER(ct.c_void_p),  # code
+            ct.POINTER(ct.c_void_p),  # A
+            ct.POINTER(ct.c_void_p),  # absmax
+            ct.POINTER(ct.c_void_p),  # out
+            ct.c_int,                # blocksize
+            ct.c_int                 # n
+        ]
+        lib.quantize_mps.restype = None
+
+
 def get_native_library() -> BNBNativeLibrary:
     binary_path = PACKAGE_DIR / f"libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}"
     cuda_specs = get_cuda_specs()
@@ -95,11 +115,18 @@ def get_native_library() -> BNBNativeLibrary:
             binary_path = cuda_binary_path
         else:
             logger.warning("Could not find the bitsandbytes CUDA binary at %r", cuda_binary_path)
+    
+    mps_specs = get_mps_specs()
+    if mps_specs:
+        binary_path = PACKAGE_DIR / f"libbitsandbytes_mps{DYNAMIC_LIBRARY_SUFFIX}"
+    
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
     dll = ct.cdll.LoadLibrary(str(binary_path))
 
-    if hasattr(dll, "get_context"):  # only a CUDA-built library exposes this
+    if cuda_specs and hasattr(dll, "get_context"):  # only a CUDA-built library exposes this
         return CudaBNBNativeLibrary(dll)
+    elif mps_specs:
+        return MPSBNBNativeLibrary(dll)
 
     logger.warning(
         "The installed version of bitsandbytes was compiled without GPU support. "

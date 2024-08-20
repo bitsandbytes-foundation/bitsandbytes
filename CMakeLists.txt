@@ -226,7 +226,9 @@ elseif(BUILD_MPS)
                 DEPENDS "${METAL_FILES}"
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
-    add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+    add_custom_target(metallib 
+                DEPENDS "bitsandbytes/bitsandbytes.metallib"
+                COMMENT "Building Metal Library bitsandbytes/bitsandbytes.metallib")
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
