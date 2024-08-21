@@ -3001,21 +3001,6 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 //// 9. write outputs to matmul output matrix
 //}
 
-template <typename T, typename TCAST, int ITEMS> __device__ inline void vector_load(T *local, T * __restrict__ const buffer, int idx, int limit_base, int limit, float zero_value = 0.0f)
-{
-    if(limit_base + ITEMS <= limit)
-      reinterpret_cast<TCAST*>(local)[0] = reinterpret_cast<TCAST*>(buffer)[idx/ITEMS];
-    else
-    {
-      for(int k = 0; k < ITEMS; k++)
-      {
-        if(limit_base + k < limit)
-          local[k] = buffer[idx+k];
-        else
-          local[k] = (T)zero_value;
-      }
-    }
-}
 
 #define WARPS 3
 template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc)
