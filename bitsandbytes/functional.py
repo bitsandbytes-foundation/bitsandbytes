@@ -1194,7 +1194,6 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
-
             )
         else:
             lib.cquantize_blockwise_fp32_nf4(
@@ -1204,7 +1203,6 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
-
             )
     elif A.dtype == torch.float16:
         if quant_type == "fp4":
@@ -1215,7 +1213,6 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
-
             )
         else:
             lib.cquantize_blockwise_fp16_nf4(
@@ -1225,7 +1222,6 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
-
             )
     elif A.dtype == torch.bfloat16:
         if quant_type == "fp4":
@@ -1236,7 +1232,6 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
-  
             )
         else:
             lib.cquantize_blockwise_bf16_nf4(
@@ -1246,7 +1241,6 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
-
             )
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
