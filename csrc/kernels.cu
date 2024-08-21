@@ -20,6 +20,7 @@
 #define NUM 4
 #define NUM_BLOCK 4096
 
+__device__ static float nf4_data[16] = {-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0};
 
 // source: https://stackoverflow.com/questions/17399119/how-do-i-use-atomicmax-on-floating-point-values-in-cuda
 __device__ float atomicMax(float* address, float val) {
@@ -462,50 +463,6 @@ __device__ __forceinline__ unsigned char quantize_2D(float *__restrict__ quadran
     }
 }
 
-template <int SIGNED>
-__device__ __forceinline__ unsigned char quantize_quadrant(int QUADRANT, float *__restrict__ const smem_code, float x, float lower, float midpoint, float upper)
-{
-    int lower_pivot = QUADRANT*16-1 - 0;
-    int pivot = QUADRANT*16-1 + 16;
-    int upper_pivot = QUADRANT*16-1 + 31;
-
-    float val = midpoint;
-
-    // i>>=1 = {32, 16, 8, 4, 2, 1}
-    for(int i = 16; i > 0; i>>=1)
-    {
-        if(x > val)
-        {
-            lower_pivot = pivot;
-            lower = val;
-            pivot+=i;
-        }
-        else
-        {
-            upper_pivot = pivot;
-            upper = val;
-            pivot-=i;
-        }
-        val = smem_code[pivot];
-    }
-
-    if(x > val)
-    {
-      midpoint = (upper+val)*0.5f;
-      if(x > midpoint)
-        return upper_pivot;
-      else
-        return pivot;
-    }
-    else
-    {
-      midpoint = (lower+val)*0.5f;
-      if(x < midpoint)
-        return lower_pivot;
-      else
-        return pivot;
-    }
-}
 
 __global__ void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n)
 {
@@ -1636,7 +1593,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         __syncthreads();
     }
 }
-
+ 
 
 template<typename T, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n)
@@ -2978,30 +2935,6 @@ template <int FORMAT> __global__ void kExtractOutliers(char *A, int *idx, char *
 	}
 }
 
-
-//template <int QUANT_TYPE, typename INPT, typename COMPT, typename OUTT> __global__ void kMatmul_inference_4bit(INPT *A, unsigned char *B, OUTT *out, int lda, int ldb, int rowsA, int colsA, int colsB)
-//{
-//// element-wise kernel
-//// 1. Load batch x k into registers
-//// 2. Load k x k into registers
-//// 3. dequantize and store in second pair of k x k
-//// 4. matmul
-//// 5. sum with cub
-//// 6. store outputs
-//// TC kernel
-//// use k warps per thread block
-//// 1. threadblock use read-only cache to read in register tile for A into shared memory
-//// 2. each warp loops over shared memory tiles of A of size 8x16 and loads them into fragments
-//// 3. each warp reads a segment of values 16x32 from B
-//// 4. do dequantization from register of B into second pair of registers
-//// 5. store (4) into fragment
-//// 6. matmul aggregate into fragment C
-//// 7. aggregate files of C into shared memory block C
-//// 8. sum (7)
-//// 9. write outputs to matmul output matrix
-//}
-
-
 #define WARPS 3
 template <typename T, int BITS, int THREADS> __global__ void gemm_device(int M, int N, int K, T * __restrict__ const A,  T* B,  T * out,  int lda, int ldb, int ldc)
 {
@@ -3219,13 +3152,28 @@ template <typename T> __device__ void printnonzero(T *A, int num_values, const c
       printf("%s %i %f\n", strval, i, (float)A[i]);
 }
 
-template __device__ void printnonzero<float>(float *A, int num_values, const char*strval);
-template __device__ void printnonzero<half>(half *A, int num_values, const char*strval);
 
-__device__ static float nf4_data[16] = {-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0};
 template <typename T, int THREADS> __global__ void kgemm_4bit_inference(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
 {
 
+  //// element-wise kernel
+  //// 1. Load batch x k into registers
+  //// 2. Load k x k into registers
+  //// 3. dequantize and store in second pair of k x k
+  //// 4. matmul
+  //// 5. sum with cub
+  //// 6. store outputs
+  //// TC kernel
+  //// use k warps per thread block
+  //// 1. threadblock use read-only cache to read in register tile for A into shared memory
+  //// 2. each warp loops over shared memory tiles of A of size 8x16 and loads them into fragments
+  //// 3. each warp reads a segment of values 16x32 from B
+  //// 4. do dequantization from register of B into second pair of registers
+  //// 5. store (4) into fragment
+  //// 6. matmul aggregate into fragment C
+  //// 7. aggregate files of C into shared memory block C
+  //// 8. sum (7)
+  //// 9. write outputs to matmul output matrix
 #if __CUDA_ARCH__ >= 750
 	using namespace nvcuda;
   int col_offset = blockIdx.x *32;
@@ -3988,3 +3936,7 @@ MAKE_OptimizerStatic8bit1StateBlockwise(LION, half, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(LION, __nv_bfloat16, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 2048, 8)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, half, 2048, 8)
+
+template __device__ void printnonzero<float>(float *A, int num_values, const char*strval);
+template __device__ void printnonzero<half>(half *A, int num_values, const char*strval);
+
