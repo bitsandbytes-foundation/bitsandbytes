@@ -438,6 +438,9 @@ def is_on_gpu(tensors):
         )
     return on_gpu
 
+def get_tensor_stream(tensor: Tensor) -> int:
+    stream = torch.cuda.current_stream(tensor.device).cuda_stream
+    return stream
 
 def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
     """
@@ -973,6 +976,7 @@ def dequantize_blockwise(
                 f"The blockwise of {quant_state.blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]",
             )
         is_on_gpu([A, absmax, out])
+        stream = get_tensor_stream(A)
         if out.dtype == torch.float32:
             lib.cdequantize_blockwise_fp32(
                 get_ptr(quant_state.code),
@@ -981,6 +985,7 @@ def dequantize_blockwise(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(A.numel()),
+                ct.c_uint64(stream)
             )
         elif out.dtype == torch.float16:
             lib.cdequantize_blockwise_fp16(
@@ -990,6 +995,7 @@ def dequantize_blockwise(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(A.numel()),
+                ct.c_uint64(stream)
             )
         elif out.dtype == torch.bfloat16:
             lib.cdequantize_blockwise_bf16(
@@ -999,6 +1005,7 @@ def dequantize_blockwise(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(A.numel()),
+                ct.c_uint64(stream)
             )
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
@@ -1012,6 +1019,7 @@ def dequantize_blockwise(
             get_ptr(out),
             ct.c_longlong(quant_state.blocksize),
             ct.c_longlong(A.numel()),
+            
         )
 
     return out
@@ -1176,7 +1184,7 @@ def quantize_4bit(
 
     prev_device = pre_call(A.device)
     is_on_gpu([A, out, absmax])
-
+    stream=torch.cuda.current_stream(A.device).cuda_stream
     if A.dtype == torch.float32:
         if quant_type == "fp4":
             lib.cquantize_blockwise_fp32_fp4(
@@ -1186,6 +1194,7 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
+
             )
         else:
             lib.cquantize_blockwise_fp32_nf4(
@@ -1195,6 +1204,7 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
+
             )
     elif A.dtype == torch.float16:
         if quant_type == "fp4":
@@ -1205,6 +1215,7 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
+
             )
         else:
             lib.cquantize_blockwise_fp16_nf4(
@@ -1214,6 +1225,7 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
+
             )
     elif A.dtype == torch.bfloat16:
         if quant_type == "fp4":
@@ -1224,6 +1236,7 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
+  
             )
         else:
             lib.cquantize_blockwise_bf16_nf4(
@@ -1233,6 +1246,7 @@ def quantize_4bit(
                 get_ptr(out),
                 ct.c_int32(blocksize),
                 ct.c_int(n),
+
             )
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
@@ -1356,6 +1370,7 @@ def dequantize_4bit(
 
     device = pre_call(A.device)
     is_on_gpu([A, absmax, out])
+    stream = get_tensor_stream(A)
     if out.dtype == torch.float32:
         if quant_state.quant_type == "fp4":
             lib.cdequantize_blockwise_fp32_fp4(
@@ -1365,6 +1380,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
+                ct.c_uint64(stream)
             )
         else:
             lib.cdequantize_blockwise_fp32_nf4(
@@ -1374,6 +1390,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
+                ct.c_uint64(stream)
             )
     elif out.dtype == torch.float16:
         if quant_state.quant_type == "fp4":
@@ -1384,6 +1401,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
+                ct.c_uint64(stream)
             )
         else:
             lib.cdequantize_blockwise_fp16_nf4(
@@ -1393,6 +1411,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
+                ct.c_uint64(stream)
             )
     elif out.dtype == torch.bfloat16:
         if quant_state.quant_type == "fp4":
@@ -1403,6 +1422,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
+                ct.c_uint64(stream)
             )
         else:
             lib.cdequantize_blockwise_bf16_nf4(
@@ -1412,6 +1432,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
+                ct.c_uint64(stream)
             )
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
@@ -2002,7 +2023,7 @@ def gemv_4bit(
     lda = ct.c_int32(lda)
     ldb = ct.c_int32(ldb)
     ldc = ct.c_int32(ldc)
-
+    stream = get_tensor_stream(A)
     if B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32]:
         if A.dtype == torch.float16:
             lib.cgemm_4bit_inference_naive_fp16(
@@ -2018,6 +2039,7 @@ def gemv_4bit(
                 ldb,
                 ldc,
                 ct.c_int32(state.blocksize),
+                ct.c_uint64(stream)
             )
         elif A.dtype == torch.bfloat16:
             lib.cgemm_4bit_inference_naive_bf16(
@@ -2033,6 +2055,7 @@ def gemv_4bit(
                 ldb,
                 ldc,
                 ct.c_int32(state.blocksize),
+                ct.c_uint64(stream)
             )
         elif A.dtype == torch.float32:
             lib.cgemm_4bit_inference_naive_fp32(
@@ -2048,6 +2071,7 @@ def gemv_4bit(
                 ldb,
                 ldc,
                 ct.c_int32(state.blocksize),
+                ct.c_uint64(stream)
             )
         else:
             raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
