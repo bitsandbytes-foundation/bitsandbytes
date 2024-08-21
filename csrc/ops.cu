@@ -47,9 +47,9 @@ void quantize(float *code, float *A, unsigned char *out, int n)
 void dequantize(float *code, unsigned char *A, float *out, int n, const uint64_t stream)
 {
   int num_blocks = n/1024;
-  cudaStream_t stream_hanlde = reinterpret_cast<cudaStream_t>(stream);
+  cudaStream_t stream_handle = reinterpret_cast<cudaStream_t>(stream);
   num_blocks = n % 1024 == 0 ? num_blocks : num_blocks + 1;
-  kDequantize<<<num_blocks, 1024, 0, stream_hanlde>>>(code, A, out, n);
+  kDequantize<<<num_blocks, 1024, 0, stream_handle>>>(code, A, out, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -83,11 +83,11 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
   int num_blocks = n/blocksize;
   num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
   int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
-  cudaStream_t stream_hanlde = reinterpret_cast<cudaStream_t>(stream);
+  cudaStream_t stream_handle = reinterpret_cast<cudaStream_t>(stream);
   if(DATA_TYPE > 0)
-    kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE><<<(n+tile_size-1)/tile_size, 64, 0, stream_hanlde>>>(code, A, absmax, out, blocksize/2, n);
+    kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE><<<(n+tile_size-1)/tile_size, 64, 0, stream_handle>>>(code, A, absmax, out, blocksize/2, n);
   else
-    kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE><<<(n+tile_size-1)/tile_size, 64, 0, stream_hanlde>>>(code, A, absmax, out, blocksize, n);
+    kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE><<<(n+tile_size-1)/tile_size, 64, 0, stream_handle>>>(code, A, absmax, out, blocksize, n);
 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -730,8 +730,8 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
 {
 
 	int num_blocks = (m+3)/4;
-  cudaStream_t stream_hanlde = reinterpret_cast<cudaStream_t>(stream);
-  kgemm_4bit_inference_naive<T, 128, BITS><<< num_blocks, 128, 0, stream_hanlde>>>(m,  n,  k, A,  B, absmax, datatype, out, lda, ldb, ldc, blocksize);
+  cudaStream_t stream_handle = reinterpret_cast<cudaStream_t>(stream);
+  kgemm_4bit_inference_naive<T, 128, BITS><<< num_blocks, 128, 0, stream_handle>>>(m,  n,  k, A,  B, absmax, datatype, out, lda, ldb, ldc, blocksize);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
