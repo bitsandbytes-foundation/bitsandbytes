@@ -1019,7 +1019,6 @@ def dequantize_blockwise(
             get_ptr(out),
             ct.c_longlong(quant_state.blocksize),
             ct.c_longlong(A.numel()),
-            
         )
 
     return out
