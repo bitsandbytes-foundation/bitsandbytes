@@ -3855,8 +3855,8 @@ MAKE_optimizerStatic8bit1State(RMSPROP, half)
 MAKE_optimizerStatic8bit1State(RMSPROP, float)
 MAKE_optimizerStatic8bit1State(LION, half)
 MAKE_optimizerStatic8bit1State(LION, float)
-MAKE_PreconditionStatic8bit1State(ADAGRAD, half)
-MAKE_PreconditionStatic8bit1State(ADAGRAD, float)
+MAKE_optimizerStatic8bit1State(ADAGRAD, half)
+MAKE_optimizerStatic8bit1State(ADAGRAD, float)
 
 
 #define MAKE_PreconditionStatic8bit2State(oname, gtype) \
