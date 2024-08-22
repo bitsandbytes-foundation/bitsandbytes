@@ -1185,7 +1185,6 @@ def quantize_4bit(
 
     prev_device = pre_call(A.device)
     is_on_gpu([A, out, absmax])
-    stream = torch.cuda.current_stream(A.device).cuda_stream
     if A.dtype == torch.float32:
         if quant_type == "fp4":
             lib.cquantize_blockwise_fp32_fp4(
