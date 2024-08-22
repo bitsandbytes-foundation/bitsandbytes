@@ -439,8 +439,8 @@ def is_on_gpu(tensors):
     return on_gpu
 
 
-def get_tensor_stream(tensor: Tensor) -> int:
-    stream = torch.cuda.current_stream(tensor.device).cuda_stream
+def get_tensor_stream(tensor: Tensor) -> torch.cuda.Stream:
+    stream = torch.cuda.current_stream(tensor.device)
     return stream
 
 
@@ -987,7 +987,7 @@ def dequantize_blockwise(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(A.numel()),
-                ct.c_uint64(stream),
+                stream,  # Used the _as_parameter_ attribute of torch.cuda.Stream, Similarly for the following
             )
         elif out.dtype == torch.float16:
             lib.cdequantize_blockwise_fp16(
@@ -997,7 +997,7 @@ def dequantize_blockwise(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(A.numel()),
-                ct.c_uint64(stream),
+                stream,
             )
         elif out.dtype == torch.bfloat16:
             lib.cdequantize_blockwise_bf16(
@@ -1007,7 +1007,7 @@ def dequantize_blockwise(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(A.numel()),
-                ct.c_uint64(stream),
+                stream,
             )
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
@@ -1375,7 +1375,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                ct.c_uint64(stream),
+                stream,
             )
         else:
             lib.cdequantize_blockwise_fp32_nf4(
@@ -1385,7 +1385,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                ct.c_uint64(stream),
+                stream,
             )
     elif out.dtype == torch.float16:
         if quant_state.quant_type == "fp4":
@@ -1396,7 +1396,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                ct.c_uint64(stream),
+                stream,
             )
         else:
             lib.cdequantize_blockwise_fp16_nf4(
@@ -1406,7 +1406,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                ct.c_uint64(stream),
+                stream,
             )
     elif out.dtype == torch.bfloat16:
         if quant_state.quant_type == "fp4":
@@ -1417,7 +1417,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                ct.c_uint64(stream),
+                stream,
             )
         else:
             lib.cdequantize_blockwise_bf16_nf4(
@@ -1427,7 +1427,7 @@ def dequantize_4bit(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                ct.c_uint64(stream),
+                stream,
             )
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
@@ -2035,7 +2035,7 @@ def gemv_4bit(
                 ldb,
                 ldc,
                 ct.c_int32(state.blocksize),
-                ct.c_uint64(stream),
+                stream,
             )
         elif A.dtype == torch.bfloat16:
             lib.cgemm_4bit_inference_naive_bf16(
@@ -2051,7 +2051,7 @@ def gemv_4bit(
                 ldb,
                 ldc,
                 ct.c_int32(state.blocksize),
-                ct.c_uint64(stream),
+                stream,
             )
         elif A.dtype == torch.float32:
             lib.cgemm_4bit_inference_naive_fp32(
@@ -2067,7 +2067,7 @@ def gemv_4bit(
                 ldb,
                 ldc,
                 ct.c_int32(state.blocksize),
-                ct.c_uint64(stream),
+                stream,
             )
         else:
             raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
