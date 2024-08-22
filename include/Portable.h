@@ -26,8 +26,31 @@ typedef struct {float a; float b; float c; float d;} __m128;
 typedef struct {int a; int b; int c; int d;} __m128i;
 typedef struct {double a; double b;} __m128d;
 #endif
+#elif defined(__powerpc64__)
+#ifdef __CUDACC__
+#undef USE_VSX // Doesn't work with nvcc, undefined symbols
+#else
+#include <altivec.h>
+#undef USE_VSX // Not yet implemented
+#endif
+#undef USE_AVX // x86_64 only
+#undef USE_AVX2 // x86_64 only
+#undef USE_SSE2 // x86_64 only
+#undef USE_SSE41 // x86_64 only
+#undef USE_SSE42 // x86_64 only
+#undef USE_FMA // x86_64 only
+#ifdef USE_VSX
+typedef vector float __m128;
+typedef vector signed int __m128i;
+typedef vector double __m128d;
+#else
+typedef struct {float a; float b; float c; float d;} __m128;
+typedef struct {int a; int b; int c; int d;} __m128i;
+typedef struct {double a; double b;} __m128d;
+#endif
 #else
 #undef USE_NEON // ARM64 only
+#undef USE_VSX // PPC only
 #ifdef __FMA__
 #define USE_FMA
 #endif
