@@ -1535,7 +1535,7 @@ def dequantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = 
         out = torch.zeros_like(A, dtype=torch.float32)
     is_on_gpu([code, A, out])
     stream = get_tensor_stream(A)
-    lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()), ct.c_uint64(stream))
+    lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()), stream)
     post_call(prev_device)
     return out
 
