@@ -1554,8 +1554,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
 
             s1_vals[j] = smem_quantiles1[c1s[j]]*max1[0];
 
-            switch(OPTIMIZER)
-            {	
+            switch(OPTIMIZER){
 		case ADAGRAD:
                 case MOMENTUM:
                   if(step == 1)
@@ -1593,7 +1592,7 @@ kOptimizerStatic8bit1State(T* p, T* const g, unsigned char* state1,
         __syncthreads();
     }
 }
- 
+
 
 template<typename T, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n)
@@ -3939,4 +3938,3 @@ MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, half, 2048, 8)
 
 template __device__ void printnonzero<float>(float *A, int num_values, const char*strval);
 template __device__ void printnonzero<half>(half *A, int num_values, const char*strval);
-
