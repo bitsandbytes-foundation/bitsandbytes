@@ -125,6 +125,7 @@ try:
         HIP_ENVIRONMENT, BNB_HIP_VERSION = False, 0
         BNB_HIP_VERSION_SHORT = ""
         BNB_BACKEND = "CUDA"
+
     lib = get_native_library()
 except Exception as e:
     lib = None

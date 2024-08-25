@@ -449,6 +449,10 @@ class Linear4bit(nn.Linear):
         if getattr(self.weight, "quant_state", None) is not None:
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
+            if getattr(self.weight.quant_state, "op_context", None) is not None:
+                context = self.weight.quant_state.op_context
+                destination[prefix + "weight." + "absmax"] = context.get_scales().reshape(-1)
+                self.weight.data = context.to_public(context.get_weight()).reshape([1, -1])
 
     def forward(self, x: torch.Tensor):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
@@ -639,8 +643,12 @@ class Int8Params(torch.nn.Parameter):
 
         if device.type == "cuda" and self.data.device.type == "cpu":
             return self.cuda(device)
-        elif device.type == "cpu" and self.data.dtype != torch.int8:
-            return self.cpu()
+        elif device.type == "cpu":
+            if self.data.dtype == torch.int8:
+                self.CB = self.data
+                return self
+            else:
+                return self.cpu()
         else:
             new_param = Int8Params(
                 super().to(device=device, dtype=dtype, non_blocking=non_blocking),

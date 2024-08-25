@@ -387,9 +387,9 @@ def quantize_4bit_impl(
             -1,  # act_quant_mode. -1 means don't quant activation
         )
         state.absmax = torch.Tensor()
-        return torch.Tensor(), state
+        return torch.empty([1, 0], dtype=torch.uint8), state
 
-    return out, state
+    return out.unsqueeze(0), state
 
 
 @_maybe_torch_compile
@@ -427,6 +427,13 @@ def dequantize_4bit_impl(
     torch.Tensor:
         Dequantized tensor.
     """
+
+    if A.shape[0] == 1:
+        transpose = False
+        A = A.squeeze(0)
+    elif A.shape[1] == 1:
+        transpose = True
+        A = A.squeeze(1)
 
     if quant_state is None:
         assert absmax is not None and out is not None
@@ -484,7 +491,10 @@ def dequantize_4bit_impl(
         out_reshaped[n - rem :] = out_dq[n - rem :] * absmax[-1]
 
     # take transpose here because weight is transposed (again) for computation
-    return out.t()
+    if transpose:
+        out = out.t()
+
+    return out
 
 
 # Do not need torch.compile here as we are calling torch/ipex kernel
@@ -523,7 +533,7 @@ def gemm_4bit_impl(
         assert state.op_context is not None
         output = torch.ops.torch_ipex.ipex_woq_linear(A, state.op_context.get_data_handle())
     else:
-        dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize)
+        dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize).t()
         output = torch.matmul(A, dqB.to(A.dtype))
     if out is not None:
         out.copy_(output)
