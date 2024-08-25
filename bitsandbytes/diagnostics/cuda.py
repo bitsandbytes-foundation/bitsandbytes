@@ -40,7 +40,7 @@ CUDA_RUNTIME_LIB_PATTERNS = (
 )
 
 if HIP_ENVIRONMENT:
-    CUDA_RUNTIME_LIB_PATTERNS = ("libamdhip64.so*")
+    CUDA_RUNTIME_LIB_PATTERNS = ("libamdhip64.so*",)
 
 logger = logging.getLogger(__name__)
 
