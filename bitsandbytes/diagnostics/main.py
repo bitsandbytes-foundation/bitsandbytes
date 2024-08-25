@@ -3,6 +3,7 @@ import traceback
 
 import torch
 
+from bitsandbytes.cextension import BNB_BACKEND, HIP_ENVIRONMENT
 from bitsandbytes.consts import PACKAGE_GITHUB_URL
 from bitsandbytes.cuda_specs import get_cuda_specs
 from bitsandbytes.diagnostics.cuda import (
@@ -11,7 +12,6 @@ from bitsandbytes.diagnostics.cuda import (
 )
 from bitsandbytes.diagnostics.utils import print_dedented, print_header
 
-from bitsandbytes.cextension import HIP_ENVIRONMENT, BNB_BACKEND
 
 def sanity_check():
     from bitsandbytes.cextension import lib
@@ -52,8 +52,8 @@ def main():
     print_header("OTHER")
     cuda_specs = get_cuda_specs()
     if HIP_ENVIRONMENT:
-        rocm_specs = f" rocm_version_string=\'{cuda_specs.cuda_version_string}\',"
-        rocm_specs+= f" rocm_version_tuple={cuda_specs.cuda_version_tuple}"
+        rocm_specs = f" rocm_version_string='{cuda_specs.cuda_version_string}',"
+        rocm_specs += f" rocm_version_tuple={cuda_specs.cuda_version_tuple}"
         print(f"{BNB_BACKEND} specs:{rocm_specs}")
     else:
         print(f"{BNB_BACKEND} specs:{cuda_specs}")

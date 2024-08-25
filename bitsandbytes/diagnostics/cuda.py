@@ -5,8 +5,7 @@ from typing import Dict, Iterable, Iterator
 
 import torch
 
-from bitsandbytes.cextension import get_cuda_bnb_library_path
-from bitsandbytes.cextension import HIP_ENVIRONMENT, BNB_BACKEND
+from bitsandbytes.cextension import BNB_BACKEND, HIP_ENVIRONMENT, get_cuda_bnb_library_path
 from bitsandbytes.consts import NONPYTORCH_DOC_URL
 from bitsandbytes.cuda_specs import CUDASpecs
 from bitsandbytes.diagnostics.utils import print_dedented
@@ -115,10 +114,7 @@ def print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
             f"Highest Compute Capability: {cuda_specs.highest_compute_capability}.",
         )
     else:
-        print(
-            f"PyTorch settings found: ROCM_VERSION={cuda_specs.cuda_version_string}"
-        )
-
+        print(f"PyTorch settings found: ROCM_VERSION={cuda_specs.cuda_version_string}")
 
     binary_path = get_cuda_bnb_library_path(cuda_specs)
     if not binary_path.exists():
@@ -143,7 +139,6 @@ def print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
             """,
             )
 
-
     cuda_major, cuda_minor = cuda_specs.cuda_version_tuple
     if not HIP_ENVIRONMENT:
         if cuda_major < 11:
@@ -162,7 +157,6 @@ def print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
                 WARNING: bitandbytes is fully supported only from ROCm 6.1.
                 """,
             )
-
 
     # 7.5 is the minimum CC for cublaslt
     if not cuda_specs.has_cublaslt and not HIP_ENVIRONMENT:
@@ -195,7 +189,7 @@ def print_cuda_runtime_diagnostics() -> None:
         )
         if not HIP_ENVIRONMENT:
             print_dedented(
-                f"""
+                """
                 To override this behavior set the `BNB_CUDA_VERSION=<version string, e.g. 122>` environmental variable.
 
                 For example, if you want to use the CUDA version 122,
@@ -210,7 +204,7 @@ def print_cuda_runtime_diagnostics() -> None:
             )
         else:
             print_dedented(
-                f"""
+                """
                 To resolve it, install PyTorch built for the ROCm version you want to use
 
                 and set LD_LIBRARY_PATH to your ROCm install path, e.g.
