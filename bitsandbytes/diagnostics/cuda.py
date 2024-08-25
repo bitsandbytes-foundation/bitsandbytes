@@ -60,8 +60,8 @@ def find_cuda_libraries_in_path_list(paths_list_candidate: str) -> Iterable[Path
             except OSError:  # Assume an esoteric error trying to poke at the directory
                 pass
             for lib_pattern in CUDA_RUNTIME_LIB_PATTERNS:
-                for pth in dir.glob(lib_pattern):
-                    if pth.is_file():
+                for pth in dir.rglob(lib_pattern):
+                    if pth.is_file() and not pth.is_symlink():
                         yield pth
         except (OSError, PermissionError):
             pass
