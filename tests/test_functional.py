@@ -158,7 +158,7 @@ def test_dynamic_quantization():
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
-@pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
+@pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64, 32])
 @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
 def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
     # print('')

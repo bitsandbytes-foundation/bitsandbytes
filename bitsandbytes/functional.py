@@ -808,7 +808,7 @@ def quantize_blockwise(
     code: Optional[torch.Tensor] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=4096,
+    blocksize=128,
     nested=False,
 ) -> Tuple[Tensor, QuantState]:
     """
@@ -852,7 +852,7 @@ def quantize_blockwise(
         out = torch.zeros_like(A, dtype=torch.uint8)
 
     if A.device.type != "cpu":
-        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
+        assert blocksize in [2048, 1024, 512, 256, 128, 64, 32]
         cblocksize = ct.c_int32(blocksize)
         prev_device = pre_call(A.device)
         code = code.to(A.device)
@@ -923,7 +923,7 @@ def dequantize_blockwise(
     absmax: Optional[torch.Tensor] = None,
     code: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 4096,
+    blocksize: int = 128,
     nested=False,
 ) -> Tensor:
     """
@@ -973,9 +973,9 @@ def dequantize_blockwise(
     if A.device.type != "cpu":
         device = pre_call(A.device)
         code = quant_state.code.to(A.device)
-        if quant_state.blocksize not in [2048, 4096, 1024, 512, 256, 128, 64]:
+        if quant_state.blocksize not in [2048, 1024, 512, 256, 128, 64, 32]:
             raise ValueError(
-                f"The blockwise of {quant_state.blocksize} is not supported. Supported values: [2048, 4096, 1024, 512, 256, 128, 64]",
+                f"The blockwise of {quant_state.blocksize} is not supported. Supported values: [2048, 1024, 512, 256, 128, 64, 32]",
             )
         is_on_gpu([A, absmax, out])
         stream = get_tensor_stream(A)
