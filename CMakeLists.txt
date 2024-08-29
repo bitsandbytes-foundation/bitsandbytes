@@ -72,7 +72,7 @@ if(BUILD_CUDA)
 
         # This is needed to build with VS2022 17.11+ and CUDA < 12.4.
         if (MSVC_VERSION VERSION_GREATER_EQUAL 1941)
-            add_compile_definitions(_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH)
+            string(APPEND CMAKE_CUDA_FLAGS " -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
         endif()
     endif()
 
