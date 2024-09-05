@@ -13,6 +13,7 @@ class AdamE(Optimizer2State):
         eps=1e-8,
         lasso=1e-2,
         weight_decay=1e-2,
+        lr_reg=None,
         amsgrad=False,
         optim_bits=32,
         args=None,
@@ -43,6 +44,8 @@ class AdamE(Optimizer2State):
                 The lasso regularization coefficient value for the optimizer.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
+            lr_reg (`float`, defaults to None):
+                The constant learning rate to use with the regularization components; if left to None the current lr of the parameter group will be used.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
@@ -66,6 +69,7 @@ class AdamE(Optimizer2State):
             eps,
             lasso,
             weight_decay,
+            lr_reg,
             optim_bits,
             args,
             min_8bit_size,
@@ -84,6 +88,7 @@ class AdamE8bit(Optimizer2State):
         eps=1e-8,
         lasso=1e-2,
         weight_decay=1e-2,
+        lr_reg=None,
         amsgrad=False,
         optim_bits=32,
         args=None,
@@ -108,6 +113,8 @@ class AdamE8bit(Optimizer2State):
                 The lasso regularization coefficient value for the optimizer.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
+            lr_reg (`float`, defaults to None):
+                The constant learning rate to use with the regularization components; if left to None the current lr of the parameter group will be used.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
@@ -131,6 +138,7 @@ class AdamE8bit(Optimizer2State):
             eps,
             lasso,
             weight_decay,
+            lr_reg,
             8,
             args,
             min_8bit_size,
@@ -149,6 +157,7 @@ class AdamE32bit(Optimizer2State):
         eps=1e-8,
         lasso=1e-2,
         weight_decay=1e-2,
+        lr_reg=None,
         amsgrad=False,
         optim_bits=32,
         args=None,
@@ -173,6 +182,8 @@ class AdamE32bit(Optimizer2State):
                 The lasso regularization coefficient value for the optimizer.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
+            lr_reg (`float`, defaults to None):
+                The constant learning rate to use with the regularization components; if left to None the current lr of the parameter group will be used.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
@@ -196,6 +207,7 @@ class AdamE32bit(Optimizer2State):
             eps,
             lasso,
             weight_decay,
+            lr_reg,
             32,
             args,
             min_8bit_size,
@@ -214,6 +226,7 @@ class PagedAdamE(Optimizer2State):
         eps=1e-8,
         lasso=1e-2,
         weight_decay=1e-2,
+        lr_reg=None,
         amsgrad=False,
         optim_bits=32,
         args=None,
@@ -237,6 +250,8 @@ class PagedAdamE(Optimizer2State):
                 The lasso regularization coefficient value for the optimizer.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
+            lr_reg (`float`, defaults to None):
+                The constant learning rate to use with the regularization components; if left to None the current lr of the parameter group will be used.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
@@ -260,6 +275,7 @@ class PagedAdamE(Optimizer2State):
             eps,
             lasso,
             weight_decay,
+            lr_reg,
             optim_bits,
             args,
             min_8bit_size,
@@ -278,6 +294,7 @@ class PagedAdamE8bit(Optimizer2State):
         eps=1e-8,
         lasso=1e-2,
         weight_decay=1e-2,
+        lr_reg=None,
         amsgrad=False,
         optim_bits=32,
         args=None,
@@ -301,6 +318,8 @@ class PagedAdamE8bit(Optimizer2State):
                 The lasso regularization coefficient value for the optimizer.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
+            lr_reg (`float`, defaults to None):
+                The constant learning rate to use with the regularization components; if left to None the current lr of the parameter group will be used.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
@@ -324,6 +343,7 @@ class PagedAdamE8bit(Optimizer2State):
             eps,
             lasso,
             weight_decay,
+            lr_reg,
             8,
             args,
             min_8bit_size,
@@ -342,6 +362,7 @@ class PagedAdamE32bit(Optimizer2State):
         eps=1e-8,
         lasso=1e-2,
         weight_decay=1e-2,
+        lr_reg=None,
         amsgrad=False,
         optim_bits=32,
         args=None,
@@ -365,6 +386,8 @@ class PagedAdamE32bit(Optimizer2State):
                 The lasso regularization coefficient value for the optimizer.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
+            lr_reg (`float`, defaults to None):
+                The constant learning rate to use with the regularization components; if left to None the current lr of the parameter group will be used.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
             optim_bits (`int`, defaults to 32):
@@ -388,6 +411,7 @@ class PagedAdamE32bit(Optimizer2State):
             eps,
             lasso,
             weight_decay,
+            lr_reg,
             32,
             args,
             min_8bit_size,

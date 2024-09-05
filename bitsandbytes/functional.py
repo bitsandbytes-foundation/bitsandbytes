@@ -1536,6 +1536,7 @@ def optimizer_update_32bit(
     beta2: float = 0.0,
     lasso: float = 0.0,
     weight_decay: float = 0.0,
+    lr_reg: Optional[float] = None,
     gnorm_scale: float = 1.0,
     unorm_vec: Optional[torch.Tensor] = None,
     max_unorm: float = 0.0,
@@ -1568,6 +1569,8 @@ def optimizer_update_32bit(
         Current optimizer step.
     lr : float
         The learning rate.
+    lr_reg (`float`, defaults to None):
+        The constant learning rate to use with the regularization components (if left None uses current lr at each step).
     state2 : torch.Tensor
         Optimizer state 2.
     beta2 : float
@@ -1615,6 +1618,7 @@ def optimizer_update_32bit(
         ct.c_float(weight_decay),
         ct.c_int32(step),
         ct.c_float(lr),
+        ct.c_float(lr_reg if lr_reg is not None else lr),
         ct.c_float(gnorm_scale),
         ct.c_bool(skip_zeros),
         ct.c_int32(g.numel()),
@@ -1641,6 +1645,7 @@ def optimizer_update_8bit(
     new_max2: Optional[torch.Tensor],
     lasso: float = 0.0,
     weight_decay: float = 0.0,
+    lr_reg: Optional[float] = None,
     gnorm_scale: float = 1.0,
     unorm_vec: Optional[torch.Tensor] = None,
     max_unorm: float = 0.0,
@@ -1677,6 +1682,8 @@ def optimizer_update_8bit(
         Current optimizer step.
     lr : float
         The learning rate.
+    lr_reg (`float`, defaults to None):
+        The constant learning rate to use with the regularization components (if left None uses current lr at each step).
     qmap1 : torch.Tensor
         Quantization map for first Adam state.
     qmap2 : torch.Tensor
@@ -1717,6 +1724,7 @@ def optimizer_update_8bit(
             ct.c_float(eps),
             ct.c_int32(step),
             ct.c_float(lr),
+            ct.c_float(lr_reg if lr_reg is not None else lr),
             get_ptr(qmap1),
             get_ptr(qmap2),
             get_ptr(max1),
@@ -1742,6 +1750,7 @@ def optimizer_update_8bit(
             ct.c_float(eps),
             ct.c_int32(step),
             ct.c_float(lr),
+            ct.c_float(lr_reg if lr_reg is not None else lr),
             get_ptr(qmap1),
             get_ptr(qmap2),
             get_ptr(max1),
@@ -1777,6 +1786,7 @@ def optimizer_update_8bit_blockwise(
     absmax2: Optional[torch.Tensor],
     lasso: float = 0.0,
     weight_decay: float = 0.0,
+    lr_reg: Optional[float] = None,
     gnorm_scale: float = 1.0,
     skip_zeros=False,
 ) -> None:
@@ -1812,6 +1822,7 @@ def optimizer_update_8bit_blockwise(
         ct.c_float(eps),
         ct.c_int32(step),
         ct.c_float(lr),
+        ct.c_float(lr_reg if lr_reg is not None else lr),
         get_ptr(qmap1),
         get_ptr(qmap2),
         get_ptr(absmax1),
