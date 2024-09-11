@@ -32,16 +32,17 @@ CUDART_PATH_IGNORED_ENVVARS = {
     "_",  # current Python interpreter
 }
 
-CUDA_RUNTIME_LIB_PATTERNS = (
-    "cudart64*.dll",  # Windows
-    "libcudart*.so*",  # libcudart.so, libcudart.so.11.0, libcudart.so.12.0, libcudart.so.12.1, libcudart.so.12.2 etc.
-    "nvcuda*.dll",  # Windows
-)
-
-if HIP_ENVIRONMENT:
-    CUDA_RUNTIME_LIB_PATTERNS = ("libamdhip64.so*",)
-
 logger = logging.getLogger(__name__)
+
+def get_runtime_lib_patterns() -> tuple:
+    if HIP_ENVIRONMENT:
+        return ("libamdhip64.so*",)
+    else:
+        return (
+                "cudart64*.dll",  # Windows
+                "libcudart*.so*",  # libcudart.so, libcudart.so.11.0, libcudart.so.12.0, libcudart.so.12.1, libcudart.so.12.2 etc.
+                "nvcuda*.dll",  # Windows
+               )
 
 
 def find_cuda_libraries_in_path_list(paths_list_candidate: str) -> Iterable[Path]:
@@ -58,7 +59,7 @@ def find_cuda_libraries_in_path_list(paths_list_candidate: str) -> Iterable[Path
                     continue
             except OSError:  # Assume an esoteric error trying to poke at the directory
                 pass
-            for lib_pattern in CUDA_RUNTIME_LIB_PATTERNS:
+            for lib_pattern in get_runtime_lib_patterns():
                 for pth in dir.glob(lib_pattern):
                     if pth.is_file() and not pth.is_symlink():
                         yield pth
