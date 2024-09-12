@@ -576,7 +576,7 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
       if (returnedAlgoCount == 0)
       {
         has_error = 1;
-        printf("Error: Matmul Algo Heurisitic didn't return algorithms\n");
+        fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
       }
       else
       {
