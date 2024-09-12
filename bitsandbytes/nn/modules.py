@@ -445,14 +445,20 @@ class Linear4bit(nn.Linear):
         save weight and bias,
         then fill state_dict with components of quant_state
         """
-        if getattr(self.weight, "quant_state", None) is not None and getattr(self.weight.quant_state, "op_context", None) is not None:
+        if (
+            getattr(self.weight, "quant_state", None) is not None
+            and getattr(self.weight.quant_state, "op_context", None) is not None
+        ):
             context = self.weight.quant_state.op_context
             self.weight.data = context.to_public(context.get_weight()).reshape([1, -1])
 
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
         if getattr(self.weight, "quant_state", None) is not None:
-            if self.weight.quant_state.absmax.shape.numel() == 0 and getattr(self.weight.quant_state, "op_context", None) is not None:
+            if (
+                self.weight.quant_state.absmax.shape.numel() == 0
+                and getattr(self.weight.quant_state, "op_context", None) is not None
+            ):
                 self.weight.quant_state.absmax = context.get_scales().reshape(-1)
                 delattr(self.weight.quant_state, "op_context")
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
@@ -460,9 +466,12 @@ class Linear4bit(nn.Linear):
 
     def forward(self, x: torch.Tensor):
         # Check if ipex fusion can be used
-        if x.device.type == "cpu" and not hasattr(self.weight.quant_state, "op_context") and \
-                self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0 and \
-                self.weight.quant_state.quant_type == "nf4":
+        if (
+            x.device.type == "cpu"
+            and not hasattr(self.weight.quant_state, "op_context")
+            and self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0
+            and self.weight.quant_state.quant_type == "nf4"
+        ):
             enable_ipex_fusion(self.weight, self.weight.quant_state)
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually

@@ -202,8 +202,10 @@ def unpack_tensor_to_dict(tensor_data):
 
 def enable_ipex_fusion(weight, quant_state):
     from bitsandbytes.backends.cpu_xpu_common import _ipex_cpu_version_prereq
+
     if _ipex_cpu_version_prereq(2, 3):
         import intel_extension_for_pytorch as ipex
+
         lowp_mode = ipex.quantization.WoqLowpMode.BF16
         quant_state.op_context = torch.ops.ipex_prepack.weight_only_qlinear_prepack(
             weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
