@@ -120,7 +120,7 @@ try:
         hip_major, hip_minor = map(int, torch.version.hip.split(".")[0:2])
         HIP_ENVIRONMENT, BNB_HIP_VERSION = True, hip_major * 100 + hip_minor
         BNB_HIP_VERSION_SHORT = f"{hip_major}{hip_minor}"
-        BNB_BACKEND = "ROCM"
+        BNB_BACKEND = "ROCm"
     else:
         HIP_ENVIRONMENT, BNB_HIP_VERSION = False, 0
         BNB_HIP_VERSION_SHORT = ""
