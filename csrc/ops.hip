@@ -643,7 +643,7 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
     if (Adesc) has_error |= checkHipblasStatus(hipblasLtMatrixLayoutDestroy(Adesc));
     if (matmulDesc) has_error |= checkHipblasStatus(hipblasLtMatmulDescDestroy(matmulDesc));
     if(has_error == 1)
-      printf("error detected\n");
+      fprintf(stderr, "error detected\n");
 
     return has_error;
 #endif // NO_HIPBLASLT
