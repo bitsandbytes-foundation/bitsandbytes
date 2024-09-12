@@ -5,7 +5,7 @@ from typing import Dict, Iterable, Iterator
 
 import torch
 
-from bitsandbytes.cextension import BNB_BACKEND, HIP_ENVIRONMENT, get_cuda_bnb_library_path
+from bitsandbytes.cextension import HIP_ENVIRONMENT, get_cuda_bnb_library_path
 from bitsandbytes.consts import NONPYTORCH_DOC_URL
 from bitsandbytes.cuda_specs import CUDASpecs
 from bitsandbytes.diagnostics.utils import print_dedented
@@ -34,15 +34,16 @@ CUDART_PATH_IGNORED_ENVVARS = {
 
 logger = logging.getLogger(__name__)
 
+
 def get_runtime_lib_patterns() -> tuple:
     if HIP_ENVIRONMENT:
         return ("libamdhip64.so*",)
     else:
         return (
-                "cudart64*.dll",  # Windows
-                "libcudart*.so*",  # libcudart.so, libcudart.so.11.0, libcudart.so.12.0, libcudart.so.12.1, libcudart.so.12.2 etc.
-                "nvcuda*.dll",  # Windows
-               )
+            "cudart64*.dll",  # Windows
+            "libcudart*.so*",  # libcudart.so, libcudart.so.11.0, libcudart.so.12.0, libcudart.so.12.1, libcudart.so.12.2 etc.
+            "nvcuda*.dll",  # Windows
+        )
 
 
 def find_cuda_libraries_in_path_list(paths_list_candidate: str) -> Iterable[Path]:
@@ -213,7 +214,7 @@ def _print_cuda_runtime_diagnostics() -> None:
 def _print_hip_runtime_diagnostics() -> None:
     cudart_paths = list(find_cudart_libraries())
     if not cudart_paths:
-        print(f"WARNING! ROCm runtime files not found in any environmental path.")
+        print("WARNING! ROCm runtime files not found in any environmental path.")
     elif len(cudart_paths) > 1:
         print_dedented(
             f"""
