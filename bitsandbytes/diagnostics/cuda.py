@@ -176,7 +176,7 @@ def _print_hip_diagnostics(cuda_specs: CUDASpecs) -> None:
         )
 
 
-def print_diagnostics(cuda_specs: CUDASpecs)) -> None:
+def print_diagnostics(cuda_specs: CUDASpecs) -> None:
     if HIP_ENVIRONMENT:
         _print_hip_diagnostics(cuda_specs)
     else:
