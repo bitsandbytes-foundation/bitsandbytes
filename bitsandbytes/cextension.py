@@ -99,7 +99,7 @@ def get_native_library() -> BNBNativeLibrary:
         if cuda_binary_path.exists():
             binary_path = cuda_binary_path
         else:
-            logger.warning(f"Could not find the bitsandbytes {BNB_BACKEND} binary at {cuda_binary_path}")
+            logger.warning("Could not find the bitsandbytes %s binary at %r", BNB_BACKEND, cuda_binary_path)
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
     dll = ct.cdll.LoadLibrary(str(binary_path))
 
