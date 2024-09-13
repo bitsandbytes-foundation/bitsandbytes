@@ -7,8 +7,8 @@ from bitsandbytes.cextension import BNB_BACKEND, HIP_ENVIRONMENT
 from bitsandbytes.consts import PACKAGE_GITHUB_URL
 from bitsandbytes.cuda_specs import get_cuda_specs
 from bitsandbytes.diagnostics.cuda import (
-    print_cuda_diagnostics,
-    print_cuda_runtime_diagnostics,
+    print_diagnostics,
+    print_runtime_diagnostics,
 )
 from bitsandbytes.diagnostics.utils import print_dedented, print_header
 
@@ -63,8 +63,8 @@ def main():
         print(f"2. {BNB_BACKEND} not installed")
         print(f"3. You have multiple conflicting {BNB_BACKEND} libraries")
     if cuda_specs:
-        print_cuda_diagnostics(cuda_specs)
-    print_cuda_runtime_diagnostics()
+        print_diagnostics(cuda_specs)
+    print_runtime_diagnostics()
     print_header("")
     print_header("DEBUG INFO END")
     print_header("")
