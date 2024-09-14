@@ -471,6 +471,7 @@ class Linear4bit(nn.Linear):
             and not hasattr(self.weight.quant_state, "op_context")
             and self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0
             and self.weight.quant_state.quant_type == "nf4"
+            and x.requires_grad == False
         ):
             enable_ipex_fusion(self.weight, self.weight.quant_state)
 
