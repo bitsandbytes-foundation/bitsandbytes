@@ -447,20 +447,17 @@ class Linear4bit(nn.Linear):
         """
         if (
             getattr(self.weight, "quant_state", None) is not None
-            and getattr(self.weight.quant_state, "op_context", None) is not None
+            and getattr(self.weight.quant_state, "ipex", False)
         ):
-            context = self.weight.quant_state.op_context
-            self.weight.data = context.to_public(context.get_weight()).reshape([1, -1])
+            original_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(
+                self.weight, "nf4", self.weight.quant_state.shape, 2
+            )
+            self.weight.data = original_weight.data
+            self.weight.quant_state.ipex = False
 
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
         if getattr(self.weight, "quant_state", None) is not None:
-            if (
-                self.weight.quant_state.absmax.shape.numel() == 0
-                and getattr(self.weight.quant_state, "op_context", None) is not None
-            ):
-                self.weight.quant_state.absmax = context.get_scales().reshape(-1)
-                delattr(self.weight.quant_state, "op_context")
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
@@ -468,11 +465,12 @@ class Linear4bit(nn.Linear):
         # Check if ipex fusion can be used
         if (
             x.device.type == "cpu"
-            and not hasattr(self.weight.quant_state, "op_context")
+            and not getattr(self.weight.quant_state, "ipex", False)
             and self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0
             and self.weight.quant_state.quant_type == "nf4"
+            and x.requires_grad == False
         ):
-            enable_ipex_fusion(self.weight, self.weight.quant_state)
+            enable_ipex_fusion(self)
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:
@@ -499,7 +497,11 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
+        if getattr(self.weight.quant_state, "ipex", False):
+            out = bnb.matmul_4bit(x, self.weight, bias=bias, quant_state=self.weight.quant_state)
+        else:
+            out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
+
 
         out = out.to(inp_dtype)
 

@@ -438,11 +438,11 @@ def dequantize_4bit_impl(
     if quant_state.nested:
         raise NotImplementedError("bnb_4bit_use_double_quant is not supported yet for CPU/XPU")
 
-    if ipex_cpu and _ipex_cpu_version_prereq(2, 3) and hasattr(quant_state, "op_context"):
-        assert quant_state.op_context is not None
-        A = quant_state.op_context.to_public(quant_state.op_context.get_weight())
-        A = A.reshape(-1)
-        absmax = quant_state.op_context.get_scales().reshape(-1)
+    if ipex_cpu and _ipex_cpu_version_prereq(2, 5) and getattr(quant_state, "ipex", False):
+        A = torch.ops.ipex_prepack.woq_linear_unpack_weight(
+                A, "nf4", quant_state.shape, 2
+            )
+        quant_state.ipex = False
 
     if out is None:
         out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
@@ -510,9 +510,10 @@ def gemm_4bit_impl(
     torch.Tensor:
         GEMM output tensor.
     """
-    if ipex_cpu and _ipex_cpu_version_prereq(2, 3) and hasattr(state, "op_context"):
-        assert state.op_context is not None
-        output = torch.ops.torch_ipex.ipex_woq_linear(A, state.op_context.get_data_handle())
+    if ipex_cpu and _ipex_cpu_version_prereq(2, 5) and getattr(state, "ipex", False):
+        output = torch.ops.torch_ipex.woq_linear(A, B, "nf4", state.shape,
+                    state.new_scales, state.new_zeros, None, None, state.blocksize,
+                    ipex_cpu.quantization.WoqLowpMode.BF16, 1, state.compensation)
     else:
         dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize).t()
         output = torch.matmul(A, dqB.to(A.dtype))

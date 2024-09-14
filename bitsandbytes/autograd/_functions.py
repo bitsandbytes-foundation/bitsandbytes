@@ -583,7 +583,10 @@ def matmul_4bit(
             )
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
         else:
-            out = F.gemv_4bit(A, B.t(), out, state=quant_state)
+            if getattr(quant_state, "ipex", False):
+                out = F.gemv_4bit(A, B, out, state=quant_state)
+            else:
+                out = F.gemv_4bit(A, B.t(), out, state=quant_state)
             if bias is not None:
                 out += bias
             return out

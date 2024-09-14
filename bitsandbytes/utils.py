@@ -200,28 +200,28 @@ def unpack_tensor_to_dict(tensor_data):
     return unpacked_dict
 
 
-def enable_ipex_fusion(weight, quant_state):
+def enable_ipex_fusion(linear):
     from bitsandbytes.backends.cpu_xpu_common import _ipex_cpu_version_prereq
 
-    if _ipex_cpu_version_prereq(2, 3):
-        import intel_extension_for_pytorch as ipex
-
-        lowp_mode = ipex.quantization.WoqLowpMode.BF16
-        quant_state.op_context = torch.ops.ipex_prepack.weight_only_qlinear_prepack(
-            weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
-            ipex.quantization.WoqWeightDtype.NF4,
-            quant_state.shape,  # weight shape
-            quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
-            None,  # zero_points
-            None,  # bias
-            None,  # g_idx
-            None,  # batch_size
-            quant_state.blocksize,
-            int(lowp_mode),
-            -1,  # act_quant_mode. -1 means don't quant activation
-        )
-        quant_state.absmax = torch.Tensor()
-        weight.data = torch.empty([1, 0], dtype=torch.uint8)
+    if _ipex_cpu_version_prereq(2, 5):
+        quant_state = linear.weight.quant_state
+        new_weight, new_scales, new_zeros, _, compensation = \
+                torch.ops.ipex_prepack.woq_linear_pack_weight(
+                    linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
+                    "nf4",
+                    quant_state.shape,  # weight shape
+                    quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
+                    None,  # zero_points
+                    None,  # bias
+                    None,  # batch_size
+                    quant_state.blocksize,
+                    2,
+                )
+        linear.weight.data = new_weight.data
+        setattr(linear.weight.quant_state, "ipex", True)
+        setattr(linear.weight.quant_state, "new_scales", new_scales)
+        setattr(linear.weight.quant_state, "new_zeros", new_zeros)
+        setattr(linear.weight.quant_state, "compensation", compensation)
 
 
 class QuantState:
