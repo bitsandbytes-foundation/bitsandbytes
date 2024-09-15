@@ -1,11 +1,31 @@
 from typing import Literal, Optional, Tuple, Union
+import ctypes as ct
 
 import torch
 
 from bitsandbytes.utils import QuantState
+from bitsandbytes.functional import dtype2bytes, get_ptr, get_4bit_type
+
+from bitsandbytes import lib
 
 from .base import Backend
 
+
+Tensor = torch.Tensor
+
+
+def assert_on_mps(tensors):
+    on_mps = True
+    for t in tensors:
+        if t is None:
+            continue  # NULL pointers are fine
+        on_mps &= t.device.type == "mps"
+    if not on_mps:
+        raise TypeError(
+            "All input tensors need to be on MPS, but found some tensors to not be on MPS:\n"
+            f" {[(t.shape, t.device) if isinstance(t, Tensor) else None for t in tensors]}"
+        )
+    return on_mps
 
 class MPSBackend(Backend):
     def double_quant(
@@ -74,7 +94,48 @@ class MPSBackend(Backend):
         quant_type: Literal["fp4", "nf4"] = "fp4",
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
-        raise NotImplementedError
+        blocksize = blocksize or 64 # TODO verify the hardware likes this
+        if A.device.type != "mps":
+            raise TypeError("Input tensor must be on MPS")
+        if quant_type not in ["fp4", "nf4"]:
+            raise ValueError("quant_type must be one of 'fp4' or 'nf4'")
+        code = get_4bit_type(quant_type, device=A.device)
+        n, input_shape = A.numel(), A.shape
+        if absmax is None:
+            blocks = n // blocksize
+            if n % blocksize: blocks += 1
+            absmax = torch.empty(blocks, dtype=A.dtype, device=A.device)
+        if out is None:
+            mod = dtype2bytes[quant_storage] * 2
+            out = torch.empty(((n + 1) // mod, 1), dtype=quant_storage, device=A.device)
+
+        assert_on_mps([A, absmax, out])
+        if A.dtype == torch.bfloat16:
+            if quant_type == "nf4":
+                lib.quantize_mps( # this is in csrc/mps_ops.mm
+                    get_ptr(code),
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_int32(blocksize),
+                    ct.c_int(n),
+                )
+            else:
+                raise NotImplementedError("Only bfloat16 to nf4 is implemented")
+        else:
+            raise NotImplementedError("Only bfloat16 to nf4 is implemented")
+
+        if compress_statistics:
+            warnings.warn("`compress_statistics` is not implemented yet")
+        state = QuantState(
+            absmax=absmax, 
+            shape=input_shape, 
+            dtype=A.dtype, 
+            blocksize=blocksize, 
+            code=code, 
+            quant_type=quant_type, 
+        )
+        return out, state
 
     def dequantize_4bit(
         self,

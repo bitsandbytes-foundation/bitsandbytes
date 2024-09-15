@@ -1,3 +1,4 @@
+#import <Metal/Metal.h>
 #import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
 #define HLF_MAX 65504
@@ -31,9 +32,13 @@ static inline id<MTLDevice> get_device()
 static inline id<MTLLibrary> get_library()
 {
   NSError *error = nil;
+  id<MTLDevice> device = get_device();
   static id<MTLLibrary> library = nil;
-  if(!library) {
-    library = [get_device() newLibraryWithURL:[NSURL fileURLWithPath:@"bitsandbytes.metallib"] error:&error];
+  if (!library) {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *currentPath = [fileManager currentDirectoryPath];
+    NSString *libraryPath = [currentPath stringByAppendingPathComponent:@"bitsandbytes/bitsandbytes.metallib"];
+    library = [device newLibraryWithURL:[NSURL fileURLWithPath:libraryPath] error:&error];
   }
   if(!library) {
     NSLog(@"Failed to load bitsandbytes.metallib");
@@ -48,20 +53,59 @@ static inline id<MTLLibrary> get_library()
   return out;
 }*/
 
-
-// MPSGraph function for quantize
-extern "C" MPSGraphTensor* quantize_mps(MPSGraph* graph, MPSGraphTensor* code, MPSGraphTensor* A, int n)
+extern "C" void quantize_mps(float* code, float* A, float* absmax, uint8_t* out, int blocksize, const int n)
 {
-  id<MTLDevice> device = get_device();
-  id<MTLLibrary> library = get_library();
-  static id<MTLFunction> kernel = nil;
-  if(!kernel) {
-    kernel = [library newFunctionWithName:@"quantize"];
-    if(!kernel) {
-      NSLog(@"Failed to load bitsandbytes.metallib");
-      abort();
+    @autoreleasepool {
+        id<MTLDevice> device = get_device();
+        if (!device) {
+            NSLog(@"Failed to get MPS device");
+            return;
+        }
+        NSError* error = nil;
+        id<MTLLibrary> library = get_library();
+        if (!library) {
+            NSLog(@"Failed to load bitsandbytes.metallib: %@", error);
+            return;
+        }
+        id<MTLFunction> kernelFunction = [library newFunctionWithName:@"quantize"];
+        if (!kernelFunction) {
+            NSLog(@"Failed to load `quantize` function");
+            return;
+        }
+        id<MTLComputePipelineState> pipelineState = [device newComputePipelineStateWithFunction:kernelFunction error:&error];
+        if (!pipelineState) {
+            NSLog(@"Failed to create pipeline state: %@", error);
+            return;
+        }
+
+        id<MTLCommandQueue> commandQueue = [device newCommandQueue];
+        id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+        id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+
+        [computeEncoder setComputePipelineState:pipelineState];
+
+        @try {
+            id<MTLBuffer> codeBuffer = [device newBufferWithBytes:code length:blocksize * sizeof(float) options:MTLResourceStorageModeShared];
+            id<MTLBuffer> inputBuffer = [device newBufferWithBytes:A length:n * sizeof(float) options:MTLResourceStorageModeShared];
+            id<MTLBuffer> outputBuffer = [device newBufferWithLength:((n + 1) / 2) * sizeof(uint8_t) options:MTLResourceStorageModeShared];
+
+            [computeEncoder setBuffer:codeBuffer offset:0 atIndex:0];
+            [computeEncoder setBuffer:inputBuffer offset:0 atIndex:1];
+            [computeEncoder setBuffer:outputBuffer offset:0 atIndex:2];
+            [computeEncoder setBytes:&n length:sizeof(int) atIndex:3];
+
+            MTLSize gridSize = MTLSizeMake(n, 1, 1);
+            MTLSize threadGroupSize = MTLSizeMake(pipelineState.maxTotalThreadsPerThreadgroup, 1, 1);
+            NSLog(@"Dispatching compute encoder with gridSize: %zu, threadGroupSize: %zu", gridSize.width, threadGroupSize.width);
+            [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+
+            [computeEncoder endEncoding];
+            [commandBuffer commit];
+            [commandBuffer waitUntilCompleted];
+
+            memcpy(out, [outputBuffer contents], ((n + 1) / 2) * sizeof(uint8_t));
+        } @catch (NSException *exception) {
+            NSLog(@"Exception occurred: %@", exception);
+        }
     }
-  }
-  NSLog(@"Not implemented");
-  return nil;
 }
