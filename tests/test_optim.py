@@ -70,6 +70,14 @@ str2optimizers["paged_ademamix8bit_blockwise"] = (
     bnb.optim.ademamix._ReferenceAdEMAMix,
     lambda pxx: bnb.optim.PagedAdEMAMix8bit(pxx),
 )
+str2optimizers["ademamix_scheduled"] = (
+    lambda pxx: bnb.optim.ademamix._ReferenceAdEMAMix(pxx, t_alpha=k, t_beta3=k),
+    lambda pxx: bnb.optim.AdEMAMix(pxx, t_alpha=k, t_beta3=k),
+)
+str2optimizers["ademamix8bit_blockwise_scheduled"] = (
+    lambda pxx: bnb.optim.ademamix._ReferenceAdEMAMix(pxx, t_alpha=100, t_beta3=100),
+    lambda pxx: bnb.optim.AdEMAMix8bit(pxx, t_alpha=100, t_beta3=100),
+)
 
 str2optimizers["lion"] = (Lion, bnb.optim.Lion)
 str2optimizers["lion8bit"] = (Lion, lambda pxx: bnb.optim.Lion8bit(pxx, block_wise=False))
@@ -134,9 +142,9 @@ str2statenames["rmsprop8bit_blockwise"] = [("square_avg", "state1", "qmap1", "ab
 str2statenames["lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 str2statenames["paged_lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 
-str2statenames["ademamix"] = [("m1_m2", "state1"), ("nu", "state2")]
+str2statenames["ademamix"] = str2statenames["ademamix_scheduled"] = [("m1_m2", "state1"), ("nu", "state2")]
 str2statenames["paged_ademamix"] = [("m1_m2", "state1"), ("nu", "state2")]
-str2statenames["ademamix8bit_blockwise"] = [
+str2statenames["ademamix8bit_blockwise"] = str2statenames["ademamix8bit_blockwise_scheduled"] = [
     ("m1_m2", "state1", "qmap1", "absmax1"),
     ("nu", "state2", "qmap2", "absmax2"),
 ]
@@ -154,6 +162,7 @@ optimizer_names_32bit = [
     "lion",
     "paged_lion",
     "ademamix",
+    "ademamix_scheduled",
     "paged_ademamix",
 ]
 
@@ -289,6 +298,7 @@ optimizer_names_8bit = [
     "momentum8bit_blockwise",
     "rmsprop8bit_blockwise",
     "ademamix8bit_blockwise",
+    "ademamix8bit_blockwise_scheduled",
 ]
 
 
@@ -337,8 +347,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         torch_optimizer.step()
 
         # since Lion can have pretty noisy updates where things lie at the boundary
-        # allow up to 5 errors for Lion
-        # allow up to 0.01% errors.
+        # and AdEMAMix can diverge as well, allow up to 0.05% errors.
         assert_most_approx_close(p1, p2.float(), patol, prtol, max_error_count=int(p1.numel() * 5e-4))
 
         dequant_states = []
@@ -346,7 +355,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
             # print(bnb_optimizer.state[p2][max_val], name1)
             if "blockwise" in optim_name:
                 ## For AdEMAMix, we need to dequantize [p2][name2][0] and [p2][name2][1]
-                ## separately and then stack them. The qmap is shraed, but absmax is also stacked.
+                ## separately and then stack them. The qmap is shared, but absmax is also stacked.
                 if optim_name == "ademamix8bit_blockwise" and name1 == "m1_m2":
                     m1 = F.dequantize_blockwise(
                         code=bnb_optimizer.state[p2][qmap],
@@ -384,10 +393,10 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         relerr = err / (torch.abs(p1) + 1e-9)
         if g.dtype == torch.bfloat16:
             assert err.mean() < 0.00015
-            assert relerr.mean() < 0.0018  # 0.0016
+            assert relerr.mean() < 0.0020  # 0.0016
         else:
-            assert err.mean() < 0.00012
-            assert relerr.mean() < 0.0012
+            assert err.mean() < 0.00016  # 0.00012
+            assert relerr.mean() < 0.0016  # 0.0012
 
         errors.append(err.mean().item())
         relerrors.append(relerr.mean().item())

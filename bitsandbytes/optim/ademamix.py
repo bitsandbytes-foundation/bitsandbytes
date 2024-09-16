@@ -1,3 +1,4 @@
+import math
 from typing import Iterable, Literal, Optional, Tuple
 
 import torch
@@ -44,8 +45,10 @@ class _ReferenceAdEMAMix(torch.optim.Optimizer):
 
             lr = group["lr"]
             eps = group["eps"]
-            beta1, beta2, beta3_final = group["betas"]
-            alpha_final = group["alpha"]
+            beta1, beta2, beta3 = group["betas"]
+            alpha = group["alpha"]
+            t_alpha = group["t_alpha"]
+            t_beta3 = group["t_beta3"]
             weight_decay = group["weight_decay"]
 
             for p in group["params"]:
@@ -68,9 +71,19 @@ class _ReferenceAdEMAMix(torch.optim.Optimizer):
 
                 bias_correction2 = 1 - beta2 ** group["step"]
 
-                # TODO: Implement schedulers for alpha/beta3
-                beta3 = beta3_final
-                alpha = alpha_final
+                # Apply scheduler for alpha
+                if t_alpha is not None:
+                    alpha = min(group["step"] * alpha / t_alpha, alpha)
+
+                # Apply scheduler for beta3
+                if t_beta3 is not None:
+                    ln_beta1 = math.log(beta1)
+                    ln_beta3 = math.log(beta3)
+                    step_scale = group["step"] / t_beta3
+                    beta3 = min(
+                        math.exp((ln_beta1 * ln_beta3) / (((1 - step_scale) * ln_beta3) + (step_scale * ln_beta1))),
+                        beta3,
+                    )
 
                 # Update the EMAs
                 m1.mul_(beta1).add_(grad, alpha=1 - beta1)
@@ -119,6 +132,8 @@ class AdEMAMix(Optimizer2State):
             block_wise=True,
             is_paged=is_paged,
             alpha=alpha,
+            t_alpha=t_alpha,
+            t_beta3=t_beta3,
         )
 
     @torch.no_grad()
@@ -158,6 +173,91 @@ class AdEMAMix(Optimizer2State):
 
         state["state1"] = self._get_state_double_buffer(p, dtype=dtype)
         state["state2"] = self.get_state_buffer(p, dtype=dtype)
+
+    @torch.no_grad()
+    def update_step(self, group, p, gindex, pindex):
+        config = self.get_config(gindex, pindex, group)
+
+        if config["t_alpha"] is None and config["t_beta3"] is None:
+            # Not using alpha/beta3 scheduler; we can fall through.
+            super().update_step(group, p, gindex, pindex)
+            return
+
+        # Ensure contiguous memory layout
+        p.data = p.data.contiguous()
+        p.grad = p.grad.contiguous()
+
+        state = self.state[p]
+        grad = p.grad
+
+        state["step"] += 1
+        step = state["step"]
+
+        beta1, beta2, beta3 = config["betas"]
+        alpha = config["alpha"]
+        t_alpha = config["t_alpha"]
+        t_beta3 = config["t_beta3"]
+
+        # Apply scheduler for alpha
+        if t_alpha is not None:
+            alpha_t = min(step * alpha / t_alpha, alpha)
+        else:
+            alpha_t = alpha
+
+        # Apply scheduler for beta3
+        if t_beta3 is not None:
+            ln_beta1 = math.log(beta1)
+            ln_beta3 = math.log(beta3)
+            step_scale = step / t_beta3
+            beta3_t = min(
+                math.exp((ln_beta1 * ln_beta3) / (((1 - step_scale) * ln_beta3) + (step_scale * ln_beta1))), beta3
+            )
+        else:
+            beta3_t = beta3
+
+        # Apply updates
+        if state["state1"].dtype == torch.float32:
+            F.optimizer_update_32bit(
+                self.optimizer_name,
+                grad,
+                p,
+                state["state1"],
+                beta1,
+                config["eps"],
+                step,
+                config["lr"],
+                state["state2"],
+                beta2,
+                beta3_t,
+                alpha_t,
+                config["weight_decay"],
+                gnorm_scale=1.0,
+                unorm_vec=state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
+                max_unorm=config["max_unorm"],
+                skip_zeros=config["skip_zeros"],
+            )
+        elif state["state1"].dtype == torch.uint8:
+            F.optimizer_update_8bit_blockwise(
+                self.optimizer_name,
+                grad,
+                p,
+                state["state1"],
+                state["state2"],
+                config["betas"][0],
+                config["betas"][1],
+                beta3_t,
+                alpha_t,
+                config["eps"],
+                step,
+                config["lr"],
+                state["qmap1"],
+                state["qmap2"],
+                state["absmax1"],
+                state["absmax2"],
+                config["weight_decay"],
+                gnorm_scale=1.0,
+                skip_zeros=config["skip_zeros"],
+            )
 
     def _get_state_double_buffer(self, p, dtype=torch.float32):
         if not self.is_paged or p.numel() < 0.5e5:
@@ -282,6 +382,8 @@ class AdEMAMix32bit(Optimizer2State):
             block_wise=True,
             is_paged=is_paged,
             alpha=alpha,
+            t_alpha=t_alpha,
+            t_beta3=t_beta3,
         )
 
 

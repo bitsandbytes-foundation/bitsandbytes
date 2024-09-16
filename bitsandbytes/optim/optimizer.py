@@ -5,6 +5,7 @@
 from collections import abc as container_abcs, defaultdict
 from copy import deepcopy
 from itertools import chain
+from typing import Optional
 
 import torch
 
@@ -301,6 +302,8 @@ class Optimizer8bit(torch.optim.Optimizer):
         config["weight_decay"] = group["weight_decay"]
         config["lr"] = group["lr"]
         config["alpha"] = group.get("alpha")
+        config["t_alpha"] = group.get("t_alpha")
+        config["t_beta3"] = group.get("t_beta3")
         config["optim_bits"] = self.args.optim_bits
         config["min_8bit_size"] = self.args.min_8bit_size
         config["percentile_clipping"] = self.args.percentile_clipping
@@ -357,6 +360,8 @@ class Optimizer2State(Optimizer8bit):
         skip_zeros=False,
         is_paged=False,
         alpha=0.0,
+        t_alpha: Optional[int] = None,
+        t_beta3: Optional[int] = None,
     ):
         """
         Base 2-state update optimizer class.
@@ -392,6 +397,11 @@ class Optimizer2State(Optimizer8bit):
                 Whether the optimizer is a paged optimizer or not.
             alpha (`float`, defaults to 0.0):
                 The alpha value for the AdEMAMix optimizer.
+            t_alpha (`Optional[int]`, defaults to `None`):
+                Number of iterations for alpha scheduling with AdEMAMix.
+            t_beta3 (`Optional[int]`, defaults to `None`):
+                Number of iterations for beta scheduling with AdEMAMix.
+
         """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -406,7 +416,11 @@ class Optimizer2State(Optimizer8bit):
                 raise ValueError(f"Invalid beta parameter at index {i}: {betas[i]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, alpha=alpha)
+
+        defaults = dict(
+            lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, alpha=alpha, t_alpha=t_alpha, t_beta3=t_beta3
+        )
+
         super().__init__(params, defaults, optim_bits, is_paged)
 
         if args is None:
