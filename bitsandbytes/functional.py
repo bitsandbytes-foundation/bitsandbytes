@@ -53,6 +53,11 @@ if lib and lib.compiled_with_cuda:
             lib.cadam32bit_grad_fp32,
             lib.cadam32bit_grad_fp16,
         ),
+        "ademamix": (
+            lib.cademamix32bit_grad_fp32,
+            lib.cademamix32bit_grad_fp16,
+            lib.cademamix32bit_grad_bf16,
+        ),
     }
 
     str2optimizer8bit = {
@@ -104,6 +109,11 @@ if lib and lib.compiled_with_cuda:
         "adagrad": (
             lib.cadagrad_8bit_blockwise_grad_fp32,
             lib.cadagrad_8bit_blockwise_grad_fp16,
+        ),
+        "ademamix": (
+            lib.cademamix_8bit_blockwise_grad_fp32,
+            lib.cademamix_8bit_blockwise_grad_fp16,
+            lib.cademamix_8bit_blockwise_grad_bf16,
         ),
     }
 
@@ -1550,6 +1560,8 @@ def optimizer_update_32bit(
     lr: float,
     state2: Optional[torch.Tensor] = None,
     beta2: float = 0.0,
+    beta3: float = 0.0,
+    alpha: float = 0.0,
     weight_decay: float = 0.0,
     gnorm_scale: float = 1.0,
     unorm_vec: Optional[torch.Tensor] = None,
@@ -1585,6 +1597,10 @@ def optimizer_update_32bit(
         Optimizer state 2.
     beta2 : float
         Optimizer beta2.
+    beta3 : float
+        Optimizer beta3.
+    alpha : float
+        Optimizer alpha.
     gnorm_scale : float
         The factor to rescale the gradient to the max clip value.
     unorm_vec : torch.Tensor
@@ -1623,6 +1639,8 @@ def optimizer_update_32bit(
         ct.c_float(param_norm),
         ct.c_float(beta1),
         ct.c_float(beta2),
+        ct.c_float(beta3),
+        ct.c_float(alpha),
         ct.c_float(eps),
         ct.c_float(weight_decay),
         ct.c_int32(step),
@@ -1775,6 +1793,8 @@ def optimizer_update_8bit_blockwise(
     state2: Optional[torch.Tensor],
     beta1: float,
     beta2: float,
+    beta3: float,
+    alpha: float,
     eps: float,
     step: int,
     lr: float,
@@ -1815,6 +1835,8 @@ def optimizer_update_8bit_blockwise(
         get_ptr(state2),
         ct.c_float(beta1),
         ct.c_float(beta2),
+        ct.c_float(beta3),
+        ct.c_float(alpha),
         ct.c_float(eps),
         ct.c_int32(step),
         ct.c_float(lr),

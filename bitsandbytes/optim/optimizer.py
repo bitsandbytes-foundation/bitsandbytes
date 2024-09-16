@@ -170,7 +170,7 @@ class Optimizer8bit(torch.optim.Optimizer):
             raise ValueError("loaded state dict has a different number of parameter groups")
         param_lens = (len(g["params"]) for g in groups)
         saved_lens = (len(g["params"]) for g in saved_groups)
-        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
+        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens, strict=True)):
             raise ValueError(
                 "loaded state dict contains a parameter group that doesn't match the size of optimizer's group",
             )
@@ -181,6 +181,7 @@ class Optimizer8bit(torch.optim.Optimizer):
             for old_id, p in zip(
                 chain.from_iterable(g["params"] for g in saved_groups),
                 chain.from_iterable(g["params"] for g in groups),
+                strict=True,
             )
         }
 
@@ -221,7 +222,7 @@ class Optimizer8bit(torch.optim.Optimizer):
             new_group["params"] = group["params"]
             return new_group
 
-        param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
+        param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups, strict=True)]
         self.__setstate__({"state": state, "param_groups": param_groups})
 
     def to_gpu(self):
@@ -299,6 +300,7 @@ class Optimizer8bit(torch.optim.Optimizer):
         config["eps"] = group["eps"]
         config["weight_decay"] = group["weight_decay"]
         config["lr"] = group["lr"]
+        config["alpha"] = group.get("alpha")
         config["optim_bits"] = self.args.optim_bits
         config["min_8bit_size"] = self.args.min_8bit_size
         config["percentile_clipping"] = self.args.percentile_clipping
@@ -354,6 +356,7 @@ class Optimizer2State(Optimizer8bit):
         max_unorm=0.0,
         skip_zeros=False,
         is_paged=False,
+        alpha=0.0,
     ):
         """
         Base 2-state update optimizer class.
@@ -387,6 +390,8 @@ class Optimizer2State(Optimizer8bit):
                 Whether to skip zero values for sparse gradients and models to ensure correct updates.
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
+            alpha (`float`, defaults to 0.0):
+                The alpha value for the AdEMAMix optimizer.
         """
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -401,7 +406,7 @@ class Optimizer2State(Optimizer8bit):
                 raise ValueError(f"Invalid beta parameter at index {i}: {betas[i]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, alpha=alpha)
         super().__init__(params, defaults, optim_bits, is_paged)
 
         if args is None:
@@ -508,6 +513,8 @@ class Optimizer2State(Optimizer8bit):
                 config["lr"],
                 state["state2"],
                 config["betas"][1],
+                config["betas"][2] if len(config["betas"]) >= 3 else 0.0,
+                config["alpha"],
                 config["weight_decay"],
                 gnorm_scale,
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
@@ -551,6 +558,8 @@ class Optimizer2State(Optimizer8bit):
                 state["state2"],
                 config["betas"][0],
                 config["betas"][1],
+                config["betas"][2] if len(config["betas"]) >= 3 else 0.0,
+                config["alpha"],
                 config["eps"],
                 step,
                 config["lr"],
@@ -723,6 +732,8 @@ class Optimizer1State(Optimizer8bit):
                 config["lr"],
                 None,
                 config["betas"][1],
+                0.0,
+                0.0,
                 config["weight_decay"],
                 gnorm_scale,
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
@@ -764,6 +775,8 @@ class Optimizer1State(Optimizer8bit):
                 None,
                 config["betas"][0],
                 config["betas"][1],
+                0.0,
+                0.0,
                 config["eps"],
                 step,
                 config["lr"],
