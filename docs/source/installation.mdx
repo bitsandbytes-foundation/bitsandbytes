@@ -134,14 +134,23 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 
 3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 11.7) and a different bitsandbytes library is loaded.
 
-## Multi-backend preview release compilation[[multi-backend]]
+## Multi-backend[[multi-backend]]
+
+> [!TIP]
+> This functionality is currently in preview and therefore not yet production-ready!
 
 Please follow these steps to install bitsandbytes with device-specific backend support other than CUDA:
+
+### Pip install the pre-built wheel (recommended for most)
+
+WIP (will be added in the coming days)
+
+### Compilation
 
 <hfoptions id="backend">
 <hfoption id="AMD ROCm">
 
-### AMD GPU
+#### AMD GPU
 
 bitsandbytes is fully supported from ROCm 6.1 onwards (currently in alpha release).
 
@@ -179,7 +188,7 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 </hfoption>
 <hfoption id="Intel CPU + GPU">
 
-### Intel CPU
+#### Intel CPU
 
 > [!TIP]
 > Intel CPU backend only supports building from source; for now, please follow the instructions below.
@@ -199,6 +208,8 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 
 </hfoption>
 <hfoption id="Apple Silicon (MPS)">
+
+#### Apple Silicon
 
 WIP
 
