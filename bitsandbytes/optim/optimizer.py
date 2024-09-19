@@ -153,12 +153,14 @@ class Optimizer8bit(torch.optim.Optimizer):
     def __setstate__(self, state):
         super().__setstate__(state)
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, move_to_device=True):
         """Load an optimizer state.
 
         Arguments:
             state_dict (`dict`):
                 An optimizer state (should be returned from a call to `state_dict`) to load.
+            move_to_device (`bool`, defaults to `True`):
+                Whether to move the optimizer's state to the device.
         """
         # deepcopy, to be consistent with module API
         state_dict = deepcopy(state_dict)
@@ -195,7 +197,8 @@ class Optimizer8bit(torch.optim.Optimizer):
             elif isinstance(value, dict):
                 for k, v in value.items():
                     if k in self.non_castable_tensor_keys:
-                        value[k] = v.to(param.device)
+                        if move_to_device:
+                            value[k] = v.to(param.device)
                     else:
                         value[k] = cast(param, v)
 
