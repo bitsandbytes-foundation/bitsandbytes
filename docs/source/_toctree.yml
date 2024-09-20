@@ -42,6 +42,8 @@
       title: Adam
     - local: reference/optim/adamw
       title: AdamW
+    - local: reference/optim/ademamix
+      title: AdEMAMix
     - local: reference/optim/lamb
       title: LAMB
     - local: reference/optim/lars

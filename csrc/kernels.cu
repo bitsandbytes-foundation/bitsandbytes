@@ -874,7 +874,7 @@ template<typename T, int OPTIMIZER>
 __launch_bounds__(TH, 1)
 __global__ void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
-                const float beta1, const float beta2, const float eps, const float weight_decay,
+                const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n)
 {
 
@@ -885,8 +885,15 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
   T g_vals[NUM_PER_THREAD];
   T p_vals[NUM_PER_THREAD];
 
+
   float s1_vals[NUM_PER_THREAD];
   float s2_vals[NUM_PER_THREAD];
+
+  // AdEMAMix has an additional state buffer, which we packed
+  // into state1. We need thread-local storage here for these.
+  // TODO: Mark with [[maybe_unused]] after upgrade to min compiler.
+  float s3_vals[NUM_PER_THREAD];
+
 
   const float correction1 = 1.0f - powf(beta1, step);
   const float correction2 = sqrtf(1.0f - powf(beta2, step));
@@ -926,6 +933,13 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
       __syncthreads();
       Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
 
+      // Load additional state1 data for AdEMAMix
+      // TODO: Make constexpr after updating min compiler
+      if (OPTIMIZER == ADEMAMIX) {
+        __syncthreads();
+        LoadFloat(temp_storage.loadf).Load(&(state1[n + i]), s3_vals, valid_items);
+      }
+
       # pragma unroll 4
       for(unsigned int j = 0; j < NUM_PER_THREAD; j++)
         g_vals[j] = gnorm_scale*((float)g_vals[j]);
@@ -935,7 +949,28 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
       {
           switch(OPTIMIZER)
           {
+              case ADEMAMIX:
+                // m1 update: m1 = beta1 * m1 + (1-beta1) * g
+                s1_vals[j] = (s1_vals[j] * beta1) + ((1.0f - beta1) * (float)g_vals[j]);
+
+                // m2 update: m2 = m2 * beta3 + (1-beta3) * g
+                s3_vals[j] = (s3_vals[j] * beta3) + ((1.0f - beta3) * (float)g_vals[j]);
+
+                // nu update: nu = beta2 * nu + (1-beta2) * g^2
+                s2_vals[j] = (s2_vals[j] * beta2) + ((1.0f - beta2) * (float)g_vals[j] * (float)g_vals[j]);
+
+                p_vals[j] = (float)p_vals[j] - lr * (
+                  ((s1_vals[j] / correction1) + (alpha * s3_vals[j])) / (
+                    (sqrtf(s2_vals[j]) / correction2) + eps
+                  )
+                );
+
+                if (weight_decay > 0.0f)
+                    p_vals[j] = ((float)p_vals[j]) * (1.0f - (lr * weight_decay));
+
+              break;
               case ADAM:
+
 									if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
 									{
 										s1_vals[j] = s1_vals[j]*beta1 + ((1.0f -beta1)*((float)g_vals[j]));
@@ -955,6 +990,11 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
       StoreFloat(temp_storage.storef).Store(&(state1[i]), s1_vals, valid_items);
       __syncthreads();
       StoreFloat(temp_storage.storef).Store(&(state2[i]), s2_vals, valid_items);
+
+      if (OPTIMIZER == ADEMAMIX) {
+        __syncthreads();
+        StoreFloat(temp_storage.storef).Store(&(state1[n + i]), s3_vals, valid_items);
+      }
   }
 }
 
@@ -1644,14 +1684,27 @@ __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int st
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH>
 __launch_bounds__(256, 3)
 __global__ void
-kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,
-                const float beta1, const float beta2,
-                const float eps, const int step, const float lr,
-                float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
-                float* absmax1, float* absmax2,
-                float weight_decay,
-                const float gnorm_scale, const bool skip_zeros, const int n)
-{
+kOptimizerStatic8bit2StateBlockwise(
+    T* p,
+    T* __restrict__ const g,
+    unsigned char* state1,
+    unsigned char* state2,
+    const float beta1,
+    const float beta2,
+    const float beta3,
+    const float alpha,
+    const float eps,
+    const int step,
+    const float lr,
+    float* __restrict__ const quantiles1,
+    float* __restrict__ const quantiles2,
+    float* absmax1,
+    float* absmax2,
+    float weight_decay,
+    const float gnorm_scale,
+    const bool skip_zeros,
+    const int n
+) {
 
     //const int n_full = n + (n%BLOCK_SIZE);
     const int n_full = gridDim.x * BLOCK_SIZE;
@@ -1660,6 +1713,8 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     float g_val = 0.0f;
     float s1_vals[N_PER_TH];
     float s2_vals[N_PER_TH];
+    float s3_vals[N_PER_TH];
+
     // 2-5%
     const float correction1 = 1.0f - __powf(beta1, step);
     const float correction2 = sqrtf(1.0f -__powf(beta2, step));
@@ -1667,11 +1722,14 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     const int lane_id = threadIdx.x % LANES;
     float new_local_abs_max1 = -FLT_MAX;
     float new_local_abs_max2 = -FLT_MAX;
+    float new_local_abs_max3 = -FLT_MAX;
     float quadrants1[QUAD];
     float quadrants2[QUAD];
 
     unsigned char c1s[N_PER_TH];
     unsigned char c2s[N_PER_TH];
+    unsigned char c3s[N_PER_TH];
+
     T g_vals[N_PER_TH];
     T p_vals[N_PER_TH];
     typedef cub::BlockLoad<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
@@ -1684,10 +1742,13 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
     __shared__ float smem_quantiles2[LANES][257];
     typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce1;
     typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce2;
+    typedef cub::BlockReduce<float, BLOCK_SIZE/N_PER_TH> BlockReduce3;
     __shared__ typename BlockReduce1::TempStorage reduce1;
     __shared__ typename BlockReduce2::TempStorage reduce2;
+    __shared__ typename BlockReduce2::TempStorage reduce3;
     __shared__ float smem_exchange1[1];
     __shared__ float smem_exchange2[1];
+    __shared__ float smem_exchange3[1];   // [[maybe_unused]]
 
     __shared__ union {
         typename LoadT::TempStorage loadh;
@@ -1728,8 +1789,15 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         __syncthreads();
         LoadChar(temp_storage.loadc).Load(&(state2[i]), c2s, valid_items, 0);
 
+        // AdEMAMix has an additional state packed into state1.
+        if (OPTIMIZER == ADEMAMIX) {
+          __syncthreads();
+          LoadChar(temp_storage.loadc).Load(&(state1[n + i]), c3s, valid_items, 128);
+        }
+
         new_local_abs_max1 = -FLT_MAX;
         new_local_abs_max2 = -FLT_MAX;
+        new_local_abs_max3 = -FLT_MAX;
 
         //  update: 2.48/1.57 -> 2.51/1.60
         # pragma unroll N_PER_TH
@@ -1747,15 +1815,29 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 
 							s1_vals[j] = smem_quantiles1[lane_id][c1s[j]]*absmax1[i/BLOCK_SIZE];
 							s1_vals[j] = (s1_vals[j]*beta1) + (((1.0f-beta1)*g_val));
+
+              if (OPTIMIZER == ADEMAMIX) {
+                // The absmax for the third state is appended to absmax1
+                s3_vals[j] = smem_quantiles1[lane_id][c3s[j]] * absmax1[(n + i)/BLOCK_SIZE];
+                s3_vals[j] = (s3_vals[j] * beta3) + (((1.0f - beta3) * g_val));
+              }
 						}
             else
             {
               s1_vals[j] = 0.0f;
               s2_vals[j] = 0.0f;
+
+              if (OPTIMIZER == ADEMAMIX) {
+                s3_vals[j] = 0.0f;
+              }
             }
 
             new_local_abs_max1 = fmaxf(new_local_abs_max1, fabsf(s1_vals[j]));
             new_local_abs_max2 = fmaxf(new_local_abs_max2, fabsf(s2_vals[j]));
+
+            if (OPTIMIZER == ADEMAMIX) {
+              new_local_abs_max3 = fmaxf(new_local_abs_max3, fabsf(s3_vals[j]));
+            }
         }
 
 
@@ -1763,10 +1845,18 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, cub::Max());
         new_local_abs_max2 = BlockReduce2(reduce2).Reduce(new_local_abs_max2, cub::Max());
 
+        if (OPTIMIZER == ADEMAMIX) {
+          new_local_abs_max3 = BlockReduce3(reduce3).Reduce(new_local_abs_max3, cub::Max());
+        }
+
         if(threadIdx.x == 0)
         {
           smem_exchange1[0] = new_local_abs_max1;
           smem_exchange2[0] = new_local_abs_max2;
+
+          if (OPTIMIZER == ADEMAMIX) {
+            smem_exchange3[0] = new_local_abs_max3;
+          }
         }
 
         __syncthreads();
@@ -1775,11 +1865,19 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
         {
           absmax1[i/BLOCK_SIZE] = new_local_abs_max1;
           absmax2[i/BLOCK_SIZE] = new_local_abs_max2;
+
+          if (OPTIMIZER == ADEMAMIX) {
+            absmax1[(n + i)/BLOCK_SIZE] = new_local_abs_max3;
+          }
         }
         else
         {
           new_local_abs_max1 = smem_exchange1[0];
           new_local_abs_max2 = smem_exchange2[0];
+
+          if (OPTIMIZER == ADEMAMIX) {
+            new_local_abs_max3 = smem_exchange3[0];
+          }
         }
 
         __syncthreads();
@@ -1791,8 +1889,17 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 						//if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
             if(!isnan((float)g_vals[j]) && !isinf((float)g_vals[j]))
 						{
-							p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(__fdividef(s1_vals[j],(sqrtf(s2_vals[j])+(correction2*eps)))))));
-							if(weight_decay > 0.0f)
+              if (OPTIMIZER == ADEMAMIX) {
+                p_vals[j] = T((float)p_vals[j] - lr * (
+                  ((s1_vals[j] / correction1) + (alpha * s3_vals[j])) / (
+                    (sqrtf(s2_vals[j]) / correction2) + eps
+                  )
+                ));
+              } else {
+                p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(__fdividef(s1_vals[j],(sqrtf(s2_vals[j])+(correction2*eps)))))));
+              }
+
+              if(weight_decay > 0.0f)
 									p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
 						}
         }
@@ -1817,12 +1924,25 @@ kOptimizerStatic8bit2StateBlockwise(T* p, T* __restrict__ const g, unsigned char
               else
                   c1s[j] -= 1;
             }
+
+            if (OPTIMIZER == ADEMAMIX) {
+              c3s[j] = quantize_2D<1>(quadrants1, smem_quantiles1[lane_id], __fdividef(s3_vals[j],new_local_abs_max3));
+
+              if (signbit(smem_quantiles1[lane_id][c3s[j]]) != signbit(s3_vals[j])) {
+                c3s[j] += (s3_vals[j] > 0.0f) ? 1 : -1;
+              }
+            }
         }
 
         __syncthreads();
         StoreChar(temp_storage.storec).Store(&(state1[i]), c1s, valid_items);
         __syncthreads();
         StoreChar(temp_storage.storec).Store(&(state2[i]), c2s, valid_items);
+
+        if (OPTIMIZER == ADEMAMIX) {
+          __syncthreads();
+          StoreChar(temp_storage.storec).Store(&(state1[n + i]), c3s, valid_items);
+        }
     }
 }
 
@@ -3740,13 +3860,23 @@ template __global__ void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 8
 MAKE_PreconditionOptimizer32bit2State(ADAM, float)
 MAKE_PreconditionOptimizer32bit2State(ADAM, half)
 MAKE_PreconditionOptimizer32bit2State(ADAM, __nv_bfloat16)
+MAKE_PreconditionOptimizer32bit2State(ADEMAMIX, float)
+MAKE_PreconditionOptimizer32bit2State(ADEMAMIX, half)
+MAKE_PreconditionOptimizer32bit2State(ADEMAMIX, __nv_bfloat16)
 
 template __global__ void kOptimizer32bit2State<float, ADAM>(float* g, float* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
+    const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
 template __global__ void kOptimizer32bit2State<half, ADAM>(half* g, half* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
+    const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
 template __global__ void kOptimizer32bit2State<__nv_bfloat16, ADAM>(__nv_bfloat16* g, __nv_bfloat16* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
-    const float beta1, const float beta2, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
+    const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
+template __global__ void kOptimizer32bit2State<float, ADEMAMIX>(float* g, float* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
+    const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
+template __global__ void kOptimizer32bit2State<half, ADEMAMIX>(half* g, half* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
+    const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
+template __global__ void kOptimizer32bit2State<__nv_bfloat16, ADEMAMIX>(__nv_bfloat16* g, __nv_bfloat16* p, float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
+    const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay,const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
+
 
 #define MAKE_PreconditionStatic8bit1State(oname, gtype) \
 template __global__ void kPreconditionOptimizerStatic8bit1State<gtype, oname>(gtype* p, gtype* __restrict__ const g, unsigned char*__restrict__  const state1,  \
@@ -3904,7 +4034,7 @@ template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, NF4>(fl
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread) \
 template __global__ void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_per_thread>(gtype* p, gtype* __restrict__ const g, unsigned char* state1, unsigned char* state2, \
-                const float beta1, const float beta2, \
+                const float beta1, const float beta2, const float beta3, const float alpha, \
                 const float eps, const int step, const float lr, \
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2, \
                 float* absmax1, float* absmax2,  \
@@ -3914,6 +4044,9 @@ template __global__ void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 2048, 8)
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 2048, 8)
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, __nv_bfloat16, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADEMAMIX, float, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADEMAMIX, half, 2048, 8)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADEMAMIX, __nv_bfloat16, 2048, 8)
 
 
 #define MAKE_OptimizerStatic8bit1StateBlockwise(oname, gtype, block_size, num_per_thread) \
