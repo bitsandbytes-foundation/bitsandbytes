@@ -74,9 +74,17 @@ str2optimizers["ademamix_scheduled"] = (
     lambda pxx: bnb.optim.ademamix._ReferenceAdEMAMix(pxx, t_alpha=k, t_beta3=k),
     lambda pxx: bnb.optim.AdEMAMix(pxx, t_alpha=k, t_beta3=k),
 )
+str2optimizers["paged_ademamix_scheduled"] = (
+    lambda pxx: bnb.optim.ademamix._ReferenceAdEMAMix(pxx, t_alpha=k, t_beta3=k),
+    lambda pxx: bnb.optim.PagedAdEMAMix(pxx, t_alpha=k, t_beta3=k),
+)
 str2optimizers["ademamix8bit_blockwise_scheduled"] = (
     lambda pxx: bnb.optim.ademamix._ReferenceAdEMAMix(pxx, t_alpha=100, t_beta3=100),
     lambda pxx: bnb.optim.AdEMAMix8bit(pxx, t_alpha=100, t_beta3=100),
+)
+str2optimizers["paged_ademamix8bit_blockwise_scheduled"] = (
+    lambda pxx: bnb.optim.ademamix._ReferenceAdEMAMix(pxx, t_alpha=100, t_beta3=100),
+    lambda pxx: bnb.optim.PagedAdEMAMix8bit(pxx, t_alpha=100, t_beta3=100),
 )
 
 str2optimizers["lion"] = (Lion, bnb.optim.Lion)
@@ -143,7 +151,7 @@ str2statenames["lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1"
 str2statenames["paged_lion8bit_blockwise"] = [("exp_avg", "state1", "qmap1", "absmax1")]
 
 str2statenames["ademamix"] = str2statenames["ademamix_scheduled"] = [("m1_m2", "state1"), ("nu", "state2")]
-str2statenames["paged_ademamix"] = [("m1_m2", "state1"), ("nu", "state2")]
+str2statenames["paged_ademamix"] = str2statenames["paged_ademamix_scheduled"] = [("m1_m2", "state1"), ("nu", "state2")]
 str2statenames["ademamix8bit_blockwise"] = str2statenames["ademamix8bit_blockwise_scheduled"] = [
     ("m1_m2", "state1", "qmap1", "absmax1"),
     ("nu", "state2", "qmap2", "absmax2"),
@@ -164,6 +172,7 @@ optimizer_names_32bit = [
     "ademamix",
     "ademamix_scheduled",
     "paged_ademamix",
+    "paged_ademamix_scheduled",
 ]
 
 
@@ -309,18 +318,15 @@ optimizer_names_8bit = [
 def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     torch.set_printoptions(precision=6)
 
-    if gtype == torch.bfloat16 and optim_name not in [
-        "adam8bit_blockwise",
-        "lion8bit_blockwise",
-        "ademamix8bit_blockwise",
-    ]:
+    if gtype == torch.bfloat16 and "blockwise" not in optim_name:
         pytest.skip()
+
     if dim1 == 1 and dim2 == 1:
         return
     p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
     p2 = p1.clone()
     p1 = p1.float()
-    blocksize = 2048
+    blocksize = 256
 
     torch_optimizer = str2optimizers[optim_name][0]([p1])
     bnb_optimizer = str2optimizers[optim_name][1]([p2])
@@ -347,8 +353,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         torch_optimizer.step()
 
         # since Lion can have pretty noisy updates where things lie at the boundary
-        # and AdEMAMix can diverge as well, allow up to 0.05% errors.
-        assert_most_approx_close(p1, p2.float(), patol, prtol, max_error_count=int(p1.numel() * 5e-4))
+        assert_most_approx_close(p1, p2.float(), patol, prtol, max_error_count=0)
 
         dequant_states = []
         for name1, name2, qmap, max_val in str2statenames[optim_name]:
@@ -392,11 +397,11 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
         err = torch.abs(p1 - p2)
         relerr = err / (torch.abs(p1) + 1e-9)
         if g.dtype == torch.bfloat16:
-            assert err.mean() < 0.00015
-            assert relerr.mean() < 0.0020  # 0.0016
+            assert err.mean() <= 0.00017
+            assert relerr.mean() <= 0.0016
         else:
-            assert err.mean() < 0.00016  # 0.00012
-            assert relerr.mean() < 0.0016  # 0.0012
+            assert err.mean() < 0.00006
+            assert relerr.mean() < 0.0006
 
         errors.append(err.mean().item())
         relerrors.append(relerr.mean().item())
@@ -454,9 +459,9 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
 
                 num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol) == 0
                 assert num_not_close.sum().item() < 20
-            # since Lion can have pretty noisy updates where things lie at the boundary
-            # and AdEMAMix can also be noisy, allow up to 0.05%.
-            assert_most_approx_close(p1, p2.float(), patol, prtol, max_error_count=int(p1.numel() * 5e-04))
+
+            # Lion can have pretty noisy updates where things lie at the boundary
+            assert_most_approx_close(p1, p2.float(), patol, prtol, max_error_count=0)
 
         # the parameters diverge quickly. Here we keep them close
         # together so we can test against the Adam error
@@ -560,7 +565,11 @@ def test_adam_percentile_clipping(dim1, dim2, gtype, optim_bits):
 optimizer_names_benchmark = [
     "adam8bit_blockwise",
     "paged_adam8bit_blockwise",
-    "paged_adamw8bit_blockwise",
+    "ademamix8bit_blockwise",
+    "paged_ademamix8bit_blockwise",
+    "ademamix8bit_blockwise_scheduled",
+    "paged_ademamix8bit_blockwise_scheduled",
+    "lion8bit_blockwise",
     "paged_lion8bit_blockwise",
     "paged_ademamix8bit_blockwise",
 ]
@@ -568,7 +577,7 @@ optimizer_names_benchmark = [
 
 @pytest.mark.parametrize("dim1", [4096], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [4096], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
+@pytest.mark.parametrize("gtype", [torch.float32, torch.bfloat16, torch.float16], ids=describe_dtype)
 @pytest.mark.parametrize("optim_name", optimizer_names_benchmark, ids=id_formatter("opt"))
 @pytest.mark.benchmark
 def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
@@ -580,8 +589,9 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
 
     g = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.01
     p1.grad = g
-    for i in range(k):
-        if i == k // 5:
+    total_steps = 500
+    for i in range(total_steps):
+        if i == total_steps // 5:
             # 100 iterations for burn-in
             torch.cuda.synchronize()
             t0 = time.time()
@@ -591,8 +601,8 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
     torch.cuda.synchronize()
     s = time.time() - t0
     print("")
-    params = (k - k // 5) * dim1 * dim2
-    print(optim_name, gtype, s / params)
+    params = (total_steps - total_steps // 5) * dim1 * dim2
+    print(optim_name, gtype, s, params, s / params)
     # assert s < 3.9
 
 

@@ -166,7 +166,7 @@ class AdEMAMix(Optimizer2State):
             self.name2qmap["udynamic"] = state["qmap2"] = self.name2qmap["udynamic"].to(p.device)
 
             n = p.numel()
-            blocks = (n // 2048) + bool(n % 2048)
+            blocks = (n // 256) + bool(n % 256)
 
             state["absmax1"] = torch.zeros((2, blocks), dtype=torch.float32, device=p.device)
             state["absmax2"] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)

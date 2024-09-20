@@ -191,10 +191,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 	}
 }
 
-#define BLOCKSIZE_2STATE 2048
-#define NUM_2STATE 8
-#define BLOCKSIZE_1STATE 2048
-#define NUM_1STATE 8
+#define BLOCKSIZE_2STATE 256
+#define NUM_2STATE 1
+#define BLOCKSIZE_1STATE 256
+#define NUM_1STATE 1
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(
     T* p,
@@ -818,13 +818,16 @@ MAKE_optimizer32bit(ADAM, float)
 MAKE_optimizer32bit(ADAM, __nv_bfloat16)
 MAKE_optimizer32bit(MOMENTUM, half)
 MAKE_optimizer32bit(MOMENTUM, float)
+MAKE_optimizer32bit(MOMENTUM, __nv_bfloat16)
 MAKE_optimizer32bit(RMSPROP, half)
 MAKE_optimizer32bit(RMSPROP, float)
+MAKE_optimizer32bit(RMSPROP, __nv_bfloat16)
 MAKE_optimizer32bit(LION, half)
 MAKE_optimizer32bit(LION, float)
 MAKE_optimizer32bit(LION, __nv_bfloat16)
 MAKE_optimizer32bit(ADAGRAD, half)
 MAKE_optimizer32bit(ADAGRAD, float)
+MAKE_optimizer32bit(ADAGRAD, __nv_bfloat16)
 MAKE_optimizer32bit(ADEMAMIX, half)
 MAKE_optimizer32bit(ADEMAMIX, __nv_bfloat16)
 MAKE_optimizer32bit(ADEMAMIX, float)
@@ -861,13 +864,16 @@ MAKE_optimizerStatic8bitBlockwise(float, ADAM);
 MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, ADAM);
 MAKE_optimizerStatic8bitBlockwise(half, MOMENTUM);
 MAKE_optimizerStatic8bitBlockwise(float, MOMENTUM);
+MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, MOMENTUM);
 MAKE_optimizerStatic8bitBlockwise(half, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(float, RMSPROP);
+MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(half, LION);
 MAKE_optimizerStatic8bitBlockwise(float, LION);
 MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, LION);
 MAKE_optimizerStatic8bitBlockwise(half, ADAGRAD);
 MAKE_optimizerStatic8bitBlockwise(float, ADAGRAD);
+MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, ADAGRAD);
 MAKE_optimizerStatic8bitBlockwise(half, ADEMAMIX);
 MAKE_optimizerStatic8bitBlockwise(__nv_bfloat16, ADEMAMIX);
 MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);

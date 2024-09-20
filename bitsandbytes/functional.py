@@ -52,6 +52,7 @@ if lib and lib.compiled_with_cuda:
         "lamb": (
             lib.cadam32bit_grad_fp32,
             lib.cadam32bit_grad_fp16,
+            lib.cadam32bit_grad_bf16,
         ),
         "ademamix": (
             lib.cademamix32bit_grad_fp32,
@@ -96,10 +97,12 @@ if lib and lib.compiled_with_cuda:
         "momentum": (
             lib.cmomentum_8bit_blockwise_grad_fp32,
             lib.cmomentum_8bit_blockwise_grad_fp16,
+            lib.cmomentum_8bit_blockwise_grad_bf16,
         ),
         "rmsprop": (
             lib.crmsprop_8bit_blockwise_grad_fp32,
             lib.crmsprop_8bit_blockwise_grad_fp16,
+            lib.crmsprop_8bit_blockwise_grad_bf16,
         ),
         "lion": (
             lib.clion_8bit_blockwise_grad_fp32,
@@ -109,6 +112,7 @@ if lib and lib.compiled_with_cuda:
         "adagrad": (
             lib.cadagrad_8bit_blockwise_grad_fp32,
             lib.cadagrad_8bit_blockwise_grad_fp16,
+            lib.cadagrad_8bit_blockwise_grad_bf16,
         ),
         "ademamix": (
             lib.cademamix_8bit_blockwise_grad_fp32,
@@ -398,7 +402,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
         data.append(0)
 
     data.sort()
-    return Tensor(data)
+    return torch.tensor(data)
 
 
 def create_quantile_map(A, total_bits=8):
