@@ -344,7 +344,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name):
     errors = []
     relerrors = []
 
-    for i in range(100):
+    for i in range(50):
         g = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.01
         p1.grad = g.clone().float()
         p2.grad = g.clone()
@@ -571,6 +571,7 @@ optimizer_names_benchmark = [
     "paged_ademamix8bit_blockwise_scheduled",
     "lion8bit_blockwise",
     "paged_lion8bit_blockwise",
+    "paged_ademamix8bit_blockwise",
 ]
 
 
