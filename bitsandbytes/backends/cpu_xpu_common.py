@@ -370,25 +370,6 @@ def quantize_4bit_impl(
             quant_type=quant_type,
         )
 
-    if ipex_cpu and _ipex_cpu_version_prereq(2, 3) and input_shape[1] % blocksize == 0 and quant_type == "nf4":
-        # lowp_mode: lowest precision for computation
-        lowp_mode = ipex_cpu.quantization.WoqLowpMode.BF16
-        state.op_context = torch.ops.ipex_prepack.weight_only_qlinear_prepack(
-            out.reshape([input_shape[0], input_shape[1] // 2]),
-            ipex_cpu.quantization.WoqWeightDtype.NF4,
-            input_shape,  # weight shape
-            absmax.view(input_shape[0], input_shape[1] // blocksize),  # scales
-            None,  # zero_points
-            None,  # bias
-            None,  # g_idx
-            None,  # batch_size
-            blocksize,
-            int(lowp_mode),
-            -1,  # act_quant_mode. -1 means don't quant activation
-        )
-        state.absmax = torch.Tensor()
-        return torch.empty([1, 0], dtype=torch.uint8), state
-
     return out.unsqueeze(0), state
 
 
