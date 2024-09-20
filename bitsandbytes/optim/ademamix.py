@@ -260,7 +260,7 @@ class AdEMAMix(Optimizer2State):
             )
 
     def _get_state_double_buffer(self, p, dtype=torch.float32):
-        if not self.is_paged or p.numel() < 0.5e5:
+        if not self.is_paged or p.numel() < 1e5:
             return torch.zeros((2, *p.size()), dtype=dtype, device=p.device)
         else:
             buff = F.get_paged(*(2, *p.size()), dtype=dtype, device=p.device)
