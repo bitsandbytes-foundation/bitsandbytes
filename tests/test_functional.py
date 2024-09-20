@@ -2303,6 +2303,7 @@ def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
             assert maxratio < 1.02 and maxratio > 0.98
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
