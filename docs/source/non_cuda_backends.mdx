@@ -26,18 +26,16 @@ Thank you for your support!
 
 The following performance data is collected from Intel 4th Gen Xeon (SPR) platform. The tables show speed-up and memory compared with different data types of [Llama-2-7b-chat-hf](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf).
 
-For inference:
+#### Inference Table:
 
-| CPU | BF16 | INT8 | NF4 | FP4 |
+| Data Type | BF16 | INT8 | NF4 | FP4 |
 |---|---|---|---|---|
-| speed-up | 1.0x | 0.6x | 2.3x | 0.03x |
-| memory | 13.1G | 7.6G | 5.0G | 4.6G |
+| Speed-Up (vs BF16) | 1.0x | 0.6x | 2.3x | 0.03x |
+| Memory (GB) | 13.1 | 7.6 | 5.0 | 4.6 |
 
-For fine-tune:
+#### Fine-Tuning Table:
 
-| CPU | AMP BF16 | INT8 | NF4 | FP4 |
+| Data Type | AMP BF16 | INT8 | NF4 | FP4 |
 |---|---|---|---|---|
-| speed-up | 1.0x | 0.38x | 0.07x | 0.07x |
-| memory | 40G | 9G | 6.6G | 6.6G |
-
-### AMD
+| Speed-Up (vs AMP BF16) | 1.0x | 0.38x | 0.07x | 0.07x |
+| Memory (GB) | 40 | 9 | 6.6 | 6.6 |
