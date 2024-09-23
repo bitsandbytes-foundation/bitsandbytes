@@ -157,6 +157,7 @@ jobs:
   upload-pre-release-wheels:
     name: Create release and upload artifacts
     runs-on: ubuntu-latest
+    if: github.ref_name == 'main' || github.ref_name == 'multi-backend-refactor'
     permissions:
       contents: write
     needs:
