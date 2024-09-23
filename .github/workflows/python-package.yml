@@ -224,7 +224,7 @@ jobs:
       - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
 
   publish-wheels:
-    name: Publish wheels to Test PyPI
+    name: Publish wheels to PyPI
     needs: [build-wheels, audit-wheels]
     runs-on: ubuntu-latest
     if: |
