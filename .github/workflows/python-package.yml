@@ -244,7 +244,7 @@ jobs:
           merge-multiple: true
 
       - name: Remove macOS wheels
-        run: rm dist/bdist_wheel_macos-*
+        run: rm dist/*macos*
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
