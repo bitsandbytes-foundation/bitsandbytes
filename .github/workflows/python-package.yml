@@ -18,6 +18,7 @@ on:
   release:
     types: [published]
   workflow_dispatch: {} # Allow manual trigger
+  workflow_call: {} # Allow triggering from other worfkflows
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -156,6 +157,7 @@ jobs:
   upload-pre-release-wheels:
     name: Create release and upload artifacts
     runs-on: ubuntu-latest
+    if: github.ref_name == 'main'
     permissions:
       contents: write
     needs:
@@ -220,6 +222,34 @@ jobs:
           python-version: "3.12"
       - run: pip install auditwheel
       - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
+
+  publish-wheels:
+    name: Publish wheels to PyPI
+    needs: [build-wheels, audit-wheels]
+    runs-on: ubuntu-latest
+    if: |
+      github.repository == 'bitsandbytes-foundation/bitsandbytes'
+      && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    environment:
+      name: release
+      url: https://pypi.org/p/bitsandbytes
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          pattern: "bdist_wheel_*"
+          merge-multiple: true
+
+      - name: Remove macOS wheels
+        run: rm dist/*macos*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true
 
 #  test:
 #    needs:
