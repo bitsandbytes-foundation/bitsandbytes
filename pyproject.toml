@@ -74,6 +74,20 @@ package-data = { "*" = ["libbitsandbytes*.*"] }
 [tool.setuptools.dynamic]
 version = {attr = "bitsandbytes.__version__"}
 
+[tool.yapf]
+align_closing_bracket_with_visual_indent = true
+allow_multiline_lambdas = true
+blank_line_before_nested_class_or_def = true
+column_limit = 88
+coalesce_brackets = true
+space_between_ending_comma_and_closing_bracket = true
+spaces_before_comment = 2
+split_before_bitwise_operator = true
+split_before_first_argument = true
+split_before_logical_operator = true
+split_before_named_assigns = true
+split_complex_comprehension = true
+
 [tool.pytest.ini_options]
 addopts = "-rP"
 #    ; --cov=bitsandbytes
