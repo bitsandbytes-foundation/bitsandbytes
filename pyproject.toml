@@ -2,6 +2,31 @@
 requires = [ "setuptools", "wheel" ]
 build-backend = "setuptools.build_meta"
 
+[tool.yapf]
+align_closing_bracket_with_visual_indent = true
+allow_multiline_lambdas = true
+blank_line_before_nested_class_or_def = true
+column_limit = 88
+coalesce_brackets = true
+space_between_ending_comma_and_closing_bracket = true
+spaces_before_comment = 2
+split_before_bitwise_operator = true
+split_before_first_argument = true
+split_before_logical_operator = true
+split_before_named_assigns = true
+split_complex_comprehension = true
+
+[tool.pytest.ini_options]
+addopts = "-rP"
+log_cli = true
+log_cli_level = "INFO"
+log_file = "logs/pytest.log"
+markers = [
+    "slow: mark test as slow",
+    "benchmark: mark test as a benchmark",
+    "deprecated: mark test as covering a deprecated feature",
+]
+
 [tool.ruff]
 src = [
     "bitsandbytes",
