@@ -206,18 +206,40 @@ jobs:
     needs:
       - build-wheels
     steps:
-      - name: Download artifacts
+      - name: Download artifacts to tmp directory
         uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          path: tmp/
           pattern: "bdist_wheel_*"
           merge-multiple: true
-      - name: Inspect artifacts directory after downloading
-        run: ls -alFR artifacts/
+      - name: Inspect tmp directory after downloading artifacts
+        run: ls -alFR tmp/
+      - name: Move and rename wheel files
+        run: |
+          mkdir -p wheels/
+          find tmp/ -type f -name '*.whl' -print0 | while IFS= read -r -d '' wheel; do
+            wheel_filename=$(basename "$wheel")
+            if [[ $wheel_filename == *linux*x86_64* ]]; then
+              mv "$wheel" wheels/bnb-linux-x86_64.whl
+            elif [[ $wheel_filename == *linux*aarch64* ]]; then
+              mv "$wheel" wheels/bnb-linux-aarch64.whl
+            elif [[ $wheel_filename == *macosx*x86_64* ]]; then
+              mv "$wheel" wheels/bnb-macos-x86_64.whl
+            elif [[ $wheel_filename == *macosx*arm64* ]]; then
+              mv "$wheel" wheels/bnb-macos-arm64.whl
+            elif [[ $wheel_filename == *win*amd64* ]]; then
+              mv "$wheel" wheels/bnb-windows-x86_64.whl
+            else
+              echo "Unknown wheel format: $wheel_filename"
+              exit 1
+            fi
+          done
+      - name: Inspect wheels directory after renaming files
+        run: ls -alFR wheels/
       - name: Create release and upload artifacts
         uses: softprops/action-gh-release@v2.0.8
         with:
-          files: artifacts/**/*.whl
+          files: wheels/*.whl
           prerelease: true
           name: Multi-Backend Preview
           tag_name: continuous-release-preview
