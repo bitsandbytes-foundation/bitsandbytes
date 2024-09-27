@@ -5,8 +5,9 @@
 
 ### Setup pre-commit hooks
 - Install pre-commit hooks with `pip install pre-commit`.
-- Run `pre-commit autoupdate` once to configure the hooks.
-- Re-run `pre-commit autoupdate` every time a new hook got added.
+- Run `pre-commit install` once to install the hooks, so they will be run on every commit.
+- If the hooks introduce changes, they'll be visible with `git diff`. Review them and `git add` them if everything is fine, then re-execute the before commit, it should pass now.
+- If you want to manually trigger the hooks, you may do `pre-commit run --all-files`
 
 Now all the pre-commit hooks will be automatically run when you try to commit and if they introduce some changes, you need to re-add the changed files before being able to commit and push.
 
