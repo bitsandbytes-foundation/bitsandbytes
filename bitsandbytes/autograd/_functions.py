@@ -552,7 +552,7 @@ class MatMul4Bit(torch.autograd.Function):
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA:
             if getattr(ctx.state, "ipex", False):
-                grad_A = F.gemv_4bit(grad_output, B, None, state=ctx.state)
+                grad_A = F.gemv_4bit(grad_output, B, None, state=ctx.state, backward=True)
             else:
                 grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
 

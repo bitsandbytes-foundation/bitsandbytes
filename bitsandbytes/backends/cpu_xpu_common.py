@@ -486,6 +486,7 @@ def gemm_4bit_impl(
     transposed_A=False,
     transposed_B=False,
     state: QuantState = None,
+    backward=False,
 ) -> torch.Tensor:
     """
     Matrix-matrix multiplication with 4-bit quantization.
@@ -511,9 +512,14 @@ def gemm_4bit_impl(
         GEMM output tensor.
     """
     if ipex_cpu and _ipex_cpu_version_prereq(2, 5) and getattr(state, "ipex", False):
-        output = torch.ops.torch_ipex.woq_linear(A, B, "nf4", state.shape,
-                    state.new_scales, state.new_zeros, None, None, state.blocksize,
-                    ipex_cpu.quantization.WoqLowpMode.BF16, 1, state.compensation)
+        if backward:
+            output = torch.ops.torch_ipex.woq_linear(A, state.backward_weight, "nf4", torch.Size([state.shape[1], state.shape[0]]),
+                        state.backward_new_scales, state.backward_new_zeros, None, None, state.blocksize,
+                        ipex_cpu.quantization.WoqLowpMode.BF16, 1, state.backward_compensation)
+        else:
+            output = torch.ops.torch_ipex.woq_linear(A, B, "nf4", state.shape,
+                        state.new_scales, state.new_zeros, None, None, state.blocksize,
+                        ipex_cpu.quantization.WoqLowpMode.BF16, 1, state.compensation)
     else:
         dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize).t()
         output = torch.matmul(A, dqB.to(A.dtype))
