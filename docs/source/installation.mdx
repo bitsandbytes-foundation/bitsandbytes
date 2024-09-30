@@ -134,28 +134,31 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 
 3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 11.7) and a different bitsandbytes library is loaded.
 
-## Multi-backend[[multi-backend]]
+## Multi-backend Support (Alpha Release)[[multi-backend]]
 
 > [!TIP]
-> This functionality is currently in preview and therefore not yet production-ready! Please reference [this guide](./non_cuda_backends) for more in-depth information about the different backends and their current status.
+> This functionality is currently in preview and not yet production-ready. We very much welcome community feedback, contributions and leadership on topics like Apple Silicon as well as other less common accellerators! For more information, see [this guide on multi-backend support](./non_cuda_backends).
 
-Please follow these steps to install bitsandbytes with device-specific backend support other than CUDA:
+### Supported Backends
 
-### Pip install the pre-built wheel (recommended for most)
+| **Backend** | **Supported Versions** | **Python versions** | **Architecture Support** | **Status** |
+|-------------|------------------------|---------------------------|-------------------------|------------|
+| **AMD ROCm** | 6.1+                   | 3.10+                     | minimum CDNA - `gfx90a`, RDNA - `gfx1100` | Alpha      |
+| **Apple Silicon (MPS)** | WIP                        | 3.10+                     | M1/M2 chips                    | Planned    |
+| **Intel CPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
+| **Intel GPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
 
-WIP (will be added in the coming days)
+For each supported backend, follow the respective instructions below:
 
-### Compilation
+### Pre-requisites
 
 <hfoptions id="backend">
 <hfoption id="AMD ROCm">
-
-#### AMD GPU
-
-bitsandbytes is fully supported from ROCm 6.1 onwards (currently in alpha release).
+- Precompiled binaries are only built for ROCm versions `6.1.0`/`6.1.1`/`6.1.2`/`6.2.0` and `gfx90a`, `gfx942`, `gfx1100` GPU architectures.
+- Other supported versions that don't come with pre-compiled binaries [can be compiled for with these instructions](#multi-backend-compile).
 
 > [!TIP]
-> If you would like to install ROCm and PyTorch on bare metal, skip Docker steps and refer to our official guides at [ROCm installation overview](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/tutorial/install-overview.html#rocm-install-overview) and [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) (Step 3 of wheels build for quick installation). Please make sure to get PyTorch wheel for the installed ROCm version.
+> If you would like to install ROCm and PyTorch on bare metal, skip the Docker steps and refer to ROCm's official guides at [ROCm installation overview](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/tutorial/install-overview.html#rocm-install-overview) and [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) (Step 3 of wheels build for quick installation). Special note: please make sure to get the respective ROCm-specific PyTorch wheel for the installed ROCm version, e.g. `https://download.pytorch.org/whl/nightly/rocm6.2/`!
 
 ```bash
 # Create a docker container with latest ROCm image, which includes ROCm libraries
@@ -165,9 +168,67 @@ apt-get update && apt-get install -y git && cd home
 
 # Install pytorch compatible with above ROCm version
 pip install torch --index-url https://download.pytorch.org/whl/rocm6.1/
+```
 
-# Install bitsandbytes from PyPI
-# (This is supported on Ubuntu 22.04, Python 3.10, ROCm 6.1.0/6.1.1/6.1.2/6.2.0 and gpu arch - gfx90a, gfx942, gfx1100
+</hfoption>
+<hfoption id="Intel CPU + GPU">
+
+Compatible hardware and functioning `import intel_extension_for_pytorch as ipex` capable environment with Python `3.10` as the minimum requirement.
+
+Please refer to [the official Intel installations instructions](https://intel.github.io/intel-extension-for-pytorch/index.html#installation?platform=cpu&version=v2.4.0%2bcpu&os=linux%2fwsl2) for guidance on how to pip install the necessary `intel_extension_for_pytorch` dependency.
+
+</hfoption>
+<hfoption id="Apple Silicon (MPS)">
+
+Apple Silicon support is still a WIP. Please visit and write us in [this Github Discussion space on coordinating the kickoff of MPS backend development](#PLACEHOLDER) and coordinate a community-led effort to implement this backend.
+
+</hfoption>
+</hfoptions>
+
+### Installation
+
+You can install the pre-built wheels for each backend, or compile from source for custom configurations.
+
+#### Pre-built Wheel Installation (recommended)
+
+<hfoptions id="platform">
+<hfoption id="Linux">
+
+```
+pip install --force-reinstall 'PLACEHOLDER'
+```
+
+</hfoption>
+<hfoption id="Windows">
+
+```
+pip install --force-reinstall 'PLACEHOLDER'
+```
+
+</hfoption>
+<hfoption id="Mac">
+
+
+> [!WARNING]
+> bitsandbytes does not yet support Apple Silicon / Metal with a dedicated backend. However, the build infrastructure is in place and the below pip install will eventually provide Apple Silicon support as it comes available on the `multi-backend-refactor` branch based on community contributions. If you're interested to work on this (we might even have limited funding the the Mozilla foundation), please contact us by tagging @Titus-von-Koeller and @matthewdouglas in a Github discussion on our repo.
+
+```
+pip install --force-reinstall 'PLACEHOLDER'
+```
+
+</hfoption>
+</hfoptions>
+
+#### Compile from Source[[multi-backend-compile]]
+
+<hfoptions id="backend">
+<hfoption id="AMD ROCm">
+
+#### AMD GPU
+
+bitsandbytes is fully supported from ROCm 6.1 onwards (currently in alpha release).
+
+```bash
 # Please install from source if your configuration doesn't match with these)
 pip install bitsandbytes
 
