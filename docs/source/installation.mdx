@@ -47,6 +47,28 @@ To install from PyPI.
 pip install bitsandbytes
 ```
 
+### `pip install` pre-built wheel from latest `main` commit
+
+If you would like to use new feature even before they are officially released and help us test them, feel free to install the wheel directly from our CI (*the wheel links will remain stable!*):
+
+<hfoptions id="OS">
+<hfoption id="Linux">
+
+```
+# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
+pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-0.44.2.dev0-py3-none-manylinux_2_24_x86_64.whl'
+```
+
+</hfoption>
+<hfoption id="Windows">
+
+```
+# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
+pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-macosx_13_1_arm64.whl'
+```
+</hfoption>
+</hfoptions>
+
 ### Compile from source[[cuda-compile]]
 
 > [!TIP]
