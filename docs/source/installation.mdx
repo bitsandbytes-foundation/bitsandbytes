@@ -203,7 +203,8 @@ Please refer to [the official Intel installations instructions](https://intel.gi
 </hfoption>
 <hfoption id="Apple Silicon (MPS)">
 
-Apple Silicon support is still a WIP. Please visit and write us in [this Github Discussion space on coordinating the kickoff of MPS backend development](#PLACEHOLDER) and coordinate a community-led effort to implement this backend.
+> [!TIP]
+> Apple Silicon support is still a WIP. Please visit and write us in [this Github Discussion space on coordinating the kickoff of MPS backend development](https://github.com/bitsandbytes-foundation/bitsandbytes/discussions/1340) and coordinate a community-led effort to implement this backend.
 
 </hfoption>
 </hfoptions>
@@ -218,6 +219,7 @@ You can install the pre-built wheels for each backend, or compile from source fo
 <hfoption id="Linux">
 
 ```
+# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
 pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl'
 ```
 
@@ -225,6 +227,7 @@ pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsan
 <hfoption id="Windows">
 
 ```
+# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
 pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl'
 ```
 
@@ -233,9 +236,10 @@ pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsan
 
 
 > [!WARNING]
-> bitsandbytes does not yet support Apple Silicon / Metal with a dedicated backend. However, the build infrastructure is in place and the below pip install will eventually provide Apple Silicon support as it comes available on the `multi-backend-refactor` branch based on community contributions. If you're interested to work on this (we might even have limited funding the the Mozilla foundation), please contact us by tagging @Titus-von-Koeller and @matthewdouglas in a Github discussion on our repo.
+> bitsandbytes does not yet support Apple Silicon / Metal with a dedicated backend. However, the build infrastructure is in place and the below pip install will eventually provide Apple Silicon support as it becomes available on the `multi-backend-refactor` branch based on community contributions.
 
 ```
+# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
 pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-macosx_13_1_arm64.whl'
 ```
 
