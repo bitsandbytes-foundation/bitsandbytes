@@ -58,6 +58,7 @@ jobs:
   # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
   ##
   build-shared-libs-cuda:
+    if: github.ref_name != 'multi-backend-refactor'
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -148,7 +149,7 @@ jobs:
   build-wheels:
     needs:
       - build-shared-libs
-      - build-shared-libs-cuda
+      # - build-shared-libs-cuda  reduce the pkg size + build times for the preview release
       - build-shared-libs-rocm
     strategy:
       matrix:
