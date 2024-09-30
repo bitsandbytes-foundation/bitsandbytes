@@ -173,7 +173,7 @@ class Optimizer8bit(torch.optim.Optimizer):
             raise ValueError("loaded state dict has a different number of parameter groups")
         param_lens = (len(g["params"]) for g in groups)
         saved_lens = (len(g["params"]) for g in saved_groups)
-        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens, strict=True)):
+        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
             raise ValueError(
                 "loaded state dict contains a parameter group that doesn't match the size of optimizer's group",
             )
@@ -184,7 +184,6 @@ class Optimizer8bit(torch.optim.Optimizer):
             for old_id, p in zip(
                 chain.from_iterable(g["params"] for g in saved_groups),
                 chain.from_iterable(g["params"] for g in groups),
-                strict=True,
             )
         }
 
@@ -226,7 +225,7 @@ class Optimizer8bit(torch.optim.Optimizer):
             new_group["params"] = group["params"]
             return new_group
 
-        param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups, strict=True)]
+        param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({"state": state, "param_groups": param_groups})
 
     def to_gpu(self):
