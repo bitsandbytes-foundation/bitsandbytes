@@ -239,10 +239,10 @@ jobs:
           files: wheels/*.whl
           prerelease: true
           name: Multi-Backend Preview
-          tag_name: continuous-release-preview
+          tag_name: continuous-release_multi-backend-refactor
           make_latest: false
           draft: false
-          target_commitish: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
 
   audit-wheels:
     needs: build-wheels
