@@ -154,8 +154,10 @@ For each supported backend, follow the respective instructions below:
 
 <hfoptions id="backend">
 <hfoption id="AMD ROCm">
-- Precompiled binaries are only built for ROCm versions `6.1.0`/`6.1.1`/`6.1.2`/`6.2.0` and `gfx90a`, `gfx942`, `gfx1100` GPU architectures.
-- Other supported versions that don't come with pre-compiled binaries [can be compiled for with these instructions](#multi-backend-compile).
+> [!WARNING]
+> Pre-compiled binaries are only built for ROCm versions `6.1.0`/`6.1.1`/`6.1.2`/`6.2.0` and `gfx90a`, `gfx942`, `gfx1100` GPU architectures. [Find the pip install instructions here](#multi-backend-pip).
+>
+> Other supported versions that don't come with pre-compiled binaries [can be compiled for with these instructions](#multi-backend-compile).
 
 > [!TIP]
 > If you would like to install ROCm and PyTorch on bare metal, skip the Docker steps and refer to ROCm's official guides at [ROCm installation overview](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/tutorial/install-overview.html#rocm-install-overview) and [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) (Step 3 of wheels build for quick installation). Special note: please make sure to get the respective ROCm-specific PyTorch wheel for the installed ROCm version, e.g. `https://download.pytorch.org/whl/nightly/rocm6.2/`!
@@ -189,20 +191,20 @@ Apple Silicon support is still a WIP. Please visit and write us in [this Github 
 
 You can install the pre-built wheels for each backend, or compile from source for custom configurations.
 
-#### Pre-built Wheel Installation (recommended)
+#### Pre-built Wheel Installation (recommended)[[multi-backend-pip]]
 
 <hfoptions id="platform">
 <hfoption id="Linux">
 
 ```
-pip install --force-reinstall 'PLACEHOLDER'
+pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl'
 ```
 
 </hfoption>
 <hfoption id="Windows">
 
 ```
-pip install --force-reinstall 'PLACEHOLDER'
+pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl'
 ```
 
 </hfoption>
@@ -213,7 +215,7 @@ pip install --force-reinstall 'PLACEHOLDER'
 > bitsandbytes does not yet support Apple Silicon / Metal with a dedicated backend. However, the build infrastructure is in place and the below pip install will eventually provide Apple Silicon support as it comes available on the `multi-backend-refactor` branch based on community contributions. If you're interested to work on this (we might even have limited funding the the Mozilla foundation), please contact us by tagging @Titus-von-Koeller and @matthewdouglas in a Github discussion on our repo.
 
 ```
-pip install --force-reinstall 'PLACEHOLDER'
+pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-macosx_13_1_arm64.whl'
 ```
 
 </hfoption>
