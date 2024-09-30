@@ -1,29 +1,45 @@
-# Installation
+# Installation Guide
 
-## CUDA
-
-bitsandbytes is only supported on CUDA GPUs for CUDA versions **11.0 - 12.5**. However, there's a multi-backend effort under way which is currently in alpha release, check [the respective section below in case you're interested to help us with early feedback](#multi-backend).
-
-The latest version of bitsandbytes builds on:
-
-| OS | CUDA | Compiler |
-|---|---|---|
-| Linux | 11.7 - 12.3 | GCC 11.4 |
-|  | 12.4+ | GCC 13.2 |
-| Windows | 11.7 - 12.4 | MSVC 19.38+ (VS2022 17.8.0+) |
+Welcome to the installation guide for the `bitsandbytes` library! This document provides step-by-step instructions to install `bitsandbytes` across various platforms and hardware configurations. The library primarily supports CUDA-based GPUs, but the team is actively working on enabling support for additional backends like AMD ROCm, Intel, and Apple Silicon.
 
 > [!TIP]
-> MacOS support is still a work in progress! Subscribe to this [issue](https://github.com/TimDettmers/bitsandbytes/issues/1020) to get notified about discussions and to track the integration progress.
+> For a high-level overview of backend support and compatibility, see the [Multi-backend Support](#multi-backend) section.
 
-For Linux systems, make sure your hardware meets the following requirements to use bitsandbytes features.
+## Table of Contents
 
-| **Feature** | **Hardware requirement** |
-|---|---|
-| LLM.int8() | NVIDIA Turing (RTX 20 series, T4) or Ampere (RTX 30 series, A4-A100) GPUs |
-| 8-bit optimizers/quantization | NVIDIA Kepler (GTX 780 or newer) |
+- [CUDA](#cuda)
+  - [Installation via PyPI](#cuda-pip)
+  - [Compile from Source](#cuda-compile)
+- [Multi-backend Support (Alpha Release)](#multi-backend)
+  - [Supported Backends](#multi-backend-supported-backends)
+  - [Pre-requisites](#multi-backend-pre-requisites)
+  - [Installation](#multi-backend-pip)
+  - [Compile from Source](#multi-backend-compile)
+- [PyTorch CUDA Versions](#pytorch-cuda-versions)
+
+## CUDA[[cuda]]
+
+`bitsandbytes` is currently only supported on CUDA GPUs for CUDA versions **11.0 - 12.5**. However, there's an ongoing multi-backend effort under development, which is currently in alpha. If you're interested in providing feedback or testing, check out [the multi-backend section below](#multi-backend-support-alpha-release).
+
+### Supported CUDA Configurations[[cuda-pip]]
+
+The latest version of `bitsandbytes` builds on the following configurations:
+
+| **OS**      | **CUDA Version** | **Compiler**         |
+|-------------|------------------|----------------------|
+| **Linux**   | 11.7 - 12.3      | GCC 11.4             |
+|             | 12.4+            | GCC 13.2             |
+| **Windows** | 11.7 - 12.4      | MSVC 19.38+ (VS2022) |
+
+For Linux systems, ensure your hardware meets the following requirements:
+
+| **Feature**                     | **Hardware Requirement**                                           |
+|---------------------------------|--------------------------------------------------------------------|
+| LLM.int8()                      | NVIDIA Turing (RTX 20 series, T4) or Ampere (RTX 30 series, A4-A100) GPUs |
+| 8-bit optimizers/quantization   | NVIDIA Kepler (GTX 780 or newer)                                    |
 
 > [!WARNING]
-> bitsandbytes >= 0.39.1 no longer includes Kepler binaries in pip installations. This requires manual compilation, and you should follow the general steps and use `cuda11x_nomatmul_kepler` for Kepler-targeted compilation.
+> `bitsandbytes >= 0.39.1` no longer includes Kepler binaries in pip installations. This requires [manual compilation using](#cuda-compile) the `cuda11x_nomatmul_kepler` configuration.
 
 To install from PyPI.
 
@@ -31,14 +47,19 @@ To install from PyPI.
 pip install bitsandbytes
 ```
 
-### Compile from source[[compile]]
+### Compile from source[[cuda-compile]]
 
-For Linux and Windows systems, you can compile bitsandbytes from source. Installing from source allows for more build options with different CMake configurations.
+> [!TIP]
+> Don't hesitate to compile from source! The process is pretty straight forward and resilient. This might be needed for older CUDA versions or other less common configurations, which we don't support out of the box due to package size.
+
+For Linux and Windows systems, compiling from source allows you to customize the build configurations. See below for detailed platform-specific instructions (see the `CMakeLists.txt` if you want to check the specifics and explore some additional options):
 
 <hfoptions id="source">
 <hfoption id="Linux">
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. Make sure you have a compiler installed to compile C++ (gcc, make, headers, etc.). For example, to install a compiler and CMake on Ubuntu:
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
+
+For example, to install a compiler and CMake on Ubuntu:
 
 ```bash
 apt-get install -y build-essential cmake
@@ -48,11 +69,11 @@ You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation 
 
 Refer to the following table if you're using another CUDA Toolkit version.
 
-| CUDA Toolkit | GCC |
-|---|---|
-| >= 11.4.1 | >= 11 |
-| >= 12.0 | >= 12 |
-| >= 12.4 | >= 13 |
+| CUDA Toolkit |  GCC  |
+|--------------|-------|
+| >= 11.4.1    | >= 11 |
+| >= 12.0      | >= 12 |
+| >= 12.4      | >= 13 |
 
 Now to install the bitsandbytes package from source, run the following commands:
 
@@ -93,7 +114,7 @@ Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com
 </hfoption>
 </hfoptions>
 
-### PyTorch CUDA versions
+### PyTorch CUDA versions[[pytorch-cuda-versions]]
 
 Some bitsandbytes features may need a newer CUDA version than the one currently supported by PyTorch binaries from Conda and pip. In this case, you should follow these instructions to load a precompiled bitsandbytes binary.
 
@@ -139,7 +160,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 > [!TIP]
 > This functionality is currently in preview and not yet production-ready. We very much welcome community feedback, contributions and leadership on topics like Apple Silicon as well as other less common accellerators! For more information, see [this guide on multi-backend support](./non_cuda_backends).
 
-### Supported Backends
+### Supported Backends[[multi-backend-supported-backends]]
 
 | **Backend** | **Supported Versions** | **Python versions** | **Architecture Support** | **Status** |
 |-------------|------------------------|---------------------------|-------------------------|------------|
@@ -150,7 +171,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 
 For each supported backend, follow the respective instructions below:
 
-### Pre-requisites
+### Pre-requisites[[multi-backend-pre-requisites]]
 
 <hfoptions id="backend">
 <hfoption id="AMD ROCm">
@@ -258,7 +279,7 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 
 Similar to the CUDA case, you can compile bitsandbytes from source for Linux and Windows systems.
 
-The below commands are for Linux. For installing on Windows, please adapt the below commands according to the same pattern as described [the section above on compiling from source under the Windows tab](#compile).
+The below commands are for Linux. For installing on Windows, please adapt the below commands according to the same pattern as described [the section above on compiling from source under the Windows tab](#cuda-compile).
 
 ```
 git clone --depth 1 -b multi-backend-refactor https://github.com/TimDettmers/bitsandbytes.git && cd bitsandbytes/
