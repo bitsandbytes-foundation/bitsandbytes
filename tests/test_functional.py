@@ -570,10 +570,14 @@ def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, trans
         torch.testing.assert_close(A, out2)
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(1, 256, n=1), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(32, 512, n=1), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", get_test_dims(32, 1024, n=1), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", get_test_dims(32, 1024, n=1), ids=id_formatter("dim4"))
+# @pytest.mark.parametrize("dim1", get_test_dims(1, 256, n=1), ids=id_formatter("dim1"))
+# @pytest.mark.parametrize("dim2", get_test_dims(32, 512, n=1), ids=id_formatter("dim2"))
+# @pytest.mark.parametrize("dim3", get_test_dims(32, 1024, n=1), ids=id_formatter("dim3"))
+# @pytest.mark.parametrize("dim4", get_test_dims(32, 1024, n=1), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", [512], ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", [512], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2, 3), ids=id_formatter("dims"))
 @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
 def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
@@ -585,20 +589,17 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         B = torch.randint(-128, 127, size=(dim4, dim3), device="cuda").to(torch.int8)
         C1 = torch.matmul(A.float(), B.t().float())
 
-        A2, SA = F.transform(A, "col32")
-        B2, SB = F.transform(B, "col_turing")
-        C2, SC = F.igemmlt(A2, B2, SA, SB)
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
-        torch.testing.assert_close(C1, C3.float())
+        C2, SC = F.igemmlt(A, B)
+        torch.testing.assert_close(C1, C2.float())
 
         # transpose
-        B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(torch.int8)
-        C1 = torch.matmul(A.float(), B.float())
+        # B = torch.randint(-128, 127, size=(dim3, dim4), device="cuda").to(torch.int8)
+        # C1 = torch.matmul(A.float(), B.float())
 
-        B2t, SBt = F.transform(B, "col_turing", transpose=True)
-        C2, SC = F.igemmlt(A2, B2t, SA, SBt)
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
-        torch.testing.assert_close(C1, C3.float())
+        # B2t, SBt = F.transform(B, "col", transpose=True)
+        # C2, SC = F.igemmlt(A2, B2t, SA, SBt)  #B2t, A2, SBt, SA)
+        # C3, S = F.nvidia_transform(C2, "row", state=SC)
+        # torch.testing.assert_close(C1, C2.float())
 
 
 @pytest.mark.parametrize("dim1", [32], ids=id_formatter("dim1"))
@@ -622,17 +623,15 @@ def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
 
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
         CB, CBt, statsB, statsBt, coo_tensor = F.double_quant(B)
-        C32A, SA = F.transform(CA, "col32")
-        CxB, SB = F.transform(CB, to_order=formatB)
-        out1_32, Sout1_32 = F.igemmlt(C32A, CxB, SA, SB)
-        output = F.mm_dequant(out1_32, Sout1_32, statsAt, statsBt)
+        out1_32, Sout1_32 = F.igemmlt(CA, CB)
+        output = F.mm_dequant(out1_32, Sout1_32, statsA, statsB)
 
         # print('')
         # print(output.flatten()[:10])
         # print(C1.flatten()[:10])
         # print(C2.flatten()[:10])
 
-        # torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
+        torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
 
         # transpose
         # B = torch.randint(-128, 127, size=(dim3, dim4), device='cuda').to(torch.int8)
@@ -801,17 +800,18 @@ def test_bench_8bit_training(batch, seq, model, hidden):
     # print(t8)
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(64, 256, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim4", get_test_dims(64, 1024, n=2), ids=id_formatter("dim4"))
+# @pytest.mark.parametrize("dim1", get_test_dims(64, 256, n=2), ids=id_formatter("dim1"))
+# @pytest.mark.parametrize("dim4", get_test_dims(64, 1024, n=2), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", (64, 256), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim4", (64, 1024), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-@pytest.mark.parametrize("formatB", ["col_turing", "col_ampere"], ids=id_formatter("formatB"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
-def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
-    inner = torch.randint(1, 128, size=(1,)).item()
+def test_dequant_mm(dim1, dim4, dims, has_bias):
+    inner = 128  # torch.randint(1, 128, size=(1,)).item()
     bias = None
     if has_bias:
         bias = torch.randn(dim4, device="cuda", dtype=torch.float16)
-    formatB = F.get_special_format_str()
+
     for i in range(1):
         A = torch.randn(dim1, inner, device="cuda")
         B = torch.randn(dim4, inner, device="cuda")
@@ -822,12 +822,9 @@ def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
-        A2, SA = F.nvidia_transform(A1, "col32")
-        B2, SB = F.nvidia_transform(B1, formatB)
-        C2, SC = F.igemmlt(A2, B2, SA, SB)
+        C2, SC = F.igemmlt(A1, B1)
 
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
-        C4 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
+        C4 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
         if has_bias:
             C4 += bias
 
@@ -840,8 +837,9 @@ def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
         # assert_all_approx_close(C1, C4, atol=0.02, rtol=0.1, count=int(n*0.06))
         # assert (count / n < p), f"error in more than {p} of elements: {count}/{n}={count/n}"
 
-        C5 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten(), bias=bias)
-        # torch.testing.assert_close(C5, C4, atol=0.015, rtol=0.1)
+        C5 = F.mm_dequant(C2, SC, maxA, maxB, bias=bias)
+        C5 /= std
+        torch.testing.assert_close(C5, C4, atol=0.015, rtol=0.1)
         n = C5.numel()
         assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01 * n))
 
@@ -890,8 +888,10 @@ def test_colrow_absmax(dim1, dim2, dims):
         assert nnz_block_ptr2 is None
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
+# @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
+# @pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
 def test_double_quant(dim1, dim2):
     for i in range(k):
         A = torch.randn(dim1, dim2, device="cuda").half()
@@ -926,9 +926,12 @@ def test_double_quant(dim1, dim2):
     (
         pytest.param(dim1, dim4, inner, id=f"{dim1=},{dim4=},{inner=}")
         for (dim1, dim4, inner) in zip(
-            get_test_dims(1, 4 * 1024, n=4),
-            get_test_dims(1, 4 * 1024, n=4),
-            get_test_dims(1, 4 * 1024, n=4),
+            (1, 8, 2048, 4096),
+            (2, 128, 2048, 4096),
+            (4, 256, 512, 4096),
+            # get_test_dims(1, 4 * 1024, n=4),
+            # get_test_dims(1, 4 * 1024, n=4),
+            # get_test_dims(1, 4 * 1024, n=4),
         )
     ),
 )
@@ -949,17 +952,11 @@ def test_integrated_igemmlt(dim1, dim4, inner):
         torch.testing.assert_close(C1a, A1, rtol=0, atol=1)
         torch.testing.assert_close(C2a, B1, rtol=0, atol=1)
 
-        A2, SA = F.nvidia_transform(C1a, "col32")
-        B2, SB = F.nvidia_transform(C2a, "col_turing")
-        outC32, SC = F.igemmlt(A2, B2, SA, SB)
-        out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
+        out2, SC = F.igemmlt(A1, B1)
 
-        A2, SA = F.nvidia_transform(A1, "col32")
-        B2, SB = F.nvidia_transform(B1, "col_turing")
-        C2, SC = F.igemmlt(A2, B2, SA, SB)
+        C2, SC = F.igemmlt(A1, B1)
 
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
-        out3 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
+        out3 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
 
         err1 = torch.abs(out1 - out2).mean().item()
         err2 = torch.abs(out1 - out3).mean().item()
@@ -999,7 +996,7 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 
         c = 10.0 * inner * scale
         row_scale = torch.ones_like(maxA) / c
-        outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=row_scale)
+        outC32, SC = F.igemmlt(A2, B2, dtype=torch.int8, row_scale=row_scale)
         C3, S = F.nvidia_transform(outC32, "row", state=SC)
         maxval = torch.abs(C3).max()
         if maxval == 127:
@@ -1012,7 +1009,7 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 
         C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
         B2, SB = F.nvidia_transform(C2a, formatB)
-        outC32, SC = F.igemmlt(A2, B2, SA, SB)
+        outC32, SC = F.igemmlt(A2, B2)
         out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
 
         CA, SA = F.vectorwise_quant(A, dim=1, quant_type="vector")
@@ -1080,7 +1077,7 @@ def test_row_scale_bench(dim1, dim4, inner):
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(k):
-        outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=row_scale)
+        outC32, SC = F.igemmlt(A2, B2, dtype=torch.int8, row_scale=row_scale)
     torch.cuda.synchronize()
     print("row-wise", time.time() - t0)
 
@@ -1089,7 +1086,7 @@ def test_row_scale_bench(dim1, dim4, inner):
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(k):
-        outC32, SC = F.igemmlt(A2, B2, SA, SB)
+        outC32, SC = F.igemmlt(A2, B2)
     torch.cuda.synchronize()
     print("vector-wise", time.time() - t0)
 
@@ -1132,10 +1129,11 @@ def test_overflow():
         a = torch.arange(5, 15).cuda().to(torch.int8).view(-1, 1)
         b = torch.arange(5, 15).cuda().to(torch.int8).view(-1, 1)
 
-        Ca, Sa = F.nvidia_transform(a, "col32")
-        Cb, Sb = F.nvidia_transform(b, formatB)
+        # Ca, Sa = F.nvidia_transform(a, "col32")
+        # Cb, Sb = F.nvidia_transform(b, formatB)
 
-        c = F.igemmlt(Ca, Cb, Sa, Sb, dtype=torch.int8)
+        # c = F.igemmlt(Ca, Cb, Sa, Sb, dtype=torch.int8)
+        c = F.igemmlt(a, b)
         c2 = torch.matmul(a.float(), b.float().t())
 
 
@@ -1238,25 +1236,21 @@ def test_spmm_bench():
 @pytest.mark.parametrize("dim2", get_test_dims(256, 1024, n=2), ids=id_formatter("dim2"))
 def test_integrated_sparse_decomp(dim1, dim2):
     threshold = 3.0
-    formatB = "col_turing"
+    # formatB = "col_turing"
     for i in range(k):
         A = torch.randn(dim1, dim2).cuda().half()
         w1 = torch.randn(dim1, dim2).cuda().half()
         out1 = torch.matmul(A, w1.t())
 
         Cw1, Cw1t, statsw1, statsw1t, coo_tensor = F.double_quant(w1)
-        CTw1, Sw1 = F.transform(Cw1, formatB)
-
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
-        C32A, SA = F.transform(CA, "col32")
 
-        out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1)
+        out1_32, Sout1_32 = F.igemmlt(CA, Cw1)
         out2 = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)
 
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
-        C32A, SA = F.transform(CA, "col32")
 
-        out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1)
+        out1_32, Sout1_32 = F.igemmlt(CA, Cw1)
         out3 = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)
 
         assert coo_tensor is not None
@@ -1484,7 +1478,12 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
 
 @pytest.mark.parametrize(
     ("batch", "seq", "model", "hidden"),
-    [pytest.param(1, 1, 6656, 4 * 6656, id="batch=1, seq=1, model=6656, hidden=26k")],
+    [
+        # pytest.param(1, 128, 6656, 4 * 6656, id="batch=1, seq=128, model=6656, hidden=26k"),
+        # pytest.param(2, 128, 6656, 4 * 6656, id="batch=2, seq=128, model=6656, hidden=26k"),
+        # pytest.param(4, 128, 6656, 4 * 6656, id="batch=4, seq=128, model=6656, hidden=26k"),
+        pytest.param(16, 256, 6656, 4 * 6656, id="batch=16, seq=256, model=6656, hidden=26k")
+    ],
 )
 @pytest.mark.benchmark
 def test_bench_matmul(batch, seq, model, hidden):
@@ -1557,19 +1556,45 @@ def test_bench_matmul(batch, seq, model, hidden):
     torch.cuda.synchronize()
     print(f"bnb nf4+DQ: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    bnb.matmul(A, B)
-    # torch.cuda.synchronize()
-    # print(f"CB -> CxB conversion (each iteration): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        bnb.matmul(A, B)
+    torch.cuda.synchronize()
+    print(
+        f"B -> CB (each iteration): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+    )
 
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        bnb.matmul(A, B, threshold=6.0)
+    torch.cuda.synchronize()
+    print(
+        f"B -> CB + threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+    )
+
+    CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=0.0)
+    CB, CBt, SCB, SCBt, coo_tensorB = F.double_quant(B)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        # CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=0.0)
+        out32, Sout32 = F.igemmlt(CA, CB)
+    torch.cuda.synchronize()
+    print(
+        f"no overhead igemmlt [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+    )
+
+    # C32A, SA = F.transform(CA, "col32")
+
+    # CxB, SB = F.transform(CB, to_order=formatB)
     # torch.cuda.synchronize()
     # t0 = time.time()
     # for i in range(iters):
-    #    bnb.matmul(A, B, threshold=6.0)
+    #    out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
     # torch.cuda.synchronize()
-    # print(f"CB -> CxB conversion + threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    # print(f"no overhead matmul-lt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
     # CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=0.0)
     # C32A, SA = F.transform(CA, "col32")
@@ -1610,21 +1635,25 @@ def test_bench_matmul(batch, seq, model, hidden):
     # torch.cuda.synchronize()
     # print(f"linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
-    # linear8bit(A)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    linear8bit(A)
-    # torch.cuda.synchronize()
-    # print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    linear8bit(A)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        linear8bit(A)
+    torch.cuda.synchronize()
+    print(
+        f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+    )
 
-    # linearMixedBit(A)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    linearMixedBit(A)
-    # torch.cuda.synchronize()
-    # print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    linearMixedBit(A)
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for i in range(iters):
+        linearMixedBit(A)
+    torch.cuda.synchronize()
+    print(
+        f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+    )
 
     # linear8bit_train(A)
     # torch.cuda.synchronize()
@@ -2144,7 +2173,7 @@ def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
 
             c = int(C1.numel() * 0.0014 * (dim / 256)) + 1
 
-            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=False)
+            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=0, throw=False)
         err1 = sum(errs1) / len(errs1) / math.sqrt(dim)
         err2 = sum(errs2) / len(errs2) / math.sqrt(dim)
         err3 = sum(errs3) / len(errs3) / math.sqrt(dim)

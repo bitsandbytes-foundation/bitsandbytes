@@ -1009,11 +1009,8 @@ class Linear8bitLt(nn.Linear):
         out = bnb.matmul(x, self.weight, bias=self.bias, state=self.state)
 
         if not self.state.has_fp16_weights:
-            if self.state.CB is not None and self.state.CxB is not None:
-                # we converted 8-bit row major to turing/ampere format in the first inference pass
-                # we no longer need the row-major weight
-                del self.state.CB
-                self.weight.data = self.state.CxB
+            if self.state.CB is not None:
+                self.weight.data = self.state.CB
         return out
 
 

@@ -204,7 +204,6 @@ class SwitchBackBnb(torch.autograd.Function):
         # 3. Matmul
         # 4. Mixed-precision decomposition matmul
         # 5. Save state
-        formatB = state.formatB
         input_shape = A.shape
         if state.outlier_pool is None:
             state.outlier_pool = GlobalOutlierPooler.get_instance()
@@ -227,14 +226,11 @@ class SwitchBackBnb(torch.autograd.Function):
                 state.subB = B[:, idx].t().contiguous()
                 state.idx = idx
             else:
-                if state.CxB is None:
-                    # B in in 8-bit row-major, we can transform it back to 16-bit to extract outlier dimensions
-                    # we also need to convert it to the turing/ampere format
-                    state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
+                if state.SB is None:
+                    state.SB = (state.CB.shape, "row")
         else:
-            # print('A shape', A.shape)
-            if not state.has_fp16_weights and state.CxB is None:
-                state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
+            if not state.has_fp16_weights and state.SB is None:
+                state.SB = (state.CB.shape, "row")
             subA = None
 
         # 2. Quantize B
@@ -245,16 +241,16 @@ class SwitchBackBnb(torch.autograd.Function):
             if is_transposed:
                 B = B.contiguous()
 
-            if (state.is_training and not has_grad) or state.CxB is None:
+            if (state.is_training and not has_grad) or state.SB is None:
                 state.reset_grads()
                 (
-                    CB,
+                    state.CB,
                     state.CBt,
                     state.SCB,
                     state.SCBt,
                     coo_tensorB,
                 ) = F.double_quant(B.to(torch.float16))
-                state.CxB, state.SB = F.transform(CB, to_order=formatB)
+                state.SB = (state.CB.shape, "row")
         else:
             has_grad = False
 
@@ -269,7 +265,8 @@ class SwitchBackBnb(torch.autograd.Function):
             #    state.idx = state.outlier_pool.get_current_outlier_idx().to(A.device)
             # else:
             #    state.idx = outlier_idx
-            outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
+            # outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
+            outliers = state.CB[:, state.idx.long()].clone()
             state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
             CA[:, state.idx.long()] = 0
             CAt[:, state.idx.long()] = 0
@@ -283,8 +280,7 @@ class SwitchBackBnb(torch.autograd.Function):
             output_shape = (input_shape[0], shapeB[0])
 
         # 3. Matmul
-        C32A, SA = F.transform(CA, "col32")
-        out32, Sout32 = F.igemmlt(C32A, state.CxB, SA, state.SB)
+        out32, Sout32 = F.igemmlt(CA, state.CB)
         # we apply the fused bias here
 
         if bias is None or bias.dtype == torch.float16:
@@ -301,7 +297,6 @@ class SwitchBackBnb(torch.autograd.Function):
         # 5. Save state
         ctx.state = state
 
-        ctx.formatB = formatB
         ctx.grad_shape = input_shape
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
@@ -324,7 +319,6 @@ class SwitchBackBnb(torch.autograd.Function):
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
         CAt, subA, A = ctx.tensors
         SCAt, idx = ctx.tensor_states
-        formatB = ctx.formatB
         state = ctx.state
         grad_A = grad_B = grad_bias = None
 
@@ -345,12 +339,7 @@ class SwitchBackBnb(torch.autograd.Function):
 
         if req_gradA:
             if state.CBt is not None:
-                C32grad, Sgrad = F.transform(Cgrad, "col32")
-                if state.CxBt is None:
-                    state.CxBt, state.SBt = F.transform(state.CBt, to_order=formatB, transpose=True)
-                # print('back B shape', state.CxBt.shape)
-                # print('back grad shape', C32grad.shape)
-                gradA32, SgradA32 = F.igemmlt(C32grad, state.CxBt, Sgrad, state.SBt)
+                gradA32, SgradA32 = F.igemmlt(Cgradt, state.CBt.t())
                 grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
 
             elif state.CB is not None:

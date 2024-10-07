@@ -310,7 +310,7 @@ def test_linear8bitlt_inference(threshold):
         b1 = torch.randn(16, 8, 32, device="cuda").half()
         o1 = l1(b1)
         if i == 1:
-            assert l1.state.CxB is not None
+            assert l1.state.CB is not None
 
 
 def test_linear8bitlt_accumulated_gradient():

@@ -3,9 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import ctypes as ct
-from functools import reduce  # Required in Python 3
 import itertools
-import operator
+from math import prod
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -15,12 +14,6 @@ from torch import Tensor
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
 from .cextension import lib
-
-
-# math.prod not compatible with python < 3.8
-def prod(iterable):
-    return reduce(operator.mul, iterable, 1)
-
 
 name2qmap = {}
 
@@ -421,15 +414,9 @@ def create_quantile_map(A, total_bits=8):
     return q
 
 
+# TODO: Deprecate
 def get_special_format_str():
-    if not torch.cuda.is_available():
-        return "col_turing"
-    major, _minor = torch.cuda.get_device_capability()
-    if major <= 7:
-        return "col_turing"
-    if major == 8:
-        return "col_ampere"
-    return "col_turing"
+    return "row"
 
 
 def is_on_gpu(tensors):
@@ -2302,84 +2289,68 @@ def batched_igemm(
     return out
 
 
-def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
-    shapeA = SA[0]
-    shapeB = SB[0]
-    dimsA = len(shapeA)
-    dimsB = len(shapeB)
-    assert dimsB == 2, "Only two dimensional matrices are supported for argument B"
-    if dimsA == 2:
-        m = shapeA[0]
-    elif dimsA == 3:
-        m = shapeA[0] * shapeA[1]
+def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
+    #
+    # To use the IMMA tensor core kernels without special Turing/Ampere layouts,
+    # cublasLt has some rules, namely: A must be transposed, B must not be transposed.
+    # The C++ API will calculate `C = A.T @ B` in with A, B, C in col-major.
+    # This will typically be used with row-major tensors to efficiently
+    # calculate the linear layer with `C = B @ A.T` without any transformations.
+    # We will swap A and B in the API invocation, so that we get `C = A @ B.T`.
+    #
+    # Quick explanation:
+    # With row-major A and B tensors, `C = A.T.T @ B.T = A @ B.T`.
+    # To get row-major output, `C.T = (A @ B.T).T = B @ A.T`.
+    #
+    A, B = B, A
 
-    rows = n = shapeB[0]
-    assert prod(list(shapeA)) > 0, f"Input tensor dimensions need to be > 0: {shapeA}"
+    shapeA = A.shape
+    shapeB = B.shape
+    dimsA = A.ndim
+    dimsB = B.ndim
 
-    # if the tensor is empty, return a transformed empty tensor with the right dimensions
-    if shapeA[0] == 0 and dimsA == 2:
-        return torch.empty((0, shapeB[0]), device=A.device, dtype=torch.float16)
-    elif shapeA[1] == 0 and dimsA == 3:
-        return torch.empty(tuple(shapeA[:2] + [shapeB[0]]), device=A.device, dtype=torch.float16)
-
-    if dimsA == 2 and out is None:
-        out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, "col32", "row")
-    elif dimsA == 3 and out is None:
-        out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row")
-
-    assert dimsB != 3, "len(B.shape)==3 not supported"
     assert A.device.type == "cuda"
     assert B.device.type == "cuda"
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
+    assert dimsA == 2, "Only two dimensional matrices are supported for argument B"
+    assert dimsB in [2, 3], "Only two or three dimensional matrices are supported for argument A"
+    assert prod(shapeB) > 0, f"Input tensor dimensions need to be > 0: {shapeB}"
+
+    shapeC = (*shapeB[:-1], shapeA[0])
+    Sout = (shapeC, "row")
+
+    if out is None:
+        out = torch.empty(shapeC, device=A.device, dtype=dtype)
+
     assert out.dtype == dtype
-    assert SA[1] == "col32"
-    assert SB[1] in ["col_turing", "col_ampere"]
-    assert Sout[1] == "col32"
-    assert (
-        shapeA[-1] == shapeB[-1]
-    ), f"Matmullt only supports A @ B^T. Inner matrix dimensions do not match: A @ B = {shapeA} @ {shapeB}"
-    formatB = SB[1]
+    k, m = shapeA
+    n = prod(shapeB[:-1])
+    lda = shapeA[-1]  # Weights (outputs, inputs)
+    ldb = shapeB[-1]  # Activations (batch, tokens, inputs)
+    ldc = shapeC[-1]  # Output (batch, tokens, outputs)
+
+    assert lda == ldb, f"igemmlt only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ B={shapeA}"
+
     prev_device = A.device
     torch.cuda.set_device(A.device)
 
-    ptr = CUBLAS_Context.get_instance().get_context(A.device)
+    ctx = CUBLAS_Context.get_instance().get_context(A.device)
     ptrA = get_ptr(A)
     ptrB = get_ptr(B)
     ptrC = get_ptr(out)
-
-    k = shapeA[-1]
-    lda = ct.c_int32(m * 32)
-    if formatB == "col_turing":
-        # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
-        # n = rows
-        ldb = ct.c_int32(((rows + 7) // 8) * 8 * 32)
-    else:
-        # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
-        # n = rows
-        ldb = ct.c_int32(((rows + 31) // 32) * 32 * 32)
-
-    ldc = ct.c_int32(m * 32)
-    m = ct.c_int32(m)
-    n = ct.c_int32(n)
-    k = ct.c_int32(k)
-
-    has_error = 0
     ptrRowScale = get_ptr(None)
+    m, n, k, lda, ldb, ldc = map(ct.c_int32, (m, n, k, lda, ldb, ldc))
+
     is_on_gpu([A, B, out])
-    if formatB == "col_turing":
-        if dtype == torch.int32:
-            has_error = lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
-        else:
-            has_error = lib.cigemmlt_turing_8(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
-    elif formatB == "col_ampere":
-        if dtype == torch.int32:
-            has_error = lib.cigemmlt_ampere_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
-        else:
-            has_error = lib.cigemmlt_ampere_8(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+
+    if dtype == torch.int32:
+        has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+    else:
+        has_error = lib.cigemmlt_8(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
 
     if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
-        raise NotImplementedError("igemmlt not available (probably built with NO_CUBLASLT)")
+        raise NotImplementedError("igemmlt not implemented!")
 
     if has_error:
         print(f"A: {shapeA}, B: {shapeB}, C: {Sout[0]}; (lda, ldb, ldc): {(lda, ldb, ldc)}; (m, n, k): {(m, n, k)}")
@@ -2391,6 +2362,26 @@ def igemmlt(A, B, SA, SB, out=None, Sout=None, dtype=torch.int32):
 
 
 def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None, bias=None):
+    assert A.dtype == torch.int32
+
+    compute_dtype = torch.float32
+
+    A_calc = A.view(-1, A.shape[-1]).to(compute_dtype)
+    row_stats = row_stats.reshape(-1).unsqueeze(-1).to(compute_dtype)
+    col_stats = col_stats.reshape(-1).unsqueeze(0).to(compute_dtype)
+
+    # TODO support out != None
+
+    out = A_calc * (row_stats * col_stats) * 6.200124e-5  # .to(torch.float16)
+
+    if bias is not None:
+        # assert bias.dtype == torch.float16
+        out.add_(bias)
+
+    return out.to(torch.float16)
+
+
+def mm_dequant_old(A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None, bias=None):
     assert A.dtype == torch.int32
     if bias is not None:
         assert bias.dtype == torch.float16
@@ -2553,6 +2544,21 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
 
 
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
+    # TODO: Optimize/write CUDA kernel for this. Currently vectorwise_quant will recalculate row/col stats.
+    # TODO: Support threshold
+
+    # if out_col is None:
+    #     out_col = torch.zeros(A.shape, device=A.device, dtype=torch.int8)
+    # if out_row is None:
+    #     out_row = torch.zeros(A.shape, device=A.device, dtype=torch.int8)
+
+    out_col, Scol = vectorwise_quant(A, dim=0)
+    out_row, Srow = vectorwise_quant(A, dim=1)
+
+    return out_row, out_col, Srow.flatten().float(), Scol.flatten().float(), None  # coo_tensor
+
+
+def double_quant_old(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
     device = A.device
     assert A.dtype == torch.half
     assert device.type == "cuda"
@@ -2949,6 +2955,7 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
 
 
 def extract_outliers(A, SA, idx):
+    # TODO: Implement for row-major
     shapeA = SA[0]
     formatA = SA[1]
     assert formatA in ["col_turing", "col_ampere"]
