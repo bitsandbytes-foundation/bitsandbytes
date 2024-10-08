@@ -824,8 +824,8 @@ template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsi
 template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, cudaStream_t stream)
 {
 
-	int num_blocks = (m+7)/8;
-  kgemm_4bit_inference_naive<T, 256, BITS><<< num_blocks, 256, 0, stream>>>(m,  n,  k, A,  B, absmax, datatype, out, lda, ldb, ldc, blocksize);
+	int num_blocks = (m+3)/4;
+  kgemm_4bit_inference_naive<T, 128, BITS><<< num_blocks, 128, 0, stream>>>(m,  n,  k, A,  B, absmax, datatype, out, lda, ldb, ldc, blocksize);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
