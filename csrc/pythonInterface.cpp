@@ -5,7 +5,6 @@
 
 #if BUILD_CUDA
 #include <ops.cuh>
-uint abc;
 #endif
 #if BUILD_MPS
 // #include <mps_ops.h>
