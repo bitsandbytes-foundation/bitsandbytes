@@ -847,45 +847,41 @@ def test_dequant_mm(dim1, dim4, dims, has_bias):
 @pytest.mark.parametrize("dim1", [1 * 1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1 * 1024], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-def test_colrow_absmax(dim1, dim2, dims):
+@pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("decomp"))
+def test_colrow_absmax(dim1, dim2, dims, threshold):
     for i in range(k):
-        threshold = 3.0
         A = torch.randn(dim1, dim2, device="cuda").half()
-        A_truncated = A.clone()
-        A_truncated[torch.abs(A_truncated) >= 3.0] = 0.0
-        if dims == 2:
-            row_stats1, _ = torch.abs(A.float()).max(1)
-            col_stats1, _ = torch.abs(A.float()).max(0)
+
+        assert dims == 2
+
+        row_stats1, _ = torch.abs(A.float()).max(1)
+        col_stats1, _ = torch.abs(A.float()).max(0)
+
+        if threshold > 0.0:
+            A_truncated = A.clone()
+            A_truncated[torch.abs(A_truncated) >= threshold] = 0.0
             row_stats1_trunc, _ = torch.abs(A_truncated.float()).max(1)
             col_stats1_trunc, _ = torch.abs(A_truncated.float()).max(0)
+
+            row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=threshold)
+
+            nnz_rows1_counts = (torch.abs(A) >= threshold).sum(1).flatten()
+            nnz_block_ptr1 = torch.zeros(
+                nnz_rows1_counts.shape[0] + 1,
+                dtype=nnz_rows1_counts.dtype,
+                device=nnz_rows1_counts.device,
+            )
+            nnz_block_ptr1[1:] = nnz_rows1_counts.cumsum(0)
+
+            torch.testing.assert_close(col_stats1_trunc, col_stats2)
+            torch.testing.assert_close(row_stats1_trunc, row_stats2)
+            torch.testing.assert_close(nnz_block_ptr1.int(), nnz_block_ptr2)
         else:
-            assert False
-
-        row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=threshold)
-
-        A_blocked = einops.rearrange(
-            torch.abs(A),
-            "(rows row_tiles) (cols block_size)-> rows cols row_tiles block_size",
-            row_tiles=16,
-            block_size=64 * 4,
-        )
-        nnz_rows1_counts = (torch.abs(A_blocked) >= threshold).sum(3).flatten()
-        nnz_block_ptr1 = torch.zeros(
-            nnz_rows1_counts.shape[0] + 1,
-            dtype=nnz_rows1_counts.dtype,
-            device=nnz_rows1_counts.device,
-        )
-        nnz_block_ptr1[1:] = nnz_rows1_counts.cumsum(0)
-
-        torch.testing.assert_close(col_stats1_trunc, col_stats2)
-        torch.testing.assert_close(row_stats1_trunc, row_stats2)
-        torch.testing.assert_close(nnz_block_ptr1.int(), nnz_block_ptr2)
-
-        row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=0.0)
+            row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=0.0)
+            assert nnz_block_ptr2 is None
 
         torch.testing.assert_close(col_stats1, col_stats2)
         torch.testing.assert_close(row_stats1, row_stats2)
-        assert nnz_block_ptr2 is None
 
 
 # @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
@@ -1480,9 +1476,9 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     ("batch", "seq", "model", "hidden"),
     [
         # pytest.param(1, 128, 6656, 4 * 6656, id="batch=1, seq=128, model=6656, hidden=26k"),
-        # pytest.param(2, 128, 6656, 4 * 6656, id="batch=2, seq=128, model=6656, hidden=26k"),
+        pytest.param(1, 1, 3584, 512, id="batch=1, seq=128, model=3584, hidden=19k"),
         # pytest.param(4, 128, 6656, 4 * 6656, id="batch=4, seq=128, model=6656, hidden=26k"),
-        pytest.param(16, 256, 6656, 4 * 6656, id="batch=16, seq=256, model=6656, hidden=26k")
+        # pytest.param(16, 256, 6656, 4 * 6656, id="batch=16, seq=256, model=6656, hidden=26k")
     ],
 )
 @pytest.mark.benchmark

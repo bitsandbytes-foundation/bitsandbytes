@@ -335,8 +335,8 @@ def test_linear8bitlt_accumulated_gradient():
         loss1.backward()
         loss2.backward()
         if i == 2:
-            assert l1[0].state.CxB is not None
-            assert l1[1].state.CxB is not None
+            assert l1[0].state.CB is not None
+            assert l1[1].state.CB is not None
 
         if i > 0 and i % acc_steps == 0:
             opt1.step()

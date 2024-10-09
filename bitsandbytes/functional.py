@@ -2330,7 +2330,7 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
     ldb = shapeB[-1]  # Activations (batch, tokens, inputs)
     ldc = shapeC[-1]  # Output (batch, tokens, outputs)
 
-    assert lda == ldb, f"igemmlt only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ B={shapeA}"
+    assert lda == ldb, f"igemmlt only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}"
 
     prev_device = A.device
     torch.cuda.set_device(A.device)
@@ -2361,18 +2361,25 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
     return out, Sout
 
 
-def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None, bias=None):
+def mm_dequant_torch(
+    A: torch.Tensor,
+    quant_state: Optional[Tuple[torch.Size, str]],  # TODO: deprecate. (shape, format)
+    row_stats: torch.Tensor,
+    col_stats: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    new_row_stats=None,  # TODO: unused
+    new_col_stats=None,  # TODO: unused
+    bias: Optional[torch.Tensor] = None,
+):
     assert A.dtype == torch.int32
 
-    compute_dtype = torch.float32
-
-    A_calc = A.view(-1, A.shape[-1]).to(compute_dtype)
-    row_stats = row_stats.reshape(-1).unsqueeze(-1).to(compute_dtype)
-    col_stats = col_stats.reshape(-1).unsqueeze(0).to(compute_dtype)
+    A_calc = A.view(-1, A.shape[-1])
+    row_stats = row_stats.reshape(-1).unsqueeze(-1)
+    col_stats = col_stats.reshape(-1).unsqueeze(0)
 
     # TODO support out != None
 
-    out = A_calc * (row_stats * col_stats) * 6.200124e-5  # .to(torch.float16)
+    out = A_calc * (row_stats * col_stats) * 6.200124e-5
 
     if bias is not None:
         # assert bias.dtype == torch.float16
@@ -2381,42 +2388,40 @@ def mm_dequant(A, quant_state, row_stats, col_stats, out=None, new_row_stats=Non
     return out.to(torch.float16)
 
 
-def mm_dequant_old(A, quant_state, row_stats, col_stats, out=None, new_row_stats=None, new_col_stats=None, bias=None):
+def mm_dequant(
+    A: torch.Tensor,
+    quant_state: Optional[Tuple[torch.Size, str]],  # TODO: deprecate. (shape, format)
+    row_stats: torch.Tensor,
+    col_stats: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    new_row_stats=None,  # TODO: unused
+    new_col_stats=None,  # TODO: unused
+    bias: Optional[torch.Tensor] = None,
+):
     assert A.dtype == torch.int32
+
     if bias is not None:
         assert bias.dtype == torch.float16
-    out_shape = quant_state[0]
-    if len(out_shape) == 3:
-        out_shape = (out_shape[0] * out_shape[1], out_shape[2])
 
     if out is None:
-        out = torch.empty(out_shape, dtype=torch.float16, device=A.device)
-    if new_row_stats is None:
-        new_row_stats = torch.empty(out_shape[0], dtype=torch.float32, device=A.device)
-    if new_col_stats is None:
-        new_col_stats = torch.empty(out_shape[1], dtype=torch.float32, device=A.device)
-    assert new_row_stats.shape[0] == row_stats.shape[0], f"{new_row_stats.shape} vs {row_stats.shape}"
-    assert new_col_stats.shape[0] == col_stats.shape[0], f"{new_col_stats.shape} vs {col_stats.shape}"
+        out = torch.empty_like(A, dtype=torch.float16)
 
-    prev_device = pre_call(A.device)
     ptrA = get_ptr(A)
     ptrOut = get_ptr(out)
     ptrRowStats = get_ptr(row_stats)
     ptrColStats = get_ptr(col_stats)
-    ptrNewRowStats = get_ptr(new_row_stats)
-    ptrNewColStats = get_ptr(new_col_stats)
     ptrBias = get_ptr(bias)
-    numRows = ct.c_int32(out_shape[0])
-    numCols = ct.c_int32(out_shape[1])
+    numRows = ct.c_int32(prod(A.shape[:-1]))
+    numCols = ct.c_int32(A.shape[-1])
 
-    is_on_gpu([A, row_stats, col_stats, out, new_row_stats, new_col_stats, bias])
+    is_on_gpu([A, row_stats, col_stats, out, bias])
+
+    prev_device = pre_call(A.device)
     lib.cdequant_mm_int32_fp16(
         ptrA,
         ptrRowStats,
         ptrColStats,
         ptrOut,
-        ptrNewRowStats,
-        ptrNewColStats,
         ptrBias,
         numRows,
         numCols,
@@ -2426,7 +2431,33 @@ def mm_dequant_old(A, quant_state, row_stats, col_stats, out=None, new_row_stats
     return out
 
 
-def get_colrow_absmax(A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0):
+def get_colrow_absmax(
+    A: torch.Tensor,
+    row_stats: torch.Tensor = None,
+    col_stats: torch.Tensor = None,
+    nnz_block_ptr: torch.Tensor = None,
+    threshold=0.0,
+):
+    # Note: prior impl only works with fp16
+    assert A.is_floating_point()
+
+    if row_stats is None or col_stats is None:
+        absA = A.abs().view(-1, A.shape[-1])  # view as 2D
+        if row_stats is None:
+            # shape [rows]; unsqueeze(-1) gives [rows,1]
+            row_stats = absA.amax(dim=1, keepdim=False).float()
+        if col_stats is None:
+            # shape [cols]; unsqueeze(0) gives [1,cols]
+            col_stats = absA.amax(dim=0, keepdim=False).float()
+
+    # TODO: threshold support
+    if nnz_block_ptr is None and threshold > 0.0:
+        nnz_block_ptr = torch.zeros_like(A, dtype=torch.int32)
+
+    return row_stats, col_stats, nnz_block_ptr
+
+
+def get_colrow_absmax_old(A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0):
     assert A.dtype == torch.float16
     device = A.device
 
@@ -2543,19 +2574,27 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
 
 
+@torch.compile
 def double_quant(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
-    # TODO: Optimize/write CUDA kernel for this. Currently vectorwise_quant will recalculate row/col stats.
+    # TODO: Optimize/write CUDA kernel for this
     # TODO: Support threshold
 
-    # if out_col is None:
-    #     out_col = torch.zeros(A.shape, device=A.device, dtype=torch.int8)
-    # if out_row is None:
-    #     out_row = torch.zeros(A.shape, device=A.device, dtype=torch.int8)
+    if row_stats is None or col_stats is None:
+        row_stats, col_stats, nnz_row_ptr = get_colrow_absmax(A, threshold=threshold)
 
-    out_col, Scol = vectorwise_quant(A, dim=0)
-    out_row, Srow = vectorwise_quant(A, dim=1)
+    scaled_A = A.mul(C)
 
-    return out_row, out_col, Srow.flatten().float(), Scol.flatten().float(), None  # coo_tensor
+    # quant_row = torch.round(A * (C / row_stats.unsqueeze(-1))).to(torch.int8)
+    # quant_col = torch.round(A * (C / col_stats.unsqueeze(0))).to(torch.int8)
+    quant_row = torch.round(scaled_A / row_stats.unsqueeze(-1)).to(torch.int8)
+    quant_col = torch.round(scaled_A / col_stats.unsqueeze(0)).to(torch.int8)
+
+    if out_row is not None:
+        quant_row = out_row.copy_(quant_row)
+    if out_col is not None:
+        quant_col = out_col.copy_(quant_col)
+
+    return quant_row, quant_col, row_stats.flatten().float(), col_stats.flatten().float(), None
 
 
 def double_quant_old(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):

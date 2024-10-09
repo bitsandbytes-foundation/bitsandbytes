@@ -284,7 +284,9 @@ class MatmulLtState:
 
 class MatMul8bitLt(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
+    def forward(ctx, A, B, out=None, bias=None, state: MatmulLtState = None):
+        state = state or MatmulLtState()
+
         using_igemmlt = supports_igemmlt(A.device) and not state.force_no_igemmlt
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
@@ -417,8 +419,7 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.tensor_states = (None, None)
             ctx.save_for_backward(None, None)
 
-        clone_func = torch.clone if len(output_shape) == 3 else lambda x: x
-        return clone_func(output.view(output_shape))
+        return output.reshape(output_shape)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -442,37 +443,18 @@ class MatMul8bitLt(torch.autograd.Function):
 
         Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
-            # CxAt, SAt = F.transform(CAt, formatB, transpose=True)
-            # C32grad, Sgrad = F.transform(Cgradt, "col32", transpose=True)
-            # gradB32, SgradB32 = F.igemmlt(C32grad, CxAt, Sgrad, SAt)
-            # grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
-            gradB32, SgradB32 = F.igemmlt(
-                Cgradt.t(), CAt.t()
-            )  # issue here in test_linear_serialization w/ has fp16 weights
+            gradB32, SgradB32 = F.igemmlt(Cgradt.t(), CAt.t())
             grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
             if state.threshold > 0.0 and subA is not None:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:
             if state.CBt is not None:
-                # C32grad, Sgrad = F.transform(Cgrad, "col32")
-                # if state.CxBt is None:
-                #    state.CxBt, state.SBt = F.transform(state.CBt, to_order=formatB, transpose=True)
-                # gradA32, SgradA32 = F.igemmlt(C32grad, state.CxBt, Sgrad, state.SBt)
-                # grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
                 gradA32, SgradA32 = F.igemmlt(Cgradt, state.CBt.t())
                 grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
-
             elif state.CB is not None:
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
-            # elif state.CxB is not None:
-            #     CB = (
-            #         undo_layout(state.CxB, state.tile_indices)
-            #         .to(ctx.dtype_A)
-            #         .mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
-            #     )
-            #     grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             else:
                 raise Exception("State must contain either CBt or CB matrix for backward")
 
