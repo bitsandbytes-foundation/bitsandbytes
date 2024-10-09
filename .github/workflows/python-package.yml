@@ -163,7 +163,7 @@ jobs:
     needs:
       - build-wheels
     steps:
-      - name: Download artifacts to tmp directory
+      - name: Download and rename artifacts
         uses: actions/download-artifact@v4
         with:
           path: tmp/
@@ -171,37 +171,28 @@ jobs:
           merge-multiple: true
       - name: Inspect tmp directory after downloading artifacts
         run: ls -alFR tmp/
-      - name: Move and rename wheel files
+      - name: Move and rename wheel files with pattern replacement
         run: |
           mkdir -p wheels/
-          find tmp/ -type f -name '*.whl' -print0 | while IFS= read -r -d '' wheel; do
+          # exclude macos wheels for now
+          find tmp/ -type f -name '*.whl' ! -name '*macos*' -print0 | while IFS= read -r -d '' wheel; do
             wheel_filename=$(basename "$wheel")
-            if [[ $wheel_filename == *linux*x86_64* ]]; then
-              mv "$wheel" wheels/bnb-linux-x86_64.whl
-            elif [[ $wheel_filename == *linux*aarch64* ]]; then
-              mv "$wheel" wheels/bnb-linux-aarch64.whl
-            elif [[ $wheel_filename == *macosx*x86_64* ]]; then
-              mv "$wheel" wheels/bnb-macos-x86_64.whl
-            elif [[ $wheel_filename == *macosx*arm64* ]]; then
-              mv "$wheel" wheels/bnb-macos-arm64.whl
-            elif [[ $wheel_filename == *win*amd64* ]]; then
-              mv "$wheel" wheels/bnb-windows-x86_64.whl
-            else
-              echo "Unknown wheel format: $wheel_filename"
-              exit 1
-            fi
+            # Remove the gith hash, e.g. `+1234567`, for a stable download link on the multi-backend pre-release
+            cleaned_filename=$(echo "$wheel_filename" | sed -E 's/\+[0-9a-f]{7}-/-/g')
+            mv "$wheel" "wheels/$cleaned_filename"
           done
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
       - name: Create release and upload artifacts
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_CONTINUOUS_RELEASE_TYPE: prerelease
-          GITHUB_CONTINUOUS_RELEASE_TAG: continuous-release_main
-        run: |
-          wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
-          chmod +x pyuploadtool-x86_64.AppImage
-          ./pyuploadtool-x86_64.AppImage --appimage-extract-and-run wheels/*.whl
+        uses: softprops/action-gh-release@v2.0.8
+        with:
+          files: wheels/*.whl
+          prerelease: true
+          name: Latest `main` wheel
+          tag_name: continuous-release_main
+          make_latest: false
+          draft: false
+          target_commitish: ${{ github.sha }}
 
   audit-wheels:
     needs: build-wheels
