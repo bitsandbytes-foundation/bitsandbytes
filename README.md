@@ -12,17 +12,17 @@ There are ongoing efforts to support further hardware backends, i.e. Intel CPU +
 
 **[https://huggingface.co/docs/bitsandbytes/main](https://huggingface.co/docs/bitsandbytes/main)**
 
-## `𝗯𝗶𝘁𝘀𝗮𝗻𝗱𝗯𝘆𝘁𝗲𝘀` 𝗺𝘂𝗹𝘁𝗶-𝗯𝗮𝗰𝗸𝗲𝗻𝗱 𝙖𝙡𝙥𝙝𝙖 𝗿𝗲𝗹𝗲𝗮𝘀𝗲 is out!
+## `bitsandbytes` multi-backend _alpha_ release is out!
 
-🚀 Big news! After months of hard work and incredible community contributions, we're thrilled to announce the 𝗯𝗶𝘁𝘀𝗮𝗻𝗱𝗯𝘆𝘁𝗲𝘀 𝗺𝘂𝗹𝘁𝗶-𝗯𝗮𝗰𝗸𝗲𝗻𝗱 𝙖𝙡𝙥𝙝𝙖 𝗿𝗲𝗹𝗲𝗮𝘀𝗲! 💥
+🚀 Big news! After months of hard work and incredible community contributions, we're thrilled to announce the **bitsandbytes multi-backend _alpha_ release**! 💥
 
 Now supporting:
-- 🔥 𝗔𝗠𝗗 𝗚𝗣𝗨𝘀 (ROCm)
-- ⚡ 𝗜𝗻𝘁𝗲𝗹 𝗖𝗣𝗨𝘀 & 𝗚𝗣𝗨𝘀
+- 🔥 **AMD GPUs** (ROCm)
+- ⚡ **Intel CPUs** & **GPUs**
 
 We’d love your early feedback! 🙏
 
-👉 [Instructions for your `𝚙𝚒𝚙 𝚒𝚗𝚜𝚝𝚊𝚕𝚕` here](https://huggingface.co/docs/bitsandbytes/main/en/installation#multi-backend)
+👉 [Instructions for your `pip install` here](https://huggingface.co/docs/bitsandbytes/main/en/installation#multi-backend)
 
 We're super excited about these recent developments and grateful for any constructive input or support that you can give to help us make this a reality (e.g. helping us with the upcoming Apple Silicon backend or reporting bugs). BNB is a community project and we're excited for your collaboration 🤗
 
