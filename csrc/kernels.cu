@@ -2661,7 +2661,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   //const int global_col = base_row; // block offset for col
                   if((base_col + subrow_loop_row + jrow + warp_id < outRows) && (base_row+warp_lane < rows))
                   {
-                    // each row hae 32 columns and is offset by 1 to prevent bank conflict during storage into smem
+                    // each row has 32 columns and is offset by 1 to prevent bank conflict during storage into smem
                     char data = smem_data[(subrow_loop_row + jrow + warp_id)*33 + warp_lane];
 
                     // each 32 columns we have new tile
@@ -2700,7 +2700,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
                   //const int global_col = base_row; // block offset for col
                   if((base_col + subrow_loop_row + jrow + warp_id < outRows) && (base_row+warp_lane < rows))
                   {
-                    // each row hae 32 columns and is offset by 1 to prevent bank conflict during storage into smem
+                    // each row has 32 columns and is offset by 1 to prevent bank conflict during storage into smem
                     char data = smem_data[(subrow_loop_row + jrow + warp_id)*33 + warp_lane];
 
                     // each 32 columns we have new tile
@@ -2777,7 +2777,7 @@ template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int T
 										//const int global_col = base_row; // block offset for col
 										if((base_col + subrow_loop_row + jrow + warp_id < outRows) && (base_row+warp_lane < rows))
 										{
-											// each row hae 32 columns and is offset by 1 to prevent bank conflict during storage into smem
+											// each row has 32 columns and is offset by 1 to prevent bank conflict during storage into smem
 											char data = smem_data[(subrow_loop_row + jrow + warp_id)*33 + warp_lane];
 
 											// each 32 columns we have new tile
