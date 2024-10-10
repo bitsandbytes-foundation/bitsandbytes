@@ -31,7 +31,6 @@ ignore = [
     "F841",  # Local assigned but not used (TODO: enable, these are likely bugs)
     "RUF012",  # Mutable class attribute annotations
 ]
-ignore-init-module-imports = true  # allow to expose in __init__.py via imports
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/__init__.py" = ["F401"]  # allow unused imports in __init__.py
