@@ -283,9 +283,9 @@ class MatMul8bitLt(torch.autograd.Function):
         B: torch.Tensor,
         out=None,
         bias: Optional[torch.Tensor] = None,
-        state=MatmulLtState,
+        state: MatmulLtState = None,
     ):
-        # state = state or MatmulLtState()
+        state = state or MatmulLtState()
 
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
@@ -318,7 +318,7 @@ class MatMul8bitLt(torch.autograd.Function):
             if is_transposed:
                 B = B.contiguous()
 
-            if (state.is_training and not has_grad) or state.CB is None:
+            if (state.is_training and not has_grad) or state.SCB is None:
                 state.reset_grads()
 
                 # 2. Quantize B
@@ -347,7 +347,7 @@ class MatMul8bitLt(torch.autograd.Function):
                 outliers = state.CB[:, state.idx].clone()
                 state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
         else:
-            subA = state.subB = None
+            subA = None
 
         # 3. Int8 Matmul
         out32, Sout32 = F.igemmlt(CA, state.CB)
@@ -377,7 +377,11 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.save_for_backward(None, None)
 
         output_shape = (*input_shape[:-1], state.CB.shape[0])
-        return output.reshape(output_shape).clone()
+
+        if len(input_shape) == 3:
+            return output.view(output_shape).clone()
+        else:
+            return output
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -400,18 +404,16 @@ class MatMul8bitLt(torch.autograd.Function):
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
         Cgrad, Cgradt, SCgrad, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
-        if req_gradB:
-            # grad_output.T @ A
-            # grad_weight = grad_output.t().mm(A)
-            grad_B = torch.matmul(grad_output.t(), A)
-            if state.threshold > 0.0 and subA is not None:
-                grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
         # if req_gradB:
-        #
-        #     gradB32, SgradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
-        #     grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
+
+        #     grad_B = torch.matmul(grad_output.t(), A)
         #     if state.threshold > 0.0 and subA is not None:
         #         grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
+        if req_gradB:
+            gradB32, SgradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
+            grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
+            if state.threshold > 0.0 and subA is not None:
+                grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:
             # grad_output @ B.T

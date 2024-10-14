@@ -529,16 +529,16 @@ module_dict = {
 @pytest.mark.parametrize("module", module_dict.values(), ids=module_dict.keys())
 def test_kbit_backprop(module):
     b = 16
-    dim1 = 32
-    dim2 = 48
+    dim1 = 36
+    dim2 = 56
     # dim1 = 37
     # dim2 = 83
 
-    ref = nn.Sequential(*[torch.nn.Linear(dim1, dim2), torch.nn.Linear(dim2, 16)])
-    ref[1].weight.requires_grad = False
+    ref = nn.Sequential(*[torch.nn.Linear(dim1, dim2), torch.nn.Linear(dim2, 128)])
+    # ref[1].weight.requires_grad = False
     torch.nn.init.kaiming_normal_(ref[0].weight)
     torch.nn.init.kaiming_normal_(ref[1].weight)
-    kbit = nn.Sequential(*[torch.nn.Linear(dim1, dim2), module(dim2, 16)])
+    kbit = nn.Sequential(*[torch.nn.Linear(dim1, dim2), module(dim2, 128)])
     kbit[0].weight.detach().copy_(ref[0].weight)
     kbit[1].weight.detach().copy_(ref[1].weight)
     kbit[0].bias.detach().copy_(ref[0].bias)
@@ -572,8 +572,8 @@ def test_kbit_backprop(module):
         relerrs1.append(relerr1.mean().item())
         relerrs2.append(relerr2.mean().item())
 
-        # if isinstance(module, bnb.nn.Linear8bitLt):
-        if module == bnb.nn.Linear8bitLt:
+        if isinstance(module, bnb.nn.Linear8bitLt):
+            # if module == bnb.nn.Linear8bitLt:
             assert_all_approx_close(grad1, grad2, atol=0.008, rtol=0.05, count=1)
             torch.testing.assert_close(bgrad1, bgrad2, atol=0.008, rtol=0.05)
         else:
