@@ -436,16 +436,10 @@ template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
   //
   // Use the IMMA kernels requires:
   // * A must be transposed and B must be non-transposed.
-  // * All leading dimensions must be multiples of 4.
   // * Dimensions m and k must be multiples of 4.
   // * All pointers must be 4-byte aligned; 16-byte alignment preferred.
-  //
-
 
   int has_error = 0;
-
-  // this is the default
-  cublasLtOrder_t col_major = CUBLASLT_ORDER_COL;
 
   cublasLtMatmulDesc_t matmulDesc;
   cublasLtMatrixLayout_t aDesc, bDesc, cDesc;

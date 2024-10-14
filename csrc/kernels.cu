@@ -627,7 +627,7 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
     for(int i = threadIdx.x; i < 256; i+=blockDim.x)
       smem_code[i] = code[i];
 
-  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
+  for (int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
   {
     valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
     local_abs_max = -FLT_MAX;
@@ -645,19 +645,13 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
 
     local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Max(), valid_items);
 
-    if(threadIdx.x == 0)
-      smem_absmax_value[0] = local_abs_max;
-
+    if (threadIdx.x == 0) {
+      smem_absmax_value[0] = 1.0f / local_abs_max;
+      absmax[i / BLOCK_SIZE] = local_abs_max;
+    }
     __syncthreads();
 
-    if(threadIdx.x == 0)
-      absmax[i/BLOCK_SIZE] = local_abs_max;
-    else
-      local_abs_max = smem_absmax_value[0];
-
-    __syncwarp();
-
-    local_abs_max = 1.0f/local_abs_max;
+    local_abs_max = smem_absmax_value[0];
 
     if(STOCHASTIC)
     {
@@ -724,15 +718,15 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * abs
 
   for (int i = base_idx; i < n_load; i += gridDim.x*TILE_SIZE)
   {
-    if(DATA_TYPE > 0)
+    if (DATA_TYPE > 0)
     {
-      valid_items_load = (n+1)/2 - i > TILE_SIZE ? TILE_SIZE : (n+1)/2 - i;
-      valid_items_store = n - i*2 > TILE_SIZE*2 ? TILE_SIZE*2 : n - i*2;
+      valid_items_load = min(TILE_SIZE, (n + 1) / 2 - i);
+      valid_items_store = min(TILE_SIZE * 2, n - i * 2);
     }
     else
     {
-      valid_items_load = n - i > TILE_SIZE ? TILE_SIZE : n - i;
-      valid_items_store = n - i > TILE_SIZE ? TILE_SIZE : n - i;
+      valid_items_load = min(TILE_SIZE, n - i);
+      valid_items_store = valid_items_load;
     }
     local_abs_max = __ldg(&absmax[(i+threadIdx.x*NUM_PER_TH) >> (31 - __clz(blocksize))]);
     //local_abs_max = __ldg(&absmax[(i+threadIdx.x*NUM_PER_TH)/(blocksize)]);
@@ -740,7 +734,7 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * abs
     __syncthreads();
     LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
 
-    switch(DATA_TYPE)
+    switch (DATA_TYPE)
     {
         case General8bit:
           // load code through read-only cache via __ldg

@@ -219,7 +219,8 @@ class SwitchBackBnb(torch.autograd.Function):
 
         if state.threshold > 0.0 and coo_tensorA is not None:
             if state.has_fp16_weights:
-                idx = torch.unique(coo_tensorA.colidx).long()
+                # idx = torch.unique(coo_tensorA.colidx).long()
+                idx = torch.unique(coo_tensorA._indices()[1]).long()
                 CA[:, idx] = 0
                 CAt[:, idx] = 0
                 subA = A[:, idx]
@@ -257,7 +258,8 @@ class SwitchBackBnb(torch.autograd.Function):
         if coo_tensorA is not None and not state.has_fp16_weights:
             # extract outliers
 
-            outlier_idx = torch.unique(coo_tensorA.colidx)
+            # outlier_idx = torch.unique(coo_tensorA.colidx)
+            outlier_idx = torch.unique(coo_tensorA._indices()[1]).long()
             state.idx = outlier_idx
             # state.outlier_pool.add_outliers(outlier_idx, A.shape[-1])
             # if state.use_pool and state.outlier_pool.model_dim == A.shape[-1]:
@@ -339,7 +341,7 @@ class SwitchBackBnb(torch.autograd.Function):
 
         if req_gradA:
             if state.CBt is not None:
-                gradA32, SgradA32 = F.igemmlt(Cgradt, state.CBt.t())
+                gradA32, SgradA32 = F.igemmlt(Cgrad, state.CBt.t())
                 grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
 
             elif state.CB is not None:

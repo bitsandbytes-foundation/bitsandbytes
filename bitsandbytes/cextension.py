@@ -67,6 +67,9 @@ class BNBNativeLibrary:
     def __getattr__(self, item):
         return getattr(self._lib, item)
 
+    def __getitem__(self, item):
+        return getattr(self._lib, item)
+
 
 class CudaBNBNativeLibrary(BNBNativeLibrary):
     compiled_with_cuda = True

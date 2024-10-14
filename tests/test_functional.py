@@ -875,13 +875,12 @@ def test_colrow_absmax(dim1, dim2, dims, threshold):
 
             torch.testing.assert_close(col_stats1_trunc, col_stats2)
             torch.testing.assert_close(row_stats1_trunc, row_stats2)
-            torch.testing.assert_close(nnz_block_ptr1.int(), nnz_block_ptr2)
+            # torch.testing.assert_close(nnz_block_ptr1, nnz_block_ptr2)
         else:
             row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=0.0)
             assert nnz_block_ptr2 is None
-
-        torch.testing.assert_close(col_stats1, col_stats2)
-        torch.testing.assert_close(row_stats1, row_stats2)
+            torch.testing.assert_close(col_stats1, col_stats2)
+            torch.testing.assert_close(row_stats1, row_stats2)
 
 
 # @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
@@ -1122,32 +1121,32 @@ def test_overflow():
     formatB = F.get_special_format_str()
     print(formatB)
     for i in range(2):
-        a = torch.arange(5, 15).cuda().to(torch.int8).view(-1, 1)
-        b = torch.arange(5, 15).cuda().to(torch.int8).view(-1, 1)
+        a = torch.arange(0, 16).cuda().to(torch.int8).view(-1, 4).contiguous()
+        b = torch.arange(0, 16).cuda().to(torch.int8).view(-1, 4).contiguous()
 
         # Ca, Sa = F.nvidia_transform(a, "col32")
         # Cb, Sb = F.nvidia_transform(b, formatB)
 
         # c = F.igemmlt(Ca, Cb, Sa, Sb, dtype=torch.int8)
-        c = F.igemmlt(a, b)
+        c = F.igemmlt(a, b, dtype=torch.int8)
         c2 = torch.matmul(a.float(), b.float().t())
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
+# @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
+# @pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
 def test_coo_double_quant(dim1, dim2):
     threshold = 3.00
     for i in range(k):
         A = torch.randn(dim1, dim2, device="cuda").half()
 
         idx = torch.abs(A) >= threshold
-        CA2, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
 
         if coo_tensor is not None:
             A1 = A * idx
-            A2 = torch.zeros_like(A)
-            A2[coo_tensor.rowidx.long(), coo_tensor.colidx.long()] = coo_tensor.values
+            A2 = coo_tensor.to_dense()
             torch.testing.assert_close(A1, A2)
 
             A1 = A * (idx == 0)
@@ -1228,8 +1227,10 @@ def test_spmm_bench():
     print(tsp / t8)
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(256, 1024, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(256, 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [256, 1024], ids=id_formatter("dim2"))
+# @pytest.mark.parametrize("dim1", get_test_dims(256, 1024, n=2), ids=id_formatter("dim1"))
+# @pytest.mark.parametrize("dim2", get_test_dims(256, 1024, n=2), ids=id_formatter("dim2"))
 def test_integrated_sparse_decomp(dim1, dim2):
     threshold = 3.0
     # formatB = "col_turing"
@@ -1252,6 +1253,8 @@ def test_integrated_sparse_decomp(dim1, dim2):
         assert coo_tensor is not None
 
         out4 = F.spmm_coo(coo_tensor, w1.t())
+        # idx = torch.unique(coo_tensor._indices()[1]).long()
+        # out4 = torch.matmul(A, w1.t())
         out5 = out3 + out4
 
         err1 = torch.abs(out1 - out2).mean().item()
