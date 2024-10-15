@@ -1,5 +1,8 @@
 # Multi-backend support (non-CUDA backends)
 
+> [!Tip]
+> If you feel these docs need some additional info, please consider submitting a PR or respectfully request the missing info in one of the below mentioned Github discussion spaces.
+
 As part of a recent refactoring effort, we will soon offer official multi-backend support. Currently, this feature is available in a preview alpha release, allowing us to gather early feedback from users to improve the functionality and identify any bugs.
 
 At present, the Intel CPU and AMD ROCm backends are considered fully functional. The Intel XPU backend has limited functionality and is less mature.
@@ -24,4 +27,18 @@ Thank you for your support!
 
 ### Intel
 
-### AMD
+The following performance data is collected from Intel 4th Gen Xeon (SPR) platform. The tables show speed-up and memory compared with different data types of [Llama-2-7b-chat-hf](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf).
+
+#### Inference (CPU)
+
+| Data Type | BF16 | INT8 | NF4 | FP4 |
+|---|---|---|---|---|
+| Speed-Up (vs BF16) | 1.0x | 0.6x | 2.3x | 0.03x |
+| Memory (GB) | 13.1 | 7.6 | 5.0 | 4.6 |
+
+#### Fine-Tuning (CPU)
+
+| Data Type | AMP BF16 | INT8 | NF4 | FP4 |
+|---|---|---|---|---|
+| Speed-Up (vs AMP BF16) | 1.0x | 0.38x | 0.07x | 0.07x |
+| Memory (GB) | 40 | 9 | 6.6 | 6.6 |

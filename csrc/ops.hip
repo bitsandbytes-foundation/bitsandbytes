@@ -576,6 +576,7 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
       if (returnedAlgoCount == 0)
       {
         has_error = 1;
+        fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
       }
       else
       {
@@ -614,18 +615,25 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
                                                             heuristicResult,
                                                             &returnedAlgoCount));
 
-      if(!SCALE_ROWS)
+      if (returnedAlgoCount == 0)
       {
-        float alpha = 1.0f, beta = 0.0f;
-
-        has_error |= checkHipblasStatus(hipblasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, &heuristicResult[0].algo, nullptr, 0, 0));
+        has_error = 1;
+        fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
       }
       else
       {
-        //has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, hipblasLt_MATMUL_DESC_POINTER_MODE, &alphaVec, sizeof(alphaVec)));
-	float beta = 0.0f;
+        if(!SCALE_ROWS)
+        {
+          float alpha = 1.0f, beta = 0.0f;
 
-        has_error |= checkHipblasStatus(hipblasLtMatmul(ltHandle, matmulDesc, row_scale, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, &heuristicResult[0].algo, nullptr, 0, 0));
+          has_error |= checkHipblasStatus(hipblasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, &heuristicResult[0].algo, nullptr, 0, 0));
+        }
+        else
+        {
+          float beta = 0.0f;
+
+          has_error |= checkHipblasStatus(hipblasLtMatmul(ltHandle, matmulDesc, row_scale, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, &heuristicResult[0].algo, nullptr, 0, 0));
+        }
       }
     }
 
@@ -635,7 +643,7 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
     if (Adesc) has_error |= checkHipblasStatus(hipblasLtMatrixLayoutDestroy(Adesc));
     if (matmulDesc) has_error |= checkHipblasStatus(hipblasLtMatmulDescDestroy(matmulDesc));
     if(has_error == 1)
-      printf("error detected");
+      fprintf(stderr, "error detected\n");
 
     return has_error;
 #endif // NO_HIPBLASLT
