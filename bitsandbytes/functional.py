@@ -1530,28 +1530,16 @@ def gemv_4bit(
     transposed_A=False,
     transposed_B=False,
     state=None,
-    backward=False,
 ):
     ensure_backend_is_available(A.device.type)
-    if A.device.type == "cpu":
-        return backends[A.device.type].gemv_4bit(
-            A,
-            B,
-            out=out,
-            transposed_A=transposed_A,
-            transposed_B=transposed_B,
-            state=state,
-            backward=backward,
-        )
-    else:
-        return backends[A.device.type].gemv_4bit(
-            A,
-            B,
-            out=out,
-            transposed_A=transposed_A,
-            transposed_B=transposed_B,
-            state=state,
-        )
+    return backends[A.device.type].gemv_4bit(
+        A,
+        B,
+        out=out,
+        transposed_A=transposed_A,
+        transposed_B=transposed_B,
+        state=state,
+    )
 
 
 def igemm(

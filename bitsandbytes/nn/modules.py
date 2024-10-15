@@ -470,7 +470,7 @@ class Linear4bit(nn.Linear):
             and self.weight.quant_state.quant_type == "nf4"
             and x.requires_grad == False
         ):
-            enable_ipex_fusion(self, x.requires_grad)
+            enable_ipex_fusion(self)
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:

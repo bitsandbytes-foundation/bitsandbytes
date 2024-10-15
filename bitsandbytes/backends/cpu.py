@@ -163,13 +163,12 @@ class CPUBackend(Backend):
         transposed_A=False,
         transposed_B=False,
         state: QuantState = None,
-        backward=False,
     ) -> torch.Tensor:
         assert_on_cpu([A, B, out])
         if state is None:
             raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
 
-        return gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state, backward)
+        return gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
 
     def dequantize_blockwise(
         self,

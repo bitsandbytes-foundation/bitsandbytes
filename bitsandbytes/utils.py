@@ -200,41 +200,23 @@ def unpack_tensor_to_dict(tensor_data):
     return unpacked_dict
 
 
-def enable_ipex_fusion(linear, grad=False):
+def enable_ipex_fusion(linear):
     from bitsandbytes.backends.cpu_xpu_common import _ipex_cpu_version_prereq
 
     if _ipex_cpu_version_prereq(2, 5):
         quant_state = linear.weight.quant_state
         new_weight, new_scales, new_zeros, _, compensation = \
-            torch.ops.ipex_prepack.woq_linear_pack_weight(
-                linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
-                "nf4",
-                quant_state.shape,  # weight shape
-                quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
-                None,  # zero_points
-                None,  # bias
-                None,  # batch_size
-                quant_state.blocksize,
-                2,
-            )
-        if grad or True:
-            backward_new_weight, backward_new_scales, backward_new_zeros, _, backward_compensation = \
                 torch.ops.ipex_prepack.woq_linear_pack_weight(
-                    linear.weight.t().data.reshape([quant_state.shape[1], quant_state.shape[0] // 2]),
+                    linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
                     "nf4",
                     quant_state.shape,  # weight shape
-                    quant_state.absmax.view(quant_state.shape[1], quant_state.shape[0] // quant_state.blocksize),  # scales
+                    quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
                     None,  # zero_points
                     None,  # bias
                     None,  # batch_size
                     quant_state.blocksize,
                     2,
                 )
-            setattr(linear.weight.quant_state, "backward_weight", backward_new_weight)
-            setattr(linear.weight.quant_state, "backward_new_scales", backward_new_scales)
-            setattr(linear.weight.quant_state, "backward_new_zeros", backward_new_zeros)
-            setattr(linear.weight.quant_state, "backward_compensation", backward_compensation)
-
         linear.weight.data = new_weight.data
         setattr(linear.weight.quant_state, "ipex", True)
         setattr(linear.weight.quant_state, "new_scales", new_scales)
