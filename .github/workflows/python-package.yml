@@ -58,6 +58,7 @@ jobs:
   # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
   ##
   build-shared-libs-cuda:
+    if: github.ref_name != 'multi-backend-refactor'
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -148,7 +149,7 @@ jobs:
   build-wheels:
     needs:
       - build-shared-libs
-      - build-shared-libs-cuda
+      # - build-shared-libs-cuda  reduce the pkg size + build times for the preview release
       - build-shared-libs-rocm
     strategy:
       matrix:
@@ -166,6 +167,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # shallow clone
+      - name: Fetch tags for dynamic versioning in setup.py
+        run: |
+          git fetch --depth=1 origin --tags
+          echo "Available Git tags:"
+          git tag -n
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -183,7 +191,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install build wheel
-      - run: python -m build .
+      # for now need to do the below instead of prior `python -m build .`, which didn't allow us to access git tags
+      - run: python -m build --sdist && python -m build --wheel
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |
@@ -196,6 +205,45 @@ jobs:
           name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
           path: dist/bitsandbytes-*.whl
           retention-days: 7
+
+  upload-pre-release-wheels:
+    name: Create release and upload artifacts
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'multi-backend-refactor'
+    permissions:
+      contents: write
+    needs:
+      - build-wheels
+    steps:
+      - name: Download and rename artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: tmp/
+          pattern: "bdist_wheel_*"
+          merge-multiple: true
+      - name: Inspect tmp directory after downloading artifacts
+        run: ls -alFR tmp/
+      - name: Move and rename wheel files with pattern replacement
+        run: |
+          mkdir -p wheels/
+          find tmp/ -type f -name '*.whl' -print0 | while IFS= read -r -d '' wheel; do
+            wheel_filename=$(basename "$wheel")
+            # Remove the gith hash, e.g. `+1234567`, for a stable download link on the multi-backend pre-release
+            cleaned_filename=$(echo "$wheel_filename" | sed -E 's/\+[0-9a-f]{7}-/-/g')
+            mv "$wheel" "wheels/$cleaned_filename"
+          done
+      - name: Inspect wheels directory after renaming files
+        run: ls -alFR wheels/
+      - name: Create release and upload artifacts
+        uses: softprops/action-gh-release@v2.0.8
+        with:
+          files: wheels/*.whl
+          prerelease: true
+          name: Multi-Backend Preview
+          tag_name: continuous-release_multi-backend-refactor
+          make_latest: false
+          draft: false
+          target_commitish: ${{ github.sha }}
 
   audit-wheels:
     needs: build-wheels

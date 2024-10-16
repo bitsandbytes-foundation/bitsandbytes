@@ -151,6 +151,8 @@ dmypy.json
 # vim
 *.swp
 
+# BNB-specific stuff
 dependencies
 cuda_build
 output/
+bitsandbytes/_version.py

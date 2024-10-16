@@ -3,6 +3,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# Import the dynamically generated version from _version.py  (see setup.py)
+from ._version import __version__  # isort: skip # type: ignore
+
 import torch
 
 from . import research, utils
@@ -73,5 +76,3 @@ __pdoc__ = {
     "optim.optimizer.Optimizer8bit": False,
     "optim.optimizer.MockArgs": False,
 }
-
-__version__ = "0.43.3.dev"
