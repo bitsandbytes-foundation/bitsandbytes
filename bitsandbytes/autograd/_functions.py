@@ -335,17 +335,17 @@ class MatMul8bitLt(torch.autograd.Function):
 
             # Zero out the outliers in the int8 inputs
             CA[:, state.idx] = 0
-            CAt[:, state.idx] = 0
+            # CAt[:, state.idx] = 0
 
             # Extract the input outliers in original precision
             subA = A[:, state.idx]
 
             # Extract the corresponding weights
             if state.has_fp16_weights:
-                state.subB = B[:, state.idx].t().contiguous()
+                state.subB = B[:, state.idx].t()  # .contiguous()
             else:
-                outliers = state.CB[:, state.idx].clone()
-                state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
+                outliers = state.CB[:, state.idx]  # .clone()
+                state.subB = (7.874016e-3 * outliers * state.SCB.view(-1, 1)).t().to(A.dtype)
         else:
             subA = None
 
@@ -372,14 +372,14 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.tensors = (CAt, subA, A)
             ctx.tensor_states = (SCAt, state.idx)
         else:
-            ctx.tensors = [None, None, A]
+            ctx.tensors = [None, None, None]  # A]
             ctx.tensor_states = (None, None)
             ctx.save_for_backward(None, None)
 
         output_shape = (*input_shape[:-1], state.CB.shape[0])
 
         if len(input_shape) == 3:
-            return output.view(output_shape).clone()
+            return output.reshape(output_shape)  # .clone()
         else:
             return output
 
@@ -417,10 +417,10 @@ class MatMul8bitLt(torch.autograd.Function):
 
         if req_gradA:
             # grad_output @ B.T
-            if state.CBt is not None:
-                gradA32, SgradA32 = F.igemmlt(Cgrad, state.CBt.t())
-                grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
-            elif state.CB is not None:
+            # if state.CBt is not None:
+            #    gradA32, SgradA32 = F.igemmlt(Cgrad, state.CBt.t())
+            #    grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
+            if state.CB is not None:
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             else:

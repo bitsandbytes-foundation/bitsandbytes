@@ -505,64 +505,6 @@ template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
   return has_error;
 }
 
-template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
-{
-    int has_error = 0;
-    cublasLtMatmulDesc_t matmulDesc = NULL;
-    cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
-    cublasOperation_t opT = CUBLAS_OP_T;
-    cublasLtPointerMode_t alphaVec = CUBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_ZERO;
-    cublasLtOrder_t col32 = CUBLASLT_ORDER_COL32;
-    cublasLtOrder_t col_turing = CUBLASLT_ORDER_COL4_4R2_8C;
-    cublasLtOrder_t col_ampere = CUBLASLT_ORDER_COL32_2R_4R4;
-
-    has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_8I, m, k, lda));
-    has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_8I, n, k, ldb));
-
-    has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-    if(FORMATB == COL_TURING)
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_turing, sizeof(col_turing)));
-    else
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col_ampere, sizeof(col_ampere)));
-
-    if(DTYPE_OUT == 32)
-    {
-      has_error |= checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32I));
-      has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32I, m, n, ldc));
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      int alpha = 1, beta = 0;
-      has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int32_t*)C, Cdesc, (int32_t*)C, Cdesc, NULL, NULL, 0, 0));
-    }
-    else
-    {
-      has_error |= checkCublasStatus(cublasLtMatmulDescCreate(&matmulDesc, CUBLAS_COMPUTE_32I, CUDA_R_32F));
-      has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_8I, m, n, ldc));
-      has_error |= checkCublasStatus(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      if(!SCALE_ROWS)
-      {
-        float alpha = 1.0f, beta = 0.0f;
-        has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, 0));
-      }
-      else
-      {
-        has_error |= checkCublasStatus(cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_POINTER_MODE, &alphaVec, sizeof(alphaVec)));
-        has_error |= checkCublasStatus(cublasLtMatmul(ltHandle, matmulDesc, row_scale, A, Adesc, B, Bdesc, NULL, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, NULL, NULL, 0, 0));
-      }
-    }
-
-
-    if (Cdesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Cdesc));
-    if (Bdesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Bdesc));
-    if (Adesc) has_error |= checkCublasStatus(cublasLtMatrixLayoutDestroy(Adesc));
-    if (matmulDesc) has_error |= checkCublasStatus(cublasLtMatmulDescDestroy(matmulDesc));
-    if(has_error == 1)
-      printf("error detected");
-
-    return has_error;
-}
-
 int fill_up_to_nearest_multiple(int value, int multiple)
 {
   return value + (value % multiple == 0 ? 0 : (multiple - (value % multiple)));
@@ -577,6 +519,15 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   const int num_blocks = (n + num_per_block - 1) / num_per_block;
 
   kdequant_mm_int32_fp16<num_per_thread, threads><<<num_blocks, threads>>>(A, rowStats, colStats, out, bias, numRows, numCols, n);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+void int8VectorQuant(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols) {
+  if (threshold == 0.0) {
+    kInt8VectorQuant<half, 1024, 0><<<rows, 1024>>>(A, out, rowStats, threshold, rows, cols);
+  } else {
+    kInt8VectorQuant<half, 1024, 1><<<rows, 1024>>>(A, out, rowStats, threshold, rows, cols);
+  }
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -600,6 +551,14 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_r
     kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 1><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 
+}
+
+void getRowStats(half *A, float *rowStats, float threshold, int rows, int cols) {
+  if (threshold == 0.0)
+    kgetRowStats<half, 1024, 0><<<rows, 1024>>>(A, rowStats, threshold, rows, cols);
+  else
+    kgetRowStats<half, 1024, 1><<<rows, 1024>>>(A, rowStats, threshold, rows, cols);
+  CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int *nnz_block_ptr, float threshold, int rows, int cols)

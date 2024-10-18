@@ -337,7 +337,12 @@ extern "C"
 	{ dequant_mm_int32_fp16(A, rowStats, colStats, out, bias, numRows, numCols); }
 	void cget_col_row_stats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)
 	{ getColRowStats(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols); }
-
+	void cget_row_stats(half *A, float *rowStats, float threshold, int rows, int cols) {
+		getRowStats(A, rowStats, threshold, rows, cols);
+	}
+	void cint8_vector_quant(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols) {
+		int8VectorQuant(A, out, rowStats, threshold, rows, cols);
+	}
   void cdouble_rowcol_quant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int *nnz_row_ptr, float threshold, int rows, int cols)
 	{ doubleRowColQuant(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_row_ptr, threshold, rows, cols); }
 

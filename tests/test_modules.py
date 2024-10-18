@@ -530,7 +530,7 @@ module_dict = {
 def test_kbit_backprop(module):
     b = 16
     dim1 = 36
-    dim2 = 56
+    dim2 = 84
     # dim1 = 37
     # dim2 = 83
 

@@ -2400,7 +2400,6 @@ def get_colrow_absmax(
     outlier_mask = None
 
     if row_stats is None or col_stats is None:
-        # view as 2D
         absA = A.abs().view(-1, A.shape[-1])
 
         if threshold > 0.0:
@@ -2408,13 +2407,10 @@ def get_colrow_absmax(
             outlier_mask = absA >= threshold
             absA.masked_fill_(outlier_mask, 0.0)
 
-            # For parity with tests build nnz_block_ptr.
-            nnz_block_ptr = torch.zeros(absA.shape[0] + 1, dtype=torch.int64, device=A.device)
-            nnz_block_ptr[1:] = outlier_mask.sum(1).cumsum(0)
-
         if row_stats is None:
             # shape [rows]; unsqueeze(-1) gives [rows,1]
-            row_stats = absA.amax(dim=1, keepdim=False).float()
+            row_stats = get_row_absmax(A, threshold)
+
         if col_stats is None:
             # shape [cols]; unsqueeze(0) gives [1,cols]
             col_stats = absA.amax(dim=0, keepdim=False).float()
@@ -2422,42 +2418,20 @@ def get_colrow_absmax(
     return row_stats, col_stats, outlier_mask
 
 
-def get_colrow_absmax_old(A, row_stats=None, col_stats=None, nnz_block_ptr=None, threshold=0.0):
+def get_row_absmax(A, threshold=0.0):
     assert A.dtype == torch.float16
-    device = A.device
 
+    rows = prod(A.shape[:-1])
     cols = A.shape[-1]
-    if len(A.shape) == 3:
-        rows = A.shape[0] * A.shape[1]
-    else:
-        rows = A.shape[0]
 
-    col_tiles = (cols + 255) // 256
-    tiled_rows = ((rows + 15) // 16) * 16
-    if row_stats is None:
-        row_stats = torch.empty((rows,), dtype=torch.float32, device=device).fill_(-50000.0)
-    if col_stats is None:
-        col_stats = torch.empty((cols,), dtype=torch.float32, device=device).fill_(-50000.0)
+    row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device)
 
-    if nnz_block_ptr is None and threshold > 0.0:
-        nnz_block_ptr = torch.zeros(((tiled_rows * col_tiles) + 1,), dtype=torch.int32, device=device)
+    is_on_gpu([A, row_stats])
 
-    ptrA = get_ptr(A)
-    ptrRowStats = get_ptr(row_stats)
-    ptrColStats = get_ptr(col_stats)
-    ptrNnzrows = get_ptr(nnz_block_ptr)
-    rows = ct.c_int32(rows)
-    cols = ct.c_int32(cols)
+    with torch.cuda.device_of(A):
+        lib.cget_row_stats(get_ptr(A), get_ptr(row_stats), ct.c_float(threshold), ct.c_int32(rows), ct.c_int32(cols))
 
-    prev_device = pre_call(A.device)
-    is_on_gpu([A, row_stats, col_stats, nnz_block_ptr])
-    lib.cget_col_row_stats(ptrA, ptrRowStats, ptrColStats, ptrNnzrows, ct.c_float(threshold), rows, cols)
-    post_call(prev_device)
-
-    if threshold > 0.0:
-        nnz_block_ptr.cumsum_(0)
-
-    return row_stats, col_stats, nnz_block_ptr
+    return row_stats
 
 
 class COOSparseTensor:
@@ -2541,127 +2515,48 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
 
 
-# @torch.compile
-def double_quant(A: torch.Tensor, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
-    # TODO: Optimize/write CUDA kernel for this
+def extract_outliers_new(A: torch.Tensor, threshold: float):
+    outlier_mask = A.abs() >= threshold
+    return A.masked_fill(outlier_mask == False, 0.0).to_sparse_coo()
 
-    if row_stats is None or col_stats is None:
-        row_stats, col_stats, outlier_mask = get_colrow_absmax(A, threshold=threshold)
+
+def double_quant(A: torch.Tensor, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
+    assert A.dtype == torch.half
+
+    rows = prod(A.shape[:-1])
+    cols = A.shape[-1]
+
+    row_stats = torch.empty((rows,), device=A.device, dtype=torch.float32)
+
+    out_row = torch.empty(A.shape, device=A.device, dtype=torch.int8)
 
     if threshold > 0.0:
         # Extract outliers to COO tensor:
         # 1. Zero out all of the non-outliers, convert to COO.
         # 2. Zero out the outliers in the dense tensor.
         # TODO we could improve perf of this
-        # is_outlier = A.abs() >= threshold
-        coo_tensor = A.masked_fill(outlier_mask == False, 0.0).to_sparse_coo()
-        A = A.masked_fill(outlier_mask, 0.0)
+        # outlier_mask = A.abs() >= threshold
+        # coo_tensor = A.masked_fill(outlier_mask == False, 0.0).to_sparse_coo()
+        # A = A.masked_fill(outlier_mask, 0.0)
+        coo_tensor = extract_outliers_new(A, threshold)
     else:
         coo_tensor = None
 
-    # Quantize
-    scaled_A = A.mul(C)
-    # quant_row = torch.round(A * (C / row_stats.unsqueeze(-1))).to(torch.int8)
-    # quant_col = torch.round(A * (C / col_stats.unsqueeze(0))).to(torch.int8)
-    quant_row = torch.round(scaled_A / row_stats.unsqueeze(-1)).to(torch.int8)
-    quant_col = torch.round(scaled_A / col_stats.unsqueeze(0)).to(torch.int8)
+    is_on_gpu([A, row_stats])
 
-    if out_row is not None:
-        quant_row = out_row.copy_(quant_row)
-    if out_col is not None:
-        quant_col = out_col.copy_(quant_col)
-
-    return quant_row, quant_col, row_stats.flatten().float(), col_stats.flatten().float(), coo_tensor
-
-
-def double_quant_old(A, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
-    device = A.device
-    assert A.dtype == torch.half
-    assert device.type == "cuda"
-    prev_device = pre_call(A.device)
-
-    cols = A.shape[-1]
-    if len(A.shape) == 3:
-        rows = A.shape[0] * A.shape[1]
-    else:
-        rows = A.shape[0]
-
-    if row_stats is None or col_stats is None:
-        row_stats, col_stats, nnz_row_ptr = get_colrow_absmax(A, threshold=threshold)
-
-    if out_col is None:
-        out_col = torch.zeros(A.shape, device=device, dtype=torch.int8)
-    if out_row is None:
-        out_row = torch.zeros(A.shape, device=device, dtype=torch.int8)
-
-    coo_tensor = None
-    ptrA = get_ptr(A)
-    ptrColStats = get_ptr(col_stats)
-    ptrRowStats = get_ptr(row_stats)
-    ptrOutCol = get_ptr(out_col)
-    ptrOutRow = get_ptr(out_row)
-
-    is_on_gpu([A, col_stats, row_stats, out_col, out_row])
-    if threshold > 0.0:
-        nnz = nnz_row_ptr[-1].item()
-        if nnz > 0:
-            coo_tensor = coo_zeros(A.shape[0], A.shape[1], nnz_row_ptr[-1].item(), device)
-            ptrRowIdx = get_ptr(coo_tensor.rowidx)
-            ptrColIdx = get_ptr(coo_tensor.colidx)
-            ptrVal = get_ptr(coo_tensor.values)
-            ptrRowPtr = get_ptr(nnz_row_ptr)
-
-            lib.cdouble_rowcol_quant(
-                ptrA,
-                ptrRowStats,
-                ptrColStats,
-                ptrOutCol,
-                ptrOutRow,
-                ptrRowIdx,
-                ptrColIdx,
-                ptrVal,
-                ptrRowPtr,
-                ct.c_float(threshold),
-                ct.c_int32(rows),
-                ct.c_int32(cols),
-            )
-            val, idx = torch.sort(coo_tensor.rowidx)
-            coo_tensor.rowidx = val
-            coo_tensor.colidx = coo_tensor.colidx[idx]
-            coo_tensor.values = coo_tensor.values[idx]
-        else:
-            lib.cdouble_rowcol_quant(
-                ptrA,
-                ptrRowStats,
-                ptrColStats,
-                ptrOutCol,
-                ptrOutRow,
-                None,
-                None,
-                None,
-                None,
-                ct.c_float(0.0),
-                ct.c_int32(rows),
-                ct.c_int32(cols),
-            )
-    else:
-        lib.cdouble_rowcol_quant(
-            ptrA,
-            ptrRowStats,
-            ptrColStats,
-            ptrOutCol,
-            ptrOutRow,
-            None,
-            None,
-            None,
-            None,
+    with torch.cuda.device_of(A):
+        lib.cint8_vector_quant(
+            get_ptr(A),
+            get_ptr(out_row),
+            get_ptr(row_stats),
             ct.c_float(threshold),
             ct.c_int32(rows),
             ct.c_int32(cols),
         )
-    post_call(prev_device)
 
-    return out_row, out_col, row_stats, col_stats, coo_tensor
+    # TODO: col_stats
+
+    return out_row, None, row_stats, None, coo_tensor  # coo_tensor #col_stats.flatten().float(), coo_tensor
 
 
 def transform(A, to_order, from_order="row", out=None, transpose=False, state=None, ld=None):

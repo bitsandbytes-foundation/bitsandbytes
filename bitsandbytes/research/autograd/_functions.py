@@ -186,7 +186,9 @@ class SwitchBackBnb(torch.autograd.Function):
     @staticmethod
     # TODO: the B008 on the line below is a likely bug; the current implementation will
     #       have each SwitchBackBnb instance share a single MatmulLtState instance!!!
-    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState()):  # noqa: B008
+    def forward(ctx, A, B, out=None, bias=None, state: MatmulLtState = None):
+        state = state or MatmulLtState()
+
         # default to pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
@@ -222,7 +224,7 @@ class SwitchBackBnb(torch.autograd.Function):
                 # idx = torch.unique(coo_tensorA.colidx).long()
                 idx = torch.unique(coo_tensorA._indices()[1]).long()
                 CA[:, idx] = 0
-                CAt[:, idx] = 0
+                # CAt[:, idx] = 0
                 subA = A[:, idx]
                 state.subB = B[:, idx].t().contiguous()
                 state.idx = idx
@@ -249,7 +251,7 @@ class SwitchBackBnb(torch.autograd.Function):
                     state.CBt,
                     state.SCB,
                     state.SCBt,
-                    coo_tensorB,
+                    _,
                 ) = F.double_quant(B.to(torch.float16))
                 state.SB = (state.CB.shape, "row")
         else:
@@ -257,21 +259,13 @@ class SwitchBackBnb(torch.autograd.Function):
 
         if coo_tensorA is not None and not state.has_fp16_weights:
             # extract outliers
+            state.idx = torch.unique(coo_tensorA._indices()[1]).long()
 
-            # outlier_idx = torch.unique(coo_tensorA.colidx)
-            outlier_idx = torch.unique(coo_tensorA._indices()[1]).long()
-            state.idx = outlier_idx
-            # state.outlier_pool.add_outliers(outlier_idx, A.shape[-1])
-            # if state.use_pool and state.outlier_pool.model_dim == A.shape[-1]:
-            #    # do not use pool for 2nd FFN layer
-            #    state.idx = state.outlier_pool.get_current_outlier_idx().to(A.device)
-            # else:
-            #    state.idx = outlier_idx
             # outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
             outliers = state.CB[:, state.idx.long()].clone()
             state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
             CA[:, state.idx.long()] = 0
-            CAt[:, state.idx.long()] = 0
+            # CAt[:, state.idx.long()] = 0
             subA = A[:, state.idx.long()]
 
         shapeB = state.SB[0]
@@ -318,6 +312,7 @@ class SwitchBackBnb(torch.autograd.Function):
         if ctx.is_empty:
             bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
+
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
         CAt, subA, A = ctx.tensors
         SCAt, idx = ctx.tensor_states
@@ -340,11 +335,10 @@ class SwitchBackBnb(torch.autograd.Function):
             grad_B = torch.matmul(grad_output.t(), A)
 
         if req_gradA:
-            if state.CBt is not None:
-                gradA32, SgradA32 = F.igemmlt(Cgrad, state.CBt.t())
-                grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
-
-            elif state.CB is not None:
+            # if state.CBt is not None:
+            #    gradA32, SgradA32 = F.igemmlt(Cgrad, state.CBt.t())
+            #    grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
+            if state.CB is not None:
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             else:

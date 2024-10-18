@@ -1008,9 +1008,9 @@ class Linear8bitLt(nn.Linear):
 
         out = bnb.matmul(x, self.weight, bias=self.bias, state=self.state)
 
-        if not self.state.has_fp16_weights:
-            if self.state.CB is not None:
-                self.weight.data = self.state.CB
+        if not self.state.has_fp16_weights and self.state.CB is not None:
+            self.weight.data = self.state.CB
+
         return out
 
 
