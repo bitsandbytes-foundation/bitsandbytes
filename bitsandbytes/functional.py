@@ -2409,6 +2409,7 @@ def get_colrow_absmax(
 
         if row_stats is None:
             # shape [rows]; unsqueeze(-1) gives [rows,1]
+            # We have a CUDA kernel for row max, but not yet for cols.
             row_stats = get_row_absmax(A, threshold)
 
         if col_stats is None:
@@ -2521,28 +2522,41 @@ def extract_outliers_new(A: torch.Tensor, threshold: float):
 
 
 def double_quant(A: torch.Tensor, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
+    # TODO: Optimize/write CUDA kernel for this?
+    # Note: for inference, use the new int8_vectorwise_quant.
+
+    # Use CUDA kernel for rowwise and COO tensor
+    quant_row, row_stats, coo_tensor = int8_vectorwise_quant(A, threshold=threshold)
+
+    # PyTorch impl for colwise
+    _, col_stats, outlier_mask = get_colrow_absmax(A, threshold=threshold)
+    if threshold > 0.0 and outlier_mask is not None:
+        A = A.masked_fill(outlier_mask, 0.0)
+    quant_col = torch.round(A.mul(C) / col_stats.unsqueeze(0)).to(torch.int8)
+
+    if out_row is not None:
+        quant_row = out_row.copy_(quant_row)
+    if out_col is not None:
+        quant_col = out_col.copy_(quant_col)
+
+    return quant_row, quant_col, row_stats, col_stats.flatten().float(), coo_tensor
+
+
+def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
     assert A.dtype == torch.half
+    is_on_gpu([A])
 
     rows = prod(A.shape[:-1])
     cols = A.shape[-1]
 
     row_stats = torch.empty((rows,), device=A.device, dtype=torch.float32)
-
     out_row = torch.empty(A.shape, device=A.device, dtype=torch.int8)
 
     if threshold > 0.0:
-        # Extract outliers to COO tensor:
-        # 1. Zero out all of the non-outliers, convert to COO.
-        # 2. Zero out the outliers in the dense tensor.
         # TODO we could improve perf of this
-        # outlier_mask = A.abs() >= threshold
-        # coo_tensor = A.masked_fill(outlier_mask == False, 0.0).to_sparse_coo()
-        # A = A.masked_fill(outlier_mask, 0.0)
         coo_tensor = extract_outliers_new(A, threshold)
     else:
         coo_tensor = None
-
-    is_on_gpu([A, row_stats])
 
     with torch.cuda.device_of(A):
         lib.cint8_vector_quant(
@@ -2554,9 +2568,7 @@ def double_quant(A: torch.Tensor, col_stats=None, row_stats=None, out_col=None, 
             ct.c_int32(cols),
         )
 
-    # TODO: col_stats
-
-    return out_row, None, row_stats, None, coo_tensor  # coo_tensor #col_stats.flatten().float(), coo_tensor
+    return out_row, row_stats, coo_tensor  # coo_tensor #col_stats.flatten().float(), coo_tensor
 
 
 def transform(A, to_order, from_order="row", out=None, transpose=False, state=None, ld=None):

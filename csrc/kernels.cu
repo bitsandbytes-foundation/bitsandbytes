@@ -3612,7 +3612,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
       #pragma unroll
       for(int k = 0; k < num_values_8bit/4; k++)
       {
-        #if __CUDA_ARCH__ >= 800
+        #if BNB_BF16_AVAILABLE
           local_B[k*2] = quant_map[local_B_4bit[(i*num_values_8bit/4) + k] >> 4]*local_absmax;
           local_B[k*2 + 1] = quant_map[local_B_4bit[(i*num_values_8bit/4) + k] & 0x0F]*local_absmax;
         #else
@@ -3649,7 +3649,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
       #pragma unroll
       for(int k = 0; k < num_values_4bit/4; k++)
       {
-        #if __CUDA_ARCH__ >= 800
+        #if BNB_BF16_AVAILABLE
           local_C += (float)(local_A[k]*local_B[k]);
         #else
           // bf16 multipliation not supported

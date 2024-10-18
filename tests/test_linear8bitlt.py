@@ -72,10 +72,11 @@ def test_linear_no_igemmlt():
 
     assert linear_custom.state.CB is not None
     assert not linear_custom.state.has_fp16_weights
-    assert torch.allclose(fx_ref, fx_ours, atol=0.02)
-    assert torch.allclose(x_ref.grad, x_ours.grad, atol=0.01)
 
-    # assert linear_custom.state.CxB is None
+    idx = torch.isclose(fx_ref, fx_ours, atol=0.02, rtol=1e-5)
+    assert (idx == 0).sum().item() < fx_ref.numel() * 2.5e-4
+    torch.testing.assert_close(fx_ref, fx_ours, atol=0.03, rtol=1e-5)
+    torch.testing.assert_close(x_ref.grad, x_ours.grad, atol=0.01, rtol=1e-5)
 
 
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))

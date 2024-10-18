@@ -253,13 +253,16 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, dec
             if not has_fp16_weights:
                 if not transpose[0] and not transpose[1]:
                     B2 = B2.t().contiguous()
-                (
-                    state.CB,
-                    CBt,
-                    state.SCB,
-                    SCBt,
-                    coo_tensorB,
-                ) = bnb.functional.double_quant(B2.to(torch.float16))
+
+                state.CB, state.SCB, _ = bnb.functional.int8_vectorwise_quant(B2.to(torch.float16))
+
+                # (
+                #     state.CB,
+                #     CBt,
+                #     state.SCB,
+                #     SCBt,
+                #     coo_tensorB,
+                # ) = bnb.functional.double_quant(B2.to(torch.float16))
                 B2 = state.CB
 
             if not transpose[0] and transpose[1]:

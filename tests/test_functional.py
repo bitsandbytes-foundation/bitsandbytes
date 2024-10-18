@@ -1132,17 +1132,37 @@ def test_overflow():
         c2 = torch.matmul(a.float(), b.float().t())
 
 
+@pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
+def test_coo_double_quant(dim1, dim2):
+    threshold = 2.00
+    for i in range(k):
+        A = torch.randn(dim1, dim2, device="cuda").half()
+
+        idx = torch.abs(A) >= threshold
+        CA, _, statsA, _, coo_tensor = F.double_quant(A, threshold=threshold)
+
+        if coo_tensor is not None:
+            A1 = A * idx
+            A2 = coo_tensor.to_dense()
+            torch.testing.assert_close(A1, A2)
+
+            A1 = A * (idx == 0)
+            A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
+            torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
+
+
 # @pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
 # @pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
-def test_coo_double_quant(dim1, dim2):
+def test_coo_int8_vectorwise_quant(dim1, dim2):
     threshold = 3.00
     for i in range(k):
         A = torch.randn(dim1, dim2, device="cuda").half()
 
         idx = torch.abs(A) >= threshold
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
+        CA, statsA, coo_tensor = F.int8_vectorwise_quant(A, threshold=threshold)
 
         if coo_tensor is not None:
             A1 = A * idx
@@ -1239,13 +1259,13 @@ def test_integrated_sparse_decomp(dim1, dim2):
         w1 = torch.randn(dim1, dim2).cuda().half()
         out1 = torch.matmul(A, w1.t())
 
-        Cw1, Cw1t, statsw1, statsw1t, coo_tensor = F.double_quant(w1)
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
+        Cw1, statsw1, coo_tensor = F.int8_vectorwise_quant(w1)
+        CA, statsA, coo_tensor = F.int8_vectorwise_quant(A)
 
         out1_32, Sout1_32 = F.igemmlt(CA, Cw1)
         out2 = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)
 
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
+        CA, statsA, coo_tensor = F.int8_vectorwise_quant(A, threshold=threshold)
 
         out1_32, Sout1_32 = F.igemmlt(CA, Cw1)
         out3 = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)

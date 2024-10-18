@@ -308,7 +308,14 @@ class MatMul8bitLt(torch.autograd.Function):
         # 1. Quantize A
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
-        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
+
+        if ctx.needs_input_grad[1]:
+            # Slower path
+            CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
+        else:
+            # Fast path
+            CA, SCA, coo_tensorA = F.int8_vectorwise_quant(A.to(torch.float16), threshold=state.threshold)
+            CAt = SCAt = None
 
         has_grad = False
 
@@ -322,20 +329,24 @@ class MatMul8bitLt(torch.autograd.Function):
                 state.reset_grads()
 
                 # 2. Quantize B
-                (
-                    state.CB,
-                    state.CBt,
-                    state.SCB,
-                    state.SCBt,
-                    _,
-                ) = F.double_quant(B.to(torch.float16))
+                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
+
+                # (
+                #     state.CB,
+                #     state.CBt,
+                #     state.SCB,
+                #     state.SCBt,
+                #     _,
+                # ) = F.double_quant(B.to(torch.float16))
 
         if state.threshold > 0.0 and coo_tensorA is not None:
             state.idx = torch.unique(coo_tensorA._indices()[1]).long()
 
             # Zero out the outliers in the int8 inputs
             CA[:, state.idx] = 0
-            # CAt[:, state.idx] = 0
+
+            if CAt is not None:
+                CAt[:, state.idx] = 0
 
             # Extract the input outliers in original precision
             subA = A[:, state.idx]
@@ -372,7 +383,7 @@ class MatMul8bitLt(torch.autograd.Function):
             ctx.tensors = (CAt, subA, A)
             ctx.tensor_states = (SCAt, state.idx)
         else:
-            ctx.tensors = [None, None, None]  # A]
+            ctx.tensors = [None, None, None]
             ctx.tensor_states = (None, None)
             ctx.save_for_backward(None, None)
 
@@ -403,17 +414,16 @@ class MatMul8bitLt(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        Cgrad, Cgradt, SCgrad, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
-        # if req_gradB:
-
-        #     grad_B = torch.matmul(grad_output.t(), A)
-        #     if state.threshold > 0.0 and subA is not None:
-        #         grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
         if req_gradB:
-            gradB32, SgradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
-            grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
+            grad_B = torch.matmul(grad_output.t(), A)
             if state.threshold > 0.0 and subA is not None:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
+        # Cgrad, Cgradt, SCgrad, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
+        # if req_gradB:
+        #     gradB32, SgradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
+        #     grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
+        #     if state.threshold > 0.0 and subA is not None:
+        #         grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:
             # grad_output @ B.T
