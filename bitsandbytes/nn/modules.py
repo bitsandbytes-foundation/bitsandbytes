@@ -588,12 +588,9 @@ class Int8Params(torch.nn.Parameter):
         if self.has_fp16_weights:
             return super().cuda(device)
         else:
-            # we store the 8-bit rows-major weight
-            # we convert this weight to the turning/ampere weight during the first inference pass
+            # We quantize the weight and store in 8bit row-major
             B = self.data.contiguous().half().cuda(device)
-            CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-            del CBt
-            del SCBt
+            CB, SCB, _ = bnb.functional.int8_vectorwise_quant(B)
             self.data = CB
             self.CB = CB
             self.SCB = SCB

@@ -305,7 +305,7 @@ class MatMul8bitLt(torch.autograd.Function):
         if A.dtype != torch.float16:
             warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
 
-        # 1. Quantize A
+        # 1. Quantize A. Note that as a side-effect, outliers are suppressed.
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
 
@@ -342,9 +342,7 @@ class MatMul8bitLt(torch.autograd.Function):
         if state.threshold > 0.0 and coo_tensorA is not None:
             state.idx = torch.unique(coo_tensorA._indices()[1]).long()
 
-            # Zero out the outliers in the int8 inputs
-            CA[:, state.idx] = 0
-
+            # Zero out the outliers in the transposed 8bit inputs.
             if CAt is not None:
                 CAt[:, state.idx] = 0
 
@@ -414,16 +412,18 @@ class MatMul8bitLt(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
+        # if req_gradB:
+        # grad_B = torch.matmul(grad_output.t(), A)
+        # if state.threshold > 0.0 and subA is not None:
+        #     grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
+        # Cgrad, Cgradt, SCgrad, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
-            grad_B = torch.matmul(grad_output.t(), A)
+            Cgrad, _, _, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
+
+            gradB32, SgradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
+            grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
             if state.threshold > 0.0 and subA is not None:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
-        # Cgrad, Cgradt, SCgrad, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
-        # if req_gradB:
-        #     gradB32, SgradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
-        #     grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
-        #     if state.threshold > 0.0 and subA is not None:
-        #         grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:
             # grad_output @ B.T

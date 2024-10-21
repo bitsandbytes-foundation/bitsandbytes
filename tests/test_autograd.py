@@ -320,11 +320,13 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, dec
                     else:
                         assert torch.abs(gradB1).sum() == 0.0
                         assert torch.abs(gradB2).sum() == 0.0
-                    idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
 
-                    assert (idx == 0).sum().item() <= n * 0.1
+                    idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
+                    assert (idx == 0).sum().item() <= n * 0.10
+
                     idx = torch.isclose(gradB1, gradB2, atol=0.10, rtol=0.3)
                     assert (idx == 0).sum().item() <= n * 0.02
+
                     torch.testing.assert_close(gradB1, gradB2, atol=0.18, rtol=0.3)
 
                 if req_grad[2]:

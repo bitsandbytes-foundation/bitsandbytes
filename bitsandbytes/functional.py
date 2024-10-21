@@ -5,7 +5,7 @@
 import ctypes as ct
 import itertools
 from math import prod
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -419,22 +419,23 @@ def get_special_format_str():
     return "row"
 
 
-def is_on_gpu(tensors):
+def is_on_gpu(tensors: Iterable[torch.Tensor]):
     on_gpu = True
     gpu_ids = set()
+
     for t in tensors:
-        if t is None:
-            continue  # NULL pointers are fine
-        is_paged = getattr(t, "is_paged", False)
-        on_gpu &= t.device.type == "cuda" or is_paged
-        if not is_paged:
+        # NULL pointers and paged tensors are OK.
+        if t is not None and not getattr(t, "is_paged", False):
+            on_gpu &= t.is_cuda
             gpu_ids.add(t.device.index)
+
     if not on_gpu:
-        raise TypeError(
+        raise RuntimeError(
             f"All input tensors need to be on the same GPU, but found some tensors to not be on a GPU:\n {[(t.shape, t.device) for t in tensors]}",
         )
+
     if len(gpu_ids) > 1:
-        raise TypeError(
+        raise RuntimeError(
             f"Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}",
         )
     return on_gpu
@@ -2290,15 +2291,11 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
 
     shapeA = A.shape
     shapeB = B.shape
-    dimsA = A.ndim
-    dimsB = B.ndim
 
-    assert A.device.type == "cuda"
-    assert B.device.type == "cuda"
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
-    assert dimsA == 2, "Only two dimensional matrices are supported for argument B"
-    assert dimsB in [2, 3], "Only two or three dimensional matrices are supported for argument A"
+    assert A.ndim == 2, "Only two dimensional matrices are supported for argument B"
+    assert B.ndim in [2, 3], "Only two or three dimensional matrices are supported for argument A"
     assert prod(shapeB) > 0, f"Input tensor dimensions need to be > 0: {shapeB}"
 
     shapeC = (*shapeB[:-1], shapeA[0])
@@ -2308,6 +2305,7 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
         out = torch.empty(shapeC, device=A.device, dtype=dtype)
 
     assert out.dtype == dtype
+
     k, m = shapeA
     n = prod(shapeB[:-1])
     lda = shapeA[-1]  # Weights (outputs, inputs)
@@ -2427,7 +2425,7 @@ def get_row_absmax(A, threshold=0.0):
 
     row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device)
 
-    is_on_gpu([A, row_stats])
+    is_on_gpu([A])
 
     with torch.cuda.device_of(A):
         lib.cget_row_stats(get_ptr(A), get_ptr(row_stats), ct.c_float(threshold), ct.c_int32(rows), ct.c_int32(cols))
@@ -2568,7 +2566,7 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
             ct.c_int32(cols),
         )
 
-    return out_row, row_stats, coo_tensor  # coo_tensor #col_stats.flatten().float(), coo_tensor
+    return out_row, row_stats, coo_tensor
 
 
 def transform(A, to_order, from_order="row", out=None, transpose=False, state=None, ld=None):
