@@ -3558,6 +3558,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
   const int warp_idx = threadIdx.x / 32;
   const int warp_lane = threadIdx.x % 32;
   const int row_B = (THREADS/32)*blockIdx.x + warp_idx;
+  const int offset_B = ldb*row_B;
   const int num_values_8bit = num_values_4bit/2;
   float local_C = 0.0f;
 
@@ -3578,7 +3579,6 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
   for(int inner_idx = warp_lane*num_values_4bit; inner_idx < K; inner_idx += 32*num_values_4bit)
   {
     const int inner_idx_halved = inner_idx/2;
-    const int offset_B = ldb*row_B;
     const int absidx = ((2*offset_B)+inner_idx) >> (31 - __clz(blocksize));
     //int absidx = ((2*offset_B)+inner_idx)/blocksize;
 	  local_absmax = __ldg(&(absmax[absidx]));

@@ -442,8 +442,7 @@ def is_on_gpu(tensors: Iterable[torch.Tensor]):
 
 
 def get_tensor_stream(tensor: Tensor) -> torch.cuda.Stream:
-    stream = torch.cuda.current_stream(tensor.device)
-    return stream
+    return torch.cuda.current_stream(tensor.device)
 
 
 def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
@@ -461,8 +460,8 @@ def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
     """
     if A is None:
         return None
-    else:
-        return ct.c_void_p(A.data.data_ptr())
+
+    return ct.c_void_p(A.data_ptr())
 
 
 def pre_call(device):
@@ -2323,11 +2322,12 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
         ptrC = get_ptr(out)
         ptrRowScale = get_ptr(None)
         m, n, k, lda, ldb, ldc = map(ct.c_int32, (m, n, k, lda, ldb, ldc))
+        stream = get_tensor_stream(A)
 
         if dtype == torch.int32:
-            has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+            has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
         else:
-            has_error = lib.cigemmlt_8(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+            has_error = lib.cigemmlt_8(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
 
     if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
         raise NotImplementedError("igemmlt not implemented!")
@@ -2373,13 +2373,7 @@ def mm_dequant(
 
     with torch.cuda.device_of(A):
         lib.cdequant_mm_int32_fp16(
-            ptrA,
-            ptrRowStats,
-            ptrColStats,
-            ptrOut,
-            ptrBias,
-            numRows,
-            numCols,
+            ptrA, ptrRowStats, ptrColStats, ptrOut, ptrBias, numRows, numCols, get_tensor_stream(A)
         )
 
     return out
@@ -2428,7 +2422,14 @@ def get_row_absmax(A, threshold=0.0):
     is_on_gpu([A])
 
     with torch.cuda.device_of(A):
-        lib.cget_row_stats(get_ptr(A), get_ptr(row_stats), ct.c_float(threshold), ct.c_int32(rows), ct.c_int32(cols))
+        lib.cget_row_stats(
+            get_ptr(A),
+            get_ptr(row_stats),
+            ct.c_float(threshold),
+            ct.c_int32(rows),
+            ct.c_int32(cols),
+            get_tensor_stream(A),
+        )
 
     return row_stats
 
@@ -2547,12 +2548,16 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
     rows = prod(A.shape[:-1])
     cols = A.shape[-1]
 
-    row_stats = torch.empty((rows,), device=A.device, dtype=torch.float32)
+    row_stats = torch.empty(rows, device=A.device, dtype=torch.float32)
     out_row = torch.empty(A.shape, device=A.device, dtype=torch.int8)
 
     if threshold > 0.0:
         # TODO we could improve perf of this
-        coo_tensor = extract_outliers_new(A, threshold)
+
+        # A.masked_fill(A.abs() < threshold, 0.0).to_sparse_coo()
+        # coo_tensor = extract_outliers_new(A, threshold)
+        coo_tensor = torch.masked_fill(A, A.abs() < threshold, 0.0).to_sparse_coo()
+
     else:
         coo_tensor = None
 
@@ -2564,6 +2569,7 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
             ct.c_float(threshold),
             ct.c_int32(rows),
             ct.c_int32(cols),
+            get_tensor_stream(A),
         )
 
     return out_row, row_stats, coo_tensor

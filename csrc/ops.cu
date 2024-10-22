@@ -423,7 +423,8 @@ template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
   const int8_t * B,
   void * C,
   float * row_scale,
-  int lda, int ldb, int ldc
+  int lda, int ldb, int ldc,
+  cudaStream_t stream
 ) {
 
   // Calculate C = A^T @ B, in col-major layout.
@@ -461,7 +462,7 @@ template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
         B, bDesc, &beta,
         (int32_t*)C, cDesc,
         (int32_t*)C, cDesc,
-        NULL, NULL, 0, 0
+        NULL, NULL, 0, stream
       ));
   } else {
     if (!SCALE_ROWS) {
@@ -472,7 +473,7 @@ template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
         B, bDesc, &beta,
         (int8_t*)C, cDesc,
         (int8_t*)C, cDesc,
-        NULL, NULL, 0, 0
+        NULL, NULL, 0, stream
       ));
     } else {
       cublasLtPointerMode_t alphaVec = CUBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
@@ -489,7 +490,7 @@ template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
         B, bDesc, &beta,
         (int8_t*)C, cDesc,
         (int8_t*)C, cDesc,
-        NULL, NULL, 0, 0
+        NULL, NULL, 0, stream
       ));
     }
   }
@@ -510,7 +511,7 @@ int fill_up_to_nearest_multiple(int value, int multiple)
   return value + (value % multiple == 0 ? 0 : (multiple - (value % multiple)));
 }
 
-void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, half *bias, int numRows, int numCols)
+void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, half *bias, int numRows, int numCols, cudaStream_t stream)
 {
   const int threads = 512;
   const int num_per_thread = 4;
@@ -518,15 +519,15 @@ void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, 
   const int n = numRows*numCols;
   const int num_blocks = (n + num_per_block - 1) / num_per_block;
 
-  kdequant_mm_int32_fp16<num_per_thread, threads><<<num_blocks, threads>>>(A, rowStats, colStats, out, bias, numRows, numCols, n);
+  kdequant_mm_int32_fp16<num_per_thread, threads><<<num_blocks, threads, 0, stream>>>(A, rowStats, colStats, out, bias, numRows, numCols, n);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-void int8VectorQuant(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols) {
+void int8VectorQuant(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols, cudaStream_t stream) {
   if (threshold == 0.0) {
-    kInt8VectorQuant<half, 1024, 0><<<rows, 1024>>>(A, out, rowStats, threshold, rows, cols);
+    kInt8VectorQuant<half, 1024, 0><<<rows, 1024, 0, stream>>>(A, out, rowStats, threshold, rows, cols);
   } else {
-    kInt8VectorQuant<half, 1024, 1><<<rows, 1024>>>(A, out, rowStats, threshold, rows, cols);
+    kInt8VectorQuant<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, out, rowStats, threshold, rows, cols);
   }
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -553,11 +554,11 @@ void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_r
 
 }
 
-void getRowStats(half *A, float *rowStats, float threshold, int rows, int cols) {
+void getRowStats(half *A, float *rowStats, float threshold, int rows, int cols, cudaStream_t stream) {
   if (threshold == 0.0)
-    kgetRowStats<half, 1024, 0><<<rows, 1024>>>(A, rowStats, threshold, rows, cols);
+    kgetRowStats<half, 1024, 0><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
   else
-    kgetRowStats<half, 1024, 1><<<rows, 1024>>>(A, rowStats, threshold, rows, cols);
+    kgetRowStats<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -795,9 +796,9 @@ template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx
 template void spmm_coo_very_sparse_naive<half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
-template int igemmlt<32, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<8, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<8, 1>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<32, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, cudaStream_t stream);
+template int igemmlt<8, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, cudaStream_t stream);
+template int igemmlt<8, 1>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, cudaStream_t stream);
 
 template void transformRowToFormat<COL32, 0>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL32, 1>(char * A, char *out, int rows, int cols);
