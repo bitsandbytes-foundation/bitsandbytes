@@ -575,18 +575,22 @@ def matmul_4bit(
     bias=None,
 ):
     assert quant_state is not None
-    if (A.numel() == A.shape[-1] or A.device.type == "cpu") and A.requires_grad == False:
-        # CPU backend does not require A to be a vector
+    if A.device.type == "cpu" and A.requires_grad == False:
+        if getattr(quant_state, "ipex", False):
+            out = F.gemv_4bit(A, B, out, state=quant_state)
+            if bias is not None:
+                out += bias
+            return out
+        else:
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
+    elif A.numel() == A.shape[-1] and A.requires_grad == False:
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(
                 f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",
             )
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
         else:
-            if getattr(quant_state, "ipex", False):
-                out = F.gemv_4bit(A, B, out, state=quant_state)
-            else:
-                out = F.gemv_4bit(A, B.t(), out, state=quant_state)
+            out = F.gemv_4bit(A, B.t(), out, state=quant_state)
             if bias is not None:
                 out += bias
             return out
