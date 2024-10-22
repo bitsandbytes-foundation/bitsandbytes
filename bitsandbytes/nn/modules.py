@@ -417,6 +417,7 @@ class Linear4bit(nn.Linear):
         # self.persistent_buffers = []  # TODO consider as way to save quant state
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
+        self.ipex_linear_is_set = False
         self.quant_state = None
         self.quant_storage = quant_storage
 
@@ -461,8 +462,7 @@ class Linear4bit(nn.Linear):
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
-    def forward(self, x: torch.Tensor):
-        # Check if ipex fusion can be used
+    def set_ipex_linear(self, x: torch.Tensor):
         if (
             x.device.type == "cpu"
             and not getattr(self.weight.quant_state, "ipex", False)
@@ -470,11 +470,14 @@ class Linear4bit(nn.Linear):
             and self.weight.quant_state.quant_type == "nf4"
             and not self.training
             and x.requires_grad == False
-            and getattr(self.weight.quant_state, "initialized", False) == False
         ):
             enable_ipex_fusion(self)
-        else:
-            setattr(self.weight.quant_state, "initialized", True)
+
+    def forward(self, x: torch.Tensor):
+        # Check if ipex fusion can be used
+        if not self.ipex_linear_is_set:
+            self.set_ipex_linear(x)
+            self.ipex_linear_is_set = True
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:
