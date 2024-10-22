@@ -149,7 +149,19 @@ class XPUBackend(Backend):
         if blocksize is None:
             blocksize = 64
         assert_on_xpu([A, absmax, out])
-        return dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
+        # return dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
+        print("------A device: ", A.device)
+        print("------quant_state device: ", quant_state.shape[0])
+        print("------absmax device: ", quant_state.absmax.device)
+        output_dq = torch.ops.torch_ipex.dequantize_4bit(
+            A,
+            "nf4",
+            quant_state.shape,
+            quant_state.absmax,
+            None,
+            blocksize
+        )
+        return output_dq        
 
     def gemv_4bit(
         self,
