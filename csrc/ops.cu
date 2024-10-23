@@ -682,29 +682,21 @@ template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int id
 
 
 
-template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
+template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, float alpha, float beta)
 {
 
-	int num_blocks = (m+31)/32;
+  auto M = (int)m;
+  auto N = (int)n;
+  auto K = (int)k;
+  dim3 dimBlock(16, 16);
+  dim3 dimGrid((M+127)/128, (M+127)/128);
 
-	//cout << num_blocks << endl;
-	//cout << lda << endl;
-	//cout << ldb << endl;
-	//cout << ldc << endl;
+  gemm_device<<< dimGrid, dimBlock, 0, 0>>>
+  (M, N, K,
+  A, B, out,
+  lda, ldb, ldc,
+  alpha, beta);
 
-	//cout << m << endl;
-	//cout << n << endl;
-	//cout << k << endl;
-  if(bits == 32)
-    //gemm_device<T, 32, 128><<< num_blocks, 128, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-    gemm_device<T, 32, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-  if(bits == 16)
-    //gemm_device<T, 16, 256><<< num_blocks, 256, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-    gemm_device<T, 16, 160><<< num_blocks, 160, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-    //gemm_device<T, 16, 128><<< num_blocks, 128, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-    //gemm_device<T, 16, 96><<< num_blocks, 96, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-    //gemm_device<T, 16, 32><<< num_blocks, 32, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
-    //gemm_device<T, 16, 64><<< num_blocks, 64, 0, 0 >>>(m,  n,  k, A,  B,  out, lda, ldb, ldc);
 }
 
 template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
@@ -759,7 +751,7 @@ template void gemm_4bit_inference_naive<__nv_bfloat16, 16>(int m, int n, int k, 
 template void gemm_4bit_inference_naive<float, 32>(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize, cudaStream_t stream);
 
 //template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc, int bits);
-template void gemm_host<half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc, int bits);
+template void gemm_host<half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc, float alpha, float beta);
 template void extractOutliers<COL_TURING>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 
