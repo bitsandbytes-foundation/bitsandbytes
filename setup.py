@@ -31,10 +31,10 @@ setup(
     description="k-bit optimizers and matrix multiplication routines.",
     license="MIT",
     keywords="gpu optimizers optimization 8-bit quantization compression",
-    url="https://github.com/TimDettmers/bitsandbytes",
+    url="https://github.com/bitsandbytes-foundation/bitsandbytes",
     packages=find_packages(),
     package_data={"": libs},
-    install_requires=["torch", "numpy"],
+    install_requires=["torch", "numpy", "typing_extensions>=4.8.0"],
     extras_require={
         "benchmark": ["pandas", "matplotlib"],
         "test": ["scipy", "lion_pytorch"],

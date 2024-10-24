@@ -481,10 +481,8 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
 
-        out = out.to(inp_dtype)
-
+        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
         return out
 
 
@@ -588,12 +586,9 @@ class Int8Params(torch.nn.Parameter):
         if self.has_fp16_weights:
             return super().cuda(device)
         else:
-            # we store the 8-bit rows-major weight
-            # we convert this weight to the turning/ampere weight during the first inference pass
+            # We quantize the weight and store in 8bit row-major
             B = self.data.contiguous().half().cuda(device)
-            CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-            del CBt
-            del SCBt
+            CB, SCB, _ = bnb.functional.int8_vectorwise_quant(B)
             self.data = CB
             self.CB = CB
             self.SCB = SCB
@@ -1008,12 +1003,9 @@ class Linear8bitLt(nn.Linear):
 
         out = bnb.matmul(x, self.weight, bias=self.bias, state=self.state)
 
-        if not self.state.has_fp16_weights:
-            if self.state.CB is not None and self.state.CxB is not None:
-                # we converted 8-bit row major to turing/ampere format in the first inference pass
-                # we no longer need the row-major weight
-                del self.state.CB
-                self.weight.data = self.state.CxB
+        if not self.state.has_fp16_weights and self.state.CB is not None:
+            self.weight.data = self.state.CB
+
         return out
 
 
