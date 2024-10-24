@@ -5,6 +5,7 @@ import warnings
 from warnings import warn
 
 import torch
+from typing_extensions import deprecated
 
 import bitsandbytes.functional as F
 
@@ -97,6 +98,10 @@ def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -
     return outputs.reshape(rows, cols).contiguous()
 
 
+@deprecated(
+    "MatMul8bit is deprecated and will be removed in a future release. Please use MatMul8bitLt instead.",
+    category=FutureWarning,
+)
 class MatMul8bit(torch.autograd.Function):
     @staticmethod
     def forward(ctx, A, B, out=None, quant_type="vector", precision=None):
@@ -208,6 +213,7 @@ bmm_cublas = MatMul8bit.apply
 matmul_cublas = MatMul8bit.apply
 
 
+@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def supports_igemmlt(device: torch.device) -> bool:
     """check if this device supports the optimized int8 kernel"""
     if torch.cuda.get_device_capability(device=device) < (7, 5):
@@ -219,6 +225,7 @@ def supports_igemmlt(device: torch.device) -> bool:
     return True
 
 
+@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def _get_tile_size(format):
     assert format in (
         "col_turing",
@@ -227,6 +234,7 @@ def _get_tile_size(format):
     return (8, 32) if format == "col_turing" else (32, 32)
 
 
+@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def get_tile_inds(format, device):
     transform = lambda x: F.transform(x.to(device), from_order="row", to_order=format)[0].to(x.device)
     with torch.no_grad():
@@ -330,14 +338,6 @@ class MatMul8bitLt(torch.autograd.Function):
 
                 # 2. Quantize B
                 state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
-
-                # (
-                #     state.CB,
-                #     state.CBt,
-                #     state.SCB,
-                #     state.SCBt,
-                #     _,
-                # ) = F.double_quant(B.to(torch.float16))
 
         if state.threshold > 0.0 and coo_tensorA is not None:
             state.idx = torch.unique(coo_tensorA._indices()[1]).long()
