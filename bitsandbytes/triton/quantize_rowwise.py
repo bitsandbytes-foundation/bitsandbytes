@@ -50,7 +50,7 @@ else:
 
         abs_x = tl.abs(x)
         max_val = tl.max(tl.where(row_mask, abs_x, 0), axis=0)
-        output = tl.libdevice.llrint(127.0 * (x / max_val))
+        output = tl.extra.cuda.libdevice.rint(127.0 * (x / max_val))
         tl.store(output_ptr + offsets, output, mask=row_mask)
         tl.store(output_maxs + pid, max_val)
 
