@@ -149,6 +149,8 @@ class XPUBackend(Backend):
         if blocksize is None:
             blocksize = 64
         assert_on_xpu([A, absmax, out])
+        # result = dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
+        # print("+++++++++result: ", result)
         # return dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
         print("------A device: ", A.device)
         print("------quant_state device: ", quant_state.shape[0])
@@ -161,6 +163,8 @@ class XPUBackend(Backend):
             None,
             blocksize
         )
+        output_dq = output_dq.t()
+        print("=====output_dq: ", output_dq)
         return output_dq        
 
     def gemv_4bit(
