@@ -319,10 +319,10 @@ class MatMul8bitLt(torch.autograd.Function):
 
         if ctx.needs_input_grad[1]:
             # Slower path
-            CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
+            CA, CAt, SCA, SCAt, outlier_cols = F.double_quant(A.to(torch.float16), threshold=state.threshold)
         else:
             # Fast path
-            CA, SCA, coo_tensorA = F.int8_vectorwise_quant(A.to(torch.float16), threshold=state.threshold)
+            CA, SCA, outlier_cols = F.int8_vectorwise_quant(A.to(torch.float16), threshold=state.threshold)
             CAt = SCAt = None
 
         has_grad = False
@@ -339,8 +339,8 @@ class MatMul8bitLt(torch.autograd.Function):
                 # 2. Quantize B
                 state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
 
-        if state.threshold > 0.0 and coo_tensorA is not None:
-            state.idx = torch.unique(coo_tensorA._indices()[1]).long()
+        if state.threshold > 0.0 and outlier_cols is not None:
+            state.idx = outlier_cols
 
             # Zero out the outliers in the transposed 8bit inputs.
             if CAt is not None:

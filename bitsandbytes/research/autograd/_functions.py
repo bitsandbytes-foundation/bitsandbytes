@@ -217,12 +217,11 @@ class SwitchBackBnb(torch.autograd.Function):
         # 1. Quantize A
         if len(A.shape) == 3:
             A = A.view(-1, A.shape[-1]).contiguous()
-        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
+        CA, CAt, SCA, SCAt, outlier_cols = F.double_quant(A.to(torch.float16), threshold=state.threshold)
 
-        if state.threshold > 0.0 and coo_tensorA is not None:
+        if state.threshold > 0.0 and outlier_cols is not None:
             if state.has_fp16_weights:
-                # idx = torch.unique(coo_tensorA.colidx).long()
-                idx = torch.unique(coo_tensorA._indices()[1]).long()
+                idx = outlier_cols
                 CA[:, idx] = 0
                 # CAt[:, idx] = 0
                 subA = A[:, idx]
@@ -257,9 +256,9 @@ class SwitchBackBnb(torch.autograd.Function):
         else:
             has_grad = False
 
-        if coo_tensorA is not None and not state.has_fp16_weights:
+        if outlier_cols is not None and not state.has_fp16_weights:
             # extract outliers
-            state.idx = torch.unique(coo_tensorA._indices()[1]).long()
+            state.idx = outlier_cols
 
             # outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
             outliers = state.CB[:, state.idx.long()].clone()
@@ -287,7 +286,7 @@ class SwitchBackBnb(torch.autograd.Function):
             output = output.to(A.dtype).add_(bias)
 
         # 4. Mixed-precision decomposition matmul
-        if coo_tensorA is not None and subA is not None:
+        if outlier_cols is not None and subA is not None:
             output += torch.matmul(subA, state.subB)
 
         # 5. Save state
@@ -327,7 +326,7 @@ class SwitchBackBnb(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
+        Cgrad, Cgradt, SCgrad, SCgradt, outlier_cols = F.double_quant(grad_output.to(torch.float16))
 
         if req_gradB:
             # print('back A shape', A.shape)

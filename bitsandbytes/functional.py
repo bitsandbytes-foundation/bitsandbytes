@@ -2546,7 +2546,7 @@ def double_quant(A: torch.Tensor, col_stats=None, row_stats=None, out_col=None, 
     # Note: for inference, use the new int8_vectorwise_quant.
 
     # Use CUDA kernel for rowwise and COO tensor
-    quant_row, row_stats, coo_tensor = int8_vectorwise_quant(A, threshold=threshold)
+    quant_row, row_stats, outlier_cols = int8_vectorwise_quant(A, threshold=threshold)
 
     # PyTorch impl for colwise
     _, col_stats, outlier_mask = get_colrow_absmax(A, threshold=threshold)
@@ -2559,7 +2559,7 @@ def double_quant(A: torch.Tensor, col_stats=None, row_stats=None, out_col=None, 
     if out_col is not None:
         quant_col = out_col.copy_(quant_col)
 
-    return quant_row, quant_col, row_stats, col_stats.flatten().float(), coo_tensor
+    return quant_row, quant_col, row_stats, col_stats.flatten().float(), outlier_cols
 
 
 def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
@@ -2574,13 +2574,9 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
 
     if threshold > 0.0:
         # TODO we could improve perf of this
-
-        # A.masked_fill(A.abs() < threshold, 0.0).to_sparse_coo()
-        # coo_tensor = extract_outliers_new(A, threshold)
-        coo_tensor = torch.masked_fill(A, A.abs() < threshold, 0.0).to_sparse_coo()
-
+        outlier_cols = torch.argwhere((A.abs() >= threshold).any(dim=0)).view(-1)
     else:
-        coo_tensor = None
+        outlier_cols = None
 
     with torch.cuda.device_of(A):
         lib.cint8_vector_quant(
@@ -2593,7 +2589,7 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
             get_tensor_stream(A),
         )
 
-    return out_row, row_stats, coo_tensor
+    return out_row, row_stats, outlier_cols
 
 
 @deprecated(
