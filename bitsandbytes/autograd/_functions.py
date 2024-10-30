@@ -519,7 +519,6 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        print("*******quant_state absmax: ", quant_state.absmax)
         output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
 
         # 3. Save state
@@ -598,5 +597,4 @@ def matmul_4bit(
                 out += bias
             return out
     else:
-        print("^^^^^^^^^grad seperate path^^^^^^^^^")
         return MatMul4Bit.apply(A, B, out, bias, quant_state)
