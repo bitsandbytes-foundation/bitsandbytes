@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 import torch
 
-from bitsandbytes.optim.optimizer import Optimizer2State
+from bitsandbytes.optim.optimizer import GaLoreWrappedParameter, Optimizer2State
 
 _galore_available = False
 try:
@@ -220,7 +220,6 @@ class GaLoreAdamW8bit(Optimizer2State):
                     lor_update = torch.zeros_like(
                         grad, dtype=p.data.dtype, device=p.data.device, requires_grad=grad.requires_grad
                     )
-                    p.grad = grad
 
                 if "state1" not in state:
                     self.init_state(group, p, gindex, pindex)
@@ -228,7 +227,8 @@ class GaLoreAdamW8bit(Optimizer2State):
                 self.prefetch_state(p)
 
                 if "rank" in group:
-                    self.update_step(group, p, gindex, pindex, return_updates=lor_update)
+                    galore_p = GaLoreWrappedParameter(p=p, grad=grad)
+                    self.update_step(group, galore_p, gindex, pindex, return_updates=lor_update)
 
                     # GaLore Projection Back
                     p.data.add_(state["projector"].project_back(lor_update))

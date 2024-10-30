@@ -4,8 +4,9 @@
 # LICENSE file in the root directory of this source tree.
 from collections import abc as container_abcs, defaultdict
 from copy import deepcopy
+from dataclasses import dataclass
 from itertools import chain
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import torch
 
@@ -16,6 +17,12 @@ class MockArgs:
     def __init__(self, initial_data):
         for key in initial_data:
             setattr(self, key, initial_data[key])
+
+
+@dataclass
+class GaLoreWrappedParameter:
+    p: torch.Tensor
+    grad: torch.Tensor
 
 
 class GlobalOptimManager:
@@ -497,17 +504,22 @@ class Optimizer2State(Optimizer8bit):
     def update_step(
         self,
         group: Dict[str, Any],
-        p: torch.Tensor,
+        p: Union[torch.Tensor, GaLoreWrappedParameter],
         gindex: int,
         pindex: int,
         return_updates: Optional[torch.Tensor] = None,
     ):
-        # avoid update error from non-contiguous memory layout
-        p.data = p.data.contiguous()
-        p.grad = p.grad.contiguous()
+        if isinstance(p, GaLoreWrappedParameter):
+            # Unwrap for GaLore
+            param_to_optimize = p.p
+        else:
+            param_to_optimize = p
 
-        state = self.state[p]
-        grad = p.grad
+        state = self.state[param_to_optimize]
+
+        # avoid update error from non-contiguous memory layout
+        param_to_optimize.data = param_to_optimize.data.contiguous()
+        grad = p.grad.contiguous()
 
         config = self.get_config(gindex, pindex, group)
 
@@ -528,7 +540,7 @@ class Optimizer2State(Optimizer8bit):
             F.optimizer_update_32bit(
                 self.optimizer_name,
                 grad,
-                p,
+                param_to_optimize,
                 state["state1"],
                 config["betas"][0],
                 config["eps"],
@@ -550,7 +562,7 @@ class Optimizer2State(Optimizer8bit):
             F.optimizer_update_8bit(
                 self.optimizer_name,
                 grad,
-                p,
+                param_to_optimize,
                 state["state1"],
                 state["state2"],
                 config["betas"][0],
@@ -578,7 +590,7 @@ class Optimizer2State(Optimizer8bit):
             F.optimizer_update_8bit_blockwise(
                 self.optimizer_name,
                 grad,
-                p,
+                param_to_optimize,
                 state["state1"],
                 state["state2"],
                 config["betas"][0],
