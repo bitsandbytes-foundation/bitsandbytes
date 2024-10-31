@@ -291,7 +291,7 @@ class MatMul8bitLt(torch.autograd.Function):
         B: torch.Tensor,
         out=None,
         bias: Optional[torch.Tensor] = None,
-        state: MatmulLtState = None,
+        state: Optional[MatmulLtState] = None,
     ):
         state = state or MatmulLtState()
 
