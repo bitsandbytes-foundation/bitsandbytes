@@ -422,7 +422,7 @@ def get_special_format_str():
     return "row"
 
 
-def is_on_gpu(tensors: Iterable[torch.Tensor]):
+def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
     on_gpu = True
     gpu_ids = set()
 
