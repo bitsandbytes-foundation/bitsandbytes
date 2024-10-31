@@ -186,7 +186,7 @@ class SwitchBackBnb(torch.autograd.Function):
     @staticmethod
     # TODO: the B008 on the line below is a likely bug; the current implementation will
     #       have each SwitchBackBnb instance share a single MatmulLtState instance!!!
-    def forward(ctx, A, B, out=None, bias=None, state: MatmulLtState = None):
+    def forward(ctx, A, B, out=None, bias=None, state: Optional[MatmulLtState] = None):
         state = state or MatmulLtState()
 
         # default to pytorch behavior if inputs are empty
