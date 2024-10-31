@@ -2347,7 +2347,12 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
         ptrB = get_ptr(B)
         ptrC = get_ptr(out)
         ptrRowScale = get_ptr(None)
-        m, n, k, lda, ldb, ldc = map(ct.c_int32, (m, n, k, lda, ldb, ldc))
+        m = ct.c_int32(m)
+        n = ct.c_int32(n)
+        k = ct.c_int32(k)
+        lda = ct.c_int32(lda)
+        ldb = ct.c_int32(ldb)
+        ldc = ct.c_int32(ldc)
         stream = get_tensor_stream(A)
 
         if dtype == torch.int32:
