@@ -1864,7 +1864,7 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
     gnorm_vec: torch.Tensor
         Vector of gradient norms. 100 elements expected.
     step: int
-        The current optimiation steps (number of past gradient norms).
+        The current optimization steps (number of past gradient norms).
 
     """
     prev_device = pre_call(grad.device)
