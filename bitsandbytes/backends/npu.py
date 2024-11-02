@@ -1,16 +1,31 @@
+import ctypes as ct
 from typing import Literal, Optional, Tuple, Union
 
 import torch
-
-from bitsandbytes.utils import QuantState
-
-from .base import Backend
-
 try:
     # to support Ascend NPU backend
     import torch_npu  # noqa: F401
 except ImportError:
     pass
+
+from bitsandbytes.cextension import lib
+from bitsandbytes.functional import (
+    dtype2bytes,
+    get_4bit_type,
+    get_ptr,
+)
+from bitsandbytes.utils import QuantState
+
+from .base import Backend
+
+
+def assert_on_npu(tensors):
+    if not all(t.device.type == "npu" for t in tensors if t is not None):
+        raise TypeError(
+            "All input tensors to be on NPU, but found some tensors not be on NPU:\n"
+            f"{[(t.shape, t.device) if isinstance(t, torch.Tensor) else None for t in tensors]}"
+        )
+    return True
 
 
 class NPUBackend(Backend):
@@ -77,10 +92,54 @@ class NPUBackend(Backend):
         out: Optional[torch.Tensor] = None,
         blocksize=64,
         compress_statistics=False,
-        quant_type: Literal["fp4", "nf4"] = "fp4",
+        quant_type: Literal["fp4", "nf4"] = "nf4",
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
-        raise NotImplementedError
+        # if quant_type != "nf4":
+        #     raise NotImplementedError(f"4-bit quantization data type {quant_type} is not implemented.")
+        if compress_statistics:
+            raise NotImplementedError("compress_statistics is not implemented.")
+        if blocksize is None:
+            blocksize = 128
+
+        n, input_shape = A.numel(), A.shape
+
+        if absmax is None:
+            blocks = n // blocksize
+            blocks += 1 if n % blocksize > 0 else 0
+            absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
+
+        if out is None:
+            mod = dtype2bytes[quant_storage] * 2
+            out = torch.zeros(((n + 1) // mod, 1), dtype=quant_storage, device=A.device)
+
+        assert_on_npu([A, absmax, out])
+        if A.dtype == torch.float16:
+            if quant_type == "nf4":
+                lib.cquantize_blockwise_fp16_nf4(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_int32(blocksize),
+                    ct.c_int(A.numel()),
+                    torch.npu.current_stream(),
+                )
+            else:
+                raise NotImplementedError("Only float16 to nf4 is implemented.")
+        else:
+            raise NotImplementedError("Only float16 to nf4 is implemented.")
+
+        code = get_4bit_type(quant_type, device=A.device)
+        state = QuantState(
+            absmax=absmax,
+            shape=input_shape,
+            dtype=A.dtype,
+            blocksize=blocksize,
+            code=code,
+            quant_type=quant_type,
+        )
+
+        return out, state
 
     def dequantize_4bit(
         self,

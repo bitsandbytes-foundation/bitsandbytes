@@ -8,7 +8,6 @@ import subprocess
 
 from setuptools import find_packages, setup
 from setuptools.dist import Distribution
-
 libs = list(glob.glob("./bitsandbytes/libbitsandbytes*.*"))
 libs = [os.path.basename(p) for p in libs]
 print("libs:", libs)
@@ -45,7 +44,6 @@ def get_version_and_write_to_file():
 
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
-
 
 # Tested with wheel v0.29.0
 class BinaryDistribution(Distribution):
