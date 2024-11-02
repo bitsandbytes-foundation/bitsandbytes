@@ -23,7 +23,7 @@ except BaseException:
 
 gxx_available = False
 try:
-    subprocess.run(["g++", "--version"])
+    subprocess.run(["g++", "--version"], capture_output=True) # hide terminal output
     gxx_available = True
 except BaseException:
     warnings.warn("g++ not found, torch.compile disabled for CPU/XPU.")

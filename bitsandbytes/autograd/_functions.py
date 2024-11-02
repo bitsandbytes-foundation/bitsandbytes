@@ -519,7 +519,12 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
+        if A.device.type == "npu":
+            output = torch.matmul(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t())
+            if bias is not None:
+                output += bias
+        else:
+            output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
 
         # 3. Save state
         ctx.state = quant_state
@@ -550,7 +555,10 @@ class MatMul4Bit(torch.autograd.Function):
         # not supported by PyTorch. TODO: create work-around
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA:
-            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
+            if grad_output.device.type == "npu":
+                grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype))
+            else:
+                grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
 
         return grad_A, grad_B, None, grad_bias, None
 
@@ -586,7 +594,7 @@ def matmul_4bit(
             return out
         else:
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
-    elif A.numel() == A.shape[-1] and A.requires_grad == False:
+    elif A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "npu":
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(
                 f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",

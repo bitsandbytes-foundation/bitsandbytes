@@ -78,6 +78,7 @@ if lib and lib.compiled_with_cuda:
 
 
 class CUDABackend(Backend):
+
     def double_quant(
         self,
         A: torch.Tensor,

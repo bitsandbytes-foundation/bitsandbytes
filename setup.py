@@ -47,7 +47,6 @@ def get_version_and_write_to_file():
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
-
 # Tested with wheel v0.29.0
 class BinaryDistribution(Distribution):
     def has_ext_modules(self):
