@@ -18,6 +18,10 @@ split_complex_comprehension = true
 
 [tool.pytest.ini_options]
 addopts = "-rP"
+#    ; --cov=bitsandbytes
+#    ; # contexts: record which test ran which line; can be seen in html coverage report
+#    ; --cov-context=test
+#    ; --cov-report html
 log_cli = true
 log_cli_level = "INFO"
 log_file = "logs/pytest.log"
