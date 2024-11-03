@@ -22,9 +22,9 @@ log_cli = true
 log_cli_level = "INFO"
 log_file = "logs/pytest.log"
 markers = [
-    "slow: mark test as slow",
     "benchmark: mark test as a benchmark",
     "deprecated: mark test as covering a deprecated feature",
+    "slow: mark test as slow",
 ]
 
 [tool.ruff]
