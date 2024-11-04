@@ -2011,7 +2011,7 @@ def gemv_4bit(
 ):
     # sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if state is None:
-        raise ValueError("state cannot None. gemv_4bit() requires the state from quantize_4bit()")
+        raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
 
     if A.numel() != A.shape[-1]:
         raise ValueError(
