@@ -729,8 +729,11 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * abs
       valid_items_load = min(TILE_SIZE, n - i);
       valid_items_store = valid_items_load;
     }
+
+    // Since blocksize will always be a power-of-2, we avoid more expensive
+    // division by the blocksize and instead use a shift operation.
+    // This is equivalent to (i+threadId.x*NUM_PER_TH)/blocksize.
     local_abs_max = __ldg(&absmax[(i+threadIdx.x*NUM_PER_TH) >> (31 - __clz(blocksize))]);
-    //local_abs_max = __ldg(&absmax[(i+threadIdx.x*NUM_PER_TH)/(blocksize)]);
 
     __syncthreads();
     LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
@@ -3579,9 +3582,13 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
   for(int inner_idx = warp_lane*num_values_4bit; inner_idx < K; inner_idx += 32*num_values_4bit)
   {
     const int inner_idx_halved = inner_idx/2;
+
+    // Since blocksize will always be a power-of-2, we avoid more expensive
+    // division by the blocksize and instead use a shift operation.
+    // This is equivalent to (i+threadId.x*NUM_PER_TH)/blocksize.
     const int absidx = ((2*offset_B)+inner_idx) >> (31 - __clz(blocksize));
-    //int absidx = ((2*offset_B)+inner_idx)/blocksize;
-	  local_absmax = __ldg(&(absmax[absidx]));
+
+    local_absmax = __ldg(&(absmax[absidx]));
 
     if(row_B < M)
     {
