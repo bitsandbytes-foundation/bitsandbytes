@@ -223,7 +223,6 @@ class SwitchBackBnb(torch.autograd.Function):
             if state.has_fp16_weights:
                 idx = outlier_cols
                 CA[:, idx] = 0
-                # CAt[:, idx] = 0
                 subA = A[:, idx]
                 state.subB = B[:, idx].t().contiguous()
                 state.idx = idx
@@ -264,7 +263,7 @@ class SwitchBackBnb(torch.autograd.Function):
             outliers = state.CB[:, state.idx.long()].clone()
             state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
             CA[:, state.idx.long()] = 0
-            # CAt[:, state.idx.long()] = 0
+
             subA = A[:, state.idx.long()]
 
         shapeB = state.SB[0]
