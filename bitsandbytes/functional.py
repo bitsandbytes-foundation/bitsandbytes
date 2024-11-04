@@ -2579,7 +2579,14 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
 
 
-def double_quant(A: torch.Tensor, col_stats=None, row_stats=None, out_col=None, out_row=None, threshold=0.0):
+def double_quant(
+    A: torch.Tensor,
+    col_stats: Optional[torch.Tensor] = None,
+    row_stats: Optional[torch.Tensor] = None,
+    out_col: Optional[torch.Tensor] = None,
+    out_row: Optional[torch.Tensor] = None,
+    threshold=0.0,
+):
     # TODO: Optimize/write CUDA kernel for this?
     # Note: for inference, use the new int8_vectorwise_quant.
 
