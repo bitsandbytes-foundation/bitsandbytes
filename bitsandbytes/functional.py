@@ -2388,9 +2388,9 @@ def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Ten
     if has_error:
         raise RuntimeError(
             f"cublasLt ran into an error!\n"
-            f"\tA: {shapeA}, B: {shapeB}, C: {shapeC}\n"
-            f"\t(lda, ldb, ldc): {(lda, ldb, ldc)}\n"
-            f"\t(m, n, k): {(m, n, k)}"
+            f"\t{shapeA=}, {shapeB=}, {shapeC=}\n"
+            f"\t{(lda, ldb, ldc)=}\n"
+            f"\t{(m, n, k)=}"
         )
 
     return out

@@ -256,8 +256,6 @@ class SwitchBackBnb(torch.autograd.Function):
         if outlier_cols is not None and not state.has_fp16_weights:
             # extract outliers
             state.idx = outlier_cols
-
-            # outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
             outliers = state.CB[:, state.idx.long()].clone()
             state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
             CA[:, state.idx.long()] = 0
