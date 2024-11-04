@@ -1439,11 +1439,9 @@ def dequantize_4bit(
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
 
-    is_transposed = A.shape[0] == 1
-    if is_transposed:
+    if A.shape[0] == 1:  # is transposed, transpose back
         return out.t()
-    else:
-        return out
+    return out
 
 
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
