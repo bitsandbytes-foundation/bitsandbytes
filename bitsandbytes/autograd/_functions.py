@@ -289,7 +289,7 @@ class MatMul8bitLt(torch.autograd.Function):
         ctx: torch.autograd.function.FunctionCtx,
         A: torch.Tensor,
         B: torch.Tensor,
-        out=None,
+        out: Optional[torch.Tensor] = None,
         bias: Optional[torch.Tensor] = None,
         state: Optional[MatmulLtState] = None,
     ):
@@ -339,7 +339,9 @@ class MatMul8bitLt(torch.autograd.Function):
                 # 2. Quantize B
                 state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
 
-        if state.threshold > 0.0 and outlier_cols is not None:
+        # Handle sparse decomposition. In some instances, we may have not found any
+        # outlier columns at all. In that case, we'll skip this part completely.
+        if state.threshold > 0.0 and outlier_cols is not None and outlier_cols.numel():
             state.idx = outlier_cols
 
             # Zero out the outliers in the transposed 8bit inputs.
@@ -359,13 +361,13 @@ class MatMul8bitLt(torch.autograd.Function):
             subA = None
 
         # 3. Int8 Matmul
-        out32, Sout32 = F.igemmlt(CA, state.CB)
+        out32 = F.igemmlt(CA, state.CB)
         if bias is None or bias.dtype == torch.float16:
             # we apply the fused bias here
-            output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=bias).to(A.dtype)
+            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=bias).to(A.dtype)
         else:  # apply bias separately
             # TODO: Fused bias for fp32/bf16?
-            output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=None).to(A.dtype).add_(bias)
+            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=None).to(A.dtype).add_(bias)
 
         # 4. Mixed-precision decomposition matmul
         if subA is not None and state.subB is not None:
@@ -420,8 +422,8 @@ class MatMul8bitLt(torch.autograd.Function):
         if req_gradB:
             Cgrad, _, _, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
 
-            gradB32, SgradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
-            grad_B = F.mm_dequant(gradB32, SgradB32, SCgradt, SCAt)
+            gradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
+            grad_B = F.int8_mm_dequant(gradB32, SCgradt, SCAt)
             if state.threshold > 0.0 and subA is not None:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 

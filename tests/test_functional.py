@@ -589,7 +589,7 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb):
         B = torch.randint(-128, 127, size=(dim4, dim3), device="cuda").to(torch.int8)
         C1 = torch.matmul(A.float(), B.t().float())
 
-        C2, SC = F.igemmlt(A, B)
+        C2 = F.igemmlt(A, B)
         torch.testing.assert_close(C1, C2.float())
 
         # transpose
@@ -623,8 +623,8 @@ def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
 
         CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
         CB, CBt, statsB, statsBt, coo_tensor = F.double_quant(B)
-        out1_32, Sout1_32 = F.igemmlt(CA, CB)
-        output = F.mm_dequant(out1_32, Sout1_32, statsA, statsB)
+        out1_32 = F.igemmlt(CA, CB)
+        output = F.int8_mm_dequant(out1_32, statsA, statsB)
 
         # print('')
         # print(output.flatten()[:10])
@@ -822,7 +822,7 @@ def test_dequant_mm(dim1, dim4, dims, has_bias):
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
-        C2, SC = F.igemmlt(A1, B1)
+        C2 = F.igemmlt(A1, B1)
 
         C4 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
         if has_bias:
@@ -837,7 +837,7 @@ def test_dequant_mm(dim1, dim4, dims, has_bias):
         # assert_all_approx_close(C1, C4, atol=0.02, rtol=0.1, count=int(n*0.06))
         # assert (count / n < p), f"error in more than {p} of elements: {count}/{n}={count/n}"
 
-        C5 = F.mm_dequant(C2, SC, maxA, maxB, bias=bias)
+        C5 = F.int8_mm_dequant(C2, maxA, maxB, bias=bias)
         C5 /= std
         torch.testing.assert_close(C5, C4, atol=0.015, rtol=0.1)
         n = C5.numel()
@@ -947,9 +947,9 @@ def test_integrated_igemmlt(dim1, dim4, inner):
         torch.testing.assert_close(C1a, A1, rtol=0, atol=1)
         torch.testing.assert_close(C2a, B1, rtol=0, atol=1)
 
-        out2, SC = F.igemmlt(A1, B1)
+        out2 = F.igemmlt(A1, B1)
 
-        C2, SC = F.igemmlt(A1, B1)
+        C2 = F.igemmlt(A1, B1)
 
         out3 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
 
@@ -991,8 +991,9 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 
         c = 10.0 * inner * scale
         row_scale = torch.ones_like(maxA) / c
-        outC32, SC = F.igemmlt(A2, B2, dtype=torch.int8, row_scale=row_scale)
-        C3, S = F.nvidia_transform(outC32, "row", state=SC)
+        outC32 = F.igemmlt(A2, B2, dtype=torch.int8, row_scale=row_scale)
+        # C3, S = F.nvidia_transform(outC32, "row", state=SC)
+        C3 = outC32
         maxval = torch.abs(C3).max()
         if maxval == 127:
             scale = 1.5
@@ -1004,8 +1005,8 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 
         C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
         B2, SB = F.nvidia_transform(C2a, formatB)
-        outC32, SC = F.igemmlt(A2, B2)
-        out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
+        outC32 = F.igemmlt(A2, B2)
+        out2 = F.int8_mm_dequant(outC32, stats1a, stats2a)
 
         CA, SA = F.vectorwise_quant(A, dim=1, quant_type="vector")
         CB, SB = F.vectorwise_quant(B, dim=1, quant_type="linear")
@@ -1072,7 +1073,7 @@ def test_row_scale_bench(dim1, dim4, inner):
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(k):
-        outC32, SC = F.igemmlt(A2, B2, dtype=torch.int8, row_scale=row_scale)
+        outC32 = F.igemmlt(A2, B2, dtype=torch.int8, row_scale=row_scale)
     torch.cuda.synchronize()
     print("row-wise", time.time() - t0)
 
@@ -1081,7 +1082,7 @@ def test_row_scale_bench(dim1, dim4, inner):
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(k):
-        outC32, SC = F.igemmlt(A2, B2)
+        outC32 = F.igemmlt(A2, B2)
     torch.cuda.synchronize()
     print("vector-wise", time.time() - t0)
 
@@ -1262,13 +1263,13 @@ def test_integrated_sparse_decomp(dim1, dim2):
         Cw1, statsw1, coo_tensor = F.int8_vectorwise_quant(w1)
         CA, statsA, coo_tensor = F.int8_vectorwise_quant(A)
 
-        out1_32, Sout1_32 = F.igemmlt(CA, Cw1)
-        out2 = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)
+        out1_32 = F.igemmlt(CA, Cw1)
+        out2 = F.int8_mm_dequant(out1_32, statsA, statsw1)
 
         CA, statsA, coo_tensor = F.int8_vectorwise_quant(A, threshold=threshold)
 
-        out1_32, Sout1_32 = F.igemmlt(CA, Cw1)
-        out3 = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)
+        out1_32 = F.igemmlt(CA, Cw1)
+        out3 = F.int8_mm_dequant(out1_32, statsA, statsw1)
 
         assert coo_tensor is not None
 
@@ -1599,7 +1600,7 @@ def test_bench_matmul(batch, seq, model, hidden):
     t0 = time.time()
     for i in range(iters):
         # CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=0.0)
-        out32, Sout32 = F.igemmlt(CA, CB)
+        out32 = F.igemmlt(CA, CB)
     torch.cuda.synchronize()
     print(
         f"no overhead igemmlt [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"

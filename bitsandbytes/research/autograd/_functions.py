@@ -275,15 +275,14 @@ class SwitchBackBnb(torch.autograd.Function):
             output_shape = (input_shape[0], shapeB[0])
 
         # 3. Matmul
-        out32, Sout32 = F.igemmlt(CA, state.CB)
+        out32 = F.igemmlt(CA, state.CB)
         # we apply the fused bias here
 
         if bias is None or bias.dtype == torch.float16:
-            output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=bias)
-            output = output.to(A.dtype)
+            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=bias).to(A.dtype)
         else:  # apply bias separately
-            output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=None)
-            output = output.to(A.dtype).add_(bias)
+            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=None).to(A.dtype)
+            output.add_(bias)
 
         # 4. Mixed-precision decomposition matmul
         if outlier_cols is not None and subA is not None:

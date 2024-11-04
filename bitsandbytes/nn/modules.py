@@ -16,7 +16,6 @@ from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
     INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
-    LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
     OutlierTracer,
 )
 
@@ -923,29 +922,19 @@ class Linear8bitLt(nn.Linear):
         param_from_weight = getattr(self.weight, scb_name)
         # case 2: self.init_8bit_state was called, SCB is in self.state
         param_from_state = getattr(self.state, scb_name)
-        # case 3: SCB is in self.state, weight layout reordered after first forward()
-        layout_reordered = self.state.CxB is not None
 
         key_name = prefix + f"{scb_name}"
+
+        # We now only save in row-major. This format information is stored for backwards compatibility.
         format_name = prefix + "weight_format"
 
         if not self.state.has_fp16_weights:
             if param_from_weight is not None:
                 destination[key_name] = param_from_weight if keep_vars else param_from_weight.detach()
                 destination[format_name] = torch.tensor(0, dtype=torch.uint8)
-            elif param_from_state is not None and not layout_reordered:
-                destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
-                destination[format_name] = torch.tensor(0, dtype=torch.uint8)
             elif param_from_state is not None:
                 destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
-                weights_format = self.state.formatB
-                # At this point `weights_format` is an str
-                if weights_format not in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING:
-                    raise ValueError(f"Unrecognized weights format {weights_format}")
-
-                weights_format = LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING[weights_format]
-
-                destination[format_name] = torch.tensor(weights_format, dtype=torch.uint8)
+                destination[format_name] = torch.tensor(0, dtype=torch.uint8)
 
     def _load_from_state_dict(
         self,
