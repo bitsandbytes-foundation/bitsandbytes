@@ -481,8 +481,7 @@ class Linear4bit(nn.Linear):
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
 
-        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
-        return out
+        return bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):
