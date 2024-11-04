@@ -2302,7 +2302,28 @@ def batched_igemm(
     return out
 
 
-def igemmlt(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
+@deprecated(
+    "igemmlt is deprecated and will be removed in a future release. " "Please use int8_linear_matmul instead.",
+    category=FutureWarning,
+)
+def igemmlt(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    SA: Tuple[torch.Size, str],
+    SB: Tuple[torch.Size, str],
+    out: Optional[torch.Tensor] = None,
+    Sout: Optional[Tuple[torch.Size, str]] = None,
+    dtype=torch.int32,
+):
+    if SA is not None and SA[1] != "row":
+        raise NotImplementedError(f"Only row-major format inputs are supported, but got format `{SA[1]}`")
+    if SB is not None and SB[1] != "row":
+        raise NotImplementedError(f"Only row-major format is supported for matrix B, but got format `{SB[1]}`")
+    result = int8_linear_matmul(A, B, out=out, dtype=dtype)
+    return result, (result.shape, "row")
+
+
+def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
     #
     # To use the IMMA tensor core kernels without special Turing/Ampere layouts,
     # cublasLt has some rules, namely: A must be transposed, B must not be transposed.

@@ -275,7 +275,7 @@ class SwitchBackBnb(torch.autograd.Function):
             output_shape = (input_shape[0], shapeB[0])
 
         # 3. Matmul
-        out32 = F.igemmlt(CA, state.CB)
+        out32 = F.int8_linear_matmul(CA, state.CB)
         # we apply the fused bias here
 
         if bias is None or bias.dtype == torch.float16:

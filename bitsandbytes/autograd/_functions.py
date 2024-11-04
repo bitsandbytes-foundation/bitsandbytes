@@ -365,7 +365,7 @@ class MatMul8bitLt(torch.autograd.Function):
             subA = None
 
         # 3. Int8 Matmul
-        out32 = F.igemmlt(CA, state.CB)
+        out32 = F.int8_linear_matmul(CA, state.CB)
         if bias is None or bias.dtype == torch.float16:
             # we apply the fused bias here
             output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=bias).to(A.dtype)
@@ -421,7 +421,7 @@ class MatMul8bitLt(torch.autograd.Function):
         if req_gradB:
             Cgrad, _, _, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
 
-            gradB32 = F.igemmlt(Cgrad.t().contiguous(), CAt.t())
+            gradB32 = F.int8_linear_matmul(Cgrad.t().contiguous(), CAt.t())
             grad_B = F.int8_mm_dequant(gradB32, SCgradt, SCAt)
             if state.threshold > 0.0 and subA is not None:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
