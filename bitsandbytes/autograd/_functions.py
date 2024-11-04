@@ -353,9 +353,13 @@ class MatMul8bitLt(torch.autograd.Function):
 
             # Extract the corresponding weights
             if state.has_fp16_weights:
-                state.subB = B[:, state.idx].t()  # .contiguous()
+                state.subB = B[:, state.idx].t()
             else:
-                outliers = state.CB[:, state.idx]  # .clone()
+                outliers = state.CB[:, state.idx]
+
+                # To dequantize our weights associated with the input outliers,
+                # we want to divide by 127. It's however more performant to multiply
+                # by the reciprocal.
                 state.subB = (7.874016e-3 * outliers * state.SCB.view(-1, 1)).t().to(A.dtype)
         else:
             subA = None
