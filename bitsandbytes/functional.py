@@ -444,7 +444,12 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
     return on_gpu
 
 
-def get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
+@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
+def get_tensor_stream(tensor: Tensor) -> torch.cuda.Stream:
+    return torch.cuda.current_stream(tensor.device)
+
+
+def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
     # We use the raw stream for performance reasons.
     return ct.c_void_p(torch._C._cuda_getCurrentRawStream(tensor.device.index))
 
@@ -468,12 +473,14 @@ def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
     return ct.c_void_p(A.data_ptr())
 
 
+@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def pre_call(device):
     prev_device = torch.cuda.current_device()
     torch.cuda.set_device(device)
     return prev_device
 
 
+@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def post_call(prev_device):
     torch.cuda.set_device(prev_device)
 
@@ -1004,7 +1011,7 @@ def dequantize_blockwise(
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(A.numel()),
-                get_tensor_stream(A),
+                _get_tensor_stream(A),
             )
     else:
         code = quant_state.code.cpu()
@@ -1360,7 +1367,7 @@ def dequantize_4bit(
     n = out.numel()
 
     is_on_gpu([A, absmax, out])
-    stream = get_tensor_stream(A)
+    stream = _get_tensor_stream(A)
     if out.dtype == torch.float32:
         if quant_state.quant_type == "fp4":
             with torch.cuda.device_of(A):
@@ -1537,7 +1544,7 @@ def dequantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = 
     if out is None:
         out = torch.zeros_like(A, dtype=torch.float32)
     is_on_gpu([code, A, out])
-    stream = get_tensor_stream(A)
+    stream = _get_tensor_stream(A)
     lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()), stream)
     post_call(prev_device)
     return out
@@ -2039,7 +2046,7 @@ def gemv_4bit(
     lda = ct.c_int32(lda)
     ldb = ct.c_int32(ldb)
     ldc = ct.c_int32(ldc)
-    stream = get_tensor_stream(A)
+    stream = _get_tensor_stream(A)
 
     with torch.cuda.device_of(A):
         if B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32]:
@@ -2096,8 +2103,6 @@ def gemv_4bit(
 
         else:
             raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
-
-    # post_call(prev_device)
 
     return out
 
@@ -2299,7 +2304,7 @@ def batched_igemm(
     return out
 
 
-def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
+def igemmlt(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
     #
     # To use the IMMA tensor core kernels without special Turing/Ampere layouts,
     # cublasLt has some rules, namely: A must be transposed, B must not be transposed.
@@ -2322,14 +2327,12 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
     assert A.ndim == 2, "Only two dimensional matrices are supported for argument B"
     assert B.ndim in [2, 3], "Only two or three dimensional matrices are supported for argument A"
     assert prod(shapeB) > 0, f"Input tensor dimensions need to be > 0: {shapeB}"
+    assert out is None or out.dtype == dtype
 
     shapeC = (*shapeB[:-1], shapeA[0])
-    Sout = (shapeC, "row")
 
     if out is None:
         out = torch.empty(shapeC, device=A.device, dtype=dtype)
-
-    assert out.dtype == dtype
 
     k, m = shapeA
     n = prod(shapeB[:-1])
@@ -2353,7 +2356,7 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
         lda = ct.c_int32(lda)
         ldb = ct.c_int32(ldb)
         ldc = ct.c_int32(ldc)
-        stream = get_tensor_stream(A)
+        stream = _get_tensor_stream(A)
 
         if dtype == torch.int32:
             has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
@@ -2366,22 +2369,19 @@ def igemmlt(A, B, out=None, Sout=None, dtype=torch.int32):
     if has_error:
         raise RuntimeError(
             f"cublasLt ran into an error!\n"
-            f"\tA: {shapeA}, B: {shapeB}, C: {Sout[0]}\n"
+            f"\tA: {shapeA}, B: {shapeB}, C: {shapeC}\n"
             f"\t(lda, ldb, ldc): {(lda, ldb, ldc)}\n"
             f"\t(m, n, k): {(m, n, k)}"
         )
 
-    return out, Sout
+    return out
 
 
-def mm_dequant(
+def int8_mm_dequant(
     A: torch.Tensor,
-    quant_state: Optional[Tuple[torch.Size, str]],  # TODO: deprecate. (shape, format)
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
     out: Optional[torch.Tensor] = None,
-    new_row_stats=None,  # TODO: unused
-    new_col_stats=None,  # TODO: unused
     bias: Optional[torch.Tensor] = None,
 ):
     assert A.dtype == torch.int32
@@ -2404,10 +2404,24 @@ def mm_dequant(
 
     with torch.cuda.device_of(A):
         lib.cdequant_mm_int32_fp16(
-            ptrA, ptrRowStats, ptrColStats, ptrOut, ptrBias, numRows, numCols, get_tensor_stream(A)
+            ptrA, ptrRowStats, ptrColStats, ptrOut, ptrBias, numRows, numCols, _get_tensor_stream(A)
         )
 
     return out
+
+
+@deprecated("mm_dequant is deprecated. Please use int8_mm_dequant() instead.", category=FutureWarning)
+def mm_dequant(
+    A: torch.Tensor,
+    quant_state: Optional[Tuple[torch.Size, str]],  # Not used
+    row_stats: torch.Tensor,
+    col_stats: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    new_row_stats=None,  # Not used
+    new_col_stats=None,  # Not used
+    bias: Optional[torch.Tensor] = None,
+):
+    return int8_mm_dequant(A, row_stats, col_stats, out, bias)
 
 
 def get_colrow_absmax(
@@ -2459,7 +2473,7 @@ def get_row_absmax(A, threshold=0.0):
             ct.c_float(threshold),
             ct.c_int32(rows),
             ct.c_int32(cols),
-            get_tensor_stream(A),
+            _get_tensor_stream(A),
         )
 
     return row_stats
@@ -2577,11 +2591,16 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
     row_stats = torch.empty(rows, device=A.device, dtype=torch.float32)
     out_row = torch.empty(A.shape, device=A.device, dtype=torch.int8)
 
+    outlier_cols = None
+
     if threshold > 0.0:
         # TODO we could improve perf of this
-        outlier_cols = torch.argwhere((A.abs() >= threshold).any(dim=0)).view(-1)
-    else:
-        outlier_cols = None
+        outliers = A.abs() >= threshold
+
+        # argwhere needs host/device sync, so we skip when
+        # there aren't actually any outliers.
+        if outliers.any():
+            outlier_cols = torch.argwhere(outliers.any(dim=0)).view(-1)
 
     with torch.cuda.device_of(A):
         lib.cint8_vector_quant(
@@ -2591,7 +2610,7 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
             ct.c_float(threshold),
             ct.c_int32(rows),
             ct.c_int32(cols),
-            get_tensor_stream(A),
+            _get_tensor_stream(A),
         )
 
     return out_row, row_stats, outlier_cols
@@ -2933,6 +2952,7 @@ def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
     return x.to(dtype)
 
 
+@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def extract_outliers(A, SA, idx):
     shapeA = SA[0]
     formatA = SA[1]
