@@ -264,7 +264,7 @@ class MatmulLtState:
     has_fp16_weights = True
     memory_efficient_backward = False
     use_pool = False
-    formatB = "row"  # F.get_special_format_str() TODO: Deprecate/remove
+    formatB = "row"  # TODO: Deprecate/remove
 
     def reset_grads(self):
         self.CB = None
@@ -394,9 +394,9 @@ class MatMul8bitLt(torch.autograd.Function):
         output_shape = (*input_shape[:-1], state.CB.shape[0])
 
         if len(input_shape) == 3:
-            return output.reshape(output_shape)  # .clone()
-        else:
-            return output
+            return output.reshape(output_shape)
+
+        return output
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -418,11 +418,6 @@ class MatMul8bitLt(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        # if req_gradB:
-        # grad_B = torch.matmul(grad_output.t(), A)
-        # if state.threshold > 0.0 and subA is not None:
-        #     grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
-        # Cgrad, Cgradt, SCgrad, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
             Cgrad, _, _, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
 
@@ -432,15 +427,11 @@ class MatMul8bitLt(torch.autograd.Function):
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:
-            # grad_output @ B.T
-            # if state.CBt is not None:
-            #    gradA32, SgradA32 = F.igemmlt(Cgrad, state.CBt.t())
-            #    grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
             if state.CB is not None:
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             else:
-                raise Exception("State must contain either CBt or CB matrix for backward")
+                raise Exception("State must contain CB matrix for backward")
 
         return grad_A, grad_B, None, grad_bias, None
 
