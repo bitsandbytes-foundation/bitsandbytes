@@ -566,11 +566,11 @@ class LinearNF4(Linear4bit):
 class Int8Params(torch.nn.Parameter):
     def __new__(
         cls,
-        data=None,
+        data: Optional[torch.Tensor] = None,
         requires_grad=True,
         has_fp16_weights=False,
-        CB=None,
-        SCB=None,
+        CB: Optional[torch.Tensor] = None,
+        SCB: Optional[torch.Tensor] = None,
     ):
         if data is None:
             data = torch.empty(0)
@@ -881,7 +881,6 @@ class Linear8bitLt(nn.Linear):
         output_features: int,
         bias=True,
         has_fp16_weights=True,
-        memory_efficient_backward=False,
         threshold=0.0,
         index=None,
         device=None,
@@ -898,13 +897,12 @@ class Linear8bitLt(nn.Linear):
                 Whether the linear class uses the bias term as well.
         """
         super().__init__(input_features, output_features, bias, device)
-        assert not memory_efficient_backward, "memory_efficient_backward is no longer required and the argument is deprecated in 0.37.0 and will be removed in 0.39.0"
         self.state = bnb.MatmulLtState()
         self.index = index
 
         self.state.threshold = threshold
         self.state.has_fp16_weights = has_fp16_weights
-        self.state.memory_efficient_backward = memory_efficient_backward
+
         if threshold > 0.0 and not has_fp16_weights:
             self.state.use_pool = True
 

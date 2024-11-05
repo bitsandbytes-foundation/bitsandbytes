@@ -244,25 +244,26 @@ def get_tile_inds(format, device):
 @dataclass
 class MatmulLtState:
     _tile_indices: Optional[torch.Tensor] = None
+
     force_no_igemmlt: bool = False
-    CB = None
-    CxB = None  # TODO: Deprecate/remove
-    SB = None
-    SCB = None
 
-    CxBt = None  # TODO: Deprecate/remove
-    SBt = None
-    CBt = None
+    CB: Optional[torch.Tensor] = None
+    CxB: Optional[torch.Tensor] = None  # TODO: Deprecate/remove
+    SB: Optional[torch.Tensor] = None
+    SCB: Optional[torch.Tensor] = None
 
-    subB = None
+    CxBt: Optional[torch.Tensor] = None  # TODO: Deprecate/remove
+    SBt: Optional[torch.Tensor] = None
+    CBt: Optional[torch.Tensor] = None
 
-    outlier_pool = None
+    subB: Optional[torch.Tensor] = None
+
+    outlier_pool: Optional[GlobalOutlierPooler] = None
     has_accumulated_gradients = False
     threshold = 0.0
-    idx = None
+    idx: Optional[torch.Tensor] = None
     is_training = True
     has_fp16_weights = True
-    memory_efficient_backward = False
     use_pool = False
     formatB = "row"  # TODO: Deprecate/remove
 
@@ -313,10 +314,10 @@ class MatMul8bitLt(torch.autograd.Function):
         if A.dtype != torch.float16:
             warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
 
-        # 1. Quantize A. Note that as a side-effect, outliers are suppressed.
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
 
+        # 1. Quantize A. Note that as a side-effect, outliers are suppressed in CA/CAt.
         if ctx.needs_input_grad[1]:
             # Slower path
             CA, CAt, SCA, SCAt, outlier_cols = F.double_quant(A.to(torch.float16), threshold=state.threshold)
@@ -366,6 +367,8 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # 3. Int8 Matmul
         out32 = F.int8_linear_matmul(CA, state.CB)
+
+        # Dequantize matmul result
         if bias is None or bias.dtype == torch.float16:
             # we apply the fused bias here
             output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=bias).to(A.dtype)
@@ -375,7 +378,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # 4. Mixed-precision decomposition matmul
         if subA is not None and state.subB is not None:
-            output += torch.matmul(subA, state.subB.to(subA.dtype))
+            output += torch.matmul(subA, state.subB)
 
         # 5. Save state
         ctx.state = state
@@ -399,7 +402,7 @@ class MatMul8bitLt(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, grad_output):
+    def backward(ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor):
         if ctx.is_empty:
             bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
@@ -407,7 +410,7 @@ class MatMul8bitLt(torch.autograd.Function):
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
         CAt, subA, A = ctx.tensors
         SCAt, idx = ctx.tensor_states
-        state = ctx.state
+        state: MatmulLtState = ctx.state
         grad_A = grad_B = grad_bias = None
 
         if req_gradBias:
@@ -499,7 +502,7 @@ def matmul(
     out: Optional[torch.Tensor] = None,
     state: Optional[MatmulLtState] = None,
     threshold=0.0,
-    bias=None,
+    bias: Optional[torch.Tensor] = None,
 ):
     state = state or MatmulLtState()
     if threshold > 0.0:
@@ -512,7 +515,7 @@ def matmul_4bit(
     B: torch.Tensor,
     quant_state: F.QuantState,
     out: Optional[torch.Tensor] = None,
-    bias=None,
+    bias: Optional[torch.Tensor] = None,
 ):
     assert quant_state is not None
 

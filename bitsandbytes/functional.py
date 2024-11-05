@@ -2279,7 +2279,9 @@ def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Ten
     ldb = shapeB[-1]  # Activations (batch, tokens, inputs)
     ldc = shapeC[-1]  # Output (batch, tokens, outputs)
 
-    assert lda == ldb, f"igemmlt only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}"
+    assert (
+        lda == ldb
+    ), f"int8_linear_matmul only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}"
 
     is_on_gpu([A, B, out])
 
@@ -2288,7 +2290,7 @@ def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Ten
         ptrA = get_ptr(A)
         ptrB = get_ptr(B)
         ptrC = get_ptr(out)
-        ptrRowScale = get_ptr(None)
+        ptrRowScale = None
         m = ct.c_int32(m)
         n = ct.c_int32(n)
         k = ct.c_int32(k)
@@ -2303,7 +2305,7 @@ def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Ten
             has_error = lib.cigemmlt_8(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
 
     if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
-        raise NotImplementedError("igemmlt not implemented!")
+        raise NotImplementedError("int8_linear_matmul not implemented!")
 
     if has_error:
         raise RuntimeError(
@@ -2369,7 +2371,7 @@ def get_colrow_absmax(
     col_stats: Optional[torch.Tensor] = None,
     nnz_block_ptr: Optional[torch.Tensor] = None,
     threshold=0.0,
-):
+) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     # Note: prior impl only works with fp16
     assert A.is_floating_point()
 
@@ -2395,7 +2397,7 @@ def get_colrow_absmax(
     return row_stats, col_stats, outlier_mask
 
 
-def get_row_absmax(A, threshold=0.0):
+def get_row_absmax(A: torch.Tensor, threshold=0.0):
     assert A.dtype == torch.float16
 
     rows = prod(A.shape[:-1])

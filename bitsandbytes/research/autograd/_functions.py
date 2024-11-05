@@ -328,9 +328,6 @@ class SwitchBackBnb(torch.autograd.Function):
             grad_B = torch.matmul(grad_output.t(), A)
 
         if req_gradA:
-            # if state.CBt is not None:
-            #    gradA32, SgradA32 = F.igemmlt(Cgrad, state.CBt.t())
-            #    grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
             if state.CB is not None:
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
