@@ -2223,7 +2223,7 @@ def batched_igemm(
 
 
 @deprecated(
-    "igemmlt is deprecated and will be removed in a future release. " "Please use int8_linear_matmul instead.",
+    "igemmlt is deprecated and will be removed in a future release. Please use int8_linear_matmul instead.",
     category=FutureWarning,
 )
 def igemmlt(
@@ -2365,9 +2365,9 @@ def mm_dequant(
 
 def get_colrow_absmax(
     A: torch.Tensor,
-    row_stats: torch.Tensor = None,
-    col_stats: torch.Tensor = None,
-    nnz_block_ptr: torch.Tensor = None,
+    row_stats: Optional[torch.Tensor] = None,
+    col_stats: Optional[torch.Tensor] = None,
+    nnz_block_ptr: Optional[torch.Tensor] = None,
     threshold=0.0,
 ):
     # Note: prior impl only works with fp16
@@ -2614,7 +2614,11 @@ def transform(A, to_order, from_order="row", out=None, transpose=False, state=No
     return out, new_state
 
 
-def spmm_coo(cooA: Union[COOSparseTensor, torch.Tensor], B: torch.Tensor, out: torch.Tensor = None):
+def spmm_coo(
+    cooA: Union[COOSparseTensor, torch.Tensor],
+    B: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+):
     if not isinstance(cooA, COOSparseTensor):
         assert (
             cooA.is_sparse and cooA.layout == torch.sparse_coo
