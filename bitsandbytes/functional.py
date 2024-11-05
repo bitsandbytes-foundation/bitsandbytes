@@ -2303,7 +2303,7 @@ def batched_igemm(
 
 
 @deprecated(
-    "igemmlt is deprecated and will be removed in a future release. " "Please use int8_linear_matmul instead.",
+    "igemmlt is deprecated and will be removed in a future release. Please use int8_linear_matmul instead.",
     category=FutureWarning,
 )
 def igemmlt(
