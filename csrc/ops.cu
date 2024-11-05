@@ -465,6 +465,8 @@ template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
         NULL, NULL, 0, stream
       ));
   } else {
+    // This path is unlikely to be used, as 8-bit accumulation can lead to likely overflows.
+
     if (!SCALE_ROWS) {
       float alpha = 1.0f, beta = 0.0f;
       has_error |= checkCublasStatus(cublasLtMatmul(
@@ -532,56 +534,11 @@ void int8VectorQuant(half * __restrict__ A, int8_t *out, float *rowStats, float 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-#define STATS_THREADS 64
-#define STATS_ITEMS 4
-#define STATS_ROWS 16
-void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols)
-{
-  int tile_cols = STATS_THREADS*STATS_ITEMS;
-  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
-  int tiledRows = fill_up_to_nearest_multiple(rows, STATS_ROWS);
-	int row_tiles = (tiledRows/STATS_ROWS);
-	int col_tiles = (tiledCols/tile_cols);
-	row_tiles = row_tiles > 0 ? row_tiles : 1;
-	col_tiles = col_tiles > 0 ? col_tiles : 1;
-  int num_blocks = row_tiles * col_tiles;
-
-  if(nnz_threshold == 0.0)
-    kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 0><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
-  else if(nnz_threshold != 0.0)
-    kgetColRowStats<half, STATS_THREADS, STATS_ITEMS, STATS_ROWS, STATS_THREADS*STATS_ITEMS, 1><<<num_blocks, STATS_THREADS>>>(A, rowStats, colStats, nnz_count_row, nnz_threshold, rows, cols, tiledRows, tiledCols);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-
-}
-
 void getRowStats(half *A, float *rowStats, float threshold, int rows, int cols, cudaStream_t stream) {
   if (threshold == 0.0)
     kgetRowStats<half, 1024, 0><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
   else
     kgetRowStats<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int *nnz_block_ptr, float threshold, int rows, int cols)
-{
-  int threads = 64;
-  int items_per_thread = 4;
-  int tile_cols = threads*items_per_thread;
-  int tile_rows = 16;
-  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
-  int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
-	int row_tiles = (tiledRows/tile_rows);
-	int col_tiles = (tiledCols/tile_cols);
-	row_tiles = row_tiles > 0 ? row_tiles : 1;
-	col_tiles = col_tiles > 0 ? col_tiles : 1;
-  int num_blocks = row_tiles * col_tiles;
-
-
-  if(threshold > 0.0f)
-    kDoubleRowColQuant<64, 4, 16, 64*4, 1><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols);
-  else
-    kDoubleRowColQuant<64, 4, 16, 64*4, 0><<<num_blocks, threads>>>(A, rowStats, colStats, out_col_normed, out_row_normed, rowidx, colidx, val, nnz_block_ptr, threshold, rows, cols, tiledCols);
-
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
