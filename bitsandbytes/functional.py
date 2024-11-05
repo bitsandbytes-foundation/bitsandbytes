@@ -2694,7 +2694,11 @@ def transform(A, to_order, from_order="row", out=None, transpose=False, state=No
     return out, new_state
 
 
-def spmm_coo(cooA: Union[COOSparseTensor, torch.Tensor], B: torch.Tensor, out: torch.Tensor = None):
+def spmm_coo(
+    cooA: Union[COOSparseTensor, torch.Tensor],
+    B: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+):
     if not isinstance(cooA, COOSparseTensor):
         assert (
             cooA.is_sparse and cooA.layout == torch.sparse_coo
