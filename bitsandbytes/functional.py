@@ -191,6 +191,10 @@ dtype2bytes[torch.int8] = 1
 
 FIRST_CUDA_DEVICE = torch.device("cuda", index=0)
 
+# When multiple GPUs are present, we use a context manager to
+# switch to the correct device of a tensor before invoking our CUDA
+# kernels in the C++ library. However, when there's only one device
+# there is no need to incur the overhead of cudaGetDevice/cudaSetDevice.
 if torch.cuda.device_count() > 1:
 
     def _cuda_device_of(a: torch.Tensor):
