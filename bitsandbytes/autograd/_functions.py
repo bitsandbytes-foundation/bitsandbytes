@@ -463,7 +463,9 @@ class MatMul8bitLt(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
+        Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = None, None, None, None, None
+        if req_gradB or (req_gradA and state.CBt):
+            Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
             CxAt, SAt = F.transform(CAt, formatB, transpose=True)
             C32grad, Sgrad = F.transform(Cgradt, "col32", transpose=True)
