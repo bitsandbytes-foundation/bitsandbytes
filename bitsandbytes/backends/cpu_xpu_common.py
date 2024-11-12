@@ -454,9 +454,9 @@ def dequantize_4bit_impl(
     out_uint8[::2] = A.bitwise_and(0xF)
     out_uint8[1::2] = A.bitwise_right_shift(4)
     out_dq = torch.empty(out_uint8.shape).to(quant_state.dtype).to(A.device)
+    # quant_state.code is fp32, cast to quant_state dtype to avoid the mismatch issue
+    quant_state.code = quant_state.code.to(quant_state.dtype)
     for i in range(len(quant_state.code)):
-        # quant_state.code is fp32, cast to quant_state dtype to avoid the mismatch issue
-        quant_state.code = quant_state.code.to(quant_state.dtype)
         out_dq[out_uint8 == i] = quant_state.code[i]
 
     # Apply scales
