@@ -201,9 +201,10 @@ def unpack_tensor_to_dict(tensor_data):
 
 
 def enable_ipex_fusion(linear):
-    from bitsandbytes.backends.cpu_xpu_common import _ipex_cpu_version_prereq
+    from bitsandbytes.backends.cpu_xpu_common import _ipex_cpu_version_prereq, _ipex_xpu_version_prereq
+    from bitsandbytes.backends.cpu_xpu_common import ipex_cpu_only, ipex_xpu
 
-    if _ipex_cpu_version_prereq(2, 5):
+    if ipex_cpu_only and _ipex_cpu_version_prereq(2, 5):
         quant_state = linear.weight.quant_state
         new_weight, new_scales, new_zeros, _, compensation = \
                 torch.ops.ipex_prepack.woq_linear_pack_weight(
@@ -217,11 +218,18 @@ def enable_ipex_fusion(linear):
                     quant_state.blocksize,
                     2,
                 )
-        linear.weight.data = new_weight.data
-        setattr(linear.weight.quant_state, "ipex", True)
-        setattr(linear.weight.quant_state, "new_scales", new_scales)
-        setattr(linear.weight.quant_state, "new_zeros", new_zeros)
-        setattr(linear.weight.quant_state, "compensation", compensation)
+    elif ipex_xpu and _ipex_xpu_version_prereq(2, 5):
+        quant_state = linear.weight.quant_state
+        new_weight = linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
+        
+        new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
+        new_zeros = None
+        compensation = None
+    linear.weight.data = new_weight.data
+    setattr(linear.weight.quant_state, "ipex", True)
+    setattr(linear.weight.quant_state, "new_scales", new_scales)
+    setattr(linear.weight.quant_state, "new_zeros", new_zeros)
+    setattr(linear.weight.quant_state, "compensation", compensation)
 
 
 class QuantState:
