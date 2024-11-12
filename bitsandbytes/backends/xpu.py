@@ -23,7 +23,7 @@ def assert_on_xpu(tensors):
         on_xpu &= t.device.type == "xpu"
     if not on_xpu:
         raise TypeError(
-            "All input tensors need to be on CPU, but found some tensors to not be on XPU:\n"
+            "All input tensors need to be on XPU, but found some tensors to not be on XPU:\n"
             f" {[(t.shape, t.device) if isinstance(t, Tensor) else None for t in tensors]}"
         )
     return on_xpu
@@ -57,7 +57,7 @@ class XPUBackend(Backend):
     ):
         """
         Transform tensor A to to_order. It is originally designed for CUDA.
-        For CPU, it returns the original tensor if transpose=False.
+        For XPU, it returns the original tensor if transpose=False.
         Otherwise, it returns the transpose of A
         """
         assert_on_xpu([A, out])
