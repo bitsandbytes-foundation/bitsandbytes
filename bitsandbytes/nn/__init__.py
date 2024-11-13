@@ -14,9 +14,12 @@ from .modules import (
     StableEmbedding,
     SwitchBackLinearBnb,
 )
-from .triton_based_modules import (
-    StandardLinear,
-    SwitchBackLinear,
-    SwitchBackLinearGlobal,
-    SwitchBackLinearVectorwise,
-)
+from ..backends import backends
+# CPU and XPU backend do not need triton, and XPU so not support triton for now.
+if "xpu" not in backends.keys() or ("cpu" in backends.keys() and len(backends.keys()) == 1):
+    from .triton_based_modules import (
+        StandardLinear,
+        SwitchBackLinear,
+        SwitchBackLinearGlobal,
+        SwitchBackLinearVectorwise,
+    )

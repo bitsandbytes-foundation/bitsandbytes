@@ -21,7 +21,6 @@ from .backends import register_backend
 from .backends.cpu import CPUBackend
 from .backends.npu import NPUBackend
 from .cextension import lib
-from .nn import modules
 
 features = {"multi_backend"}
 supported_torch_devices = {
@@ -63,6 +62,10 @@ if hasattr(torch, "xpu") and torch.xpu.is_available():
 # Register Ascend NPU backend, if available.
 if hasattr(torch, "npu") and torch.npu.is_available():
     register_backend("npu", NPUBackend())
+
+
+# import module after decided backends
+from .nn import modules
 
 # TODO: Other potential backends:
 # XLA - Google TPU / PJRT runtime
