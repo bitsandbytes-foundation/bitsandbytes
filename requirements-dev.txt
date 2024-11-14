@@ -2,7 +2,7 @@
 setuptools>=63
 pytest~=8.3.3
 einops~=0.8.0
-wheel~=0.44.0
+wheel~=0.45.0
 lion-pytorch~=0.2.2
 scipy~=1.14.1
 pandas~=2.2.2
