@@ -467,7 +467,7 @@ class Linear4bit(nn.Linear):
 
     def set_ipex_linear(self, x: torch.Tensor):
         if (
-            (x.device.type == "cpu" or x.device.type == "xpu")
+            (x.device.type in ("cpu", "xpu"))
             and not getattr(self.weight.quant_state, "ipex", False)
             and self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0
             and self.weight.quant_state.quant_type == "nf4"

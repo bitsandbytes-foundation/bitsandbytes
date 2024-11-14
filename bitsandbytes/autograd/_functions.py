@@ -577,7 +577,7 @@ def matmul_4bit(
     bias=None,
 ):
     assert quant_state is not None
-    if A.device.type == "cpu" and A.requires_grad == False:
+    if A.device.type in ("cpu", "xpu") and A.requires_grad == False:
         if getattr(quant_state, "ipex", False):
             out = F.gemv_4bit(A, B, out, state=quant_state)
             if bias is not None:

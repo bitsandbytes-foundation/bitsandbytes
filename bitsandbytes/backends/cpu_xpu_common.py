@@ -513,7 +513,7 @@ def gemm_4bit_impl(
     torch.Tensor:
         GEMM output tensor.
     """
-    if (ipex_cpu and _ipex_cpu_version_prereq(2, 5)) or (ipex_xpu and _ipex_xpu_version_prereq(2, 5)) and getattr(state, "ipex", False):
+    if getattr(state, "ipex", False):
         output = torch.ops.torch_ipex.woq_linear(A, B, "nf4", state.shape,
                     state.new_scales, state.new_zeros, None, None, state.blocksize,
                     ipex_cpu.quantization.WoqLowpMode.BF16, 1, state.compensation)
