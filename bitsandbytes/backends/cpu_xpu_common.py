@@ -182,7 +182,7 @@ def igemmlt_impl(A, B, SA=None, SB=None, out=None, Sout=None, dtype=torch.int32)
     A_reshaped = A.reshape(m, k)
 
     # torch._int_mm is available on CPU since torch 2.4
-    if _torch_version_prereq(2, 4):
+    if _torch_version_prereq(2, 4) and A.device.type == "cpu":
         C = torch._int_mm(A_reshaped, B.T).to(dtype)
     else:
         C = torch.matmul(A_reshaped.float(), B.t().float()).to(dtype)
