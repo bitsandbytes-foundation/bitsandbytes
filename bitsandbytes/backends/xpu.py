@@ -149,16 +149,9 @@ class XPUBackend(Backend):
         if blocksize is None:
             blocksize = 64
         assert_on_xpu([A, absmax, out])
-        output_dq = torch.ops.torch_ipex.dequantize_4bit(
-            A,
-            "nf4",
-            quant_state.shape,
-            quant_state.absmax,
-            None,
-            blocksize
-        )
-        output_dq = output_dq.t()
-        return output_dq        
+        dequant_out = dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
+        torch.xpu.empty_cache()
+        return dequant_out
 
     def gemv_4bit(
         self,
@@ -172,9 +165,7 @@ class XPUBackend(Backend):
         assert_on_xpu([A, B, out])
         if state is None:
             raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
-        dequant_out = gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
-        torch.xpu.empty_cache()
-        return dequant_out
+        return gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
 
     def dequantize_blockwise(
         self,
