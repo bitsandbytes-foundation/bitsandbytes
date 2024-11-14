@@ -234,8 +234,8 @@ def mm_dequant_impl(
         out_shape = (out_shape[0] * out_shape[1], out_shape[2])
 
     if compute_dtype not in [torch.float32, torch.bfloat16]:
-        warnings.warn(f"mm_dequant_{A.device}: compute_dtype {compute_dtype} is not supported, will use float instead")
-        compute_dtype = torch.float32
+        warnings.warn(f"mm_dequant_{A.device}: compute_dtype {compute_dtype} is not supported, will use bfloat16 instead")
+        compute_dtype = torch.bfloat16
     A_reshaped = A.reshape(out_shape).to(compute_dtype)
     row_stats = row_stats.reshape(-1).unsqueeze(-1).to(compute_dtype)
     col_stats = col_stats.reshape(-1).unsqueeze(0).to(compute_dtype)
