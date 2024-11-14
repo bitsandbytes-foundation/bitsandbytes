@@ -43,7 +43,9 @@ class XPUBackend(Backend):
         threshold=0.0,
     ):
         assert_on_xpu([A, col_stats, row_stats, out_col, out_row])
-        return double_quant_impl(A, col_stats, row_stats, out_col, out_row, threshold)
+        output = double_quant_impl(A, col_stats, row_stats, out_col, out_row, threshold)
+        torch.xpu.empty_cache()
+        return output
 
     def transform(
         self,
@@ -84,7 +86,9 @@ class XPUBackend(Backend):
         dtype=torch.int32,
     ) -> Union[torch.Tensor, Tuple[Optional[Tuple[torch.Tensor, Tuple[torch.Size, str]]]]]:
         assert_on_xpu([A, B])
-        return igemmlt_impl(A, B, SA, SB, out, Sout, dtype)
+        torch.xpu.empty_cache()
+        output = igemmlt_impl(A, B, SA, SB, out, Sout, dtype)
+        return output
 
     def mm_dequant(
         self,
@@ -98,7 +102,7 @@ class XPUBackend(Backend):
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         assert_on_xpu([A, row_stats, col_stats, out, bias])
-        return mm_dequant_impl(
+        output = mm_dequant_impl(
             A,
             quant_state,
             row_stats,
@@ -110,6 +114,8 @@ class XPUBackend(Backend):
             self.mm_dequant_compute_dtype,
             self.mm_dequant_output_dtype,
         )
+        torch.xpu.empty_cache()
+        return output
 
     def extract_outliers(
         self,
@@ -118,7 +124,9 @@ class XPUBackend(Backend):
         idx: torch.Tensor,
     ) -> torch.Tensor:
         assert_on_xpu([A])
-        return A[:, idx].contiguous()
+        output = A[:, idx].contiguous()
+        torch.xpu.empty_cache()
+        return output
 
 
     def quantize_4bit(
@@ -135,7 +143,9 @@ class XPUBackend(Backend):
             blocksize = 64
         assert_on_xpu([A, absmax, out])
         assert quant_storage == torch.uint8, "CPU backend only supports uint8 quant_storage"
-        return quantize_4bit_impl(A, absmax, out, blocksize, compress_statistics, quant_type)
+        output = quantize_4bit_impl(A, absmax, out, blocksize, compress_statistics, quant_type)
+        torch.xpu.empty_cache()
+        return output
 
     def dequantize_4bit(
         self,
@@ -149,9 +159,9 @@ class XPUBackend(Backend):
         if blocksize is None:
             blocksize = 64
         assert_on_xpu([A, absmax, out])
-        dequant_out = dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
+        output = dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
         torch.xpu.empty_cache()
-        return dequant_out
+        return output
 
     def gemv_4bit(
         self,
@@ -165,7 +175,9 @@ class XPUBackend(Backend):
         assert_on_xpu([A, B, out])
         if state is None:
             raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
-        return gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
+        output = gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
+        torch.xpu.empty_cache()
+        return output
 
     def dequantize_blockwise(
         self,
