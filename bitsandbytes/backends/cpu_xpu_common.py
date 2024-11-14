@@ -409,7 +409,6 @@ def dequantize_4bit_impl(
     torch.Tensor:
         Dequantized tensor.
     """
-
     if A.shape[0] == 1:
         transpose = False
         A = A.squeeze(0)
@@ -445,19 +444,14 @@ def dequantize_4bit_impl(
             )
         quant_state.ipex = False
 
-    if out is None:
-        out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
-
-    n = out.numel()
     # Map nf4 to [-1, 1]
-    out_uint8 = torch.empty(A.size(0) * 2, dtype=torch.uint8, device=A.device)
-    out_uint8[::2] = A.bitwise_and(0xF)
-    out_uint8[1::2] = A.bitwise_right_shift(4)
-    out_dq = torch.empty(out_uint8.shape).to(quant_state.dtype).to(A.device)
+    out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
+    n = out_dq.numel()
+    out_dq[::2] = A & 0xF
+    out_dq[1::2] = A >> 4
     # quant_state.code is fp32, cast to quant_state dtype to avoid the mismatch issue
     quant_state.code = quant_state.code.to(quant_state.dtype)
-    for i in range(len(quant_state.code)):
-        out_dq[out_uint8 == i] = quant_state.code[i]
+    out_dq = quant_state.code[out_dq]
 
     # Apply scales
     if out_dq.numel() != n:
@@ -467,12 +461,17 @@ def dequantize_4bit_impl(
     blocks += 1 if n % blocksize > 0 else 0
     rem = n % blocksize
     has_rem = rem > 0
-    out_reshaped = out.reshape(-1)
-    out_reshaped[: n - rem] = (out_dq[: n - rem].view(-1, blocksize) * absmax[: blocks - has_rem].view(-1, 1)).reshape(
-        -1
-    )
+
     if has_rem:
+        if out is None:
+            out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
+        out_reshaped = out.reshape(-1)
+        out_reshaped[: n - rem] = (out_dq[: n - rem].view(-1, blocksize) * absmax[: blocks - has_rem].view(-1, 1)).reshape(
+            -1
+        )
         out_reshaped[n - rem :] = out_dq[n - rem :] * absmax[-1]
+    else:
+        out = (out_dq.view(-1, blocksize) * absmax.view(-1, 1)).reshape(quant_state.shape).to(quant_state.dtype)
 
     # take transpose here because weight is transposed (again) for computation
     if transpose:

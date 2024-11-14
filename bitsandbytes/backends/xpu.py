@@ -172,7 +172,9 @@ class XPUBackend(Backend):
         assert_on_xpu([A, B, out])
         if state is None:
             raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
-        return gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
+        dequant_out = gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
+        torch.xpu.empty_cache()
+        return dequant_out
 
     def dequantize_blockwise(
         self,
