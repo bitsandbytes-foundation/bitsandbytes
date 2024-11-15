@@ -453,11 +453,14 @@ class Linear4bit(nn.Linear):
             getattr(self.weight, "quant_state", None) is not None
             and getattr(self.weight.quant_state, "ipex", False)
         ):
-            original_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(
-                self.weight, "nf4", self.weight.quant_state.shape, 2
-            )
-            self.weight.data = original_weight.data
-            self.weight.quant_state.ipex = False
+            if self.device.type == "cpu":
+                original_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(
+                    self.weight, "nf4", self.weight.quant_state.shape, 2
+                )
+                self.weight.data = original_weight.data
+                self.weight.quant_state.ipex = False
+            elif self.device.type == "xpu":
+                self.weight.data = self.weight.data.reshape(1, -1)
 
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
