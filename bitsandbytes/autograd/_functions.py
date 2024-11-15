@@ -321,7 +321,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # Cast A to fp16
         A_dtype = torch.float16
-        if A.device == torch.device("cpu") or torch.device("xpu"):
+        if A.device == torch.device("cpu"):
             A_dtype = torch.bfloat16
         if A.dtype != A_dtype:
             warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to {A_dtype} during quantization")
