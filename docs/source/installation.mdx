@@ -208,8 +208,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 |-------------|------------------------|---------------------------|-------------------------|------------|
 | **AMD ROCm** | 6.1+                   | 3.10+                     | minimum CDNA - `gfx90a`, RDNA - `gfx1100` | Alpha      |
 | **Apple Silicon (MPS)** | WIP                        | 3.10+                     | M1/M2 chips                    | Planned    |
-| **Intel CPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
-| **Intel GPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
+| **Intel CPU** | v2.5.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
+| **Intel GPU** | v2.5.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
 
 For each supported backend, follow the respective instructions below:
 
@@ -308,7 +308,7 @@ bitsandbytes is fully supported from ROCm 6.1 onwards (currently in alpha releas
 ```bash
 # Install bitsandbytes from source
 # Clone bitsandbytes repo, ROCm backend is currently enabled on multi-backend-refactor branch
-git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+git clone -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 
 # Install dependencies
 pip install -r requirements-dev.txt
