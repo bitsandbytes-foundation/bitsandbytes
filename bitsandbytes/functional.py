@@ -1027,7 +1027,7 @@ def dequantize_4bit(
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
     blocksize: Optional[int] = None,
-    quant_type="fp4",
+    quant_type=None,
 ) -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
