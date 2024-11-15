@@ -179,7 +179,6 @@ class XPUBackend(Backend):
         if state is None:
             raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
         output = gemm_4bit_impl(A, B, out, transposed_A, transposed_B, state)
-        torch.xpu.empty_cache()
         return output
 
     def dequantize_blockwise(
