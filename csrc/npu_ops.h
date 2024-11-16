@@ -22,8 +22,6 @@ struct BlockwiseNf4TilingData {
 
 extern "C" {
 
-void quantizeBlockwiseNf4(uint8_t *A, uint8_t *absmax, uint8_t *out, uint32_t blocksize, uint32_t n, void* stream);
-
 void dequantizeBlockwiseNF4(uint8_t *A, uint8_t *absmax, uint8_t *out, uint32_t blocksize, uint32_t n, void* stream, const uint32_t type_mode);
 
 }
