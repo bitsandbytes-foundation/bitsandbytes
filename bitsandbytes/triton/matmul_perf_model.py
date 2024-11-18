@@ -1,3 +1,6 @@
+# Adapted from https://github.com/triton-lang/kernels/blob/eeeebdd8be7d13629de22d600621e6234057eed3/kernels/matmul_perf_model.py
+# https://github.com/triton-lang/kernels is licensed under the MIT License.
+
 import functools
 import heapq
 
