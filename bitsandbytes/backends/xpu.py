@@ -138,7 +138,7 @@ class XPUBackend(Backend):
         if blocksize is None:
             blocksize = 64
         assert_on_xpu([A, absmax, out])
-        assert quant_storage == torch.uint8, "CPU backend only supports uint8 quant_storage"
+        assert quant_storage == torch.uint8, "XPU backend only supports uint8 quant_storage"
         output = quantize_4bit_impl(A, absmax, out, blocksize, compress_statistics, quant_type)
         return output
 
