@@ -696,7 +696,7 @@ class Int8Params(torch.nn.Parameter):
         elif device.type == "xpu":
             if self.data.dtype == torch.int8:
                 self.CB = self.data
-                return self
+                return self.to(device="xpu", non_blocking=non_blocking)
             else:
                 return self.xpu()
         else:
