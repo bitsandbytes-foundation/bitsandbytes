@@ -215,7 +215,7 @@ class SwitchBackBnb(torch.autograd.Function):
         # 1. Quantize A
         if len(A.shape) == 3:
             A = A.view(-1, A.shape[-1]).contiguous()
-        CA, CAt, SCA, SCAt, outlier_cols = F.double_quant(A.to(torch.float16), threshold=state.threshold)
+        CA, CAt, SCA, SCAt, outlier_cols = F.int8_double_quant(A.to(torch.float16), threshold=state.threshold)
 
         if state.threshold > 0.0 and outlier_cols is not None:
             if state.has_fp16_weights:
@@ -248,7 +248,7 @@ class SwitchBackBnb(torch.autograd.Function):
                     state.SCB,
                     state.SCBt,
                     _,
-                ) = F.double_quant(B.to(torch.float16))
+                ) = F.int8_double_quant(B.to(torch.float16))
                 state.SB = (state.CB.shape, "row")
         else:
             has_grad = False
@@ -320,7 +320,7 @@ class SwitchBackBnb(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        Cgrad, Cgradt, SCgrad, SCgradt, outlier_cols = F.double_quant(grad_output.to(torch.float16))
+        Cgrad, Cgradt, SCgrad, SCgradt, outlier_cols = F.int8_double_quant(grad_output.to(torch.float16))
 
         if req_gradB:
             # print('back A shape', A.shape)

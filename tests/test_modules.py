@@ -356,7 +356,6 @@ def test_linear8bitlt_accumulated_gradient():
 
 
 @pytest.mark.parametrize("threshold", [0.0, 2.0])
-@pytest.mark.parametrize("memory_efficient_backward", [False])
 def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
     l1 = (
         bnb.nn.Linear8bitLt(
@@ -364,7 +363,6 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
             64,
             threshold=threshold,
             has_fp16_weights=False,
-            memory_efficient_backward=memory_efficient_backward,
         )
         .cuda()
         .half()

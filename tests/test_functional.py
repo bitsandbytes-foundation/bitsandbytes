@@ -606,8 +606,8 @@ def test_int8_linear_matmul_half(dim1, dim2, dim3, dim4, dims):
 
         A = A.view(-1, A.shape[-1])
 
-        CA, _, statsA, _, _ = F.double_quant(A)
-        CB, _, statsB, _, _ = F.int8_vectorwise_quant(B)
+        CA, _, statsA, _, _ = F.int8_double_quant(A)
+        CB, statsB, _ = F.int8_vectorwise_quant(B)
         output = F.int8_mm_dequant(F.int8_linear_matmul(CA, CB), statsA, statsB)
 
         torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
@@ -863,7 +863,7 @@ def test_double_quant(dim1, dim2):
         out_col1, Scol = F.vectorwise_quant(A, dim=0)
         out_row1, Srow = F.vectorwise_quant(A, dim=1)
 
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
+        CA, CAt, statsA, statsAt, coo_tensor = F.int8_double_quant(A)
 
         # max difference is 1 due to rounding differences
         torch.testing.assert_close(CA, out_row1, atol=1, rtol=0)
@@ -953,7 +953,7 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 
         out1 = torch.matmul(A.half(), B.t().half())
 
-        C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
+        C1a, C1b, stats1a, stats1b, coo_tensor = F.int8_double_quant(A)
         CB, absmaxB = F.vectorwise_quant(B, quant_type="linear")
         A2, SA = F.nvidia_transform(C1a, "col32")
         B2, SB = F.nvidia_transform(CB, formatB)
@@ -1032,7 +1032,7 @@ def test_row_scale_bench(dim1, dim4, inner):
     torch.cuda.synchronize()
     print("16", time.time() - t0)
 
-    C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
+    C1a, C1b, stats1a, stats1b, coo_tensor = F.int8_double_quant(A)
     CB, absmaxB = F.vectorwise_quant(B, quant_type="linear")
     A2, SA = F.nvidia_transform(C1a, "col32")
     B2, SB = F.nvidia_transform(CB, formatB)
@@ -1047,7 +1047,7 @@ def test_row_scale_bench(dim1, dim4, inner):
     torch.cuda.synchronize()
     print("row-wise", time.time() - t0)
 
-    C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
+    C2a, C2b, stats2a, stats2b, coo_tensor = F.int8_double_quant(B)
     B2, SB = F.nvidia_transform(C2a, formatB)
     torch.cuda.synchronize()
     t0 = time.time()
@@ -1115,7 +1115,8 @@ def test_coo_double_quant(dim1, dim2):
 
         if coo_tensor is not None:
             A1 = A * idx
-            A2 = coo_tensor.to_dense()
+            A2 = torch.zeros_like(A)
+            A2[coo_tensor.rowidx.long(), coo_tensor.colidx.long()] = coo_tensor.values
             torch.testing.assert_close(A1, A2)
 
             A1 = A * (idx == 0)
@@ -1133,14 +1134,9 @@ def test_coo_int8_vectorwise_quant(dim1, dim2):
         A = torch.randn(dim1, dim2, device="cuda").half()
 
         idx = torch.abs(A) >= threshold
-        CA, statsA, coo_tensor = F.int8_vectorwise_quant(A, threshold=threshold)
+        CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
 
-        if coo_tensor is not None:
-            A1 = A * idx
-            A2 = coo_tensor.to_dense()
-            torch.testing.assert_close(A1, A2)
-
-            A1 = A * (idx == 0)
+        if outlier_cols is not None:
             A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
             torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
 
@@ -1230,13 +1226,14 @@ def test_integrated_sparse_decomp(dim1, dim2):
         w1 = torch.randn(dim1, dim2).cuda().half()
         out1 = torch.matmul(A, w1.t())
 
-        Cw1, statsw1, coo_tensor = F.int8_vectorwise_quant(w1)
-        CA, statsA, coo_tensor = F.int8_vectorwise_quant(A)
+        Cw1, statsw1, _ = F.int8_vectorwise_quant(w1)
+        CA, statsA, _ = F.int8_vectorwise_quant(A)
 
         out1_32 = F.int8_linear_matmul(CA, Cw1)
         out2 = F.int8_mm_dequant(out1_32, statsA, statsw1)
 
-        CA, statsA, coo_tensor = F.int8_vectorwise_quant(A, threshold=threshold)
+        # CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
+        CA, _, statsA, _, coo_tensor = F.double_quant(A, threshold=threshold)
 
         out1_32 = F.int8_linear_matmul(CA, Cw1)
         out3 = F.int8_mm_dequant(out1_32, statsA, statsw1)
@@ -1377,7 +1374,7 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     torch.nn.init.xavier_uniform_(B)
     Bt = B.t().contiguous()
 
-    CB, CBt, statsB, statsBt, coo_tensor = F.double_quant(B)
+    CB, CBt, statsB, statsBt, coo_tensor = F.int8_double_quant(B)
 
     rowidx = torch.randint(0, A.shape[-1], size=(15,))
 

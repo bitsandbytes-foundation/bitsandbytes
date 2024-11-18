@@ -320,7 +320,7 @@ class MatMul8bitLt(torch.autograd.Function):
         # 1. Quantize A. Note that as a side-effect, outliers are suppressed in CA/CAt.
         if ctx.needs_input_grad[1]:
             # Slower path
-            CA, CAt, SCA, SCAt, outlier_cols = F.double_quant(A.to(torch.float16), threshold=state.threshold)
+            CA, CAt, SCA, SCAt, outlier_cols = F.int8_double_quant(A.to(torch.float16), threshold=state.threshold)
         else:
             # Fast path
             CA, SCA, outlier_cols = F.int8_vectorwise_quant(A.to(torch.float16), threshold=state.threshold)
@@ -422,7 +422,7 @@ class MatMul8bitLt(torch.autograd.Function):
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
         if req_gradB:
-            Cgrad, _, _, SCgradt, _ = F.double_quant(grad_output.to(torch.float16))
+            Cgrad, _, _, SCgradt, _ = F.int8_double_quant(grad_output.to(torch.float16))
 
             gradB32 = F.int8_linear_matmul(Cgrad.t().contiguous(), CAt.t())
             grad_B = F.int8_mm_dequant(gradB32, SCgradt, SCAt)

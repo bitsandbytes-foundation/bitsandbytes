@@ -442,7 +442,7 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
     An input tensor may also be marked as `paged`, in which case the device placement is ignored.
 
     Args:
-        tensors (Iterable[Optional[torch.Tensor]]): A list of tensors to verify.
+        tensors (`Iterable[Optional[torch.Tensor]]`): A list of tensors to verify.
 
     Raises:
         `RuntimeError`: Raised when the verification fails.
@@ -2572,7 +2572,74 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
 
 
+@deprecated("This function is deprecated. Please use `int8_double_quant` instead.", category=FutureWarning)
 def double_quant(
+    A: torch.Tensor,
+    col_stats: Optional[torch.Tensor] = None,
+    row_stats: Optional[torch.Tensor] = None,
+    out_col: Optional[torch.Tensor] = None,
+    out_row: Optional[torch.Tensor] = None,
+    threshold=0.0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[COOSparseTensor]]:
+    """Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
+
+    The statistics are determined both row-wise and column-wise (transposed).
+
+    For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
+
+    <Tip warning={true}>
+    This function exists for backwards compatibility only. It is advised to use [`int8_double_quant`] instead.
+    The difference is that this function will return a [`COOSparseTensor`] for outliers instead of a column index.
+    </Tip>
+
+    Args:
+        A (`torch.Tensor` with dtype `torch.float16`): The input matrix.
+        col_stats (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the column-wise quantization scales.
+        row_stats (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the row-wise quantization scales.
+        out_col (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the column-wise quantized data.
+        out_row (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the row-wise quantized data.
+        threshold (`float`, *optional*):
+            An optional threshold for sparse decomposition of outlier features.
+
+            No outliers are held back when 0.0. Defaults to 0.0.
+
+    Returns:
+        `Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]`: A tuple containing the quantized tensor and relevant statistics.
+        - `torch.Tensor` with dtype `torch.int8`: The row-wise quantized data.
+        - `torch.Tensor` with dtype `torch.int8`: The column-wise quantized data.
+        - `torch.Tensor` with dtype `torch.float32`: The row-wise quantization scales.
+        - `torch.Tensor` with dtype `torch.float32`: The column-wise quantization scales.
+        - `COOSparseTensor`, *optional*: A structure representing the outlier values from the input tensor.
+    """
+
+    coo_tensor = None
+    quant_row, quant_col, row_stats, col_stats, _ = int8_double_quant(
+        A,
+        col_stats,
+        row_stats,
+        out_col,
+        out_row,
+        threshold=threshold,
+    )
+
+    if threshold > 0.0:
+        # Build COO tensor for any outliers.
+        outlier_mask = A.abs() >= threshold
+        outlier_locations = outlier_mask.nonzero()
+        outliers = A[outlier_mask]
+        coo_tensor = COOSparseTensor(
+            A.shape[0],
+            A.shape[1],
+            outliers.numel(),
+            outlier_locations[:, 0].int(),
+            outlier_locations[:, 1].int(),
+            outliers,
+        )
+
+    return quant_row, quant_col, row_stats, col_stats.flatten().float(), coo_tensor
+
+
+def int8_double_quant(
     A: torch.Tensor,
     col_stats: Optional[torch.Tensor] = None,
     row_stats: Optional[torch.Tensor] = None,
@@ -2612,7 +2679,6 @@ def double_quant(
     """
 
     # TODO: Optimize/write CUDA kernel for this?
-    # Note: for inference, use the new int8_vectorwise_quant.
 
     # Use CUDA kernel for rowwise and COO tensor
     quant_row, row_stats, outlier_cols = int8_vectorwise_quant(A, threshold=threshold)
@@ -2665,8 +2731,6 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
         # TODO we could improve perf of this
         outliers = A.abs() >= threshold
 
-        # argwhere needs host/device sync, so we skip when
-        # there aren't actually any outliers.
         if outliers.any():
             outlier_cols = torch.argwhere(outliers.any(dim=0)).view(-1)
 
