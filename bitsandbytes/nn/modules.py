@@ -449,10 +449,7 @@ class Linear4bit(nn.Linear):
         save weight and bias,
         then fill state_dict with components of quant_state
         """
-        if (
-            getattr(self.weight, "quant_state", None) is not None
-            and getattr(self.weight.quant_state, "ipex", False)
-        ):
+        if getattr(self.weight, "quant_state", None) is not None and getattr(self.weight.quant_state, "ipex", False):
             if self.weight.device.type == "cpu":
                 original_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(
                     self.weight, "nf4", self.weight.quant_state.shape, 2

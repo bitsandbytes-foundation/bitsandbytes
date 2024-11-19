@@ -1006,7 +1006,6 @@ def dequantize_fp4(
     out: Optional[torch.Tensor] = None,
     blocksize: Optional[int] = None,
 ) -> Tensor:
-
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -1017,7 +1016,6 @@ def dequantize_nf4(
     out: Optional[torch.Tensor] = None,
     blocksize: Optional[int] = None,
 ) -> Tensor:
-
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 

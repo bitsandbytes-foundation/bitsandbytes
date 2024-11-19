@@ -234,7 +234,9 @@ def mm_dequant_impl(
         out_shape = (out_shape[0] * out_shape[1], out_shape[2])
 
     if compute_dtype not in [torch.float32, torch.bfloat16]:
-        warnings.warn(f"mm_dequant_{A.device}: compute_dtype {compute_dtype} is not supported, will use bfloat16 instead")
+        warnings.warn(
+            f"mm_dequant_{A.device}: compute_dtype {compute_dtype} is not supported, will use bfloat16 instead"
+        )
         compute_dtype = torch.bfloat16
     A_reshaped = A.reshape(out_shape).to(compute_dtype)
     row_stats = row_stats.reshape(-1).unsqueeze(-1).to(compute_dtype)
@@ -439,9 +441,7 @@ def dequantize_4bit_impl(
         raise NotImplementedError("bnb_4bit_use_double_quant is not supported yet for CPU/XPU")
 
     if ipex_cpu_only and _ipex_cpu_version_prereq(2, 5) and getattr(quant_state, "ipex", False):
-        A = torch.ops.ipex_prepack.woq_linear_unpack_weight(
-                A, "nf4", quant_state.shape, 2
-            )
+        A = torch.ops.ipex_prepack.woq_linear_unpack_weight(A, "nf4", quant_state.shape, 2)
         quant_state.ipex = False
 
     # Map nf4 to [-1, 1]
@@ -466,9 +466,9 @@ def dequantize_4bit_impl(
         if out is None:
             out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
         out_reshaped = out.reshape(-1)
-        out_reshaped[: n - rem] = (out_dq[: n - rem].view(-1, blocksize) * absmax[: blocks - has_rem].view(-1, 1)).reshape(
-            -1
-        )
+        out_reshaped[: n - rem] = (
+            out_dq[: n - rem].view(-1, blocksize) * absmax[: blocks - has_rem].view(-1, 1)
+        ).reshape(-1)
         out_reshaped[n - rem :] = out_dq[n - rem :] * absmax[-1]
     else:
         out = (out_dq.view(-1, blocksize) * absmax.view(-1, 1)).reshape(quant_state.shape).to(quant_state.dtype)
@@ -513,9 +513,20 @@ def gemm_4bit_impl(
         GEMM output tensor.
     """
     if getattr(state, "ipex", False):
-        output = torch.ops.torch_ipex.woq_linear(A, B, "nf4", state.shape,
-                    state.new_scales, state.new_zeros, None, None, state.blocksize,
-                    ipex_cpu.quantization.WoqLowpMode.BF16, 1, state.compensation)
+        output = torch.ops.torch_ipex.woq_linear(
+            A,
+            B,
+            "nf4",
+            state.shape,
+            state.new_scales,
+            state.new_zeros,
+            None,
+            None,
+            state.blocksize,
+            ipex_cpu.quantization.WoqLowpMode.BF16,
+            1,
+            state.compensation,
+        )
     else:
         dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize).t()
         output = torch.matmul(A, dqB.to(A.dtype))

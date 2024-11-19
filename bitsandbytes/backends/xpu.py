@@ -15,6 +15,8 @@ from .cpu_xpu_common import (
 )
 
 Tensor = torch.Tensor
+
+
 def assert_on_xpu(tensors):
     on_xpu = True
     for t in tensors:
@@ -124,7 +126,6 @@ class XPUBackend(Backend):
         output = A[:, idx].contiguous()
         return output
 
-
     def quantize_4bit(
         self,
         A: torch.Tensor,
@@ -155,7 +156,7 @@ class XPUBackend(Backend):
             blocksize = 64
         assert_on_xpu([A, absmax, out])
         if quant_type == "nf4":
-            output = torch.ops.torch_ipex.dequantize_4bit(A, "nf4", quant_state.shape, absmax, None,blocksize).t()
+            output = torch.ops.torch_ipex.dequantize_4bit(A, "nf4", quant_state.shape, absmax, None, blocksize).t()
         else:
             output = dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)
 
