@@ -23,7 +23,7 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
 
     override_value = os.environ.get("BNB_CUDA_VERSION")
     if override_value:
-        library_name = re.sub("cuda\d+", f"cuda{override_value}", library_name, count=1)
+        library_name = re.sub(r"cuda\d+", f"cuda{override_value}", library_name, count=1)
         logger.warning(
             f"WARNING: BNB_CUDA_VERSION={override_value} environment variable detected; loading {library_name}.\n"
             "This can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n"

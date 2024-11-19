@@ -14,7 +14,8 @@ line-length = 119
 [tool.ruff.lint]
 select = [
     "B",    # bugbear: security warnings
-    "E",    # pycodestyle
+    "E",    # pycodestyle (error)
+    "W",    # pycodestyle (warning)
     "F",    # pyflakes
     "I",    # isort
     "ISC",  # implicit string concatenation
