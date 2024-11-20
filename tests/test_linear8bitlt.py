@@ -82,7 +82,6 @@ def test_linear_no_igemmlt():
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
 @pytest.mark.parametrize("serialize_before_forward", TRUE_FALSE, ids=id_formatter("serialize_before_forward"))
 @pytest.mark.parametrize("deserialize_before_cuda", TRUE_FALSE, ids=id_formatter("deserialize_before_cuda"))
-# @pytest.mark.parametrize("force_no_igemmlt", TRUE_FALSE, ids=id_formatter("force_no_igemmlt"))
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
 @pytest.mark.parametrize("load_before_cuda", TRUE_FALSE, ids=id_formatter("load_before_cuda"))
 def test_linear_serialization(
@@ -104,8 +103,6 @@ def test_linear_serialization(
         has_fp16_weights=has_fp16_weights,
         threshold=6.0,
     )
-    # if force_no_igemmlt:
-    #    linear_custom.state.force_no_igemmlt = True
 
     linear_custom.weight = bnb.nn.Int8Params(
         linear.weight.data.clone(),
@@ -151,8 +148,6 @@ def test_linear_serialization(
         has_fp16_weights=has_fp16_weights,
         threshold=6.0,
     )
-    # if force_no_igemmlt:
-    #    new_linear_custom.state.force_no_igemmlt = True
 
     if deserialize_before_cuda:
         with nullcontext() if has_fp16_weights else pytest.raises(RuntimeError):

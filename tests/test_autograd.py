@@ -28,6 +28,7 @@ TRANSPOSE_VALS = [(False, True), (False, False)]
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=describe_dtype)
 @pytest.mark.parametrize("req_grad", BOOLEAN_TUPLES, ids=id_formatter("req_grad"))
 @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
+@pytest.mark.deprecated
 def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad: Tuple[bool, bool], transpose: Tuple[bool, bool]):
     if dim2 > 0:
         dim2 = dim2 - (dim2 % 16)
@@ -198,12 +199,8 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad: Tuple[bool, bool
                 assert (idx == 0).sum().item() < n * 0.02
 
 
-# @pytest.mark.parametrize("dim1", get_test_dims(16, 64, n=1), ids=id_formatter("dim1"))
-# @pytest.mark.parametrize("dim2", [*get_test_dims(32, 96, n=1), 0], ids=id_formatter("dim2"))
-# @pytest.mark.parametrize("dim3", get_test_dims(32, 96, n=1), ids=id_formatter("dim3"))
-# @pytest.mark.parametrize("dim4", get_test_dims(32, 96, n=1), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dim1", [40], ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", [64, 0], ids=id_formatter("dim2"))  # [64,0]
+@pytest.mark.parametrize("dim2", [64, 0], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", [32], ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dim4", [48], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("decomp", [0.0, 6.0], ids=id_formatter("decomp"))

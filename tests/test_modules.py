@@ -566,7 +566,6 @@ def test_kbit_backprop(module):
         relerrs2.append(relerr2.mean().item())
 
         if isinstance(module, bnb.nn.Linear8bitLt):
-            # if module == bnb.nn.Linear8bitLt:
             assert_all_approx_close(grad1, grad2, atol=0.008, rtol=0.05, count=1)
             torch.testing.assert_close(bgrad1, bgrad2, atol=0.008, rtol=0.05)
         else:
@@ -577,10 +576,6 @@ def test_kbit_backprop(module):
 
         assert kbit[0].weight.grad is None or kbit[0].weight.grad.sum().item() == 0
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
-    # print('out', sum(errs1)/len(errs1))
-    # print('grad', sum(errs2)/len(errs2))
-    # print('rel out', sum(relerrs1)/len(relerrs1))
-    # print('rel grad', sum(relerrs2)/len(relerrs2))
 
 
 def test_fp8linear():

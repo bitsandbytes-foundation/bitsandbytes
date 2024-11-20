@@ -17,8 +17,6 @@ text = "Below is a question. I need an answer.\n\nExplain machine learning: "
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 input_ids = tokenizer([text] * 8, return_tensors="pt").input_ids.to(0)
 
-max_memory = f"{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB"
-
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     device_map="auto",
