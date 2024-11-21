@@ -17,7 +17,7 @@ from .autograd._functions import (
     matmul_cublas,
     mm_cublas,
 )
-from .backends import register_backend
+from .backends import backends, register_backend
 from .backends.cpu import CPUBackend
 from .backends.npu import NPUBackend
 from .cextension import lib
@@ -65,7 +65,8 @@ if hasattr(torch, "npu") and torch.npu.is_available():
 
 
 # import module after decided backends
-from .nn import modules
+if backends:
+    from .nn import modules
 
 # TODO: Other potential backends:
 # XLA - Google TPU / PJRT runtime
