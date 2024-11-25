@@ -2314,9 +2314,6 @@ def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Ten
 
     shapeC = (*shapeB[:-1], shapeA[0])
 
-    if out is None:
-        out = torch.empty(shapeC, device=A.device, dtype=dtype)
-
     k, m = shapeA
     n = prod(shapeB[:-1])
     lda = shapeA[-1]  # Weights (outputs, inputs)
@@ -2326,6 +2323,18 @@ def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Ten
     assert (
         lda == ldb
     ), f"int8_linear_matmul only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}"
+
+    # cuBLASLt does not support int8 matmul with inner dimensions that are not divisible by 4.
+    # We'll fall back to a slower fp32 calculation in this circumstance.
+    # Fortunately, this should not be very common.
+    if lda % 4 != 0:
+        result = torch.matmul(B.float(), A.float().t()).to(torch.int32)
+        if out is not None:
+            result = out.copy_(result)
+        return result
+
+    if out is None:
+        out = torch.empty(shapeC, device=A.device, dtype=dtype)
 
     is_on_gpu([A, B, out])
 

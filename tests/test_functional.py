@@ -427,7 +427,7 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
 
 @pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", [512], ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim3", [499, 512], ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dim4", [512], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2, 3), ids=id_formatter("dims"))
 @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
