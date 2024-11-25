@@ -695,38 +695,6 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
     print(sum(err3) / len(err3))
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dims", [2], ids=id_formatter("dims"))
-@pytest.mark.parametrize("dtype", [torch.int8], ids=describe_dtype)
-@pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
-@pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
-@pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
-@pytest.mark.deprecated
-def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
-    for i in range(k):
-        if dims == 2:
-            A = torch.randint(10, 99, size=(dim1, dim2), device="cuda").to(dtype)
-        elif dims == 3:
-            A = torch.randint(10, 99, size=(dim1, dim2, dim3), device="cuda").to(dtype)
-
-        A.view(-1)[-1] = -1
-        if transpose:
-            At = A.t().contiguous()
-            out1, S1 = F.nvidia_transform(At, to_order=orderOut)
-        else:
-            out1, S1 = F.nvidia_transform(A, to_order=orderOut)
-        out2, S2 = F.transform(A, to_order=orderOut, transpose=transpose)
-
-        assert S1[0][0] == S2[0][0]
-        assert S1[0][1] == S2[0][1]
-        # print(out1)
-        # print(out2)
-
-        torch.testing.assert_close(out1, out2)
-
-
 @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
 def test_coo_double_quant(dim1, dim2):
@@ -1780,6 +1748,38 @@ def test_percentile_clipping(gtype):
         torch.testing.assert_close(gnorm_vec1, torch.sqrt(gnorm_vec2))
         torch.testing.assert_close(clip1, clip2)
         torch.testing.assert_close(gnorm1, gnorm2)
+
+
+@pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dims", [2], ids=id_formatter("dims"))
+@pytest.mark.parametrize("dtype", [torch.int8], ids=describe_dtype)
+@pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
+@pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
+@pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
+@pytest.mark.deprecated
+def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
+    for i in range(k):
+        if dims == 2:
+            A = torch.randint(10, 99, size=(dim1, dim2), device="cuda").to(dtype)
+        elif dims == 3:
+            A = torch.randint(10, 99, size=(dim1, dim2, dim3), device="cuda").to(dtype)
+
+        A.view(-1)[-1] = -1
+        if transpose:
+            At = A.t().contiguous()
+            out1, S1 = F.nvidia_transform(At, to_order=orderOut)
+        else:
+            out1, S1 = F.nvidia_transform(A, to_order=orderOut)
+        out2, S2 = F.transform(A, to_order=orderOut, transpose=transpose)
+
+        assert S1[0][0] == S2[0][0]
+        assert S1[0][1] == S2[0][1]
+        # print(out1)
+        # print(out2)
+
+        torch.testing.assert_close(out1, out2)
 
 
 @pytest.mark.parametrize("dim1", get_test_dims(2, 256, n=2), ids=id_formatter("dim1"))

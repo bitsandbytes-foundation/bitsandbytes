@@ -350,18 +350,17 @@ class MatMul8bitLt(torch.autograd.Function):
                 CAt[:, state.idx] = 0
 
             # Extract the input outliers in original precision
-            subA = A[:, state.idx]
+            subA = A[:, state.idx].contiguous()
 
             # Extract the corresponding weights
             if state.has_fp16_weights:
                 state.subB = B[:, state.idx].t()
             else:
-                outliers = state.CB[:, state.idx]
-
                 # To dequantize our weights associated with the input outliers,
                 # we want to divide by 127. It's however more performant to multiply
                 # by the reciprocal.
-                state.subB = (7.874016e-3 * outliers * state.SCB.view(-1, 1)).t().to(A.dtype)
+                outliers = state.CB[:, state.idx]
+                state.subB = (outliers.t() * state.SCB * 7.874015718698502e-3).to(A.dtype)
         else:
             subA = None
 
@@ -378,7 +377,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # 4. Mixed-precision decomposition matmul
         if subA is not None and state.subB is not None:
-            output += torch.matmul(subA, state.subB)
+            output = output.addmm(subA, state.subB)
 
         # 5. Save state
         ctx.state = state

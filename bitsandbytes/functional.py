@@ -2722,6 +2722,20 @@ def int8_double_quant(
     return quant_row, quant_col, row_stats, col_stats.flatten().float(), outlier_cols
 
 
+def int8_vectorwise_dequant(A: torch.Tensor, stats: torch.Tensor):
+    """Dequantizes a tensor with dtype `torch.int8` to `torch.float32`.
+
+    Args:
+        A (`torch.Tensor` with dtype `torch.int8`): The quantized int8 tensor.
+        stats (`torch.Tensor` with dtype `torch.float32`): The row-wise quantization statistics.
+
+    Returns:
+        `torch.Tensor` with dtype `torch.float32`: The dequantized tensor.
+    """
+    # To dequantize we divide by 127, or multiply by the reciprocal.
+    return A * stats.view(-1, 1) * 7.874015718698502e-3
+
+
 def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
     """Quantizes a tensor with dtype `torch.float16` to `torch.int8` in accordance to the `LLM.int8()` algorithm.
 
@@ -3026,7 +3040,10 @@ def vectorwise_quant(x, dim=1, quant_type="vector"):
         return None
 
 
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
+@deprecated(
+    "This function is deprecated and will be removed in a future release. Consider using `int8_vectorwise_dequant` instead.",
+    category=FutureWarning,
+)
 def vectorwise_dequant(xq, max1, quant_type="vector"):
     if quant_type == "vector":
         x = (xq / C * max1).to(torch.float32)
