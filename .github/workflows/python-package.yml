@@ -60,6 +60,7 @@ jobs:
   ##
   build-shared-libs-cuda:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         arch: [x86_64, aarch64]
