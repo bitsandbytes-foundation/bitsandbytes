@@ -5,6 +5,7 @@
 
 #include "kernels.cuh"
 #include "common.cuh"
+#include <cuda_fp16.h>
 #include <cub/block/block_radix_sort.cuh>
 #include <cub/warp/warp_reduce.cuh>
 #include <cub/block/block_load.cuh>
@@ -2141,7 +2142,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 template<typename T, int THREADS, int SPARSE_DECOMP>
 __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024)
 __global__ void kInt8VectorQuant(T * __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols) {
-  using BlockReduceT = cub::BlockReduce<float, THREADS>;
+  using BlockReduceT = cub::BlockReduce<T, THREADS>;
 
   // One block per row.
   // Threads load column values in a striped arrangement.
@@ -2151,27 +2152,27 @@ __global__ void kInt8VectorQuant(T * __restrict__ A, int8_t* out, float* rowStat
   // We then do a blockwise reduction to determine the row's absmax.
 
   __shared__ typename BlockReduceT::TempStorage temp_storage;
-  __shared__ float smem_row_absmax;
+  __shared__ T smem_row_absmax;
 
   const int row_id = blockIdx.x;
-  const T* __restrict__ row_data = A + (row_id * cols);
+  const T* row_data = A + (row_id * cols);
 
   // Threads will read the row values in a striped access pattern and find a local absmax.
-  float row_local_absmax = -FLT_MIN;
+  T row_local_absmax = -FLT_MIN;
   for (int i = threadIdx.x; i < cols; i += THREADS) {
-    const float absval = fabsf(__ldcs(&(row_data[i])));
+    const T absval = fabsf(__ldcs(&(row_data[i])));
 
     // For sparse decomposition, values outside of the threshold are not to be
     // included when calculating the row's absmax.
     if constexpr (SPARSE_DECOMP) {
-      row_local_absmax = fmaxf(row_local_absmax, absval < threshold ? absval : row_local_absmax);
+      row_local_absmax = fmaxf(row_local_absmax, absval < T(threshold) ? absval : row_local_absmax);
     } else {
       row_local_absmax = fmaxf(row_local_absmax, absval);
     }
   }
 
   // Reduce thread-local absmax across the block.
-  const float row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, cub::Max(), cols);
+  const T row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, cub::Max(), cols);
   if (threadIdx.x == 0) {
     // Save our block's absmax to shared memory for the quantization step.
     rowStats[row_id] = smem_row_absmax = row_absmax;
@@ -2181,13 +2182,14 @@ __global__ void kInt8VectorQuant(T * __restrict__ A, int8_t* out, float* rowStat
   // Quantize row-wise.
   const float scale = __fdividef(127.0f, smem_row_absmax);
   for (int i = threadIdx.x; i < cols; i += THREADS) {
+    float val = row_data[i];
+
     if constexpr (SPARSE_DECOMP) {
       // For sparse decomposition, we do not want to quantize the outliers.
       // Instead they're zeroed out.
-      float val = row_data[i];
       out[row_id * cols + i] = fabs(val) < threshold ? __float2int_rn(val * scale) : 0;
     } else {
-      out[row_id * cols + i] = __float2int_rn(float(row_data[i]) * scale);
+      out[row_id * cols + i] = __float2int_rn(val * scale);
     }
   }
 }
