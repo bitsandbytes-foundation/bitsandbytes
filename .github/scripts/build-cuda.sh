@@ -15,7 +15,7 @@ if [ "${build_os:0:6}" == ubuntu ]; then
     docker run --platform "linux/$build_arch" -i -w /src -v "$PWD:/src" "$image" sh -c \
         "apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-    && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" . \
+    && cmake -DPTXAS_VERBOSE=1 -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" . \
     && cmake --build ."
 else
     pip install cmake==3.28.3
