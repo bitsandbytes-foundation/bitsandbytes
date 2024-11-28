@@ -29,7 +29,6 @@ def assert_on_npu(tensors):
 
 
 class NPUBackend(Backend):
-
     def double_quant(
         self,
         A: torch.Tensor,
@@ -107,21 +106,21 @@ class NPUBackend(Backend):
         torch.npu.set_device(A.device)
         if A.dtype in [torch.float32, torch.float16, torch.bfloat16]:
             data = [
-                -1.0, 
-                -0.6961928009986877, 
+                -1.0,
+                -0.6961928009986877,
                 -0.5250730514526367,
                 -0.39491748809814453,
                 -0.28444138169288635,
                 -0.18477343022823334,
-                -0.09105003625154495, 
-                0.0, 
-                0.07958029955625534, 
-                0.16093020141124725, 
-                0.24611230194568634, 
-                0.33791524171829224, 
-                0.44070982933044434, 
-                0.5626170039176941, 
-                0.7229568362236023, 
+                -0.09105003625154495,
+                0.0,
+                0.07958029955625534,
+                0.16093020141124725,
+                0.24611230194568634,
+                0.33791524171829224,
+                0.44070982933044434,
+                0.5626170039176941,
+                0.7229568362236023,
                 1.0,
             ]
             data = torch.tensor(data, device="npu", dtype=torch.float32).view(1, -1)
@@ -132,10 +131,10 @@ class NPUBackend(Backend):
             out = out.reshape(-1, 2)
             out = (out[:, 0] + out[:, 1] * 16).to(torch.uint8)
         else:
-             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
+            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
         assert_on_npu([A, absmax, out])
         torch.npu.set_device(prev_device)
-        
+
         code = get_4bit_type(quant_type, device=A.device)
         state = QuantState(
             absmax=absmax,
@@ -164,7 +163,7 @@ class NPUBackend(Backend):
             raise ValueError(
                 f"The blockwise of {blocksize} is not supported. Supported values: {supported_blocksizes}"
             )
-        
+
         if quant_state is None:
             assert absmax is not None and out is not None
             quant_state = QuantState(
@@ -192,7 +191,7 @@ class NPUBackend(Backend):
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                torch.npu.current_stream(),  
+                torch.npu.current_stream(),
             )
         elif out.dtype == torch.float16:
             lib.cdequantize_blockwise_fp16_nf4(
@@ -201,7 +200,7 @@ class NPUBackend(Backend):
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                torch.npu.current_stream(),  
+                torch.npu.current_stream(),
             )
         elif out.dtype == torch.bfloat16:
             # bf16: bf16 -> fp32 -> op -> fp32 -> bf16
@@ -213,7 +212,7 @@ class NPUBackend(Backend):
                 get_ptr(out),
                 ct.c_int(quant_state.blocksize),
                 ct.c_int(n),
-                torch.npu.current_stream() 
+                torch.npu.current_stream(),
             )
             out = out.to(torch.bfloat16)
         else:

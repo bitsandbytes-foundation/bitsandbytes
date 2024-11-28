@@ -9,6 +9,7 @@ extend-ignore-re = [
 
 [type.py.extend-words]
 "BA" = "BA"  # used as a commented-out variable in tests
+"cann" = "cann" # cann (Compute Architecture for Neural Networks) is a heterogeneous computing architecture for Ascend NPU
 
 [type.cuda.extend-words]
 "subtile" = "subtile"

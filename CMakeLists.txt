@@ -240,26 +240,26 @@ elseif(BUILD_MPS)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
 elseif(BUILD_NPU)
     list(APPEND SRC_FILES ${NPU_FILES})
-    
+
     set(SOC_VERSION "Ascend910B4" CACHE STRING "system on chip type")
-    set(ASCEND_CANN_PACKAGE_PATH $ENV{ASCEND_HOME_PATH} CACHE 
-        STRING "ASCEND CANN package installation directory"
+    set(ASCEND_CAN_PACKAGE_PATH $ENV{ASCEND_HOME_PATH} CACHE
+        STRING "ASCEND CAN package installation directory"
     )
-    
+
     # ${KERNEL_FILES} are used to compile library, push files written by ascendc in ${KERNEL_FILES}.
     # ref to cmake/npu.cmake ascendc_library, cmake/cpu.cmake add_library
     # file(GLOB KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/csrc/npu_kernels.cpp)
     file(GLOB KERNEL_FILES csrc/npu_kernels.cpp)
-    
-    if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
-        set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
-    elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
-        set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+
+    if(EXISTS ${ASCEND_CAN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+        set(ASCENDC_CMAKE_DIR ${ASCEND_CAN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+    elseif(EXISTS ${ASCEND_CAN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+        set(ASCENDC_CMAKE_DIR ${ASCEND_CAN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
     else()
-        message(FATAL_ERROR "ascendc_kernel_cmake does not exist ,please check whether the cann package is installed")
+        message(FATAL_ERROR "ascendc_kernel_cmake does not exist ,please check whether the can package is installed")
     endif()
     include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
-    
+
     # ascendc_library use to add kernel file to generate ascendc library
     ascendc_library(ascendc_kernels_npu STATIC ${KERNEL_FILES})
 

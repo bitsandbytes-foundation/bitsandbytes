@@ -313,7 +313,7 @@ class Params4bit(torch.nn.Parameter):
 
     def cpu(self, non_blocking: bool = False):
         return self.to(device="cpu", non_blocking=non_blocking)
-    
+
     def npu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
         # `torch.Tensor.to(<int num>)` is not supported by `torch_npu` (see this [issue](https://github.com/Ascend/pytorch/issues/16)).
         if isinstance(device, int):

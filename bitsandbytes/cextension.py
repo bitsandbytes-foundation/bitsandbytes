@@ -25,7 +25,7 @@ import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
 from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_rocm_gpu_arch
-from bitsandbytes.npu_specs import  get_npu_specs
+from bitsandbytes.npu_specs import get_npu_specs
 
 logger = logging.getLogger(__name__)
 

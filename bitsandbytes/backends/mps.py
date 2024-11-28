@@ -8,7 +8,6 @@ from .base import Backend
 
 
 class MPSBackend(Backend):
-
     def double_quant(
         self,
         A: torch.Tensor,
