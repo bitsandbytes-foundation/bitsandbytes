@@ -1006,11 +1006,6 @@ def dequantize_fp4(
     out: Optional[torch.Tensor] = None,
     blocksize: Optional[int] = None,
 ) -> Tensor:
-    if blocksize is None:
-        # Some AMD GPUs have warpsize 64
-        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
-
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -1021,11 +1016,6 @@ def dequantize_nf4(
     out: Optional[torch.Tensor] = None,
     blocksize: Optional[int] = None,
 ) -> Tensor:
-    if blocksize is None:
-        # Some AMD GPUs have warpsize 64
-        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
-
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 
@@ -1035,7 +1025,7 @@ def dequantize_4bit(
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
     blocksize: Optional[int] = None,
-    quant_type="fp4",
+    quant_type=None,
 ) -> Tensor:
     """
     Dequantizes FP4 blockwise quantized values.
@@ -1064,6 +1054,14 @@ def dequantize_4bit(
         Dequantized tensor.
     """
     ensure_backend_is_available(A.device.type)
+    if quant_state is not None:
+        absmax = absmax or quant_state.absmax
+        quant_type = quant_type or quant_state.quant_type
+        blocksize = blocksize or quant_state.blocksize
+    if blocksize is None:
+        # Some AMD GPUs have warpsize 64
+        # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return backends[A.device.type].dequantize_4bit(
         A, quant_state=quant_state, absmax=absmax, out=out, blocksize=blocksize, quant_type=quant_type
     )
@@ -1800,7 +1798,7 @@ class COOSparseTensor:
     def __init__(self, rows, cols, nnz, rowidx, colidx, values):
         assert rowidx.dtype == torch.int32
         assert colidx.dtype == torch.int32
-        if values.device == torch.device("cpu"):
+        if values.device == torch.device("cpu") or torch.device("xpu"):
             assert values.dtype in [torch.bfloat16, torch.half, torch.float]
         else:
             assert values.dtype == torch.float16

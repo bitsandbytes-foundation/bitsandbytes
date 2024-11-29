@@ -208,8 +208,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 |-------------|------------------------|---------------------------|-------------------------|------------|
 | **AMD ROCm** | 6.1+                   | 3.10+                     | minimum CDNA - `gfx90a`, RDNA - `gfx1100` | Alpha      |
 | **Apple Silicon (MPS)** | WIP                        | 3.10+                     | M1/M2 chips                    | Planned    |
-| **Intel CPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
-| **Intel GPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
+| **Intel CPU** | v2.5.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
+| **Intel GPU** | v2.5.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
 
 For each supported backend, follow the respective instructions below:
 
@@ -336,8 +336,6 @@ The below commands are for Linux. For installing on Windows, please adapt the be
 git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install intel_extension_for_pytorch
 pip install -r requirements-dev.txt
-cmake -DCOMPUTE_BACKEND=cpu -S .
-make
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 

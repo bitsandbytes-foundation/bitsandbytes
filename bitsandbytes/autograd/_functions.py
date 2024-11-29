@@ -221,7 +221,7 @@ matmul_cublas = MatMul8bit.apply
 
 def supports_igemmlt(device: torch.device) -> bool:
     """check if this device supports the optimized int8 kernel"""
-    if device == torch.device("cpu"):
+    if device == torch.device("cpu") or torch.device("xpu"):
         return True
     if torch.version.hip:
         return False if BNB_HIP_VERSION < 601 else True
@@ -463,7 +463,9 @@ class MatMul8bitLt(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
+        Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = None, None, None, None, None
+        if req_gradB or (req_gradA and state.CBt):
+            Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
         if req_gradB:
             CxAt, SAt = F.transform(CAt, formatB, transpose=True)
             C32grad, Sgrad = F.transform(Cgradt, "col32", transpose=True)
@@ -575,8 +577,15 @@ def matmul_4bit(
     bias=None,
 ):
     assert quant_state is not None
-    if (A.numel() == A.shape[-1] or A.device.type == "cpu") and A.requires_grad == False:
-        # CPU backend does not require A to be a vector
+    if A.device.type in ("cpu", "xpu") and A.requires_grad == False:
+        if getattr(quant_state, "ipex", False):
+            out = F.gemv_4bit(A, B.t(), out, state=quant_state)
+            if bias is not None:
+                out += bias
+            return out
+        else:
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
+    elif A.numel() == A.shape[-1] and A.requires_grad == False:
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(
                 f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",
