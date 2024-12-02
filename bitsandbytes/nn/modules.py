@@ -508,7 +508,8 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
+        weight = self.weight.t() if len(self.weight.shape) == 2 else self.weight
+        out = bnb.matmul_4bit(x, weight, bias=bias, quant_state=self.weight.quant_state)
 
         out = out.to(inp_dtype)
 
