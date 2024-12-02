@@ -431,7 +431,7 @@ class MatMul8bitLt(torch.autograd.Function):
         if req_gradA:
             if state.CB is not None:
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
-                grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
+                grad_A = torch.matmul(grad_output.to(ctx.dtype_A), CB).view(ctx.grad_shape)
             else:
                 raise Exception("State must contain CB matrix for backward")
 
