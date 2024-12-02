@@ -14,7 +14,6 @@ on:
       - "requirements*.txt"
       - "setup.py"
       - "pyproject.toml"
-      - "pytest.ini"
   release:
     types: [published]
   workflow_dispatch: {} # Allow manual trigger
