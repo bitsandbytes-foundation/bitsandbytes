@@ -328,13 +328,13 @@ class MatMul8bitLt(torch.autograd.Function):
 
         has_grad = False
 
-        if state.has_fp16_weights:
+        if state.has_fp16_weights or state.CB is None:
             has_grad = getattr(B, "grad", None) is not None
             is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
             if is_transposed:
                 B = B.contiguous()
 
-            if (state.is_training and not has_grad) or state.SCB is None:
+            if (state.is_training and not has_grad) or state.CB is None or state.SCB is None:
                 state.reset_grads()
 
                 # 2. Quantize B
