@@ -2793,6 +2793,11 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
             _get_tensor_stream(A),
         )
 
+    # Zero out values from outlier columns across all rows.
+    # The kernel will handle this for outliers themselves, so we can optimize for rows=1.
+    if rows > 1 and outlier_cols is not None:
+        out_row[:, outlier_cols] = 0
+
     return out_row, row_stats, outlier_cols
 
 

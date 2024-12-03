@@ -2145,7 +2145,7 @@ __global__ void kInt8VectorQuant(T * __restrict__ A, int8_t* out, float* rowStat
 
   // For sm50/sm52 and CUDA < 12.2 we need to do the reduction in fp32.
   // Otherwise `T` is `fp16`. This can be removed when Maxwell is dropped.
-#if (__CUDACC_VER_MAJOR__ >= 12 && __CUDACC_VER_MINOR >= 2) || BNB_FP16_AVAILABLE && __CUDACC__
+#if (__CUDACC_VER_MAJOR__ >= 12 && __CUDACC_VER_MINOR >= 2) || BNB_FP16_AVAILABLE
   using TReduction = T;
 #else
   using TReduction = float;
