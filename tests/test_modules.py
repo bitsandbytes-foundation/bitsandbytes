@@ -349,8 +349,8 @@ def test_linear8bitlt_accumulated_gradient():
             l1[0].bias.data.copy_(l2[0].bias.data)
             l1[1].bias.data.copy_(l2[1].bias.data)
         else:
-            torch.testing.assert_close(l1[0].weight.grad, l2[0].weight.grad, rtol=1.05, atol=0.04)
-            torch.testing.assert_close(l1[1].weight.grad, l2[1].weight.grad, rtol=1.00, atol=0.02)
+            assert_all_approx_close(l1[0].weight.grad, l2[0].weight.grad, rtol=1.05, atol=0.04, count=1)
+            assert_all_approx_close(l1[1].weight.grad, l2[1].weight.grad, rtol=1.05, atol=0.04, count=1)
 
 
 @pytest.mark.parametrize("threshold", [0.0, 2.0])

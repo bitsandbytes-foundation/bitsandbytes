@@ -2656,7 +2656,7 @@ def double_quant(
         threshold=threshold,
     )
 
-    if threshold > 0.0:
+    if threshold > 0.0 and outlier_cols is not None:
         # Build a COO tensor including all of the outlier columns.
         outlier_rows = torch.arange(0, A.shape[0], device=A.device, dtype=torch.int32)
         outliers = A[:, outlier_cols]

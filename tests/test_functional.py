@@ -703,17 +703,16 @@ def test_coo_double_quant(dim1, dim2):
         A = torch.randn(dim1, dim2, device="cuda").half()
 
         idx = torch.abs(A) >= threshold
-        CA, _, statsA, _, coo_tensor = F.double_quant(A, threshold=threshold)
+        CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
 
-        if coo_tensor is not None:
+        if outlier_cols is not None:
             A1 = A * idx
-            A2 = torch.zeros_like(A)
-            A2[coo_tensor.rowidx.long(), coo_tensor.colidx.long()] = coo_tensor.values
+            A2 = torch.zeros_like(A) + A1
             torch.testing.assert_close(A1, A2)
 
-            A1 = A * (idx == 0)
+            A[:, outlier_cols] = 0
             A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
-            torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
+            torch.testing.assert_close(A, A2, rtol=0.05, atol=1.5e-2)
 
 
 @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
@@ -728,6 +727,7 @@ def test_coo_int8_vectorwise_quant(dim1, dim2):
 
         if outlier_cols is not None:
             A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
+            A[:, outlier_cols] = 0
             torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
 
 
