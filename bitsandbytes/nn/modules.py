@@ -345,7 +345,7 @@ class Params4bit(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None and device.type in ["cuda", "cpu", "npu", "xpu"] and not self.bnb_quantized:
+        if device is not None and device.type in ["cuda", "cpu", "npu", "xpu", "hpu"] and not self.bnb_quantized:
             return self._quantize(device)
         else:
             if self.quant_state is not None:
