@@ -90,7 +90,7 @@ class NPUBackend(Backend):
         A: torch.Tensor,
         absmax: Optional[torch.Tensor] = None,
         out: Optional[torch.Tensor] = None,
-        blocksize=64,
+        blocksize: Optional[int] = None,
         compress_statistics=False,
         quant_type: Literal["fp4", "nf4"] = "nf4",
         quant_storage=torch.uint8,
