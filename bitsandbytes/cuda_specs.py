@@ -11,7 +11,7 @@ class CUDASpecs:
     cuda_version_tuple: Tuple[int, int]
 
     @property
-    def has_cublaslt(self) -> bool:
+    def has_imma(self) -> bool:
         return self.highest_compute_capability >= (7, 5)
 
 

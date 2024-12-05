@@ -31,6 +31,7 @@ ignore = [
     "E731",  # Do not use lambda
     "F841",  # Local assigned but not used (TODO: enable, these are likely bugs)
     "RUF012",  # Mutable class attribute annotations
+    "ISC001",   # single-line-implicit-string-concatenation incompatible with formatter
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]

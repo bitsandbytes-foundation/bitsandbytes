@@ -1,21 +1,3 @@
-"""
-extract factors the build is dependent on:
-[X] compute capability
-    [ ] TODO: Q - What if we have multiple GPUs of different makes?
-- CUDA version
-- Software:
-    - CPU-only: only CPU quantization functions (no optimizer, no matrix multiple)
-    - CuBLAS-LT: full-build 8-bit optimizer
-    - no CuBLAS-LT: no 8-bit matrix multiplication (`nomatmul`)
-
-evaluation:
-    - if paths faulty, return meaningful error
-    - else:
-        - determine CUDA version
-        - determine capabilities
-        - based on that set the default path
-"""
-
 import ctypes as ct
 import logging
 import os
@@ -37,11 +19,7 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
 
     The library is not guaranteed to exist at the returned path.
     """
-    library_name = f"libbitsandbytes_cuda{cuda_specs.cuda_version_string}"
-    if not cuda_specs.has_cublaslt:
-        # if not has_cublaslt (CC < 7.5), then we have to choose _nocublaslt
-        library_name += "_nocublaslt"
-    library_name = f"{library_name}{DYNAMIC_LIBRARY_SUFFIX}"
+    library_name = f"libbitsandbytes_cuda{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
 
     override_value = os.environ.get("BNB_CUDA_VERSION")
     if override_value:
@@ -65,6 +43,9 @@ class BNBNativeLibrary:
         self._lib = lib
 
     def __getattr__(self, item):
+        return getattr(self._lib, item)
+
+    def __getitem__(self, item):
         return getattr(self._lib, item)
 
 
@@ -114,6 +95,6 @@ python -m bitsandbytes
 
 Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
 to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
-and open an issue at: https://github.com/TimDettmers/bitsandbytes/issues
+and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
 """,
         )

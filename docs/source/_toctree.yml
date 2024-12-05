@@ -32,6 +32,8 @@
     title: Papers, resources & how to cite
 - title: API reference
   sections:
+  - title: Functional
+    local: reference/functional
   - title: Optimizers
     sections:
     - local: reference/optim/optim_overview
@@ -57,7 +59,7 @@
   - title: k-bit quantizers
     sections:
     - local: reference/nn/linear8bit
-      title: 8-bit quantizer
+      title: LLM.int8()
     - local: reference/nn/linear4bit
       title: 4-bit quantizer
     - local: reference/nn/embeddings

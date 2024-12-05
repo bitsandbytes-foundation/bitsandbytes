@@ -23,25 +23,28 @@ Welcome to the installation guide for the `bitsandbytes` library! This document 
 
 ### Supported CUDA Configurations[[cuda-pip]]
 
-The latest version of `bitsandbytes` builds on the following configurations:
+The latest version of the distributed `bitsandbytes` package is built with the following configurations:
 
-| **OS**      | **CUDA Version** | **Compiler**         |
+| **OS**      | **CUDA Toolkit** | **Host Compiler**         |
 |-------------|------------------|----------------------|
 | **Linux**   | 11.7 - 12.3      | GCC 11.4             |
+|             | 12.4 - 12.6      | GCC 13.2             |
+| **Windows** | 11.7 - 12.6      | MSVC 19.42+ (VS2022) |
 |             | 12.4+            | GCC 13.2             |
 | **Windows** | 11.7 - 12.6      | MSVC 19.38+ (VS2022) |
 
-For Linux systems, ensure your hardware meets the following requirements:
+For CUDA systems, ensure your hardware meets the following requirements:
 
-| **Feature**                     | **Hardware Requirement**                                           |
-|---------------------------------|--------------------------------------------------------------------|
-| LLM.int8()                      | NVIDIA Turing (RTX 20 series, T4) or Ampere (RTX 30 series, A4-A100) GPUs |
-| 8-bit optimizers/quantization   | NVIDIA Kepler (GTX 780 or newer)                                    |
+| **Feature**                     | **Minimum Hardware Requirement**                              |
+|---------------------------------|---------------------------------------------------------------|
+| LLM.int8()                      | NVIDIA Turing (RTX 20 series, T4) or newer GPUs               |
+| 8-bit optimizers/quantization   | NVIDIA Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs * |
+| NF4/FP4 quantization            | NVIDIA Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs * |
 
 > [!WARNING]
-> `bitsandbytes >= 0.39.1` no longer includes Kepler binaries in pip installations. This requires [manual compilation using](#cuda-compile) the `cuda11x_nomatmul_kepler` configuration.
-
-To install from PyPI.
+> `bitsandbytes >= 0.45.0` no longer supports Kepler GPUs.
+>
+> Support for Maxwell GPUs is deprecated and will be removed in a future release. For the best results, a Turing generation device or newer is recommended.
 
 ```bash
 pip install bitsandbytes
@@ -79,7 +82,7 @@ For Linux and Windows systems, compiling from source allows you to customize the
 <hfoptions id="source">
 <hfoption id="Linux">
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
 
 For example, to install a compiler and CMake on Ubuntu:
 

@@ -16,7 +16,6 @@ from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
     INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
-    LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
     OutlierTracer,
 )
 
@@ -481,11 +480,8 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
 
-        out = out.to(inp_dtype)
-
-        return out
+        return bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):
@@ -570,11 +566,11 @@ class LinearNF4(Linear4bit):
 class Int8Params(torch.nn.Parameter):
     def __new__(
         cls,
-        data=None,
+        data: Optional[torch.Tensor] = None,
         requires_grad=True,
         has_fp16_weights=False,
-        CB=None,
-        SCB=None,
+        CB: Optional[torch.Tensor] = None,
+        SCB: Optional[torch.Tensor] = None,
     ):
         if data is None:
             data = torch.empty(0)
@@ -588,12 +584,9 @@ class Int8Params(torch.nn.Parameter):
         if self.has_fp16_weights:
             return super().cuda(device)
         else:
-            # we store the 8-bit rows-major weight
-            # we convert this weight to the turning/ampere weight during the first inference pass
+            # We quantize the weight and store in 8bit row-major
             B = self.data.contiguous().half().cuda(device)
-            CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-            del CBt
-            del SCBt
+            CB, SCB, _ = bnb.functional.int8_vectorwise_quant(B)
             self.data = CB
             self.CB = CB
             self.SCB = SCB
@@ -888,7 +881,6 @@ class Linear8bitLt(nn.Linear):
         output_features: int,
         bias=True,
         has_fp16_weights=True,
-        memory_efficient_backward=False,
         threshold=0.0,
         index=None,
         device=None,
@@ -905,13 +897,12 @@ class Linear8bitLt(nn.Linear):
                 Whether the linear class uses the bias term as well.
         """
         super().__init__(input_features, output_features, bias, device)
-        assert not memory_efficient_backward, "memory_efficient_backward is no longer required and the argument is deprecated in 0.37.0 and will be removed in 0.39.0"
         self.state = bnb.MatmulLtState()
         self.index = index
 
         self.state.threshold = threshold
         self.state.has_fp16_weights = has_fp16_weights
-        self.state.memory_efficient_backward = memory_efficient_backward
+
         if threshold > 0.0 and not has_fp16_weights:
             self.state.use_pool = True
 
@@ -928,29 +919,19 @@ class Linear8bitLt(nn.Linear):
         param_from_weight = getattr(self.weight, scb_name)
         # case 2: self.init_8bit_state was called, SCB is in self.state
         param_from_state = getattr(self.state, scb_name)
-        # case 3: SCB is in self.state, weight layout reordered after first forward()
-        layout_reordered = self.state.CxB is not None
 
         key_name = prefix + f"{scb_name}"
+
+        # We now only save in row-major. This format information is stored for backwards compatibility.
         format_name = prefix + "weight_format"
 
         if not self.state.has_fp16_weights:
             if param_from_weight is not None:
                 destination[key_name] = param_from_weight if keep_vars else param_from_weight.detach()
                 destination[format_name] = torch.tensor(0, dtype=torch.uint8)
-            elif param_from_state is not None and not layout_reordered:
-                destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
-                destination[format_name] = torch.tensor(0, dtype=torch.uint8)
             elif param_from_state is not None:
                 destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
-                weights_format = self.state.formatB
-                # At this point `weights_format` is an str
-                if weights_format not in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING:
-                    raise ValueError(f"Unrecognized weights format {weights_format}")
-
-                weights_format = LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING[weights_format]
-
-                destination[format_name] = torch.tensor(weights_format, dtype=torch.uint8)
+                destination[format_name] = torch.tensor(0, dtype=torch.uint8)
 
     def _load_from_state_dict(
         self,
@@ -1008,12 +989,9 @@ class Linear8bitLt(nn.Linear):
 
         out = bnb.matmul(x, self.weight, bias=self.bias, state=self.state)
 
-        if not self.state.has_fp16_weights:
-            if self.state.CB is not None and self.state.CxB is not None:
-                # we converted 8-bit row major to turing/ampere format in the first inference pass
-                # we no longer need the row-major weight
-                del self.state.CB
-                self.weight.data = self.state.CxB
+        if not self.state.has_fp16_weights and self.state.CB is not None:
+            self.weight.data = self.state.CB
+
         return out
 
 
