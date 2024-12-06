@@ -25,6 +25,7 @@ from .cextension import lib
 features = {"multi_backend"}
 supported_torch_devices = {
     "cuda",  # includes ROCm
+    "npu",  # Ascend NPU
     "xpu",  # Intel GPU
     "cpu",
 }
