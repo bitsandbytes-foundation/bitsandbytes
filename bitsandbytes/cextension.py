@@ -25,6 +25,7 @@ import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
 from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_rocm_gpu_arch
+from bitsandbytes.npu_specs import get_npu_specs
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,10 @@ def get_native_library() -> BNBNativeLibrary:
             binary_path = cuda_binary_path
         else:
             logger.warning("Could not find the bitsandbytes %s binary at %r", BNB_BACKEND, cuda_binary_path)
+    npu_specs = get_npu_specs()
+    if npu_specs:
+        binary_path = PACKAGE_DIR / f"libbitsandbytes_npu{DYNAMIC_LIBRARY_SUFFIX}"
+
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
     dll = ct.cdll.LoadLibrary(str(binary_path))
 

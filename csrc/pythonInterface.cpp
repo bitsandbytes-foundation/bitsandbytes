@@ -12,6 +12,9 @@
 #if BUILD_MPS
 // #include <mps_ops.h>
 #endif
+#if BUILD_NPU
+#include <npu_ops.h>
+#endif
 #include <cpu_ops.h>
 
 // We cannot call templated code from C, so we wrap the template in a C compatible call here if necessary.
@@ -599,6 +602,14 @@ extern "C"
 	void cgemm_4bit_inference_naive_fp32(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize)
 	{ gemm_4bit_inference_naive_fp32(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize); }
 
+#endif
+
+#if BUILD_NPU
+	void cdequantize_blockwise_fp32_nf4(uint8_t *A, uint8_t *absmax, uint8_t *out, uint32_t blocksize, uint32_t n, void* stream)
+	{ dequantizeBlockwiseNf4(A, absmax, out, blocksize, n, stream, 1); }
+
+	void cdequantize_blockwise_fp16_nf4(uint8_t *A, uint8_t *absmax, uint8_t *out, uint32_t blocksize, uint32_t n, void* stream)
+	{ dequantizeBlockwiseNf4(A, absmax, out, blocksize, n, stream, 2); }
 #endif
 
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }

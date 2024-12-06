@@ -3,12 +3,15 @@
 [default]
 extend-ignore-re = [
     "@Ther-nul",  # valid Github user
+    "CANN",  # CANN (Compute Architecture for Neural Networks) is a heterogeneous computing architecture for Ascend NPU
 ]
 
 [default.extend-identifiers]
 
 [type.py.extend-words]
 "BA" = "BA"  # used as a commented-out variable in tests
+"cann" = "cann" # cann (Compute Architecture for Neural Networks) is a heterogeneous computing architecture for Ascend NPU
+
 
 [type.cuda.extend-words]
 "subtile" = "subtile"

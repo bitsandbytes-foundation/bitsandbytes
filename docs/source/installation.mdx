@@ -210,6 +210,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 | **Apple Silicon (MPS)** | WIP                        | 3.10+                     | M1/M2 chips                    | Planned    |
 | **Intel CPU** | v2.5.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
 | **Intel GPU** | v2.5.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
+| **Ascend NPU** | 2.1.0+ (`torch_npu`)         | 3.10+                     | Ascend NPU | Experimental |
 
 For each supported backend, follow the respective instructions below:
 
@@ -250,6 +251,13 @@ pip install torch --index-url https://download.pytorch.org/whl/rocm6.1/
 Compatible hardware and functioning `import intel_extension_for_pytorch as ipex` capable environment with Python `3.10` as the minimum requirement.
 
 Please refer to [the official Intel installations instructions](https://intel.github.io/intel-extension-for-pytorch/index.html#installation?platform=cpu&version=v2.4.0%2bcpu&os=linux%2fwsl2) for guidance on how to pip install the necessary `intel_extension_for_pytorch` dependency.
+
+</hfoption>
+<hfoption id="Ascend NPU">
+
+Compatible hardware and functioning `import torch_npu` capable environment with Python `3.10` as the minimum requirement.
+
+Please refer to [the official Ascend installations instructions](https://www.hiascend.com/document/detail/zh/Pytorch/60RC3/configandinstg/instg/insg_0001.html) for guidance on how to pip install the necessary `torch_npu` dependency.
 
 </hfoption>
 <hfoption id="Apple Silicon (MPS)">
@@ -338,6 +346,31 @@ pip install intel_extension_for_pytorch
 pip install -r requirements-dev.txt
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
+
+</hfoption>
+<hfoption id="Ascend NPU">
+
+#### Ascend NPU
+
+> [!TIP]
+> Ascend NPU backend only supports building from source; for now, please follow the instructions below.
+
+
+```
+# Install bitsandbytes from source
+# Clone bitsandbytes repo, Ascend NPU backend is currently enabled on multi-backend-refactor branch
+git clone -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+
+# Install dependencies
+pip install -r requirements-dev.txt
+
+# Compile & install
+apt-get install -y build-essential cmake  # install build tools dependencies, unless present
+cmake -DCOMPUTE_BACKEND=npu -S .
+make
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
+```
+
 
 </hfoption>
 <hfoption id="Apple Silicon (MPS)">
