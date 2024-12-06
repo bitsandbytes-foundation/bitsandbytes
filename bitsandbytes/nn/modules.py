@@ -320,7 +320,6 @@ class Params4bit(torch.nn.Parameter):
             device = f"npu:{device}"
         return self.to(device="npu" if device is None else device, non_blocking=non_blocking)
 
-
     def xpu(self, non_blocking: bool = False):
         return self.to(device="xpu", non_blocking=non_blocking)
 

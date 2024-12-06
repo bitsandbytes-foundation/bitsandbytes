@@ -242,7 +242,7 @@ elseif(BUILD_NPU)
     list(APPEND SRC_FILES ${NPU_FILES})
 
     set(SOC_VERSION "Ascend910B4" CACHE STRING "system on chip type")
-    set(ASCEND_CAN_PACKAGE_PATH $ENV{ASCEND_HOME_PATH} CACHE
+    set(ASCEND_CANN_PACKAGE_PATH $ENV{ASCEND_HOME_PATH} CACHE
         STRING "ASCEND CAN package installation directory"
     )
 
@@ -251,10 +251,10 @@ elseif(BUILD_NPU)
     # file(GLOB KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/csrc/npu_kernels.cpp)
     file(GLOB KERNEL_FILES csrc/npu_kernels.cpp)
 
-    if(EXISTS ${ASCEND_CAN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
-        set(ASCENDC_CMAKE_DIR ${ASCEND_CAN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
-    elseif(EXISTS ${ASCEND_CAN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
-        set(ASCENDC_CMAKE_DIR ${ASCEND_CAN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+    if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+        set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+    elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+        set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
     else()
         message(FATAL_ERROR "ascendc_kernel_cmake does not exist ,please check whether the can package is installed")
     endif()
