@@ -35,7 +35,7 @@ else:
         mask = offsets < n_elements
         x = tl.load(x_ptr + offsets, mask=mask)
         absmax_inv = tl.load(absmax_inv_ptr)
-        output = tl.libdevice.llrint(127.0 * (x * absmax_inv))
+        output = tl.extra.cuda.libdevice.rint(127.0 * (x * absmax_inv))
         tl.store(output_ptr + offsets, output, mask=mask)
 
     def quantize_global(x: torch.Tensor):
@@ -95,7 +95,7 @@ else:
         B = B + (rm[:, None] * stride_bm + rn[None, :] * stride_bn)
         mask = (rm < M)[:, None] & (rn < N)[None, :]
 
-        output = tl.libdevice.llrint(127.0 * (a * absmax_inv))
+        output = tl.extra.cuda.libdevice.rint(127.0 * (a * absmax_inv))
 
         tl.store(B, output, mask=mask)
 
