@@ -200,15 +200,15 @@ def unpack_tensor_to_dict(tensor_data):
     return unpacked_dict
 
 
-def enable_ipex_fusion(linear):
+def enable_ipex_fusion(linear, x):
     from bitsandbytes.backends.cpu_xpu_common import (
         _ipex_cpu_version_prereq,
         _ipex_xpu_version_prereq,
-        ipex_cpu_only,
+        ipex_cpu,
         ipex_xpu,
     )
 
-    if ipex_cpu_only and _ipex_cpu_version_prereq(2, 5):
+    if x.device.type == "cpu" and ipex_cpu and _ipex_cpu_version_prereq(2, 5):
         quant_state = linear.weight.quant_state
         new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
             linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
@@ -221,7 +221,7 @@ def enable_ipex_fusion(linear):
             quant_state.blocksize,
             2,
         )
-    elif ipex_xpu and _ipex_xpu_version_prereq(2, 5):
+    elif x.device.type == "xpu" and ipex_xpu and _ipex_xpu_version_prereq(2, 5):
         quant_state = linear.weight.quant_state
         new_weight = linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
 
