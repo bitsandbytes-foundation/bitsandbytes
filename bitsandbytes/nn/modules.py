@@ -481,7 +481,7 @@ class Linear4bit(nn.Linear):
             and not self.training
             and x.requires_grad == False
         ):
-            enable_ipex_fusion(self)
+            enable_ipex_fusion(self, x)
 
     def forward(self, x: torch.Tensor):
         # Check if ipex fusion can be used

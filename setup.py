@@ -27,8 +27,8 @@ def get_latest_semver_tag():
     tags = subprocess.check_output(["git", "tag"], text=True).splitlines()
     semver_tags = [tag for tag in tags if tag.count(".") == 2 and all(part.isdigit() for part in tag.split("."))]
     if not semver_tags:
-        print("No valid semantic version tags found, use 0.0.1 defaultly")
-        semver_tags = ["0.0.1"]
+        print("No valid semantic version tags found, use 1.0.0 defaultly")
+        semver_tags = ["1.0.0"]
     return sorted(semver_tags, key=lambda s: list(map(int, s.split("."))))[-1]
 
 
