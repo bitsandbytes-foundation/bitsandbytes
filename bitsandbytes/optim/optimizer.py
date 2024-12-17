@@ -303,9 +303,9 @@ class Optimizer8bit(torch.optim.Optimizer):
         config["eps"] = group["eps"]
         config["weight_decay"] = group["weight_decay"]
         config["lr"] = group["lr"]
-        config["alpha"] = group.get("alpha")
-        config["t_alpha"] = group.get("t_alpha")
-        config["t_beta3"] = group.get("t_beta3")
+        config["alpha"] = group.get("alpha", 0.0)
+        config["t_alpha"] = group.get("t_alpha", 0)
+        config["t_beta3"] = group.get("t_beta3", 0)
         config["optim_bits"] = self.args.optim_bits
         config["min_8bit_size"] = self.args.min_8bit_size
         config["percentile_clipping"] = self.args.percentile_clipping
@@ -530,7 +530,7 @@ class Optimizer2State(Optimizer8bit):
                 state["state2"],
                 config["betas"][1],
                 config["betas"][2] if len(config["betas"]) >= 3 else 0.0,
-                config["alpha"],
+                config.get("alpha", 0.0),
                 config["weight_decay"],
                 gnorm_scale,
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
@@ -575,7 +575,7 @@ class Optimizer2State(Optimizer8bit):
                 config["betas"][0],
                 config["betas"][1],
                 config["betas"][2] if len(config["betas"]) >= 3 else 0.0,
-                config["alpha"],
+                config.get("alpha", 0.0),
                 config["eps"],
                 step,
                 config["lr"],
