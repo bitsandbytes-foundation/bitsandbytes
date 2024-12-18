@@ -128,7 +128,6 @@ Refer to the following table if you're using another CUDA Toolkit version.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
-pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cuda -S .
 cmake --build . --config Release
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
