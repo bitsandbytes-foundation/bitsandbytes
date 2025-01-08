@@ -100,9 +100,7 @@ trainer = SFTTrainer(
     model=model,
     train_dataset=dataset,
     peft_config=peft_config,
-    dataset_text_field="text",
-    max_seq_length=max_seq_length,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     args=training_arguments,
 )
 trainer.train()
