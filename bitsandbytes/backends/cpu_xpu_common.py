@@ -6,8 +6,8 @@ import torch
 
 from bitsandbytes.functional import (
     QuantState,
-    get_4bit_type,
     create_dynamic_map,
+    get_4bit_type,
 )
 
 try:
@@ -361,15 +361,14 @@ def quantize_4bit_impl(
         for i in range(len(INT8_QUANT_TABLE)):
             out_uint8[scaled_A > INT8_QUANT_TABLE[i]] = i
 
-    if quant_type != "int8":
+    if quant_type == "int8":
+        out = out_uint8
+        code = torch.Tensor(INT8_QUANT_TABLE, device=A.device)
+    else:
         if out_uint8.size(-1) % 2:
             out_uint8 = torch.nn.functional.pad(out_uint8, (0, 1), value=0)
         out[:] = out_uint8[1::2].bitwise_left_shift(4).bitwise_or_(out_uint8[::2])
-
         code = get_4bit_type(quant_type, device=A.device)
-    else:
-        out = out_uint8
-        code = torch.Tensor(INT8_QUANT_TABLE, device=A.device)
 
     if compress_statistics:
         offset = absmax.mean()
