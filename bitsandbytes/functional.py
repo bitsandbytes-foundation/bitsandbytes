@@ -728,6 +728,27 @@ def quantize_blockwise(
     else:
         quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=A.dtype)
 
+
+    n = A.numel()
+    blocks = n // blocksize
+    blocks += 1 if n % blocksize > 0 else 0
+    rem = n % blocksize
+    has_rem = rem > 0
+    # Scale tensor to [-1, 1]
+    A_reshaped = A.reshape(n)
+    A_com = A_reshaped[: n - rem]
+    A_com_reshaped = A_com.reshape(n // blocksize, blocksize)
+    absmax[: blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=-1)[0]
+    scaled_A = torch.clamp(A_com_reshaped * (1 / absmax[: blocks - has_rem].view(-1, 1)), -1, 1)
+    scaled_A = scaled_A.reshape(-1)
+    if has_rem:
+        absmax[-1] = torch.abs(A_reshaped[n - rem :]).max()
+        scaled_A_rem = torch.clamp(A_reshaped[n - rem :] * (1 / absmax[-1]), -1, 1)
+        scaled_A = torch.cat([scaled_A, scaled_A_rem], dim=0)
+    B = torch.empty(A.shape, dtype=torch.uint8, device=A.device)
+    for i in range(len(code)):
+        B[scaled_A > code[i]] = i
+
     return out, quant_state
 
 

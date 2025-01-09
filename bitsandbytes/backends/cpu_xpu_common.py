@@ -7,6 +7,7 @@ import torch
 from bitsandbytes.functional import (
     QuantState,
     get_4bit_type,
+    create_dynamic_map,
 )
 
 try:
@@ -279,8 +280,9 @@ FP4_QUANT_TABLE = {
     0.8333333: 3,  # 0b0011
 }
 
+INT8_QUANT_TABLE = create_dynamic_map().tolist()
 
-@_maybe_torch_compile
+
 def quantize_4bit_impl(
     A: Tensor,
     absmax: Tensor = None,
@@ -314,7 +316,7 @@ def quantize_4bit_impl(
     tuple(torch.Tensor, torch.Size, torch.dtype, int):
         The quantization state to undo the quantization.
     """
-    if quant_type not in ["nf4", "fp4"]:
+    if quant_type not in ["nf4", "fp4", "int8"]:
         raise NotImplementedError(f"4-bit quantization data type {quant_type} is not implemented for CPU/XPU.")
     if quant_type == "fp4":
         warnings.warn("fp4 quantization is currently slow on CPU/XPU. Please Use nf4 instead for better performance.")
@@ -355,14 +357,35 @@ def quantize_4bit_impl(
         for key, val in FP4_QUANT_TABLE.items():
             out_uint8[abs_scaled_A > key] = val
         out_uint8 += sign.to(torch.uint8) * 8
-    if out_uint8.size(-1) % 2:
-        out_uint8 = torch.nn.functional.pad(out_uint8, (0, 1), value=0)
-    out[:] = out_uint8[1::2].bitwise_left_shift(4).bitwise_or_(out_uint8[::2])
+    elif quant_type == "int8":
+        for i in range(len(INT8_QUANT_TABLE)):
+            out_uint8[scaled_A > INT8_QUANT_TABLE[i]] = i
 
-    code = get_4bit_type(quant_type, device=A.device)
+    if quant_type != "int8":
+        if out_uint8.size(-1) % 2:
+            out_uint8 = torch.nn.functional.pad(out_uint8, (0, 1), value=0)
+        out[:] = out_uint8[1::2].bitwise_left_shift(4).bitwise_or_(out_uint8[::2])
+
+        code = get_4bit_type(quant_type, device=A.device)
+    else:
+        out = out_uint8
+        code = torch.Tensor(INT8_QUANT_TABLE, device=A.device)
 
     if compress_statistics:
-        raise NotImplementedError("bnb_4bit_use_double_quant is not supported yet for CPU/XPU")
+        offset = absmax.mean()
+        absmax -= offset
+        qabsmax, state2 = quantize_4bit_impl(absmax, blocksize=256, quant_type="int8")
+        del absmax
+        state = QuantState(
+            absmax=qabsmax,
+            shape=input_shape,
+            dtype=A.dtype,
+            blocksize=blocksize,
+            code=code,
+            quant_type=quant_type,
+            offset=offset,
+            state2=state2,
+        )
     else:
         state = QuantState(
             absmax=absmax,
@@ -374,6 +397,14 @@ def quantize_4bit_impl(
         )
 
     return out.unsqueeze(0), state
+
+
+def dequant_8bit(A, offset, quant_state):
+    assert A.dtype == torch.uint8
+    absmax = quant_state.code[A.reshape(-1).int()]
+    absmax += offset
+    absmax = (absmax.view(-1, 256) * quant_state.absmax.view(-1, 1)).reshape(quant_state.shape).to(quant_state.dtype)
+    return absmax
 
 
 @_maybe_torch_compile
@@ -438,7 +469,7 @@ def dequantize_4bit_impl(
         )
 
     if quant_state.nested:
-        raise NotImplementedError("bnb_4bit_use_double_quant is not supported yet for CPU/XPU")
+        absmax = dequant_8bit(absmax, quant_state.offset, quant_state.state2)
 
     if ipex_cpu_only and _ipex_cpu_version_prereq(2, 5) and getattr(quant_state, "ipex", False):
         A = torch.ops.ipex_prepack.woq_linear_unpack_weight(A, "nf4", quant_state.shape, 2)

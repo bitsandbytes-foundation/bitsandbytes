@@ -206,10 +206,17 @@ def enable_ipex_fusion(linear, x):
         _ipex_xpu_version_prereq,
         ipex_cpu,
         ipex_xpu,
+        dequant_8bit,
     )
 
+    quant_state = linear.weight.quant_state
+
+    if quant_state.nested:
+        quant_state.absmax = dequant_8bit(quant_state.absmax, quant_state.offset, quant_state.state2)
+        quant_state.nested = False
+        delattr(quant_state, "state2")
+
     if x.device.type == "cpu" and ipex_cpu and _ipex_cpu_version_prereq(2, 5):
-        quant_state = linear.weight.quant_state
         new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
             linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
             "nf4",
@@ -222,7 +229,6 @@ def enable_ipex_fusion(linear, x):
             2,
         )
     elif x.device.type == "xpu" and ipex_xpu and _ipex_xpu_version_prereq(2, 5):
-        quant_state = linear.weight.quant_state
         new_weight = linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
 
         new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
