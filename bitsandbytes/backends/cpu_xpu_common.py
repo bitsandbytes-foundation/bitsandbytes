@@ -401,8 +401,8 @@ def quantize_4bit_impl(
 def dequant_8bit(A, offset, quant_state):
     assert A.dtype == torch.uint8
     absmax = quant_state.code[A.reshape(-1).int()]
-    absmax += offset
     absmax = (absmax.view(-1, 256) * quant_state.absmax.view(-1, 1)).reshape(quant_state.shape).to(quant_state.dtype)
+    absmax += offset
     return absmax
 
 
