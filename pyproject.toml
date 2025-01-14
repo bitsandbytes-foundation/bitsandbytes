@@ -7,6 +7,10 @@ name = "bitsandbytes"
 dynamic = ["version"]
 description = "k-bit optimizers and matrix multiplication routines."
 authors = [{name="Tim Dettmers", email="dettmers@cs.washington.edu"}]
+maintainers = [
+    {name="Titus von Köller", email="titus@huggingface.co"},
+    {name="Matthew Douglas", email="matthew.douglas@huggingface.co"}
+]
 requires-python = ">=3.8"
 readme = "README.md"
 license = {file="LICENSE"}
@@ -26,7 +30,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX :: Linux",
-    "Operating System :: MacOS",
+    # "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: C++",
     "Programming Language :: Python :: Implementation :: CPython",
@@ -38,9 +42,15 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "torch>=1.11,!=1.12.0",
+    "torch~=2.0",
     "numpy>=1.17"
 ]
+
+[project.urls]
+homepage = "https://github.com/bitsandbytes-foundation/bitsandbytes"
+changelog = "https://github.com/bitsandbytes-foundation/bitsandbytes/blob/main/CHANGELOG.md"
+docs = "https://huggingface.co/docs/bitsandbytes/main"
+issues = "https://github.com/bitsandbytes-foundation/bitsandbytes/issues"
 
 [project.optional-dependencies]
 benchmark = ["pandas", "matplotlib"]
@@ -53,20 +63,13 @@ dev = [
     "wheel>=0.42,<1"
 ]
 test = [
-    "einops~=0.6.0",
-    "lion-pytorch==0.0.6",
-    "pytest~=7.4",
+    "einops~=0.8.0",
+    "lion-pytorch==0.2.3",
+    "pytest~=8.3",
     "scipy>=1.10.1,<2; python_version < '3.9'",
     "scipy>=1.11.4,<2; python_version >= '3.9'",
     "transformers>=4.30.1,<5"
 ]
-triton = ["triton~=2.0.0; sys_platform=='linux' and platform_machine=='x86_64'"]
-
-[project.urls]
-homepage = "https://github.com/TimDettmers/bitsandbytes"
-changelog = "https://github.com/TimDettmers/bitsandbytes/blob/main/CHANGELOG.md"
-docs = "https://huggingface.co/docs/bitsandbytes/main"
-issues = "https://github.com/TimDettmers/bitsandbytes/issues"
 
 [tool.setuptools]
 package-data = { "*" = ["libbitsandbytes*.*"] }
