@@ -365,7 +365,7 @@ def quantize_4bit_impl(
 
     if quant_type == "int8":
         out = out_uint8
-        code = torch.Tensor(INT8_QUANT_TABLE, device=A.device)
+        code = torch.Tensor(INT8_QUANT_TABLE).to(A.device)
     else:
         if out_uint8.size(-1) % 2:
             out_uint8 = torch.nn.functional.pad(out_uint8, (0, 1), value=0)
