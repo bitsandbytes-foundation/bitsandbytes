@@ -397,7 +397,7 @@ def quantize_4bit_impl(
             quant_type=quant_type,
         )
 
-    return out.unsqueeze(0), state
+    return out.reshape(-1, 1), state
 
 
 def dequant_8bit(A, offset, quant_state):
@@ -449,12 +449,8 @@ def dequantize_4bit_impl(
     torch.Tensor:
         Dequantized tensor.
     """
-    if A.shape[0] == 1:
-        transpose = False
-        A = A.squeeze(0)
-    elif A.shape[1] == 1:
-        transpose = True
-        A = A.squeeze(1)
+    transpose = True if A.shape[0] == 1 else False
+    A = A.reshape(-1)
 
     if quant_state is None:
         assert absmax is not None and out is not None
