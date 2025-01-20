@@ -58,7 +58,7 @@ docs = ["hf-doc-builder==0.5.0"]
 dev = [
     "bitsandbytes[test]",
     "build>=1.0.0,<2",
-    "ruff==0.6.9",
+    "ruff==0.9.2",
     "pre-commit>=3.5.0,<4",
     "wheel>=0.42,<1"
 ]
