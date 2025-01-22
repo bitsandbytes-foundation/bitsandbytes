@@ -1,3 +1,9 @@
+### 0.45.1
+
+#### Improvements:
+
+- Initial Support Blackwell B100 GPUs, RTX 50 Blackwell series GPUs and Jetson Thor Blackwell
+
 ### 0.43.3
 
 #### Improvements:

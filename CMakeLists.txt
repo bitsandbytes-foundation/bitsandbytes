@@ -7,7 +7,7 @@
 #  - CUDA_VERSION: The expected CUDA version, for sanity checking. The actual version
 #                  is whatever CMake finds on your path.
 #  - COMPUTE_CAPABILITY: Which GPU Arch/Compute codes to provide to NVCC.
-#                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90`
+#                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90;100;120`
 #                        Check your compute capability here: https://developer.nvidia.com/cuda-gpus
 #  - PTXAS_VERBOSE: Pass the `-v` option to the PTX Assembler
 cmake_minimum_required(VERSION 3.22.1)
@@ -121,6 +121,17 @@ if(BUILD_CUDA)
         if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
+        endif()
+        # CUDA 12.7 adds support for Blackwell B100.
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.7")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100)
+        endif()
+
+        # CUDA 12.8 adds support for RTX 50 Blackwell.
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 101 120)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 101 120)
         endif()
     endif()
 
