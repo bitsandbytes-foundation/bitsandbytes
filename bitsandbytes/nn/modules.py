@@ -20,6 +20,7 @@ from bitsandbytes.utils import (
     LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
     OutlierTracer,
     enable_ipex_fusion,
+    reverse_4bit_compress_format,
 )
 
 T = TypeVar("T", bound="torch.nn.Module")
@@ -460,9 +461,9 @@ class Linear4bit(nn.Linear):
                 original_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(
                     self.weight, "nf4", self.weight.quant_state.shape, 2
                 )
-                self.weight.data = original_weight.data
+                self.weight.data = reverse_4bit_compress_format(original_weight.data)
             elif self.weight.device.type == "xpu":
-                self.weight.data = self.weight.data.reshape(1, -1)
+                self.weight.data = reverse_4bit_compress_format(self.weight.data.reshape(1, -1))
 
             self.weight.quant_state.ipex = False
 

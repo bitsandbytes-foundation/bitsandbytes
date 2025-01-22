@@ -155,7 +155,7 @@ class XPUBackend(Backend):
         if blocksize is None:
             blocksize = 64
         assert_on_xpu([A, absmax, out])
-        if quant_type == "nf4":
+        if quant_type == "nf4" and getattr(quant_state, "ipex", False):
             output = torch.ops.torch_ipex.dequantize_4bit(A, "nf4", quant_state.shape, absmax, None, blocksize).t()
         else:
             output = dequantize_4bit_impl(A, quant_state, absmax, out, blocksize, quant_type)

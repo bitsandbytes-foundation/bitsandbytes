@@ -200,18 +200,35 @@ def unpack_tensor_to_dict(tensor_data):
     return unpacked_dict
 
 
+def reverse_4bit_compress_format(weight):
+    out_1 = torch.empty(weight.size(0), dtype=torch.int32, device=weight.device)
+    out_2 = torch.empty(weight.size(0), dtype=torch.int32, device=weight.device)
+    out_1 = (weight & 0xF0) >> 4
+    out_2 = (weight & 0xF) << 4
+    out = out_1 | out_2
+    return out
+
+
 def enable_ipex_fusion(linear, x):
     from bitsandbytes.backends.cpu_xpu_common import (
         _ipex_cpu_version_prereq,
         _ipex_xpu_version_prereq,
+        dequant_8bit,
         ipex_cpu,
         ipex_xpu,
     )
 
+    quant_state = linear.weight.quant_state
+
+    if quant_state.nested:
+        quant_state.absmax = dequant_8bit(quant_state.absmax, quant_state.offset, quant_state.state2)
+        quant_state.nested = False
+        delattr(quant_state, "state2")
+
     if x.device.type == "cpu" and ipex_cpu and _ipex_cpu_version_prereq(2, 5):
-        quant_state = linear.weight.quant_state
+        converted_weight = reverse_4bit_compress_format(linear.weight.data)
         new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
-            linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
+            converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
             "nf4",
             quant_state.shape,  # weight shape
             quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
@@ -222,12 +239,16 @@ def enable_ipex_fusion(linear, x):
             2,
         )
     elif x.device.type == "xpu" and ipex_xpu and _ipex_xpu_version_prereq(2, 5):
-        quant_state = linear.weight.quant_state
-        new_weight = linear.weight.data.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
-
+        converted_weight = reverse_4bit_compress_format(linear.weight.data)
+        new_weight = converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
         new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
         new_zeros = None
         compensation = None
+    else:
+        raise ValueError(
+            "Please check the device and ipex version. The device should be cpu or xpu while ipex version should >= 2.5"
+        )
+
     linear.weight.data = new_weight.data
     linear.weight.quant_state.ipex = True
     linear.weight.quant_state.new_scales = new_scales
