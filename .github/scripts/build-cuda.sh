@@ -5,7 +5,7 @@ declare cuda_version
 
 set -xeuo pipefail
 build_capability="50;52;60;61;70;75;80;86;89;90;100;120"
-remove_for_11_7=";86;89;90;100;120"
+remove_for_11_7=";89;90;100;120"
 remove_for_11_8=";89;90;100;120"
 remove_for_lt_12_7=";100;120"
 [[ "${cuda_version}" == 11.7.* ]] && build_capability=$(sed 's|'"$remove_for_11_7"'||g' <<< "$build_capability")
