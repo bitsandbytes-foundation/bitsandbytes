@@ -5,8 +5,12 @@ declare cuda_version
 
 set -xeuo pipefail
 build_capability="50;52;60;61;70;75;80;86;89;90;100;120"
-[[ "${cuda_version}" == 11.7.* ]] && build_capability=${build_capability%??????}
-[[ "${cuda_version}" == 11.8.* ]] && build_capability=${build_capability%???}
+remove_for_11_7=";86;89;90;100;120"
+remove_for_11_8=";89;90;100;120"
+remove_for_lt_12_7=";100;120"
+[[ "${cuda_version}" == 11.7.* ]] && build_capability=$(sed 's|'"$remove_for_11_7"'||g' <<< "$build_capability")
+[[ "${cuda_version}" == 11.8.* ]] && build_capability=$(sed 's|'"$remove_for_11_8"'||g' <<< "$build_capability")
+[[ "${cuda_version}" < 12.7 ]] && build_capability=$(sed 's|'"$remove_for_lt_12_7"'||g; s|'"${remove_for_lt_12_7#;}"';||g' <<< "$build_capability")
 [[ "${build_os}" = windows-* ]] && python3 -m pip install ninja
 
 if [ "${build_os:0:6}" == ubuntu ]; then
