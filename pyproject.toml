@@ -149,3 +149,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "scipy.stats"
 ignore_missing_imports = true
+
+[tool.setuptools.packages.find]
+exclude = ["tests*"]
