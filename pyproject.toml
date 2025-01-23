@@ -72,8 +72,10 @@ test = [
 ]
 
 [tool.setuptools]
-packages = ["bitsandbytes"]
 package-data = { "*" = ["libbitsandbytes*.*"] }
+
+[tool.setuptools.packages.find]
+include = ["bitsandbytes*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "bitsandbytes.__version__"}
