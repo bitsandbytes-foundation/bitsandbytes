@@ -579,7 +579,8 @@ class MatMul8bitFp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         state = ctx.state
-        CB = state.CB.to(ctx.dtype_A).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+        B = state.CxB if state.CxB is not None else state.CB
+        CB = B.to(ctx.dtype_A).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
         grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
 
         return grad_A, None, None, None, None
