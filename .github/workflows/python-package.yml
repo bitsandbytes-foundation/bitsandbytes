@@ -76,9 +76,9 @@ jobs:
         # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
       - name: Set up Docker multiarch
         if: startsWith(matrix.os, 'ubuntu')
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
         # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@v0.2.19
+      - uses: Jimver/cuda-toolkit@v0.2.20
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
