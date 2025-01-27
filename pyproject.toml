@@ -59,7 +59,7 @@ dev = [
     "bitsandbytes[test]",
     "build>=1.0.0,<2",
     "ruff==0.6.9",
-    "pre-commit>=3.5.0,<4",
+    "pre-commit>=3.5.0,<5",
     "wheel>=0.42,<1"
 ]
 test = [
