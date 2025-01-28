@@ -78,7 +78,7 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         uses: docker/setup-qemu-action@v3
         # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@v0.2.20
+      - uses: Jimver/cuda-toolkit@v0.2.21
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
