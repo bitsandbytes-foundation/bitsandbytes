@@ -23,7 +23,8 @@ else:
 #       consider a separate op without aliased return:
 #           int8_linear_matmul_out(
 #               Tensor A, Tensor B, Tensor out, ScalarType dtype=int32
-#           ) -> None
+#           ) -> ()
+#           return () instead of `None` for compatibility, see here: https://github.com/pytorch/pytorch/issues/125044
 torch.library.define(
     "bitsandbytes::int8_linear_matmul",
     "(Tensor A, Tensor B, Tensor(a!)? out=None, ScalarType dtype=int32) -> Tensor(a!)",
