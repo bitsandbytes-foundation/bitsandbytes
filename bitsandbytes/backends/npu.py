@@ -1,5 +1,5 @@
 import ctypes as ct
-from typing import Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Tuple
 
 import torch
 
@@ -29,7 +29,7 @@ def assert_on_npu(tensors):
 
 
 class NPUBackend(Backend):
-    def double_quant(
+    def int8_double_quant(
         self,
         A: torch.Tensor,
         col_stats: Optional[torch.Tensor] = None,
@@ -37,7 +37,17 @@ class NPUBackend(Backend):
         out_col: Optional[torch.Tensor] = None,
         out_row: Optional[torch.Tensor] = None,
         threshold=0.0,
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        raise NotImplementedError
+
+    def int8_vectorwise_dequant(self, A, stats):
+        return super().int8_vectorwise_dequant(A, stats)
+
+    def int8_vectorwise_quant(
+        self,
+        A: torch.Tensor,
+        threshold=0.0,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         raise NotImplementedError
 
     def transform(
@@ -52,27 +62,21 @@ class NPUBackend(Backend):
     ):
         raise NotImplementedError
 
-    def igemmlt(
+    def int8_linear_matmul(
         self,
         A: torch.Tensor,
         B: torch.Tensor,
-        SA: Tuple[torch.Size, str],
-        SB: Tuple[torch.Size, str],
         out: Optional[torch.Tensor] = None,
-        Sout: Optional[Tuple[torch.Size, str]] = None,
         dtype=torch.int32,
-    ) -> Union[torch.Tensor, Tuple[Optional[Tuple[torch.Tensor, Tuple[torch.Size, str]]]]]:
+    ) -> torch.Tensor:
         raise NotImplementedError
 
-    def mm_dequant(
+    def int8_mm_dequant(
         self,
         A: torch.Tensor,
-        quant_state: Tuple[torch.Size, str],
         row_stats: torch.Tensor,
         col_stats: torch.Tensor,
         out: Optional[torch.Tensor] = None,
-        new_row_stats: Optional[torch.Tensor] = None,
-        new_col_stats: Optional[torch.Tensor] = None,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         raise NotImplementedError
@@ -268,6 +272,8 @@ class NPUBackend(Backend):
         state2: Optional[torch.Tensor],
         beta1: float,
         beta2: float,
+        beta3: float,
+        alpha: float,
         eps: float,
         step: int,
         lr: float,
@@ -293,6 +299,8 @@ class NPUBackend(Backend):
         lr: float,
         state2: Optional[torch.Tensor] = None,
         beta2: float = 0.0,
+        beta3: float = 0.0,
+        alpha: float = 0.0,
         weight_decay: float = 0.0,
         gnorm_scale: float = 1.0,
         unorm_vec: Optional[torch.Tensor] = None,
