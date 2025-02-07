@@ -1,0 +1,34 @@
+# AdEMAMix
+
+[AdEMAMix](https://hf.co/papers/2409.03137) is a variant of the [`Adam`] optimizer.
+
+bitsandbytes also supports paged optimizers which take advantage of CUDAs unified memory to transfer memory from the GPU to the CPU when GPU memory is exhausted.
+
+## AdEMAMix[[api-class]]
+
+[[autodoc]] bitsandbytes.optim.AdEMAMix
+    - __init__
+
+## AdEMAMix8bit
+
+[[autodoc]] bitsandbytes.optim.AdEMAMix8bit
+    - __init__
+
+## AdEMAMix32bit
+
+[[autodoc]] bitsandbytes.optim.AdEMAMix32bit
+    - __init__
+
+## PagedAdEMAMix
+
+[[autodoc]] bitsandbytes.optim.PagedAdEMAMix
+    - __init__
+## PagedAdEMAMix8bit
+
+[[autodoc]] bitsandbytes.optim.PagedAdEMAMix8bit
+    - __init__
+
+## PagedAdEMAMix32bit
+
+[[autodoc]] bitsandbytes.optim.PagedAdEMAMix32bit
+    - __init__

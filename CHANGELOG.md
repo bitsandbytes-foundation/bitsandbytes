@@ -1,3 +1,89 @@
+### v0.45.1
+
+#### Improvements:
+
+* Compatibility for `triton>=3.2.0`
+* Moved package configuration to `pyproject.toml`
+* Build system: initial support for NVIDIA Blackwell B100 GPUs, RTX 50 Blackwell series GPUs and Jetson Thor Blackwell.
+  * Note: Binaries built for these platforms are not included in this release. They will be included in future releases upon the availability of the upcoming CUDA Toolkit 12.7 and 12.8.
+
+#### Bug Fixes:
+* Packaging: wheels will no longer include unit tests. (#1478)
+
+#### Dependencies:
+* Sets the minimum PyTorch version to 2.0.0.
+
+### 0.45.0
+
+This is a significant release, bringing support for LLM.int8() to NVIDIA Hopper GPUs such as the H100.
+
+As part of the compatibility enhancements, we've rebuilt much of the LLM.int8() code in order to simplify for future compatibility and maintenance. We no longer use the col32 or architecture-specific tensor layout formats while maintaining backwards compatibility. We additionally bring performance improvements targeted for inference scenarios.
+
+#### Performance Improvements
+This release includes broad performance improvements for a wide variety of inference scenarios. See [this X thread](https://x.com/Tim_Dettmers/status/1864706051171287069) for a detailed explanation.
+
+#### Breaking Changes
+🤗[PEFT](https://github.com/huggingface/peft) users wishing to merge adapters with 8-bit weights will need to upgrade to `peft>=0.14.0`.
+
+#### Packaging Improvements
+* The size of our wheel has been reduced by ~43.5% from 122.4 MB to 69.1 MB! This results in an on-disk size decrease from ~396MB to ~224MB.
+* Binaries built with CUDA Toolkit 12.6.2 are now included in the PyPI distribution.
+* The CUDA 12.5.0 build has been updated to CUDA Toolkit 12.5.1.
+
+
+#### Deprecations
+* A number of public API functions have been marked for deprecation and will emit `FutureWarning` when used. These functions will become unavailable in future releases. This should have minimal impact on most end-users.
+* The k-bit quantization features are deprecated in favor of blockwise quantization. For all optimizers, using `block_wise=False` is not recommended and support will be removed in a future release.
+* As part of the refactoring process, we've implemented many new 8bit operations. These operations no longer use specialized data layouts.
+
+#### Full Changelog
+
+* refine docs for multi-backend alpha release by @Titus-von-Koeller in #1380
+* README: Replace special Unicode text symbols with regular characters by @akx in #1385
+* Update CI tools & fix typos by @akx in #1386
+* Fix invalid escape sequence warning in Python 3.12 by @oshiteku in #1420
+* [Build] Add CUDA 12.6.2 build; update 12.5.0 to 12.5.1 by @matthewdouglas in #1431
+* LLM.int8() Refactoring: Part 1 by @matthewdouglas in #1401
+
+### 0.44.1
+
+#### Bug fixes:
+* Fix optimizer support for Python <= 3.9 by @matthewdouglas in #1379
+
+### 0.44.0
+
+#### New: AdEMAMix Optimizer
+The [AdEMAMix](https://hf.co/papers/2409.03137) optimizer is a modification to AdamW which proposes tracking two EMAs to better leverage past gradients. This allows for faster convergence with less training data and improved resistance to forgetting.
+
+We've implemented 8bit and paged variations: `AdEMAMix`, `AdEMAMix8bit`, `PagedAdEMAMix`, and `PagedAdEMAMix8bit`. These can be used with a similar API to existing optimizers.
+
+#### Improvements:
+* **8-bit Optimizers**: The block size for all 8-bit optimizers has been reduced from 2048 to 256 in this release. This is a change from the original implementation proposed in [the paper](https://hf.co/papers/2110.02861) which improves accuracy.
+* **CUDA Graphs support**: A fix to enable [CUDA Graphs](https://pytorch.org/blog/accelerating-pytorch-with-cuda-graphs/) capture of kernel functions was made in #1330. This allows for performance improvements with inference frameworks like vLLM. Thanks @jeejeelee!
+
+#### Full Changelog:
+* Embedding4bit and Embedding8bit implementation by @galqiwi in #1292
+* Bugfix: Load correct nocublaslt library variant when BNB_CUDA_VERSION override is set by @matthewdouglas in #1318
+* Enable certain CUDA kernels to accept specified cuda stream by @jeejeelee in #1330
+* Initial support for ppc64le by @mgiessing in #1316
+* Cuda source cleanup , refactor and fixes by @abhilash1910 in #1328
+* Update for VS2022 17.11 compatibility with CUDA < 12.4 by @matthewdouglas in #1341
+* Bump the minor-patch group with 3 updates by @dependabot in #1362
+* Update matplotlib requirement from ~=3.9.1 to ~=3.9.2 in the major group by @dependabot in #1361
+* docs: add internal reference to multi-backend guide by @Titus-von-Koeller in #1352
+* Add move_to_device kwarg to the optimizer's load_state_dict by @koute in #1344
+* Add AdEMAMix optimizer by @matthewdouglas in #1360
+* Change 8bit optimizer blocksize 2048->256; additional bf16 support by @matthewdouglas in #1365
+
+### 0.43.3
+
+#### Improvements:
+
+- FSDP: Enable loading prequantized weights with bf16/fp16/fp32 quant_storage
+    - Background: This update, linked to [Transformer PR #32276](https://github.com/huggingface/transformers/pull/32276), allows loading prequantized weights with alternative storage formats. Metadata is tracked similarly to `Params4bit.__new__` post PR #970. It supports models exported with non-default `quant_storage`, such as [this NF4 model with BF16 storage](https://huggingface.co/hugging-quants/Meta-Llama-3.1-405B-BNB-NF4-BF16).
+    - Special thanks to @winglian and @matthewdouglas for enabling FSDP+QLoRA finetuning of Llama 3.1 405B on a single 8xH100 or 8xA100 node with as little as 256GB system RAM.
+
+
 ### 0.43.2
 
 This release is quite significant as the QLoRA bug fix big implications for higher `seqlen` and batch sizes.

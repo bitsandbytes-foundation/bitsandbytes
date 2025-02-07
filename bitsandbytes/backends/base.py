@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Tuple
 
 import torch
 
@@ -9,17 +9,17 @@ from bitsandbytes.utils import QuantState
 class Backend(ABC):
     """Base class for devices backends that will implement their own 8bits and 4bits functions."""
 
-    @abstractmethod
-    def double_quant(
-        self,
-        A: torch.Tensor,
-        col_stats: Optional[torch.Tensor] = None,
-        row_stats: Optional[torch.Tensor] = None,
-        out_col: Optional[torch.Tensor] = None,
-        out_row: Optional[torch.Tensor] = None,
-        threshold=0.0,
-    ):
-        raise NotImplementedError
+    # @abstractmethod
+    # def double_quant(
+    #     self,
+    #     A: torch.Tensor,
+    #     col_stats: Optional[torch.Tensor] = None,
+    #     row_stats: Optional[torch.Tensor] = None,
+    #     out_col: Optional[torch.Tensor] = None,
+    #     out_row: Optional[torch.Tensor] = None,
+    #     threshold=0.0,
+    # ):
+    #     raise NotImplementedError
 
     @abstractmethod
     def transform(
@@ -34,32 +34,32 @@ class Backend(ABC):
     ):
         raise NotImplementedError
 
-    @abstractmethod
-    def igemmlt(
-        self,
-        A: torch.Tensor,
-        B: torch.Tensor,
-        SA: Tuple[torch.Size, str],
-        SB: Tuple[torch.Size, str],
-        out: Optional[torch.Tensor] = None,
-        Sout: Optional[Tuple[torch.Size, str]] = None,
-        dtype=torch.int32,
-    ) -> Union[torch.Tensor, Tuple[Optional[Tuple[torch.Tensor, Tuple[torch.Size, str]]]]]:
-        raise NotImplementedError
+    # @abstractmethod
+    # def igemmlt(
+    #     self,
+    #     A: torch.Tensor,
+    #     B: torch.Tensor,
+    #     SA: Tuple[torch.Size, str],
+    #     SB: Tuple[torch.Size, str],
+    #     out: Optional[torch.Tensor] = None,
+    #     Sout: Optional[Tuple[torch.Size, str]] = None,
+    #     dtype=torch.int32,
+    # ) -> Union[torch.Tensor, Tuple[Optional[Tuple[torch.Tensor, Tuple[torch.Size, str]]]]]:
+    #     raise NotImplementedError
 
-    @abstractmethod
-    def mm_dequant(
-        self,
-        A: torch.Tensor,
-        quant_state: Tuple[torch.Size, str],
-        row_stats: torch.Tensor,
-        col_stats: torch.Tensor,
-        out: Optional[torch.Tensor] = None,
-        new_row_stats: Optional[torch.Tensor] = None,
-        new_col_stats: Optional[torch.Tensor] = None,
-        bias: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        raise NotImplementedError
+    # @abstractmethod
+    # def mm_dequant(
+    #     self,
+    #     A: torch.Tensor,
+    #     quant_state: Tuple[torch.Size, str],
+    #     row_stats: torch.Tensor,
+    #     col_stats: torch.Tensor,
+    #     out: Optional[torch.Tensor] = None,
+    #     new_row_stats: Optional[torch.Tensor] = None,
+    #     new_col_stats: Optional[torch.Tensor] = None,
+    #     bias: Optional[torch.Tensor] = None,
+    # ) -> torch.Tensor:
+    #     raise NotImplementedError
 
     @abstractmethod
     def extract_outliers(

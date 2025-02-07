@@ -29,6 +29,7 @@ TRANSPOSE_VALS = [(False, True), (False, False)]
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=describe_dtype)
 @pytest.mark.parametrize("req_grad", BOOLEAN_TUPLES, ids=id_formatter("req_grad"))
 @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
+@pytest.mark.deprecated
 def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad: Tuple[bool, bool], transpose: Tuple[bool, bool]):
     if dim2 > 0:
         dim2 = dim2 - (dim2 % 16)
@@ -200,10 +201,10 @@ def test_matmul(dim1, dim2, dim3, dim4, funcs, dtype, req_grad: Tuple[bool, bool
 
 
 @pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
-@pytest.mark.parametrize("dim1", get_test_dims(16, 64, n=1), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", [*get_test_dims(32, 96, n=1), 0], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", get_test_dims(32, 96, n=1), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", get_test_dims(32, 96, n=1), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", [40], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [64, 0], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", [32], ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", [48], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("decomp", [0.0, 6.0], ids=id_formatter("decomp"))
 @pytest.mark.parametrize(
     "funcs",
@@ -251,13 +252,8 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, dec
             if not has_fp16_weights:
                 if not transpose[0] and not transpose[1]:
                     B2 = B2.t().contiguous()
-                (
-                    state.CB,
-                    CBt,
-                    state.SCB,
-                    SCBt,
-                    coo_tensorB,
-                ) = bnb.functional.double_quant(B2.to(torch.float16))
+
+                state.CB, state.SCB, _ = bnb.functional.int8_vectorwise_quant(B2.to(torch.float16))
                 B2 = state.CB
 
             if not transpose[0] and transpose[1]:
@@ -315,11 +311,13 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, dec
                     else:
                         assert torch.abs(gradB1).sum() == 0.0
                         assert torch.abs(gradB2).sum() == 0.0
-                    idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
 
-                    assert (idx == 0).sum().item() <= n * 0.1
+                    idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
+                    assert (idx == 0).sum().item() <= n * 0.10
+
                     idx = torch.isclose(gradB1, gradB2, atol=0.10, rtol=0.3)
                     assert (idx == 0).sum().item() <= n * 0.02
+
                     torch.testing.assert_close(gradB1, gradB2, atol=0.18, rtol=0.3)
 
                 if req_grad[2]:

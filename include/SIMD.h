@@ -41,7 +41,7 @@ template <> struct InstrFloatTraits<Scalar, double>
 }
 }
 
-#if !defined(__aarch64__)
+#if !defined(__aarch64__) && !defined(__powerpc64__)
 #ifdef USE_SSE42
 #ifndef _MSC_VER
 #include <popcntintrin.h>

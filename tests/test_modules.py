@@ -1,3 +1,4 @@
+import inspect
 import math
 
 import einops
@@ -17,20 +18,18 @@ class MockArgs:
 
 
 class MLP8bit(torch.nn.Module):
-    def __init__(self, dim1, dim2, has_fp16_weights=True, memory_efficient_backward=False, threshold=0.0):
+    def __init__(self, dim1, dim2, has_fp16_weights=True, threshold=0.0):
         super().__init__()
         self.fc1 = bnb.nn.Linear8bitLt(
             dim1,
             dim2,
             has_fp16_weights=has_fp16_weights,
-            memory_efficient_backward=memory_efficient_backward,
             threshold=threshold,
         )
         self.fc2 = bnb.nn.Linear8bitLt(
             dim2,
             dim1,
             has_fp16_weights=has_fp16_weights,
-            memory_efficient_backward=memory_efficient_backward,
             threshold=threshold,
         )
 
@@ -311,7 +310,7 @@ def test_linear8bitlt_inference(threshold):
         b1 = torch.randn(16, 8, 32, device="cuda").half()
         o1 = l1(b1)
         if i == 1:
-            assert l1.state.CxB is not None
+            assert l1.state.CB is not None
 
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
@@ -328,7 +327,7 @@ def test_linear8bitlt_accumulated_gradient():
 
     acc_steps = 10
 
-    for i in range(10):
+    for i in range(15):
         b1 = torch.randn(16, 8, 32, device="cuda").half()
         o1 = l1(b1)
         o2 = l2(b1)
@@ -337,8 +336,8 @@ def test_linear8bitlt_accumulated_gradient():
         loss1.backward()
         loss2.backward()
         if i == 2:
-            assert l1[0].state.CxB is not None
-            assert l1[1].state.CxB is not None
+            assert l1[0].state.CB is not None
+            assert l1[1].state.CB is not None
 
         if i > 0 and i % acc_steps == 0:
             opt1.step()
@@ -353,20 +352,18 @@ def test_linear8bitlt_accumulated_gradient():
             l1[0].bias.data.copy_(l2[0].bias.data)
             l1[1].bias.data.copy_(l2[1].bias.data)
         else:
-            torch.testing.assert_close(l1[0].weight.grad, l2[0].weight.grad, atol=1e-3, rtol=1e-3)
-            torch.testing.assert_close(l1[1].weight.grad, l2[1].weight.grad, atol=1e-3, rtol=1e-3)
+            assert_all_approx_close(l1[0].weight.grad, l2[0].weight.grad, rtol=1.05, atol=0.04, count=1)
+            assert_all_approx_close(l1[1].weight.grad, l2[1].weight.grad, rtol=1.05, atol=0.04, count=1)
 
 
 @pytest.mark.parametrize("threshold", [0.0, 2.0])
-@pytest.mark.parametrize("memory_efficient_backward", [False])
-def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
+def test_linear8bitlt_no_fp16_weights(threshold):
     l1 = (
         bnb.nn.Linear8bitLt(
             32,
             64,
             threshold=threshold,
             has_fp16_weights=False,
-            memory_efficient_backward=memory_efficient_backward,
         )
         .cuda()
         .half()
@@ -424,7 +421,6 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
             64,
             threshold=threshold,
             has_fp16_weights=False,
-            memory_efficient_backward=memory_efficient_backward,
         )
         .half()
         .to("cuda")
@@ -448,7 +444,6 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
         64,
         threshold=threshold,
         has_fp16_weights=False,
-        memory_efficient_backward=memory_efficient_backward,
     )
     w1, w2 = mlp.fc1.weight.clone().cuda(), mlp.fc2.weight.clone().cuda()  # grab weights before quantization,
     mlp = mlp.cuda().half()  # and this line triggers quantization
@@ -467,21 +462,20 @@ def test_linear8bitlt_no_fp16_weights(threshold, memory_efficient_backward):
     assert mlp.fc1.weight.device.type == "cuda"
     assert mlp.fc2.weight.device.type == "cuda"
 
-    if memory_efficient_backward:
-        b1 = torch.randn(16, 8, 32, device="cuda", requires_grad=True, dtype=torch.half)
-        o1 = mlp(b1)
-        assert o1.dtype == torch.float16
-        assert o1.requires_grad
-        grad_proj = torch.randn_like(o1)
+    b1 = torch.randn(16, 8, 32, device="cuda", requires_grad=True, dtype=torch.half)
+    o1 = mlp(b1)
+    assert o1.dtype == torch.float16
+    assert o1.requires_grad
+    grad_proj = torch.randn_like(o1)
 
-        mlp.zero_grad()
-        (o1 * grad_proj).sum().backward()
-        grad_ref = grad_proj.flatten(2) @ w2.half() @ w1.half()
-        scale = grad_ref.abs().mean()
+    mlp.zero_grad()
+    (o1 * grad_proj).sum().backward()
+    grad_ref = grad_proj.flatten(2) @ w2.half() @ w1.half()
+    scale = grad_ref.abs().mean()
 
-        torch.testing.assert_close(b1.grad, grad_ref, rtol=0, atol=0.05 * scale)
-        idx = torch.isclose(b1.grad, grad_ref, atol=0.01 * scale, rtol=0.1)
-        assert (idx == 0).sum().item() <= b1.numel() * 0.005
+    torch.testing.assert_close(b1.grad, grad_ref, rtol=0, atol=0.05 * scale)
+    idx = torch.isclose(b1.grad, grad_ref, atol=0.01 * scale, rtol=0.1)
+    assert (idx == 0).sum().item() <= b1.numel() * 0.005
 
 
 @pytest.mark.parametrize(
@@ -531,22 +525,24 @@ module_dict = {
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("module", module_dict.values(), ids=module_dict.keys())
 def test_kbit_backprop(module):
-    b = 17
-    dim1 = 37
-    dim2 = 83
+    b = 16
+    dim1 = 36
+    dim2 = 84
+    # dim1 = 37
+    # dim2 = 83
 
-    ref = nn.Sequential(*[torch.nn.Linear(dim1, dim2), torch.nn.Linear(dim2, 10)])
-    ref[1].weight.requires_grad = False
+    ref = nn.Sequential(*[torch.nn.Linear(dim1, dim2), torch.nn.Linear(dim2, 128)])
+    # ref[1].weight.requires_grad = False
     torch.nn.init.kaiming_normal_(ref[0].weight)
     torch.nn.init.kaiming_normal_(ref[1].weight)
-    kbit = nn.Sequential(*[torch.nn.Linear(dim1, dim2), module(dim2, 10)])
+    kbit = nn.Sequential(*[torch.nn.Linear(dim1, dim2), module(dim2, 128)])
     kbit[0].weight.detach().copy_(ref[0].weight)
     kbit[1].weight.detach().copy_(ref[1].weight)
     kbit[0].bias.detach().copy_(ref[0].bias)
     kbit[1].bias.detach().copy_(ref[1].bias)
     ref = ref.half().cuda()
     kbit = kbit.half().cuda()
-    kbit = kbit.half().to("cuda")
+    # kbit = kbit.half().to("cuda")
 
     errs1 = []
     errs2 = []
@@ -584,10 +580,6 @@ def test_kbit_backprop(module):
 
         assert kbit[0].weight.grad is None or kbit[0].weight.grad.sum().item() == 0
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
-    # print('out', sum(errs1)/len(errs1))
-    # print('grad', sum(errs2)/len(errs2))
-    # print('rel out', sum(relerrs1)/len(relerrs1))
-    # print('rel grad', sum(relerrs2)/len(relerrs2))
 
 
 def test_fp8linear():
@@ -620,7 +612,97 @@ def test_fp8linear():
     assert bgraderr < 0.00002
 
 
-def test_4bit_warnings(requires_cuda):
+@pytest.mark.parametrize("embedding_dim", [64, 65])
+@pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
+@pytest.mark.parametrize(
+    "embedding_class,quant_storage",
+    [
+        (bnb.nn.Embedding8bit, None),
+        (bnb.nn.EmbeddingFP4, torch.uint8),
+        (bnb.nn.EmbeddingFP4, torch.float32),
+        (bnb.nn.EmbeddingNF4, torch.uint8),
+        (bnb.nn.EmbeddingNF4, torch.float32),
+    ],
+    ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
+)
+def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_storage):
+    num_embeddings = 128
+
+    src_weight = (torch.randn((num_embeddings, embedding_dim), dtype=torch.float32) > 0).to(
+        torch.float32
+    ) * 2 - 1  # Embeddings filled with {-1, 1} values. It should compress losslessly
+
+    emb_base = nn.Embedding(
+        num_embeddings=num_embeddings,
+        embedding_dim=embedding_dim,
+        _freeze=True,
+        _weight=src_weight,
+    )
+    if embedding_class is bnb.nn.Embedding8bit:
+        e = embedding_class(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+    else:
+        e = embedding_class(num_embeddings=num_embeddings, embedding_dim=embedding_dim, quant_storage=quant_storage)
+
+    e.load_state_dict(emb_base.state_dict())
+
+    emb_base.cuda()
+    e.cuda()
+
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device="cuda")
+
+    torch.testing.assert_close(
+        actual=e(input_tokens),
+        expected=emb_base(input_tokens),
+    )
+
+
+@pytest.mark.parametrize("embedding_dim", [64, 65])
+@pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
+@pytest.mark.parametrize(
+    "embedding_class,quant_storage",
+    [
+        (bnb.nn.Embedding8bit, None),
+        (bnb.nn.EmbeddingFP4, torch.uint8),
+        (bnb.nn.EmbeddingFP4, torch.float32),
+        (bnb.nn.EmbeddingNF4, torch.uint8),
+        (bnb.nn.EmbeddingNF4, torch.float32),
+    ],
+    ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
+)
+def test_embedding_error(embedding_class, input_shape, embedding_dim, quant_storage):
+    is_8bit = embedding_class is bnb.nn.Embedding8bit
+
+    num_embeddings = 128
+
+    src_weight = torch.rand((num_embeddings, embedding_dim), dtype=torch.float32)
+
+    emb_base = nn.Embedding(
+        num_embeddings=num_embeddings,
+        embedding_dim=embedding_dim,
+        _freeze=True,
+        _weight=src_weight,
+    )
+    if is_8bit:
+        e = embedding_class(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+    else:
+        e = embedding_class(num_embeddings=num_embeddings, embedding_dim=embedding_dim, quant_storage=quant_storage)
+
+    e.load_state_dict(emb_base.state_dict())
+
+    emb_base.cuda()
+    e.cuda()
+
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device="cuda")
+
+    torch.testing.assert_close(
+        actual=e(input_tokens),
+        expected=emb_base(input_tokens),
+        atol=0.05 if is_8bit else 0.20,
+        rtol=0.0,
+    )
+
+
+def test_4bit_linear_warnings():
     dim1 = 64
 
     with pytest.warns(UserWarning, match=r"inference or training"):
@@ -646,3 +728,58 @@ def test_4bit_warnings(requires_cuda):
         net(inp)
 
     assert len(record) == 2
+
+
+def test_4bit_embedding_warnings():
+    num_embeddings = 128
+    default_block_size = 64
+
+    with pytest.warns(UserWarning, match=r"inference."):
+        net = bnb.nn.Embedding4bit(num_embeddings=num_embeddings, embedding_dim=default_block_size + 1)
+        net.cuda()
+        inp = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
+        net(inp)
+
+
+def test_4bit_embedding_weight_fsdp_fix():
+    num_embeddings = 64
+    embedding_dim = 32
+
+    module = bnb.nn.Embedding4bit(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+
+    module.cuda()
+
+    module.weight.quant_state = None
+
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
+
+    module(input_tokens)
+
+    assert module.weight.quant_state is not None
+
+
+def test_4bit_linear_weight_fsdp_fix():
+    inp_size = 64
+    out_size = 32
+
+    module = bnb.nn.Linear4bit(inp_size, out_size)
+
+    module.cuda()
+
+    module.weight.quant_state = None
+
+    input_tensor = torch.randn((1, inp_size), device="cuda")
+
+    module(input_tensor)
+
+    assert module.weight.quant_state is not None
+
+
+def test_embedding_not_implemented_error():
+    with pytest.raises(NotImplementedError):
+        emb = bnb.nn.Embedding4bit(32, 32)
+        emb.state_dict()
+
+    with pytest.raises(NotImplementedError):
+        emb = bnb.nn.Embedding8bit(32, 32)
+        emb.state_dict()

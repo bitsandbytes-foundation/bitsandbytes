@@ -4,11 +4,10 @@
 #   For MSVC: `cmake -B build . && cmake --build build --config Release`
 # You can also use the following options and variables
 #  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, `hip`, `mps` or `npu` to select the backend
-#  - NO_CUBLASLT: Default OFF, will skip building/linking CUBLASLT support
 #  - CUDA_VERSION: The expected CUDA version, for sanity checking. The actual version
 #                  is whatever CMake finds on your path.
 #  - COMPUTE_CAPABILITY: Which GPU Arch/Compute codes to provide to NVCC.
-#                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90`
+#                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90;100;120`
 #                        Check your compute capability here: https://developer.nvidia.com/cuda-gpus
 #  - PTXAS_VERBOSE: Pass the `-v` option to the PTX Assembler
 cmake_minimum_required(VERSION 3.22.1)
@@ -49,7 +48,6 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
     if(APPLE)
         message(FATAL_ERROR "CUDA is not supported on macOS" )
     endif()
-    option(NO_CUBLASLT "Disable CUBLAS" OFF)
     set(BUILD_CUDA ON)
     set(BUILD_HIP OFF)
     set(BUILD_MPS OFF)
@@ -62,7 +60,6 @@ elseif(${COMPUTE_BACKEND} STREQUAL "hip")
     set(BUILD_CUDA OFF)
     set(BUILD_HIP ON)
     set(BUILD_MPS OFF)
-    message(STATUS "NO_CUBLASLT := ${NO_CUBLASLT}")
 elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
@@ -144,6 +141,17 @@ if(BUILD_CUDA)
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
         endif()
+        # CUDA 12.7 adds support for Blackwell B100.
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.7")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100)
+        endif()
+
+        # CUDA 12.8 adds support for RTX 50 Blackwell.
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 101 120)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 101 120)
+        endif()
     endif()
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
@@ -185,9 +193,6 @@ if(BUILD_CUDA)
     list(APPEND SRC_FILES ${CUDA_FILES})
 
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
-    if(NO_CUBLASLT)
-        string(APPEND BNB_OUTPUT_NAME "_nocublaslt")
-    endif()
     add_compile_definitions(BUILD_CUDA)
 elseif(BUILD_HIP)
     enable_language(HIP)
@@ -292,13 +297,7 @@ target_include_directories(bitsandbytes PUBLIC csrc include)
 
 if(BUILD_CUDA)
     target_include_directories(bitsandbytes PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-    target_link_libraries(bitsandbytes PUBLIC CUDA::cudart CUDA::cublas CUDA::cusparse)
-    if(NO_CUBLASLT)
-        target_compile_definitions(bitsandbytes PUBLIC NO_CUBLASLT)
-    else()
-        target_link_libraries(bitsandbytes PUBLIC CUDA::cublasLt)
-    endif()
-
+    target_link_libraries(bitsandbytes PUBLIC CUDA::cudart CUDA::cublas CUDA::cublasLt CUDA::cusparse)
     set_target_properties(bitsandbytes
         PROPERTIES
             CUDA_SEPARABLE_COMPILATION ON

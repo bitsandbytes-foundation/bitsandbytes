@@ -185,9 +185,9 @@ class MatMulFP8Global(torch.autograd.Function):
 
 class SwitchBackBnb(torch.autograd.Function):
     @staticmethod
-    # TODO: the B008 on the line below is a likely bug; the current implementation will
-    #       have each SwitchBackBnb instance share a single MatmulLtState instance!!!
-    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState()):  # noqa: B008
+    def forward(ctx, A, B, out=None, bias=None, state: Optional[MatmulLtState] = None):
+        state = state or MatmulLtState()
+
         # default to pytorch behavior if inputs are empty
         ctx.is_empty = False
         if prod(A.shape) == 0:
@@ -205,7 +205,6 @@ class SwitchBackBnb(torch.autograd.Function):
         # 3. Matmul
         # 4. Mixed-precision decomposition matmul
         # 5. Save state
-        formatB = state.formatB
         input_shape = A.shape
         if state.outlier_pool is None:
             state.outlier_pool = GlobalOutlierPooler.get_instance()
@@ -217,25 +216,21 @@ class SwitchBackBnb(torch.autograd.Function):
         # 1. Quantize A
         if len(A.shape) == 3:
             A = A.view(-1, A.shape[-1]).contiguous()
-        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
+        CA, CAt, SCA, SCAt, outlier_cols = F.int8_double_quant(A.to(torch.float16), threshold=state.threshold)
 
-        if state.threshold > 0.0 and coo_tensorA is not None:
+        if state.threshold > 0.0 and outlier_cols is not None:
             if state.has_fp16_weights:
-                idx = torch.unique(coo_tensorA.colidx).long()
+                idx = outlier_cols
                 CA[:, idx] = 0
-                CAt[:, idx] = 0
                 subA = A[:, idx]
                 state.subB = B[:, idx].t().contiguous()
                 state.idx = idx
             else:
-                if state.CxB is None:
-                    # B in in 8-bit row-major, we can transform it back to 16-bit to extract outlier dimensions
-                    # we also need to convert it to the turing/ampere format
-                    state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
+                if state.SB is None:
+                    state.SB = (state.CB.shape, "row")
         else:
-            # print('A shape', A.shape)
-            if not state.has_fp16_weights and state.CxB is None:
-                state.CxB, state.SB = F.transform(state.CB, to_order=formatB)
+            if not state.has_fp16_weights and state.SB is None:
+                state.SB = (state.CB.shape, "row")
             subA = None
 
         # 2. Quantize B
@@ -246,34 +241,26 @@ class SwitchBackBnb(torch.autograd.Function):
             if is_transposed:
                 B = B.contiguous()
 
-            if (state.is_training and not has_grad) or state.CxB is None:
+            if (state.is_training and not has_grad) or state.SB is None:
                 state.reset_grads()
                 (
-                    CB,
+                    state.CB,
                     state.CBt,
                     state.SCB,
                     state.SCBt,
-                    coo_tensorB,
-                ) = F.double_quant(B.to(torch.float16))
-                state.CxB, state.SB = F.transform(CB, to_order=formatB)
+                    _,
+                ) = F.int8_double_quant(B.to(torch.float16))
+                state.SB = (state.CB.shape, "row")
         else:
             has_grad = False
 
-        if coo_tensorA is not None and not state.has_fp16_weights:
+        if outlier_cols is not None and not state.has_fp16_weights:
             # extract outliers
-
-            outlier_idx = torch.unique(coo_tensorA.colidx)
-            state.idx = outlier_idx
-            # state.outlier_pool.add_outliers(outlier_idx, A.shape[-1])
-            # if state.use_pool and state.outlier_pool.model_dim == A.shape[-1]:
-            #    # do not use pool for 2nd FFN layer
-            #    state.idx = state.outlier_pool.get_current_outlier_idx().to(A.device)
-            # else:
-            #    state.idx = outlier_idx
-            outliers = F.extract_outliers(state.CxB, state.SB, state.idx.int())
+            state.idx = outlier_cols
+            outliers = state.CB[:, state.idx.long()].clone()
             state.subB = (outliers * state.SCB.view(-1, 1) / 127.0).t().contiguous().to(A.dtype)
             CA[:, state.idx.long()] = 0
-            CAt[:, state.idx.long()] = 0
+
             subA = A[:, state.idx.long()]
 
         shapeB = state.SB[0]
@@ -284,25 +271,22 @@ class SwitchBackBnb(torch.autograd.Function):
             output_shape = (input_shape[0], shapeB[0])
 
         # 3. Matmul
-        C32A, SA = F.transform(CA, "col32")
-        out32, Sout32 = F.igemmlt(C32A, state.CxB, SA, state.SB)
+        out32 = F.int8_linear_matmul(CA, state.CB)
         # we apply the fused bias here
 
         if bias is None or bias.dtype == torch.float16:
-            output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=bias)
-            output = output.to(A.dtype)
+            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=bias).to(A.dtype)
         else:  # apply bias separately
-            output = F.mm_dequant(out32, Sout32, SCA, state.SCB, bias=None)
-            output = output.to(A.dtype).add_(bias)
+            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=None).to(A.dtype)
+            output.add_(bias)
 
         # 4. Mixed-precision decomposition matmul
-        if coo_tensorA is not None and subA is not None:
+        if outlier_cols is not None and subA is not None:
             output += torch.matmul(subA, state.subB)
 
         # 5. Save state
         ctx.state = state
 
-        ctx.formatB = formatB
         ctx.grad_shape = input_shape
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
@@ -322,10 +306,10 @@ class SwitchBackBnb(torch.autograd.Function):
         if ctx.is_empty:
             bias_grad = None if ctx.bias is None else torch.zeros_like(ctx.bias)
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
+
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
         CAt, subA, A = ctx.tensors
         SCAt, idx = ctx.tensor_states
-        formatB = ctx.formatB
         state = ctx.state
         grad_A = grad_B = grad_bias = None
 
@@ -337,7 +321,7 @@ class SwitchBackBnb(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        Cgrad, Cgradt, SCgrad, SCgradt, coo_tensor = F.double_quant(grad_output.to(torch.float16))
+        Cgrad, Cgradt, SCgrad, SCgradt, outlier_cols = F.int8_double_quant(grad_output.to(torch.float16))
 
         if req_gradB:
             # print('back A shape', A.shape)
@@ -345,16 +329,7 @@ class SwitchBackBnb(torch.autograd.Function):
             grad_B = torch.matmul(grad_output.t(), A)
 
         if req_gradA:
-            if state.CBt is not None:
-                C32grad, Sgrad = F.transform(Cgrad, "col32")
-                if state.CxBt is None:
-                    state.CxBt, state.SBt = F.transform(state.CBt, to_order=formatB, transpose=True)
-                # print('back B shape', state.CxBt.shape)
-                # print('back grad shape', C32grad.shape)
-                gradA32, SgradA32 = F.igemmlt(C32grad, state.CxBt, Sgrad, state.SBt)
-                grad_A = F.mm_dequant(gradA32, SgradA32, SCgrad, state.SCBt).view(ctx.grad_shape).to(ctx.dtype_A)
-
-            elif state.CB is not None:
+            if state.CB is not None:
                 CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
                 grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
             else:
