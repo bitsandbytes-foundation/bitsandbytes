@@ -93,6 +93,11 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
 
 
 def get_native_library() -> BNBNativeLibrary:
+    from bitsandbytes.backends.cpu_xpu_common import ipex_cpu, ipex_xpu
+
+    if ipex_cpu or ipex_xpu:
+        return None
+
     binary_path = PACKAGE_DIR / f"libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}"
     cuda_specs = get_cuda_specs()
     if cuda_specs:
@@ -130,8 +135,8 @@ try:
     lib = get_native_library()
 except Exception as e:
     lib = None
+    logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
     if torch.cuda.is_available():
-        logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
         logger.warning(
             f"""
 {BNB_BACKEND} Setup failed despite {BNB_BACKEND} being available. Please run the following command to get more information:
