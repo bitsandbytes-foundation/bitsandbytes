@@ -130,8 +130,8 @@ try:
     lib = get_native_library()
 except Exception as e:
     lib = None
-    logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
     if torch.cuda.is_available():
+        logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
         logger.warning(
             f"""
 {BNB_BACKEND} Setup failed despite {BNB_BACKEND} being available. Please run the following command to get more information:
