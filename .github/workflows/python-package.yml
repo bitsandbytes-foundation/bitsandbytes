@@ -192,8 +192,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install build wheel
-      # for now need to do the below instead of prior `python -m build .`, which didn't allow us to access git tags
-      - run: python -m build --sdist && python -m build --wheel
+      - run: python -m build .
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |

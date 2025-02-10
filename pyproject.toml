@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools >= 63.0.0"]
+requires = ["setuptools >= 63.0.0", "setuptools_scm >= 8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -78,7 +78,11 @@ package-data = { "*" = ["libbitsandbytes*.*"] }
 include = ["bitsandbytes*"]
 
 [tool.setuptools.dynamic]
-version = {attr = "bitsandbytes.__version__"}
+#version = {attr = "bitsandbytes.__version__"}
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+version_file = "bitsandbytes/_version.py"
 
 [tool.pytest.ini_options]
 addopts = "-rP"
