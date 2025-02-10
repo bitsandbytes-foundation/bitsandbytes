@@ -168,6 +168,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for setuptools_scm.
       #   with:
       #     fetch-depth: 1  # shallow clone
       # - name: Fetch tags for dynamic versioning in setup.py
