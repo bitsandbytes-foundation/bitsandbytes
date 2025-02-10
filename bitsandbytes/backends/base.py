@@ -113,7 +113,8 @@ class Backend(ABC):
         Returns:
             `torch.Tensor` with dtype `torch.float32`: The dequantized tensor.
         """
-        ...
+        # To dequantize we divide by 127, or multiply by the reciprocal.
+        return A * stats.view(-1, 1) * 7.874015718698502e-3
 
     @abstractmethod
     def int8_vectorwise_quant(self, A: torch.Tensor, threshold=0.0):

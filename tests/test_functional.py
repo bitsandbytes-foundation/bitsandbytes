@@ -516,8 +516,8 @@ def test_dequant_mm(dim1, dim4, dims, has_bias):
         assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01 * n))
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(64, 256, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim4", get_test_dims(64, 1024, n=2), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", [64, 256], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim4", [64, 1024], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
 def test_dequant_mm_cpu(dim1, dim4, dims, has_bias):
@@ -532,14 +532,14 @@ def test_dequant_mm_cpu(dim1, dim4, dims, has_bias):
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
-        C2, SC = F.igemmlt(A1, B1, SA=None, SB=None)
-        assert SC is None
+        C2 = F.int8_linear_matmul(A1, B1)
 
         C3 = F.vectorwise_mm_dequant(C2.bfloat16(), maxA, maxB.t())
         if has_bias:
             C3 += bias
 
-        C4 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten(), bias=bias)
+        C4 = F.int8_mm_dequant(C2, maxA.flatten(), maxB.flatten(), bias=bias)
+
         torch.testing.assert_close(C3.float(), C4.float(), atol=0.05, rtol=0.1)
 
 
@@ -798,12 +798,12 @@ def test_transform_cpu(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpos
 @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
-def test_coo_double_quant(dim1, dim2, device, dtype):
+def test_coo_int8_vectorwise_quant(dim1, dim2, device, dtype):
     if device == "cuda" and dtype == torch.bfloat16:
         pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
     threshold = 2.00
     for i in range(k):
-        A = torch.randn(dim1, dim2, device="cuda").half()
+        A = torch.randn(dim1, dim2, device=device).to(dtype)
 
         idx = torch.abs(A) >= threshold
         CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
@@ -814,29 +814,8 @@ def test_coo_double_quant(dim1, dim2, device, dtype):
             torch.testing.assert_close(A1, A2)
 
             A[:, outlier_cols] = 0
-            A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
+            A2 = (CA.float() * statsA.unsqueeze(1) / 127).to(dtype)
             torch.testing.assert_close(A, A2, rtol=0.05, atol=1.5e-2)
-
-
-@pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
-@pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
-def test_coo_int8_vectorwise_quant(dim1, dim2, device, dtype):
-    if device == "cuda" and dtype == torch.bfloat16:
-        pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
-
-    threshold = 2.00
-    for i in range(k):
-        A = torch.randn(dim1, dim2, device=device).to(dtype)
-
-        idx = torch.abs(A) >= threshold
-        CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
-
-        if outlier_cols is not None:
-            A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
-            A[:, outlier_cols] = 0
-            torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
 
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
@@ -1480,8 +1459,8 @@ def test_4bit_quant(dtype, quant_type, blocksize, device):
     A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
     qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
     A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
-    if device == "cpu":
-        A2 = A2.t()
+    # if device == "cpu":
+    #     A2 = A2.t()
 
     err = (A1 - A2).abs().float()
     relerr = (err / (A1.abs().float() + 1e-8)).mean()
@@ -1767,7 +1746,7 @@ def test_gemv_4bit_cpu(dtype, quant_type, kind):
                 quant_storage=torch.uint8,
             )
             dqB = F.dequantize_4bit(qB, state)
-            C3 = torch.matmul(A, dqB)
+            C3 = torch.matmul(A, dqB.t())
             C2 = F.gemv_4bit(A, qB.t(), state=state)
             A.requires_grad = True
             C1 = bnb.matmul_4bit(A, qB.t(), state)
