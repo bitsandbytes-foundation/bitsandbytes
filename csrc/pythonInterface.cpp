@@ -447,7 +447,7 @@ int cigemmlt_8_rowscale(Context *context, int m, int n, int k, const int8_t *A, 
 	MAKE_FUNC_CTRANSFORM(8, row, col_ampere, n, int8_t, ROW, COL_AMPERE, false, 8)
 	MAKE_FUNC_CTRANSFORM(8, col32, row, n, int8_t, COL32, ROW, false, 8)
 	MAKE_FUNC_CTRANSFORM(32, col32, row, n, int32_t, COL32, ROW, false, 32)
-	#elifif defined(BUILD_HIP)
+	#elif defined(BUILD_HIP)
 	MAKE_FUNC_CTRANSFORM(8, row, col, t, int8_t, ROW, COL, true, 8)
 	MAKE_FUNC_CTRANSFORM(32, row, col, n, int32_t, ROW, COL, false, 32)
 	MAKE_FUNC_CTRANSFORM(32, row, col, t, int32_t, ROW, COL, true, 32)
