@@ -168,13 +168,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1  # shallow clone
-      - name: Fetch tags for dynamic versioning in setup.py
-        run: |
-          git fetch --depth=1 origin --tags
-          echo "Available Git tags:"
-          git tag -n
+      #   with:
+      #     fetch-depth: 1  # shallow clone
+      # - name: Fetch tags for dynamic versioning in setup.py
+      #   run: |
+      #     git fetch --depth=1 origin --tags
+      #     echo "Available Git tags:"
+      #     git tag -n
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -192,7 +192,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install build wheel
-      - run: python -m build .
+      - run: python -m build . -w
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |
