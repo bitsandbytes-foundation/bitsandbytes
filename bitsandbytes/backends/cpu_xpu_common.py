@@ -558,7 +558,7 @@ def gemm_4bit_impl(
             None,
             None,
             state.blocksize,
-            ipex_cpu.quantization.WoqLowpMode.BF16,
+            2,
             1,
             state.compensation,
         )
