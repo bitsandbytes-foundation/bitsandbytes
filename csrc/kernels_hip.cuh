@@ -30,7 +30,7 @@ __global__ void kPreconditionOptimizer32bit2State(T* g, T* p,
 template<typename T, int OPTIMIZER>
 __global__ void kOptimizer32bit2State(T* g, T* p,
                 float* state1, float* state2, float *unorm, const float max_unorm, const float param_norm,
-                const float beta1, const float beta2, const float eps, const float weight_decay,
+                const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
@@ -92,7 +92,7 @@ kOptimizerStatic8bit2State(T* p, T* const g, unsigned char* state1, unsigned cha
 
 template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> __global__ void kOptimizerStatic8bit2StateBlockwise(
 		T* p, T* __restrict__ const g, unsigned char* state1, unsigned char* state2,
-                const float beta1, const float beta2, const float eps, const int step, const float lr,
+                const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const int step, const float lr,
                 float* __restrict__ const quantiles1, float* __restrict__ const quantiles2,
                 float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, const bool skip_zeros, const int n);
 
@@ -116,7 +116,7 @@ template <typename T, int SPMM_ITEMS, int BITS> __global__ void kspmm_coo_very_s
 
 template <int ITEMS_PER_THREAD, int SUBTILE_ROWS, int THREADS>__global__ void kdequant_mm_int32_fp16(
   int *__restrict__ const A, float *__restrict__ const rowStats, float *__restrict__ const colStats,
-  half *out, float* newRowStats, float* newcolStats, half * __restrict__ const bias, const int numRows, const int numCols, const int tileCols, const int n);
+  half *out,  half * __restrict__ const bias, const int numRows, const int numCols, const int n);
 
 template<typename T, int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> __global__ void kgetColRowStats(T * __restrict__ A, float *rowStats, float *colStats, int * nnz_count_row, float nnz_threshold, int rows, int cols, int tiledRows, int tiledCols);
 template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int SPARSE_DECOMP> __global__ void kDoubleRowColQuant(half *__restrict__ const A, float *__restrict__ const rowStats, float * __restrict__ const colStats, char *out_col_normed, char *out_row_normed, int *rowidx, int *colidx, half *val, int * __restrict__ nnz_block_ptr, float threshold, int rows, int cols, int tiledCols);
