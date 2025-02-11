@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Tuple
 
 import torch
 
@@ -9,8 +9,8 @@ from .cpu_xpu_common import (
     dequantize_4bit_impl,
     double_quant_impl,
     gemm_4bit_impl,
-    igemmlt_impl,
-    mm_dequant_impl,
+    int8_linear_matmul_impl,
+    int8_mm_dequant_impl,
     quantize_4bit_impl,
 )
 
@@ -35,7 +35,7 @@ class XPUBackend(Backend):
     mm_dequant_compute_dtype = torch.bfloat16
     mm_dequant_output_dtype = torch.bfloat16
 
-    def double_quant(
+    def int8_double_quant(
         self,
         A: torch.Tensor,
         col_stats: Optional[torch.Tensor] = None,
@@ -43,7 +43,7 @@ class XPUBackend(Backend):
         out_col: Optional[torch.Tensor] = None,
         out_row: Optional[torch.Tensor] = None,
         threshold=0.0,
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         assert_on_xpu([A, col_stats, row_stats, out_col, out_row])
         output = double_quant_impl(A, col_stats, row_stats, out_col, out_row, threshold)
         return output
@@ -76,45 +76,44 @@ class XPUBackend(Backend):
                 out = A
         return out, state
 
-    def igemmlt(
+    def int8_linear_matmul(
         self,
         A: torch.Tensor,
         B: torch.Tensor,
-        SA: Tuple[torch.Size, str],
-        SB: Tuple[torch.Size, str],
         out: Optional[torch.Tensor] = None,
-        Sout: Optional[Tuple[torch.Size, str]] = None,
         dtype=torch.int32,
-    ) -> Union[torch.Tensor, Tuple[Optional[Tuple[torch.Tensor, Tuple[torch.Size, str]]]]]:
+    ) -> torch.Tensor:
         assert_on_xpu([A, B])
-        output = igemmlt_impl(A, B, SA, SB, out, Sout, dtype)
+        output = int8_linear_matmul_impl(A, B, out, dtype)
         return output
 
-    def mm_dequant(
+    def int8_mm_dequant(
         self,
         A: torch.Tensor,
-        quant_state: Tuple[torch.Size, str],
         row_stats: torch.Tensor,
         col_stats: torch.Tensor,
         out: Optional[torch.Tensor] = None,
-        new_row_stats: Optional[torch.Tensor] = None,
-        new_col_stats: Optional[torch.Tensor] = None,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         assert_on_xpu([A, row_stats, col_stats, out, bias])
-        output = mm_dequant_impl(
+        output = int8_mm_dequant_impl(
             A,
-            quant_state,
             row_stats,
             col_stats,
             out,
-            new_row_stats,
-            new_col_stats,
             bias,
             self.mm_dequant_compute_dtype,
             self.mm_dequant_output_dtype,
         )
         return output
+
+    def int8_vectorwise_dequant(self, A, stats):
+        return super().int8_vectorwise_dequant(A, stats)
+
+    def int8_vectorwise_quant(self, A: torch.Tensor, threshold=0.0):
+        # TODO: We can optimize this as we don't actually need column-wise quant.
+        out, _, stats, _, outlier_cols = self.int8_double_quant(A, threshold=threshold)
+        return out, stats, outlier_cols
 
     def extract_outliers(
         self,
@@ -209,6 +208,8 @@ class XPUBackend(Backend):
         state2: Optional[torch.Tensor],
         beta1: float,
         beta2: float,
+        beta3: float,
+        alpha: float,
         eps: float,
         step: int,
         lr: float,
@@ -234,6 +235,8 @@ class XPUBackend(Backend):
         lr: float,
         state2: Optional[torch.Tensor] = None,
         beta2: float = 0.0,
+        beta3: float = 0.0,
+        alpha: float = 0.0,
         weight_decay: float = 0.0,
         gnorm_scale: float = 1.0,
         unorm_vec: Optional[torch.Tensor] = None,

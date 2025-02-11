@@ -5,7 +5,7 @@ This is an overview of the `bnb.functional` API in `bitsandbytes` that we think 
 
 ## Using Int8 Matrix Multiplication
 
-For straight Int8 matrix multiplication with mixed precision decomposition you can use ``bnb.matmul(...)``. To enable mixed precision decomposition, use the threshold parameter:
+For straight Int8 matrix multiplication without mixed precision decomposition you can use ``bnb.matmul(...)``. To enable mixed precision decomposition, use the threshold parameter:
 
 ```py
 bnb.matmul(..., threshold=6.0)

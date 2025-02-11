@@ -7,6 +7,7 @@
 #ifndef ops_H
 #define ops_H
 
+#include <cstdint>
 #include <stdio.h>
 #include <iostream>
 #include <assert.h>
@@ -28,7 +29,6 @@
     exit(1);                              \
   } }
 
-#define THREADS_PER_BLOCKS (512)
 
 #define CHECK_CUSPARSE(value) {                      \
   cusparseStatus_t _m_cudaStat = value;                    \
@@ -37,9 +37,6 @@
         cusparseGetErrorString(_m_cudaStat), __LINE__, __FILE__);   \
     exit(1);                              \
   } }
-
-
-#define THREADS_PER_BLOCKS (512)
 
 
 inline void checkCudaStatus(cudaError_t status) {
@@ -71,6 +68,7 @@ typedef enum Optimizer_t
   LARS = 3,
   ADAGRAD = 4,
   LION = 5,
+  ADEMAMIX = 6
 } Optimizer_t;
 
 typedef enum Transform_t
@@ -142,13 +140,13 @@ class ContextCusparse
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
 
 void quantize(float *code, float *A, unsigned char *out, int n);
-void dequantize(float *code, unsigned char *A, float *out, int n);
+void dequantize(float *code, unsigned char *A, float *out, int n, cudaStream_t stream);
 template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
-template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n);
+template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int block_size, const int n, cudaStream_t stream);
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
-                float beta1, float beta2, float eps, float weight_decay,
+                float beta1, float beta2, float beta3, float alpha, float eps, float weight_decay,
                 int step, float lr, const float gnorm_scale, bool skip_zeros, int n);
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g, unsigned char* state1, unsigned char* state2,
@@ -161,7 +159,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g, unsigne
                 const float gnorm_scale, int n);
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
-                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3, float alpha, float eps, int step, float lr,
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale,
 								bool skip_zeros, int n);
 
@@ -173,15 +171,13 @@ void gemmex(Context * context, bool transposeA, bool transposeB, int m, int n, i
 void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc,
                     long long int strideA, long long int strideB, long long int strideC, int batchCount);
 
-
-template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, cudaStream_t stream);
 
 template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2);
 void cutlass_igemm(bool transposeA, bool transposeB, int m, int n, int k, void *A, void *B, void *C, int lda, int ldb, int ldc);
-void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, half* bias, int numRows, int numCols);
-void getColRowStats(half * A, float *rowStats, float *colStats, int *nnz_count_row, float nnz_threshold, int rows, int cols);
-void doubleRowColQuant(half * A, float *rowStats, float *colStats, char *out_col_normed, char *out_row_normed,
-                       int *rowidx, int *colidx, half *val, int *nnz_block_ptr, float threshold, int rows, int cols);
+void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, half* bias, int numRows, int numCols, cudaStream_t stream);
+void getRowStats(half *A, float *rowStats, float threshold, int rows, int cols, cudaStream_t stream);
+void int8VectorQuant(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols, cudaStream_t stream);
 
 template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *out, int rows, int cols);
 
@@ -195,7 +191,7 @@ void matmul4bite(half *A, unsigned char *B, half*out, int lda, int ldb, int rows
 
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits);
 template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize);
-template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize);
+template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, cudaStream_t stream);
 
 template <typename T, int FUNC> void func(T *A, T *B, T value, long n);
 

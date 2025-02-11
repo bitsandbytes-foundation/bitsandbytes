@@ -19,29 +19,32 @@ Welcome to the installation guide for the `bitsandbytes` library! This document 
 
 ## CUDA[[cuda]]
 
-`bitsandbytes` is currently only supported on CUDA GPUs for CUDA versions **11.0 - 12.5**. However, there's an ongoing multi-backend effort under development, which is currently in alpha. If you're interested in providing feedback or testing, check out [the multi-backend section below](#multi-backend).
+`bitsandbytes` is currently only supported on CUDA GPUs for CUDA versions **11.0 - 12.6**. However, there's an ongoing multi-backend effort under development, which is currently in alpha. If you're interested in providing feedback or testing, check out [the multi-backend section below](#multi-backend).
 
 ### Supported CUDA Configurations[[cuda-pip]]
 
-The latest version of `bitsandbytes` builds on the following configurations:
+The latest version of the distributed `bitsandbytes` package is built with the following configurations:
 
-| **OS**      | **CUDA Version** | **Compiler**         |
+| **OS**      | **CUDA Toolkit** | **Host Compiler**         |
 |-------------|------------------|----------------------|
 | **Linux**   | 11.7 - 12.3      | GCC 11.4             |
+|             | 12.4 - 12.6      | GCC 13.2             |
+| **Windows** | 11.7 - 12.6      | MSVC 19.42+ (VS2022) |
 |             | 12.4+            | GCC 13.2             |
-| **Windows** | 11.7 - 12.4      | MSVC 19.38+ (VS2022) |
+| **Windows** | 11.7 - 12.6      | MSVC 19.38+ (VS2022) |
 
-For Linux systems, ensure your hardware meets the following requirements:
+For CUDA systems, ensure your hardware meets the following requirements:
 
-| **Feature**                     | **Hardware Requirement**                                           |
-|---------------------------------|--------------------------------------------------------------------|
-| LLM.int8()                      | NVIDIA Turing (RTX 20 series, T4) or Ampere (RTX 30 series, A4-A100) GPUs |
-| 8-bit optimizers/quantization   | NVIDIA Kepler (GTX 780 or newer)                                    |
+| **Feature**                     | **Minimum Hardware Requirement**                              |
+|---------------------------------|---------------------------------------------------------------|
+| LLM.int8()                      | NVIDIA Turing (RTX 20 series, T4) or newer GPUs               |
+| 8-bit optimizers/quantization   | NVIDIA Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs * |
+| NF4/FP4 quantization            | NVIDIA Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs * |
 
 > [!WARNING]
-> `bitsandbytes >= 0.39.1` no longer includes Kepler binaries in pip installations. This requires [manual compilation using](#cuda-compile) the `cuda11x_nomatmul_kepler` configuration.
-
-To install from PyPI.
+> `bitsandbytes >= 0.45.0` no longer supports Kepler GPUs.
+>
+> Support for Maxwell GPUs is deprecated and will be removed in a future release. For the best results, a Turing generation device or newer is recommended.
 
 ```bash
 pip install bitsandbytes
@@ -79,7 +82,7 @@ For Linux and Windows systems, compiling from source allows you to customize the
 <hfoptions id="source">
 <hfoption id="Linux">
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
 
 For example, to install a compiler and CMake on Ubuntu:
 
@@ -115,7 +118,7 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 
 Windows systems require Visual Studio with C++ support as well as an installation of the CUDA SDK.
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.8** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA.
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA.
 
 Refer to the following table if you're using another CUDA Toolkit version.
 
@@ -125,7 +128,6 @@ Refer to the following table if you're using another CUDA Toolkit version.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
-pip install -r requirements-dev.txt
 cmake -DCOMPUTE_BACKEND=cuda -S .
 cmake --build . --config Release
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
@@ -150,12 +152,12 @@ Then locally install the CUDA version you need with this script from bitsandbyte
 ```bash
 wget https://raw.githubusercontent.com/bitsandbytes-foundation/bitsandbytes/main/install_cuda.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
-#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122, 123, 124, 125}
+#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122, 123, 124, 125, 126}
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True
 
-# For example, the following installs CUDA 11.7 to ~/local/cuda-11.7 and exports the path to your .bashrc
+# For example, the following installs CUDA 12.6 to ~/local/cuda-12.6 and exports the path to your .bashrc
 
-bash install_cuda.sh 117 ~/local 1
+bash install_cuda.sh 126 ~/local 1
 ```
 
 2. Set the environment variables `BNB_CUDA_VERSION` and `LD_LIBRARY_PATH` by manually overriding the CUDA version installed by PyTorch.
@@ -171,8 +173,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<PATH>
 For example, to use a local install path:
 
 ```bash
-export BNB_CUDA_VERSION=117
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
+export BNB_CUDA_VERSION=126
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-12.6
 ```
 
 3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 11.7) and a different bitsandbytes library is loaded.
@@ -208,8 +210,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-11.7
 |-------------|------------------------|---------------------------|-------------------------|------------|
 | **AMD ROCm** | 6.1+                   | 3.10+                     | minimum CDNA - `gfx90a`, RDNA - `gfx1100` | Alpha      |
 | **Apple Silicon (MPS)** | WIP                        | 3.10+                     | M1/M2 chips                    | Planned    |
-| **Intel CPU** | v2.5.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
-| **Intel GPU** | v2.5.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
+| **Intel CPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
+| **Intel GPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
 | **Ascend NPU** | 2.1.0+ (`torch_npu`)         | 3.10+                     | Ascend NPU | Experimental |
 
 For each supported backend, follow the respective instructions below:
@@ -291,6 +293,14 @@ pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsan
 ```
 
 </hfoption>
+
+<hfoption id="Ascend NPU">
+
+Compatible hardware and functioning `import torch_npu` capable environment with Python `3.10` as the minimum requirement.
+
+Please refer to [the official Ascend installations instructions](https://www.hiascend.com/document/detail/zh/Pytorch/60RC3/configandinstg/instg/insg_0001.html) for guidance on how to pip install the necessary `torch_npu` dependency.
+
+</hfoption>
 <hfoption id="Mac">
 
 > [!WARNING]
@@ -344,6 +354,8 @@ The below commands are for Linux. For installing on Windows, please adapt the be
 git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install intel_extension_for_pytorch
 pip install -r requirements-dev.txt
+cmake -DCOMPUTE_BACKEND=cpu -S .
+make
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 

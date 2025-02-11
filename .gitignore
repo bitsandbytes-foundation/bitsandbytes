@@ -22,9 +22,11 @@ CMakeFiles/
 bitsandbytes.dir/
 Debug/
 Release/
+cmake-build-*/
 
 # IDE local files
 .vs/
+.idea/
 
 # Distribution / packaging
 .Python

@@ -22,6 +22,7 @@ try:
 except BaseException:
     ipex_cpu = None
     ipex_xpu = None
+    ipex_cpu_only = None
 
 
 gxx_available = False
@@ -88,7 +89,6 @@ def double_quant_impl(A, col_stats=None, row_stats=None, out_col=None, out_row=N
         A tuple of output quantized per row, output quantized per column, absolute max values of
         each row of A, absolute max values of each column of A, outliers in COO format
     """
-    from ..functional import COOSparseTensor
 
     cols = A.shape[-1]
     if len(A.shape) == 3:
@@ -97,8 +97,6 @@ def double_quant_impl(A, col_stats=None, row_stats=None, out_col=None, out_row=N
         assert A.dim() == 2, f"double_quant: Input tensor should be 2d or 3d but got {A.dim()}d"
         rows = A.shape[0]
     A = A.reshape(rows, cols)
-
-    coo_tensor = None
 
     def get_row_col_stats(A):
         row_stats = torch.max(torch.abs(A), 1).values  # absolute max of each row
@@ -111,15 +109,20 @@ def double_quant_impl(A, col_stats=None, row_stats=None, out_col=None, out_row=N
     if threshold == 0.0:
         if row_stats is None or col_stats is None:
             row_stats, col_stats = get_row_col_stats(A)
+        outlier_cols = None
     else:
         outlier_indices = torch.abs(A) >= threshold  # find outliers
-        outlier_coord = outlier_indices.nonzero()  # get outlier coordinates
-        outlier_rows = outlier_coord[:, 0]  # outlier row for COO sparse tensor
-        outlier_cols = outlier_coord[:, 1]  # outlier column for COO sparse tensor
-        outlier_values = A[outlier_indices]  # outlier values for COO sparse tensor
-        coo_tensor = COOSparseTensor(
-            A.shape[0], A.shape[1], outlier_values.numel(), outlier_rows.int(), outlier_cols.int(), outlier_values
-        )
+        outlier_cols = torch.argwhere(outlier_indices.any(dim=0)).view(-1)
+        outlier_values = A[outlier_indices].clone()
+
+        # outlier_indices = torch.abs(A) >= threshold  # find outliers
+        # outlier_coord = outlier_indices.nonzero()  # get outlier coordinates
+        # outlier_rows = outlier_coord[:, 0]  # outlier row for COO sparse tensor
+        # outlier_cols = outlier_coord[:, 1]  # outlier column for COO sparse tensor
+        # outlier_values = A[outlier_indices]  # outlier values for COO sparse tensor
+        # coo_tensor = COOSparseTensor(
+        #     A.shape[0], A.shape[1], outlier_values.numel(), outlier_rows.int(), outlier_cols.int(), outlier_values
+        # )
         if row_stats is None or col_stats is None:
             A[outlier_indices] = 0  # zero out outliers
             row_stats, col_stats = get_row_col_stats(A)
@@ -127,8 +130,12 @@ def double_quant_impl(A, col_stats=None, row_stats=None, out_col=None, out_row=N
     quant_by_row = quant_to_int8(A, row_stats.unsqueeze(-1))
     quant_by_col = quant_to_int8(A, col_stats.unsqueeze(0))
 
-    if coo_tensor is not None:
+    if outlier_cols is not None:
         A[outlier_indices] = outlier_values  # restore outliers for later use
+
+        if rows > 1:
+            # zero out outlier columns for all rows
+            quant_by_row[:, outlier_cols] = 0
 
     if out_row is not None:
         out_row.copy_(quant_by_row)
@@ -139,23 +146,26 @@ def double_quant_impl(A, col_stats=None, row_stats=None, out_col=None, out_row=N
     else:
         out_col = quant_by_col
     # Return float stats to align with CUDA impl
-    return out_row, out_col, row_stats.float(), col_stats.float(), coo_tensor
+    return out_row, out_col, row_stats.float(), col_stats.float(), outlier_cols
 
 
-def igemmlt_impl(A, B, SA=None, SB=None, out=None, Sout=None, dtype=torch.int32):
+def int8_linear_matmul_impl(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    dtype=torch.int32,
+) -> torch.Tensor:
     """
     Do GEMMM computation. Data type: int8 * int8 -> int32.
     Args:
         A Activation of linear, data type is int8
         B Weight of linear, data type is int8
-        SA Not used for CPU/XPU
-        SB Not used for CPU/XPU
         out Specified output tensor if it is not None
-        Sout Not used for CPU/XPU but returned as is
         dtype Data type of output
     Return:
         A tuple of GEMM result in dtype and Sout
     """
+
     assert A.dtype == torch.int8
     assert B.dtype == torch.int8
     if out is not None:
@@ -198,33 +208,27 @@ def igemmlt_impl(A, B, SA=None, SB=None, out=None, Sout=None, dtype=torch.int32)
     else:
         out = C
 
-    return out, Sout
+    return out
 
 
 @_maybe_torch_compile
-def mm_dequant_impl(
-    A,
-    quant_state,
-    row_stats,
-    col_stats,
-    out=None,
-    new_row_stats=None,
-    new_col_stats=None,
-    bias=None,
+def int8_mm_dequant_impl(
+    A: torch.Tensor,
+    row_stats: torch.Tensor,
+    col_stats: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
     compute_dtype=torch.float32,
     output_dtype=torch.float32,
-):
+) -> torch.Tensor:
     """
     Dequant and add bias
     out = A_int32 * (abs_max_A * abs_max_B) / 127 * 127 + bias
     Args:
         A The output of int8 gemm, whose dtype is int32
-        quant_state Not used for CPU
         row_stats Absolute max value of each row of input (A) of gemm
         col_stats Absolute max value of each row of weight (B) of gemm
         out Output buffer
-        new_row_stats Not used for CPU/XPU
-        new_col_stats Not used for CPU/XPU
         bias Bias of linear
         compute_dtype Data type for computation
         output_dtype Data type for output
@@ -563,7 +567,7 @@ def gemm_4bit_impl(
             state.compensation,
         )
     else:
-        dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize).t()
+        dqB = dequantize_4bit_impl(B, state, blocksize=state.blocksize)
         output = torch.matmul(A, dqB.to(A.dtype))
     if out is not None:
         out.copy_(output)

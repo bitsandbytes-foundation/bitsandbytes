@@ -6,7 +6,8 @@ import torch
 from bitsandbytes.cextension import HIP_ENVIRONMENT, lib
 from bitsandbytes.functional import (
     CUBLAS_Context,
-    coo_zeros,
+    _cuda_device_of,
+    _get_tensor_stream,
     dequantize_blockwise,
     dtype2bytes,
     get_4bit_type,
@@ -49,6 +50,16 @@ if lib and lib.compiled_with_cuda:
             lib.cadagrad32bit_grad_32,
             lib.cadagrad32bit_grad_16,
         ),
+        "lamb": (
+            lib.cadam32bit_grad_fp32,
+            lib.cadam32bit_grad_fp16,
+            lib.cadam32bit_grad_bf16,
+        ),
+        "ademamix": (
+            lib.cademamix32bit_grad_fp32,
+            lib.cademamix32bit_grad_fp16,
+            lib.cademamix32bit_grad_bf16,
+        ),
     }
 
     str2optimizer8bit_blockwise = {
@@ -60,10 +71,12 @@ if lib and lib.compiled_with_cuda:
         "momentum": (
             lib.cmomentum_8bit_blockwise_grad_fp32,
             lib.cmomentum_8bit_blockwise_grad_fp16,
+            lib.cmomentum_8bit_blockwise_grad_bf16,
         ),
         "rmsprop": (
             lib.crmsprop_8bit_blockwise_grad_fp32,
             lib.crmsprop_8bit_blockwise_grad_fp16,
+            lib.crmsprop_8bit_blockwise_grad_bf16,
         ),
         "lion": (
             lib.clion_8bit_blockwise_grad_fp32,
@@ -73,108 +86,17 @@ if lib and lib.compiled_with_cuda:
         "adagrad": (
             lib.cadagrad_8bit_blockwise_grad_fp32,
             lib.cadagrad_8bit_blockwise_grad_fp16,
+            lib.cadagrad_8bit_blockwise_grad_bf16,
+        ),
+        "ademamix": (
+            lib.cademamix_8bit_blockwise_grad_fp32,
+            lib.cademamix_8bit_blockwise_grad_fp16,
+            lib.cademamix_8bit_blockwise_grad_bf16,
         ),
     }
 
 
 class CUDABackend(Backend):
-    def double_quant(
-        self,
-        A: torch.Tensor,
-        col_stats: Optional[torch.Tensor] = None,
-        row_stats: Optional[torch.Tensor] = None,
-        out_col: Optional[torch.Tensor] = None,
-        out_row: Optional[torch.Tensor] = None,
-        threshold=0.0,
-    ):
-        device = A.device
-        assert A.dtype == torch.half
-        assert device.type == "cuda"
-        prev_device = pre_call(A.device)
-
-        cols = A.shape[-1]
-        if len(A.shape) == 3:
-            rows = A.shape[0] * A.shape[1]
-        else:
-            rows = A.shape[0]
-
-        if row_stats is None or col_stats is None:
-            row_stats, col_stats, nnz_row_ptr = get_colrow_absmax(A, threshold=threshold)
-
-        if out_col is None:
-            out_col = torch.zeros(A.shape, device=device, dtype=torch.int8)
-        if out_row is None:
-            out_row = torch.zeros(A.shape, device=device, dtype=torch.int8)
-
-        coo_tensor = None
-        ptrA = get_ptr(A)
-        ptrColStats = get_ptr(col_stats)
-        ptrRowStats = get_ptr(row_stats)
-        ptrOutCol = get_ptr(out_col)
-        ptrOutRow = get_ptr(out_row)
-
-        is_on_gpu([A, col_stats, row_stats, out_col, out_row])
-        if threshold > 0.0:
-            nnz = nnz_row_ptr[-1].item()
-            if nnz > 0:
-                coo_tensor = coo_zeros(A.shape[0], A.shape[1], nnz_row_ptr[-1].item(), device)
-                ptrRowIdx = get_ptr(coo_tensor.rowidx)
-                ptrColIdx = get_ptr(coo_tensor.colidx)
-                ptrVal = get_ptr(coo_tensor.values)
-                ptrRowPtr = get_ptr(nnz_row_ptr)
-
-                lib.cdouble_rowcol_quant(
-                    ptrA,
-                    ptrRowStats,
-                    ptrColStats,
-                    ptrOutCol,
-                    ptrOutRow,
-                    ptrRowIdx,
-                    ptrColIdx,
-                    ptrVal,
-                    ptrRowPtr,
-                    ct.c_float(threshold),
-                    ct.c_int32(rows),
-                    ct.c_int32(cols),
-                )
-                val, idx = torch.sort(coo_tensor.rowidx)
-                coo_tensor.rowidx = val
-                coo_tensor.colidx = coo_tensor.colidx[idx]
-                coo_tensor.values = coo_tensor.values[idx]
-            else:
-                lib.cdouble_rowcol_quant(
-                    ptrA,
-                    ptrRowStats,
-                    ptrColStats,
-                    ptrOutCol,
-                    ptrOutRow,
-                    None,
-                    None,
-                    None,
-                    None,
-                    ct.c_float(0.0),
-                    ct.c_int32(rows),
-                    ct.c_int32(cols),
-                )
-        else:
-            lib.cdouble_rowcol_quant(
-                ptrA,
-                ptrRowStats,
-                ptrColStats,
-                ptrOutCol,
-                ptrOutRow,
-                None,
-                None,
-                None,
-                None,
-                ct.c_float(threshold),
-                ct.c_int32(rows),
-                ct.c_int32(cols),
-            )
-        post_call(prev_device)
-
-        return out_row, out_col, row_stats, col_stats, coo_tensor
-
     def transform(
         self,
         A: torch.Tensor,
@@ -241,176 +163,203 @@ class CUDABackend(Backend):
 
         return out, new_state
 
-    def igemmlt(
+    def int8_double_quant(
+        self,
+        A: torch.Tensor,
+        col_stats: Optional[torch.Tensor] = None,
+        row_stats: Optional[torch.Tensor] = None,
+        out_col: Optional[torch.Tensor] = None,
+        out_row: Optional[torch.Tensor] = None,
+        threshold=0.0,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        # TODO: Optimize/write CUDA kernel for this?
+
+        # Use CUDA kernel for rowwise and COO tensor
+        quant_row, row_stats, outlier_cols = self.int8_vectorwise_quant(A, threshold=threshold)
+
+        # PyTorch impl for colwise
+        _, col_stats, outlier_mask = get_colrow_absmax(A, threshold=threshold)
+        if threshold > 0.0 and outlier_mask is not None:
+            A = A.masked_fill(outlier_mask, 0.0)
+        quant_col = torch.round(A.mul(127) / col_stats.unsqueeze(0)).to(torch.int8)
+
+        if out_row is not None:
+            quant_row = out_row.copy_(quant_row)
+        if out_col is not None:
+            quant_col = out_col.copy_(quant_col)
+
+        return quant_row, quant_col, row_stats, col_stats.flatten().float(), outlier_cols
+
+    def int8_linear_matmul(
         self,
         A: torch.Tensor,
         B: torch.Tensor,
-        SA: Tuple[torch.Size, str],
-        SB: Tuple[torch.Size, str],
         out: Optional[torch.Tensor] = None,
-        Sout: Optional[Tuple[torch.Size, str]] = None,
         dtype=torch.int32,
-    ):
-        shapeA = SA[0]
-        shapeB = SB[0]
-        dimsA = len(shapeA)
-        dimsB = len(shapeB)
+    ) -> torch.Tensor:
+        #
+        # To use the IMMA tensor core kernels without special Turing/Ampere layouts,
+        # cublasLt has some rules, namely: A must be transposed, B must not be transposed.
+        # The C++ API will calculate `C = A.T @ B` in with A, B, C in col-major.
+        # This will typically be used with row-major tensors to efficiently
+        # calculate the linear layer with `C = B @ A.T` without any transformations.
+        # We will swap A and B in the API invocation, so that we get `C = A @ B.T`.
+        #
+        # Quick explanation:
+        # With row-major A and B tensors, `C = A.T.T @ B.T = A @ B.T`.
+        # To get row-major output, `C.T = (A @ B.T).T = B @ A.T`.
+        #
+        A, B = B, A
 
-        assert dimsB == 2, "Only two dimensional matrices are supported for argument B"
-        if dimsA == 2:
-            m = shapeA[0]
-        elif dimsA == 3:
-            m = shapeA[0] * shapeA[1]
+        shapeA = A.shape
+        shapeB = B.shape
 
-        rows = n = shapeB[0]
-        assert prod(list(shapeA)) > 0, f"Input tensor dimensions need to be > 0: {shapeA}"
-
-        # if the tensor is empty, return a transformed empty tensor with the right dimensions
-        if shapeA[0] == 0 and dimsA == 2:
-            return torch.empty((0, shapeB[0]), device=A.device, dtype=torch.float16)
-        elif shapeA[1] == 0 and dimsA == 3:
-            return torch.empty(tuple(shapeA[:2] + [shapeB[0]]), device=A.device, dtype=torch.float16)
-
-        if dimsA == 2 and out is None:
-            if HIP_ENVIRONMENT:
-                # Use col format for HIP
-                out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, "col", "row")
-            else:
-                out, Sout = get_transform_buffer((shapeA[0], shapeB[0]), dtype, A.device, "col32", "row")
-        elif dimsA == 3 and out is None:
-            if HIP_ENVIRONMENT:
-                # Use col format for HIP
-                out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col", "row")
-            else:
-                out, Sout = get_transform_buffer((shapeA[0], shapeA[1], shapeB[0]), dtype, A.device, "col32", "row")
-
-        assert dimsB != 3, "len(B.shape)==3 not supported"
-        assert A.device.type == "cuda"
-        assert B.device.type == "cuda"
         assert A.dtype == torch.int8
         assert B.dtype == torch.int8
-        assert out.dtype == dtype
-        if HIP_ENVIRONMENT:
-            # Use col format for HIP
-            assert SA[1] == "col"
-            assert SB[1] == "col"
-            assert Sout[1] == "col"
-        else:
-            assert SA[1] == "col32"
-            assert SB[1] in ["col_turing", "col_ampere"]
-            assert Sout[1] == "col32"
+        assert A.ndim == 2, "Only two dimensional matrices are supported for argument B"
+        assert B.ndim in [2, 3], "Only two or three dimensional matrices are supported for argument A"
+        assert prod(shapeB) > 0, f"Input tensor dimensions need to be > 0: {shapeB}"
+        assert out is None or out.dtype == dtype
+
+        shapeC = (*shapeB[:-1], shapeA[0])
+
+        k, m = shapeA
+        n = prod(shapeB[:-1])
+        lda = shapeA[-1]  # Weights (outputs, inputs)
+        ldb = shapeB[-1]  # Activations (batch, tokens, inputs)
+        ldc = shapeC[-1]  # Output (batch, tokens, outputs)
+
         assert (
-            shapeA[-1] == shapeB[-1]
-        ), f"Matmullt only supports A @ B^T. Inner matrix dimensions do not match: A @ B = {shapeA} @ {shapeB}"
+            lda == ldb
+        ), f"int8_linear_matmul only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}"
 
-        formatB = SB[1]
-        prev_device = A.device
-        torch.cuda.set_device(A.device)
+        # cuBLASLt does not support int8 matmul with inner dimensions that are not divisible by 4.
+        # We'll fall back to a slower fp32 calculation in this circumstance.
+        # Fortunately, this should not be very common.
+        if lda % 4 != 0:
+            result = torch.matmul(B.float(), A.float().t()).to(torch.int32)
+            if out is not None:
+                result = out.copy_(result)
+            return result
 
-        ptr = CUBLAS_Context.get_instance().get_context(A.device)
-        ptrA = get_ptr(A)
-        ptrB = get_ptr(B)
-        ptrC = get_ptr(out)
+        if out is None:
+            out = torch.empty(shapeC, device=A.device, dtype=dtype)
 
-        k = shapeA[-1]
-        if HIP_ENVIRONMENT:
-            # Set ld values for col format
-            lda = ct.c_int32(m)
-            ldb = ct.c_int32(shapeB[0])
-            ldc = ct.c_int32(m)
-        else:
-            lda = ct.c_int32(m * 32)
-            if formatB == "col_turing":
-                # turing: tiles with rows filled up to multiple of 8 rows by 32 columns
-                # n = rows
-                ldb = ct.c_int32(((rows + 7) // 8) * 8 * 32)
-            else:
-                # ampere: tiles with rows filled up to multiple of 32 rows by 32 columns
-                # n = rows
-                ldb = ct.c_int32(((rows + 31) // 32) * 32 * 32)
-
-            ldc = ct.c_int32(m * 32)
-        m = ct.c_int32(m)
-        n = ct.c_int32(n)
-        k = ct.c_int32(k)
-
-        has_error = 0
-        ptrRowScale = get_ptr(None)
         is_on_gpu([A, B, out])
 
-        if formatB == "col_turing" or HIP_ENVIRONMENT:
-            if dtype == torch.int32:
-                has_error = lib.cigemmlt_turing_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
-            else:
-                has_error = lib.cigemmlt_turing_8(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+        with _cuda_device_of(A):
+            ctx = CUBLAS_Context.get_instance().get_context(A.device)
+            ptrA = get_ptr(A)
+            ptrB = get_ptr(B)
+            ptrC = get_ptr(out)
+            ptrRowScale = None
+            m = ct.c_int32(m)
+            n = ct.c_int32(n)
+            k = ct.c_int32(k)
+            lda = ct.c_int32(lda)
+            ldb = ct.c_int32(ldb)
+            ldc = ct.c_int32(ldc)
+            stream = _get_tensor_stream(A)
 
-        elif formatB == "col_ampere":
             if dtype == torch.int32:
-                has_error = lib.cigemmlt_ampere_32(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+                has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
             else:
-                has_error = lib.cigemmlt_ampere_8(ptr, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc)
+                has_error = lib.cigemmlt_8(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
 
-        if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`, `ops.hip`
-            raise NotImplementedError("igemmlt not available (probably built with NO_CUBLASLT)")
+        if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
+            raise NotImplementedError("int8_linear_matmul not implemented!")
 
         if has_error:
-            print(
-                f"A: {shapeA}, B: {shapeB}, C: {Sout[0]}; (lda, ldb, ldc): {(lda, ldb, ldc)}; (m, n, k): {(m, n, k)}"
+            raise RuntimeError(
+                f"cublasLt ran into an error!\n"
+                f"\t{shapeA=}, {shapeB=}, {shapeC=}\n"
+                f"\t{(lda, ldb, ldc)=}\n"
+                f"\t{(m, n, k)=}"
             )
-            raise Exception("cublasLt ran into an error!")
 
-        torch.cuda.set_device(prev_device)
+        return out
 
-        return out, Sout
-
-    def mm_dequant(
+    def int8_mm_dequant(
         self,
         A: torch.Tensor,
-        quant_state: Tuple[torch.Size, str],
         row_stats: torch.Tensor,
         col_stats: torch.Tensor,
         out: Optional[torch.Tensor] = None,
-        new_row_stats: Optional[torch.Tensor] = None,
-        new_col_stats: Optional[torch.Tensor] = None,
         bias: Optional[torch.Tensor] = None,
-    ):
-        if HIP_ENVIRONMENT:
-            # HIP kernel requires 'row' format
-            A, quant_state = nvidia_transform(A, "row", state=quant_state)
+    ) -> torch.Tensor:
         assert A.dtype == torch.int32
+
         if bias is not None:
             assert bias.dtype == torch.float16
-        out_shape = quant_state[0]
-        if len(out_shape) == 3:
-            out_shape = (out_shape[0] * out_shape[1], out_shape[2])
 
         if out is None:
-            out = torch.empty(out_shape, dtype=torch.float16, device=A.device)
-        if new_row_stats is None:
-            new_row_stats = torch.empty(out_shape[0], dtype=torch.float32, device=A.device)
-        if new_col_stats is None:
-            new_col_stats = torch.empty(out_shape[1], dtype=torch.float32, device=A.device)
-        assert new_row_stats.shape[0] == row_stats.shape[0], f"{new_row_stats.shape} vs {row_stats.shape}"
-        assert new_col_stats.shape[0] == col_stats.shape[0], f"{new_col_stats.shape} vs {col_stats.shape}"
+            out = torch.empty_like(A, dtype=torch.float16)
 
-        prev_device = pre_call(A.device)
         ptrA = get_ptr(A)
         ptrOut = get_ptr(out)
         ptrRowStats = get_ptr(row_stats)
         ptrColStats = get_ptr(col_stats)
-        ptrNewRowStats = get_ptr(new_row_stats)
-        ptrNewColStats = get_ptr(new_col_stats)
         ptrBias = get_ptr(bias)
-        numRows = ct.c_int32(out_shape[0])
-        numCols = ct.c_int32(out_shape[1])
+        numRows = ct.c_int32(prod(A.shape[:-1]))
+        numCols = ct.c_int32(A.shape[-1])
 
-        is_on_gpu([A, row_stats, col_stats, out, new_row_stats, new_col_stats, bias])
-        lib.cdequant_mm_int32_fp16(
-            ptrA, ptrRowStats, ptrColStats, ptrOut, ptrNewRowStats, ptrNewColStats, ptrBias, numRows, numCols
-        )
-        post_call(prev_device)
+        is_on_gpu([A, row_stats, col_stats, out, bias])
+
+        with _cuda_device_of(A):
+            lib.cdequant_mm_int32_fp16(
+                ptrA, ptrRowStats, ptrColStats, ptrOut, ptrBias, numRows, numCols, _get_tensor_stream(A)
+            )
 
         return out
+
+    def int8_vectorwise_dequant(
+        self,
+        A: torch.Tensor,
+        stats: torch.Tensor,
+    ) -> torch.Tensor:
+        # To dequantize we divide by 127, or multiply by the reciprocal.
+        return A * stats.view(-1, 1) * 7.874015718698502e-3
+
+    def int8_vectorwise_quant(
+        self,
+        A: torch.Tensor,
+        threshold=0.0,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        assert A.dtype == torch.half
+        is_on_gpu([A])
+
+        rows = prod(A.shape[:-1])
+        cols = A.shape[-1]
+
+        row_stats = torch.empty(rows, device=A.device, dtype=torch.float32)
+        out_row = torch.empty(A.shape, device=A.device, dtype=torch.int8)
+
+        outlier_cols = None
+
+        if threshold > 0.0:
+            # TODO we could improve perf of this
+            outliers = A.abs() >= threshold
+
+            if outliers.any():
+                outlier_cols = torch.argwhere(outliers.any(dim=0)).view(-1)
+
+        with _cuda_device_of(A):
+            lib.cint8_vector_quant(
+                get_ptr(A),
+                get_ptr(out_row),
+                get_ptr(row_stats),
+                ct.c_float(threshold),
+                ct.c_int32(rows),
+                ct.c_int32(cols),
+                _get_tensor_stream(A),
+            )
+
+        # Zero out values from outlier columns across all rows.
+        # The kernel will handle this for outliers themselves, so we can optimize for rows=1.
+        if rows > 1 and outlier_cols is not None:
+            out_row[:, outlier_cols] = 0
+
+        return out_row, row_stats, outlier_cols
 
     def extract_outliers(self, A: torch.Tensor, SA: Tuple[torch.Size, str], idx: torch.Tensor):
         shapeA = SA[0]
@@ -480,50 +429,42 @@ class CUDABackend(Backend):
         else:
             assert blocksize in [4096, 2048, 1024, 512, 256, 128]
 
-        prev_device = pre_call(A.device)
         is_on_gpu([A, out, absmax])
 
-        if A.dtype == torch.float32:
-            if quant_type == "fp4":
-                lib.cquantize_blockwise_fp32_fp4(
-                    get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n)
-                )
+        with _cuda_device_of(A):
+            args = (
+                None,
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_int32(blocksize),
+                ct.c_int(n),
+            )
+
+            if A.dtype == torch.bfloat16:
+                if quant_type == "fp4":
+                    lib.cquantize_blockwise_bf16_fp4(*args)
+                else:
+                    lib.cquantize_blockwise_bf16_nf4(*args)
+            elif A.dtype == torch.float16:
+                if quant_type == "fp4":
+                    lib.cquantize_blockwise_fp16_fp4(*args)
+                else:
+                    lib.cquantize_blockwise_fp16_nf4(*args)
+            elif A.dtype == torch.float32:
+                if quant_type == "fp4":
+                    lib.cquantize_blockwise_fp32_fp4(*args)
+                else:
+                    lib.cquantize_blockwise_fp32_nf4(*args)
             else:
-                lib.cquantize_blockwise_fp32_nf4(
-                    get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n)
-                )
-
-        elif A.dtype == torch.float16:
-            if quant_type == "fp4":
-                lib.cquantize_blockwise_fp16_fp4(
-                    get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n)
-                )
-            else:
-                lib.cquantize_blockwise_fp16_nf4(
-                    get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n)
-                )
-
-        elif A.dtype == torch.bfloat16:
-            if quant_type == "fp4":
-                lib.cquantize_blockwise_bf16_fp4(
-                    get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n)
-                )
-            else:
-                lib.cquantize_blockwise_bf16_nf4(
-                    get_ptr(None), get_ptr(A), get_ptr(absmax), get_ptr(out), ct.c_int32(blocksize), ct.c_int(n)
-                )
-
-        else:
-            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
-
-        post_call(A.device)
+                raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
 
         code = get_4bit_type(quant_type, device=A.device)
 
         if compress_statistics:
             offset = absmax.mean()
             absmax -= offset
-            qabsmax, state2 = self.quantize_blockwise(absmax, blocksize=256)
+            qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
             del absmax
             state = QuantState(
                 absmax=qabsmax,
@@ -535,10 +476,14 @@ class CUDABackend(Backend):
                 offset=offset,
                 state2=state2,
             )
-
         else:
             state = QuantState(
-                absmax=absmax, shape=input_shape, dtype=A.dtype, blocksize=blocksize, code=code, quant_type=quant_type
+                absmax=absmax,
+                shape=input_shape,
+                dtype=A.dtype,
+                blocksize=blocksize,
+                code=code,
+                quant_type=quant_type,
             )
 
         return out, state
@@ -587,80 +532,42 @@ class CUDABackend(Backend):
 
         n = out.numel()
 
-        device = pre_call(A.device)
         is_on_gpu([A, absmax, out])
+        stream = _get_tensor_stream(A)
 
-        if out.dtype == torch.float32:
-            if quant_state.quant_type == "fp4":
-                lib.cdequantize_blockwise_fp32_fp4(
-                    get_ptr(None),
-                    get_ptr(A),
-                    get_ptr(absmax),
-                    get_ptr(out),
-                    ct.c_int(quant_state.blocksize),
-                    ct.c_int(n),
-                )
+        with _cuda_device_of(A):
+            args = (
+                None,
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_int(quant_state.blocksize),
+                ct.c_int(n),
+                stream,
+            )
+
+            if out.dtype == torch.bfloat16:
+                if quant_state.quant_type == "fp4":
+                    lib.cdequantize_blockwise_bf16_fp4(*args)
+                else:
+                    lib.cdequantize_blockwise_bf16_nf4(*args)
+            elif out.dtype == torch.float16:
+                if quant_state.quant_type == "fp4":
+                    lib.cdequantize_blockwise_fp16_fp4(*args)
+                else:
+                    lib.cdequantize_blockwise_fp16_nf4(*args)
+            elif out.dtype == torch.float32:
+                if quant_state.quant_type == "fp4":
+                    lib.cdequantize_blockwise_fp32_fp4(*args)
+                else:
+                    lib.cdequantize_blockwise_fp32_nf4(*args)
             else:
-                lib.cdequantize_blockwise_fp32_nf4(
-                    get_ptr(None),
-                    get_ptr(A),
-                    get_ptr(absmax),
-                    get_ptr(out),
-                    ct.c_int(quant_state.blocksize),
-                    ct.c_int(n),
-                )
+                raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
 
-        elif out.dtype == torch.float16:
-            if quant_state.quant_type == "fp4":
-                lib.cdequantize_blockwise_fp16_fp4(
-                    get_ptr(None),
-                    get_ptr(A),
-                    get_ptr(absmax),
-                    get_ptr(out),
-                    ct.c_int(quant_state.blocksize),
-                    ct.c_int(n),
-                )
-            else:
-                lib.cdequantize_blockwise_fp16_nf4(
-                    get_ptr(None),
-                    get_ptr(A),
-                    get_ptr(absmax),
-                    get_ptr(out),
-                    ct.c_int(quant_state.blocksize),
-                    ct.c_int(n),
-                )
-
-        elif out.dtype == torch.bfloat16:
-            if quant_state.quant_type == "fp4":
-                lib.cdequantize_blockwise_bf16_fp4(
-                    get_ptr(None),
-                    get_ptr(A),
-                    get_ptr(absmax),
-                    get_ptr(out),
-                    ct.c_int(quant_state.blocksize),
-                    ct.c_int(n),
-                )
-            else:
-                lib.cdequantize_blockwise_bf16_nf4(
-                    get_ptr(None),
-                    get_ptr(A),
-                    get_ptr(absmax),
-                    get_ptr(out),
-                    ct.c_int(quant_state.blocksize),
-                    ct.c_int(n),
-                )
-
-        else:
-            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
-
-        post_call(A.device)
-
-        is_transposed = True if A.shape[0] == 1 else False
-
-        if is_transposed:
+        if A.shape[0] == 1:  # is transposed, transpose back
             return out.t()
-        else:
-            return out
+
+        return out
 
     def gemv_4bit(
         self,
@@ -671,8 +578,6 @@ class CUDABackend(Backend):
         transposed_B=False,
         state: QuantState = None,
     ):
-        prev_device = pre_call(A.device)
-
         if state is None:
             raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
 
@@ -721,6 +626,7 @@ class CUDABackend(Backend):
             ldb,
             ldc,
             ct.c_int32(state.blocksize),
+            _get_tensor_stream(A),
         ]
 
         if B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32]:
@@ -732,11 +638,8 @@ class CUDABackend(Backend):
                 lib.cgemm_4bit_inference_naive_fp32(*inference_args)
             else:
                 raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
-
         else:
             raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
-
-        post_call(prev_device)
 
         return out
 
@@ -789,6 +692,8 @@ class CUDABackend(Backend):
         state2: Optional[torch.Tensor],
         beta1: float,
         beta2: float,
+        beta3: float,
+        alpha: float,
         eps: float,
         step: int,
         lr: float,
@@ -801,7 +706,7 @@ class CUDABackend(Backend):
         skip_zeros=False,
     ) -> None:
         optim_func = None
-        prev_device = pre_call(g.device)
+
         is_on_gpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
         if g.dtype == torch.float32 and state1.dtype == torch.uint8:
             optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
@@ -817,31 +722,31 @@ class CUDABackend(Backend):
             raise ValueError(
                 f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
             )
-        post_call(prev_device)
 
         is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
 
-        prev_device = pre_call(g.device)
-        optim_func(
-            get_ptr(p),
-            get_ptr(g),
-            get_ptr(state1),
-            get_ptr(state2),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(eps),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            get_ptr(qmap1),
-            get_ptr(qmap2),
-            get_ptr(absmax1),
-            get_ptr(absmax2),
-            ct.c_float(weight_decay),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
-        post_call(prev_device)
+        with _cuda_device_of(g):
+            optim_func(
+                get_ptr(p),
+                get_ptr(g),
+                get_ptr(state1),
+                get_ptr(state2),
+                ct.c_float(beta1),
+                ct.c_float(beta2),
+                ct.c_float(beta3),
+                ct.c_float(alpha),
+                ct.c_float(eps),
+                ct.c_int32(step),
+                ct.c_float(lr),
+                get_ptr(qmap1),
+                get_ptr(qmap2),
+                get_ptr(absmax1),
+                get_ptr(absmax2),
+                ct.c_float(weight_decay),
+                ct.c_float(gnorm_scale),
+                ct.c_bool(skip_zeros),
+                ct.c_int32(g.numel()),
+            )
 
     def optimizer_update_32bit(
         self,
@@ -855,6 +760,8 @@ class CUDABackend(Backend):
         lr: float,
         state2: Optional[torch.Tensor] = None,
         beta2: float = 0.0,
+        beta3: float = 0.0,
+        alpha: float = 0.0,
         weight_decay: float = 0.0,
         gnorm_scale: float = 1.0,
         unorm_vec: Optional[torch.Tensor] = None,
@@ -878,23 +785,25 @@ class CUDABackend(Backend):
             )
 
         is_on_gpu([g, p, state1, state2, unorm_vec])
-        prev_device = pre_call(g.device)
-        optim_func(
-            get_ptr(g),
-            get_ptr(p),
-            get_ptr(state1),
-            get_ptr(state2),
-            get_ptr(unorm_vec),
-            ct.c_float(max_unorm),
-            ct.c_float(param_norm),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(eps),
-            ct.c_float(weight_decay),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
-        post_call(prev_device)
+
+        with _cuda_device_of(g):
+            optim_func(
+                get_ptr(g),
+                get_ptr(p),
+                get_ptr(state1),
+                get_ptr(state2),
+                get_ptr(unorm_vec),
+                ct.c_float(max_unorm),
+                ct.c_float(param_norm),
+                ct.c_float(beta1),
+                ct.c_float(beta2),
+                ct.c_float(beta3),
+                ct.c_float(alpha),
+                ct.c_float(eps),
+                ct.c_float(weight_decay),
+                ct.c_int32(step),
+                ct.c_float(lr),
+                ct.c_float(gnorm_scale),
+                ct.c_bool(skip_zeros),
+                ct.c_int32(g.numel()),
+            )
