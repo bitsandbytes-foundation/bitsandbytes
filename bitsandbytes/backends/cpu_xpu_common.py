@@ -552,6 +552,8 @@ def gemm_4bit_impl(
         GEMM output tensor.
     """
     if getattr(state, "ipex", False):
+        # compute_dtype: 1 indicates fp16, 2 indicates bf16
+        compute_dtype = 2 if A.dtype == torch.bfloat16 else 1
         output = torch.ops.torch_ipex.woq_linear(
             A,
             B,
@@ -562,7 +564,7 @@ def gemm_4bit_impl(
             None,
             None,
             state.blocksize,
-            2,
+            compute_dtype,
             1,
             state.compensation,
         )
