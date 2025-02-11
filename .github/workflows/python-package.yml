@@ -14,10 +14,10 @@ on:
       - "requirements*.txt"
       - "setup.py"
       - "pyproject.toml"
-      - "pytest.ini"
   release:
     types: [published]
   workflow_dispatch: {} # Allow manual trigger
+  workflow_call: {} # Allow triggering from other worfkflows
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -60,11 +60,12 @@ jobs:
   build-shared-libs-cuda:
     if: github.ref_name != 'multi-backend-refactor'
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         arch: [x86_64, aarch64]
         cuda_version:
-          ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.0"]
+          ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.0"]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
@@ -76,9 +77,9 @@ jobs:
         # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
       - name: Set up Docker multiarch
         if: startsWith(matrix.os, 'ubuntu')
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
         # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@v0.2.16
+      - uses: Jimver/cuda-toolkit@v0.2.21
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
@@ -108,7 +109,7 @@ jobs:
         os: [ubuntu-latest]
         arch: [x86_64]
         rocm_version:
-          ["6.1.2", "6.2"]
+          ["6.1.2", "6.2.4", "6.3.2"]
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
       - uses: actions/checkout@v4
@@ -168,12 +169,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # shallow clone
-      - name: Fetch tags for dynamic versioning in setup.py
-        run: |
-          git fetch --depth=1 origin --tags
-          echo "Available Git tags:"
-          git tag -n
+          fetch-depth: 0  # Needed for setuptools_scm.
+      #   with:
+      #     fetch-depth: 1  # shallow clone
+      # - name: Fetch tags for dynamic versioning in setup.py
+      #   run: |
+      #     git fetch --depth=1 origin --tags
+      #     echo "Available Git tags:"
+      #     git tag -n
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -191,8 +194,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install build wheel
-      # for now need to do the below instead of prior `python -m build .`, which didn't allow us to access git tags
-      - run: python -m build --sdist && python -m build --wheel
+      - run: python -m build . -w
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |
@@ -226,7 +228,8 @@ jobs:
       - name: Move and rename wheel files with pattern replacement
         run: |
           mkdir -p wheels/
-          find tmp/ -type f -name '*.whl' -print0 | while IFS= read -r -d '' wheel; do
+          # exclude macos wheels for now
+          find tmp/ -type f -name '*.whl' ! -name '*macos*' -print0 | while IFS= read -r -d '' wheel; do
             wheel_filename=$(basename "$wheel")
             # Remove the gith hash, e.g. `+1234567`, for a stable download link on the multi-backend pre-release
             cleaned_filename=$(echo "$wheel_filename" | sed -E 's/\+[0-9a-f]{7}-/-/g')
@@ -264,6 +267,34 @@ jobs:
           python-version: "3.12"
       - run: pip install auditwheel
       - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
+
+  publish-wheels:
+    name: Publish wheels to PyPI
+    needs: [build-wheels, audit-wheels]
+    runs-on: ubuntu-latest
+    if: |
+      github.repository == 'bitsandbytes-foundation/bitsandbytes'
+      && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    environment:
+      name: release
+      url: https://pypi.org/p/bitsandbytes
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          pattern: "bdist_wheel_*"
+          merge-multiple: true
+
+      - name: Remove macOS wheels
+        run: rm dist/*macos*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true
 
 #  test:
 #    needs:

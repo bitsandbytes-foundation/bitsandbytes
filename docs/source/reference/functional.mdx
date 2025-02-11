@@ -1,0 +1,53 @@
+# Overview
+The `bitsandbytes.functional` API provides the low-level building blocks for the library's features.
+
+## When to Use `bitsandbytes.functional`
+
+* When you need direct control over quantized operations and their parameters.
+* To build custom layers or operations leveraging low-bit arithmetic.
+* To integrate with other ecosystem tooling.
+* For experimental or research purposes requiring non-standard quantization or performance optimizations.
+
+## LLM.int8()
+[[autodoc]] functional.int8_double_quant
+
+[[autodoc]] functional.int8_linear_matmul
+
+[[autodoc]] functional.int8_mm_dequant
+
+[[autodoc]] functional.int8_vectorwise_dequant
+
+[[autodoc]] functional.int8_vectorwise_quant
+
+
+## 4-bit
+[[autodoc]] functional.dequantize_4bit
+
+[[autodoc]] functional.dequantize_fp4
+
+[[autodoc]] functional.dequantize_nf4
+
+[[autodoc]] functional.gemv_4bit
+
+[[autodoc]] functional.quantize_4bit
+
+[[autodoc]] functional.quantize_fp4
+
+[[autodoc]] functional.quantize_nf4
+
+[[autodoc]] functional.QuantState
+
+## Dynamic 8-bit Quantization
+
+Primitives used in the 8-bit optimizer quantization.
+
+For more details see [8-Bit Approximations for Parallelism in Deep Learning](https://arxiv.org/abs/1511.04561)
+
+[[autodoc]] functional.dequantize_blockwise
+
+[[autodoc]] functional.quantize_blockwise
+
+## Utility
+[[autodoc]] functional.get_ptr
+
+[[autodoc]] functional.is_on_gpu

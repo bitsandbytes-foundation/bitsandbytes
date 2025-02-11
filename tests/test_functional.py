@@ -116,54 +116,11 @@ def test_estimate_quantiles(dtype):
     assert (diff > 5e-02).sum().item() == 0
 
 
-def test_quantile_quantization():
-    for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
-        code = F.estimate_quantiles(A1)
-        C = F.quantize_no_absmax(A1, code)
-        A2 = F.dequantize_no_absmax(C, code)
-        diff = torch.abs(A1 - A2).mean().item()
-        assert diff < 0.0075
-
-        A1 = torch.rand(1024, 1024, device="cuda")
-        code = F.estimate_quantiles(A1)
-        C = F.quantize_no_absmax(A1, code)
-        A2 = F.dequantize_no_absmax(C, code)
-        diff = torch.abs(A1 - A2).mean().item()
-        torch.testing.assert_close(A1, A2, atol=5e-3, rtol=0)
-        assert diff < 0.001
-
-
-def test_dynamic_quantization():
-    diffs = []
-    reldiffs = []
-    for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
-        C, S = F.quantize(A1)
-        A2 = F.dequantize(C, S)
-        diff = torch.abs(A1 - A2)
-        reldiff = diff / torch.abs(A1 + 1e-8)
-        diffs.append(diff.mean().item())
-        reldiffs.append(reldiff.mean().item())
-        assert diff.mean().item() < 0.0135
-    print(sum(diffs) / len(diffs))
-    print(sum(reldiffs) / len(reldiffs))
-
-    for i in range(100):
-        A1 = torch.rand(1024, 1024, device="cuda")
-        C, S = F.quantize(A1)
-        A2 = F.dequantize(C, S)
-        diff = torch.abs(A1 - A2).mean().item()
-        torch.testing.assert_close(A1, A2, atol=1e-2, rtol=0)
-        assert diff < 0.004
-
-
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
 @pytest.mark.parametrize("blocksize", get_blocksizes(HIP_ENVIRONMENT))
 @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
 def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
-    # print('')
     diffs = []
     reldiffs = []
     for i in range(100):
@@ -204,33 +161,6 @@ def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
     assert A2.dtype == dtype
     # print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
     # print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
-
-
-@pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=["float", "half"])
-def test_percentile_clipping(gtype):
-    gnorm_vec1 = torch.zeros(100, device="cuda")
-    gnorm_vec2 = torch.zeros(100, device="cuda")
-    n = 4
-    step = 0
-    percentile = 5
-    for i in range(k):
-        step += 1
-        g = torch.randn(n, n, dtype=gtype, device="cuda")
-        gnorm1, clip2, gnorm_scale = F.percentile_clipping(g, gnorm_vec2, step, percentile=percentile)
-        assert gnorm_scale == 1.0 if gnorm1 < clip2 else clip2 / gnorm1
-
-        gnorm2 = torch.norm(g.float())
-        if step == 1:
-            gnorm_vec1[:] = gnorm2
-        else:
-            gnorm_vec1[step % 100] = gnorm2
-
-        vals, idx = torch.sort(gnorm_vec1)
-        clip1 = vals[percentile]
-
-        torch.testing.assert_close(gnorm_vec1, torch.sqrt(gnorm_vec2))
-        torch.testing.assert_close(clip1, clip2)
-        torch.testing.assert_close(gnorm1, gnorm2)
 
 
 def quant(x):
@@ -497,93 +427,14 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
         torch.testing.assert_close(out.float(), out2.float())
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
-@pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=1), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=1), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=1), ids=id_formatter("dim3"))
-def test_vector_quant(dim1, dim2, dim3):
-    dim2 = dim2 - (dim2 % 16)
-    dim3 = dim3 - (dim3 % 16)
-    for i in range(k):
-        A = torch.randn(size=(dim2, dim3), device="cuda")
-        qA, SA = F.vectorwise_quant(A, dim=0)
-        A1 = F.vectorwise_dequant(qA, SA)
-        n = A1.numel()
-        assert_all_approx_close(A1, A, atol=0.01, rtol=0.1, count=int(n * 0.002))
-
-
-@pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
-@pytest.mark.parametrize("dim1", get_test_dims(2, 256, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(2, 256, n=2), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", get_test_dims(2, 256, n=2), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dtype", [torch.int8, torch.int32], ids=describe_dtype)
-@pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
-@pytest.mark.parametrize(
-    "orderOut", ["col", "row"] if HIP_ENVIRONMENT else ["col", "row", "col32"], ids=id_formatter("orderOut")
-)
-@pytest.mark.parametrize("transpose", [False], ids=id_formatter("transpose"))
-@pytest.mark.parametrize("dims", [2, 3], ids=id_formatter("dims"))
-def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
-    if dims == 3 and orderOut != "col32":
-        return
-    if dtype == torch.int32 and orderOut != "col32":
-        return
-    try:
-        func = F.get_transform_func(dtype, orderA, orderOut, transpose)
-    except ValueError as ve:
-        pytest.skip(str(ve))  # skip if not supported
-
-    if dims == 2:
-        A = torch.randint(-128, 127, size=(dim1, dim2), device="cuda").to(dtype)
-    elif dims == 3:
-        A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device="cuda").to(dtype)
-
-    out, S = F.nvidia_transform(A, to_order=orderOut)
-
-    if orderOut == "row":
-        torch.testing.assert_close(A.flatten(), out.flatten())
-    elif orderOut == "col":
-        torch.testing.assert_close(A.t().flatten(), out.flatten())
-    elif orderOut == "col32":
-        if dims == 2:
-            n = A.shape[0] * (A.shape[1] + (32 - (A.shape[1] % 32)))
-        elif dims == 3:
-            n = A.shape[0] * A.shape[1] * (A.shape[2] + (32 - (A.shape[2] % 32)))
-        assert out.numel() == n
-    elif orderOut == "col_turing":
-        # 32 col 8 row tiles
-        n = (A.shape[0] + (8 - A.shape[0] % 8)) * (A.shape[1] + (32 - (A.shape[1] % 32)))
-        assert out.numel() == n
-        total_coltile = (A.shape[1] // 32) + (1 if A.shape[1] % 32 != 0 else 0)
-        for row in range(A.shape[0]):
-            for col in range(A.shape[1]):
-                i = row * A.shape[1]
-                j = col
-
-                coltile = (col // 32) + (1 if col % 32 != 0 else 0)
-                rowtile = ((row // 8) + (1 if row % 8 != 0 else 0)) * total_coltile
-                offset = 32 * 8 * (rowtile + coltile)
-                col2 = col % 32
-                row2 = (row % 8) * 32
-
-                assert A.flatten()[i + j] == A[row, col]
-                # assert A.flatten()[i+j] == out.flatten()[row2+col2]
-                # torch.testing.assert_close(A.flatten()[i+j], A[row, col])
-                # torch.testing.assert_close(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
-
-    if orderOut == "col32":
-        out2, S = F.nvidia_transform(out, from_order=orderOut, to_order="row", state=S)
-        torch.testing.assert_close(A, out2)
-
-
-@pytest.mark.parametrize("dim1", get_test_dims(1, 256, n=1), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(32, 512, n=1), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", get_test_dims(32, 1024, n=1), ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dim4", get_test_dims(32, 1024, n=1), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", [499, 512], ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dim4", [512], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2, 3), ids=id_formatter("dims"))
 @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
 @pytest.mark.parametrize("device", ("cuda", "cpu"), ids=id_formatter("device"))
-def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb, device):
+def test_int8_linear_matmul(dim1, dim2, dim3, dim4, dims, ldb, device):
     if HIP_ENVIRONMENT and device == "cpu":
         pytest.skip("this test is not supported on ROCm yet")
 
@@ -595,28 +446,8 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb, device):
         B = torch.randint(-128, 127, size=(dim4, dim3), device=device).to(torch.int8)
         C1 = torch.matmul(A.float(), B.t().float())
 
-        A2, SA = F.transform(A, "col32")
-        B2, SB = F.transform(B, "col_turing")
-        C2, SC = F.igemmlt(A2, B2, SA, SB)
-        if device == "cpu":
-            assert SC is None
-        if device == "cuda":
-            C3, S = F.nvidia_transform(C2, "row", state=SC)
-        else:
-            C3, S = C2, None
-        torch.testing.assert_close(C1, C3.float())
-
-        # transpose
-        B = torch.randint(-128, 127, size=(dim3, dim4), device=device).to(torch.int8)
-        C1 = torch.matmul(A.float(), B.float())
-
-        B2t, SBt = F.transform(B, "col_turing", transpose=True)
-        C2, SC = F.igemmlt(A2, B2t, SA, SBt)
-        if device == "cuda":
-            C3, S = F.nvidia_transform(C2, "row", state=SC)
-        else:
-            C3, S = C2, None
-        torch.testing.assert_close(C1, C3.float())
+        C2 = F.int8_linear_matmul(A, B)
+        torch.testing.assert_close(C1, C2.float())
 
 
 @pytest.mark.parametrize("dim1", [32], ids=id_formatter("dim1"))
@@ -624,8 +455,7 @@ def test_igemmlt_int(dim1, dim2, dim3, dim4, dims, ldb, device):
 @pytest.mark.parametrize("dim3", [32], ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dim4", [32], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
-    formatB = F.get_special_format_str()
+def test_int8_linear_matmul_half(dim1, dim2, dim3, dim4, dims):
     for i in range(k):
         if dims == 2:
             A = torch.normal(0, 0.5, size=(dim1, dim3), device="cuda").half()
@@ -634,202 +464,26 @@ def test_igemmlt_half(dim1, dim2, dim3, dim4, dims):
         B = torch.randn((dim4, dim3), device="cuda").half()
         torch.nn.init.xavier_uniform_(B)
         C1 = torch.matmul(A, B.t())
-        C2 = bnb.matmul(A, B.t())
 
         A = A.view(-1, A.shape[-1])
 
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
-        CB, CBt, statsB, statsBt, coo_tensor = F.double_quant(B)
-        C32A, SA = F.transform(CA, "col32")
-        CxB, SB = F.transform(CB, to_order=formatB)
-        out1_32, Sout1_32 = F.igemmlt(C32A, CxB, SA, SB)
-        output = F.mm_dequant(out1_32, Sout1_32, statsAt, statsBt)
+        CA, _, statsA, _, _ = F.int8_double_quant(A)
+        CB, statsB, _ = F.int8_vectorwise_quant(B)
+        output = F.int8_mm_dequant(F.int8_linear_matmul(CA, CB), statsA, statsB)
 
-        # print('')
-        # print(output.flatten()[:10])
-        # print(C1.flatten()[:10])
-        # print(C2.flatten()[:10])
-
-        # torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
-
-        # transpose
-        # B = torch.randint(-128, 127, size=(dim3, dim4), device='cuda').to(torch.int8)
-        # C1 = torch.matmul(A.float(), B.float())
-
-        # B2t, SBt = F.transform2(B, 'col_turing', transpose=True)
-        # C2, SC = F.igemmlt(A2, B2t, SA, SBt)
-        # C3, S = F.transform(C2, 'row', state=SC)
-        # torch.testing.assert_close(C1, C3.float())
+        torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
 
 
-@pytest.mark.parametrize(
-    ("batch", "seq", "model", "hidden"),
-    [
-        pytest.param(2, 512, 4 * 1024, 3 * 4 * 1024, id="batch=2, seq=512, model=4k, hidden=12k"),
-        pytest.param(2, 512, 5120, 3 * 5120, id="batch=2, seq=512, model=5k, hidden=15k"),
-        pytest.param(2, 512, 12 * 1024, 4 * 12 * 1024, id="batch=2, seq=512, model=12k, hidden=48k"),
-    ],
-)
-@pytest.mark.benchmark
-def test_bench_8bit_training(batch, seq, model, hidden):
-    formatB = F.get_special_format_str()
-    A = torch.randn(batch, seq, model, device="cuda").half()
-    grad = torch.randn(batch, seq, model, device="cuda").half()
-    w1 = torch.randint(-128, 127, size=(hidden, model), device="cuda").half()
-    w2 = torch.randint(-128, 127, size=(model, hidden), device="cuda").half()
-    print("")
-
-    # torch.cuda.synchronize()
-    ## warmup
-    # for i in range(100):
-    #    torch.matmul(A, w1.t())
-    # torch.cuda.synchronize()
-
-    dtype = torch.int8
-    A = A.view(-1, A.shape[-1]).contiguous()
-    grad = grad.view(-1, grad.shape[-1]).contiguous()
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(k):
-        out1 = torch.matmul(A, w1.t())  # fc1
-        # out2 = torch.matmul(out1, w2.t())# fc2
-
-        # d1 = torch.matmul(grad, w2) # delta1
-        # d2 = torch.matmul(d1, w1) # delta2
-
-        # grad1 = torch.einsum('bo,bh->oh', out1, grad) # grad w2
-        # grad2 = torch.einsum('bh,bo->ho', A, d2) # grad w1
-
-    torch.cuda.synchronize()
-    t16 = time.time() - t0
-    print(t16)
-
-    # torch.cuda.empty_cache()
-
-    # Cw1, Cw1t, statsw1, statsw1t, coo_tensor = F.double_quant(w1)
-    # Cw2, Cw2t, statsw2, statsw2t, coo_tensor = F.double_quant(w2)
-
-    # CTw1, Sw1 = F.transform2(Cw1, formatB)
-    # CTw2, Sw2 = F.transform2(Cw2, formatB)
-    # CTw2t, Sw2t = F.transform2(Cw2t, formatB, transpose=True)
-    # CTw1t, Sw1t = F.transform2(Cw1t, formatB, transpose=True)
-
-    # CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
-    # C32A, SA = F.transform2(CA, 'col32')
-    ## fc1
-    # out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1, dtype=dtype)
-    ##out1 = F.mm_dequant(out1_32, Sout1_32, statsAt, statsw1t)
-
-    ## fc2
-    # Cout1, Cout1t, statsout1, statsout1t, coo_tensor = F.double_quant(out1)
-    # C32out1, Sout1 = F.transform2(Cout1, 'col32')
-    # out2_32, Sout2_32 = F.igemmlt(C32out1, CTw2, Sout1, Sw2, dtype=dtype)
-    ##out2 = F.mm_dequant(out2_32, Sout2_32, statsout1t, statsw2t)
-
-    ## delta1
-    # Cgrad, Cgradt, statsgrad, statsgradt, coo_tensor = F.double_quant(grad)
-    # C32grad, Sgrad = F.transform2(Cgrad, 'col32')
-    ##d1_32, Sd1_32 = F.igemmlt(C32grad, CTw2t, Sgrad, Sw2t, dtype=dtype)
-    ##d1 = F.mm_dequant(d1_32, Sd1_32, statsgradt, statsw2)
-
-    ## delta2
-    # Cd1, Cd1t, statsd1, statsd1t, coo_tensor = F.double_quant(d1)
-    # C32d1, Sd1 = F.transform2(Cd1, 'col32')
-    ##d2_32, Sd2_32 = F.igemmlt(C32d1, CTw1t, Sd1, Sw1t, dtype=dtype)
-    ##d2 = F.mm_dequant(d2_32, Sd2_32, statsd1t, statsw1)
-
-    ## grad1
-    # C32out1t, Sout1t = F.transform2(Cout1t, 'col32', transpose=True)
-    # CTgradt, Sgradt = F.transform2(Cgradt, formatB, transpose=True)
-    ##grad1_32, Sgrad1_32 = F.igemmlt(C32out1t, CTgradt, Sout1t, Sgradt, dtype=dtype)
-    ##grad1 = F.mm_dequant(grad1_32, Sgrad1_32, statsout1, statsgrad)
-
-    ## grad2
-    # C32At, SAt = F.transform2(CAt, 'col32', transpose=True)
-    # CTd1t, Sd1t = F.transform2(Cd1t, formatB, transpose=True)
-    ##grad2_32, Sgrad2_32 = F.igemmlt(C32At, CTd1t, SAt, Sd1t, dtype=dtype)
-    ##grad2 = F.mm_dequant(grad2_32, Sgrad2_32, statsA, statsd1)
-
-    # Cw2, Cw2t, statsw2, statsw2t, coo_tensor = F.double_quant(w2)
-
-    # Cw1, Cw1t, statsw1, statsw1t, coo_tensor = F.double_quant(w1)
-    # Cw2, Cw2t, statsw2, statsw2t, coo_tensor = F.double_quant(w2)
-
-    # CTw1, Sw1 = F.transform2(Cw1, formatB)
-    # CTw1t, Sw1t = F.transform2(Cw1t, formatB, transpose=True)
-    # CTw2, Sw2 = F.transform2(Cw2, formatB)
-    # CTw2t, Sw2t = F.transform2(Cw2t, formatB, transpose=True)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(k):
-    #    #Cw1, Cw1t, statsw1, statsw1t, coo_tensor = F.double_quant(w1)
-    #    #CTw1, Sw1 = F.transform2(Cw1, formatB)
-    #    #Cw1, Cw1t, statsw1, statsw1t, coo_tensor = F.double_quant(w1)
-    #    #CTw1, Sw1 = F.transform2(Cw1, formatB)
-
-    #    #CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=3.5)
-    #    CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
-    #    #CTw1t, Sw1t = F.transform2(Cw1t, formatB, transpose=True)
-    #    #CTw2, Sw2 = F.transform2(Cw2, formatB)
-    #    #CTw2t, Sw2t = F.transform2(Cw2t, formatB, transpose=True)
-
-    #    C32A, SA = F.transform2(CA, 'col32')
-
-    #    # fc1
-    #    out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1, dtype=dtype)
-    #    #out1dn = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)
-
-    #    #print(coo_tensor.nnz)
-    #    #out1sp = F.spmm_coo(coo_tensor, w1.t())
-    #    #print(w1.t().shape)
-    #    #out1 = out1dn + out1sp
-
-    #    # fc2
-    #    Cout1, Cout1t, statsout1, statsout1t, coo_tensor = F.double_quant(out1)
-    #    C32out1, Sout1 = F.transform2(Cout1, 'col32')
-    #    out2_32, Sout2_32 = F.igemmlt(C32out1, CTw2, Sout1, Sw2, dtype=dtype)
-    #    #out2 = F.mm_dequant(out2_32, Sout2_32, statsout1, statsw2)
-
-    #    # delta1
-    #    Cgrad, Cgradt, statsgrad, statsgradt, coo_tensor = F.double_quant(grad)
-    #    C32grad, Sgrad = F.transform2(Cgrad, 'col32')
-    #    d1_32, Sd1_32 = F.igemmlt(C32grad, CTw2t, Sgrad, Sw2t, dtype=dtype)
-    #    #d1 = F.mm_dequant(d1_32, Sd1_32, statsgrad, statsw2t)
-
-    #    # delta2
-    #    Cd1, Cd1t, statsd1, statsd1t, coo_tensor = F.double_quant(d1)
-    #    C32d1, Sd1 = F.transform2(Cd1, 'col32')
-    #    d2_32, Sd2_32 = F.igemmlt(C32d1, CTw1t, Sd1, Sw1t, dtype=dtype)
-    #    #d2 = F.mm_dequant(d2_32, Sd2_32, statsd1, statsw1t)
-
-    #    # grad1
-    #    #C32out1t, Sout1t = F.transform2(Cout1t, 'col32', transpose=True)
-    #    #CTgradt, Sgradt = F.transform2(Cgradt, formatB, transpose=True)
-    #    #grad1_32, Sgrad1_32 = F.igemmlt(C32out1t, CTgradt, Sout1t, Sgradt, dtype=dtype)
-    #    #grad1 = F.mm_dequant(grad1_32, Sgrad1_32, statsout1t, statsgradt)
-
-    #    ## grad2
-    #    #C32At, SAt = F.transform2(CAt, 'col32', transpose=True)
-    #    #CTd1t, Sd1t = F.transform2(Cd1t, formatB, transpose=True)
-    #    #grad2_32, Sgrad2_32 = F.igemmlt(C32At, CTd1t, SAt, Sd1t, dtype=dtype)
-    #    #grad2 = F.mm_dequant(grad2_32, Sgrad2_32, statsAt, statsd1t)
-
-    # torch.cuda.synchronize()
-    # t8 = time.time() - t0
-    # print(t8)
-
-
-@pytest.mark.parametrize("dim1", get_test_dims(64, 256, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim4", get_test_dims(64, 1024, n=2), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", (64, 256), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim4", (64, 1024), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-@pytest.mark.parametrize("formatB", ["col_turing", "col_ampere"], ids=id_formatter("formatB"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
-def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
-    inner = torch.randint(1, 128, size=(1,)).item()
+def test_dequant_mm(dim1, dim4, dims, has_bias):
+    inner = 128
     bias = None
     if has_bias:
         bias = torch.randn(dim4, device="cuda", dtype=torch.float16)
-    formatB = F.get_special_format_str()
+
     for i in range(1):
         A = torch.randn(dim1, inner, device="cuda")
         B = torch.randn(dim4, inner, device="cuda")
@@ -840,12 +494,9 @@ def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
-        A2, SA = F.nvidia_transform(A1, "col32")
-        B2, SB = F.nvidia_transform(B1, formatB)
-        C2, SC = F.igemmlt(A2, B2, SA, SB)
+        C2 = F.int8_linear_matmul(A1, B1)
 
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
-        C4 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
+        C4 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
         if has_bias:
             C4 += bias
 
@@ -858,14 +509,15 @@ def test_dequant_mm(dim1, dim4, dims, formatB, has_bias):
         # assert_all_approx_close(C1, C4, atol=0.02, rtol=0.1, count=int(n*0.06))
         # assert (count / n < p), f"error in more than {p} of elements: {count}/{n}={count/n}"
 
-        C5 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten(), bias=bias)
-        # torch.testing.assert_close(C5, C4, atol=0.015, rtol=0.1)
+        C5 = F.int8_mm_dequant(C2, maxA, maxB, bias=bias)
+        C5 /= std
+        torch.testing.assert_close(C5, C4, atol=0.015, rtol=0.1)
         n = C5.numel()
         assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01 * n))
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(64, 256, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim4", get_test_dims(64, 1024, n=2), ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dim1", [64, 256], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim4", [64, 1024], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
 def test_dequant_mm_cpu(dim1, dim4, dims, has_bias):
@@ -880,74 +532,70 @@ def test_dequant_mm_cpu(dim1, dim4, dims, has_bias):
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
-        C2, SC = F.igemmlt(A1, B1, SA=None, SB=None)
-        assert SC is None
+        C2 = F.int8_linear_matmul(A1, B1)
 
         C3 = F.vectorwise_mm_dequant(C2.bfloat16(), maxA, maxB.t())
         if has_bias:
             C3 += bias
 
-        C4 = F.mm_dequant(C2, SC, maxA.flatten(), maxB.flatten(), bias=bias)
+        C4 = F.int8_mm_dequant(C2, maxA.flatten(), maxB.flatten(), bias=bias)
+
         torch.testing.assert_close(C3.float(), C4.float(), atol=0.05, rtol=0.1)
 
 
 @pytest.mark.parametrize("dim1", [1 * 1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1 * 1024], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-def test_colrow_absmax(dim1, dim2, dims):
+@pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("decomp"))
+def test_colrow_absmax(dim1, dim2, dims, threshold):
     for i in range(k):
-        threshold = 3.0
         A = torch.randn(dim1, dim2, device="cuda").half()
-        A_truncated = A.clone()
-        A_truncated[torch.abs(A_truncated) >= 3.0] = 0.0
-        if dims == 2:
-            row_stats1, _ = torch.abs(A.float()).max(1)
-            col_stats1, _ = torch.abs(A.float()).max(0)
+
+        assert dims == 2
+
+        row_stats1, _ = torch.abs(A.float()).max(1)
+        col_stats1, _ = torch.abs(A.float()).max(0)
+
+        if threshold > 0.0:
+            A_truncated = A.clone()
+            A_truncated[torch.abs(A_truncated) >= threshold] = 0.0
             row_stats1_trunc, _ = torch.abs(A_truncated.float()).max(1)
             col_stats1_trunc, _ = torch.abs(A_truncated.float()).max(0)
+
+            row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=threshold)
+
+            nnz_rows1_counts = (torch.abs(A) >= threshold).sum(1).flatten()
+            nnz_block_ptr1 = torch.zeros(
+                nnz_rows1_counts.shape[0] + 1,
+                dtype=nnz_rows1_counts.dtype,
+                device=nnz_rows1_counts.device,
+            )
+            nnz_block_ptr1[1:] = nnz_rows1_counts.cumsum(0)
+
+            torch.testing.assert_close(col_stats1_trunc, col_stats2)
+            torch.testing.assert_close(row_stats1_trunc, row_stats2)
+            # torch.testing.assert_close(nnz_block_ptr1, nnz_block_ptr2)
         else:
-            assert False
-
-        row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=threshold)
-
-        A_blocked = einops.rearrange(
-            torch.abs(A),
-            "(rows row_tiles) (cols block_size)-> rows cols row_tiles block_size",
-            row_tiles=16,
-            block_size=64 * 4,
-        )
-        nnz_rows1_counts = (torch.abs(A_blocked) >= threshold).sum(3).flatten()
-        nnz_block_ptr1 = torch.zeros(
-            nnz_rows1_counts.shape[0] + 1,
-            dtype=nnz_rows1_counts.dtype,
-            device=nnz_rows1_counts.device,
-        )
-        nnz_block_ptr1[1:] = nnz_rows1_counts.cumsum(0)
-
-        torch.testing.assert_close(col_stats1_trunc, col_stats2)
-        torch.testing.assert_close(row_stats1_trunc, row_stats2)
-        torch.testing.assert_close(nnz_block_ptr1.int(), nnz_block_ptr2)
-
-        row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=0.0)
-
-        torch.testing.assert_close(col_stats1, col_stats2)
-        torch.testing.assert_close(row_stats1, row_stats2)
-        assert nnz_block_ptr2 is None
+            row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=0.0)
+            assert nnz_block_ptr2 is None
+            torch.testing.assert_close(col_stats1, col_stats2)
+            torch.testing.assert_close(row_stats1, row_stats2)
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
-def test_double_quant(dim1, dim2, device, dtype):
+def test_int8_double_quant(dim1, dim2, device, dtype):
     if device == "cuda" and dtype == torch.bfloat16:
         pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
+
     for i in range(k):
         A = torch.randn(dim1, dim2, device=device).to(dtype)
         out_col1, Scol = F.vectorwise_quant(A, dim=0)
         out_row1, Srow = F.vectorwise_quant(A, dim=1)
 
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
+        CA, CAt, statsA, statsAt, _ = F.int8_double_quant(A)
 
         # max difference is 1 due to rounding differences
         torch.testing.assert_close(CA, out_row1, atol=1, rtol=0)
@@ -976,21 +624,21 @@ def test_double_quant(dim1, dim2, device, dtype):
     (
         pytest.param(dim1, dim4, inner, id=f"{dim1=},{dim4=},{inner=}")
         for (dim1, dim4, inner) in zip(
-            get_test_dims(1, 4 * 1024, n=4),
-            get_test_dims(1, 4 * 1024, n=4),
-            get_test_dims(1, 4 * 1024, n=4),
+            (1, 8, 2048, 4096),
+            (2, 128, 2048, 4096),
+            (4, 256, 512, 4096),
         )
     ),
 )
-def test_integrated_igemmlt(dim1, dim4, inner):
+def test_integrated_int8_linear_matmul(dim1, dim4, inner):
     for i in range(k):
         A = torch.randn(dim1, inner, device="cuda").half()
         B = torch.randn(dim4, inner, device="cuda").half()
 
         out1 = torch.matmul(A.half(), B.t().half())
 
-        C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
-        C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
+        C1a, stats1a, _ = F.int8_vectorwise_quant(A)
+        C2a, stats2a, _ = F.int8_vectorwise_quant(B)
         A1, maxA = F.vectorwise_quant(A, dim=1)
         B1, maxB = F.vectorwise_quant(B, dim=1)
 
@@ -999,17 +647,11 @@ def test_integrated_igemmlt(dim1, dim4, inner):
         torch.testing.assert_close(C1a, A1, rtol=0, atol=1)
         torch.testing.assert_close(C2a, B1, rtol=0, atol=1)
 
-        A2, SA = F.nvidia_transform(C1a, "col32")
-        B2, SB = F.nvidia_transform(C2a, "col_turing")
-        outC32, SC = F.igemmlt(A2, B2, SA, SB)
-        out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
+        out2 = F.int8_linear_matmul(A1, B1)
 
-        A2, SA = F.nvidia_transform(A1, "col32")
-        B2, SB = F.nvidia_transform(B1, "col_turing")
-        C2, SC = F.igemmlt(A2, B2, SA, SB)
+        C2 = F.int8_linear_matmul(A1, B1)
 
-        C3, S = F.nvidia_transform(C2, "row", state=SC)
-        out3 = F.vectorwise_mm_dequant(C3.float(), maxA, maxB.t())
+        out3 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
 
         err1 = torch.abs(out1 - out2).mean().item()
         err2 = torch.abs(out1 - out3).mean().item()
@@ -1041,7 +683,7 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 
         out1 = torch.matmul(A.half(), B.t().half())
 
-        C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
+        C1a, C1b, stats1a, stats1b, coo_tensor = F.int8_double_quant(A)
         CB, absmaxB = F.vectorwise_quant(B, quant_type="linear")
         A2, SA = F.nvidia_transform(C1a, "col32")
         B2, SB = F.nvidia_transform(CB, formatB)
@@ -1049,8 +691,9 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 
         c = 10.0 * inner * scale
         row_scale = torch.ones_like(maxA) / c
-        outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=row_scale)
-        C3, S = F.nvidia_transform(outC32, "row", state=SC)
+        outC32 = F.int8_linear_matmul(A2, B2, dtype=torch.int8, row_scale=row_scale)
+        # C3, S = F.nvidia_transform(outC32, "row", state=SC)
+        C3 = outC32
         maxval = torch.abs(C3).max()
         if maxval == 127:
             scale = 1.5
@@ -1062,8 +705,8 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 
         C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
         B2, SB = F.nvidia_transform(C2a, formatB)
-        outC32, SC = F.igemmlt(A2, B2, SA, SB)
-        out2 = F.mm_dequant(outC32, SC, stats1a, stats2a)
+        outC32 = F.int8_linear_matmul(A2, B2)
+        out2 = F.int8_mm_dequant(outC32, stats1a, stats2a)
 
         CA, SA = F.vectorwise_quant(A, dim=1, quant_type="vector")
         CB, SB = F.vectorwise_quant(B, dim=1, quant_type="linear")
@@ -1091,59 +734,6 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
     print(sum(err3) / len(err3))
 
 
-@pytest.mark.parametrize(
-    ("dim1", "dim4", "inner"),
-    [
-        pytest.param(1024, 12288 * 4, 12288, id="1024, 12288*4, 12288"),
-        pytest.param(2048, 4096 * 4, 4096, id="2048, 4096*4, 4096"),
-    ],
-)
-@pytest.mark.skip("Row scale has some bugs for ampere")
-@pytest.mark.benchmark
-def test_row_scale_bench(dim1, dim4, inner):
-    formatB = F.get_special_format_str()
-    err1, err2, err3 = [], [], []
-    relerr1, relerr2 = [], []
-    scale = 1
-    A = torch.randn(dim1, inner, device="cuda").half()
-    B = torch.randn(dim4, inner, device="cuda").half()
-    torch.nn.init.xavier_uniform_(B)
-    # warmpup
-    for i in range(k):
-        C1 = torch.matmul(A, B.t())
-
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(k):
-        C1 = torch.matmul(A, B.t())
-    torch.cuda.synchronize()
-    print("16", time.time() - t0)
-
-    C1a, C1b, stats1a, stats1b, coo_tensor = F.double_quant(A)
-    CB, absmaxB = F.vectorwise_quant(B, quant_type="linear")
-    A2, SA = F.nvidia_transform(C1a, "col32")
-    B2, SB = F.nvidia_transform(CB, formatB)
-    A1, maxA = F.vectorwise_quant(A, dim=1)
-
-    c = 10.0 * inner * scale
-    row_scale = maxA / c
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(k):
-        outC32, SC = F.igemmlt(A2, B2, SA, SB, dtype=torch.int8, row_scale=row_scale)
-    torch.cuda.synchronize()
-    print("row-wise", time.time() - t0)
-
-    C2a, C2b, stats2a, stats2b, coo_tensor = F.double_quant(B)
-    B2, SB = F.nvidia_transform(C2a, formatB)
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(k):
-        outC32, SC = F.igemmlt(A2, B2, SA, SB)
-    torch.cuda.synchronize()
-    print("vector-wise", time.time() - t0)
-
-
 @pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
@@ -1152,6 +742,7 @@ def test_row_scale_bench(dim1, dim4, inner):
 @pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
 @pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
 @pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
+@pytest.mark.deprecated
 def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     for i in range(k):
         if dims == 2:
@@ -1183,6 +774,7 @@ def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
 @pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
 @pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
 @pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
+@pytest.mark.deprecated
 def test_transform_cpu(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
     for i in range(k):
         if dims == 2:
@@ -1202,47 +794,28 @@ def test_transform_cpu(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpos
         torch.testing.assert_close(out1, out2)
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
-def test_overflow():
-    formatB = F.get_special_format_str()
-    print(formatB)
-    for i in range(2):
-        a = torch.arange(5, 15).cuda().to(torch.int8).view(-1, 1)
-        b = torch.arange(5, 15).cuda().to(torch.int8).view(-1, 1)
-
-        Ca, Sa = F.nvidia_transform(a, "col32")
-        Cb, Sb = F.nvidia_transform(b, formatB)
-
-        c = F.igemmlt(Ca, Cb, Sa, Sb, dtype=torch.int8)
-        c2 = torch.matmul(a.float(), b.float().t())
-
-
-@pytest.mark.parametrize("dim1", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(1, 4 * 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
-def test_coo_double_quant(dim1, dim2, device, dtype):
+def test_coo_int8_vectorwise_quant(dim1, dim2, device, dtype):
     if device == "cuda" and dtype == torch.bfloat16:
         pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
-    threshold = 3.00
+    threshold = 2.00
     for i in range(k):
         A = torch.randn(dim1, dim2, device=device).to(dtype)
 
         idx = torch.abs(A) >= threshold
-        CA2, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
+        CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
 
-        if idx.sum() > 0:
-            assert coo_tensor is not None
-        if coo_tensor is not None:
+        if outlier_cols is not None:
             A1 = A * idx
-            A2 = torch.zeros_like(A)
-            A2[coo_tensor.rowidx.long(), coo_tensor.colidx.long()] = coo_tensor.values
+            A2 = torch.zeros_like(A) + A1
             torch.testing.assert_close(A1, A2)
 
-            A1 = A * (idx == 0)
+            A[:, outlier_cols] = 0
             A2 = (CA.float() * statsA.unsqueeze(1) / 127).to(dtype)
-            torch.testing.assert_close(A1, A2, rtol=0.05, atol=1.5e-2)
+            torch.testing.assert_close(A, A2, rtol=0.05, atol=1.5e-2)
 
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
@@ -1321,34 +894,32 @@ def test_spmm_bench():
 
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
-@pytest.mark.parametrize("dim1", get_test_dims(256, 1024, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(256, 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [256, 1024], ids=id_formatter("dim2"))
 def test_integrated_sparse_decomp(dim1, dim2):
     threshold = 3.0
-    formatB = "col_turing"
-    for i in range(k):
+    for _ in range(k):
         A = torch.randn(dim1, dim2).cuda().half()
         w1 = torch.randn(dim1, dim2).cuda().half()
         out1 = torch.matmul(A, w1.t())
 
-        Cw1, Cw1t, statsw1, statsw1t, coo_tensor = F.double_quant(w1)
-        CTw1, Sw1 = F.transform(Cw1, formatB)
+        Cw1, statsw1, _ = F.int8_vectorwise_quant(w1)
+        CA, statsA, _ = F.int8_vectorwise_quant(A)
 
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A)
-        C32A, SA = F.transform(CA, "col32")
+        out1_32 = F.int8_linear_matmul(CA, Cw1)
+        out2 = F.int8_mm_dequant(out1_32, statsA, statsw1)
 
-        out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1)
-        out2 = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)
+        # CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
+        CA, _, statsA, _, coo_tensor = F.double_quant(A, threshold=threshold)
 
-        CA, CAt, statsA, statsAt, coo_tensor = F.double_quant(A, threshold=threshold)
-        C32A, SA = F.transform(CA, "col32")
-
-        out1_32, Sout1_32 = F.igemmlt(C32A, CTw1, SA, Sw1)
-        out3 = F.mm_dequant(out1_32, Sout1_32, statsA, statsw1)
+        out1_32 = F.int8_linear_matmul(CA, Cw1)
+        out3 = F.int8_mm_dequant(out1_32, statsA, statsw1)
 
         assert coo_tensor is not None
 
         out4 = F.spmm_coo(coo_tensor, w1.t())
+        # idx = torch.unique(coo_tensor._indices()[1]).long()
+        # out4 = torch.matmul(A, w1.t())
         out5 = out3 + out4
 
         err1 = torch.abs(out1 - out2).mean().item()
@@ -1481,7 +1052,7 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     torch.nn.init.xavier_uniform_(B)
     Bt = B.t().contiguous()
 
-    CB, CBt, statsB, statsBt, coo_tensor = F.double_quant(B)
+    CB, CBt, statsB, statsBt, coo_tensor = F.int8_double_quant(B)
 
     rowidx = torch.randint(0, A.shape[-1], size=(15,))
 
@@ -1568,167 +1139,6 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
         out1 = bnb.matmul(A, Bt)
     torch.cuda.synchronize()
     print("partial matmul", time.time() - t0)
-
-
-@pytest.mark.parametrize(
-    ("batch", "seq", "model", "hidden"),
-    [pytest.param(1, 1, 6656, 4 * 6656, id="batch=1, seq=1, model=6656, hidden=26k")],
-)
-@pytest.mark.benchmark
-def test_bench_matmul(batch, seq, model, hidden):
-    iters = 1000
-    formatB = F.get_special_format_str()
-
-    A = torch.randn(batch, seq, model, device="cuda").half()
-    B = torch.empty(hidden, model, dtype=torch.float16, device="cuda")
-    torch.nn.init.xavier_uniform_(B)
-
-    B_fp4, state = F.quantize_fp4(B)
-    B_fp4_c, state_c = F.quantize_fp4(B, compress_statistics=True)
-
-    B_nf4, state_nf4 = F.quantize_nf4(B)
-    B_nf4_c, state_nf4_c = F.quantize_nf4(B, compress_statistics=True)
-
-    linear8bit = bnb.nn.Linear8bitLt(model, hidden, False, False).cuda().half()
-    linear8bit.eval()
-
-    outliers = torch.randint(0, model, size=(5,)).cuda()
-    A[:, :, outliers] = 8.0
-
-    linearMixedBit = bnb.nn.Linear8bitLt(model, hidden, False, False, threshold=6.0).cuda().half()
-    # linearMixedBit.eval()
-
-    linear8bit_train = bnb.nn.Linear8bitLt(model, hidden, False).cuda().half()
-    linear8bit_train_thresh = bnb.nn.Linear8bitLt(model, hidden, False, threshold=6.0).cuda().half()
-    bnb.matmul_4bit(A, B_nf4.t(), quant_state=state_nf4)
-
-    # warmup
-    for i in range(iters):
-        torch.matmul(A, B.t())
-    torch.cuda.synchronize()
-    print("")
-
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        torch.matmul(A, B.t())
-    torch.cuda.synchronize()
-    print(
-        f"pytorch fp16: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s",
-    )
-
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    bnb.matmul_4bit(A, B_fp4.t(), quant_state=state)
-    # torch.cuda.synchronize()
-    # print( f"bnb fp4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
-
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    bnb.matmul_4bit(A, B_fp4.t(), quant_state=state_c)
-    # torch.cuda.synchronize()
-    # print( f"bnb fp4 + compressed stats: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s" )
-
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        bnb.matmul_4bit(A, B_nf4.t(), quant_state=state_nf4)
-    torch.cuda.synchronize()
-    print(f"bnb nf4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for i in range(iters):
-        bnb.matmul_4bit(A, B_nf4_c.t(), quant_state=state_nf4_c)
-    torch.cuda.synchronize()
-    print(f"bnb nf4+DQ: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    bnb.matmul(A, B)
-    # torch.cuda.synchronize()
-    # print(f"CB -> CxB conversion (each iteration): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    bnb.matmul(A, B, threshold=6.0)
-    # torch.cuda.synchronize()
-    # print(f"CB -> CxB conversion + threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A, threshold=0.0)
-    # C32A, SA = F.transform(CA, "col32")
-    # CB, CBt, SCB, SCBt, coo_tensorB = F.double_quant(B)
-    # CxB, SB = F.transform(CB, to_order=formatB)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
-    # torch.cuda.synchronize()
-    # print(f"no overhead matmul-lt: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # BA, statsB = F.vectorwise_quant(B, dim=1)
-    # CxB, SB = F.nvidia_transform(CB, to_order=formatB)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    A2 = A.view(-1, A.shape[-1]).contiguous()
-    #    CA, statsA = F.vectorwise_quant(A2, dim=1)
-    #    C32A, SA = F.nvidia_transform(CA, "col32")
-    #    out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
-    #    Cout, Sout = F.nvidia_transform(out32, "row", state=Sout32)
-    #    F.vectorwise_mm_dequant(Cout, statsA, statsB.t())
-    # torch.cuda.synchronize()
-    # print(f"vector pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # BA, statsB = F.vectorwise_quant(B, dim=1, quant_type="linear")
-    # CxB, SB = F.nvidia_transform(CB, to_order=formatB)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    A2 = A.view(-1, A.shape[-1]).contiguous()
-    #    CA, statsA = F.vectorwise_quant(A2, dim=1, quant_type="linear")
-    #    C32A, SA = F.nvidia_transform(CA, "col32")
-    #    out32, Sout32 = F.igemmlt(C32A, CxB, SA, SB)
-    #    Cout, Sout = F.nvidia_transform(out32, "row", state=Sout32)
-    #    out = Cout * statsB * statsA * (1.0 / (127 * 127))
-    # torch.cuda.synchronize()
-    # print(f"linear pytorch + nvidia: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # linear8bit(A)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    linear8bit(A)
-    # torch.cuda.synchronize()
-    # print( f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # linearMixedBit(A)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    linearMixedBit(A)
-    # torch.cuda.synchronize()
-    # print( f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # linear8bit_train(A)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    linear8bit_train(A)
-    # torch.cuda.synchronize()
-    # print( f"bnb linear8bitlt (training): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
-
-    # linear8bit_train_thresh(A)
-    # torch.cuda.synchronize()
-    # t0 = time.time()
-    # for i in range(iters):
-    #    linear8bit_train(A)
-    # torch.cuda.synchronize()
-    # print( f"bnb linear8bitlt with threshold (training): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
 
 
 def test_zeropoint():
@@ -1819,6 +1229,7 @@ def test_zeropoint():
 
 @pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
 @pytest.mark.parametrize("device", ["cuda", "cpu"])
+@pytest.mark.deprecated
 def test_extract_outliers(device):
     for i in range(k):
         shapeA = (4096, 4096 * 4)
@@ -2048,8 +1459,8 @@ def test_4bit_quant(dtype, quant_type, blocksize, device):
     A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
     qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
     A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
-    if device == "cpu":
-        A2 = A2.t()
+    # if device == "cpu":
+    #     A2 = A2.t()
 
     err = (A1 - A2).abs().float()
     relerr = (err / (A1.abs().float() + 1e-8)).mean()
@@ -2241,7 +1652,7 @@ def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
 
             c = int(C1.numel() * 0.0014 * (dim / 256)) + 1
 
-            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=c, throw=False)
+            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=0, throw=False)
         err1 = sum(errs1) / len(errs1) / math.sqrt(dim)
         err2 = sum(errs2) / len(errs2) / math.sqrt(dim)
         err3 = sum(errs3) / len(errs3) / math.sqrt(dim)
@@ -2335,7 +1746,7 @@ def test_gemv_4bit_cpu(dtype, quant_type, kind):
                 quant_storage=torch.uint8,
             )
             dqB = F.dequantize_4bit(qB, state)
-            C3 = torch.matmul(A, dqB)
+            C3 = torch.matmul(A, dqB.t())
             C2 = F.gemv_4bit(A, qB.t(), state=state)
             A.requires_grad = True
             C1 = bnb.matmul_4bit(A, qB.t(), state)
@@ -2370,23 +1781,6 @@ def test_managed():
     assert (A == 17 * (2**3)).sum().item() == n * n
 
 
-# F.prefetch_tensor(A)
-# F.prefetch_tensor(B)
-
-
-# F.fill(B2, 17.0)
-# F._mul(A, B2)
-
-# F.prefetch_tensor(A, to_cpu=True)
-# F.prefetch_tensor(B, to_cpu=True)
-# F.prefetch_tensor(B2, to_cpu=True)
-# torch.cuda.synchronize()
-
-# assert (A==17).sum().item() == n*n
-
-# torch.testing.assert_close(A, torch.ones(A.shape)*289)
-
-
 @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
 @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
@@ -2415,3 +1809,156 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
         torch.testing.assert_close(A, C2)
         # torch.testing.assert_close(A, C1, rtol=1e-5, atol=0.00001)
         # torch.testing.assert_close(A, C2, rtol=1e-5, atol=0.080)
+
+
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
+@pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=1), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=1), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=1), ids=id_formatter("dim3"))
+@pytest.mark.deprecated
+def test_vector_quant(dim1, dim2, dim3):
+    dim2 = dim2 - (dim2 % 16)
+    dim3 = dim3 - (dim3 % 16)
+    for i in range(k):
+        A = torch.randn(size=(dim2, dim3), device="cuda")
+        qA, SA = F.vectorwise_quant(A, dim=0)
+        A1 = F.vectorwise_dequant(qA, SA)
+        n = A1.numel()
+        assert_all_approx_close(A1, A, atol=0.01, rtol=0.1, count=int(n * 0.002))
+
+
+@pytest.mark.deprecated
+def test_quantile_quantization():
+    for i in range(100):
+        A1 = torch.randn(1024, 1024, device="cuda")
+        code = F.estimate_quantiles(A1)
+        C = F.quantize_no_absmax(A1, code)
+        A2 = F.dequantize_no_absmax(C, code)
+        diff = torch.abs(A1 - A2).mean().item()
+        assert diff < 0.0075
+
+        A1 = torch.rand(1024, 1024, device="cuda")
+        code = F.estimate_quantiles(A1)
+        C = F.quantize_no_absmax(A1, code)
+        A2 = F.dequantize_no_absmax(C, code)
+        diff = torch.abs(A1 - A2).mean().item()
+        torch.testing.assert_close(A1, A2, atol=5e-3, rtol=0)
+        assert diff < 0.001
+
+
+@pytest.mark.deprecated
+def test_dynamic_quantization():
+    diffs = []
+    reldiffs = []
+    for i in range(100):
+        A1 = torch.randn(1024, 1024, device="cuda")
+        C, S = F.quantize(A1)
+        A2 = F.dequantize(C, S)
+        diff = torch.abs(A1 - A2)
+        reldiff = diff / torch.abs(A1 + 1e-8)
+        diffs.append(diff.mean().item())
+        reldiffs.append(reldiff.mean().item())
+        assert diff.mean().item() < 0.0135
+    print(sum(diffs) / len(diffs))
+    print(sum(reldiffs) / len(reldiffs))
+
+    for i in range(100):
+        A1 = torch.rand(1024, 1024, device="cuda")
+        C, S = F.quantize(A1)
+        A2 = F.dequantize(C, S)
+        diff = torch.abs(A1 - A2).mean().item()
+        torch.testing.assert_close(A1, A2, atol=1e-2, rtol=0)
+        assert diff < 0.004
+
+
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=["float", "half"])
+@pytest.mark.deprecated
+def test_percentile_clipping(gtype):
+    gnorm_vec1 = torch.zeros(100, device="cuda")
+    gnorm_vec2 = torch.zeros(100, device="cuda")
+    n = 4
+    step = 0
+    percentile = 5
+    for i in range(k):
+        step += 1
+        g = torch.randn(n, n, dtype=gtype, device="cuda")
+        gnorm1, clip2, gnorm_scale = F.percentile_clipping(g, gnorm_vec2, step, percentile=percentile)
+        assert gnorm_scale == 1.0 if gnorm1 < clip2 else clip2 / gnorm1
+
+        gnorm2 = torch.norm(g.float())
+        if step == 1:
+            gnorm_vec1[:] = gnorm2
+        else:
+            gnorm_vec1[step % 100] = gnorm2
+
+        vals, idx = torch.sort(gnorm_vec1)
+        clip1 = vals[percentile]
+
+        torch.testing.assert_close(gnorm_vec1, torch.sqrt(gnorm_vec2))
+        torch.testing.assert_close(clip1, clip2)
+        torch.testing.assert_close(gnorm1, gnorm2)
+
+
+@pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
+@pytest.mark.parametrize("dim1", get_test_dims(2, 256, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(2, 256, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", get_test_dims(2, 256, n=2), ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dtype", [torch.int8, torch.int32], ids=describe_dtype)
+@pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
+@pytest.mark.parametrize(
+    "orderOut", ["col", "row"] if HIP_ENVIRONMENT else ["col", "row", "col32"], ids=id_formatter("orderOut")
+)
+@pytest.mark.parametrize("transpose", [False], ids=id_formatter("transpose"))
+@pytest.mark.parametrize("dims", [2, 3], ids=id_formatter("dims"))
+@pytest.mark.deprecated
+def test_nvidia_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
+    if dims == 3 and orderOut != "col32":
+        return
+    if dtype == torch.int32 and orderOut != "col32":
+        return
+    try:
+        func = F.get_transform_func(dtype, orderA, orderOut, transpose)
+    except ValueError as ve:
+        pytest.skip(str(ve))  # skip if not supported
+
+    if dims == 2:
+        A = torch.randint(-128, 127, size=(dim1, dim2), device="cuda").to(dtype)
+    elif dims == 3:
+        A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device="cuda").to(dtype)
+
+    out, S = F.nvidia_transform(A, to_order=orderOut)
+
+    if orderOut == "row":
+        torch.testing.assert_close(A.flatten(), out.flatten())
+    elif orderOut == "col":
+        torch.testing.assert_close(A.t().flatten(), out.flatten())
+    elif orderOut == "col32":
+        if dims == 2:
+            n = A.shape[0] * (A.shape[1] + (32 - (A.shape[1] % 32)))
+        elif dims == 3:
+            n = A.shape[0] * A.shape[1] * (A.shape[2] + (32 - (A.shape[2] % 32)))
+        assert out.numel() == n
+    elif orderOut == "col_turing":
+        # 32 col 8 row tiles
+        n = (A.shape[0] + (8 - A.shape[0] % 8)) * (A.shape[1] + (32 - (A.shape[1] % 32)))
+        assert out.numel() == n
+        total_coltile = (A.shape[1] // 32) + (1 if A.shape[1] % 32 != 0 else 0)
+        for row in range(A.shape[0]):
+            for col in range(A.shape[1]):
+                i = row * A.shape[1]
+                j = col
+
+                coltile = (col // 32) + (1 if col % 32 != 0 else 0)
+                rowtile = ((row // 8) + (1 if row % 8 != 0 else 0)) * total_coltile
+                offset = 32 * 8 * (rowtile + coltile)
+                col2 = col % 32
+                row2 = (row % 8) * 32
+
+                assert A.flatten()[i + j] == A[row, col]
+                # assert A.flatten()[i+j] == out.flatten()[row2+col2]
+                # torch.testing.assert_close(A.flatten()[i+j], A[row, col])
+                # torch.testing.assert_close(A.flatten()[i+j], out.flatten()[row2+ col2+block_offset])
+
+    if orderOut == "col32":
+        out2, S = F.nvidia_transform(out, from_order=orderOut, to_order="row", state=S)
+        torch.testing.assert_close(A, out2)

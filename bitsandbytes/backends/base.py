@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Tuple
 
 import torch
 
@@ -10,7 +10,7 @@ class Backend(ABC):
     """Base class for devices backends that will implement their own 8bits and 4bits functions."""
 
     @abstractmethod
-    def double_quant(
+    def int8_double_quant(
         self,
         A: torch.Tensor,
         col_stats: Optional[torch.Tensor] = None,
@@ -18,8 +18,124 @@ class Backend(ABC):
         out_col: Optional[torch.Tensor] = None,
         out_row: Optional[torch.Tensor] = None,
         threshold=0.0,
-    ):
-        raise NotImplementedError
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        """Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
+
+        The statistics are determined both row-wise and column-wise (transposed).
+
+        For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
+
+        <Tip>
+        This function is useful for training, but for inference it is advised to use [`int8_vectorwise_quant`] instead.
+        This implementation performs additional column-wise transposed calculations which are not optimized.
+        </Tip>
+
+        Args:
+            A (`torch.Tensor` with dtype `torch.float16`): The input matrix.
+            col_stats (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the column-wise quantization scales.
+            row_stats (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the row-wise quantization scales.
+            out_col (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the column-wise quantized data.
+            out_row (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the row-wise quantized data.
+            threshold (`float`, *optional*):
+                An optional threshold for sparse decomposition of outlier features.
+
+                No outliers are held back when 0.0. Defaults to 0.0.
+
+        Returns:
+            `Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]`: A tuple containing the quantized tensor and relevant statistics.
+            - `torch.Tensor` with dtype `torch.int8`: The row-wise quantized data.
+            - `torch.Tensor` with dtype `torch.int8`: The column-wise quantized data.
+            - `torch.Tensor` with dtype `torch.float32`: The row-wise quantization scales.
+            - `torch.Tensor` with dtype `torch.float32`: The column-wise quantization scales.
+            - `torch.Tensor` with dtype `torch.int32`, *optional*: A list of column indices which contain outlier features.
+        """
+        ...
+
+    @abstractmethod
+    def int8_linear_matmul(
+        self,
+        A: torch.Tensor,
+        B: torch.Tensor,
+        out: Optional[torch.Tensor] = None,
+        dtype=torch.int32,
+    ) -> torch.Tensor:
+        """Performs an 8-bit integer matrix multiplication.
+
+        A linear transformation is applied such that `out = A @ B.T`. When possible, integer tensor core hardware is
+        utilized to accelerate the operation.
+
+        Args:
+            A (`torch.Tensor`): The first matrix operand with the data type `torch.int8`.
+            B (`torch.Tensor`): The second matrix operand with the data type `torch.int8`.
+            out (`torch.Tensor`, *optional*): A pre-allocated tensor used to store the result.
+            dtype (`torch.dtype`, *optional*): The expected data type of the output. Defaults to `torch.int32`.
+
+        Raises:
+            `NotImplementedError`: The operation is not supported in the current environment.
+            `RuntimeError`: Raised when the cannot be completed for any other reason.
+
+        Returns:
+            `torch.Tensor`: The result of the operation.
+        """
+        ...
+
+    @abstractmethod
+    def int8_mm_dequant(
+        self,
+        A: torch.Tensor,
+        row_stats: torch.Tensor,
+        col_stats: torch.Tensor,
+        out: Optional[torch.Tensor] = None,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Performs dequantization on the result of a quantized int8 matrix multiplication.
+
+        Args:
+            A (`torch.Tensor` with dtype `torch.int32`): The result of a quantized int8 matrix multiplication.
+            row_stats (`torch.Tensor`): The row-wise quantization statistics for the lhs operand of the matrix multiplication.
+            col_stats (`torch.Tensor`): The column-wise quantization statistics for the rhs operand of the matrix multiplication.
+            out (`torch.Tensor`, *optional*): A pre-allocated tensor to store the output of the operation.
+            bias (`torch.Tensor`, *optional*): An optional bias vector to add to the result.
+
+        Returns:
+            `torch.Tensor`: The dequantized result with an optional bias, with dtype `torch.float16`.
+        """
+        ...
+
+    @abstractmethod
+    def int8_vectorwise_dequant(self, A: torch.Tensor, stats: torch.Tensor):
+        """Dequantizes a tensor with dtype `torch.int8` to `torch.float32`.
+
+        Args:
+            A (`torch.Tensor` with dtype `torch.int8`): The quantized int8 tensor.
+            stats (`torch.Tensor` with dtype `torch.float32`): The row-wise quantization statistics.
+
+        Returns:
+            `torch.Tensor` with dtype `torch.float32`: The dequantized tensor.
+        """
+        # To dequantize we divide by 127, or multiply by the reciprocal.
+        return A * stats.view(-1, 1) * 7.874015718698502e-3
+
+    @abstractmethod
+    def int8_vectorwise_quant(self, A: torch.Tensor, threshold=0.0):
+        """Quantizes a tensor with dtype `torch.float16` to `torch.int8` in accordance to the `LLM.int8()` algorithm.
+
+        For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
+
+        Args:
+            A (`torch.Tensor` with dtype `torch.float16`): The input tensor.
+            threshold (`float`, *optional*):
+                An optional threshold for sparse decomposition of outlier features.
+
+                No outliers are held back when 0.0. Defaults to 0.0.
+
+        Returns:
+            `Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]`: A tuple containing the quantized tensor and relevant statistics.
+            - `torch.Tensor` with dtype `torch.int8`: The quantized data.
+            - `torch.Tensor` with dtype `torch.float32`: The quantization scales.
+            - `torch.Tensor` with dtype `torch.int32`, *optional*: A list of column indices which contain outlier features.
+        """
+        ...
 
     @abstractmethod
     def transform(
@@ -32,33 +148,6 @@ class Backend(ABC):
         state: Optional[Tuple[torch.Size, str]] = None,
         ld=None,
     ):
-        raise NotImplementedError
-
-    @abstractmethod
-    def igemmlt(
-        self,
-        A: torch.Tensor,
-        B: torch.Tensor,
-        SA: Tuple[torch.Size, str],
-        SB: Tuple[torch.Size, str],
-        out: Optional[torch.Tensor] = None,
-        Sout: Optional[Tuple[torch.Size, str]] = None,
-        dtype=torch.int32,
-    ) -> Union[torch.Tensor, Tuple[Optional[Tuple[torch.Tensor, Tuple[torch.Size, str]]]]]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def mm_dequant(
-        self,
-        A: torch.Tensor,
-        quant_state: Tuple[torch.Size, str],
-        row_stats: torch.Tensor,
-        col_stats: torch.Tensor,
-        out: Optional[torch.Tensor] = None,
-        new_row_stats: Optional[torch.Tensor] = None,
-        new_col_stats: Optional[torch.Tensor] = None,
-        bias: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
         raise NotImplementedError
 
     @abstractmethod
@@ -81,32 +170,30 @@ class Backend(ABC):
         quant_type: Literal["fp4", "nf4"] = "fp4",
         quant_storage=torch.uint8,
     ) -> Tuple[torch.Tensor, QuantState]:
+        """Quantize tensor A in blocks of 4-bit values.
+
+        Quantizes tensor A by dividing it into blocks which are independently quantized.
+
+        Args:
+            A (`torch.Tensor`): The input tensor. Supports `float16`, `bfloat16`, or `float32` datatypes.
+            absmax (`torch.Tensor`, *optional*): A tensor to use to store the absmax values.
+            out (`torch.Tensor`, *optional*): A tensor to use to store the result.
+            blocksize (`int`, *optional*):
+                The size of the blocks. Defaults to 64.
+                Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
+            compress_statistics (`bool`, *optional*): Whether to additionally quantize the absmax values. Defaults to False.
+            quant_type (`str`, *optional*): The data type to use: `nf4` or `fp4`. Defaults to `fp4`.
+            quant_storage (`torch.dtype`, *optional*): The dtype of the tensor used to store the result. Defaults to `torch.uint8`.
+
+        Raises:
+            ValueError: Raised when the input data type is not supported.
+
+        Returns:
+            Tuple[`torch.Tensor`, `QuantState`]: A tuple containing the quantization results.
+            - `torch.Tensor`: The quantized tensor with packed 4-bit values.
+            - [`QuantState`]: The state object used to undo the quantization.
         """
-        Quantize tensor A in blocks of 4-bit values.
-
-        Quantizes tensor A by dividing it into blocks which are independently quantized to FP4.
-
-        Parameters
-        ----------
-        A : torch.Tensor
-            The input tensor.
-        absmax : torch.Tensor
-            The absmax values.
-        out : torch.Tensor
-            The output tensor.
-        blocksize : int
-            The blocksize used in quantization.
-        quant_type : str
-            The 4-bit quantization data type {fp4, nf4}
-
-        Returns
-        -------
-        torch.Tensor:
-            Tensor with packed 4-bit values.
-        tuple(torch.Tensor, torch.Size, torch.dtype, int):
-            The quantization state to undo the quantization.
-        """
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def dequantize_4bit(
@@ -118,33 +205,33 @@ class Backend(ABC):
         blocksize: int = 64,
         quant_type: Literal["fp4", "nf4"] = "fp4",
     ) -> torch.Tensor:
+        """Dequantizes a packed 4-bit quantized tensor.
+
+        The input tensor is dequantized by dividing it into blocks of `blocksize` values.
+        The the absolute maximum value within these blocks is used for scaling
+        the non-linear dequantization.
+
+        Args:
+            A (`torch.Tensor`): The quantized input tensor.
+            quant_state ([`QuantState`], *optional*):
+                The quantization state as returned by [`quantize_4bit`].
+                Required if `absmax` is not provided.
+            absmax (`torch.Tensor`, *optional*):
+                A tensor containing the scaling values.
+                Required if `quant_state` is not provided and ignored otherwise.
+            out (`torch.Tensor`, *optional*): A tensor to use to store the result.
+            blocksize (`int`, *optional*):
+                The size of the blocks. Defaults to 64.
+                Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
+            quant_type (`str`, *optional*): The data type to use: `nf4` or `fp4`. Defaults to `fp4`.
+
+        Raises:
+            ValueError: Raised when the input data type or blocksize is not supported.
+
+        Returns:
+            `torch.Tensor`: The dequantized tensor.
         """
-        Dequantizes FP4 blockwise quantized values.
-
-        Dequantizes the tensor A with maximum absolute values absmax in blocks of size blocksize.
-
-        Parameters
-        ----------
-        A : torch.Tensor
-            The input tensor (packed 4-bit values).
-        quant_state : QuantState
-            object with quantisation stats, incl. absmax values, original tensor shape and original dtype.
-        absmax : torch.Tensor
-            The absmax values.
-        out : torch.Tensor
-            Dequantized output tensor.
-        blocksize : int
-            The blocksize used in quantization.
-        quant_type : str
-            The 4-bit quantization data type {fp4, nf4}
-
-
-        Returns
-        -------
-        torch.Tensor:
-            Dequantized tensor.
-        """
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def gemv_4bit(
@@ -155,8 +242,7 @@ class Backend(ABC):
         transposed_A=False,
         transposed_B=False,
         state: QuantState = None,
-    ) -> torch.Tensor:
-        raise NotImplementedError
+    ) -> torch.Tensor: ...
 
     @abstractmethod
     def quantize_blockwise(
@@ -168,7 +254,33 @@ class Backend(ABC):
         blocksize=4096,
         nested=False,
     ) -> Tuple[torch.Tensor, QuantState]:
-        raise NotImplementedError
+        """Quantize a tensor in blocks of values.
+
+        The input tensor is quantized by dividing it into blocks of `blocksize` values.
+        The the absolute maximum value within these blocks is calculated for scaling
+        the non-linear quantization.
+
+        Args:
+            A (`torch.Tensor`): The input tensor. Supports `float16`, `bfloat16`, or `float32` datatypes.
+            code (`torch.Tensor`, *optional*):
+                A mapping describing the low-bit data type. Defaults to a signed 8-bit dynamic type.
+                For more details, see  (8-Bit Approximations for Parallelism in Deep Learning)[https://arxiv.org/abs/1511.04561].
+            absmax (`torch.Tensor`, *optional*): A tensor to use to store the absmax values.
+            out (`torch.Tensor`, *optional*): A tensor to use to store the result.
+            blocksize (`int`, *optional*):
+                The size of the blocks. Defaults to 4096.
+                Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
+            nested (`bool`, *optional*): Whether to additionally quantize the absmax values. Defaults to False.
+
+        Raises:
+            ValueError: Raised when the input data type is not supported.
+
+        Returns:
+            `Tuple[torch.Tensor, QuantState]`: A tuple containing the quantization results.
+            - `torch.Tensor`: The quantized tensor.
+            - [`QuantState`]: The state object used to undo the quantization.
+        """
+        ...
 
     @abstractmethod
     def dequantize_blockwise(
@@ -181,7 +293,38 @@ class Backend(ABC):
         blocksize: int = 4096,
         nested=False,
     ) -> torch.Tensor:
-        raise NotImplementedError
+        """Dequantize a tensor in blocks of values.
+
+        The input tensor is dequantized by dividing it into blocks of `blocksize` values.
+        The the absolute maximum value within these blocks is used for scaling
+        the non-linear dequantization.
+
+        Args:
+            A (`torch.Tensor`): The quantized input tensor.
+            quant_state ([`QuantState`], *optional*):
+                The quantization state as returned by [`quantize_blockwise`].
+                Required if `absmax` is not provided.
+            absmax (`torch.Tensor`, *optional*):
+                A tensor containing the scaling values.
+                Required if `quant_state` is not provided and ignored otherwise.
+            code (`torch.Tensor`, *optional*):
+                A mapping describing the low-bit data type. Defaults to a signed 8-bit dynamic type.
+                For more details, see  (8-Bit Approximations for Parallelism in Deep Learning)[https://arxiv.org/abs/1511.04561].
+                Ignored when `quant_state` is provided.
+            out (`torch.Tensor`, *optional*): A tensor to use to store the result.
+            blocksize (`int`, *optional*):
+                The size of the blocks. Defaults to 4096.
+                Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
+                Ignored when `quant_state` is provided.
+
+        Raises:
+            ValueError: Raised when the input data type is not supported.
+
+        Returns:
+            `torch.Tensor`:
+                The dequantized tensor. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.
+        """
+        ...
 
     @abstractmethod
     def optimizer_update_8bit_blockwise(
@@ -193,6 +336,8 @@ class Backend(ABC):
         state2: Optional[torch.Tensor],
         beta1: float,
         beta2: float,
+        beta3: float,
+        alpha: float,
         eps: float,
         step: int,
         lr: float,
@@ -241,6 +386,8 @@ class Backend(ABC):
         lr: float,
         state2: Optional[torch.Tensor] = None,
         beta2: float = 0.0,
+        beta3: float = 0.0,
+        alpha: float = 0.0,
         weight_decay: float = 0.0,
         gnorm_scale: float = 1.0,
         unorm_vec: Optional[torch.Tensor] = None,

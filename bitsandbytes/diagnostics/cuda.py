@@ -139,8 +139,8 @@ def _print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
 
     print(f"To manually override the PyTorch CUDA version please see: {NONPYTORCH_DOC_URL}")
 
-    # 7.5 is the minimum CC for cublaslt
-    if not cuda_specs.has_cublaslt:
+    # 7.5 is the minimum CC for int8 tensor cores
+    if not cuda_specs.has_imma:
         print_dedented(
             """
             WARNING: Compute capability < 7.5 detected! Only slow 8-bit matmul is supported for your GPU!

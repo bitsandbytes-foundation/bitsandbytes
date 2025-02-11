@@ -5,6 +5,10 @@
 from ..backends import backends
 from .modules import (
     Embedding,
+    Embedding4bit,
+    Embedding8bit,
+    EmbeddingFP4,
+    EmbeddingNF4,
     Int8Params,
     Linear4bit,
     Linear8bitLt,

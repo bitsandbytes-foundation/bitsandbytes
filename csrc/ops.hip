@@ -50,11 +50,11 @@ void quantize(float *code, float *A, unsigned char *out, int n)
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
-void dequantize(float *code, unsigned char *A, float *out, int n)
+void dequantize(float *code, unsigned char *A, float *out, int n, hipStream_t stream)
 {
   int num_blocks = n/1024;
   num_blocks = n % 1024 == 0 ? num_blocks : num_blocks + 1;
- hipLaunchKernelGGL(( kDequantize), dim3(num_blocks), dim3(1024), 0, 0, code, A, out, n);
+ hipLaunchKernelGGL(( kDequantize), dim3(num_blocks), dim3(1024), 0, stream, code, A, out, n);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
@@ -82,16 +82,16 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
-template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int blocksize, const int n)
+template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int blocksize, const int n, hipStream_t stream)
 {
   int num_blocks = n/blocksize;
   num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
   int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
 
   if(DATA_TYPE > 0)
-   hipLaunchKernelGGL(( kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>), dim3((n+tile_size-1)/tile_size), dim3(64), 0, 0, code, A, absmax, out, blocksize/2, n);
+   hipLaunchKernelGGL(( kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>), dim3((n+tile_size-1)/tile_size), dim3(64), 0, stream, code, A, absmax, out, blocksize/2, n);
   else
-   hipLaunchKernelGGL(( kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>), dim3((n+tile_size-1)/tile_size), dim3(64), 0, 0, code, A, absmax, out, blocksize, n);
+   hipLaunchKernelGGL(( kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>), dim3((n+tile_size-1)/tile_size), dim3(64), 0, stream, code, A, absmax, out, blocksize, n);
 
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
@@ -107,7 +107,8 @@ template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsign
 
 template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
                 float* state1, float* state2, float *unorm, float max_unorm, float param_norm,
-                const float beta1, const float beta2, const float eps, const float weight_decay,
+                const float beta1, const float beta2, const float beta3, const float alpha,
+                const float eps, const float weight_decay,
                 const int step, const float lr, const float gnorm_scale, bool skip_zeros, const int n)
 {
   int num_blocks = n/4096;
@@ -121,9 +122,12 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
        hipLaunchKernelGGL(( kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8>), dim3(num_blocks), dim3(512), 0, 0, g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(hipPeekAtLastError());
       }
-		hipLaunchKernelGGL((	kOptimizer32bit2State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+		hipLaunchKernelGGL((	kOptimizer32bit2State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, beta3, alpha, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(hipPeekAtLastError());
 			break;
+    case ADEMAMIX:
+      // TODO: Not implemented!
+      break;
 		case MOMENTUM:
     case RMSPROP:
     case ADAGRAD:
@@ -209,7 +213,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 #define NUM_1STATE 8
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g,
-                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3, float alpha, float eps, int step, float lr,
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n)
 {
 
@@ -219,10 +223,11 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(T* p, T* g
 		case ADAM:
 			num_blocks = n/BLOCKSIZE_2STATE;
 			num_blocks = n % BLOCKSIZE_2STATE == 0 ? num_blocks : num_blocks + 1;
-		hipLaunchKernelGGL((	kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>), dim3(num_blocks), dim3(BLOCKSIZE_2STATE/NUM_2STATE), 0, 0, p, g, state1, state2, beta1, beta2, eps, step, lr,
+		hipLaunchKernelGGL((	kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>), dim3(num_blocks), dim3(BLOCKSIZE_2STATE/NUM_2STATE), 0, 0, p, g, state1, state2, beta1, beta2, beta3, alpha, eps, step, lr,
 																														quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n);
 			CUDA_CHECK_RETURN(hipPeekAtLastError());
 		break;
+    case ADEMAMIX: break; // TODO: Not implemented!
 		case MOMENTUM:
 		case RMSPROP:
     case ADAGRAD:
@@ -509,45 +514,41 @@ static std::string hipError_to_string(const hipError_t ret)
 	}
 }
 
-template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc)
+template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream)
 {
 #ifdef NO_HIPBLASLT
 	return ERR_NOT_IMPLEMENTED;
 #else
-    int has_error = 0;
-    hipblasLtMatmulDesc_t matmulDesc = NULL;
-    hipblasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
-    hipblasOperation_t opT = HIPBLAS_OP_T;
-    //hipblasLtPointerMode_t alphaVec = hipblasLt_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_ZERO;
-    hipblasLtOrder_t col32 = HIPBLASLT_ORDER_COL;
-    hipblasLtOrder_t col_turing = HIPBLASLT_ORDER_COL;
-    hipblasLtOrder_t col_ampere = HIPBLASLT_ORDER_COL;
 
-    has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_8I, m, k, lda));
-    has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Bdesc, HIP_R_8I, n, k, ldb));
-    has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Adesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
+  // Calculate C = A^T @ B, in col-major layout.
+  //
+  // Use the IMMA kernels requires:
+  // * A must be transposed and B must be non-transposed.
+  // * Dimensions m and k must be multiples of 4.
+  // * All pointers must be 4-byte aligned; 16-byte alignment preferred.
 
+  int has_error = 0;
+  const int64_t max_workspace_size = 0;//set to 0 to avoid choosing GSU kernel
 
-    if(FORMATB == COL_TURING)
-      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Bdesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col_turing, sizeof(col_turing)));
-    else
-      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Bdesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col_ampere, sizeof(col_ampere)));
+  hipblasLtMatmulDesc_t matmulDesc;
+  hipblasLtMatrixLayout_t aDesc, bDesc, cDesc;
+  hipblasOperation_t opT = HIPBLAS_OP_T;
 
-    const int64_t max_workspace_size = 0;//set to 0 to avoid choosing GSU kernel
+  hipDataType outType = DTYPE_OUT == 32 ? HIP_R_32I : HIP_R_8I;
+  hipDataType scaleType = DTYPE_OUT == 32 ? HIP_R_32I : HIP_R_32F;
 
-    if(DTYPE_OUT == 32)
-    {
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32I, HIP_R_32I));
-      auto opA = HIPBLAS_OP_N;
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(int32_t)));
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(int32_t)));
-      hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_DEFAULT;
-      checkHipblasStatus(hipblasLtMatmulDescSetAttribute(
-        matmulDesc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
-      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Cdesc, HIP_R_32I, m, n, ldc));
-      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Cdesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      int alpha = 1, beta = 0;
+  hipblasLtPointerMode_t pointerMode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
 
+  has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&aDesc, HIP_R_8I, m, k, lda));
+  has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&bDesc, HIP_R_8I, m, n, ldb));
+  has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&cDesc, outType, k, n, ldc));
+
+  // Default layout order is col major
+
+  has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32I, scaleType));
+  has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &opT, sizeof(opT)));
+
+  if (DTYPE_OUT == 32) {
 
       /* Algo and workspace TODO: need to rework to not be duplicated */
       // Set User Preference attributes
@@ -564,10 +565,10 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
       int                              returnedAlgoCount = 0;
       checkHipblasStatus(hipblasLtMatmulAlgoGetHeuristic(ltHandle,
                                                             matmulDesc,
-                                                            Adesc,
-                                                            Bdesc,
-                                                            Cdesc,
-                                                            Cdesc,
+                                                            aDesc,
+                                                            bDesc,
+                                                            cDesc,
+                                                            cDesc,
                                                             pref,
                                                             request_solutions,
                                                             heuristicResult,
@@ -577,75 +578,59 @@ template <int FORMATB, int DTYPE_OUT, int SCALE_ROWS> int igemmlt(hipblasLtHandl
       {
         has_error = 1;
         fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
+      } else {
+        int alpha = 1, beta = 0;
+        has_error |= checkHipblasStatus(hipblasLtMatmul(
+          ltHandle, matmulDesc,
+          &alpha, A, aDesc,
+          B, bDesc, &beta,
+          (int32_t*)C, cDesc,
+          (int32_t*)C, cDesc,
+          &heuristicResult[0].algo, NULL, 0, stream
+        ));
       }
-      else
-      {
-        has_error |= checkHipblasStatus(hipblasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int32_t*)C, Cdesc, (int32_t*)C, Cdesc, &heuristicResult[0].algo, nullptr, 0, 0));
-      }
+  } else {
+    // This path is unlikely to be used, as 8-bit accumulation can lead to likely overflows.
+
+    if (!SCALE_ROWS) {
+      float alpha = 1.0f, beta = 0.0f;
+      has_error |= checkHipblasStatus(hipblasLtMatmul(
+        ltHandle, matmulDesc,
+        &alpha, A, aDesc,
+        B, bDesc, &beta,
+        (int8_t*)C, cDesc,
+        (int8_t*)C, cDesc,
+        NULL, NULL, 0, stream
+      ));
+    } else {
+      hipblasLtPointerMode_t alphaVec = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
+      float beta = 0.0f;
+      has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(
+        matmulDesc,
+        HIPBLASLT_MATMUL_DESC_POINTER_MODE,
+        &pointerMode,
+        sizeof(alphaVec)
+      ));
+      has_error |= checkHipblasStatus(hipblasLtMatmul(
+        ltHandle, matmulDesc,
+        row_scale, A, aDesc,
+        B, bDesc, &beta,
+        (int8_t*)C, cDesc,
+        (int8_t*)C, cDesc,
+        NULL, NULL, 0, stream
+      ));
     }
-    else
-    {
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32I, HIP_R_8I));
-      hipblasOperation_t opA = HIPBLAS_OP_N;
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA)));
-      has_error |= checkHipblasStatus(hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &opT, sizeof(opT)));
-      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutCreate(&Cdesc, HIP_R_8I, m, n, ldc));
-      has_error |= checkHipblasStatus(hipblasLtMatrixLayoutSetAttribute(Cdesc, HIPBLASLT_MATRIX_LAYOUT_ORDER, &col32, sizeof(col32)));
-      /* Algo and workspace TODO: need to rework to not be duplicated */
-      // Set User Preference attributes
-      hipblasLtMatmulPreference_t pref;
-      checkHipblasStatus(hipblasLtMatmulPreferenceCreate(&pref));
-      checkHipblasStatus(
-          hipblasLtMatmulPreferenceSetAttribute(pref,
-                                                HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                &max_workspace_size,
-                                                sizeof(max_workspace_size)));
+  }
 
-      const int                        request_solutions = 1;
-      hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
-      int                              returnedAlgoCount = 0;
-      checkHipblasStatus(hipblasLtMatmulAlgoGetHeuristic(ltHandle,
-                                                            matmulDesc,
-                                                            Adesc,
-                                                            Bdesc,
-                                                            Cdesc,
-                                                            Cdesc,
-                                                            pref,
-                                                            request_solutions,
-                                                            heuristicResult,
-                                                            &returnedAlgoCount));
+  has_error |= checkHipblasStatus(hipblasLtMatrixLayoutDestroy(cDesc));
+  has_error |= checkHipblasStatus(hipblasLtMatrixLayoutDestroy(bDesc));
+  has_error |= checkHipblasStatus(hipblasLtMatrixLayoutDestroy(aDesc));
+  has_error |= checkHipblasStatus(hipblasLtMatmulDescDestroy(matmulDesc));
 
-      if (returnedAlgoCount == 0)
-      {
-        has_error = 1;
-        fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
-      }
-      else
-      {
-        if(!SCALE_ROWS)
-        {
-          float alpha = 1.0f, beta = 0.0f;
+  if(has_error == 1)
+    printf("error detected");
 
-          has_error |= checkHipblasStatus(hipblasLtMatmul(ltHandle, matmulDesc,&alpha, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, &heuristicResult[0].algo, nullptr, 0, 0));
-        }
-        else
-        {
-          float beta = 0.0f;
-
-          has_error |= checkHipblasStatus(hipblasLtMatmul(ltHandle, matmulDesc, row_scale, A, Adesc, B, Bdesc, &beta, (int8_t*)C, Cdesc, (int8_t*)C, Cdesc, &heuristicResult[0].algo, nullptr, 0, 0));
-        }
-      }
-    }
-
-
-    if (Cdesc) has_error |= checkHipblasStatus(hipblasLtMatrixLayoutDestroy(Cdesc));
-    if (Bdesc) has_error |= checkHipblasStatus(hipblasLtMatrixLayoutDestroy(Bdesc));
-    if (Adesc) has_error |= checkHipblasStatus(hipblasLtMatrixLayoutDestroy(Adesc));
-    if (matmulDesc) has_error |= checkHipblasStatus(hipblasLtMatmulDescDestroy(matmulDesc));
-    if(has_error == 1)
-      fprintf(stderr, "error detected\n");
-
-    return has_error;
+  return has_error;
 #endif // NO_HIPBLASLT
 }
 
@@ -654,23 +639,15 @@ int fill_up_to_nearest_multiple(int value, int multiple)
   return value + (value % multiple == 0 ? 0 : (multiple - (value % multiple)));
 }
 
-void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, float* newRowStats, float* newcolStats, half *bias, int numRows, int numCols)
+void dequant_mm_int32_fp16(int *A, float *rowStats, float *colStats, half *out, half *bias, int numRows, int numCols, hipStream_t stream)
 {
-  int threads = 512;
-  //int tileCols = fill_up_to_nearest_multiple(numCols, 32);
-  //int n = numRows*tileCols;
-  int tileCols = numCols;
-  int n = numRows*numCols;
-  //int subtile_rows = 128;
-  //int tilesize = 32*subtile_rows;
-  //int num_blocks = numRows/subtile_rows;
-  //num_blocks += (numRows % subtile_rows == 0) ? 0 : 1;
-  //num_blocks = num_blocks*(tileCols/32);
-  //assert(threads <= tilesize);
-  int num_blocks = numRows * numCols / (threads * 4);
-  num_blocks += (numRows * numCols) % (threads * 4) == 0 ? 0 : 1;
+  const int threads = 512;
+  const int num_per_thread = 4;
+  const int num_per_block = threads * num_per_thread;
+  const int n = numRows*numCols;
+  const int num_blocks = (n + num_per_block - 1) / num_per_block;
 
- hipLaunchKernelGGL(( kdequant_mm_int32_fp16<4, 128, 512>), dim3(num_blocks), dim3(threads), 0, 0, A, rowStats, colStats, out, newRowStats, newcolStats, bias, numRows, numCols, tileCols, n);
+ hipLaunchKernelGGL(( kdequant_mm_int32_fp16<4, 128, 512>), dim3(num_blocks), dim3(threads), 0, stream, A, rowStats, colStats, out, bias, numRows, numCols, n);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
@@ -939,12 +916,9 @@ template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx
 template void spmm_coo_very_sparse_naive<half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
-template int igemmlt<COL_TURING, 32, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_TURING, 8, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_TURING, 8, 1>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_AMPERE, 32, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_AMPERE, 8, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
-template int igemmlt<COL_AMPERE, 8, 1>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc);
+template int igemmlt<32, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream);
+template int igemmlt<8, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream);
+template int igemmlt<8, 1>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream);
 
 template void transformRowToFormat<COL32, 0>(char * A, char *out, int rows, int cols);
 template void transformRowToFormat<COL32, 1>(char * A, char *out, int rows, int cols);
@@ -969,20 +943,20 @@ template void quantizeBlockwise<hip_bfloat16, 0, General8bit>(float * code, hip_
 template void quantizeBlockwise<hip_bfloat16, 0, FP4>(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void quantizeBlockwise<hip_bfloat16, 0, NF4>(float * code, hip_bfloat16 *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 
-template void dequantizeBlockwise<float, General8bit>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
-template void dequantizeBlockwise<float, FP4>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
-template void dequantizeBlockwise<float, NF4>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n);
-template void dequantizeBlockwise<half, General8bit>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
-template void dequantizeBlockwise<half, FP4>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
-template void dequantizeBlockwise<half, NF4>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n);
-template void dequantizeBlockwise<hip_bfloat16, General8bit>(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n);
-template void dequantizeBlockwise<hip_bfloat16, FP4>(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n);
-template void dequantizeBlockwise<hip_bfloat16, NF4>(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n);
+template void dequantizeBlockwise<float, General8bit>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n, hipStream_t stream);
+template void dequantizeBlockwise<float, FP4>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n, hipStream_t stream);
+template void dequantizeBlockwise<float, NF4>(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n, hipStream_t stream);
+template void dequantizeBlockwise<half, General8bit>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n, hipStream_t stream);
+template void dequantizeBlockwise<half, FP4>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n, hipStream_t stream);
+template void dequantizeBlockwise<half, NF4>(float *code, unsigned char *A, float *absmax, half *out, int blocksize, const int n, hipStream_t stream);
+template void dequantizeBlockwise<hip_bfloat16, General8bit>(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n, hipStream_t stream);
+template void dequantizeBlockwise<hip_bfloat16, FP4>(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n, hipStream_t stream);
+template void dequantizeBlockwise<hip_bfloat16, NF4>(float *code, unsigned char *A, float *absmax, hip_bfloat16 *out, int blocksize, const int n, hipStream_t stream);
 
 #define MAKE_optimizer32bit(name, gtype) \
 template void optimizer32bit<gtype, name>(gtype* g, gtype* p, \
                 float* state1, float* state2, float* unorm, float max_unorm, float param_norm, \
-                const float beta1, const float beta2, const float eps, const float weight_decay, \
+                const float beta1, const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay, \
                 const int step, const float lr, const float gnorm_scale, const bool skip_zeros, const int n);
 
 MAKE_optimizer32bit(ADAM, half)
@@ -990,13 +964,19 @@ MAKE_optimizer32bit(ADAM, float)
 MAKE_optimizer32bit(ADAM, hip_bfloat16)
 MAKE_optimizer32bit(MOMENTUM, half)
 MAKE_optimizer32bit(MOMENTUM, float)
+MAKE_optimizer32bit(MOMENTUM, hip_bfloat16)
 MAKE_optimizer32bit(RMSPROP, half)
 MAKE_optimizer32bit(RMSPROP, float)
+MAKE_optimizer32bit(RMSPROP, hip_bfloat16)
 MAKE_optimizer32bit(LION, half)
 MAKE_optimizer32bit(LION, float)
 MAKE_optimizer32bit(LION, hip_bfloat16)
 MAKE_optimizer32bit(ADAGRAD, half)
 MAKE_optimizer32bit(ADAGRAD, float)
+MAKE_optimizer32bit(ADAGRAD, hip_bfloat16)
+MAKE_optimizer32bit(ADEMAMIX, half)
+MAKE_optimizer32bit(ADEMAMIX, hip_bfloat16)
+MAKE_optimizer32bit(ADEMAMIX, float)
 
 #define MAKE_optimizerStatic8bit(name, gtype) \
 template void optimizerStatic8bit<gtype, name>(gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, \
@@ -1019,22 +999,27 @@ MAKE_optimizerStatic8bit(LION, float)
 
 #define MAKE_optimizerStatic8bitBlockwise(gtype, optim_name) \
 template void optimizerStatic8bitBlockwise<gtype, optim_name>(gtype* p, gtype* g, \
-                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float eps, int step, float lr,  \
+                unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3, float alpha, float eps, int step, float lr,  \
                 float* quantiles1, float* quantiles2, float* absmax1, float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n); \
 
 MAKE_optimizerStatic8bitBlockwise(half, ADAM);
 MAKE_optimizerStatic8bitBlockwise(float, ADAM);
+MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, ADAM);
 MAKE_optimizerStatic8bitBlockwise(half, MOMENTUM);
 MAKE_optimizerStatic8bitBlockwise(float, MOMENTUM);
+MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, MOMENTUM);
 MAKE_optimizerStatic8bitBlockwise(half, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(float, RMSPROP);
+MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, RMSPROP);
 MAKE_optimizerStatic8bitBlockwise(half, LION);
 MAKE_optimizerStatic8bitBlockwise(float, LION);
 MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, LION);
 MAKE_optimizerStatic8bitBlockwise(half, ADAGRAD);
 MAKE_optimizerStatic8bitBlockwise(float, ADAGRAD);
+MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, ADAGRAD);
+MAKE_optimizerStatic8bitBlockwise(half, ADEMAMIX);
+MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, ADEMAMIX);
+MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);
 
 template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
 template void percentileClipping(half * g, float *gnorm_vec, int step, const int n);
-
-MAKE_optimizerStatic8bitBlockwise(hip_bfloat16, ADAM);
