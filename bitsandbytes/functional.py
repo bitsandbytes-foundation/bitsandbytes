@@ -2291,88 +2291,7 @@ def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Ten
     Returns:
         `torch.Tensor`: The result of the operation.
     """
-
-    #
-    # To use the IMMA tensor core kernels without special Turing/Ampere layouts,
-    # cublasLt has some rules, namely: A must be transposed, B must not be transposed.
-    # The C++ API will calculate `C = A.T @ B` in with A, B, C in col-major.
-    # This will typically be used with row-major tensors to efficiently
-    # calculate the linear layer with `C = B @ A.T` without any transformations.
-    # We will swap A and B in the API invocation, so that we get `C = A @ B.T`.
-    #
-    # Quick explanation:
-    # With row-major A and B tensors, `C = A.T.T @ B.T = A @ B.T`.
-    # To get row-major output, `C.T = (A @ B.T).T = B @ A.T`.
-    #
-    A, B = B, A
-
-    shapeA = A.shape
-    shapeB = B.shape
-
-    assert A.dtype == torch.int8
-    assert B.dtype == torch.int8
-    assert A.ndim == 2, "Only two dimensional matrices are supported for argument B"
-    assert B.ndim in [2, 3], "Only two or three dimensional matrices are supported for argument A"
-    assert prod(shapeB) > 0, f"Input tensor dimensions need to be > 0: {shapeB}"
-    assert out is None or out.dtype == dtype
-
-    shapeC = (*shapeB[:-1], shapeA[0])
-
-    k, m = shapeA
-    n = prod(shapeB[:-1])
-    lda = shapeA[-1]  # Weights (outputs, inputs)
-    ldb = shapeB[-1]  # Activations (batch, tokens, inputs)
-    ldc = shapeC[-1]  # Output (batch, tokens, outputs)
-
-    assert (
-        lda == ldb
-    ), f"int8_linear_matmul only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}"
-
-    # cuBLASLt does not support int8 matmul with inner dimensions that are not divisible by 4.
-    # We'll fall back to a slower fp32 calculation in this circumstance.
-    # Fortunately, this should not be very common.
-    if lda % 4 != 0:
-        result = torch.matmul(B.float(), A.float().t()).to(torch.int32)
-        if out is not None:
-            result = out.copy_(result)
-        return result
-
-    if out is None:
-        out = torch.empty(shapeC, device=A.device, dtype=dtype)
-
-    is_on_gpu([A, B, out])
-
-    with _cuda_device_of(A):
-        ctx = CUBLAS_Context.get_instance().get_context(A.device)
-        ptrA = get_ptr(A)
-        ptrB = get_ptr(B)
-        ptrC = get_ptr(out)
-        ptrRowScale = None
-        m = ct.c_int32(m)
-        n = ct.c_int32(n)
-        k = ct.c_int32(k)
-        lda = ct.c_int32(lda)
-        ldb = ct.c_int32(ldb)
-        ldc = ct.c_int32(ldc)
-        stream = _get_tensor_stream(A)
-
-        if dtype == torch.int32:
-            has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
-        else:
-            has_error = lib.cigemmlt_8(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
-
-    if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
-        raise NotImplementedError("int8_linear_matmul not implemented!")
-
-    if has_error:
-        raise RuntimeError(
-            f"cublasLt ran into an error!\n"
-            f"\t{shapeA=}, {shapeB=}, {shapeC=}\n"
-            f"\t{(lda, ldb, ldc)=}\n"
-            f"\t{(m, n, k)=}"
-        )
-
-    return out
+    return torch.ops.bitsandbytes.int8_linear_matmul(A, B, out, dtype)
 
 
 def int8_mm_dequant(
@@ -2394,31 +2313,7 @@ def int8_mm_dequant(
     Returns:
         `torch.Tensor`: The dequantized result with an optional bias, with dtype `torch.float16`.
     """
-
-    assert A.dtype == torch.int32
-
-    if bias is not None:
-        assert bias.dtype == torch.float16
-
-    if out is None:
-        out = torch.empty_like(A, dtype=torch.float16)
-
-    ptrA = get_ptr(A)
-    ptrOut = get_ptr(out)
-    ptrRowStats = get_ptr(row_stats)
-    ptrColStats = get_ptr(col_stats)
-    ptrBias = get_ptr(bias)
-    numRows = ct.c_int32(prod(A.shape[:-1]))
-    numCols = ct.c_int32(A.shape[-1])
-
-    is_on_gpu([A, row_stats, col_stats, out, bias])
-
-    with _cuda_device_of(A):
-        lib.cdequant_mm_int32_fp16(
-            ptrA, ptrRowStats, ptrColStats, ptrOut, ptrBias, numRows, numCols, _get_tensor_stream(A)
-        )
-
-    return out
+    return torch.ops.bitsandbytes.int8_mm_dequant(A, row_stats, col_stats, out, bias)
 
 
 @deprecated("mm_dequant is deprecated. Please use int8_mm_dequant() instead.", category=FutureWarning)
@@ -2766,42 +2661,7 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
         - `torch.Tensor` with dtype `torch.float32`: The quantization scales.
         - `torch.Tensor` with dtype `torch.int32`, *optional*: A list of column indices which contain outlier features.
     """
-
-    assert A.dtype == torch.half
-    is_on_gpu([A])
-
-    rows = prod(A.shape[:-1])
-    cols = A.shape[-1]
-
-    row_stats = torch.empty(rows, device=A.device, dtype=torch.float32)
-    out_row = torch.empty(A.shape, device=A.device, dtype=torch.int8)
-
-    outlier_cols = None
-
-    if threshold > 0.0:
-        # TODO we could improve perf of this
-        outliers = A.abs() >= threshold
-
-        if outliers.any():
-            outlier_cols = torch.argwhere(outliers.any(dim=0)).view(-1)
-
-    with _cuda_device_of(A):
-        lib.cint8_vector_quant(
-            get_ptr(A),
-            get_ptr(out_row),
-            get_ptr(row_stats),
-            ct.c_float(threshold),
-            ct.c_int32(rows),
-            ct.c_int32(cols),
-            _get_tensor_stream(A),
-        )
-
-    # Zero out values from outlier columns across all rows.
-    # The kernel will handle this for outliers themselves, so we can optimize for rows=1.
-    if rows > 1 and outlier_cols is not None:
-        out_row[:, outlier_cols] = 0
-
-    return out_row, row_stats, outlier_cols
+    return torch.ops.bitsandbytes.int8_vectorwise_quant(A, threshold)
 
 
 @deprecated(

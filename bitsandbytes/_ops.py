@@ -1,11 +1,7 @@
-import ctypes as ct
 from math import prod
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
-
-from .cextension import lib
-from .functional import CUBLAS_Context, _cuda_device_of, _get_tensor_stream, get_ptr, is_on_gpu
 
 _IS_TORCH_GTE_24 = False
 
@@ -27,11 +23,10 @@ else:
 #           return () instead of `None` for compatibility, see here: https://github.com/pytorch/pytorch/issues/125044
 torch.library.define(
     "bitsandbytes::int8_linear_matmul",
-    "(Tensor A, Tensor B, Tensor(a!)? out=None, ScalarType dtype=int32) -> Tensor(a!)",
+    "(Tensor A, Tensor B, Tensor? out=None, ScalarType dtype=int32) -> Tensor",
 )
 
 
-# Fake/abstract op
 @register_fake("bitsandbytes::int8_linear_matmul")
 def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
     shapeC = (*A.shape[:-1], B.shape[0])
@@ -40,103 +35,71 @@ def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtyp
     return out
 
 
-# CPU implementation
-@register_kernel("bitsandbytes::int8_linear_matmul", "cpu")
-def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
-    # Naive implementation: perform matmul in fp32
-    result = torch.matmul(A.float(), B.float().t()).to(torch.int32)
-    if out is not None:
-        result = out.copy_(result)
-    return result
+torch.library.define(
+    "bitsandbytes::int8_vectorwise_quant",
+    "(Tensor A, Scalar threshold=0.0) -> (Tensor, Tensor, Tensor?)",
+)
 
 
-# MPS impl
-@register_kernel("bitsandbytes::int8_linear_matmul", "mps")
-def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
-    pass
+@register_fake("bitsandbytes::int8_vectorwise_quant")
+def _(A: torch.Tensor, threshold=0.0):
+    out_row = torch.empty(A.shape, device=A.device, dtype=torch.int8)
+    row_stats = torch.empty(prod(A.shape[:-1]), device=A.device, dtype=torch.float32)
+
+    if threshold == 0.0:
+        return out_row, row_stats, None
+
+    outlier_cols = torch.library.get_ctx().new_dynamic_size()
+
+    return out_row, row_stats, A.new_empty(outlier_cols, dtype=torch.int64)
 
 
-# XPU impl
-@register_kernel("bitsandbytes::int8_linear_matmul", "xpu")
-def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
-    pass
+torch.library.define("bitsandbytes::int8_vectorwise_dequant", "(Tensor A, Tensor stats) -> Tensor")
 
 
-# Ascend NPU impl
-@register_kernel("bitsandbytes::int8_linear_matmul", "npu")
-def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
-    pass
+@register_fake("bitsandbytes::int8_vectorwise_dequant")
+def _(A: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
+    torch._check(A.dtype == torch.int8, "A must be int8")
+    return torch.empty_like(A, dtype=torch.float32)
 
 
-# CUDA/ROCm impl
-@register_kernel("bitsandbytes::int8_linear_matmul", "cuda")
-def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
-    A, B = B, A
+torch.library.define(
+    "bitsandbytes::int8_mm_dequant",
+    "(Tensor A, Tensor row_stats, Tensor col_stats, Tensor? out, Tensor? bias) -> Tensor",
+)
 
-    shapeA = A.shape
-    shapeB = B.shape
 
-    assert A.dtype == torch.int8
-    assert B.dtype == torch.int8
-    assert A.ndim == 2, "Only two dimensional matrices are supported for argument B"
-    assert B.ndim in [2, 3], "Only two or three dimensional matrices are supported for argument A"
-    assert prod(shapeB) > 0, f"Input tensor dimensions need to be > 0: {shapeB}"
-    assert out is None or out.dtype == dtype
+@register_fake("bitsandbytes::int8_mm_dequant")
+def _(
+    A: torch.Tensor,
+    row_stats: torch.Tensor,
+    col_stats: torch.Tensor,
+    out: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    torch._check(A.dtype == torch.int32, "A must be int32")
+    return torch.empty_like(A, dtype=torch.float16)
 
-    shapeC = (*shapeB[:-1], shapeA[0])
 
-    k, m = shapeA
-    n = prod(shapeB[:-1])
-    lda = shapeA[-1]  # Weights (outputs, inputs)
-    ldb = shapeB[-1]  # Activations (batch, tokens, inputs)
-    ldc = shapeC[-1]  # Output (batch, tokens, outputs)
+torch.library.define(
+    "bitsandbytes::int8_double_quant",
+    "(Tensor A, Tensor? col_stats, Tensor? row_stats, Tensor? out_col, Tensor? out_row, Scalar threshold=0.0) -> (Tensor, Tensor, Tensor, Tensor, Tensor?)",
+)
 
-    assert (
-        lda == ldb
-    ), f"int8_linear_matmul only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}"
 
-    # cuBLASLt does not support int8 matmul with inner dimensions that are not divisible by 4.
-    # We'll fall back to a slower fp32 calculation in this circumstance.
-    # Fortunately, this should not be very common.
-    if lda % 4 != 0:
-        result = torch.matmul(B.float(), A.float().t()).to(torch.int32)
-        if out is not None:
-            result = out.copy_(result)
-        return result
-
-    if out is None:
-        out = torch.empty(shapeC, device=A.device, dtype=dtype)
-
-    is_on_gpu([A, B, out])
-
-    with _cuda_device_of(A):
-        ctx = CUBLAS_Context.get_instance().get_context(A.device)
-        ptrA = get_ptr(A)
-        ptrB = get_ptr(B)
-        ptrC = get_ptr(out)
-        ptrRowScale = None
-        m = ct.c_int32(m)
-        n = ct.c_int32(n)
-        k = ct.c_int32(k)
-        lda = ct.c_int32(lda)
-        ldb = ct.c_int32(ldb)
-        ldc = ct.c_int32(ldc)
-        stream = _get_tensor_stream(A)
-
-        if dtype == torch.int32:
-            has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
-        else:
-            has_error = lib.cigemmlt_8(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
-
-    if has_error == 100:  # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
-        raise NotImplementedError("int8_linear_matmul not implemented!")
-
-    if has_error:
-        raise RuntimeError(
-            f"cublasLt ran into an error!\n"
-            f"\t{shapeA=}, {shapeB=}, {shapeC=}\n"
-            f"\t{(lda, ldb, ldc)=}\n"
-            f"\t{(m, n, k)=}"
-        )
-
-    return out
+@register_fake("bitsandbytes::int8_double_quant")
+def _(
+    A: torch.Tensor,
+    col_stats: Optional[torch.Tensor] = None,
+    row_stats: Optional[torch.Tensor] = None,
+    out_col: Optional[torch.Tensor] = None,
+    out_row: Optional[torch.Tensor] = None,
+    threshold=0.0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    out_row = torch.empty_like(A, dtype=torch.int8)
+    out_col = torch.empty_like(A, dtype=torch.int8)
+    row_stats = torch.empty(prod(A.shape[:-1]), device=A.device, dtype=torch.float32)
+    col_stats = torch.empty(A.shape[-1], device=A.device, dtype=torch.float32)
+    outlier_n = torch.library.get_ctx().new_dynamic_size()
+    outlier_cols = A.new_empty(outlier_n, dtype=torch.int64)
+    return out_row, out_col, row_stats, col_stats, outlier_cols
