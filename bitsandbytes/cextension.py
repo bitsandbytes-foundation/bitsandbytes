@@ -95,23 +95,21 @@ def get_native_library() -> BNBNativeLibrary:
 ROCM_GPU_ARCH = get_rocm_gpu_arch()
 
 
-if ipex_cpu or ipex_xpu:
-    lib = None
-else:
-    try:
-        if torch.version.hip:
-            hip_major, hip_minor = map(int, torch.version.hip.split(".")[0:2])
-            HIP_ENVIRONMENT, BNB_HIP_VERSION = True, hip_major * 100 + hip_minor
-            BNB_HIP_VERSION_SHORT = f"{hip_major}{hip_minor}"
-            BNB_BACKEND = "ROCm"
-        else:
-            HIP_ENVIRONMENT, BNB_HIP_VERSION = False, 0
-            BNB_HIP_VERSION_SHORT = ""
-            BNB_BACKEND = "CUDA"
+try:
+    if torch.version.hip:
+        hip_major, hip_minor = map(int, torch.version.hip.split(".")[0:2])
+        HIP_ENVIRONMENT, BNB_HIP_VERSION = True, hip_major * 100 + hip_minor
+        BNB_HIP_VERSION_SHORT = f"{hip_major}{hip_minor}"
+        BNB_BACKEND = "ROCm"
+    else:
+        HIP_ENVIRONMENT, BNB_HIP_VERSION = False, 0
+        BNB_HIP_VERSION_SHORT = ""
+        BNB_BACKEND = "CUDA"
 
-        lib = get_native_library()
-    except Exception as e:
-        lib = None
+    lib = get_native_library()
+except Exception as e:
+    lib = None
+    if not ipex_cpu and not ipex_xpu:
         logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
         if torch.cuda.is_available():
             logger.warning(
