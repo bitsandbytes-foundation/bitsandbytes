@@ -71,11 +71,6 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
 
 
 def get_native_library() -> BNBNativeLibrary:
-    from bitsandbytes.backends.cpu_xpu_common import ipex_cpu, ipex_xpu
-
-    if ipex_cpu or ipex_xpu:
-        return None
-
     binary_path = PACKAGE_DIR / f"libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}"
     cuda_specs = get_cuda_specs()
     if cuda_specs:
