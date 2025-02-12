@@ -431,11 +431,6 @@ def create_quantile_map(A, total_bits=8):
     return q
 
 
-@deprecated("This function is deprecated and will be removed in a future version.", category=FutureWarning)
-def get_special_format_str():
-    return "row"
-
-
 def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
     """Verifies that the input tensors are all on the same device.
 
@@ -470,11 +465,6 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
             f"Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}",
         )
     return on_gpu
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def get_tensor_stream(tensor: Tensor) -> torch.cuda.Stream:
-    return torch.cuda.current_stream(tensor.device)
 
 
 def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
@@ -2251,27 +2241,6 @@ def batched_igemm(
     return out
 
 
-@deprecated(
-    "igemmlt is deprecated and will be removed in a future release. Please use int8_linear_matmul instead.",
-    category=FutureWarning,
-)
-def igemmlt(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    SA: Tuple[torch.Size, str],
-    SB: Tuple[torch.Size, str],
-    out: Optional[torch.Tensor] = None,
-    Sout: Optional[Tuple[torch.Size, str]] = None,
-    dtype=torch.int32,
-):
-    if SA is not None and SA[1] != "row":
-        raise NotImplementedError(f"Only row-major format inputs are supported, but got format `{SA[1]}`")
-    if SB is not None and SB[1] != "row":
-        raise NotImplementedError(f"Only row-major format is supported for matrix B, but got format `{SB[1]}`")
-    result = int8_linear_matmul(A, B, out=out, dtype=dtype)
-    return result, (result.shape, "row")
-
-
 def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
     """Performs an 8-bit integer matrix multiplication.
 
@@ -2314,20 +2283,6 @@ def int8_mm_dequant(
         `torch.Tensor`: The dequantized result with an optional bias, with dtype `torch.float16`.
     """
     return torch.ops.bitsandbytes.int8_mm_dequant(A, row_stats, col_stats, out, bias)
-
-
-@deprecated("mm_dequant is deprecated. Please use int8_mm_dequant() instead.", category=FutureWarning)
-def mm_dequant(
-    A: torch.Tensor,
-    quant_state: Optional[Tuple[torch.Size, str]],  # Not used
-    row_stats: torch.Tensor,
-    col_stats: torch.Tensor,
-    out: Optional[torch.Tensor] = None,
-    new_row_stats=None,  # Not used
-    new_col_stats=None,  # Not used
-    bias: Optional[torch.Tensor] = None,
-):
-    return int8_mm_dequant(A, row_stats, col_stats, out, bias)
 
 
 def get_colrow_absmax(
@@ -2503,72 +2458,6 @@ def coo_zeros(rows, cols, nnz, device, dtype=torch.half):
     colidx = torch.zeros((nnz,), dtype=torch.int32, device=device)
     values = torch.zeros((nnz,), dtype=dtype, device=device)
     return COOSparseTensor(rows, cols, nnz, rowidx, colidx, values)
-
-
-@deprecated("This function is deprecated. Please use `int8_double_quant` instead.", category=FutureWarning)
-def double_quant(
-    A: torch.Tensor,
-    col_stats: Optional[torch.Tensor] = None,
-    row_stats: Optional[torch.Tensor] = None,
-    out_col: Optional[torch.Tensor] = None,
-    out_row: Optional[torch.Tensor] = None,
-    threshold=0.0,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[COOSparseTensor]]:
-    """Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
-
-    The statistics are determined both row-wise and column-wise (transposed).
-
-    For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
-
-    <Tip warning={true}>
-    This function exists for backwards compatibility only. It is advised to use [`int8_double_quant`] instead.
-    The difference is that this function will return a [`COOSparseTensor`] for outliers instead of a column index.
-    </Tip>
-
-    Args:
-        A (`torch.Tensor` with dtype `torch.float16`): The input matrix.
-        col_stats (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the column-wise quantization scales.
-        row_stats (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the row-wise quantization scales.
-        out_col (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the column-wise quantized data.
-        out_row (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the row-wise quantized data.
-        threshold (`float`, *optional*):
-            An optional threshold for sparse decomposition of outlier features.
-
-            No outliers are held back when 0.0. Defaults to 0.0.
-
-    Returns:
-        `Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]`: A tuple containing the quantized tensor and relevant statistics.
-        - `torch.Tensor` with dtype `torch.int8`: The row-wise quantized data.
-        - `torch.Tensor` with dtype `torch.int8`: The column-wise quantized data.
-        - `torch.Tensor` with dtype `torch.float32`: The row-wise quantization scales.
-        - `torch.Tensor` with dtype `torch.float32`: The column-wise quantization scales.
-        - `COOSparseTensor`, *optional*: A structure representing the outlier values from the input tensor.
-    """
-
-    coo_tensor = None
-    quant_row, quant_col, row_stats, col_stats, outlier_cols = int8_double_quant(
-        A,
-        col_stats,
-        row_stats,
-        out_col,
-        out_row,
-        threshold=threshold,
-    )
-
-    if threshold > 0.0 and outlier_cols is not None:
-        # Build a COO tensor including all of the outlier columns.
-        outlier_rows = torch.arange(0, A.shape[0], device=A.device, dtype=torch.int32)
-        outliers = A[:, outlier_cols]
-        coo_tensor = COOSparseTensor(
-            A.shape[0],
-            A.shape[1],
-            outliers.numel(),
-            outlier_rows.repeat_interleave(outliers.size(1)),
-            outlier_cols.repeat(outliers.size(0)).int(),
-            outliers,
-        )
-
-    return quant_row, quant_col, row_stats, col_stats.flatten().float(), coo_tensor
 
 
 def int8_double_quant(
@@ -2993,21 +2882,6 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type="vector"):
 
 
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def dequant_min_max(xq, A, B, SA, SB, dtype=torch.half):
-    offset = B.float().t().sum(0) * (SA[0] + SA[1])
-    x = xq.float()
-    if len(xq.shape) == 2 and len(SB.shape) == 3:
-        SB = SB.squeeze(0)
-    if len(SB.shape) == 2:
-        x *= SB.t() / 127
-    else:
-        x *= SB / 127
-    x *= SA[1] / 127
-    x += offset
-    return x.to(dtype)
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def extract_outliers(A, SA, idx):
     shapeA = SA[0]
     formatA = SA[1]
@@ -3030,11 +2904,4 @@ def extract_outliers(A, SA, idx):
         lib.cextractOutliers_ampere(ptrA, ptrIdx, ptrOut, idx_size, rows, cols)
     post_call(prev_device)
 
-    return out
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def pipeline_test(A, batch_size):
-    out = torch.zeros_like(A)
-    lib.cpipeline_test(get_ptr(A), get_ptr(out), ct.c_size_t(A.numel()), ct.c_size_t(batch_size))
     return out
