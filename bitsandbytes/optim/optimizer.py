@@ -10,6 +10,7 @@ from typing import Optional
 import torch
 
 import bitsandbytes.functional as F
+from bitsandbytes.backends import backends
 
 
 class MockArgs:
@@ -289,11 +290,11 @@ class Optimizer8bit(torch.optim.Optimizer):
 
                 self.prefetch_state(p)
                 self.update_step(group, p, gindex, pindex)
-                torch.cuda.synchronize()
+                backends[p.device.type].device_synchronize()
         if self.is_paged:
             # all paged operation are asynchronous, we need
             # to sync to make sure all tensors are in the right state
-            torch.cuda.synchronize()
+            backends[p.device.type].device_synchronize()
 
         return loss
 
@@ -537,7 +538,6 @@ class Optimizer2State(Optimizer8bit):
                 max_unorm=config["max_unorm"],
                 skip_zeros=config["skip_zeros"],
             )
-
         elif state["state1"].dtype == torch.uint8 and not config["block_wise"]:
             F.optimizer_update_8bit(
                 self.optimizer_name,
