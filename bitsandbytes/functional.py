@@ -2498,24 +2498,7 @@ def int8_double_quant(
         - `torch.Tensor` with dtype `torch.float32`: The column-wise quantization scales.
         - `torch.Tensor` with dtype `torch.int32`, *optional*: A list of column indices which contain outlier features.
     """
-
-    # TODO: Optimize/write CUDA kernel for this?
-
-    # Use CUDA kernel for rowwise and COO tensor
-    quant_row, row_stats, outlier_cols = int8_vectorwise_quant(A, threshold=threshold)
-
-    # PyTorch impl for colwise
-    _, col_stats, outlier_mask = get_colrow_absmax(A, threshold=threshold)
-    if threshold > 0.0 and outlier_mask is not None:
-        A = A.masked_fill(outlier_mask, 0.0)
-    quant_col = torch.round(A.mul(C) / col_stats.unsqueeze(0)).to(torch.int8)
-
-    if out_row is not None:
-        quant_row = out_row.copy_(quant_row)
-    if out_col is not None:
-        quant_col = out_col.copy_(quant_col)
-
-    return quant_row, quant_col, row_stats, col_stats.flatten().float(), outlier_cols
+    return torch.ops.bitsandbytes.int8_double_quant(A, col_stats, row_stats, out_col, out_row, threshold)
 
 
 def int8_vectorwise_dequant(A: torch.Tensor, stats: torch.Tensor):
@@ -2529,7 +2512,7 @@ def int8_vectorwise_dequant(A: torch.Tensor, stats: torch.Tensor):
         `torch.Tensor` with dtype `torch.float32`: The dequantized tensor.
     """
     # To dequantize we divide by 127, or multiply by the reciprocal.
-    return A * stats.view(-1, 1) * 7.874015718698502e-3
+    return torch.ops.bitsandbytes.int8_vectorwise_dequant(A, stats)
 
 
 def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):

@@ -63,9 +63,16 @@ def _(A: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
     return torch.empty_like(A, dtype=torch.float32)
 
 
+# Default PyTorch-native implementation
+@register_kernel("bitsandbytes::int8_vectorwise_dequant", None)
+def _(A: torch.Tensor, stats: torch.Tensor):
+    # To dequantize we divide by 127, or multiply by the reciprocal.
+    return A * stats.view(-1, 1) * 7.874015718698502e-3
+
+
 torch.library.define(
     "bitsandbytes::int8_mm_dequant",
-    "(Tensor A, Tensor row_stats, Tensor col_stats, Tensor? out, Tensor? bias) -> Tensor",
+    "(Tensor A, Tensor row_stats, Tensor col_stats, Tensor? out=None, Tensor? bias=None) -> Tensor",
 )
 
 
