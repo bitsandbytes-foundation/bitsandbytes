@@ -1,5 +1,5 @@
 from math import prod
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import torch
 
@@ -37,7 +37,7 @@ def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtyp
 
 torch.library.define(
     "bitsandbytes::int8_vectorwise_quant",
-    "(Tensor A, Scalar threshold=0.0) -> (Tensor, Tensor, Tensor?)",
+    "(Tensor A, float threshold=0.0) -> (Tensor, Tensor, Tensor?)",
 )
 
 
@@ -90,7 +90,7 @@ def _(
 
 torch.library.define(
     "bitsandbytes::int8_double_quant",
-    "(Tensor A, Tensor? col_stats, Tensor? row_stats, Tensor? out_col, Tensor? out_row, Scalar threshold=0.0) -> (Tensor, Tensor, Tensor, Tensor, Tensor?)",
+    "(Tensor A, Tensor? col_stats, Tensor? row_stats, Tensor? out_col, Tensor? out_row, float threshold=0.0) -> (Tensor, Tensor, Tensor, Tensor, Tensor?)",
 )
 
 
@@ -110,3 +110,53 @@ def _(
     outlier_n = torch.library.get_ctx().new_dynamic_size()
     outlier_cols = A.new_empty(outlier_n, dtype=torch.int64)
     return out_row, out_col, row_stats, col_stats, outlier_cols
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_4bit",
+    "(Tensor A, Tensor absmax, int blocksize, str quant_type, int[] shape, ScalarType dtype) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::dequantize_4bit")
+def _(
+    A: torch.Tensor, absmax: torch.Tensor, blocksize: int, quant_type: str, shape: Sequence[int], dtype: torch.dtype
+) -> torch.Tensor:
+    return torch.empty(shape, dtype=dtype, device=A.device)
+
+
+torch.library.define(
+    "bitsandbytes::quantize_4bit",
+    "(Tensor A, int blocksize, str quant_type, ScalarType quant_storage) -> (Tensor, Tensor)",
+)
+
+
+def _(
+    A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    n = A.numel()
+    blocks = -(n // -blocksize)
+    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
+    out = torch.zeros(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)
+    return out, absmax
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_blockwise",
+    "(Tensor A, Tensor absmax, Tensor code, int blocksize, ScalarType dtype) -> Tensor",
+)
+
+
+def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
+    return torch.empty_like(A, dtype=dtype)
+
+
+torch.library.define("bitsandbytes::quantize_blockwise", "(Tensor A, Tensor code, int blocksize) -> (Tensor, Tensor)")
+
+
+def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    n = A.numel()
+    blocks = -(n // -blocksize)
+    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
+    out = torch.zeros_like(A, dtype=torch.uint8)
+    return out, absmax
