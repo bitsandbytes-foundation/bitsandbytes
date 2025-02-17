@@ -231,7 +231,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
 
-        return out, absmax
+    return out, absmax
 
 
 @register_kernel("bitsandbytes::dequantize_blockwise", "cuda")

@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-import bitsandbytes  # noqa: F401
+import bitsandbytes
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -63,3 +63,23 @@ def test_int8_mm_dequant(device):
     assert out.device == A.device
 
     torch.library.opcheck(torch.ops.bitsandbytes.int8_mm_dequant, (A, row_stats, col_stats))
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_quantize_blockwise(device):
+    # if device == "cpu":
+    #     pytest.skip("CPU implementation is not available")
+    blocksize = 256
+
+    code = bitsandbytes.functional.create_dynamic_map().to(device)
+    A = torch.randn(1024, 1024, dtype=torch.float16, device=device)
+    out, absmax = torch.ops.bitsandbytes.quantize_blockwise(A, code, blocksize)
+
+    assert out.shape == A.shape
+    assert out.dtype == torch.uint8
+    assert out.device == A.device
+
+    assert absmax.device == A.device
+    assert absmax.dtype == torch.float32
+
+    torch.library.opcheck(torch.ops.bitsandbytes.quantize_blockwise, (A, code, blocksize))

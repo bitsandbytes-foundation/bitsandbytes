@@ -131,6 +131,7 @@ torch.library.define(
 )
 
 
+@register_fake("bitsandbytes::quantize_4bit")
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -147,6 +148,7 @@ torch.library.define(
 )
 
 
+@register_fake("bitsandbytes::dequantize_blockwise")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
     return torch.empty_like(A, dtype=dtype)
 
@@ -154,6 +156,7 @@ def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int,
 torch.library.define("bitsandbytes::quantize_blockwise", "(Tensor A, Tensor code, int blocksize) -> (Tensor, Tensor)")
 
 
+@register_fake("bitsandbytes::quantize_blockwise")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor, torch.Tensor]:
     n = A.numel()
     blocks = -(n // -blocksize)
