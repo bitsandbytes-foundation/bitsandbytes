@@ -1142,8 +1142,6 @@ def quantize_4bit(
 
     if compress_statistics:
         offset = absmax.mean()
-        # absmax -= offset
-        # qabsmax, state2 = quantize_blockwise(absmax, blocksize=256)
         qabsmax, state2 = quantize_blockwise(absmax - offset, blocksize=256)
         del absmax
         state = QuantState(
