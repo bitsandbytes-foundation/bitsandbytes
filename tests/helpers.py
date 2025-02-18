@@ -36,6 +36,8 @@ def format_with_label(label: str, value: Any) -> str:
         formatted = "T" if value else "F"
     elif isinstance(value, (list, tuple)) and all(isinstance(v, bool) for v in value):
         formatted = "".join("T" if b else "F" for b in value)
+    elif isinstance(value, torch.dtype):
+        formatted = describe_dtype(value)
     else:
         formatted = str(value)
     return f"{label}={formatted}"

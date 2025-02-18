@@ -59,7 +59,7 @@ torch.library.define("bitsandbytes::int8_vectorwise_dequant", "(Tensor A, Tensor
 
 @register_fake("bitsandbytes::int8_vectorwise_dequant")
 def _(A: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
-    torch._check(A.dtype == torch.int8, "A must be int8")
+    torch._check(A.dtype == torch.int8, lambda: "A must be int8")
     return torch.empty_like(A, dtype=torch.float32)
 
 
@@ -84,7 +84,7 @@ def _(
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    torch._check(A.dtype == torch.int32, "A must be int32")
+    torch._check(A.dtype == torch.int32, lambda: "A must be int32")
     return torch.empty_like(A, dtype=torch.float16)
 
 
@@ -137,8 +137,8 @@ def _(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     n = A.numel()
     blocks = -(n // -blocksize)
-    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-    out = torch.zeros(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+    out = torch.empty(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)
     return out, absmax
 
 

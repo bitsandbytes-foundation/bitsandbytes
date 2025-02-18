@@ -17,11 +17,11 @@ def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtyp
     shapeA = A.shape
     shapeB = B.shape
 
-    torch._check(A.dtype == torch.int8, "B must be int8")
-    torch._check(B.dtype == torch.int8, "A must be int8")
-    torch._check(A.ndim == 2, "Only two dimensional matrices are supported for argument B")
-    torch._check(B.ndim in [2, 3], "Only two or three dimensional matrices are supported for argument A")
-    torch._check(prod(shapeB) > 0, f"Input tensor dimensions need to be > 0: {shapeB}")
+    torch._check(A.dtype == torch.int8, lambda: "B must be int8")
+    torch._check(B.dtype == torch.int8, lambda: "A must be int8")
+    torch._check(A.ndim == 2, lambda: "Only two dimensional matrices are supported for argument B")
+    torch._check(B.ndim in [2, 3], lambda: "Only two or three dimensional matrices are supported for argument A")
+    torch._check(prod(shapeB) > 0, lambda: f"Input tensor dimensions need to be > 0: {shapeB}")
     torch._check(out is None or out.dtype == dtype)
 
     shapeC = (*shapeB[:-1], shapeA[0])
@@ -34,7 +34,7 @@ def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtyp
 
     torch._check(
         lda == ldb,
-        f"int8_linear_matmul only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}",
+        lambda: f"int8_linear_matmul only supports B^T @ A. Inner dimensions do not match: B @ A = {shapeB} @ {shapeA}",
     )
 
     # cuBLASLt does not support int8 matmul with inner dimensions that are not divisible by 4.
@@ -92,10 +92,12 @@ def _(
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    torch._check(A.dtype == torch.int32, "A must be int32")
+    torch._check(A.dtype == torch.int32, lambda: f"A must be int32, got {A.dtype}")
+    torch._check(row_stats.dtype == torch.float32, lambda: f"row_stats must be float32, got {row_stats.dtype}")
+    torch._check(col_stats.dtype == torch.float32, lambda: f"col_stats must be float32, got {col_stats.dtype}")
 
     if bias is not None:
-        torch._check(bias.dtype == torch.float16)
+        torch._check(bias.dtype == torch.float16, lambda: f"Only fp16 bias is supported, got {bias.dtype}")
 
     if out is None:
         out = torch.empty_like(A, dtype=torch.float16)
@@ -118,7 +120,8 @@ def _(
 
 @register_kernel("bitsandbytes::int8_vectorwise_quant", "cuda")
 def _(A: torch.Tensor, threshold=0.0):
-    torch._check(A.dtype == torch.float16, "A must be float16")
+    torch._check(A.dtype == torch.float16, lambda: f"A must be float16, got {A.dtype}")
+    torch._check(threshold >= 0.0, lambda: "threshold must be non-negative")
 
     rows = prod(A.shape[:-1])
     cols = A.shape[-1]
@@ -205,12 +208,14 @@ def _get_col_absmax(
 
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    torch._check_is_size(blocksize)
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
 
     n = A.numel()
     blocks = -(n // -blocksize)
-    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-    out = torch.zeros_like(A, dtype=torch.uint8)
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+    out = torch.empty_like(A, dtype=torch.uint8)
 
     with _cuda_device_of(A):
         args = (
@@ -237,6 +242,10 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor
 @register_kernel("bitsandbytes::dequantize_blockwise", "cuda")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    torch._check(
+        dtype in [torch.float16, torch.bfloat16, torch.float32],
+        lambda: f"Blockwise dequantization only supports 16bit/32bit floating types, got {dtype}",
+    )
 
     out = torch.empty_like(A, dtype=dtype)
 
@@ -257,8 +266,6 @@ def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int,
             lib.cdequantize_blockwise_bf16(*args)
         elif dtype == torch.float32:
             lib.cdequantize_blockwise_fp32(*args)
-        else:
-            raise ValueError(f"Blockwise dequantization only supports 16/32-bit floats, but got {dtype}")
 
     return out
 
@@ -269,6 +276,10 @@ def _(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     torch._check(quant_type in ["fp4", "nf4"])
+    torch._check(
+        A.dtype in [torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
+    )
 
     n = A.numel()
     blocks = -(n // -blocksize)
@@ -300,8 +311,6 @@ def _(
                 lib.cquantize_blockwise_fp32_fp4(*args)
             else:
                 lib.cquantize_blockwise_fp32_nf4(*args)
-        else:
-            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
 
     return out, absmax
 
@@ -312,6 +321,10 @@ def _(
 ) -> torch.Tensor:
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     torch._check(quant_type in ["fp4", "nf4"])
+    torch._check(
+        dtype in [torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
+    )
 
     out = torch.empty(shape, dtype=dtype, device=A.device)
     n = out.numel()
@@ -344,7 +357,5 @@ def _(
                 lib.cdequantize_blockwise_fp32_fp4(*args)
             else:
                 lib.cdequantize_blockwise_fp32_nf4(*args)
-        else:
-            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
 
     return out
