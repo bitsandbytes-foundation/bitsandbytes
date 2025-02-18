@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import copy
+import importlib
 from typing import Any, Dict, Optional, TypeVar, Union, overload
 import warnings
 
@@ -320,9 +321,6 @@ class Params4bit(torch.nn.Parameter):
         return self.to(device="cpu", non_blocking=non_blocking)
 
     def npu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
-        # `torch.Tensor.to(<int num>)` is not supported by `torch_npu` (see this [issue](https://github.com/Ascend/pytorch/issues/16)).
-        if isinstance(device, int):
-            device = f"npu:{device}"
         return self.to(device="npu" if device is None else device, non_blocking=non_blocking)
 
     def xpu(self, non_blocking: bool = False):
@@ -345,7 +343,10 @@ class Params4bit(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None and device.type in ["cuda", "cpu", "npu", "xpu"] and not self.bnb_quantized:
+        # `torch.Tensor.to(<int num>)` is not supported by `torch_npu` (see this [issue](https://github.com/Ascend/pytorch/issues/16)).
+        if importlib.util.find_spec("torch_npu") and device.type == "cuda" and not self.bnb_quantized:
+            return self._quantize(f"npu:{device}" if isinstance(device, int) else str(device).replace("cuda", "npu"))
+        elif device is not None and device.type in ["cuda", "cpu", "npu", "xpu"] and not self.bnb_quantized:
             return self._quantize(device)
         else:
             if self.quant_state is not None:
@@ -677,6 +678,19 @@ class Int8Params(torch.nn.Parameter):
         self.SCB = SCB
         return self
 
+    def npu(self, device):
+        # we store the 8-bit rows-major weight
+        B = self.data.contiguous().to(torch.float16).npu(device)
+        CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
+        if CBt is not None:
+            del CBt
+        if SCBt is not None:
+            del SCBt
+        self.data = CB
+        self.CB = CB
+        self.SCB = SCB
+        return self
+
     @overload
     def to(
         self: T,
@@ -695,7 +709,10 @@ class Int8Params(torch.nn.Parameter):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if device is not None:
-            if device.type == "cuda" and self.data.device.type == "cpu":
+            # `torch.Tensor.to(<int num>)` is not supported by `torch_npu` (see this [issue](https://github.com/Ascend/pytorch/issues/16)).
+            if importlib.util.find_spec("torch_npu") and device.type == "cuda":
+                return self.npu(f"npu:{device}" if isinstance(device, int) else str(device).replace("cuda", "npu"))
+            elif device.type == "cuda" and self.data.device.type == "cpu":
                 return self.cuda(device)
             elif device.type == "cpu":
                 if self.data.dtype == torch.int8:
