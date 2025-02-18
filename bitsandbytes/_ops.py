@@ -150,6 +150,8 @@ torch.library.define(
 
 @register_fake("bitsandbytes::dequantize_blockwise")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     return torch.empty_like(A, dtype=dtype)
 
 
@@ -158,8 +160,9 @@ torch.library.define("bitsandbytes::quantize_blockwise", "(Tensor A, Tensor code
 
 @register_fake("bitsandbytes::quantize_blockwise")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    torch._check_is_size(blocksize)
     n = A.numel()
     blocks = -(n // -blocksize)
-    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-    out = torch.zeros_like(A, dtype=torch.uint8)
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+    out = torch.empty_like(A, dtype=torch.uint8)
     return out, absmax

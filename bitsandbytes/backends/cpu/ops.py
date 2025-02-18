@@ -21,7 +21,7 @@ def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtyp
 @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
-    torch._check(A.dtype == torch.float32, "A must be float32")
+    torch._check(A.dtype == torch.float32, lambda: f"A must be float32 on cpu, got {A.dtype}")
 
     n = A.numel()
     blocks = -(n // -blocksize)
@@ -44,7 +44,8 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor
 @register_kernel("bitsandbytes::dequantize_blockwise", "cpu")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
     torch._check_is_size(blocksize)
-    torch._check(dtype == torch.float32, "A must be float32 on cpu")
+    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
+    torch._check(dtype == torch.float32, lambda: f"dtype must be float32 on cpu, got {dtype}")
 
     out = torch.empty_like(A, dtype=dtype)
 

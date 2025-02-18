@@ -242,6 +242,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor
 @register_kernel("bitsandbytes::dequantize_blockwise", "cuda")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     torch._check(
         dtype in [torch.float16, torch.bfloat16, torch.float32],
         lambda: f"Blockwise dequantization only supports 16bit/32bit floating types, got {dtype}",

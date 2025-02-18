@@ -66,8 +66,8 @@ class TestLLMInt8Ops:
 
         torch.library.opcheck(torch.ops.bitsandbytes.int8_mm_dequant, (A, row_stats, col_stats))
 
-    def test_int8_double_quant():
-        pass
+    # def test_int8_double_quant():
+    #    pass
 
 
 class TestInt8BlockwiseQuantOps:
@@ -91,8 +91,27 @@ class TestInt8BlockwiseQuantOps:
 
         torch.library.opcheck(torch.ops.bitsandbytes.quantize_blockwise, (A, code, blocksize))
 
-    def test_dequantize_blockwise():
-        pass
+    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    def test_dequantize_blockwise(self, device, dtype, blocksize):
+        if device == "cpu" and dtype != torch.float32:
+            pytest.skip("CPU implementation is only available for float32")
+
+        A = torch.randint(0, 255, (1024, 1024), dtype=torch.uint8, device=device)
+        code = bitsandbytes.functional.create_dynamic_map().to(device, dtype=torch.float32)
+
+        n = A.numel()
+        blocks = -(n // -blocksize)
+        absmax = torch.randn((blocks,), device=device, dtype=torch.float32)
+
+        out = torch.ops.bitsandbytes.dequantize_blockwise(A, absmax, code, blocksize, dtype)
+
+        assert out.shape == A.shape
+        assert out.dtype == dtype
+        assert out.device == A.device
+
+        torch.library.opcheck(torch.ops.bitsandbytes.dequantize_blockwise, (A, absmax, code, blocksize, dtype))
 
 
 class Test4bitBlockwiseQuantOps:
