@@ -7,7 +7,8 @@ import re
 import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
-from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs
+from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_rocm_gpu_arch
+from bitsandbytes.npu_specs import get_npu_specs
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,15 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
 
     The library is not guaranteed to exist at the returned path.
     """
-    library_name = f"libbitsandbytes_cuda{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
+    if torch.version.hip:
+        if BNB_HIP_VERSION < 601:
+            return PACKAGE_DIR / f"libbitsandbytes_rocm{BNB_HIP_VERSION_SHORT}_nohipblaslt{DYNAMIC_LIBRARY_SUFFIX}"
+        else:
+            return PACKAGE_DIR / f"libbitsandbytes_rocm{BNB_HIP_VERSION_SHORT}{DYNAMIC_LIBRARY_SUFFIX}"
 
+    library_name = f"libbitsandbytes_cuda{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
     override_value = os.environ.get("BNB_CUDA_VERSION")
+
     if override_value:
         library_name = re.sub(r"cuda\d+", f"cuda{override_value}", library_name, count=1)
         logger.warning(
@@ -55,7 +62,10 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
     def __init__(self, lib: ct.CDLL):
         super().__init__(lib)
         lib.get_context.restype = ct.c_void_p
-        lib.get_cusparse.restype = ct.c_void_p
+        if torch.version.cuda:
+            lib.get_cusparse.restype = ct.c_void_p
+        elif torch.version.hip:
+            lib.get_hipsparse.restype = ct.c_void_p
         lib.cget_managed_ptr.restype = ct.c_void_p
 
 
@@ -67,33 +77,45 @@ def get_native_library() -> BNBNativeLibrary:
         if cuda_binary_path.exists():
             binary_path = cuda_binary_path
         else:
-            logger.warning("Could not find the bitsandbytes CUDA binary at %r", cuda_binary_path)
+            logger.warning("Could not find the bitsandbytes %s binary at %r", BNB_BACKEND, cuda_binary_path)
+    npu_specs = get_npu_specs()
+    if npu_specs:
+        binary_path = PACKAGE_DIR / f"libbitsandbytes_npu{DYNAMIC_LIBRARY_SUFFIX}"
+
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
     dll = ct.cdll.LoadLibrary(str(binary_path))
 
     if hasattr(dll, "get_context"):  # only a CUDA-built library exposes this
         return CudaBNBNativeLibrary(dll)
 
-    logger.warning(
-        "The installed version of bitsandbytes was compiled without GPU support. "
-        "8-bit optimizers, 8-bit multiplication, and GPU quantization are unavailable.",
-    )
     return BNBNativeLibrary(dll)
 
 
+ROCM_GPU_ARCH = get_rocm_gpu_arch()
+
 try:
+    if torch.version.hip:
+        hip_major, hip_minor = map(int, torch.version.hip.split(".")[0:2])
+        HIP_ENVIRONMENT, BNB_HIP_VERSION = True, hip_major * 100 + hip_minor
+        BNB_HIP_VERSION_SHORT = f"{hip_major}{hip_minor}"
+        BNB_BACKEND = "ROCm"
+    else:
+        HIP_ENVIRONMENT, BNB_HIP_VERSION = False, 0
+        BNB_HIP_VERSION_SHORT = ""
+        BNB_BACKEND = "CUDA"
+
     lib = get_native_library()
 except Exception as e:
     lib = None
     logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
     if torch.cuda.is_available():
         logger.warning(
-            """
-CUDA Setup failed despite CUDA being available. Please run the following command to get more information:
+            f"""
+{BNB_BACKEND} Setup failed despite {BNB_BACKEND} being available. Please run the following command to get more information:
 
 python -m bitsandbytes
 
-Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
+Inspect the output of the command and see if you can locate {BNB_BACKEND} libraries. You might need to add them
 to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
 and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
 """,

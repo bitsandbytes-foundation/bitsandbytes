@@ -7,6 +7,7 @@ from warnings import warn
 import torch
 from typing_extensions import deprecated
 
+from bitsandbytes.cextension import BNB_HIP_VERSION
 import bitsandbytes.functional as F
 
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
@@ -88,6 +89,9 @@ def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -
     :param tile_indices: reverse transformation indices, from get_inverse_transform_indices
     :return: contiguous row-major tensor
     """
+    # CPU has no change on layout
+    if permuted_tensor.device.type == "cpu":
+        return permuted_tensor
     (rows, cols), (tile_rows, tile_cols) = permuted_tensor.shape, tile_indices.shape
     assert rows % tile_rows == cols % tile_cols == 0, "tensor must contain a whole number of tiles"
     tensor = permuted_tensor.reshape(-1, tile_indices.numel()).t()
@@ -216,6 +220,10 @@ matmul_cublas = MatMul8bit.apply
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def supports_igemmlt(device: torch.device) -> bool:
     """check if this device supports the optimized int8 kernel"""
+    if device == torch.device("cpu") or torch.device("xpu"):
+        return True
+    if torch.version.hip:
+        return False if BNB_HIP_VERSION < 601 else True
     if torch.cuda.get_device_capability(device=device) < (7, 5):
         return False
     device_name = torch.cuda.get_device_name(device=device)
@@ -311,8 +319,11 @@ class MatMul8bitLt(torch.autograd.Function):
         input_shape = A.shape
 
         # Cast A to fp16
-        if A.dtype != torch.float16:
-            warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
+        A_dtype = torch.float16
+        if A.device == torch.device("cpu"):
+            A_dtype = torch.bfloat16
+        if A.dtype != A_dtype:
+            warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to {A_dtype} during quantization")
 
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
@@ -459,7 +470,12 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
+        if A.device.type == "npu":
+            output = torch.matmul(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t())
+            if bias is not None:
+                output += bias
+        else:
+            output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
 
         # 3. Save state
         ctx.state = quant_state
@@ -490,9 +506,35 @@ class MatMul4Bit(torch.autograd.Function):
         # not supported by PyTorch. TODO: create work-around
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA:
-            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
+            if grad_output.device.type == "npu":
+                grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype))
+            else:
+                grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
 
         return grad_A, grad_B, None, grad_bias, None
+
+
+class MatMul8bitFp(torch.autograd.Function):
+    # For Intel CPU and XPU, the double quant has many unsafe operations which will breaks the finetune.
+    # We'd like to use dequant + matmul to run finetune currently.
+
+    @staticmethod
+    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
+        CB = B.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0)).t()
+        output = torch.matmul(A, CB).to(A.dtype)
+        ctx.state = state
+        ctx.dtype_A = A.dtype
+        ctx.grad_shape = A.shape
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        state = ctx.state
+        B = state.CxB if state.CxB is not None else state.CB
+        CB = B.to(ctx.dtype_A).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+        grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
+
+        return grad_A, None, None, None, None
 
 
 def matmul(
@@ -506,6 +548,8 @@ def matmul(
     state = state or MatmulLtState()
     if threshold > 0.0:
         state.threshold = threshold
+    if A.device.type in ("cpu", "xpu") and state.is_training:
+        return MatMul8bitFp.apply(A, B, out, bias, state)
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
@@ -517,8 +561,16 @@ def matmul_4bit(
     bias: Optional[torch.Tensor] = None,
 ):
     assert quant_state is not None
-
-    if A.numel() == A.shape[-1] and A.requires_grad == False:
+    if A.device.type in ("cpu", "xpu") and A.requires_grad == False:
+        if getattr(quant_state, "ipex", False):
+            B = B.t() if len(B.shape) == 2 else B
+            out = F.gemv_4bit(A, B, out, state=quant_state)
+            if bias is not None:
+                out += bias
+            return out
+        else:
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
+    elif A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "npu":
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(
                 f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",

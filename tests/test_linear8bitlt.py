@@ -10,6 +10,7 @@ import torch
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
 from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 from bitsandbytes.nn.modules import Linear8bitLt
 from tests.helpers import (
     TRUE_FALSE,
@@ -22,6 +23,7 @@ from tests.helpers import (
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.skipif(
     not torch.cuda.is_available() or torch.cuda.get_device_capability() < (7, 5),
     reason="this test requires a turing-generation or newer GPU, see bitsandbytes docs",
@@ -40,6 +42,7 @@ def test_layout_exact_match():
         assert torch.all(torch.eq(restored_x, x))
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_linear_no_igemmlt():
     linear = torch.nn.Linear(1024, 3072)
     x = torch.randn(3, 1024, dtype=torch.half)
@@ -79,6 +82,7 @@ def test_linear_no_igemmlt():
     torch.testing.assert_close(x_ref.grad, x_ours.grad, atol=0.01, rtol=1e-5)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
 @pytest.mark.parametrize("serialize_before_forward", TRUE_FALSE, ids=id_formatter("serialize_before_forward"))
 @pytest.mark.parametrize("deserialize_before_cuda", TRUE_FALSE, ids=id_formatter("deserialize_before_cuda"))

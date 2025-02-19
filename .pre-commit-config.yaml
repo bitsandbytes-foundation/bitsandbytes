@@ -21,3 +21,4 @@ repos:
     rev: v1.26.0
     hooks:
       - id: typos
+        exclude: ^.*\.hip$

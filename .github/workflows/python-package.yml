@@ -58,6 +58,7 @@ jobs:
   # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
   ##
   build-shared-libs-cuda:
+    if: github.ref_name != 'multi-backend-refactor'
     strategy:
       fail-fast: false
       matrix:
@@ -102,11 +103,55 @@ jobs:
           name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
           path: output/*
           retention-days: 7
-
+  build-shared-libs-rocm:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        arch: [x86_64]
+        rocm_version:
+          ["6.1.2", "6.2.4", "6.3.2"]
+    runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker multiarch
+        if: startsWith(matrix.os, 'ubuntu')
+        uses: docker/setup-qemu-action@v2
+      - name: Clean up disk space
+        run: |
+          sudo rm -rf \
+              /usr/share/dotnet \
+              /opt/ghc \
+              "/usr/local/share/boost" \
+              "$AGENT_TOOLSDIRECTORY" \
+              /opt/hostedtoolcache \
+              /opt/google/chrome \
+              /opt/microsoft/msedge \
+              /opt/microsoft/powershell \
+              /opt/pipx \
+              /usr/lib/mono \
+              /usr/local/julia* \
+              /usr/local/lib/android \
+              /usr/local/lib/node_modules \
+              /usr/local/share/chromium \
+              /usr/local/share/powershell \
+              /usr/share/swift
+      - name: Build C++
+        run: bash .github/scripts/build-rocm.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+          rocm_version: ${{ matrix.rocm_version }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}
+          path: output/*
+          retention-days: 7
   build-wheels:
     needs:
       - build-shared-libs
-      - build-shared-libs-cuda
+      # - build-shared-libs-cuda  reduce the pkg size + build times for the preview release
+      - build-shared-libs-rocm
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -123,7 +168,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download build artifacts
+        with:
+          fetch-depth: 0  # Needed for setuptools_scm.
+      #   with:
+      #     fetch-depth: 1  # shallow clone
+      # - name: Fetch tags for dynamic versioning in setup.py
+      #   run: |
+      #     git fetch --depth=1 origin --tags
+      #     echo "Available Git tags:"
+      #     git tag -n
+      - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -140,7 +194,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install build wheel
-      - run: python -m build .
+      - run: python -m build . -w
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |
@@ -157,7 +211,7 @@ jobs:
   upload-pre-release-wheels:
     name: Create release and upload artifacts
     runs-on: ubuntu-latest
-    if: github.ref_name == 'main'
+    if: github.ref_name == 'multi-backend-refactor'
     permissions:
       contents: write
     needs:
@@ -188,8 +242,8 @@ jobs:
         with:
           files: wheels/*.whl
           prerelease: true
-          name: Latest `main` wheel
-          tag_name: continuous-release_main
+          name: Multi-Backend Preview
+          tag_name: continuous-release_multi-backend-refactor
           make_latest: false
           draft: false
           target_commitish: ${{ github.sha }}

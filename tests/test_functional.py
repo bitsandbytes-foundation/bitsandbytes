@@ -11,10 +11,12 @@ import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
+from bitsandbytes.cextension import BNB_HIP_VERSION, HIP_ENVIRONMENT, ROCM_GPU_ARCH
 from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,
     describe_dtype,
+    get_blocksizes,
     get_test_dims,
     id_formatter,
 )
@@ -116,7 +118,7 @@ def test_estimate_quantiles(dtype):
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
-@pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
+@pytest.mark.parametrize("blocksize", get_blocksizes(HIP_ENVIRONMENT))
 @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
 def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
     diffs = []
@@ -431,13 +433,17 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
 @pytest.mark.parametrize("dim4", [512], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2, 3), ids=id_formatter("dims"))
 @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
-def test_int8_linear_matmul(dim1, dim2, dim3, dim4, dims, ldb):
+@pytest.mark.parametrize("device", ("cuda", "cpu"), ids=id_formatter("device"))
+def test_int8_linear_matmul(dim1, dim2, dim3, dim4, dims, ldb, device):
+    if HIP_ENVIRONMENT and device == "cpu":
+        pytest.skip("this test is not supported on ROCm yet")
+
     for i in range(k):
         if dims == 2:
-            A = torch.randint(-128, 127, size=(dim1, dim3), device="cuda").to(torch.int8)
+            A = torch.randint(-128, 127, size=(dim1, dim3), device=device).to(torch.int8)
         elif dims == 3:
-            A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device="cuda").to(torch.int8)
-        B = torch.randint(-128, 127, size=(dim4, dim3), device="cuda").to(torch.int8)
+            A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device=device).to(torch.int8)
+        B = torch.randint(-128, 127, size=(dim4, dim3), device=device).to(torch.int8)
         C1 = torch.matmul(A.float(), B.t().float())
 
         C2 = F.int8_linear_matmul(A, B)
@@ -510,6 +516,33 @@ def test_dequant_mm(dim1, dim4, dims, has_bias):
         assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01 * n))
 
 
+@pytest.mark.parametrize("dim1", [64, 256], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim4", [64, 1024], ids=id_formatter("dim4"))
+@pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
+@pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
+def test_dequant_mm_cpu(dim1, dim4, dims, has_bias):
+    inner = torch.randint(1, 128, size=(1,)).item()
+    bias = None
+    if has_bias:
+        bias = torch.randn(dim4, device="cpu", dtype=torch.bfloat16)
+    for i in range(1):
+        A = torch.randn(dim1, inner, device="cpu")
+        B = torch.randn(dim4, inner, device="cpu")
+
+        A1, maxA = F.vectorwise_quant(A, dim=1)
+        B1, maxB = F.vectorwise_quant(B, dim=1)
+
+        C2 = F.int8_linear_matmul(A1, B1)
+
+        C3 = F.vectorwise_mm_dequant(C2.bfloat16(), maxA, maxB.t())
+        if has_bias:
+            C3 += bias
+
+        C4 = F.int8_mm_dequant(C2, maxA.flatten(), maxB.flatten(), bias=bias)
+
+        torch.testing.assert_close(C3.float(), C4.float(), atol=0.05, rtol=0.1)
+
+
 @pytest.mark.parametrize("dim1", [1 * 1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1 * 1024], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
@@ -551,9 +584,14 @@ def test_colrow_absmax(dim1, dim2, dims, threshold):
 
 @pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
-def test_int8_double_quant(dim1, dim2):
+@pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
+@pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
+def test_int8_double_quant(dim1, dim2, device, dtype):
+    if device == "cuda" and dtype == torch.bfloat16:
+        pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
+
     for i in range(k):
-        A = torch.randn(dim1, dim2, device="cuda").half()
+        A = torch.randn(dim1, dim2, device=device).to(dtype)
         out_col1, Scol = F.vectorwise_quant(A, dim=0)
         out_row1, Srow = F.vectorwise_quant(A, dim=1)
 
@@ -580,6 +618,7 @@ def test_int8_double_quant(dim1, dim2):
         torch.testing.assert_close(Scol.flatten().float(), statsAt)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize(
     ("dim1", "dim4", "inner"),
     (
@@ -695,12 +734,76 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
     print(sum(err3) / len(err3))
 
 
+@pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dims", [2], ids=id_formatter("dims"))
+@pytest.mark.parametrize("dtype", [torch.int8], ids=describe_dtype)
+@pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
+@pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
+@pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
+@pytest.mark.deprecated
+def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
+    for i in range(k):
+        if dims == 2:
+            A = torch.randint(10, 99, size=(dim1, dim2), device="cuda").to(dtype)
+        elif dims == 3:
+            A = torch.randint(10, 99, size=(dim1, dim2, dim3), device="cuda").to(dtype)
+
+        A.view(-1)[-1] = -1
+        if transpose:
+            At = A.t().contiguous()
+            out1, S1 = F.nvidia_transform(At, to_order=orderOut)
+        else:
+            out1, S1 = F.nvidia_transform(A, to_order=orderOut)
+        out2, S2 = F.transform(A, to_order=orderOut, transpose=transpose)
+
+        assert S1[0][0] == S2[0][0]
+        assert S1[0][1] == S2[0][1]
+        # print(out1)
+        # print(out2)
+
+        torch.testing.assert_close(out1, out2)
+
+
+@pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
+@pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
+@pytest.mark.parametrize("dims", [2], ids=id_formatter("dims"))
+@pytest.mark.parametrize("dtype", [torch.int8], ids=describe_dtype)
+@pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
+@pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
+@pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
+@pytest.mark.deprecated
+def test_transform_cpu(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
+    for i in range(k):
+        if dims == 2:
+            A = torch.randint(10, 99, size=(dim1, dim2), device="cpu").to(dtype)
+        elif dims == 3:
+            A = torch.randint(10, 99, size=(dim1, dim2, dim3), device="cpu").to(dtype)
+
+        A.view(-1)[-1] = -1
+        if transpose:
+            out1 = A.t().contiguous()
+        else:
+            out1 = A
+        out2, S2 = F.transform(A, to_order=orderOut, transpose=transpose)
+
+        assert S2 is None
+
+        torch.testing.assert_close(out1, out2)
+
+
 @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
-def test_coo_double_quant(dim1, dim2):
+@pytest.mark.parametrize("device", ["cuda", "cpu"], ids=id_formatter("device"))
+@pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
+def test_coo_int8_vectorwise_quant(dim1, dim2, device, dtype):
+    if device == "cuda" and dtype == torch.bfloat16:
+        pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
     threshold = 2.00
     for i in range(k):
-        A = torch.randn(dim1, dim2, device="cuda").half()
+        A = torch.randn(dim1, dim2, device=device).to(dtype)
 
         idx = torch.abs(A) >= threshold
         CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
@@ -711,26 +814,11 @@ def test_coo_double_quant(dim1, dim2):
             torch.testing.assert_close(A1, A2)
 
             A[:, outlier_cols] = 0
-            A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
+            A2 = (CA.float() * statsA.unsqueeze(1) / 127).to(dtype)
             torch.testing.assert_close(A, A2, rtol=0.05, atol=1.5e-2)
 
 
-@pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
-def test_coo_int8_vectorwise_quant(dim1, dim2):
-    threshold = 3.00
-    for i in range(k):
-        A = torch.randn(dim1, dim2, device="cuda").half()
-
-        idx = torch.abs(A) >= threshold
-        CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
-
-        if outlier_cols is not None:
-            A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
-            A[:, outlier_cols] = 0
-            torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
-
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("transposed_B", TRUE_FALSE, ids=id_formatter("transposed_B"))
@@ -762,6 +850,7 @@ def test_spmm_coo(dim1, dim2, transposed_B):
         assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=30)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.benchmark
 def test_spmm_bench():
     batch = 2
@@ -804,6 +893,7 @@ def test_spmm_bench():
     print(tsp / t8)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [256, 1024], ids=id_formatter("dim2"))
 def test_integrated_sparse_decomp(dim1, dim2):
@@ -949,6 +1039,7 @@ def test_coo2csc():
     torch.testing.assert_close(A2.t()[idx], cscA.values)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", [1 * 2048])
 @pytest.mark.parametrize("dim2", [2048])
 @pytest.mark.parametrize("dtype", [torch.int8])
@@ -1136,13 +1227,14 @@ def test_zeropoint():
     print(err1, err2, err3, err4, err5, err6)
 
 
+@pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
 @pytest.mark.deprecated
-def test_extract_outliers():
+def test_extract_outliers(device):
     for i in range(k):
         shapeA = (4096, 4096 * 4)
-        idx = torch.unique(torch.randint(0, shapeA[1], size=(10,)).int()).cuda()
-        # idx = torch.Tensor([0]).int().cuda()
-        A = torch.randint(-128, 127, size=shapeA, device="cuda").to(torch.int8)
+        idx = torch.unique(torch.randint(0, shapeA[1], size=(10,)).int()).to(device=device)
+        A = torch.randint(-128, 127, size=shapeA, device=device).to(torch.int8)
         outliers1 = A[:, idx.long()]
 
         CA, SA = F.transform(A, "col_turing")
@@ -1335,10 +1427,12 @@ def test_bench_dequantization():
     # print((time.time()-t0)/1e6)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
 @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
-def test_4bit_quant(dtype, quant_type, blocksize):
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
+def test_4bit_quant(dtype, quant_type, blocksize, device):
     vals = list(product([0, 1], repeat=4))
 
     code = {}
@@ -1362,9 +1456,11 @@ def test_4bit_quant(dtype, quant_type, blocksize):
             result = sign * exp * frac
         code[idx] = result
 
-    A1 = torch.randn(1024, 1024, device="cuda", dtype=dtype)
+    A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
     qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
     A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
+    # if device == "cpu":
+    #     A2 = A2.t()
 
     err = (A1 - A2).abs().float()
     relerr = (err / (A1.abs().float() + 1e-8)).mean()
@@ -1394,7 +1490,8 @@ def test_4bit_quant(dtype, quant_type, blocksize):
 
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
 def test_4bit_compressed_stats(quant_type):
-    for blocksize in [128, 64]:
+    blocksizes = [128, 64] if not HIP_ENVIRONMENT else [128]
+    for blocksize in blocksizes:
         errs1 = []
         errs2 = []
         for i in range(10):
@@ -1474,6 +1571,9 @@ def test_normal_map_tree():
         # print(pivots)
 
 
+@pytest.mark.skipif(
+    HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64"
+)
 @pytest.mark.parametrize("double_quant", TRUE_FALSE, ids=lambda double_quant: f"DQ_{double_quant}")
 @pytest.mark.parametrize("storage_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
@@ -1614,6 +1714,50 @@ def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
             assert maxratio < 1.02 and maxratio > 0.98
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
+@pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+def test_gemv_4bit_cpu(dtype, quant_type, kind):
+    """
+    Test 4bit GEMV for CPU. It is simplified a lot from the cuda version, since
+    the CPU backend does not support double_quant or quant_storage other than uint8.
+    Also, the CPU backend has different numeric accuracy from that of CUDA
+    """
+    for dim in [128, 256, 512, 1024]:
+        for i in range(10):
+            if kind == "fc1":
+                A = torch.randn(1, dim, dtype=dtype, device="cpu")
+                B = torch.randn(dim * 4, dim, dtype=dtype, device="cpu") / math.sqrt(dim)
+            elif kind == "fc2":
+                A = torch.randn(1, 4 * dim, dtype=dtype, device="cpu")
+                B = torch.randn(dim, 4 * dim, dtype=dtype, device="cpu") / math.sqrt(dim)
+            elif kind == "attn":
+                A = torch.randn(1, dim, dtype=dtype, device="cpu")
+                B = torch.randn(dim, dim, dtype=dtype, device="cpu") / math.sqrt(dim)
+            elif kind == "attn_packed":
+                A = torch.randn(1, dim, dtype=dtype, device="cpu")
+                B = torch.randn(dim * 3, dim, dtype=dtype, device="cpu") / math.sqrt(dim)
+
+            qB, state = F.quantize_4bit(
+                B,
+                quant_type=quant_type,
+                compress_statistics=False,
+                quant_storage=torch.uint8,
+            )
+            dqB = F.dequantize_4bit(qB, state)
+            C3 = torch.matmul(A, dqB.t())
+            C2 = F.gemv_4bit(A, qB.t(), state=state)
+            A.requires_grad = True
+            C1 = bnb.matmul_4bit(A, qB.t(), state)
+
+            c = int(C1.numel() * 0.0014 * (dim / 256)) + 1
+            rtol = 1e-3 if dtype != torch.bfloat16 else 1e-2
+            atol = 1e-2 if dtype != torch.bfloat16 else 5e-2
+            assert_all_approx_close(C1, C2, rtol, atol, count=c)
+            assert_all_approx_close(C3, C2, rtol, atol, count=c)
+
+
 @pytest.mark.skip("Row scale has some bugs for ampere")
 def test_managed():
     n = 32 * 10
@@ -1640,6 +1784,10 @@ def test_managed():
 @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
 @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
+@pytest.mark.skipif(
+    HIP_ENVIRONMENT and ROCM_GPU_ARCH == "gfx90a",
+    reason="this test is not supported on ROCm with gfx90a architecture yet",
+)
 def test_gemv_eye_4bit(storage_type, dtype, double_quant):
     dims = 10
     torch.random.manual_seed(np.random.randint(0, 412424242))
@@ -1663,6 +1811,7 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
         # torch.testing.assert_close(A, C2, rtol=1e-5, atol=0.080)
 
 
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=1), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=1), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=1), ids=id_formatter("dim3"))
@@ -1750,44 +1899,15 @@ def test_percentile_clipping(gtype):
         torch.testing.assert_close(gnorm1, gnorm2)
 
 
-@pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
-@pytest.mark.parametrize("dims", [2], ids=id_formatter("dims"))
-@pytest.mark.parametrize("dtype", [torch.int8], ids=describe_dtype)
-@pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
-@pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
-@pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
-@pytest.mark.deprecated
-def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
-    for i in range(k):
-        if dims == 2:
-            A = torch.randint(10, 99, size=(dim1, dim2), device="cuda").to(dtype)
-        elif dims == 3:
-            A = torch.randint(10, 99, size=(dim1, dim2, dim3), device="cuda").to(dtype)
-
-        A.view(-1)[-1] = -1
-        if transpose:
-            At = A.t().contiguous()
-            out1, S1 = F.nvidia_transform(At, to_order=orderOut)
-        else:
-            out1, S1 = F.nvidia_transform(A, to_order=orderOut)
-        out2, S2 = F.transform(A, to_order=orderOut, transpose=transpose)
-
-        assert S1[0][0] == S2[0][0]
-        assert S1[0][1] == S2[0][1]
-        # print(out1)
-        # print(out2)
-
-        torch.testing.assert_close(out1, out2)
-
-
+@pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
 @pytest.mark.parametrize("dim1", get_test_dims(2, 256, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(2, 256, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", get_test_dims(2, 256, n=2), ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dtype", [torch.int8, torch.int32], ids=describe_dtype)
 @pytest.mark.parametrize("orderA", ["row"], ids=id_formatter("orderA"))
-@pytest.mark.parametrize("orderOut", ["col", "row", "col32"], ids=id_formatter("orderOut"))
+@pytest.mark.parametrize(
+    "orderOut", ["col", "row"] if HIP_ENVIRONMENT else ["col", "row", "col32"], ids=id_formatter("orderOut")
+)
 @pytest.mark.parametrize("transpose", [False], ids=id_formatter("transpose"))
 @pytest.mark.parametrize("dims", [2, 3], ids=id_formatter("dims"))
 @pytest.mark.deprecated
