@@ -94,9 +94,11 @@ def get_native_library() -> BNBNativeLibrary:
 ROCM_GPU_ARCH = get_rocm_gpu_arch()
 
 try:
-    import intel_extension_for_pytorch
+    import intel_extension_for_pytorch as ipex
+
+    assert ipex._C._has_cpu() or ipex._C._has_xpu()
     is_ipex_available = True
-except:
+except Exception:
     is_ipex_available = False
 
 try:
