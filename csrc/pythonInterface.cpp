@@ -584,6 +584,16 @@ int cigemmlt_8_rowscale(Context *context, int m, int n, int k, const int8_t *A, 
 
 	void cdequantize_blockwise_fp16_nf4(uint8_t *A, uint8_t *absmax, uint8_t *out, uint32_t blocksize, uint32_t n, void* stream)
 	{ dequantizeBlockwiseNf4(A, absmax, out, blocksize, n, stream, 2); }
+
+	void cget_col_row_stats(uint8_t *A, uint8_t *rowStats, uint8_t *colStats, uint8_t *outliersNum, float threshold, int rows, int cols, void *stream) {
+		rowColStats(A, rowStats, colStats, outliersNum, threshold, rows, cols, stream);
+	}
+
+	void cdouble_rowcol_quant(uint8_t *A, uint8_t *rowStats, uint8_t *colStats, uint8_t *outRowNormed, uint8_t *outColNormed,
+					uint8_t *outliersRowIdx, uint8_t *outliersColIdx, uint8_t *outliersValue, uint32_t outliersNum,
+					float threshold, int rows, int cols, void *stream) {
+		rowColQuant(A, rowStats, colStats, outRowNormed, outColNormed, outliersRowIdx, outliersColIdx, outliersValue, outliersNum, threshold, rows, cols, stream);
+	}
 #endif
 
 	void cquantize_blockwise_cpu_fp32(float *code, float *A, float *absmax, unsigned char *out, long long blocksize, long long n){ quantize_cpu(code, A, absmax, out, blocksize, n); }
