@@ -8,4 +8,4 @@ class BinaryDistribution(Distribution):
         return True
 
 
-setup(packages=find_packages(), distclass=BinaryDistribution)
+setup(packages=find_packages(), distclass=BinaryDistribution, version="1.0.0")
