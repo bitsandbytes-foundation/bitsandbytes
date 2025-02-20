@@ -6,7 +6,6 @@ import re
 
 import torch
 
-from bitsandbytes.backends.cpu_xpu_common import ipex_cpu, ipex_xpu
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
 from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_rocm_gpu_arch
 from bitsandbytes.npu_specs import get_npu_specs
@@ -94,6 +93,11 @@ def get_native_library() -> BNBNativeLibrary:
 
 ROCM_GPU_ARCH = get_rocm_gpu_arch()
 
+try:
+    import intel_extension_for_pytorch
+    is_ipex_available = True
+except:
+    is_ipex_available = False
 
 try:
     if torch.version.hip:
@@ -109,7 +113,7 @@ try:
     lib = get_native_library()
 except Exception as e:
     lib = None
-    if not ipex_cpu and not ipex_xpu:
+    if not is_ipex_available:
         logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
         if torch.cuda.is_available():
             logger.warning(
