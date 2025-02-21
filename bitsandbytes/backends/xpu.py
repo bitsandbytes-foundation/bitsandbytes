@@ -198,7 +198,16 @@ class XPUBackend(Backend):
         blocksize: int = 4096,
         nested=False,
     ) -> torch.Tensor:
-        raise NotImplementedError
+        # void cdequantize_blockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n, cudaStream_t stream)
+        if out.dtype == torch.float16:
+            ipex.xpu.bitsandbytes.cdequantize_blockwise_fp16(code, A, absmax, out, blocksize, A.numel())
+        elif out.dtype == torch.bfloat16:
+            ipex.xpu.bitsandbytes.cdequantize_blockwise_bf16(code, A, absmax, out, blocksize, A.numel())
+        elif out.dtype == torch.float32:
+            ipex.xpu.bitsandbytes.cdequantize_blockwise_fp32(code, A, absmax, out, blocksize, A.numel())
+        else:
+            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
+        
 
     def quantize_blockwise(
         self,
