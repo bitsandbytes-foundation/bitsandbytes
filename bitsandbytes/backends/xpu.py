@@ -20,8 +20,8 @@ Tensor = torch.Tensor
 str2optimizer8bit_blockwise = {
         "adam": (
             ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp32,
-            # lib.cadam_8bit_blockwise_grad_fp16,
-            # lib.cadam_8bit_blockwise_grad_bf16,
+            ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp16,
+            ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_bf16,
         ),
     }
 
@@ -244,23 +244,22 @@ class XPUBackend(Backend):
     ) -> None:
         optim_func = None
 
-        # is_on_gpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
+        assert_on_xpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
+
         if g.dtype == torch.float32 and state1.dtype == torch.uint8:
             optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
-        # elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        #     optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
-        # elif (
-        #     g.dtype == torch.bfloat16
-        #     and state1.dtype == torch.uint8
-        #     and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
-        # ):
-        #     optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
-        # else:
-        #     raise ValueError(
-        #         f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        #     )
-
-        # is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
+        elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
+        elif (
+            g.dtype == torch.bfloat16
+            and state1.dtype == torch.uint8
+            and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
+        ):
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
+        else:
+            raise ValueError(
+                f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
+            )
 
         optim_func(
             p,

@@ -859,7 +859,16 @@ def dequantize_blockwise(
     if out is None:
         out = torch.empty(A.shape, dtype=quant_state.dtype, device=A.device)
 
-    if A.device.type != "cpu":
+    if A.device.type == "xpu":
+        backends[A.device.type].dequantize_blockwise(
+            A=A,
+            quant_state=quant_state,
+            absmax=absmax,
+            code=quant_state.code,
+            out=out,
+            blocksize=blocksize,
+            nested=quant_state.nested,)
+    elif A.device.type != "cpu":
         code = quant_state.code.to(A.device)
         supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
         # Some AMD GPUs have warpsize 64
@@ -871,39 +880,27 @@ def dequantize_blockwise(
                 f"The blocksize of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}",
             )
 
-        # is_on_gpu([A, absmax, out])
+        is_on_gpu([A, absmax, out])
 
-        # with _cuda_device_of(A):
-        #     args = (
-        #         get_ptr(quant_state.code),
-        #         get_ptr(A),
-        #         get_ptr(absmax),
-        #         get_ptr(out),
-        #         ct.c_int(quant_state.blocksize),
-        #         ct.c_int(A.numel()),
-        #         _get_tensor_stream(A),
-        #     )
+        with _cuda_device_of(A):
+            args = (
+                get_ptr(quant_state.code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_int(quant_state.blocksize),
+                ct.c_int(A.numel()),
+                _get_tensor_stream(A),
+            )
 
-        #     if out.dtype == torch.float16:
-        #         lib.cdequantize_blockwise_fp16(*args)
-        #     elif out.dtype == torch.bfloat16:
-        #         lib.cdequantize_blockwise_bf16(*args)
-        #     elif out.dtype == torch.float32:
-        #         lib.cdequantize_blockwise_fp32(*args)
-        #     else:
-        #         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
-        
-        ## xpu
-        backends[A.device.type].dequantize_blockwise(
-            A=A,
-            quant_state=quant_state,
-            absmax=absmax,
-            code=quant_state.code,
-            out=out,
-            blocksize=blocksize,
-            nested=quant_state.nested,)
-            
-
+            if out.dtype == torch.float16:
+                lib.cdequantize_blockwise_fp16(*args)
+            elif out.dtype == torch.bfloat16:
+                lib.cdequantize_blockwise_bf16(*args)
+            elif out.dtype == torch.float32:
+                lib.cdequantize_blockwise_fp32(*args)
+            else:
+                raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
     else:
         code = quant_state.code.cpu()
         lib.cdequantize_blockwise_cpu_fp32(
