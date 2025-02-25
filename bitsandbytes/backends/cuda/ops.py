@@ -89,6 +89,7 @@ def _(
     A: torch.Tensor,
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
+    dtype=torch.float16,
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
@@ -96,26 +97,33 @@ def _(
     torch._check(row_stats.dtype == torch.float32, lambda: f"row_stats must be float32, got {row_stats.dtype}")
     torch._check(col_stats.dtype == torch.float32, lambda: f"col_stats must be float32, got {col_stats.dtype}")
 
-    if bias is not None:
-        torch._check(bias.dtype == torch.float16, lambda: f"Only fp16 bias is supported, got {bias.dtype}")
-
     if out is None:
+        # TODO: deprecate out arg
+        # Note: cuda kernel only currently supports fp16 output.
+        # We'll later cast to desired dtype if needed.
         out = torch.empty_like(A, dtype=torch.float16)
 
     ptrA = get_ptr(A)
     ptrOut = get_ptr(out)
     ptrRowStats = get_ptr(row_stats)
     ptrColStats = get_ptr(col_stats)
-    ptrBias = get_ptr(bias)
     numRows = ct.c_int32(prod(A.shape[:-1]))
     numCols = ct.c_int32(A.shape[-1])
+
+    # Note: fused bias in the kernel is only supported for fp16
+    # TODO(matthewdouglas): Consider supporting bf16 fused bias
+    ptrBias = get_ptr(bias) if bias is not None and bias.dtype == torch.float16 else None
 
     with _cuda_device_of(A):
         lib.cdequant_mm_int32_fp16(
             ptrA, ptrRowStats, ptrColStats, ptrOut, ptrBias, numRows, numCols, _get_tensor_stream(A)
         )
 
-    return out
+    # Add bias separately if not fused in kernel
+    if bias is not None and bias.dtype != torch.float16:
+        out.add_(bias)
+
+    return out.to(dtype)
 
 
 @register_kernel("bitsandbytes::int8_vectorwise_quant", "cuda")

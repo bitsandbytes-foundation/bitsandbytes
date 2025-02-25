@@ -2155,7 +2155,7 @@ def int8_mm_dequant(
     Returns:
         `torch.Tensor`: The dequantized result with an optional bias, with dtype `torch.float16`.
     """
-    return torch.ops.bitsandbytes.int8_mm_dequant(A, row_stats, col_stats, out, bias)
+    return torch.ops.bitsandbytes.int8_mm_dequant(A, row_stats, col_stats, dtype=torch.float16, out=out, bias=bias)
 
 
 def get_colrow_absmax(

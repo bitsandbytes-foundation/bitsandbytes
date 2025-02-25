@@ -14,6 +14,41 @@ else:
     register_fake = torch.library.impl_abstract
     register_kernel = torch.library.impl
 
+
+# Higher level op: int8 matmul + dequant + bias
+torch.library.define(
+    "bitsandbytes::int8_linear_dequant",
+    "(Tensor A, Tensor B, Tensor row_stats, Tensor col_stats, Tensor? bias=None, ScalarType dtype=float16) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::int8_linear_dequant")
+def _(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    row_stats: torch.Tensor,
+    col_stats: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
+    dtype=torch.float16,
+) -> torch.Tensor:
+    shapeC = (*A.shape[:-1], B.shape[0])
+    return torch.empty(shapeC, device=A.device, dtype=dtype)
+
+
+@register_kernel("bitsandbytes::int8_linear_dequant", None)
+def _(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    row_stats: torch.Tensor,
+    col_stats: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
+    dtype=torch.float16,
+) -> torch.Tensor:
+    out_i32 = torch.ops.bitsandbytes.int8_linear_matmul(A, B)
+    out = torch.ops.bitsandbytes.int8_mm_dequant(out_i32, row_stats, col_stats, dtype=dtype, bias=bias)
+    return out
+
+
 # Define op
 # TODO: mutable output arg as alias of return can be challenging;
 #       consider a separate op without aliased return:
@@ -72,7 +107,7 @@ def _(A: torch.Tensor, stats: torch.Tensor):
 
 torch.library.define(
     "bitsandbytes::int8_mm_dequant",
-    "(Tensor A, Tensor row_stats, Tensor col_stats, Tensor? out=None, Tensor? bias=None) -> Tensor",
+    "(Tensor A, Tensor row_stats, Tensor col_stats, ScalarType dtype=float16, Tensor? out=None, Tensor? bias=None) -> Tensor",
 )
 
 
@@ -81,11 +116,12 @@ def _(
     A: torch.Tensor,
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
+    dtype=torch.float16,
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     torch._check(A.dtype == torch.int32, lambda: "A must be int32")
-    return torch.empty_like(A, dtype=torch.float16)
+    return torch.empty_like(A, dtype=dtype)
 
 
 torch.library.define(

@@ -364,16 +364,8 @@ class MatMul8bitLt(torch.autograd.Function):
         else:
             subA = None
 
-        # 3. Int8 Matmul
-        out32 = F.int8_linear_matmul(CA, state.CB)
-
-        # Dequantize matmul result
-        if bias is None or bias.dtype == torch.float16:
-            # we apply the fused bias here
-            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=bias).to(A.dtype)
-        else:  # apply bias separately
-            # TODO: Fused bias for fp32/bf16?
-            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=None).to(A.dtype).add_(bias)
+        # 3. Int8 Matmul + Dequant + Bias
+        output = torch.ops.bitsandbytes.int8_linear_dequant(CA, state.CB, SCA, state.SCB, bias=bias, dtype=A.dtype)
 
         # 4. Mixed-precision decomposition matmul
         if subA is not None and state.subB is not None:
@@ -423,8 +415,14 @@ class MatMul8bitLt(torch.autograd.Function):
         if req_gradB:
             Cgrad, _, _, SCgradt, _ = F.int8_double_quant(grad_output.to(torch.float16))
 
-            gradB32 = F.int8_linear_matmul(Cgrad.t().contiguous(), CAt.t())
-            grad_B = F.int8_mm_dequant(gradB32, SCgradt, SCAt)
+            grad_B = torch.ops.bitsandbytes.int8_linear_dequant(
+                Cgrad.t().contiguous(),
+                CAt.t(),
+                SCgradt,
+                SCAt,
+                dtype=torch.float16,
+            )
+
             if state.threshold > 0.0 and subA is not None:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 

@@ -4,7 +4,7 @@ import pytest
 import torch
 
 import bitsandbytes
-from tests.helpers import id_formatter
+from tests.helpers import TRUE_FALSE, id_formatter
 
 
 class TestLLMInt8Ops:
@@ -66,8 +66,25 @@ class TestLLMInt8Ops:
 
         torch.library.opcheck(torch.ops.bitsandbytes.int8_mm_dequant, (A, row_stats, col_stats))
 
-    # def test_int8_double_quant():
-    #    pass
+    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("has_bias", TRUE_FALSE)
+    def test_int8_linear_dequant(self, device, dtype, has_bias):
+        if device == "cpu":
+            pytest.skip("CPU implementation is not available")
+
+        A = torch.randint(-128, 127, (10, 20), dtype=torch.int8, device=device)
+        B = torch.randint(-128, 127, (30, 20), dtype=torch.int8, device=device)
+        row_stats = torch.randn(10, dtype=torch.float32, device=device)
+        col_stats = torch.randn(20, dtype=torch.float32, device=device)
+        bias = torch.randn(30, dtype=dtype, device=device) if has_bias else None
+        out = torch.ops.bitsandbytes.int8_linear_dequant(A, B, row_stats, col_stats, bias=bias, dtype=dtype)
+
+        assert out.shape == (10, 30)
+        assert out.dtype == dtype
+        assert out.device == A.device
+
+        torch.library.opcheck(torch.ops.bitsandbytes.int8_linear_dequant, (A, B, row_stats, col_stats, bias, dtype))
 
 
 class TestInt8BlockwiseQuantOps:
