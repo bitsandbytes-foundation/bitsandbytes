@@ -63,14 +63,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, ubuntu-22.04-arm]
+        os: [ubuntu-22.04, windows-latest, ubuntu-22.04-arm]
         arch: [x86_64, aarch64]
         cuda_version:
           ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.0"]
         exclude:
           - os: windows-latest
             arch: aarch64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             arch: aarch64
           - os: ubuntu-22.04-arm 
             arch: x86_64
@@ -109,7 +109,7 @@ jobs:
       - build-shared-libs-cuda
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-22.04-arm]
+        os: [ubuntu-22.04, macos-latest, windows-latest, ubuntu-22.04-arm]
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
         # code. This ensures compatibility across Python versions, including Python 3.8, as compatibility is
         # dictated by the packaged code itself, not the Python version used for packaging.
@@ -118,7 +118,7 @@ jobs:
         exclude:
           - os: windows-latest
             arch: aarch64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             arch: aarch64
           - os: ubuntu-22.04-arm 
             arch: x86_64
