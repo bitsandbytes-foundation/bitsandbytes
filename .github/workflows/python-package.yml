@@ -35,7 +35,7 @@ jobs:
         exclude:
           - os: windows-latest
             arch: aarch64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             arch: aarch64
           - os: ubuntu-22.04-arm 
             arch: x86_64
