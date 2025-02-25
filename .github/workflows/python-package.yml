@@ -30,7 +30,7 @@ jobs:
   build-shared-libs:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-22.04-arm]
+        os: [ubuntu-22.04, macos-latest, windows-latest, ubuntu-22.04-arm]
         arch: [x86_64, aarch64]
         exclude:
           - os: windows-latest
