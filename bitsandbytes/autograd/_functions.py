@@ -360,7 +360,7 @@ class MatMul8bitLt(torch.autograd.Function):
                 # we want to divide by 127. It's however more performant to multiply
                 # by the reciprocal.
                 outliers = state.CB[:, state.idx]
-                state.subB = (outliers.t() * state.SCB * 7.874015718698502e-3).to(A.dtype)
+                state.subB = F.int8_vectorwise_dequant(outliers, state.SCB).to(A.dtype).t()
         else:
             subA = None
 

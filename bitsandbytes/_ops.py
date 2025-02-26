@@ -158,6 +158,7 @@ torch.library.define(
 def _(
     A: torch.Tensor, absmax: torch.Tensor, blocksize: int, quant_type: str, shape: Sequence[int], dtype: torch.dtype
 ) -> torch.Tensor:
+    torch._check_is_size(blocksize)
     return torch.empty(shape, dtype=dtype, device=A.device)
 
 
@@ -171,6 +172,8 @@ torch.library.define(
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    torch._check_is_size(blocksize)
+
     n = A.numel()
     blocks = -(n // -blocksize)
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
@@ -202,3 +205,27 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
     out = torch.empty_like(A, dtype=torch.uint8)
     return out, absmax
+
+
+torch.library.define(
+    "bitsandbytes::gemv_4bit",
+    "(Tensor A, Tensor B, int[] shapeB, Tensor absmax, Tensor code, int blocksize) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::gemv_4bit")
+def _(
+    A: torch.Tensor, B: torch.Tensor, shapeB: Sequence[int], absmax: torch.Tensor, code: torch.Tensor, blocksize: int
+) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(A.numel() == A.size(-1), lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}")
+    torch._check(
+        A.dtype in [torch.float16, torch.bfloat16, torch.float32],
+        lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
+    )
+    torch._check(
+        B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"B must be backed by storage of type uint8, bfloat16, float16, or float32, got {B.dtype}",
+    )
+    shape = (*A.shape[:-1], shapeB[0])
+    return torch.empty(shape, device=A.device, dtype=A.dtype)

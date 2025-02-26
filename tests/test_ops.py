@@ -182,3 +182,29 @@ class Test4bitBlockwiseQuantOps:
         assert out.shape == shape
 
         torch.library.opcheck(torch.ops.bitsandbytes.dequantize_4bit, (A, absmax, blocksize, quant_type, shape, dtype))
+
+    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if device == "cpu":
+            pytest.skip("CPU implementation is not available")
+
+        out_features = 1024
+        in_features = 256
+
+        A = torch.randn((1, 1, in_features), dtype=dtype, device=device)
+        B = torch.randn((out_features, in_features), dtype=dtype, device=A.device)
+        B_q, absmax = torch.ops.bitsandbytes.quantize_4bit(B, blocksize, quant_type, storage_dtype)
+        code = bitsandbytes.functional.get_4bit_type(quant_type, device=A.device, blocksize=blocksize)
+
+        out = torch.ops.bitsandbytes.gemv_4bit(A, B_q, B.shape, absmax, code, blocksize)
+
+        assert out.device == A.device
+        assert out.dtype == dtype
+        assert out.shape == (1, 1, out_features)
+        assert out.isreal().all()
+
+        torch.library.opcheck(torch.ops.bitsandbytes.gemv_4bit, (A, B_q, B.shape, absmax, code, blocksize))

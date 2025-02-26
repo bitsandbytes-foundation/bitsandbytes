@@ -368,3 +368,86 @@ def _(
                 lib.cdequantize_blockwise_fp32_nf4(*args)
 
     return out
+
+
+@register_kernel("bitsandbytes::gemv_4bit", "cuda")
+def _(
+    A: torch.Tensor, B: torch.Tensor, shapeB: Sequence[int], absmax: torch.Tensor, code: torch.Tensor, blocksize: int
+) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(A.numel() == A.size(-1), lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}")
+    torch._check(
+        A.dtype in [torch.float16, torch.bfloat16, torch.float32],
+        lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
+    )
+    torch._check(
+        B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"B must be backed by storage of type uint8, bfloat16, float16, or float32, got {B.dtype}",
+    )
+    torch._check(absmax.dtype == torch.float32, lambda: f"absmax must be float32, got {absmax.dtype}")
+    torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
+
+    shape = (*A.shape[:-1], shapeB[0])
+    out = torch.empty(shape, device=A.device, dtype=A.dtype)
+
+    m = ct.c_int32(shapeB[0])
+    n = ct.c_int32(1)
+    k = ct.c_int32(shapeB[1])
+
+    lda = m
+    ldb = ct.c_int32((A.shape[-1] + 1) // 2)
+    ldc = m
+
+    stream = _get_tensor_stream(A)
+
+    with _cuda_device_of(A):
+        if A.dtype == torch.float16:
+            lib.cgemm_4bit_inference_naive_fp16(
+                m,
+                n,
+                k,
+                get_ptr(A),
+                get_ptr(B),
+                get_ptr(absmax),
+                get_ptr(code),
+                get_ptr(out),
+                lda,
+                ldb,
+                ldc,
+                ct.c_int32(blocksize),
+                stream,
+            )
+        elif A.dtype == torch.bfloat16:
+            lib.cgemm_4bit_inference_naive_bf16(
+                m,
+                n,
+                k,
+                get_ptr(A),
+                get_ptr(B),
+                get_ptr(absmax),
+                get_ptr(code),
+                get_ptr(out),
+                lda,
+                ldb,
+                ldc,
+                ct.c_int32(blocksize),
+                stream,
+            )
+        elif A.dtype == torch.float32:
+            lib.cgemm_4bit_inference_naive_fp32(
+                m,
+                n,
+                k,
+                get_ptr(A),
+                get_ptr(B),
+                get_ptr(absmax),
+                get_ptr(code),
+                get_ptr(out),
+                lda,
+                ldb,
+                ldc,
+                ct.c_int32(blocksize),
+                stream,
+            )
+
+    return out
