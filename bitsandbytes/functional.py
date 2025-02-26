@@ -1821,21 +1821,12 @@ def gemv_4bit(
     transposed_B=False,
     state=None,
 ):
-    # sout = check_matmul(A, B, out, transposed_A, transposed_B, expected_type=A.dtype)
     if state is None:
         raise ValueError("state cannot be None. gemv_4bit() requires the state from quantize_4bit()")
 
-    if A.numel() != A.shape[-1]:
-        raise ValueError(
-            'Dimensions of A are invalid. Must be a vector with the leading dimensions of "1", e.g. [1, 1, 2048]',
-        )
-
-    # Bshape = state.shape
-    # bout = Bshape[0]
     absmax = state.absmax
     if state.nested:
-        absmax = dequantize_blockwise(state.absmax, state.state2)
-        absmax += state.offset
+        absmax = dequantize_blockwise(absmax, state.state2) + state.offset
 
     return torch.ops.bitsandbytes.gemv_4bit(
         A,
@@ -1845,85 +1836,6 @@ def gemv_4bit(
         state.code,
         state.blocksize,
     )
-
-    # if out is None:
-    #     if len(A.shape) == 3:
-    #         out = torch.empty(size=(A.shape[0], A.shape[1], bout), dtype=A.dtype, device=A.device)
-    #     else:
-    #         out = torch.empty(size=(A.shape[0], bout), dtype=A.dtype, device=A.device)
-
-    # n = 1
-    # m = Bshape[0]
-    # k = Bshape[1]
-    # lda = Bshape[0]
-    # ldc = Bshape[0]
-    # ldb = (A.shape[-1] + 1) // 2
-    # is_on_gpu([B, A, out, absmax, state.code])
-    # m = ct.c_int32(m)
-    # n = ct.c_int32(n)
-    # k = ct.c_int32(k)
-    # lda = ct.c_int32(lda)
-    # ldb = ct.c_int32(ldb)
-    # ldc = ct.c_int32(ldc)
-    # stream = _get_tensor_stream(A)
-
-    # with _cuda_device_of(A):
-    #     if B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32]:
-    #         if A.dtype == torch.float16:
-    #             lib.cgemm_4bit_inference_naive_fp16(
-    #                 m,
-    #                 n,
-    #                 k,
-    #                 get_ptr(A),
-    #                 get_ptr(B),
-    #                 get_ptr(absmax),
-    #                 get_ptr(state.code),
-    #                 get_ptr(out),
-    #                 lda,
-    #                 ldb,
-    #                 ldc,
-    #                 ct.c_int32(state.blocksize),
-    #                 stream,
-    #             )
-    #         elif A.dtype == torch.bfloat16:
-    #             lib.cgemm_4bit_inference_naive_bf16(
-    #                 m,
-    #                 n,
-    #                 k,
-    #                 get_ptr(A),
-    #                 get_ptr(B),
-    #                 get_ptr(absmax),
-    #                 get_ptr(state.code),
-    #                 get_ptr(out),
-    #                 lda,
-    #                 ldb,
-    #                 ldc,
-    #                 ct.c_int32(state.blocksize),
-    #                 stream,
-    #             )
-    #         elif A.dtype == torch.float32:
-    #             lib.cgemm_4bit_inference_naive_fp32(
-    #                 m,
-    #                 n,
-    #                 k,
-    #                 get_ptr(A),
-    #                 get_ptr(B),
-    #                 get_ptr(absmax),
-    #                 get_ptr(state.code),
-    #                 get_ptr(out),
-    #                 lda,
-    #                 ldb,
-    #                 ldc,
-    #                 ct.c_int32(state.blocksize),
-    #                 stream,
-    #             )
-    #         else:
-    #             raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
-
-    #     else:
-    #         raise NotImplementedError(f"Matmul not implemented for data type {A.dtype}")
-
-    # return out
 
 
 def igemm(
