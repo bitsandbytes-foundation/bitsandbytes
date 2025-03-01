@@ -1049,7 +1049,7 @@ def dequantize_blockwise(
         lib.cdequantize_blockwise_cpu_fp32(
             get_ptr(code),
             get_ptr(A),
-            get_ptr(quant_state.absmax),
+            get_ptr(absmax),
             get_ptr(out),
             ct.c_longlong(quant_state.blocksize),
             ct.c_longlong(A.numel()),
