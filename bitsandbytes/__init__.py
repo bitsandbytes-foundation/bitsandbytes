@@ -3,7 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from . import research, utils
+
+from . import _ops, research, utils
 from .autograd._functions import (
     MatmulLtState,
     bmm_cublas,
@@ -12,6 +13,8 @@ from .autograd._functions import (
     matmul_cublas,
     mm_cublas,
 )
+from .backends.cpu import ops as cpu_ops
+from .backends.cuda import ops as cuda_ops  ## TODO: We would guard this for CUDA only
 from .nn import modules
 from .optim import adam
 
