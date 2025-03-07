@@ -10,7 +10,17 @@ from ...cextension import lib
 
 
 @register_kernel("bitsandbytes::int8_linear_matmul", "cpu")
-def _(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None, dtype=torch.int32):
+def _(A: torch.Tensor, B: torch.Tensor):
+    return _int8_linear_matmul_impl(A, B)
+
+
+@register_kernel("bitsandbytes::int8_linear_matmul.out", "cpu")
+def _(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor):
+    torch._check(out.dtype == torch.int32)
+    _int8_linear_matmul_impl(A, B, out)
+
+
+def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None):
     # Naive implementation: perform matmul in fp32
     result = torch.matmul(A.float(), B.float().t()).to(torch.int32)
     if out is not None:

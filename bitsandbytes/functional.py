@@ -881,25 +881,16 @@ def quantize_blockwise(
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
         code = name2qmap["dynamic"]
 
-    ## TODO: Handle absmax/out args
-    # if absmax is None:
-    #     n = A.numel()
-    #     blocks = -(n // -blocksize)
-    #     absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-
-    # if out is None:
-    #     out = torch.zeros_like(A, dtype=torch.uint8)
-
-    out, absmax = torch.ops.bitsandbytes.quantize_blockwise(
+    _out, _absmax = torch.ops.bitsandbytes.quantize_blockwise.default(
         A,
         code.to(A.device),
         blocksize,
     )
 
     if nested:
-        offset = absmax.mean()
-        absmax -= offset
-        qabsmax, state2 = quantize_blockwise(absmax, blocksize=blocksize, nested=False)
+        offset = _absmax.mean()
+        _absmax -= offset
+        qabsmax, state2 = quantize_blockwise(_absmax, blocksize=blocksize, nested=False)
         quant_state = QuantState(
             absmax=qabsmax,
             code=code,
@@ -909,7 +900,14 @@ def quantize_blockwise(
             state2=state2,
         )
     else:
-        quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=A.dtype)
+        quant_state = QuantState(absmax=_absmax, code=code, blocksize=blocksize, dtype=A.dtype)
+
+    # TODO(matthewdouglas): Deprecate out kwarg
+    out = out.copy_(_out) if out is not None else _out
+
+    # TODO(matthewdouglas): Deprecate absmax kwarg
+    if absmax is not None:
+        quant_state.absmax = absmax.copy_(quant_state.absmax)
 
     return out, quant_state
 
@@ -971,9 +969,16 @@ def dequantize_blockwise(
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-    # TODO: out arg
-    # if out is None:
-    #     out = torch.empty(A.shape, dtype=quant_state.dtype, device=A.device)
+    if out is not None:
+        torch.ops.bitsandbytes.dequantize_blockwise.out(
+            A,
+            absmax,
+            code.to(A.device),
+            blocksize,
+            quant_state.dtype,
+            out=out,
+        )
+        return out
 
     return torch.ops.bitsandbytes.dequantize_blockwise(
         A,
@@ -1122,16 +1127,7 @@ def quantize_4bit(
     """
     input_shape = A.shape
 
-    ## TODO: out args
-    # if absmax is None:
-    #     blocks = -(n // -blocksize)
-    #     absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-
-    # if out is None:
-    #     mod = dtype2bytes[quant_storage] * 2
-    #     out = torch.zeros(((n + 1) // mod, 1), dtype=quant_storage, device=A.device)
-
-    out, absmax = torch.ops.bitsandbytes.quantize_4bit(
+    _out, _absmax = torch.ops.bitsandbytes.quantize_4bit.default(
         A,
         blocksize,
         quant_type,
@@ -1141,9 +1137,9 @@ def quantize_4bit(
     code = get_4bit_type(quant_type, device=A.device)
 
     if compress_statistics:
-        offset = absmax.mean()
-        qabsmax, state2 = quantize_blockwise(absmax - offset, blocksize=256)
-        del absmax
+        offset = _absmax.mean()
+        qabsmax, state2 = quantize_blockwise(_absmax - offset, blocksize=256)
+        del _absmax
         state = QuantState(
             absmax=qabsmax,
             shape=input_shape,
@@ -1156,13 +1152,20 @@ def quantize_4bit(
         )
     else:
         state = QuantState(
-            absmax=absmax,
+            absmax=_absmax,
             shape=input_shape,
             dtype=A.dtype,
             blocksize=blocksize,
             code=code,
             quant_type=quant_type,
         )
+
+    # TODO(matthewdouglas): Deprecate out kwarg
+    out = out.copy_(_out) if out is not None else _out
+
+    # TODO(matthewdouglas): Deprecate absmax kwarg
+    if absmax is not None:
+        state.absmax = absmax.copy_(state.absmax)
 
     return out, state
 
@@ -1241,18 +1244,19 @@ def dequantize_4bit(
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-    # TODO: out args
-    # if out is None:
-    #     out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
-
-    out = torch.ops.bitsandbytes.dequantize_4bit(
-        A,
-        absmax,
-        quant_state.blocksize,
-        quant_state.quant_type,
-        quant_state.shape,
-        quant_state.dtype,
-    )
+    if out is not None:
+        torch.ops.bitsandbytes.dequantize_4bit.out(
+            A, absmax, quant_state.blocksize, quant_state.quant_type, quant_state.shape, quant_state.dtype, out=out
+        )
+    else:
+        out = torch.ops.bitsandbytes.dequantize_4bit.default(
+            A,
+            absmax,
+            quant_state.blocksize,
+            quant_state.quant_type,
+            quant_state.shape,
+            quant_state.dtype,
+        )
 
     if A.shape[0] == 1:  # is transposed, transpose back
         return out.t()
@@ -1828,7 +1832,19 @@ def gemv_4bit(
     if state.nested:
         absmax = dequantize_blockwise(absmax, state.state2) + state.offset
 
-    return torch.ops.bitsandbytes.gemv_4bit(
+    if out is not None:
+        torch.ops.bitsandbytes.gemv_4bit.out(
+            A,
+            B,
+            state.shape,
+            absmax,
+            state.code,
+            state.blocksize,
+            out=out,
+        )
+        return out
+
+    return torch.ops.bitsandbytes.gemv_4bit.default(
         A,
         B,
         state.shape,
@@ -2054,7 +2070,11 @@ def int8_linear_matmul(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Ten
     Returns:
         `torch.Tensor`: The result of the operation.
     """
-    return torch.ops.bitsandbytes.int8_linear_matmul(A, B, out, dtype)
+    if out is not None:
+        torch.ops.bitsandbytes.int8_linear_matmul.out(A, B, out)
+        return out
+
+    return torch.ops.bitsandbytes.int8_linear_matmul.default(A, B)
 
 
 def int8_mm_dequant(
@@ -2076,7 +2096,13 @@ def int8_mm_dequant(
     Returns:
         `torch.Tensor`: The dequantized result with an optional bias, with dtype `torch.float16`.
     """
-    return torch.ops.bitsandbytes.int8_mm_dequant(A, row_stats, col_stats, dtype=torch.float16, out=out, bias=bias)
+    result = torch.ops.bitsandbytes.int8_mm_dequant.default(A, row_stats, col_stats, dtype=torch.float16, bias=bias)
+
+    # TODO(matthewdouglas): Deprecate out kwarg
+    if out is not None:
+        return out.copy_(result)
+
+    return result
 
 
 def get_colrow_absmax(
@@ -2292,7 +2318,17 @@ def int8_double_quant(
         - `torch.Tensor` with dtype `torch.float32`: The column-wise quantization scales.
         - `torch.Tensor` with dtype `torch.int32`, *optional*: A list of column indices which contain outlier features.
     """
-    return torch.ops.bitsandbytes.int8_double_quant(A, col_stats, row_stats, out_col, out_row, threshold)
+
+    if row_stats is not None:
+        raise ValueError("row_stats must be None. int8_double_quant() does not support pre-allocated row_stats.")
+    if col_stats is not None:
+        raise ValueError("col_stats must be None. int8_double_quant() does not support pre-allocated col_stats.")
+    if out_col is not None:
+        raise ValueError("out_col must be None. int8_double_quant() does not support pre-allocated out_col.")
+    if out_row is not None:
+        raise ValueError("out_row must be None. int8_double_quant() does not support pre-allocated out_row.")
+
+    return torch.ops.bitsandbytes.int8_double_quant.default(A, threshold=threshold)
 
 
 def int8_vectorwise_dequant(A: torch.Tensor, stats: torch.Tensor):
@@ -2327,7 +2363,7 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
         - `torch.Tensor` with dtype `torch.float32`: The quantization scales.
         - `torch.Tensor` with dtype `torch.int32`, *optional*: A list of column indices which contain outlier features.
     """
-    return torch.ops.bitsandbytes.int8_vectorwise_quant(A, threshold)
+    return torch.ops.bitsandbytes.int8_vectorwise_quant.default(A, threshold)
 
 
 @deprecated(

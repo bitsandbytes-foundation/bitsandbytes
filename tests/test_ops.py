@@ -12,13 +12,27 @@ class TestLLMInt8Ops:
     def test_int8_linear_matmul(self, device):
         A = torch.randint(-128, 127, (10, 20), dtype=torch.int8, device=device)
         B = torch.randint(-128, 127, (30, 20), dtype=torch.int8, device=device)
-        out = torch.ops.bitsandbytes.int8_linear_matmul(A, B)
+        out = torch.ops.bitsandbytes.int8_linear_matmul.default(A, B)
 
         assert out.shape == (10, 30)
         assert out.dtype == torch.int32
         assert out.device == A.device
 
-        torch.library.opcheck(torch.ops.bitsandbytes.int8_linear_matmul, (A, B))
+        torch.library.opcheck(torch.ops.bitsandbytes.int8_linear_matmul.default, (A, B))
+
+    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    def test_int8_linear_matmul_out(self, device):
+        A = torch.randint(-128, 127, (10, 20), dtype=torch.int8, device=device)
+        B = torch.randint(-128, 127, (30, 20), dtype=torch.int8, device=device)
+
+        out = torch.empty((10, 30), dtype=torch.int32, device=device)
+        torch.ops.bitsandbytes.int8_linear_matmul.out(A, B, out)
+
+        assert out.shape == (10, 30)
+        assert out.dtype == torch.int32
+        assert out.device == A.device
+
+        torch.library.opcheck(torch.ops.bitsandbytes.int8_linear_matmul.out, (A, B, out))
 
     @pytest.mark.parametrize("threshold", [0.0, 6.0])
     @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -122,13 +136,13 @@ class TestInt8BlockwiseQuantOps:
         blocks = -(n // -blocksize)
         absmax = torch.randn((blocks,), device=device, dtype=torch.float32)
 
-        out = torch.ops.bitsandbytes.dequantize_blockwise(A, absmax, code, blocksize, dtype)
+        out = torch.ops.bitsandbytes.dequantize_blockwise.default(A, absmax, code, blocksize, dtype)
 
         assert out.shape == A.shape
         assert out.dtype == dtype
         assert out.device == A.device
 
-        torch.library.opcheck(torch.ops.bitsandbytes.dequantize_blockwise, (A, absmax, code, blocksize, dtype))
+        torch.library.opcheck(torch.ops.bitsandbytes.dequantize_blockwise.default, (A, absmax, code, blocksize, dtype))
 
 
 class Test4bitBlockwiseQuantOps:
@@ -172,16 +186,19 @@ class Test4bitBlockwiseQuantOps:
             torch.randint(0, 255, ((n + 1) // 2,), dtype=torch.uint8, device=device)
             .view(storage_dtype)
             .reshape(quantized_shape)
+            .contiguous()
         )
 
         absmax = torch.randn((blocks,), dtype=torch.float32, device=device)
 
-        out = torch.ops.bitsandbytes.dequantize_4bit(A, absmax, blocksize, quant_type, shape, dtype)
+        out = torch.ops.bitsandbytes.dequantize_4bit.default(A, absmax, blocksize, quant_type, shape, dtype)
 
         assert out.device == A.device
         assert out.shape == shape
 
-        torch.library.opcheck(torch.ops.bitsandbytes.dequantize_4bit, (A, absmax, blocksize, quant_type, shape, dtype))
+        torch.library.opcheck(
+            torch.ops.bitsandbytes.dequantize_4bit.default, (A, absmax, blocksize, quant_type, shape, dtype)
+        )
 
     @pytest.mark.parametrize("device", ["cpu", "cuda"])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
@@ -200,11 +217,11 @@ class Test4bitBlockwiseQuantOps:
         B_q, absmax = torch.ops.bitsandbytes.quantize_4bit(B, blocksize, quant_type, storage_dtype)
         code = bitsandbytes.functional.get_4bit_type(quant_type, device=A.device, blocksize=blocksize)
 
-        out = torch.ops.bitsandbytes.gemv_4bit(A, B_q, B.shape, absmax, code, blocksize)
+        out = torch.ops.bitsandbytes.gemv_4bit.default(A, B_q, B.shape, absmax, code, blocksize)
 
         assert out.device == A.device
         assert out.dtype == dtype
         assert out.shape == (1, 1, out_features)
         assert out.isreal().all()
 
-        torch.library.opcheck(torch.ops.bitsandbytes.gemv_4bit, (A, B_q, B.shape, absmax, code, blocksize))
+        torch.library.opcheck(torch.ops.bitsandbytes.gemv_4bit.default, (A, B_q, B.shape, absmax, code, blocksize))
