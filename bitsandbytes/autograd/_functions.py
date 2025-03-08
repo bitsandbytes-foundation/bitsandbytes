@@ -49,6 +49,10 @@ class GlobalOutlierPooler:
         return torch.Tensor(list(self.outliers)).to(torch.int64)
 
 
+@deprecated(
+    "This function is deprecated and will be removed in a future release. Consider using `int8_vectorwise_dequant` instead.",
+    category=FutureWarning,
+)
 def get_inverse_transform_indices(
     transform_tile: Callable[[torch.Tensor], torch.Tensor],
     tile_size: Tuple[int, int],
@@ -80,6 +84,10 @@ def get_inverse_transform_indices(
     return permuted_tile_indices
 
 
+@deprecated(
+    "This function is deprecated and will be removed in a future release. Consider using `int8_vectorwise_dequant` instead.",
+    category=FutureWarning,
+)
 def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -> torch.Tensor:
     """
     Undo a tiled permutation such as turing or ampere layout
@@ -225,25 +233,9 @@ def supports_igemmlt(device: torch.device) -> bool:
     return True
 
 
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def _get_tile_size(format):
-    assert format in (
-        "col_turing",
-        "col_ampere",
-    ), f"please find this assert and manually enter tile size for {format}"
-    return (8, 32) if format == "col_turing" else (32, 32)
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def get_tile_inds(format, device):
-    transform = lambda x: F.transform(x.to(device), from_order="row", to_order=format)[0].to(x.device)
-    with torch.no_grad():
-        return get_inverse_transform_indices(transform, _get_tile_size(format)).to(device)
-
-
 @dataclass
 class MatmulLtState:
-    _tile_indices: Optional[torch.Tensor] = None
+    _tile_indices: Optional[torch.Tensor] = None  # TODO: remove
 
     force_no_igemmlt: bool = False
 
@@ -279,9 +271,7 @@ class MatmulLtState:
 
     @property
     def tile_indices(self):
-        if self._tile_indices is None:
-            self._tile_indices = get_tile_inds(self.formatB, self.CxB.device)
-        return self._tile_indices
+        raise ValueError("tile_indices is no longer supported.")
 
 
 class MatMul8bitLt(torch.autograd.Function):
