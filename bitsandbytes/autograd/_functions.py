@@ -50,7 +50,7 @@ class GlobalOutlierPooler:
 
 
 @deprecated(
-    "This function is deprecated and will be removed in a future release. Consider using `int8_vectorwise_dequant` instead.",
+    "This function is deprecated and will be removed in a future release.",
     category=FutureWarning,
 )
 def get_inverse_transform_indices(
@@ -85,7 +85,7 @@ def get_inverse_transform_indices(
 
 
 @deprecated(
-    "This function is deprecated and will be removed in a future release. Consider using `int8_vectorwise_dequant` instead.",
+    "This function is deprecated and will be removed in a future release.",
     category=FutureWarning,
 )
 def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -> torch.Tensor:

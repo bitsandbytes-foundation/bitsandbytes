@@ -2463,7 +2463,7 @@ def vectorwise_quant(x, dim=1, quant_type="vector"):
 
 
 @deprecated(
-    "This function is deprecated and will be removed in a future release. Consider using `int8_vectorwise_dequant` instead.",
+    "This function is deprecated and will be removed in a future release.",
     category=FutureWarning,
 )
 def vectorwise_dequant(xq, max1, quant_type="vector"):
@@ -2475,7 +2475,7 @@ def vectorwise_dequant(xq, max1, quant_type="vector"):
 
 
 @deprecated(
-    "This function is deprecated and will be removed in a future release. Consider using `int8_mm_dequant` instead.",
+    "This function is deprecated and will be removed in a future release.",
     category=FutureWarning,
 )
 def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type="vector"):
