@@ -348,7 +348,7 @@ def _(
 
 
 @register_kernel("bitsandbytes::dequantize_4bit.out", "cuda")
-def _dequantize_4bit_impl(
+def _(
     A: torch.Tensor,
     absmax: torch.Tensor,
     blocksize: int,
@@ -358,7 +358,6 @@ def _dequantize_4bit_impl(
     out: torch.Tensor,
 ) -> None:
     torch._check(out.shape == shape, lambda: f"Expected out.shape == {shape}, got {out.shape}")
-    torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
     _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
 
@@ -430,7 +429,6 @@ def _(
         out.shape == (*A.shape[:-1], shapeB[0]),
         lambda: f"Expected out.shape == {(*A.shape[:-1], shapeB[0])}, got {out.shape}",
     )
-    torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
     torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
     _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
 

@@ -17,12 +17,12 @@ else:
 
 # Higher level op: int8 matmul + dequant + bias
 torch.library.define(
-    "bitsandbytes::int8_linear_dequant",
+    "bitsandbytes::int8_scaled_mm",
     "(Tensor A, Tensor B, Tensor row_stats, Tensor col_stats, Tensor? bias=None, ScalarType dtype=float16) -> Tensor",
 )
 
 
-@register_fake("bitsandbytes::int8_linear_dequant")
+@register_fake("bitsandbytes::int8_scaled_mm")
 def _(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -35,7 +35,7 @@ def _(
     return torch.empty(shapeC, device=A.device, dtype=dtype)
 
 
-@register_kernel("bitsandbytes::int8_linear_dequant", None)
+@register_kernel("bitsandbytes::int8_scaled_mm", None)
 def _(
     A: torch.Tensor,
     B: torch.Tensor,
