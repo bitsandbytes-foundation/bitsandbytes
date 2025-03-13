@@ -137,8 +137,7 @@ class CPUBackend(Backend):
         if blocksize is None:
             blocksize = 64
         assert_on_cpu([A, absmax, out])
-        assert quant_storage == torch.uint8, "CPU backend only supports uint8 quant_storage"
-        return quantize_4bit_impl(A, absmax, out, blocksize, compress_statistics, quant_type)
+        return quantize_4bit_impl(A, absmax, out, blocksize, compress_statistics, quant_type, quant_storage)
 
     def dequantize_4bit(
         self,
