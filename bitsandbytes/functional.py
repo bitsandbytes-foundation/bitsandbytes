@@ -873,7 +873,7 @@ def dequantize_blockwise(
         )
         return out
 
-    return torch.ops.bitsandbytes.dequantize_blockwise(
+    return torch.ops.bitsandbytes.dequantize_blockwise.default(
         A,
         absmax,
         quant_state.code.to(A.device),
@@ -2238,7 +2238,7 @@ def int8_vectorwise_dequant(A: torch.Tensor, stats: torch.Tensor):
         `torch.Tensor` with dtype `torch.float32`: The dequantized tensor.
     """
     # To dequantize we divide by 127, or multiply by the reciprocal.
-    return torch.ops.bitsandbytes.int8_vectorwise_dequant(A, stats)
+    return torch.ops.bitsandbytes.int8_vectorwise_dequant.default(A, stats)
 
 
 def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):

@@ -170,10 +170,11 @@ def _(
     A: torch.Tensor,
     threshold=0.0,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-    # TODO: Optimize/write CUDA kernel for this?
-
     # Use CUDA kernel for rowwise and COO tensor
-    quant_row, row_stats, outlier_cols = torch.ops.bitsandbytes.int8_vectorwise_quant(A, threshold=threshold)
+    quant_row, row_stats, outlier_cols = torch.ops.bitsandbytes.int8_vectorwise_quant.default(
+        A,
+        threshold=threshold,
+    )
 
     # PyTorch impl for colwise
     col_stats, outlier_mask = _get_col_absmax(A, threshold=threshold)

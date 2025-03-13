@@ -228,7 +228,7 @@ class MatMul8bitLt(torch.autograd.Function):
             subA = None
 
         # 3. Int8 Matmul + Dequant + Bias
-        output = torch.ops.bitsandbytes.int8_scaled_mm(CA, state.CB, SCA, state.SCB, bias=bias, dtype=A.dtype)
+        output = torch.ops.bitsandbytes.int8_scaled_mm.default(CA, state.CB, SCA, state.SCB, bias=bias, dtype=A.dtype)
 
         # 4. Mixed-precision decomposition matmul
         if subA is not None and state.subB is not None:
@@ -278,7 +278,7 @@ class MatMul8bitLt(torch.autograd.Function):
         if req_gradB:
             Cgrad, _, _, SCgradt, _ = F.int8_double_quant(grad_output.to(torch.float16))
 
-            grad_B = torch.ops.bitsandbytes.int8_scaled_mm(
+            grad_B = torch.ops.bitsandbytes.int8_scaled_mm.default(
                 Cgrad.t().contiguous(),
                 CAt.t(),
                 SCgradt,
