@@ -428,8 +428,7 @@ def dequantize_4bit_impl(
     quant_type="nf4",
 ) -> Tensor:
     """
-    Dequantizes FP4 blockwise quantized values.
-
+    Dequantizes 4-bit blockwise quantized values.
     Dequantizes the tensor A with maximum absolute values absmax in blocks of size blocksize.
 
     Parameters
@@ -445,8 +444,7 @@ def dequantize_4bit_impl(
     blocksize : int
         The blocksize used in quantization.
     quant_type : str
-        The 4-bit quantization data type {fp4, nf4}, only nf4 is supported now
-
+        The 4-bit quantization data type {fp4, nf4}
 
     Returns
     -------
