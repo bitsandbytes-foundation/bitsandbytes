@@ -694,7 +694,7 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None:
+        if device in ("cuda", "xpu", "cpu"):
             if device.type == "cuda" and self.data.device.type == "cpu":
                 return self.cuda(device)
             elif device.type == "cpu":
