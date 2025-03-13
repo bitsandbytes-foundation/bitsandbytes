@@ -1541,21 +1541,12 @@ def optimizer_update_8bit_blockwise(
 
     is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
 
-    print(
-        f"{p.device} {g.device} {state1.device} {state2.device} {qmap1.device} {qmap2.device} {absmax1.device} {absmax2.device} \n\n"
-        f"{p.dtype} {g.dtype} {state1.dtype} {state2.dtype} {qmap1.dtype} {qmap2.dtype} {absmax1.dtype} {absmax2.dtype} \n\n"
-        f"{p.__class__} {g.__class__} {state1.__class__} {state2.__class__} {qmap1.__class__} {qmap2.__class__} {absmax1.__class__} {absmax2.__class__} \n\n"
-        f"{p.data_ptr()} {g.data_ptr()} {state1.data_ptr()} {state2.data_ptr()} {qmap1.data_ptr()} {qmap2.data_ptr()} {absmax1.data_ptr()} {absmax2.data_ptr()} \n\n"
-    )
-
-    print(p, g, state1, state2)
-
     with _cuda_device_of(g):
         optim_func(
-            get_ptr(p.to_local()),
-            get_ptr(g.to_local()),
-            get_ptr(state1.to_local()),
-            get_ptr(state2.to_local()),
+            get_ptr(p),
+            get_ptr(g),
+            get_ptr(state1),
+            get_ptr(state2),
             ct.c_float(beta1),
             ct.c_float(beta2),
             ct.c_float(beta3),
@@ -1570,7 +1561,7 @@ def optimizer_update_8bit_blockwise(
             ct.c_float(weight_decay),
             ct.c_float(gnorm_scale),
             ct.c_bool(skip_zeros),
-            ct.c_int32(g.to_local().numel()),
+            ct.c_int32(g.numel()),
         )
 
 

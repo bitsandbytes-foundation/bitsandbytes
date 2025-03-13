@@ -7,11 +7,8 @@
 from . import _ops, research, utils
 from .autograd._functions import (
     MatmulLtState,
-    bmm_cublas,
     matmul,
     matmul_4bit,
-    matmul_cublas,
-    mm_cublas,
 )
 from .backends.cpu import ops as cpu_ops
 from .backends.cuda import ops as cuda_ops  ## TODO: We would guard this for CUDA only

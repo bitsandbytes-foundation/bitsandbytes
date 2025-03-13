@@ -742,20 +742,6 @@ def test_integrated_sparse_decomp(dim1, dim2):
         assert err2 < err1
 
 
-def test_matmuls():
-    a = torch.randn(256, 512).half().cuda()
-    b = torch.randn(256, 512).half().cuda()
-    c1 = torch.matmul(a, b.t())
-    c2 = bnb.matmul(a, b)
-    c3 = bnb.matmul_cublas(a, b.t())
-
-    err1 = torch.abs(c1 - c2).mean().item()
-    err2 = torch.abs(c1 - c3).mean().item()
-    assert err1 < 0.2
-    assert err2 < 0.2
-    print(err1, err2)
-
-
 @pytest.mark.parametrize("dim1", [1 * 2048], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [12288], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dtype", [torch.float16], ids=describe_dtype)
