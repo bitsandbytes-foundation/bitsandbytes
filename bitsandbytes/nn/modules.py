@@ -498,6 +498,7 @@ class Linear4bit(nn.Linear):
         if (
             (x.device.type in ("cpu", "xpu"))
             and not getattr(self.weight.quant_state, "ipex", False)
+            and self.weight.data.dtype == torch.uint8
             and self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0
             and self.weight.quant_state.quant_type == "nf4"
             and not self.training
