@@ -405,8 +405,8 @@ def quantize_4bit_impl(
         )
 
     if quant_storage != torch.uint8:
-        bytes_value = out.numpy().tobytes()
-        out = torch.frombuffer(bytes_value, dtype=quant_storage)
+        bytes_value = out.cpu().numpy().tobytes()
+        out = torch.frombuffer(bytes_value, dtype=quant_storage).to(A.device)
 
     return out.reshape(-1, 1), state
 
@@ -463,9 +463,10 @@ def dequantize_4bit_impl(
     """
     transpose = True if A.shape[0] == 1 else False
     A = A.reshape(-1)
+    device = A.device
     if A.dtype != torch.uint8:
-        bytes_value = A.numpy().tobytes()
-        A = torch.frombuffer(bytes_value, dtype=torch.uint8)
+        bytes_value = A.cpu().numpy().tobytes()
+        A = torch.frombuffer(bytes_value, dtype=torch.uint8).to(device)
 
     if quant_state is None:
         assert absmax is not None and out is not None
