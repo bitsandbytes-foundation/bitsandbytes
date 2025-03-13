@@ -106,18 +106,6 @@ def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -
     return outputs.reshape(rows, cols).contiguous()
 
 
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def supports_igemmlt(device: torch.device) -> bool:
-    """check if this device supports the optimized int8 kernel"""
-    if torch.cuda.get_device_capability(device=device) < (7, 5):
-        return False
-    device_name = torch.cuda.get_device_name(device=device)
-    nvidia16_models = ("GTX 1630", "GTX 1650", "GTX 1660")  # https://en.wikipedia.org/wiki/GeForce_16_series
-    if any(model_name in device_name for model_name in nvidia16_models):
-        return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
-    return True
-
-
 @dataclass
 class MatmulLtState:
     _tile_indices: Optional[torch.Tensor] = None  # TODO: remove
