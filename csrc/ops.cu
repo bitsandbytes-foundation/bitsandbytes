@@ -557,32 +557,6 @@ template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, 
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-
-template <int FORMAT> void extractOutliers(char * A, int *idx, char *out, int idx_size, int rows, int cols)
-{
-  int threads = 256;
-  // we load 128 column values per warp
-  int tiledCols = tiledCols = fill_up_to_nearest_multiple(cols, 32);
-  int tiledRows = 0;
-
-	int num_blocks = idx_size;
-
-  if(FORMAT == COL_TURING)
-  {
-      tiledRows = fill_up_to_nearest_multiple(rows, 8);
-  }
-  else if(FORMAT == COL_AMPERE)
-  {
-      tiledRows = fill_up_to_nearest_multiple(rows, 32);
-	}
-
-  kExtractOutliers<FORMAT><<<num_blocks, threads>>>(A, idx, out, idx_size, rows, cols, tiledRows, tiledCols);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-
-
-
 template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
 {
 
@@ -636,8 +610,6 @@ template void gemm_4bit_inference_naive<float, 32>(int m, int n, int k, float * 
 
 //template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc, int bits);
 template void gemm_host<half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc, int bits);
-template void extractOutliers<COL_TURING>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
-template void extractOutliers<COL_AMPERE>(char * A, int *idx, char *out, int idx_size, int rows, int cols);
 
 template void spmm_coo_very_sparse_naive<half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
