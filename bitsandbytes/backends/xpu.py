@@ -205,6 +205,9 @@ class XPUBackend(Backend):
         blocksize: int = 4096,
         nested=False,
     ) -> torch.Tensor:
+        if ipex_xpu is None:
+            raise RuntimeError("Please install intel_extension_for_ipex for 8bit optimizer backend on XPU device.")
+
         # void cdequantize_blockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n, cudaStream_t stream)
         if out.dtype == torch.float16:
             ipex.xpu.bitsandbytes.cdequantize_blockwise_fp16(code, A, absmax, out, blocksize, A.numel())
