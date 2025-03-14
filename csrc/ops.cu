@@ -374,48 +374,6 @@ template<int ORDER> int get_leading_dim(int dim1, int dim2)
   }
 }
 
-template <typename T, int SRC, int TARGET, bool transpose, int DTYPE> void transform(cublasLtHandle_t ltHandle, T *A, T *out, int dim1, int dim2)
-{
-  cublasLtOrder_t orderA = get_order<SRC>();
-  cublasLtOrder_t orderOut = get_order<TARGET>();
-  int ldA = get_leading_dim<SRC>(dim1, dim2);
-  int ldOut = get_leading_dim<TARGET>(dim1, dim2);
-
-  cublasLtMatrixLayout_t A_desc = NULL, out_desc = NULL;
-  cublasLtMatrixTransformDesc_t A2Out_desc = NULL;
-  cublasOperation_t opTranspose = CUBLAS_OP_T;
-  float transformAlpha = 1.0f, transformBeta = 0.0f;
-
-
-  if(DTYPE == 8)
-  {
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&A_desc, CUDA_R_8I, dim1, dim2, ldA));
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&out_desc, CUDA_R_8I, dim1, dim2, ldOut));
-  }
-  else if(DTYPE == 32)
-  {
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&A_desc, CUDA_R_32I, dim1, dim2, ldA));
-    checkCublasStatus(cublasLtMatrixLayoutCreate(&out_desc, CUDA_R_32I, dim1, dim2, ldOut));
-  }
-  else
-  {
-    printf("ERROR WRONG TYPE FOR TRANSFORM: %i\n", DTYPE);
-  }
-
-  checkCublasStatus(cublasLtMatrixLayoutSetAttribute(A_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
-  checkCublasStatus(cublasLtMatrixLayoutSetAttribute(out_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderOut, sizeof(orderOut)));
-
-  checkCublasStatus(cublasLtMatrixTransformDescCreate(&A2Out_desc, CUDA_R_32F));
-
-  if(transpose){ checkCublasStatus(cublasLtMatrixTransformDescSetAttribute(A2Out_desc, CUBLASLT_MATRIX_TRANSFORM_DESC_TRANSA, &opTranspose, sizeof(opTranspose))); }
-
-  checkCublasStatus(cublasLtMatrixTransform(ltHandle, A2Out_desc, &transformAlpha, A, A_desc, &transformBeta, NULL, NULL, out, out_desc, 0));
-
-  if (A_desc) checkCublasStatus(cublasLtMatrixLayoutDestroy(A_desc));
-  if (out_desc) checkCublasStatus(cublasLtMatrixLayoutDestroy(out_desc));
-  if (A2Out_desc) checkCublasStatus(cublasLtMatrixTransformDescDestroy(A2Out_desc));
-}
-
 template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
   cublasLtHandle_t ltHandle,
   int m, int n, int k,
@@ -539,50 +497,6 @@ void getRowStats(half *A, float *rowStats, float threshold, int rows, int cols, 
     kgetRowStats<half, 1024, 0><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
   else
     kgetRowStats<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-template <int FORMAT, int TRANSPOSE> void transformRowToFormat(char * A, char *out, int rows, int cols)
-{
-  int threads = 256;
-  int items_per_thread = 8;
-  // we load 128 column values per warp
-  int tile_cols = 32*items_per_thread;
-  int tile_rows = 32;
-  int tiledCols = fill_up_to_nearest_multiple(cols, tile_cols);
-  int tiledRows = fill_up_to_nearest_multiple(rows, tile_rows);
-	int row_tiles = (tiledRows/tile_rows);
-	int col_tiles = (tiledCols/tile_cols);
-	row_tiles = row_tiles > 0 ? row_tiles : 1;
-	col_tiles = col_tiles > 0 ? col_tiles : 1;
-  int num_blocks = row_tiles * col_tiles;
-
-  int outCols = fill_up_to_nearest_multiple(cols, 32);
-  int outRows = fill_up_to_nearest_multiple(rows, 32);
-  if(FORMAT == COL_TURING)
-  {
-    if(TRANSPOSE)
-      outRows = fill_up_to_nearest_multiple(cols, 8);
-    else
-      outRows = fill_up_to_nearest_multiple(rows, 8);
-  }
-  else if(FORMAT == COL_AMPERE)
-  {
-    if(TRANSPOSE)
-      outRows = fill_up_to_nearest_multiple(cols, 32);
-    else
-      outRows = fill_up_to_nearest_multiple(rows, 32);
-  }
-  else
-  {
-    if(TRANSPOSE)
-    {
-      outCols = fill_up_to_nearest_multiple(rows, 32);
-      outRows = cols;
-    }
-  }
-
-  kTransformRowToFormat<256, 8, 32, 32*8, TRANSPOSE, FORMAT><<<num_blocks, threads>>>(A, out, rows, cols, tiledCols, outRows, outCols);
   CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -732,13 +646,6 @@ template int igemmlt<32, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, cons
 template int igemmlt<8, 0>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, cudaStream_t stream);
 template int igemmlt<8, 1>(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, cudaStream_t stream);
 
-template void transformRowToFormat<COL32, 0>(char * A, char *out, int rows, int cols);
-template void transformRowToFormat<COL32, 1>(char * A, char *out, int rows, int cols);
-template void transformRowToFormat<COL_TURING, 0>(char * A, char *out, int rows, int cols);
-template void transformRowToFormat<COL_TURING, 1>(char * A, char *out, int rows, int cols);
-template void transformRowToFormat<COL_AMPERE, 0>(char * A, char *out, int rows, int cols);
-template void transformRowToFormat<COL_AMPERE, 1>(char * A, char *out, int rows, int cols);
-
 template void estimateQuantiles(half *A, float *code, float offset, int n);
 template void estimateQuantiles(float *A, float *code, float offset, int n);
 
@@ -839,15 +746,6 @@ MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);
 
 template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
 template void percentileClipping(half * g, float *gnorm_vec, int step, const int n);
-
-template void transform<int8_t, ROW, COL, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int8_t, ROW, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int8_t, ROW, COL32, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int32_t, ROW, COL32, false, 32>(cublasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
-template void transform<int8_t, ROW, COL_TURING, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int8_t, ROW, COL_AMPERE, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int8_t, COL32, ROW, false, 8>(cublasLtHandle_t ltHandle, int8_t *A, int8_t *out, int dim1, int dim2);
-template void transform<int32_t, COL32, ROW, false, 32>(cublasLtHandle_t ltHandle, int32_t *A, int32_t *out, int dim1, int dim2);
 
 template int get_leading_dim<ROW>(int dim1, int dim2);
 template int get_leading_dim<COL>(int dim1, int dim2);
