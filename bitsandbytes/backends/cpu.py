@@ -35,6 +35,9 @@ class CPUBackend(Backend):
     mm_dequant_compute_dtype = torch.bfloat16
     mm_dequant_output_dtype = torch.bfloat16
 
+    def device_synchronize(self):
+        pass
+
     def int8_double_quant(
         self,
         A: torch.Tensor,
