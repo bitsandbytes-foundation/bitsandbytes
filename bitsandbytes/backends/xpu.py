@@ -15,18 +15,22 @@ from .cpu_xpu_common import (
 )
 try:
     import intel_extension_for_pytorch as ipex
+    ipex_xpu = ipex if ipex._C._has_xpu() else None
 except BaseException:
     ipex_xpu = None
 
 Tensor = torch.Tensor
 
-str2optimizer8bit_blockwise = {
-        "adam": (
-            ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp32,
-            ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp16,
-            ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_bf16,
-        ),
-    }
+
+str2optimizer8bit_blockwise = {}
+if ipex_xpu is not None:
+    str2optimizer8bit_blockwise = {
+            "adam": (
+                ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp32,
+                ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp16,
+                ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_bf16,
+            ),
+        }
 
 
 def assert_on_xpu(tensors):
@@ -246,6 +250,8 @@ class XPUBackend(Backend):
         skip_zeros=False,
     ) -> None:
         optim_func = None
+        if ipex_xpu is None:
+            raise RuntimeError("Please install intel_extension_for_ipex for 8bit optimizer backend on XPU device.")
 
         assert_on_xpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
 
