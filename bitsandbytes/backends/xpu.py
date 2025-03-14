@@ -12,6 +12,7 @@ from .cpu_xpu_common import (
     int8_linear_matmul_impl,
     int8_mm_dequant_impl,
     quantize_4bit_impl,
+    _ipex_xpu_version_prereq
 )
 try:
     import intel_extension_for_pytorch as ipex
@@ -23,7 +24,7 @@ Tensor = torch.Tensor
 
 
 str2optimizer8bit_blockwise = {}
-if ipex_xpu is not None:
+if ipex_xpu is not None and _ipex_xpu_version_prereq(2, 7):
     str2optimizer8bit_blockwise = {
             "adam": (
                 ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp32,
@@ -205,8 +206,8 @@ class XPUBackend(Backend):
         blocksize: int = 4096,
         nested=False,
     ) -> torch.Tensor:
-        if ipex_xpu is None:
-            raise RuntimeError("Please install intel_extension_for_ipex for 8bit optimizer backend on XPU device.")
+        if ipex_xpu is None or not _ipex_xpu_version_prereq(2, 7):
+            raise RuntimeError("Please install intel_extension_for_ipex >= 2.7 for 8bit optimizer backend on XPU device.")
 
         # void cdequantize_blockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n, cudaStream_t stream)
         if out.dtype == torch.float16:
@@ -253,8 +254,8 @@ class XPUBackend(Backend):
         skip_zeros=False,
     ) -> None:
         optim_func = None
-        if ipex_xpu is None:
-            raise RuntimeError("Please install intel_extension_for_ipex for 8bit optimizer backend on XPU device.")
+        if ipex_xpu is None or not _ipex_xpu_version_prereq(2, 7):
+            raise RuntimeError("Please install intel_extension_for_ipex >= 2.7 for 8bit optimizer backend on XPU device.")
 
         assert_on_xpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
 
