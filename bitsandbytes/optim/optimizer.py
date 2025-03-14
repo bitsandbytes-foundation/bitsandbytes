@@ -538,6 +538,7 @@ class Optimizer2State(Optimizer8bit):
                 max_unorm=config["max_unorm"],
                 skip_zeros=config["skip_zeros"],
             )
+
         elif state["state1"].dtype == torch.uint8 and not config["block_wise"]:
             F.optimizer_update_8bit(
                 self.optimizer_name,

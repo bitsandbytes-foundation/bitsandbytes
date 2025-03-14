@@ -13,7 +13,10 @@ from .cpu_xpu_common import (
     int8_mm_dequant_impl,
     quantize_4bit_impl,
 )
-import intel_extension_for_pytorch as ipex
+try:
+    import intel_extension_for_pytorch as ipex
+except BaseException:
+    ipex_xpu = None
 
 Tensor = torch.Tensor
 
@@ -260,7 +263,6 @@ class XPUBackend(Backend):
             raise ValueError(
                 f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
             )
-
         optim_func(
             p,
             g,
