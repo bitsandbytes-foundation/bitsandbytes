@@ -1118,9 +1118,9 @@ def dequantize_4bit(
     """
     ensure_backend_is_available(A.device.type)
     if quant_state is not None:
-        absmax = absmax or quant_state.absmax
-        quant_type = quant_type or quant_state.quant_type
-        blocksize = blocksize or quant_state.blocksize
+        absmax = quant_state.absmax or absmax
+        quant_type = quant_state.quant_type or quant_type
+        blocksize = quant_state.blocksize or blocksize
     if blocksize is None:
         # Some AMD GPUs have warpsize 64
         # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP

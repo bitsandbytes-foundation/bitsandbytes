@@ -496,15 +496,13 @@ class Linear4bit(nn.Linear):
 
     def set_ipex_linear(self, x: torch.Tensor):
         if (
-            (x.device.type in ("cpu", "xpu"))
-            and not getattr(self.weight.quant_state, "ipex", False)
+            not getattr(self.weight.quant_state, "ipex", False)
             and self.weight.data.dtype == torch.uint8
             and self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0
             and self.weight.quant_state.quant_type == "nf4"
-            and not self.training
-            and x.requires_grad == False
         ):
-            enable_ipex_fusion(self, x)
+            if x.device.type == "xpu" or (x.device.type == "cpu" and not self.training and x.requires_grad == False):
+                enable_ipex_fusion(self, x)
 
     def forward(self, x: torch.Tensor):
         # Check if ipex fusion can be used
