@@ -1,4 +1,5 @@
 import dataclasses
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 import torch
@@ -12,22 +13,26 @@ class CUDASpecs:
 
     @property
     def has_imma(self) -> bool:
-        return self.highest_compute_capability >= (7, 5)
+        return torch.version.hip or self.highest_compute_capability >= (7, 5)
 
 
 def get_compute_capabilities() -> List[Tuple[int, int]]:
     return sorted(torch.cuda.get_device_capability(torch.cuda.device(i)) for i in range(torch.cuda.device_count()))
 
 
+@lru_cache(None)
 def get_cuda_version_tuple() -> Tuple[int, int]:
-    # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
-    major, minor = map(int, torch.version.cuda.split("."))
-    return major, minor
+    if torch.version.cuda:
+        return map(int, torch.version.cuda.split(".")[0:2])
+    elif torch.version.hip:
+        return map(int, torch.version.hip.split(".")[0:2])
+
+    return None
 
 
 def get_cuda_version_string() -> str:
     major, minor = get_cuda_version_tuple()
-    return f"{major}{minor}"
+    return f"{major * 10 + minor}"
 
 
 def get_cuda_specs() -> Optional[CUDASpecs]:
