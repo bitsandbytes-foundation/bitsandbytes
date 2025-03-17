@@ -69,10 +69,10 @@ if [[ -n "$CUDA_VERSION" ]]; then
     URL=$URL126
     FOLDER=cuda-12.6
   else
-    echo "argument error: No cuda version passed as input. Choose among versions 110 to 125"
+    echo "argument error: No cuda version passed as input. Choose among versions 110 to 126"
   fi
 else
-    echo "argument error: No cuda version passed as input. Choose among versions 110 to 125"
+    echo "argument error: No cuda version passed as input. Choose among versions 110 to 126"
 fi
 
 FILE=$(basename $URL)
