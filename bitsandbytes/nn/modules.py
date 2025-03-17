@@ -487,7 +487,7 @@ class Linear4bit(nn.Linear):
                 self.weight.data = reverse_4bit_compress_format(self.weight.data.reshape(1, -1))
 
             self.weight.quant_state.ipex = False
-            self.ipex_linear_is_set = True
+            self.ipex_linear_is_set = False
 
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
