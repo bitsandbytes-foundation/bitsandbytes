@@ -8,24 +8,19 @@ from bitsandbytes.functional import get_ptr
 from ..._ops import register_kernel
 from ...cextension import lib
 
+# torch._int_mm for s8@s8->s32 is supported on CPU from torch 2.4+.
+# However, we can overflow if we use this without AVX512_VNNI support.
+# This is fixed in torch 2.6+, so we set this as the minimum to be safe.
+# For more information: https://github.com/pytorch/pytorch/pull/136942
+# TODO(matthewdouglas): aarch64?
+if torch.__version__ >= (2, 6):
 
-@register_kernel("bitsandbytes::int8_linear_matmul", "cpu")
-def _(A: torch.Tensor, B: torch.Tensor):
-    return _int8_linear_matmul_impl(A, B)
-
-
-@register_kernel("bitsandbytes::int8_linear_matmul.out", "cpu")
-def _(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor):
-    torch._check(out.dtype == torch.int32)
-    _int8_linear_matmul_impl(A, B, out)
-
-
-def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: Optional[torch.Tensor] = None):
-    # Naive implementation: perform matmul in fp32
-    result = torch.matmul(A.float(), B.float().t()).to(torch.int32)
-    if out is not None:
-        result = out.copy_(result)
-    return result
+    @register_kernel("bitsandbytes::int8_linear_matmul", "cpu")
+    def _(A: torch.Tensor, B: torch.Tensor):
+        return torch._int_mm(
+            A.reshape(-1, A.shape[-1]),
+            B.t(),
+        ).reshape(*A.shape[:-1], B.shape[0])
 
 
 @register_kernel("bitsandbytes::int8_mm_dequant", "cpu")
@@ -92,3 +87,56 @@ def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int,
     )
 
     return out
+
+
+_NF4_QUANT_TABLE = torch.tensor(
+    [
+        -1.0,
+        -0.6961928009986877,
+        -0.5250730514526367,
+        -0.39491748809814453,
+        -0.28444138169288635,
+        -0.18477343022823334,
+        -0.09105003625154495,
+        0.0,
+        0.07958029955625534,
+        0.16093020141124725,
+        0.24611230194568634,
+        0.33791524171829224,
+        0.44070982933044434,
+        0.5626170039176941,
+        0.7229568362236023,
+        1.0,
+    ],
+    dtype=torch.float32,
+    device="cpu",
+)
+
+
+@register_kernel("bitsandbytes::quantize_4bit", "cpu")
+def _(
+    A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    torch._check_is_size(blocksize)
+    torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
+
+    n = A.numel()
+
+    # TODO: Support when weight matrix is not divisible by blocksize
+    torch._check(n % blocksize == 0, lambda: f"n must be divisible by blocksize, got {n} and {blocksize}")
+
+    # Divide into blocks and normalize
+    blocks = A.reshape(-1, blocksize)
+    absmax = blocks.abs().max(dim=1).values.float()
+    scaled = blocks / absmax.unsqueeze(-1)
+
+    # Quantize with the lookup table
+    quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - _NF4_QUANT_TABLE), dim=-1, keepdim=True).to(torch.uint8)
+
+    # Pack two quantized values per byte
+    packed = quantized[::2] << 4 | quantized[1::2]
+
+    if quant_storage != torch.uint8:
+        packed = packed.squeeze().view(quant_storage).unsqueeze(1)
+
+    return packed, absmax.float()

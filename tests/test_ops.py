@@ -146,8 +146,8 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_quantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
-        if device == "cpu":
-            pytest.skip("CPU implementation is not available")
+        if device == "cpu" and quant_type != "nf4":
+            pytest.skip("CPU implementation is only available for nf4")
 
         A = torch.randn(1024, 1024, dtype=dtype, device=device)
 

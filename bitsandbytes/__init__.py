@@ -12,6 +12,7 @@ from .autograd._functions import (
 )
 from .backends.cpu import ops as cpu_ops
 from .backends.cuda import ops as cuda_ops  ## TODO: We would guard this for CUDA only
+from .backends.default import ops as default_ops
 from .nn import modules
 from .optim import adam
 

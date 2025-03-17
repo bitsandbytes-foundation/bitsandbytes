@@ -35,20 +35,6 @@ def _(
     return torch.empty(shapeC, device=A.device, dtype=dtype)
 
 
-@register_kernel("bitsandbytes::int8_scaled_mm", None)
-def _(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    row_stats: torch.Tensor,
-    col_stats: torch.Tensor,
-    bias: Optional[torch.Tensor] = None,
-    dtype=torch.float16,
-) -> torch.Tensor:
-    out_i32 = torch.ops.bitsandbytes.int8_linear_matmul.default(A, B)
-    out = torch.ops.bitsandbytes.int8_mm_dequant.default(out_i32, row_stats, col_stats, dtype=dtype, bias=bias)
-    return out
-
-
 torch.library.define(
     "bitsandbytes::int8_linear_matmul",
     "(Tensor A, Tensor B) -> Tensor",
