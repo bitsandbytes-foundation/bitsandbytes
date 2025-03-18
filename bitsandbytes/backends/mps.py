@@ -8,6 +8,9 @@ from .base import Backend
 
 
 class MPSBackend(Backend):
+    def device_synchronize(self):
+        torch.mps.synchronize()
+
     def double_quant(
         self,
         A: torch.Tensor,
