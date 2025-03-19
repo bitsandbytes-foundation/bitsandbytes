@@ -11,7 +11,6 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.autograd._functions import get_tile_inds, undo_layout
 from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
@@ -654,8 +653,7 @@ def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_k
         weight_format = INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING[weight_format]
 
     if weight_format != "row":
-        tile_indices = get_tile_inds(weight_format, weight.device)
-        state_dict[f"{prefix}weight"] = undo_layout(weight, tile_indices)
+        raise ValueError(f"Only 'row' weight format is supported, got {weight_format}")
 
 
 class Embedding8bit(nn.Embedding):
