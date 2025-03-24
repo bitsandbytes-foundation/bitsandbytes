@@ -694,7 +694,7 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None and device.type in ("cuda", "xpu", "cpu"):
+        if device is not None:
             if device.type == "cuda" and self.data.device.type == "cpu":
                 return self.cuda(device)
             elif device.type == "cpu":
@@ -705,21 +705,18 @@ class Int8Params(torch.nn.Parameter):
                     return self.cpu()
             elif device.type == "xpu":
                 if self.data.dtype == torch.int8:
-                    self.data = self.data.contiguous().xpu(device)
+                    self.data = self.data.contiguous()
                     self.CB = self.data
-                    return self
-                else:
-                    return self.xpu(device)
-        else:
-            new_param = Int8Params(
-                super().to(device=device, dtype=dtype, non_blocking=non_blocking),
-                requires_grad=self.requires_grad,
-                has_fp16_weights=self.has_fp16_weights,
-            )
-            new_param.CB = self.CB
-            new_param.SCB = self.SCB
 
-            return new_param
+        new_param = Int8Params(
+            super().to(device=device, dtype=dtype, non_blocking=non_blocking),
+            requires_grad=self.requires_grad,
+            has_fp16_weights=self.has_fp16_weights,
+        )
+        new_param.CB = self.CB
+        new_param.SCB = self.SCB
+
+        return new_param
 
 
 def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
