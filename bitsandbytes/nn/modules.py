@@ -700,13 +700,14 @@ class Int8Params(torch.nn.Parameter):
             elif device.type == "cpu":
                 if self.data.dtype == torch.int8:
                     self.CB = self.data
-                    return self
                 else:
                     return self.cpu()
             elif device.type == "xpu":
                 if self.data.dtype == torch.int8:
                     self.data = self.data.contiguous()
                     self.CB = self.data
+                if self.data.device.type == "cpu":
+                    return self.xpu(device)
 
         new_param = Int8Params(
             super().to(device=device, dtype=dtype, non_blocking=non_blocking),
