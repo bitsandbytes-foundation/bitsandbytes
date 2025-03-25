@@ -8,8 +8,6 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
-from bitsandbytes import functional as F
-from bitsandbytes.autograd import get_inverse_transform_indices, undo_layout
 from bitsandbytes.nn.modules import Linear8bitLt
 from tests.helpers import (
     TRUE_FALSE,
@@ -18,28 +16,9 @@ from tests.helpers import (
     torch_save_to_buffer,
 )
 
+
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
-
-
-@pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability() < (7, 5),
-    reason="this test requires a turing-generation or newer GPU, see bitsandbytes docs",
-)
-def test_layout_exact_match():
-    x = (torch.randn(14336 * 3, 14336) * 10).to(torch.int8).cuda()
-    for tile_size, order in ((8, 32), "col_turing"), ((32, 32), "col_ampere"):
-        transform = lambda x: F.transform(x.cuda(), from_order="row", to_order=order)[0].to(x.device)
-        tile_indices = get_inverse_transform_indices(transform, tile_size)
-        cxb = transform(x)
-
-        torch.cuda.synchronize()
-        restored_x = undo_layout(cxb, tile_indices)
-        torch.cuda.synchronize()
-        assert restored_x.is_contiguous()
-        assert torch.all(torch.eq(restored_x, x))
-
-
 def test_linear_no_igemmlt():
     linear = torch.nn.Linear(1024, 3072)
     x = torch.randn(3, 1024, dtype=torch.half)
@@ -139,7 +118,7 @@ def test_linear_serialization(
         if not has_fp16_weights:
             assert os.path.getsize(state_path_8bit) < 0.5 * os.path.getsize(state_path)
 
-        new_state_dict = torch.load(state_path_8bit)
+        new_state_dict = torch.load(state_path_8bit, weights_only=False)
 
     new_linear_custom = Linear8bitLt(
         linear.in_features,

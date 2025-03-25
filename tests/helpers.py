@@ -22,7 +22,7 @@ def torch_save_to_buffer(obj):
 
 def torch_load_from_buffer(buffer):
     buffer.seek(0)
-    obj = torch.load(buffer)
+    obj = torch.load(buffer, weights_only=False)
     buffer.seek(0)
     return obj
 
@@ -36,6 +36,8 @@ def format_with_label(label: str, value: Any) -> str:
         formatted = "T" if value else "F"
     elif isinstance(value, (list, tuple)) and all(isinstance(v, bool) for v in value):
         formatted = "".join("T" if b else "F" for b in value)
+    elif isinstance(value, torch.dtype):
+        formatted = describe_dtype(value)
     else:
         formatted = str(value)
     return f"{label}={formatted}"
