@@ -1067,7 +1067,7 @@ def dequantize_fp4(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
+    blocksize: Optional[int] = None,
 ) -> torch.Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
@@ -1077,7 +1077,7 @@ def dequantize_nf4(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
+    blocksize: Optional[int] = None,
 ) -> torch.Tensor:
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
@@ -1087,8 +1087,8 @@ def dequantize_4bit(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
-    quant_type="fp4",
+    blocksize: Optional[int] = None,
+    quant_type: Optional[str] = "fp4",
 ) -> torch.Tensor:
     """Dequantizes a packed 4-bit quantized tensor.
 
@@ -1106,9 +1106,9 @@ def dequantize_4bit(
             Required if `quant_state` is not provided and ignored otherwise.
         out (`torch.Tensor`, *optional*): A tensor to use to store the result.
         blocksize (`int`, *optional*):
-            The size of the blocks. Defaults to 64.
+            The size of the blocks. Defaults to 64 if not HIP_ENVIRONMENT else 128.
             Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
-        quant_type (`str`, *optional*): The data type to use: `nf4` or `fp4`. Defaults to `fp4`.
+        quant_type (`str`, *optional*): The data type to use: `nf4` or `fp4`. Defaults to "fp4".
 
     Raises:
         ValueError: Raised when the input data type or blocksize is not supported.
@@ -1118,9 +1118,9 @@ def dequantize_4bit(
     """
     ensure_backend_is_available(A.device.type)
     if quant_state is not None:
-        absmax = absmax or quant_state.absmax
-        quant_type = quant_type or quant_state.quant_type
-        blocksize = blocksize or quant_state.blocksize
+        absmax = quant_state.absmax
+        quant_type = quant_state.quant_type
+        blocksize = quant_state.blocksize
     if blocksize is None:
         # Some AMD GPUs have warpsize 64
         # Set default blocksize to 128 (~warpsize 64 in kernel) for HIP

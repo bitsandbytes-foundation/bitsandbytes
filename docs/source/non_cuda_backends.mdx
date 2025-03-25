@@ -27,18 +27,25 @@ Thank you for your support!
 
 ### Intel
 
-The following performance data is collected from Intel 4th Gen Xeon (SPR) platform. The tables show speed-up and memory compared with different data types of [Llama-2-7b-chat-hf](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf).
+The below performance data is collected from the Intel 4th Gen Xeon (SPR) platform. The tables show speed-up and memory compared with different data types of [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct).
+
+You may run `benchmarking/generation_benchmark.py` to reproduce the below model memory and inference results. Please note that you need to bind cores if you are using the CPU to benchmark. For example, run `numactl -C 0-55 -m 0 python generation_benchmark.py --quant_type nf4` on Intel 4th Gen Xeon with single socket.
+
+The finetune results are selected from [peft](https://github.com/huggingface/peft/blob/main/examples/olora_finetuning/olora_finetuning.py).
+
+#### Model memory (CPU)
+| Data Type | BF16 | INT8 | NF4 | FP4 |
+|---|---|---|---|---|
+| Memory (GB) | 15.0 | 8.5 | 5.2 | 5.2 |
 
 #### Inference (CPU)
 
 | Data Type | BF16 | INT8 | NF4 | FP4 |
 |---|---|---|---|---|
-| Speed-Up (vs BF16) | 1.0x | 0.44x | 1.8x | 0.1x |
-| Memory (GB) | 13.1 | 7.6 | 5.0 | 4.6 |
+| Speed-Up (vs BF16) | 1.0x | 0.57x | 2.6x | 0.1x |
 
 #### Fine-Tuning (CPU)
 
 | Data Type | BF16 | INT8 | NF4 | FP4 |
 |---|---|---|---|---|
-| Speed-Up (vs BF16) | 1.0x | 0.38x | 0.1x | 0.1x |
-| Memory (GB) | 40 | 9 | 6.6 | 6.6 |
+| Speed-Up (vs BF16) | 1.0x | 0.91x | 1.0x | 1.0x |

@@ -487,6 +487,7 @@ class Linear4bit(nn.Linear):
                 self.weight.data = reverse_4bit_compress_format(self.weight.data.reshape(1, -1))
 
             self.weight.quant_state.ipex = False
+            self.ipex_linear_is_set = False
 
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
 
@@ -496,14 +497,13 @@ class Linear4bit(nn.Linear):
 
     def set_ipex_linear(self, x: torch.Tensor):
         if (
-            (x.device.type in ("cpu", "xpu"))
-            and not getattr(self.weight.quant_state, "ipex", False)
+            not getattr(self.weight.quant_state, "ipex", False)
+            and self.weight.data.dtype == torch.uint8
             and self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0
             and self.weight.quant_state.quant_type == "nf4"
-            and not self.training
-            and x.requires_grad == False
         ):
-            enable_ipex_fusion(self, x)
+            if x.device.type == "xpu" or (x.device.type == "cpu" and not self.training and x.requires_grad == False):
+                enable_ipex_fusion(self, x)
 
     def forward(self, x: torch.Tensor):
         # Check if ipex fusion can be used
@@ -700,26 +700,24 @@ class Int8Params(torch.nn.Parameter):
             elif device.type == "cpu":
                 if self.data.dtype == torch.int8:
                     self.CB = self.data
-                    return self
                 else:
                     return self.cpu()
             elif device.type == "xpu":
                 if self.data.dtype == torch.int8:
-                    self.data = self.data.contiguous().xpu(device)
+                    self.data = self.data.contiguous()
                     self.CB = self.data
-                    return self
-                else:
+                if self.data.device.type == "cpu":
                     return self.xpu(device)
-        else:
-            new_param = Int8Params(
-                super().to(device=device, dtype=dtype, non_blocking=non_blocking),
-                requires_grad=self.requires_grad,
-                has_fp16_weights=self.has_fp16_weights,
-            )
-            new_param.CB = self.CB
-            new_param.SCB = self.SCB
 
-            return new_param
+        new_param = Int8Params(
+            super().to(device=device, dtype=dtype, non_blocking=non_blocking),
+            requires_grad=self.requires_grad,
+            has_fp16_weights=self.has_fp16_weights,
+        )
+        new_param.CB = self.CB
+        new_param.SCB = self.SCB
+
+        return new_param
 
 
 def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
