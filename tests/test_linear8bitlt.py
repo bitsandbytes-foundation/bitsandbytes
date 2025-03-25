@@ -118,7 +118,7 @@ def test_linear_serialization(
         if not has_fp16_weights:
             assert os.path.getsize(state_path_8bit) < 0.5 * os.path.getsize(state_path)
 
-        new_state_dict = torch.load(state_path_8bit)
+        new_state_dict = torch.load(state_path_8bit, weights_only=False)
 
     new_linear_custom = Linear8bitLt(
         linear.in_features,

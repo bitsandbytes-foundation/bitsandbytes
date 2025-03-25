@@ -22,7 +22,7 @@ def torch_save_to_buffer(obj):
 
 def torch_load_from_buffer(buffer):
     buffer.seek(0)
-    obj = torch.load(buffer)
+    obj = torch.load(buffer, weights_only=False)
     buffer.seek(0)
     return obj
 
