@@ -94,6 +94,14 @@ def get_native_library() -> BNBNativeLibrary:
 ROCM_GPU_ARCH = get_rocm_gpu_arch()
 
 try:
+    import intel_extension_for_pytorch as ipex
+
+    assert ipex._C._has_cpu() or ipex._C._has_xpu()
+    is_ipex_available = True
+except Exception:
+    is_ipex_available = False
+
+try:
     if torch.version.hip:
         hip_major, hip_minor = map(int, torch.version.hip.split(".")[0:2])
         HIP_ENVIRONMENT, BNB_HIP_VERSION = True, hip_major * 100 + hip_minor
@@ -107,16 +115,17 @@ try:
     lib = get_native_library()
 except Exception as e:
     lib = None
-    logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
-    if torch.cuda.is_available():
-        logger.warning(
-            f"""
-{BNB_BACKEND} Setup failed despite {BNB_BACKEND} being available. Please run the following command to get more information:
+    if not is_ipex_available:
+        logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
+        if torch.cuda.is_available():
+            logger.warning(
+                f"""
+    {BNB_BACKEND} Setup failed despite {BNB_BACKEND} being available. Please run the following command to get more information:
 
-python -m bitsandbytes
+    python -m bitsandbytes
 
-Inspect the output of the command and see if you can locate {BNB_BACKEND} libraries. You might need to add them
-to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
-and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
-""",
-        )
+    Inspect the output of the command and see if you can locate {BNB_BACKEND} libraries. You might need to add them
+    to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
+    and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
+    """,
+            )
