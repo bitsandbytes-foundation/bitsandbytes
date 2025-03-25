@@ -893,6 +893,7 @@ class TestSpMMFunctional:
 
     @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [256, 1024], ids=id_formatter("dim2"))
+    @pytest.skip("No longer supported")
     def test_integrated_sparse_decomp(self, dim1, dim2):
         threshold = 3.0
         for _ in range(k):
