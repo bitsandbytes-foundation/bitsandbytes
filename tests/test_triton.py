@@ -11,6 +11,7 @@ from tests.helpers import TRUE_FALSE
     not is_triton_available() or not torch.cuda.is_available() or not torch.cuda.get_device_capability()[0] >= 8,
     reason="This test requires triton and a GPU with compute capability 8.0 or higher.",
 )
+@pytest.mark.skip("No longer supported.")
 @pytest.mark.parametrize("vector_wise_quantization", TRUE_FALSE)
 def test_switchback(vector_wise_quantization):
     for dim in [83]:
