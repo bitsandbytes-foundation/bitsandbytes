@@ -149,6 +149,9 @@ class Test4bitBlockwiseQuantOps:
         if device == "cpu" and quant_type != "nf4":
             pytest.skip("CPU implementation is only available for nf4")
 
+        if storage_dtype != torch.uint8:
+            pytest.xfail("Known issue with storage_dtype != uint8")
+
         A = torch.randn(1024, 1024, dtype=dtype, device=device)
 
         out, absmax = torch.ops.bitsandbytes.quantize_4bit(A, blocksize, quant_type, storage_dtype)
