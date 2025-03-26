@@ -66,7 +66,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         torch.matmul(A, B.t())
     torch.cuda.synchronize()
     print(
-        f"pytorch fp16: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s",
+        f"pytorch fp16: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s",
     )
 
     # torch.cuda.synchronize()
@@ -88,14 +88,16 @@ def test_bench_matmul(batch, seq, model, hidden):
     for i in range(iters):
         bnb.matmul_4bit(A, B_nf4.t(), quant_state=state_nf4)
     torch.cuda.synchronize()
-    print(f"bnb nf4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    print(f"bnb nf4: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s")
 
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
         bnb.matmul_4bit(A, B_nf4_c.t(), quant_state=state_nf4_c)
     torch.cuda.synchronize()
-    print(f"bnb nf4+DQ: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s")
+    print(
+        f"bnb nf4+DQ: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s"
+    )
 
     torch.cuda.synchronize()
     t0 = time.time()
@@ -103,7 +105,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         bnb.matmul(A, B)
     torch.cuda.synchronize()
     print(
-        f"B -> CB (each iteration): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+        f"B -> CB (each iteration): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s"
     )
 
     torch.cuda.synchronize()
@@ -112,7 +114,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         bnb.matmul(A, B, threshold=6.0)
     torch.cuda.synchronize()
     print(
-        f"B -> CB + threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+        f"B -> CB + threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s"
     )
 
     CA, SCA, _ = F.int8_vectorwise_quant(A, threshold=0.0)
@@ -124,7 +126,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         out32 = F.int8_linear_matmul(CA, CB)
     torch.cuda.synchronize()
     print(
-        f"no overhead int8 [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+        f"no overhead int8 [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s"
     )
 
     # C32A, SA = F.transform(CA, "col32")
@@ -183,7 +185,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         linear8bit(A)
     torch.cuda.synchronize()
     print(
-        f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+        f"bnb linear8bitlt (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s"
     )
 
     linearMixedBit(A)
@@ -193,7 +195,7 @@ def test_bench_matmul(batch, seq, model, hidden):
         linearMixedBit(A)
     torch.cuda.synchronize()
     print(
-        f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time()-t0:.4f}s"
+        f"bnb linear8bitlt with threshold (eval): [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s"
     )
 
     # linear8bit_train(A)

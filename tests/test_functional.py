@@ -674,12 +674,12 @@ class TestLLMInt8Functional:
             min_error = 1 / 500
             if num_not_close_cols > (min_error * n):
                 print(
-                    f"Min error exceeded {num_not_close_cols} elements are different. Error: {num_not_close_cols/n:.4f}"
+                    f"Min error exceeded {num_not_close_cols} elements are different. Error: {num_not_close_cols / n:.4f}"
                 )
                 assert False
             if num_not_close_rows > (min_error * n):
                 print(
-                    f"Min error exceeded {num_not_close_rows} elements are different. Error: {num_not_close_rows/n:.4f}"
+                    f"Min error exceeded {num_not_close_rows} elements are different. Error: {num_not_close_rows / n:.4f}"
                 )
                 assert False
 
