@@ -1,27 +1,27 @@
 import dataclasses
 from functools import lru_cache
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 
 
 @dataclasses.dataclass(frozen=True)
 class CUDASpecs:
-    highest_compute_capability: Tuple[int, int]
+    highest_compute_capability: tuple[int, int]
     cuda_version_string: str
-    cuda_version_tuple: Tuple[int, int]
+    cuda_version_tuple: tuple[int, int]
 
     @property
     def has_imma(self) -> bool:
         return torch.version.hip or self.highest_compute_capability >= (7, 5)
 
 
-def get_compute_capabilities() -> List[Tuple[int, int]]:
+def get_compute_capabilities() -> list[tuple[int, int]]:
     return sorted(torch.cuda.get_device_capability(torch.cuda.device(i)) for i in range(torch.cuda.device_count()))
 
 
 @lru_cache(None)
-def get_cuda_version_tuple() -> Tuple[int, int]:
+def get_cuda_version_tuple() -> tuple[int, int]:
     if torch.version.cuda:
         return map(int, torch.version.cuda.split(".")[0:2])
     elif torch.version.hip:

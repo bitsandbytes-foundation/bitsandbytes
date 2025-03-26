@@ -3,7 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import copy
-from typing import Any, Dict, Optional, TypeVar, Union, overload
+from typing import Any, Optional, TypeVar, Union, overload
 import warnings
 
 import torch
@@ -268,7 +268,7 @@ class Params4bit(torch.nn.Parameter):
     def from_prequantized(
         cls,
         data: torch.Tensor,
-        quantized_stats: Dict[str, Any],
+        quantized_stats: dict[str, Any],
         requires_grad: bool = False,
         device="cuda",
         module: Optional["Linear4bit"] = None,

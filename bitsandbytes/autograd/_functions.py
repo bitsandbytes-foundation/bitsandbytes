@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from math import prod
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 import warnings
 from warnings import warn
 
@@ -55,7 +55,7 @@ class GlobalOutlierPooler:
 )
 def get_inverse_transform_indices(
     transform_tile: Callable[[torch.Tensor], torch.Tensor],
-    tile_size: Tuple[int, int],
+    tile_size: tuple[int, int],
 ):
     """
     Compute a permutation of indices that invert the specified (tiled) matrix transformation

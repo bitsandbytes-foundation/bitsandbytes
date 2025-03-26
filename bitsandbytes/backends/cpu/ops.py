@@ -1,5 +1,5 @@
 import ctypes as ct
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
@@ -47,7 +47,7 @@ def _(
 
 
 @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
-def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor, torch.Tensor]:
+def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
     torch._check(A.dtype == torch.float32, lambda: f"A must be float32 on cpu, got {A.dtype}")
 
@@ -116,7 +116,7 @@ _NF4_QUANT_TABLE = torch.tensor(
 @register_kernel("bitsandbytes::quantize_4bit", "cpu")
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
     torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
 
