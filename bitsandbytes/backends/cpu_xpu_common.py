@@ -60,7 +60,7 @@ def _ipex_xpu_version_prereq(major, minor):
 
 def _maybe_torch_compile(func):
     # torch.compile requires g++ and pytorch >= 2.0
-    if gxx_available and _torch_version_prereq(2, 0) and not ipex_xpu:
+    if gxx_available and _torch_version_prereq(2, 0) and ipex_cpu_only:
         options = {}
         # fx_graph_cache requires pytorch >= 2.2
         if _torch_version_prereq(2, 2):

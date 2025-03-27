@@ -12,9 +12,26 @@ from .cpu_xpu_common import (
     int8_linear_matmul_impl,
     int8_mm_dequant_impl,
     quantize_4bit_impl,
+    _ipex_xpu_version_prereq
 )
+try:
+    import intel_extension_for_pytorch as ipex
+    ipex_xpu = ipex if ipex._C._has_xpu() else None
+except BaseException:
+    ipex_xpu = None
 
 Tensor = torch.Tensor
+
+
+str2optimizer8bit_blockwise = {}
+if ipex_xpu is not None and _ipex_xpu_version_prereq(2, 7):
+    str2optimizer8bit_blockwise = {
+            "adam": (
+                ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp32,
+                ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_fp16,
+                ipex.xpu.bitsandbytes.cadam_8bit_blockwise_grad_bf16,
+            ),
+        }
 
 
 def assert_on_xpu(tensors):
@@ -34,6 +51,9 @@ def assert_on_xpu(tensors):
 class XPUBackend(Backend):
     mm_dequant_compute_dtype = torch.bfloat16
     mm_dequant_output_dtype = torch.bfloat16
+
+    def device_synchronize(self):
+        torch.xpu.synchronize()
 
     def int8_double_quant(
         self,
@@ -185,7 +205,19 @@ class XPUBackend(Backend):
         blocksize: int = 4096,
         nested=False,
     ) -> torch.Tensor:
-        raise NotImplementedError
+        if ipex_xpu is None or not _ipex_xpu_version_prereq(2, 7):
+            raise RuntimeError("Please install intel_extension_for_ipex >= 2.7 for 8bit optimizer backend on XPU device.")
+
+        # void cdequantize_blockwise_fp32(float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n, cudaStream_t stream)
+        if out.dtype == torch.float16:
+            ipex.xpu.bitsandbytes.cdequantize_blockwise_fp16(code, A, absmax, out, blocksize, A.numel())
+        elif out.dtype == torch.bfloat16:
+            ipex.xpu.bitsandbytes.cdequantize_blockwise_bf16(code, A, absmax, out, blocksize, A.numel())
+        elif out.dtype == torch.float32:
+            ipex.xpu.bitsandbytes.cdequantize_blockwise_fp32(code, A, absmax, out, blocksize, A.numel())
+        else:
+            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
+        
 
     def quantize_blockwise(
         self,
@@ -220,7 +252,48 @@ class XPUBackend(Backend):
         gnorm_scale: float = 1.0,
         skip_zeros=False,
     ) -> None:
-        raise NotImplementedError
+        optim_func = None
+        if ipex_xpu is None or not _ipex_xpu_version_prereq(2, 7):
+            raise RuntimeError("Please install intel_extension_for_ipex >= 2.7 for 8bit optimizer backend on XPU device.")
+
+        assert_on_xpu([g, p, state1, state2, qmap1, qmap2, absmax1, absmax2])
+
+        if g.dtype == torch.float32 and state1.dtype == torch.uint8:
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
+        elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
+        elif (
+            g.dtype == torch.bfloat16
+            and state1.dtype == torch.uint8
+            and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
+        ):
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
+        else:
+            raise ValueError(
+                f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
+            )
+        optim_func(
+            p,
+            g,
+            state1,
+            state2,
+            beta1,
+            beta2,
+            beta3,
+            alpha,
+            eps,
+            step,
+            lr,
+            qmap1,
+            qmap2,
+            absmax1,
+            absmax2,
+            weight_decay,
+            gnorm_scale,
+            skip_zeros,
+            g.numel()
+        )
+
 
     def optimizer_update_32bit(
         self,
