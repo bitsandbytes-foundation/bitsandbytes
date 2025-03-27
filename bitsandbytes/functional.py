@@ -2,10 +2,11 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+from collections.abc import Iterable
 import ctypes as ct
 import itertools
 from math import prod
-from typing import Any, Dict, Iterable, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import torch
@@ -619,7 +620,7 @@ class QuantState:
         return list_repr[idx]
 
     @classmethod
-    def from_dict(cls, qs_dict: Dict[str, Any], device: torch.device) -> "QuantState":
+    def from_dict(cls, qs_dict: dict[str, Any], device: torch.device) -> "QuantState":
         """
         unpacks components of state_dict into QuantState
         where necessary, convert into strings, torch.dtype, ints, etc.
@@ -741,7 +742,7 @@ def quantize_blockwise(
     out: Optional[torch.Tensor] = None,
     blocksize=4096,
     nested=False,
-) -> Tuple[torch.Tensor, QuantState]:
+) -> tuple[torch.Tensor, QuantState]:
     """Quantize a tensor in blocks of values.
 
     The input tensor is quantized by dividing it into blocks of `blocksize` values.
@@ -994,7 +995,7 @@ def quantize_4bit(
     compress_statistics=False,
     quant_type="fp4",
     quant_storage=torch.uint8,
-) -> Tuple[torch.Tensor, QuantState]:
+) -> tuple[torch.Tensor, QuantState]:
     """Quantize tensor A in blocks of 4-bit values.
 
     Quantizes tensor A by dividing it into blocks which are independently quantized.
@@ -1161,7 +1162,7 @@ def quantize(
     A: Tensor,
     code: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+) -> tuple[Tensor, tuple[Tensor, Tensor]]:
     if code is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
@@ -1179,7 +1180,7 @@ def quantize(
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def dequantize(
     A: Tensor,
-    state: Optional[Tuple[Tensor, Tensor]] = None,
+    state: Optional[tuple[Tensor, Tensor]] = None,
     absmax: Optional[torch.Tensor] = None,
     code: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
@@ -2006,7 +2007,7 @@ def get_colrow_absmax(
     col_stats: Optional[torch.Tensor] = None,
     nnz_block_ptr: Optional[torch.Tensor] = None,
     threshold=0.0,
-) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """ "Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
 
     The row-wise and column-wise absmax values are determined.
@@ -2268,9 +2269,9 @@ def spmm_coo(
     out: Optional[torch.Tensor] = None,
 ):
     if not isinstance(cooA, COOSparseTensor):
-        assert (
-            cooA.is_sparse and cooA.layout == torch.sparse_coo
-        ), "Tensor must be `COOSparseTensor or a PyTorch COO tensor."
+        assert cooA.is_sparse and cooA.layout == torch.sparse_coo, (
+            "Tensor must be `COOSparseTensor or a PyTorch COO tensor."
+        )
 
         # Convert to custom COOSparseTensor
         cooA = COOSparseTensor(

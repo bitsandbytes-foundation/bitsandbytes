@@ -1,7 +1,7 @@
 from io import BytesIO
 from itertools import product
 import random
-from typing import Any, List
+from typing import Any
 
 import torch
 
@@ -27,7 +27,7 @@ def torch_load_from_buffer(buffer):
     return obj
 
 
-def get_test_dims(min: int, max: int, *, n: int) -> List[int]:
+def get_test_dims(min: int, max: int, *, n: int) -> list[int]:
     return [test_dims_rng.randint(min, max) for _ in range(n)]
 
 
