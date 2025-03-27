@@ -1,0 +1,445 @@
+WARNING: BNB_CUDA_VERSION=124 environment variable detected; loading libbitsandbytes_cuda124.so.
+This can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.
+If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=
+If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH
+For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64
+
+
+Map:   0%|          | 0/3 [00:00<?, ? examples/s]
+Map: 100%|██████████| 3/3 [00:00<00:00, 1426.96 examples/s]
+
+Map:   0%|          | 0/3 [00:00<?, ? examples/s]
+Map: 100%|██████████| 3/3 [00:00<00:00, 420.17 examples/s]
+/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/trl/trainer/sft_trainer.py:381: UserWarning: You passed a dataset that is already processed (contains an `input_ids` field) together with a formatting function. Therefore `formatting_func` will be ignored. Either remove the `formatting_func` or pass a dataset that is not already processed.
+  warnings.warn(
+
+Converting train dataset to ChatML:   0%|          | 0/3 [00:00<?, ? examples/s]
+Converting train dataset to ChatML: 100%|██████████| 3/3 [00:00<00:00, 1298.68 examples/s]
+
+Applying chat template to train dataset:   0%|          | 0/3 [00:00<?, ? examples/s]
+Applying chat template to train dataset: 100%|██████████| 3/3 [00:00<00:00, 1305.55 examples/s]
+
+Packing train dataset:   0%|          | 0/3 [00:00<?, ? examples/s]
+Packing train dataset: 100%|██████████| 3/3 [00:00<00:00, 1182.05 examples/s]
+No label_names provided for model class `PeftModelForCausalLM`. Since `PeftModel` hides base models input arguments, if label_names is not given, label_names can't be set automatically within `Trainer`. Note that empty label_names list will be used instead.
+
+  0%|          | 0/5 [00:00<?, ?it/s]V0327 19:01:18.259000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [0/0] [__graph_breaks] Graph break in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/peft_model.py:1754
+V0327 19:01:18.259000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [0/0] [__graph_breaks] Reason: Unsupported: 'inline in skipfiles: PeftModel._enable_peft_forward_hooks | helper /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/contextlib.py, skipped according trace_rules.lookup SKIP_DIRS'
+V0327 19:01:18.259000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [0/0] [__graph_breaks] User code traceback:
+V0327 19:01:18.259000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [0/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/peft_model.py", line 1754, in forward
+V0327 19:01:18.259000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [0/0] [__graph_breaks]     with self._enable_peft_forward_hooks(**kwargs):
+V0327 19:01:18.259000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [0/0] [__graph_breaks]
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks] Graph break: skip: from user code at:
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/peft_model.py", line 1754, in torch_dynamo_resume_in_forward_at_1754
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     with self._enable_peft_forward_hooks(**kwargs):
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks] Traceback (most recent call last):
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 1164, in __call__
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     result = self._inner_convert(
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]              ^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 547, in __call__
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     return _compile(
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]            ^^^^^^^^^
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 986, in _compile
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     guarded_code = compile_inner(code, one_graph, hooks, transform)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 715, in compile_inner
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     return _compile_inner(code, one_graph, hooks, transform)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_utils_internal.py", line 95, in wrapper_function
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     return function(*args, **kwargs)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 750, in _compile_inner
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     out_code = transform_code_object(code, transform)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/bytecode_transformation.py", line 1361, in transform_code_object
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     transformations(instructions, code_options)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 231, in _fn
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     return fn(*args, **kwargs)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 662, in transform
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     tracer.run()
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 2868, in run
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     super().run()
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 1052, in run
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     while self.step():
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]           ^^^^^^^^^^^
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 962, in step
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 2361, in BEFORE_WITH
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     self.setup_or_before_with(inst)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 2368, in setup_or_before_with
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     unimplemented(f"{inst.opname} {ctx}")
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/exc.py", line 317, in unimplemented
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     raise Unsupported(msg, case_name=case_name)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks] torch._dynamo.exc.Unsupported: BEFORE_WITH UserDefinedObjectVariable(_GeneratorContextManager)
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks] from user code:
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]    File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/peft_model.py", line 1754, in torch_dynamo_resume_in_forward_at_1754
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     with self._enable_peft_forward_hooks(**kwargs):
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks] Set TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks] You can suppress this exception and fall back to eager by setting:
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     import torch._dynamo
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]     torch._dynamo.config.suppress_errors = True
+V0327 19:01:18.321000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [1/0] [__graph_breaks]
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks] Graph break: skip: from user code at:
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/peft_model.py", line 1755, in <dictcomp>
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks] Traceback (most recent call last):
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 1164, in __call__
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     result = self._inner_convert(
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]              ^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 547, in __call__
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     return _compile(
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]            ^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 986, in _compile
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     guarded_code = compile_inner(code, one_graph, hooks, transform)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 715, in compile_inner
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     return _compile_inner(code, one_graph, hooks, transform)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_utils_internal.py", line 95, in wrapper_function
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     return function(*args, **kwargs)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 750, in _compile_inner
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     out_code = transform_code_object(code, transform)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/bytecode_transformation.py", line 1361, in transform_code_object
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     transformations(instructions, code_options)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 231, in _fn
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     return fn(*args, **kwargs)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 662, in transform
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     tracer.run()
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 2868, in run
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     super().run()
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 1052, in run
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     while self.step():
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]           ^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 962, in step
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 1401, in FOR_ITER
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     val = it.next_variable(self)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]           ^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/variables/user_defined.py", line 859, in next_variable
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     return self.call_method(tx, "__next__", [], {})
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/variables/user_defined.py", line 823, in call_method
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     return super().call_method(tx, name, args, kwargs)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/variables/base.py", line 414, in call_method
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     unimplemented(f"call_method {self} {name} {args} {kwargs}")
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/exc.py", line 317, in unimplemented
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     raise Unsupported(msg, case_name=case_name)
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks] torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(dict_itemiterator) __next__ [] {}
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks] from user code:
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]    File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/peft_model.py", line 1755, in <dictcomp>
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks] Set TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks] You can suppress this exception and fall back to eager by setting:
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     import torch._dynamo
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]     torch._dynamo.config.suppress_errors = True
+V0327 19:01:18.330000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [2/0] [__graph_breaks]
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0] Graph break from `Tensor.item()`, consider setting:
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]     torch._dynamo.config.capture_scalar_outputs = True
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0] or:
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]     env TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0] to include these operations in the captured graph.
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0] Graph break: from user code at:
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/tuners/tuners_utils.py", line 193, in forward
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]     return self.model.forward(*args, **kwargs)
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/utils/deprecation.py", line 172, in wrapped_func
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]     return func(*args, **kwargs)
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 855, in forward
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]     outputs = self.model(
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 549, in forward
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]     causal_mask = self._update_causal_mask(
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 620, in _update_causal_mask
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]     is_padding_right = attention_mask[:, -1].sum().item() != input_tensor.size()[0]
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]
+W0327 19:01:18.598000 565954 site-packages/torch/_dynamo/variables/tensor.py:869] [3/0]
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks] Graph break in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks] User code traceback:
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/tuners/tuners_utils.py", line 193, in forward
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]     return self.model.forward(*args, **kwargs)
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/utils/deprecation.py", line 172, in wrapped_func
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]     return func(*args, **kwargs)
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 855, in forward
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]     outputs = self.model(
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 549, in forward
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]     causal_mask = self._update_causal_mask(
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 620, in _update_causal_mask
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]     is_padding_right = attention_mask[:, -1].sum().item() != input_tensor.size()[0]
+V0327 19:01:18.601000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [3/0] [__graph_breaks]
+V0327 19:01:18.654000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [4/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:18.654000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [4/0] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:18.698000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [5/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:18.698000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [5/0] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:18.741000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [6/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:18.741000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [6/0] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:19.492000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [7/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:19.492000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [7/0] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks] Graph break: skip: from user code at:
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 627, in torch_dynamo_resume_in__update_causal_mask_at_620
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     if attention_mask is not None and 0.0 in attention_mask:
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks] Traceback (most recent call last):
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 1164, in __call__
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     result = self._inner_convert(
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]              ^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 547, in __call__
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     return _compile(
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]            ^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 986, in _compile
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     guarded_code = compile_inner(code, one_graph, hooks, transform)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 715, in compile_inner
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     return _compile_inner(code, one_graph, hooks, transform)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_utils_internal.py", line 95, in wrapper_function
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     return function(*args, **kwargs)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 750, in _compile_inner
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     out_code = transform_code_object(code, transform)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/bytecode_transformation.py", line 1361, in transform_code_object
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     transformations(instructions, code_options)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 231, in _fn
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     return fn(*args, **kwargs)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/convert_frame.py", line 662, in transform
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     tracer.run()
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 2868, in run
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     super().run()
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 1052, in run
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     while self.step():
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]           ^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 962, in step
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/symbolic_convert.py", line 2164, in CONTAINS_OP
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     self.push(right.call_method(self, "__contains__", [left], {}))
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/variables/tensor.py", line 583, in call_method
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     result = handler_method(*args, **kwargs)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/variables/tensor.py", line 983, in method___contains__
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     return result.call_method(tx, "item", [], {})
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/variables/tensor.py", line 583, in call_method
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     result = handler_method(*args, **kwargs)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/variables/tensor.py", line 838, in method_item
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     unimplemented("Tensor.item")
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/_dynamo/exc.py", line 317, in unimplemented
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     raise Unsupported(msg, case_name=case_name)
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks] torch._dynamo.exc.Unsupported: Tensor.item
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks] from user code:
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]    File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 627, in torch_dynamo_resume_in__update_causal_mask_at_620
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     if attention_mask is not None and 0.0 in attention_mask:
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks] Set TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks] You can suppress this exception and fall back to eager by setting:
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     import torch._dynamo
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]     torch._dynamo.config.suppress_errors = True
+V0327 19:01:19.569000 565954 site-packages/torch/_dynamo/convert_frame.py:1214] [8/0] [__graph_breaks]
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks] Graph break in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks] User code traceback:
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 579, in torch_dynamo_resume_in_forward_at_549
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]     layer_outputs = decoder_layer(
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 260, in forward
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]     hidden_states, self_attn_weights = self.self_attn(
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 162, in forward
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]     query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/peft/tuners/lora/bnb.py", line 494, in forward
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]     result = self.base_layer(x, *args, **kwargs)
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]   File "/home/ubuntu/src/bnb/bitsandbytes/nn/modules.py", line 483, in forward
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]     return bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]
+V0327 19:01:19.984000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:19.984000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:20.125000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:20.125000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:20.169000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:20.169000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:20.252000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:20.252000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:21.002000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:21.002000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:21.106000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:21.106000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks] Graph break in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks] User code traceback:
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 192, in torch_dynamo_resume_in_forward_at_164
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]     attn_output, attn_weights = attention_interface(
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/integrations/flash_attention.py", line 50, in flash_attention_forward
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]     attn_output = _flash_attention_forward(
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py", line 297, in _flash_attention_forward
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]     query_states, key_states, value_states = fa_peft_integration_check(
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py", line 213, in fa_peft_integration_check
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]     logger.warning_once(
+V0327 19:01:21.234000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [19/0] [__graph_breaks]
+V0327 19:01:21.495000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [20/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:21.495000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [20/0] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:21.575000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [21/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:21.575000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [21/0] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:21.616000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [22/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:21.616000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [22/0] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+The input hidden states seems to be silently casted in float32, this might be related to the fact you have upcasted embedding or layer norm layers in float32. We will cast back the input in torch.bfloat16.
+V0327 19:01:21.762000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [24/0] [__graph_breaks] Graph break in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:329
+V0327 19:01:21.762000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [24/0] [__graph_breaks] Reason: Data-dependent jump
+V0327 19:01:21.762000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [24/0] [__graph_breaks] User code traceback:
+V0327 19:01:21.762000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [24/0] [__graph_breaks]   File "/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py", line 329, in torch_dynamo_resume_in__flash_attention_forward_at_297
+V0327 19:01:21.762000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [24/0] [__graph_breaks]     max_length_q is not None or (query_length != 1 and not (torch.diff(position_ids, dim=-1) >= 0).all())
+V0327 19:01:21.762000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [24/0] [__graph_breaks]
+V0327 19:01:22.058000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [27/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.058000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [27/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:22.133000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.133000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:22.528000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.528000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:22.703000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [30/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.703000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [30/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:22.752000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.752000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/2] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:23.107000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [31/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.107000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [31/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:23.237000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [32/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.237000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [32/0] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:23.359000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.359000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/3] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:23.786000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.786000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:23.951000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.951000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:23.990000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.990000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:24.036000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/4] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:24.036000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/4] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:24.558000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:24.558000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:24.649000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:24.649000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:24.756000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:24.756000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/1] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:24.994000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [20/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:24.994000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [20/1] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:25.064000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [21/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:25.064000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [21/1] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:25.217000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [24/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:329
+V0327 19:01:25.217000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [24/1] [__graph_breaks] Reason: Data-dependent jump
+V0327 19:01:25.457000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:25.457000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:25.665000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:25.665000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/2] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:25.946000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:25.946000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/3] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:26.226000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/4] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:26.226000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/4] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:26.505000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/5] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:26.505000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/5] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:26.786000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/6] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:26.786000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/6] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+V0327 19:01:27.069000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/7] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/modeling_flash_attention_utils.py:213
+V0327 19:01:27.069000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [19/7] [__graph_breaks] Reason: Unsupported: Logger not supported for non-export cases. To avoid graph breaks caused by logger in compile-mode, it is recommended to disable logging by adding logging methods to config.ignore_logger_methods
+W0327 19:01:27.292000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [19/8] torch._dynamo hit config.cache_size_limit (8)
+W0327 19:01:27.292000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [19/8]    function: 'torch_dynamo_resume_in_forward_at_164' (/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:164)
+W0327 19:01:27.292000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [19/8]    last reason: 19/0: L['self'].layer_idx == 0
+W0327 19:01:27.292000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [19/8] To log all recompilation reasons, use TORCH_LOGS="recompiles".
+W0327 19:01:27.292000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [19/8] To diagnose recompilation issues, see https://pytorch.org/docs/main/torch.compiler_troubleshooting.html.
+/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/utils/_config_module.py:342: UserWarning: Skipping serialization of skipfiles_inline_module_allowlist value {}
+  warnings.warn(
+/home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/torch/utils/_config_module.py:342: UserWarning: Skipping serialization of skipfiles_inline_module_allowlist value {}
+  warnings.warn(
+
+ 20%|██        | 1/5 [00:10<00:43, 10.86s/it]
+
+
+ 20%|██        | 1/5 [00:10<00:43, 10.86s/it]V0327 19:01:29.067000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [3/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:29.067000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [3/1] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:29.120000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [4/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:29.120000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [4/1] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:29.165000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [5/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:29.165000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [5/1] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:29.205000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [6/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:29.205000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [6/1] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:29.316000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [7/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/.condax/mamba/envs/bnb/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py:620
+V0327 19:01:29.316000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [7/1] [__graph_breaks] Reason: Unsupported: Tensor.item
+V0327 19:01:29.511000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:29.511000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/2] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:29.605000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:29.605000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/2] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:29.635000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:29.635000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/2] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:29.669000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/5] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:29.669000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/5] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:30.078000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.078000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/2] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:30.179000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.179000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/2] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:30.268000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.268000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/2] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:30.396000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [30/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.396000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [30/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:30.419000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/6] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.419000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/6] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:30.661000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [31/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.661000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [31/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:30.750000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [32/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.750000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [32/1] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:31.075000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.075000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/3] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:31.199000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.199000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/3] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:31.230000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.230000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/3] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:31.264000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/7] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.264000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/7] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+W0327 19:01:31.314000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [15/8] torch._dynamo hit config.cache_size_limit (8)
+W0327 19:01:31.314000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [15/8]    function: 'torch_dynamo_resume_in_forward_at_483' (/home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483)
+W0327 19:01:31.314000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [15/8]    last reason: 15/0: tensor 'L['___stack1']' requires_grad mismatch. expected requires_grad=0
+W0327 19:01:31.314000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [15/8] To log all recompilation reasons, use TORCH_LOGS="recompiles".
+W0327 19:01:31.314000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [15/8] To diagnose recompilation issues, see https://pytorch.org/docs/main/torch.compiler_troubleshooting.html.
+V0327 19:01:31.522000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.522000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/3] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:31.623000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.623000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/3] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+V0327 19:01:31.711000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.711000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/3] [__graph_breaks] Reason: Unsupported: call_method UserDefinedObjectVariable(Params4bit) t [] {}
+
+ 40%|████      | 2/5 [00:14<00:19,  6.62s/it]
+
+
+ 40%|████      | 2/5 [00:14<00:19,  6.62s/it]W0327 19:01:32.668000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [14/8] torch._dynamo hit config.cache_size_limit (8)
+W0327 19:01:32.668000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [14/8]    function: 'forward' (/home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:466)
+W0327 19:01:32.668000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [14/8]    last reason: 14/0: ___check_obj_id(L['self'].compute_type_is_set, 109972630010656)
+W0327 19:01:32.668000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [14/8] To log all recompilation reasons, use TORCH_LOGS="recompiles".
+W0327 19:01:32.668000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [14/8] To diagnose recompilation issues, see https://pytorch.org/docs/main/torch.compiler_troubleshooting.html.
+
+ 60%|██████    | 3/5 [00:14<00:07,  3.70s/it]
+
+
+ 60%|██████    | 3/5 [00:14<00:07,  3.70s/it]
+ 80%|████████  | 4/5 [00:14<00:02,  2.31s/it]
+
+
+ 80%|████████  | 4/5 [00:14<00:02,  2.31s/it]
+100%|██████████| 5/5 [00:15<00:00,  1.55s/it]
+
+
+100%|██████████| 5/5 [00:15<00:00,  1.55s/it]
+
+
+100%|██████████| 5/5 [00:15<00:00,  1.55s/it]
+100%|██████████| 5/5 [00:15<00:00,  3.10s/it]

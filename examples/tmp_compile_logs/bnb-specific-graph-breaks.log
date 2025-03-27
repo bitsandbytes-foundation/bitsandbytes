@@ -1,0 +1,45 @@
+WARNING: BNB_CUDA_VERSION=124 environment variable detected; loading libbitsandbytes_cuda124.so.
+This can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks] Graph break in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:19.771000 565954 site-packages/torch/_dynamo/symbolic_convert.py:435] [9/0] [__graph_breaks]   File "/home/ubuntu/src/bnb/bitsandbytes/nn/modules.py", line 483, in forward
+V0327 19:01:19.984000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:20.125000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:20.169000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:20.252000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:21.002000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:21.106000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.058000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [27/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.133000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.528000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.703000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [30/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:22.752000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.107000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [31/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.237000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [32/0] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.359000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.786000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.951000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:23.990000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:24.036000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/4] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:24.558000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:24.649000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:25.457000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:29.511000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:29.605000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:29.635000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:29.669000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/5] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.078000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.179000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.268000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/2] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.396000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [30/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.419000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/6] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.661000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [31/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:30.750000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [32/1] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.075000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [11/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.199000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [12/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.230000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [13/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.264000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [14/7] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+W0327 19:01:31.314000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [15/8]    function: 'torch_dynamo_resume_in_forward_at_483' (/home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483)
+V0327 19:01:31.522000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [17/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.623000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [18/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+V0327 19:01:31.711000 565954 site-packages/torch/_dynamo/symbolic_convert.py:442] [29/3] [__graph_breaks] Graph break (details suppressed) in user code at /home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:483
+W0327 19:01:32.668000 565954 site-packages/torch/_dynamo/convert_frame.py:906] [14/8]    function: 'forward' (/home/ubuntu/src/bnb/bitsandbytes/nn/modules.py:466)
