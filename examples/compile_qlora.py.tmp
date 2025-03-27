@@ -1,0 +1,131 @@
+# 🦄 Fine-Tune Llama-3.8B to Write Pirate Jokes & Shakespearean Sonnets
+# Using bitsandbytes 4-bit + torch.compile 🏴☠️
+
+# !pip install -qU "unsloth[colab] @ git+https://github.com/unslothai/unsloth.git" \
+#     transformers==4.40.0 accelerate==0.30.0 bitsandbytes==0.43.0
+
+from datasets import load_dataset
+import torch
+from unsloth import FastLanguageModel
+
+# 1. Load Pre-Quantized Model with bitsandbytes 🎯
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="unsloth/llama-3-8B-bnb-4bit",
+    max_seq_length=2048,
+    dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+    load_in_4bit=True,
+    quantization_config={
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_compute_dtype": torch.bfloat16,
+        "bnb_4bit_use_double_quant": True,
+    },
+)
+
+# 2. Prepare Creative Dataset 🎭
+pirate_dataset = load_dataset(
+    "json",
+    data_files={"train": "https://huggingface.co/datasets/jondurbin/pirate-jokes/resolve/main/pirate_jokes.json"},
+)
+
+
+def format_creative_prompt(sample):
+    return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+    You are a swashbuckling pirate poet. Respond ONLY in pirate speak or Shakespearean verse.<|eot_id|>
+    <|start_header_id|>user<|end_header_id|>
+    {sample['prompt']}<|eot_id|>
+    <|start_header_id|>assistant<|end_header_id|>
+    {sample['response']}<|eot_id|>"""
+
+
+dataset = pirate_dataset.map(format_creative_prompt)
+
+# 3. Configure QLoRA with torch.compile Diagnostics 🔍
+model = FastLanguageModel.get_peft_model(
+    model,
+    r=32,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    lora_alpha=64,
+    lora_dropout=0.1,
+    bias="none",
+    use_gradient_checkpointing=True,
+    torch_compile={
+        "mode": "reduce-overhead",
+        "fullgraph": False,  # Allow partial compilation initially
+        "dynamic": True,
+    },
+    random_state=3407,  # For reproducibility of creative outputs
+)
+
+
+# 4. Custom Training Loop with Graph Break Analysis 🕵️♂️
+def detect_graph_breaks():
+    import torch._dynamo
+
+    original_verbose = torch._dynamo.config.verbose
+    torch._dynamo.config.verbose = True
+
+    # Trigger compilation with sample input
+    sample_input = tokenizer("Arrr! Tell me about yer treasure...", return_tensors="pt").to("cuda")
+    compiled_model = torch.compile(model)
+    _ = compiled_model(**sample_input)
+
+    torch._dynamo.config.verbose = original_verbose
+
+
+detect_graph_breaks()  # Initial graph break detection
+
+
+# 5. Creative Generation During Training 🎩
+class PirateStreamer:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+        self.prompt = "Yarrr! Why did the pirate's chicken cross the road?"
+
+    def __call__(self, input_ids, *args, **kwargs):
+        if random.random() < 0.1:  # 10% chance to generate during training
+            with torch.no_grad():
+                outputs = model.generate(
+                    input_ids=self.tokenizer(self.prompt, return_tensors="pt").to("cuda").input_ids,
+                    max_new_tokens=50,
+                    temperature=0.7,
+                    repetition_penalty=1.1,
+                )
+            print("\n🏴☠️ Crew's Update:", self.tokenizer.decode(outputs[0]))
+        return input_ids
+
+
+# 6. Launch Training with Progressive Compilation 🚀
+trainer = SFTTrainer(
+    model=model,
+    train_dataset=dataset,
+    dataset_text_field="text",
+    max_seq_length=1024,
+    packing=True,
+    callbacks=[PirateStreamer(tokenizer)],
+    args=TrainingArguments(
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
+        warmup_steps=10,
+        max_steps=100,
+        learning_rate=3e-5,
+        fp16=not torch.cuda.is_bf16_supported(),
+        bf16=torch.cuda.is_bf16_supported(),
+        logging_steps=1,
+        optim="paged_adamw_8bit",
+        weight_decay=0.01,
+        lr_scheduler_type="cosine",
+        output_dir="pirate-poet",
+        report_to="none",
+    ),
+)
+
+# Progressive compilation strategy
+trainer.train_step = torch.compile(
+    trainer.train_step,
+    mode="reduce-overhead",
+    fullgraph=False,  # Start with partial graphs
+    dynamic=True,
+)
+
+print("🏁 Starting training - watch for graph breaks and pirate wisdom!")
+trainer.train()

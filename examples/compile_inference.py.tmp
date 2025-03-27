@@ -1,0 +1,59 @@
+import logging
+
+import torch
+import torch._dynamo
+
+# Enable verbose logging using PyTorch's new logging system
+from torch._logging import set_logs
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+set_logs(dynamo=logging.DEBUG, graph_breaks=True, recompiles=True)  # Enable specific artifacts
+
+torch.set_float32_matmul_precision("high")
+
+quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+
+model_id = "google/gemma-2-2b-it"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    quantization_config=quantization_config,
+    device_map="auto",
+    torch_dtype=torch.bfloat16,
+)
+
+input_text = "Write me a poem about Machine Learning."
+input_ids = tokenizer(input_text, return_tensors="pt").to(model.device)
+
+# Improved explanation with artifact capture
+from torch._dynamo import explain
+
+explanation, graphs, guards, log_location = explain(
+    model,
+    **input_ids,
+    traceback=True,  # Show origin of graph breaks
+)
+print(f"Graph breaks: {len(explanation)}\nDetails:")
+for break_info in explanation:
+    print(f"- {break_info}")
+
+
+# Enhanced AOTAutograd tracing
+def trace_handler(gm: torch.fx.GraphModule, example_inputs):
+    print(f"AOT traced graph with {len(gm.graph.nodes)} nodes")
+    gm.graph.print_tabular()  # Show full graph structure
+    return gm.forward
+
+
+model = torch.compile(
+    model,
+    backend="aot_eager",
+    options={
+        "fw_compiler": trace_handler,
+        "track_graph_metrics": True,  # Additional compilation metrics
+    },
+)
+
+# Generate with compilation diagnostics
+outputs = model.generate(**input_ids, max_new_tokens=32)
+print(tokenizer.decode(outputs[0]))
