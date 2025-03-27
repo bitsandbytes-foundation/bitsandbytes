@@ -369,9 +369,9 @@ class TestIGEMMFunctional:
         # print(mean(errors))
         # print(mean(relerrors))
 
-    @pytest.mark.parametrize("hidden_dim", get_test_dims(32, 256, n=2), ids=id_formatter("hidden_dim"))
-    @pytest.mark.parametrize("batch_dim", get_test_dims(16, 256, n=2), ids=id_formatter("batch_dim"))
-    @pytest.mark.parametrize("seq_dim", get_test_dims(16, 256, n=2), ids=id_formatter("seq_dim"))
+    @pytest.mark.parametrize("hidden_dim", [32, 256], ids=id_formatter("hidden_dim"))
+    @pytest.mark.parametrize("batch_dim", [16, 256], ids=id_formatter("batch_dim"))
+    @pytest.mark.parametrize("seq_dim", [16, 256], ids=id_formatter("seq_dim"))
     @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
     def test_igemm(self, hidden_dim, batch_dim, transpose, seq_dim):
         hidden_dim = hidden_dim - (hidden_dim % 32)
@@ -415,9 +415,9 @@ class TestIGEMMFunctional:
 
             torch.testing.assert_close(out.float(), out2)
 
-    @pytest.mark.parametrize("seq_dim", get_test_dims(32, 512, n=3), ids=id_formatter("seq_dim"))
-    @pytest.mark.parametrize("hidden_dim", get_test_dims(32, 1024 * 4, n=3), ids=id_formatter("hidden_dim"))
-    @pytest.mark.parametrize("batch_dim", get_test_dims(2, 16, n=3), ids=id_formatter("batch_dim"))
+    @pytest.mark.parametrize("seq_dim", [32, 256, 512], ids=id_formatter("seq_dim"))
+    @pytest.mark.parametrize("hidden_dim", [64, 1024, 4096], ids=id_formatter("hidden_dim"))
+    @pytest.mark.parametrize("batch_dim", [2, 8, 16], ids=id_formatter("batch_dim"))
     def test_dim3_igemm(self, seq_dim, hidden_dim, batch_dim):
         seq_dim = seq_dim - (seq_dim % 32)
         hidden_dim = hidden_dim - (hidden_dim % 32)
@@ -431,9 +431,9 @@ class TestIGEMMFunctional:
 
             torch.testing.assert_close(out.float(), out2)
 
-    @pytest.mark.parametrize("seq_dim", get_test_dims(32, 512, n=2), ids=id_formatter("seq_dim"))
-    @pytest.mark.parametrize("hidden_dim", get_test_dims(32, 1024 * 4, n=2), ids=id_formatter("hidden_dim"))
-    @pytest.mark.parametrize("batch_dim", get_test_dims(2, 16, n=2), ids=id_formatter("batch_dim"))
+    @pytest.mark.parametrize("seq_dim", [32, 512], ids=id_formatter("seq_dim"))
+    @pytest.mark.parametrize("hidden_dim", [32, 1024 * 4], ids=id_formatter("hidden_dim"))
+    @pytest.mark.parametrize("batch_dim", [2, 16], ids=id_formatter("batch_dim"))
     @pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
     def test_minmax_igemm(self, seq_dim, hidden_dim, batch_dim, transpose):
         def min_max(x):
@@ -501,10 +501,10 @@ class TestIGEMMFunctional:
         assert mean(errs) < 0.015
         assert mean(relerrs) < 0.3
 
-    @pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=2), ids=id_formatter("dim1"))
-    @pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=2), ids=id_formatter("dim2"))
-    @pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=2), ids=id_formatter("dim3"))
-    @pytest.mark.parametrize("dim4", get_test_dims(32, 256, n=2), ids=id_formatter("dim4"))
+    @pytest.mark.parametrize("dim1", [1, 64], ids=id_formatter("dim1"))
+    @pytest.mark.parametrize("dim2", [32, 128], ids=id_formatter("dim2"))
+    @pytest.mark.parametrize("dim3", [32, 256], ids=id_formatter("dim3"))
+    @pytest.mark.parametrize("dim4", [32, 256], ids=id_formatter("dim4"))
     @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
     def test_ibmm(self, dim1, dim2, dim3, dim4, transpose):
         dim2 = dim2 - (dim2 % 16)
@@ -760,8 +760,8 @@ class TestLLMInt8Functional:
 
 
 class TestSpMMFunctional:
-    @pytest.mark.parametrize("dim1", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim1"))
-    @pytest.mark.parametrize("dim2", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim2"))
+    @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
+    @pytest.mark.parametrize("dim2", [128, 512], ids=id_formatter("dim2"))
     @pytest.mark.parametrize("transposed_B", TRUE_FALSE, ids=id_formatter("transposed_B"))
     def test_spmm_coo(self, dim1, dim2, transposed_B):
         threshold = 1.5
@@ -893,7 +893,7 @@ class TestSpMMFunctional:
 
     @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [256, 1024], ids=id_formatter("dim2"))
-    @pytest.skip("No longer supported")
+    @pytest.mark.skip("No longer supported")
     def test_integrated_sparse_decomp(self, dim1, dim2):
         threshold = 3.0
         for _ in range(k):
@@ -1096,37 +1096,34 @@ class TestQuantize4BitFunctional:
             assert err.item() < math.log2(blocksize) * 8e-2
 
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    def test_4bit_compressed_stats(self, quant_type):
-        for blocksize in [128, 64]:
-            errs1 = []
-            errs2 = []
-            for i in range(10):
-                A1 = torch.randn(1024, 1024, device="cuda").half()
-                q2, SA2 = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
-                q3, SA3 = F.quantize_4bit(A1, blocksize=blocksize, compress_statistics=True, quant_type=quant_type)
-                A2 = F.dequantize_4bit(q2, SA2, quant_type=quant_type)
-                A3 = F.dequantize_4bit(q3, SA3, quant_type=quant_type)
+    @pytest.mark.parametrize("blocksize", [64, 128], ids=id_formatter("blocksize"))
+    def test_4bit_compressed_stats(self, quant_type, blocksize):
+        errs1 = []
+        errs2 = []
+        for i in range(10):
+            A1 = torch.randn(1024, 1024, device="cuda").half()
+            q2, SA2 = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
+            q3, SA3 = F.quantize_4bit(A1, blocksize=blocksize, compress_statistics=True, quant_type=quant_type)
+            A2 = F.dequantize_4bit(q2, SA2, quant_type=quant_type)
+            A3 = F.dequantize_4bit(q3, SA3, quant_type=quant_type)
 
-                err = (A1 - A2).abs().float()
-                relerr = (err / (A1.abs().float() + 1e-15)).mean()
-                err = err.mean()
+            err = (A1 - A2).abs().float()
+            relerr = (err / (A1.abs().float() + 1e-15)).mean()
+            err = err.mean()
 
-                errs1.append(err.item())
+            errs1.append(err.item())
 
-                assert err.item() < 0.11
-                assert relerr.item() < 0.28
+            assert err.item() < 0.11
+            assert relerr.item() < 0.28
 
-                err = (A1 - A3).abs().float()
-                relerr = (err / (A1.abs().float() + 1e-15)).mean()
-                err = err.mean()
+            err = (A1 - A3).abs().float()
+            relerr = (err / (A1.abs().float() + 1e-15)).mean()
+            err = err.mean()
 
-                errs2.append(err.item())
+            errs2.append(err.item())
 
-                assert err.item() < 0.11
-                assert relerr.item() < 0.28
-
-            # print(sum(errs1)/len(errs1), blocksize, quant_type)
-            # print(sum(errs2)/len(errs2), blocksize, quant_type)
+            assert err.item() < 0.11
+            assert relerr.item() < 0.28
 
     # @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
     @pytest.mark.parametrize("quant_type", ["nf4"])
@@ -1169,135 +1166,133 @@ class TestQuantize4BitFunctional:
         [torch.uint8, torch.float16, torch.bfloat16, torch.float32],
         ids=describe_dtype,
     )
-    def test_gemv_4bit(self, dtype, storage_type, quant_storage, double_quant, kind):
-        for dim in [128, 256, 512, 1024]:
-            # for dim in [4*1024]:
-            # for dim in [1*16]:
-            errs1 = []
-            errs2 = []
-            errs3 = []
-            relerrs1 = []
-            relerrs2 = []
-            relerrs3 = []
-            max_errs1 = []
-            max_errs2 = []
-            max_errs3 = []
+    @pytest.mark.parametrize("dim", [128, 256, 512, 1024], ids=id_formatter("dim"))
+    def test_gemv_4bit(self, dim, dtype, storage_type, quant_storage, double_quant, kind):
+        errs1 = []
+        errs2 = []
+        errs3 = []
+        relerrs1 = []
+        relerrs2 = []
+        relerrs3 = []
+        max_errs1 = []
+        max_errs2 = []
+        max_errs3 = []
 
-            for i in range(100):
-                if kind == "fc1":
-                    A = torch.randn(1, dim, dtype=dtype, device="cuda")
-                    B = torch.randn(dim * 4, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
-                elif kind == "fc2":
-                    A = torch.randn(1, 4 * dim, dtype=dtype, device="cuda")
-                    B = torch.randn(dim, 4 * dim, dtype=dtype, device="cuda") / math.sqrt(dim)
-                elif kind == "attn":
-                    A = torch.randn(1, dim, dtype=dtype, device="cuda")
-                    B = torch.randn(dim, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
-                elif kind == "attn_packed":
-                    A = torch.randn(1, dim, dtype=dtype, device="cuda")
-                    B = torch.randn(dim * 3, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
+        for i in range(100):
+            if kind == "fc1":
+                A = torch.randn(1, dim, dtype=dtype, device="cuda")
+                B = torch.randn(dim * 4, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
+            elif kind == "fc2":
+                A = torch.randn(1, 4 * dim, dtype=dtype, device="cuda")
+                B = torch.randn(dim, 4 * dim, dtype=dtype, device="cuda") / math.sqrt(dim)
+            elif kind == "attn":
+                A = torch.randn(1, dim, dtype=dtype, device="cuda")
+                B = torch.randn(dim, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
+            elif kind == "attn_packed":
+                A = torch.randn(1, dim, dtype=dtype, device="cuda")
+                B = torch.randn(dim * 3, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
 
-                qB, state = F.quantize_4bit(
-                    B,
-                    quant_type=storage_type,
-                    compress_statistics=double_quant,
-                    quant_storage=quant_storage,
-                )
-                C3 = torch.matmul(A, B.t())
-                C2 = F.gemv_4bit(A, qB.t(), state=state)
-                A.requires_grad = True
-                C1 = bnb.matmul_4bit(A, qB.t(), state)
+            qB, state = F.quantize_4bit(
+                B,
+                quant_type=storage_type,
+                compress_statistics=double_quant,
+                quant_storage=quant_storage,
+            )
+            C3 = torch.matmul(A, B.t())
+            C2 = F.gemv_4bit(A, qB.t(), state=state)
+            A.requires_grad = True
+            C1 = bnb.matmul_4bit(A, qB.t(), state)
 
-                err1 = (C1 - C2).abs().float()
-                err2 = (C3 - C2).abs().float()
-                err3 = (C3 - C1).abs().float()
+            err1 = (C1 - C2).abs().float()
+            err2 = (C3 - C2).abs().float()
+            err3 = (C3 - C1).abs().float()
 
-                mag1 = torch.abs(C1).float() + 1e-5
-                mag2 = torch.abs(C3).float() + 1e-5
-                mag3 = torch.abs(C3).float() + 1e-5
+            mag1 = torch.abs(C1).float() + 1e-5
+            mag2 = torch.abs(C3).float() + 1e-5
+            mag3 = torch.abs(C3).float() + 1e-5
 
-                relerr1 = err1 / mag1
-                relerr2 = err2 / mag2
-                relerr3 = err3 / mag3
+            relerr1 = err1 / mag1
+            relerr2 = err2 / mag2
+            relerr3 = err3 / mag3
 
-                max_err1 = err1.max()
-                max_err2 = err2.max()
-                max_err3 = err3.max()
+            max_err1 = err1.max()
+            max_err2 = err2.max()
+            max_err3 = err3.max()
 
-                errs1.append(err1.mean().item())
-                errs2.append(err2.mean().item())
-                errs3.append(err3.mean().item())
+            errs1.append(err1.mean().item())
+            errs2.append(err2.mean().item())
+            errs3.append(err3.mean().item())
 
-                relerrs1.append(relerr1.mean().item())
-                relerrs2.append(relerr2.mean().item())
-                relerrs3.append(relerr3.mean().item())
+            relerrs1.append(relerr1.mean().item())
+            relerrs2.append(relerr2.mean().item())
+            relerrs3.append(relerr3.mean().item())
 
-                max_errs1.append(max_err1.item())
-                max_errs2.append(max_err2.item())
-                max_errs3.append(max_err3.item())
+            max_errs1.append(max_err1.item())
+            max_errs2.append(max_err2.item())
+            max_errs3.append(max_err3.item())
 
-                c = int(C1.numel() * 0.0014 * (dim / 256)) + 1
+            c = int(C1.numel() * 0.0014 * (dim / 256)) + 1
 
-                c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=0, throw=False)
-            err1 = sum(errs1) / len(errs1) / math.sqrt(dim)
-            err2 = sum(errs2) / len(errs2) / math.sqrt(dim)
-            err3 = sum(errs3) / len(errs3) / math.sqrt(dim)
-            relerr1 = sum(relerrs1) / len(relerrs1) / math.sqrt(dim)
-            relerr2 = sum(relerrs2) / len(relerrs2) / math.sqrt(dim)
-            relerr3 = sum(relerrs3) / len(relerrs3) / math.sqrt(dim)
-            maxerr1 = sum(max_errs1) / len(max_errs1) / math.sqrt(dim)
-            maxerr2 = sum(max_errs2) / len(max_errs2) / math.sqrt(dim)
-            maxerr3 = sum(max_errs3) / len(max_errs3) / math.sqrt(dim)
-            absratio = err2 / err3
-            relratio = relerr2 / relerr3
-            maxratio = relerr2 / relerr3
+            c = assert_all_approx_close(C1, C2, 1e-5, 0.01, count=0, throw=False)
+        err1 = sum(errs1) / len(errs1) / math.sqrt(dim)
+        err2 = sum(errs2) / len(errs2) / math.sqrt(dim)
+        err3 = sum(errs3) / len(errs3) / math.sqrt(dim)
+        relerr1 = sum(relerrs1) / len(relerrs1) / math.sqrt(dim)
+        relerr2 = sum(relerrs2) / len(relerrs2) / math.sqrt(dim)
+        relerr3 = sum(relerrs3) / len(relerrs3) / math.sqrt(dim)
+        maxerr1 = sum(max_errs1) / len(max_errs1) / math.sqrt(dim)
+        maxerr2 = sum(max_errs2) / len(max_errs2) / math.sqrt(dim)
+        maxerr3 = sum(max_errs3) / len(max_errs3) / math.sqrt(dim)
+        absratio = err2 / err3
+        relratio = relerr2 / relerr3
+        maxratio = relerr2 / relerr3
 
-            # for debugging if the tests fails
-            #
-            # print('='*80)
-            # print(f'For matmul: {A.shape}, {B.shape}, {kind}, {dtype}, {storage_type}, double_quant={double_quant}:')
-            # print(C1.flatten()[-20:])
-            # print(C2.flatten()[-20:])
-            # print(f'inference vs training abs: {err1}')
-            # print(f'inference vs training rel: {relerr1}')
-            # print(f'inference vs training max: {maxerr1}')
-            # print(f'inference vs training vs torch err ratio abs: {absratio}')
-            # print(f'inference vs training vs torch err ratio rel: {relratio}')
-            # print(f'inference vs training vs torch err ratio max: {maxratio}')
-            if dtype == torch.float16:
-                if dim <= 512:
-                    assert err1 < 7e-5
-                    assert relerr1 < 0.0008
-                else:
-                    assert err1 < 6e-5
-                    assert relerr1 < 2e-4
-                assert absratio < 1.005 and absratio > 0.995
-                assert relratio < 1.005 and relratio > 0.995
-                assert maxratio < 1.005 and maxratio > 0.995
-            elif dtype == torch.float32:
-                if dim <= 512:
-                    assert err1 < 5e-8
-                    assert relerr1 < 1e-6
-                    assert maxerr1 < 1e-7
-                else:
-                    assert err1 < 5e-8
-                    assert relerr1 < 8e-6
-                    assert maxerr1 < 1e-7
-                assert absratio < 1.005 and absratio > 0.995
-                assert relratio < 1.005 and relratio > 0.995
-                assert maxratio < 1.005 and maxratio > 0.995
-            elif dtype == torch.bfloat16:
-                if dim <= 512:
-                    assert err1 < 6e-4
-                    assert relerr1 < 0.007
-                    assert maxerr1 < 0.015
-                else:
-                    assert err1 < 2e-4
-                    assert relerr1 < 0.002
-                    assert maxerr1 < 0.0012
-                assert absratio < 1.005 and absratio > 0.995
-                assert relratio < 1.04 and relratio > 0.96
-                assert maxratio < 1.02 and maxratio > 0.98
+        # for debugging if the tests fails
+        #
+        # print('='*80)
+        # print(f'For matmul: {A.shape}, {B.shape}, {kind}, {dtype}, {storage_type}, double_quant={double_quant}:')
+        # print(C1.flatten()[-20:])
+        # print(C2.flatten()[-20:])
+        # print(f'inference vs training abs: {err1}')
+        # print(f'inference vs training rel: {relerr1}')
+        # print(f'inference vs training max: {maxerr1}')
+        # print(f'inference vs training vs torch err ratio abs: {absratio}')
+        # print(f'inference vs training vs torch err ratio rel: {relratio}')
+        # print(f'inference vs training vs torch err ratio max: {maxratio}')
+        if dtype == torch.float16:
+            if dim <= 512:
+                assert err1 < 7e-5
+                assert relerr1 < 0.0008
+            else:
+                assert err1 < 6e-5
+                assert relerr1 < 2e-4
+            assert absratio < 1.005 and absratio > 0.995
+            assert relratio < 1.005 and relratio > 0.995
+            assert maxratio < 1.005 and maxratio > 0.995
+        elif dtype == torch.float32:
+            if dim <= 512:
+                assert err1 < 5e-8
+                assert relerr1 < 1e-6
+                assert maxerr1 < 1e-7
+            else:
+                assert err1 < 5e-8
+                assert relerr1 < 8e-6
+                assert maxerr1 < 1e-7
+            assert absratio < 1.005 and absratio > 0.995
+            assert relratio < 1.005 and relratio > 0.995
+            assert maxratio < 1.005 and maxratio > 0.995
+        elif dtype == torch.bfloat16:
+            if dim <= 512:
+                assert err1 < 6e-4
+                assert relerr1 < 0.007
+                assert maxerr1 < 0.015
+            else:
+                assert err1 < 2e-4
+                assert relerr1 < 0.002
+                assert maxerr1 < 0.0012
+            assert absratio < 1.005 and absratio > 0.995
+            assert relratio < 1.04 and relratio > 0.96
+            assert maxratio < 1.02 and maxratio > 0.98
 
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
@@ -1361,18 +1356,3 @@ def test_managed():
     F._mul(A, B2)
     F._mul(A, B2)
     assert (A == 17 * (2**3)).sum().item() == n * n
-
-
-@pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=1), ids=id_formatter("dim1"))
-@pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=1), ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=1), ids=id_formatter("dim3"))
-@pytest.mark.deprecated
-def test_vector_quant(dim1, dim2, dim3):
-    dim2 = dim2 - (dim2 % 16)
-    dim3 = dim3 - (dim3 % 16)
-    for i in range(k):
-        A = torch.randn(size=(dim2, dim3), device="cuda")
-        qA, SA = F.vectorwise_quant(A, dim=0)
-        A1 = F.vectorwise_dequant(qA, SA)
-        n = A1.numel()
-        assert_all_approx_close(A1, A, atol=0.01, rtol=0.1, count=int(n * 0.002))
