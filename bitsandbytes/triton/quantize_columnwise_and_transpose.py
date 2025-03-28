@@ -2,7 +2,8 @@ import math
 
 import torch
 
-from bitsandbytes.triton.triton_utils import is_triton_available
+from bitsandbytes.triton.triton_utils import is_triton_available, assert_same_device
+from triton.language.extra import libdevice
 
 if not is_triton_available():
 
@@ -54,7 +55,7 @@ else:
         x = tl.load(x_ptr + offsets, mask=p2_arange_mask)
         abs_x = tl.abs(x)
         max_val = tl.max(tl.where(p2_arange_mask, abs_x, 0), axis=0)
-        output = tl.libdevice.llrint(127.0 * (x / max_val))
+        output = libdevice.llrint(127.0 * (x / max_val))
 
         new_start = pid * M
         new_offsets = new_start + p2_arange
@@ -68,7 +69,7 @@ else:
 
         P2 = int(2 ** (math.ceil(math.log2(M))))
 
-        assert x.is_cuda and output.is_cuda
+        assert_same_device(x, output)
         n_elements = output.numel()
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
         _quantize_columnwise_and_transpose[grid](x, output, output_maxs, n_elements, M, N, BLOCK_SIZE=M, P2=P2)

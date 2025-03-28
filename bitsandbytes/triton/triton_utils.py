@@ -12,3 +12,6 @@ def is_triton_available():
         from torch._inductor.utils import has_triton
 
         return has_triton()
+
+def assert_same_device(a, b):
+    assert a.is_cuda and b.is_cuda or a.is_xpu and b.is_xpu

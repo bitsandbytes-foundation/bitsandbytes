@@ -3,6 +3,9 @@ import math
 import torch
 
 from bitsandbytes.triton.triton_utils import is_triton_available
+from .triton_utils import assert_same_device
+
+from triton.language.extra import libdevice
 
 if not is_triton_available():
 
@@ -50,7 +53,7 @@ else:
 
         abs_x = tl.abs(x)
         max_val = tl.max(tl.where(row_mask, abs_x, 0), axis=0)
-        output = tl.libdevice.llrint(127.0 * (x / max_val))
+        output = libdevice.llrint(127.0 * (x / max_val))
         tl.store(output_ptr + offsets, output, mask=row_mask)
         tl.store(output_maxs + pid, max_val)
 
@@ -60,7 +63,7 @@ else:
 
         P2 = int(2 ** (math.ceil(math.log2(x.shape[1]))))
 
-        assert x.is_cuda and output.is_cuda
+        assert_same_device(x, output)
         n_elements = output.numel()
         grid = lambda meta: (x.shape[0],)
         _quantize_rowwise[grid](x, output, output_maxs, n_elements, BLOCK_SIZE=x.shape[1], P2=P2)

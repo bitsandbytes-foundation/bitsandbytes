@@ -1,6 +1,7 @@
 import torch
 
-from bitsandbytes.triton.triton_utils import is_triton_available
+from bitsandbytes.triton.triton_utils import is_triton_available, assert_same_device
+from triton.language.extra import libdevice
 
 if not is_triton_available():
 
@@ -34,15 +35,15 @@ else:
         offsets = block_start + tl.arange(0, BLOCK_SIZE)
         mask = offsets < n_elements
         x = tl.load(x_ptr + offsets, mask=mask)
-        absmax_inv = tl.load(absmax_inv_ptr)
-        output = tl.libdevice.llrint(127.0 * (x * absmax_inv))
+        absmax_inv = tl.load(absmax_inv_ptr).cast(tl.float32)
+        output = libdevice.llrint(127.0 * (x * absmax_inv))
         tl.store(output_ptr + offsets, output, mask=mask)
 
     def quantize_global(x: torch.Tensor):
         absmax = x.abs().max().unsqueeze(0)
         absmax_inv = 1.0 / absmax
-        output = torch.empty(*x.shape, device="cuda", dtype=torch.int8)
-        assert x.is_cuda and output.is_cuda
+        output = torch.empty(*x.shape, device=x.device, dtype=torch.int8)
+        assert_same_device(x, output)
         n_elements = output.numel()
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
         _quantize_global[grid](x, absmax_inv, output, n_elements)
@@ -95,7 +96,7 @@ else:
         B = B + (rm[:, None] * stride_bm + rn[None, :] * stride_bn)
         mask = (rm < M)[:, None] & (rn < N)[None, :]
 
-        output = tl.libdevice.llrint(127.0 * (a * absmax_inv))
+        output = libdevice.llrint(127.0 * (a * absmax_inv))
 
         tl.store(B, output, mask=mask)
 
@@ -103,7 +104,7 @@ else:
         absmax = input.abs().max().unsqueeze(0)
         absmax_inv = 1.0 / absmax
         M, N = input.shape
-        out = torch.empty(N, M, device="cuda", dtype=torch.int8)
+        out = torch.empty(N, M, device=input.device, dtype=torch.int8)
 
         assert out.size(0) == N and out.size(1) == M
         assert input.stride(0) == 1 or input.stride(1) == 1

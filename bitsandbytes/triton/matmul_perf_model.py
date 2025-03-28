@@ -51,10 +51,11 @@ def get_simd_tflops(device, num_ctas, num_warps, dtype):
 
 
 def get_tflops(device, num_ctas, num_warps, dtype):
-    capability = torch.cuda.get_device_capability(device)
-    if capability[0] < 8 and dtype == torch.float32:
-        return get_simd_tflops(device, num_ctas, num_warps, dtype)
-    return get_tensorcore_tflops(device, num_ctas, num_warps, dtype)
+    # capability = torch.cuda.get_device_capability(device)
+    # if capability[0] < 8 and dtype == torch.float32:
+    #     return get_simd_tflops(device, num_ctas, num_warps, dtype)
+    # return get_tensorcore_tflops(device, num_ctas, num_warps, dtype)
+    return 70e12
 
 
 def estimate_matmul_time(
@@ -76,7 +77,8 @@ def estimate_matmul_time(
 ):
     """return estimated running time in ms
     = max(compute, loading) + store"""
-    device = torch.cuda.current_device()
+    # device = torch.cuda.current_device()
+    device = 'xpu'
     dtype = A.dtype
     dtsize = A.element_size()
 
@@ -94,7 +96,8 @@ def estimate_matmul_time(
     compute_ms = total_ops / tput
 
     # time to load data
-    num_sm = driver.active.utils.get_device_properties(device)["multiprocessor_count"]
+    # num_sm = driver.active.utils.get_device_properties(device)["multiprocessor_count"]
+    num_sm = 24
     active_cta_ratio = min(1, num_ctas / num_sm)
     active_cta_ratio_bw1 = min(1, num_ctas / 32)  # 32 active ctas are enough to saturate
     active_cta_ratio_bw2 = max(min(1, (num_ctas - 32) / (108 - 32)), 0)  # 32-108, remaining 5%
@@ -134,9 +137,9 @@ def estimate_matmul_time(
 
 
 def early_config_prune(configs, named_args, **kwargs):
-    device = torch.cuda.current_device()
-    capability = torch.cuda.get_device_capability()
-    # BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps, num_stages
+    # device = torch.cuda.current_device()
+    # capability = torch.cuda.get_device_capability()
+    # # BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps, num_stages
     dtsize = named_args["A"].element_size()
     dtype = named_args["A"].dtype
 
@@ -151,7 +154,7 @@ def early_config_prune(configs, named_args, **kwargs):
             config.num_stages,
         )
 
-        max_shared_memory = driver.active.utils.get_device_properties(device)["max_shared_mem"]
+        max_shared_memory = 9 * 1e9# driver.active.utils.get_device_properties(device)["max_shared_mem"]
         required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
         if required_shared_memory <= max_shared_memory:
             pruned_configs.append(config)
@@ -183,7 +186,7 @@ def early_config_prune(configs, named_args, **kwargs):
     pruned_configs = []
     for k, v in configs_map.items():
         BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps = k
-        if capability[0] >= 8:
+        if False:
             # compute cycles (only works for ampere GPUs)
             mmas = BLOCK_M * BLOCK_N * BLOCK_K / (16 * 8 * 16)
             mma_cycles = mmas / min(4, num_warps) * 8
@@ -206,6 +209,6 @@ def early_config_prune(configs, named_args, **kwargs):
                 pruned_configs.append(n[0])
         else:  # Volta & Turing only supports num_stages <= 2
             random_config = v[0][0]
-            random_config.num_stages = 2
+            random_config.num_stages = 3
             pruned_configs.append(random_config)
     return pruned_configs

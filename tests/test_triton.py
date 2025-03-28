@@ -8,26 +8,30 @@ from bitsandbytes.triton.triton_utils import is_triton_available
 from tests.helpers import TRUE_FALSE
 
 
+device = "xpu"
+
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.skipif(
-    not is_triton_available() or not torch.cuda.is_available() or not torch.cuda.get_device_capability()[0] >= 8,
+    not is_triton_available() or (torch.cuda.is_available() and not torch.cuda.get_device_capability()[0] >= 8),
     reason="This test requires triton and a GPU with compute capability 8.0 or higher.",
 )
 @pytest.mark.parametrize("vector_wise_quantization", TRUE_FALSE)
 def test_switchback(vector_wise_quantization):
     for dim in [83]:
         for batch in [13]:
-            standard = torch.nn.Linear(dim, 4 * dim).cuda().half()
+            # send to device
+            standard = torch.nn.Linear(dim, 4 * dim).to(device).half()
             switchback = (
-                SwitchBackLinear(dim, 4 * dim, vector_wise_quantization=vector_wise_quantization).cuda().half()
+                SwitchBackLinear(dim, 4 * dim, vector_wise_quantization=vector_wise_quantization).to(device).half()
             )
-            baseline = Linear8bitLt(dim, 4 * dim).cuda().half()
+            baseline = Linear8bitLt(dim, 4 * dim)
+            baseline = baseline.to(device).half()
             switchback.weight.data.copy_(standard.weight)
             switchback.bias.data.copy_(standard.bias)
             baseline.weight.data.copy_(standard.weight)
             baseline.bias.data.copy_(standard.bias)
 
-            x1 = torch.randn(batch, dim).cuda().half().requires_grad_(True)
+            x1 = torch.randn(batch, dim).to(device).half().requires_grad_(True)
             x2 = x1.clone().detach().requires_grad_(True)
             x3 = x1.clone().detach().requires_grad_(True)
 

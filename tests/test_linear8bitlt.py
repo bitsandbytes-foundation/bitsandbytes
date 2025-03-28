@@ -22,6 +22,7 @@ from tests.helpers import (
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
 
+device = 'xpu'
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.skipif(
@@ -114,7 +115,9 @@ def test_linear_serialization(
         has_fp16_weights=has_fp16_weights,
     )
     linear_custom.bias = linear.bias
-    linear_custom = linear_custom.cuda()
+    import pdb
+    pdb.set_trace()
+    linear_custom = linear_custom.to(device)
 
     if serialize_before_forward:
         state_dict_8bit = linear_custom.state_dict()
