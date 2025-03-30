@@ -23,9 +23,9 @@ def get_compute_capabilities() -> list[tuple[int, int]]:
 @lru_cache(None)
 def get_cuda_version_tuple() -> tuple[int, int]:
     if torch.version.cuda:
-        return map(int, torch.version.cuda.split(".")[0:2])
+        return tuple(map(int, torch.version.cuda.split(".")[0:2]))
     elif torch.version.hip:
-        return map(int, torch.version.hip.split(".")[0:2])
+        return tuple(map(int, torch.version.hip.split(".")[0:2]))
 
     return None
 
