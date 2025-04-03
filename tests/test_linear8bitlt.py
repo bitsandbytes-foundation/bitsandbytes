@@ -115,8 +115,6 @@ def test_linear_serialization(
         has_fp16_weights=has_fp16_weights,
     )
     linear_custom.bias = linear.bias
-    import pdb
-    pdb.set_trace()
     linear_custom = linear_custom.to(device)
 
     if serialize_before_forward:

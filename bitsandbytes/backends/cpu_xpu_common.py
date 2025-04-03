@@ -21,7 +21,7 @@ try:
     ipex_cpu_only = ipex._C._has_cpu() and (not ipex._C._has_xpu())
 except BaseException:
     ipex_cpu = None
-    ipex_xpu = None
+    ipex_xpu = torch
     ipex_cpu_only = None
 
 

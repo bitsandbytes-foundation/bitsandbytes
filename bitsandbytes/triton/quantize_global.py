@@ -88,7 +88,7 @@ else:
         A = A + (rm[:, None] * stride_am + rn[None, :] * stride_an)
         mask = (rm < M)[:, None] & (rn < N)[None, :]
         a = tl.load(A, mask=mask)
-        absmax_inv = tl.load(absmax_inv_ptr)
+        absmax_inv = tl.load(absmax_inv_ptr).cast(tl.float32)
 
         # rematerialize to save registers
         rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)

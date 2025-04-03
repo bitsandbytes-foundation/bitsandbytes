@@ -20,18 +20,18 @@ else:
     # TODO: autotune this better.
     @triton.autotune(
         configs=[
-            triton.Config({}, num_stages=1, num_warps=8),
-            triton.Config({}, num_stages=2, num_warps=8),
+            # triton.Config({}, num_stages=1, num_warps=8),
+            # triton.Config({}, num_stages=2, num_warps=8),
             triton.Config({}, num_stages=4, num_warps=8),
-            triton.Config({}, num_stages=8, num_warps=8),
-            triton.Config({}, num_stages=1),
-            triton.Config({}, num_stages=2),
-            triton.Config({}, num_stages=4),
-            triton.Config({}, num_stages=8),
-            triton.Config({}, num_warps=1),
-            triton.Config({}, num_warps=2),
-            triton.Config({}, num_warps=4),
-            triton.Config({}, num_warps=8),
+            # triton.Config({}, num_stages=8, num_warps=8),
+            # triton.Config({}, num_stages=1),
+            # triton.Config({}, num_stages=2),
+            # triton.Config({}, num_stages=4),
+            # triton.Config({}, num_stages=8),
+            # triton.Config({}, num_warps=1),
+            # triton.Config({}, num_warps=2),
+            # triton.Config({}, num_warps=4),
+            # triton.Config({}, num_warps=8),
         ],
         key=["n_elements"],
     )
@@ -52,7 +52,7 @@ else:
         x = tl.load(x_ptr + offsets, mask=row_mask)
 
         abs_x = tl.abs(x)
-        max_val = tl.max(tl.where(row_mask, abs_x, 0), axis=0)
+        max_val = tl.max(tl.where(row_mask, abs_x, 0), axis=0).cast(tl.float32)
         output = libdevice.llrint(127.0 * (x / max_val))
         tl.store(output_ptr + offsets, output, mask=row_mask)
         tl.store(output_maxs + pid, max_val)
