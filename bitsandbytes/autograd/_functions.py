@@ -520,9 +520,6 @@ class MatMul8bitFp(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
-        import pdb
-        
-        pdb.set_trace()
         CB = B.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0)).t()
         output = torch.matmul(A, CB).to(A.dtype)
         ctx.state = state

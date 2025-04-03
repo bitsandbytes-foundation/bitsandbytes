@@ -671,8 +671,6 @@ class Int8Params(torch.nn.Parameter):
             # we store the 8-bit rows-major weight
             B = self.data.contiguous().to(torch.float16).xpu(device)
             CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
-            # import pdb
-            # pdb.set_trace()
             if CBt is not None:
                 del CBt
             if SCBt is not None:

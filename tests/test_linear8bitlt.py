@@ -30,9 +30,9 @@ device = 'xpu'
     reason="this test requires a turing-generation or newer GPU, see bitsandbytes docs",
 )
 def test_layout_exact_match():
-    x = (torch.randn(14336 * 3, 14336) * 10).to(torch.int8).cuda()
+    x = (torch.randn(14336 * 3, 14336) * 10).to(torch.int8).to(device)
     for tile_size, order in ((8, 32), "col_turing"), ((32, 32), "col_ampere"):
-        transform = lambda x: F.transform(x.cuda(), from_order="row", to_order=order)[0].to(x.device)
+        transform = lambda x: F.transform(x.to(device), from_order="row", to_order=order)[0].to(x.device)
         tile_indices = get_inverse_transform_indices(transform, tile_size)
         cxb = transform(x)
 
@@ -62,11 +62,11 @@ def test_linear_no_igemmlt():
         has_fp16_weights=False,
     ).to(linear.weight.dtype)
     linear_custom.bias = linear.bias
-    linear_custom = linear_custom.cuda()
-    linear = linear.half().cuda()
+    linear_custom = linear_custom.to(device)
+    linear = linear.half().to(device)
 
-    x_ref = x.clone().cuda().requires_grad_(True)
-    x_ours = x.clone().cuda().requires_grad_(True)
+    x_ref = x.clone().to(device).requires_grad_(True)
+    x_ours = x.clone().to(device).requires_grad_(True)
     fx_ref = linear(x_ref).float()
     grad_proj = torch.randn_like(fx_ref)
     (fx_ref * grad_proj).mean().backward()
@@ -123,7 +123,7 @@ def test_linear_serialization(
     if save_before_forward:
         bytes_8bit = torch_save_to_buffer(linear_custom)
 
-    x_first = x.clone().cuda().requires_grad_(True)
+    x_first = x.clone().to(device).requires_grad_(True)
     fx_first = linear_custom(x_first).float()
     grad_proj = torch.randn_like(fx_first)
     (fx_first * grad_proj).mean().backward()
@@ -161,7 +161,7 @@ def test_linear_serialization(
     if load_before_cuda:
         new_linear_custom2 = torch_load_from_buffer(bytes_8bit)
 
-    new_linear_custom = new_linear_custom.cuda()
+    new_linear_custom = new_linear_custom.to(device)
 
     if not deserialize_before_cuda:
         new_linear_custom.load_state_dict(new_state_dict, strict=True)
@@ -169,11 +169,11 @@ def test_linear_serialization(
     if not load_before_cuda:
         new_linear_custom2 = torch_load_from_buffer(bytes_8bit)
 
-    x_second = x.clone().cuda().requires_grad_(True)
+    x_second = x.clone().to(device).requires_grad_(True)
     fx_second = new_linear_custom(x_second).float()
     (fx_second * grad_proj).mean().backward()
 
-    x_third = x.clone().cuda().requires_grad_(True)
+    x_third = x.clone().to(device).requires_grad_(True)
     fx_third = new_linear_custom2(x_third).float()
     (fx_third * grad_proj).mean().backward()
 
@@ -201,7 +201,7 @@ def linear8bit(requires_cuda):
         has_fp16_weights=False,
     )
     linear_custom.bias = linear.bias
-    linear_custom = linear_custom.cuda()
+    linear_custom = linear_custom.to(device)
     return linear_custom
 
 
