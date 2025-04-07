@@ -60,7 +60,7 @@ def generate(model, tokenizer, text, generation_config, prompt_func=get_prompt_f
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
-models = ["huggyllama/llama-7b", "bigscience/bloom-1b7"]
+models = ["bigscience/bloom-1b7"]
 dtypes = ["nf4", "fp4"]
 
 

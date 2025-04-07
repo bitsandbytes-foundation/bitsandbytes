@@ -1,6 +1,7 @@
+from collections.abc import Sequence
 import ctypes as ct
 from math import prod
-from typing import Optional, Sequence, Tuple
+from typing import Optional
 
 import torch
 
@@ -78,10 +79,7 @@ def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor
             raise NotImplementedError("int8_linear_matmul not implemented!")
         else:
             raise RuntimeError(
-                f"cublasLt ran into an error!\n"
-                f"\t{shapeA=}, {shapeB=}, {shapeC=}\n"
-                f"\t{(lda, ldb, ldc)=}\n"
-                f"\t{(m, n, k)=}"
+                f"cublasLt ran into an error!\n\t{shapeA=}, {shapeB=}, {shapeC=}\n\t{(lda, ldb, ldc)=}\n\t{(m, n, k)=}"
             )
 
     return out
@@ -169,7 +167,7 @@ def _(A: torch.Tensor, threshold=0.0):
 def _(
     A: torch.Tensor,
     threshold=0.0,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     # Use CUDA kernel for rowwise and COO tensor
     quant_row, row_stats, outlier_cols = torch.ops.bitsandbytes.int8_vectorwise_quant.default(
         A,
@@ -188,7 +186,7 @@ def _(
 def _get_col_absmax(
     A: torch.Tensor,
     threshold=0.0,
-) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
     torch._check(A.is_floating_point())
 
     outlier_mask = None
@@ -207,7 +205,7 @@ def _get_col_absmax(
 
 
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
-def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor, torch.Tensor]:
+def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
@@ -292,7 +290,7 @@ def _dequantize_blockwise_impl(
 @register_kernel("bitsandbytes::quantize_4bit", "cuda")
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(

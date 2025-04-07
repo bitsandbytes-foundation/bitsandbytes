@@ -2,10 +2,11 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+from collections.abc import Iterable
 import ctypes as ct
 import itertools
 from math import prod
-from typing import Any, Dict, Iterable, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import torch
@@ -251,12 +252,6 @@ def fill(A, value, device=None, prefetch=True):
     elementwise_func("fill", A, None, value)
 
 
-@deprecated("Function will be removed in a future release.", category=FutureWarning)
-def arange(A, device=None):
-    elementwise_func("arange", A, None, 0)
-
-
-@deprecated("Function will be removed in a future release.", category=FutureWarning)
 def _mul(A, B, device=None):
     elementwise_func("_mul", A, B, 0)
 
@@ -407,6 +402,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     return torch.tensor(data, dtype=torch.float32)
 
 
+@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def create_quantile_map(A, total_bits=8):
     q = estimate_quantiles(A, num_quantiles=2**total_bits - 1)
     q = q.tolist()
@@ -480,17 +476,6 @@ def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
 
 
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def pre_call(device):
-    prev_device = torch.cuda.current_device()
-    torch.cuda.set_device(device)
-    return prev_device
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def post_call(prev_device):
-    torch.cuda.set_device(prev_device)
-
-
 def estimate_quantiles(
     A: Tensor,
     out: Optional[torch.Tensor] = None,
@@ -539,15 +524,16 @@ def estimate_quantiles(
 
     if out is None:
         out = torch.zeros((256,), dtype=torch.float32, device=A.device)
-    is_on_gpu([A, out])
-    device = pre_call(A.device)
-    if A.dtype == torch.float32:
-        lib.cestimate_quantiles_fp32(get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel()))
-    elif A.dtype == torch.float16:
-        lib.cestimate_quantiles_fp16(get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel()))
-    else:
-        raise NotImplementedError(f"Not supported data type {A.dtype}")
-    post_call(device)
+
+    with _cuda_device_of(A):
+        is_on_gpu([A, out])
+
+        if A.dtype == torch.float32:
+            lib.cestimate_quantiles_fp32(get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel()))
+        elif A.dtype == torch.float16:
+            lib.cestimate_quantiles_fp16(get_ptr(A), get_ptr(out), ct.c_float(offset), ct.c_int(A.numel()))
+        else:
+            raise NotImplementedError(f"Not supported data type {A.dtype}")
 
     if num_quantiles < 256:
         step = round(256 / num_quantiles)
@@ -619,7 +605,7 @@ class QuantState:
         return list_repr[idx]
 
     @classmethod
-    def from_dict(cls, qs_dict: Dict[str, Any], device: torch.device) -> "QuantState":
+    def from_dict(cls, qs_dict: dict[str, Any], device: torch.device) -> "QuantState":
         """
         unpacks components of state_dict into QuantState
         where necessary, convert into strings, torch.dtype, ints, etc.
@@ -741,7 +727,7 @@ def quantize_blockwise(
     out: Optional[torch.Tensor] = None,
     blocksize=4096,
     nested=False,
-) -> Tuple[torch.Tensor, QuantState]:
+) -> tuple[torch.Tensor, QuantState]:
     """Quantize a tensor in blocks of values.
 
     The input tensor is quantized by dividing it into blocks of `blocksize` values.
@@ -994,7 +980,7 @@ def quantize_4bit(
     compress_statistics=False,
     quant_type="fp4",
     quant_storage=torch.uint8,
-) -> Tuple[torch.Tensor, QuantState]:
+) -> tuple[torch.Tensor, QuantState]:
     """Quantize tensor A in blocks of 4-bit values.
 
     Quantizes tensor A by dividing it into blocks which are independently quantized.
@@ -1161,7 +1147,7 @@ def quantize(
     A: Tensor,
     code: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+) -> tuple[Tensor, tuple[Tensor, Tensor]]:
     if code is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
@@ -1179,7 +1165,7 @@ def quantize(
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def dequantize(
     A: Tensor,
-    state: Optional[Tuple[Tensor, Tensor]] = None,
+    state: Optional[tuple[Tensor, Tensor]] = None,
     absmax: Optional[torch.Tensor] = None,
     code: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
@@ -1219,12 +1205,12 @@ def quantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = No
     torch.Tensor:
         Quantized 8-bit tensor.
     """
-    prev_device = pre_call(A.device)
-    if out is None:
-        out = torch.zeros_like(A, dtype=torch.uint8)
-    is_on_gpu([A, out])
-    lib.cquantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
-    post_call(prev_device)
+    with _cuda_device_of(A):
+        if out is None:
+            out = torch.zeros_like(A, dtype=torch.uint8)
+        is_on_gpu([A, out])
+        lib.cquantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
+
     return out
 
 
@@ -1250,13 +1236,13 @@ def dequantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = 
     torch.Tensor:
         32-bit output tensor.
     """
-    prev_device = pre_call(A.device)
-    if out is None:
-        out = torch.zeros_like(A, dtype=torch.float32)
-    is_on_gpu([code, A, out])
-    stream = _get_tensor_stream(A)
-    lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()), stream)
-    post_call(prev_device)
+    with _cuda_device_of(A):
+        if out is None:
+            out = torch.zeros_like(A, dtype=torch.float32)
+        is_on_gpu([code, A, out])
+        stream = _get_tensor_stream(A)
+        lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()), stream)
+
     return out
 
 
@@ -1444,61 +1430,60 @@ def optimizer_update_8bit(
     if max_unorm > 0.0:
         param_norm = torch.norm(p.data.float())
 
-    prev_device = pre_call(g.device)
-    is_on_gpu([g, p, state1, state2, unorm_vec, qmap1, qmap2, max1, max2, new_max1, new_max2])
-    if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-        str2optimizer8bit[optimizer_name][0](
-            get_ptr(p),
-            get_ptr(g),
-            get_ptr(state1),
-            get_ptr(state2),
-            get_ptr(unorm_vec),
-            ct.c_float(max_unorm),
-            ct.c_float(param_norm),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(eps),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            get_ptr(qmap1),
-            get_ptr(qmap2),
-            get_ptr(max1),
-            get_ptr(max2),
-            get_ptr(new_max1),
-            get_ptr(new_max2),
-            ct.c_float(weight_decay),
-            ct.c_float(gnorm_scale),
-            ct.c_int32(g.numel()),
-        )
-    elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        str2optimizer8bit[optimizer_name][1](
-            get_ptr(p),
-            get_ptr(g),
-            get_ptr(state1),
-            get_ptr(state2),
-            get_ptr(unorm_vec),
-            ct.c_float(max_unorm),
-            ct.c_float(param_norm),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(eps),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            get_ptr(qmap1),
-            get_ptr(qmap2),
-            get_ptr(max1),
-            get_ptr(max2),
-            get_ptr(new_max1),
-            get_ptr(new_max2),
-            ct.c_float(weight_decay),
-            ct.c_float(gnorm_scale),
-            ct.c_int32(g.numel()),
-        )
-    else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
-    post_call(prev_device)
+    with _cuda_device_of(g):
+        is_on_gpu([g, p, state1, state2, unorm_vec, qmap1, qmap2, max1, max2, new_max1, new_max2])
+        if g.dtype == torch.float32 and state1.dtype == torch.uint8:
+            str2optimizer8bit[optimizer_name][0](
+                get_ptr(p),
+                get_ptr(g),
+                get_ptr(state1),
+                get_ptr(state2),
+                get_ptr(unorm_vec),
+                ct.c_float(max_unorm),
+                ct.c_float(param_norm),
+                ct.c_float(beta1),
+                ct.c_float(beta2),
+                ct.c_float(eps),
+                ct.c_int32(step),
+                ct.c_float(lr),
+                get_ptr(qmap1),
+                get_ptr(qmap2),
+                get_ptr(max1),
+                get_ptr(max2),
+                get_ptr(new_max1),
+                get_ptr(new_max2),
+                ct.c_float(weight_decay),
+                ct.c_float(gnorm_scale),
+                ct.c_int32(g.numel()),
+            )
+        elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
+            str2optimizer8bit[optimizer_name][1](
+                get_ptr(p),
+                get_ptr(g),
+                get_ptr(state1),
+                get_ptr(state2),
+                get_ptr(unorm_vec),
+                ct.c_float(max_unorm),
+                ct.c_float(param_norm),
+                ct.c_float(beta1),
+                ct.c_float(beta2),
+                ct.c_float(eps),
+                ct.c_int32(step),
+                ct.c_float(lr),
+                get_ptr(qmap1),
+                get_ptr(qmap2),
+                get_ptr(max1),
+                get_ptr(max2),
+                get_ptr(new_max1),
+                get_ptr(new_max2),
+                ct.c_float(weight_decay),
+                ct.c_float(gnorm_scale),
+                ct.c_int32(g.numel()),
+            )
+        else:
+            raise ValueError(
+                f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
+            )
 
 
 def optimizer_update_8bit_blockwise(
@@ -1577,25 +1562,24 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
         The current optimization steps (number of past gradient norms).
 
     """
-    prev_device = pre_call(grad.device)
-    is_on_gpu([grad, gnorm_vec])
-    if grad.dtype == torch.float32:
-        lib.cpercentile_clipping_g32(
-            get_ptr(grad),
-            get_ptr(gnorm_vec),
-            ct.c_int32(step),
-            ct.c_int32(grad.numel()),
-        )
-    elif grad.dtype == torch.float16:
-        lib.cpercentile_clipping_g16(
-            get_ptr(grad),
-            get_ptr(gnorm_vec),
-            ct.c_int32(step),
-            ct.c_int32(grad.numel()),
-        )
-    else:
-        raise ValueError(f"Gradient type {grad.dtype} not supported!")
-    post_call(prev_device)
+    with _cuda_device_of(grad):
+        is_on_gpu([grad, gnorm_vec])
+        if grad.dtype == torch.float32:
+            lib.cpercentile_clipping_g32(
+                get_ptr(grad),
+                get_ptr(gnorm_vec),
+                ct.c_int32(step),
+                ct.c_int32(grad.numel()),
+            )
+        elif grad.dtype == torch.float16:
+            lib.cpercentile_clipping_g16(
+                get_ptr(grad),
+                get_ptr(gnorm_vec),
+                ct.c_int32(step),
+                ct.c_int32(grad.numel()),
+            )
+        else:
+            raise ValueError(f"Gradient type {grad.dtype} not supported!")
 
     current_gnorm = torch.sqrt(gnorm_vec[step % 100])
     vals, idx = torch.sort(gnorm_vec)
@@ -2006,7 +1990,7 @@ def get_colrow_absmax(
     col_stats: Optional[torch.Tensor] = None,
     nnz_block_ptr: Optional[torch.Tensor] = None,
     threshold=0.0,
-) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """ "Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
 
     The row-wise and column-wise absmax values are determined.
@@ -2268,9 +2252,9 @@ def spmm_coo(
     out: Optional[torch.Tensor] = None,
 ):
     if not isinstance(cooA, COOSparseTensor):
-        assert (
-            cooA.is_sparse and cooA.layout == torch.sparse_coo
-        ), "Tensor must be `COOSparseTensor or a PyTorch COO tensor."
+        assert cooA.is_sparse and cooA.layout == torch.sparse_coo, (
+            "Tensor must be `COOSparseTensor or a PyTorch COO tensor."
+        )
 
         # Convert to custom COOSparseTensor
         cooA = COOSparseTensor(
@@ -2333,7 +2317,7 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     if out is None:
         out = torch.zeros((cooA.rows, B.shape[1]), device=B.device, dtype=cooA.values.dtype)
     nnz = cooA.nnz
-    prev_device = pre_call(B.device)
+
     assert cooA.rowidx.numel() == nnz
     assert cooA.colidx.numel() == nnz
     assert cooA.values.numel() == nnz
@@ -2370,43 +2354,43 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     cldb = ct.c_int32(ldb)
     cldc = ct.c_int32(ldc)
 
-    is_on_gpu([cooA.rowidx, cooA.colidx, cooA.values, B, out, dequant_stats])
-    if B.dtype == torch.float16:
-        lib.cspmm_coo_very_sparse_naive_fp16(
-            ptrMaxCount,
-            ptrMaxIdx,
-            ptrOffset,
-            ptrRowidx,
-            ptrColidx,
-            ptrValues,
-            ptrB,
-            ptrC,
-            ptrDequantStats,
-            cnnz_rows,
-            cnnz,
-            crowsA,
-            crowsB,
-            ccolsB,
-        )
-    elif B.dtype == torch.int8:
-        lib.cspmm_coo_very_sparse_naive_int8(
-            ptrMaxCount,
-            ptrMaxIdx,
-            ptrOffset,
-            ptrRowidx,
-            ptrColidx,
-            ptrValues,
-            ptrB,
-            ptrC,
-            ptrDequantStats,
-            cnnz_rows,
-            cnnz,
-            crowsA,
-            crowsB,
-            ccolsB,
-        )
-    # else: assertion error
-    post_call(prev_device)
+    with _cuda_device_of(B):
+        is_on_gpu([cooA.rowidx, cooA.colidx, cooA.values, B, out, dequant_stats])
+        if B.dtype == torch.float16:
+            lib.cspmm_coo_very_sparse_naive_fp16(
+                ptrMaxCount,
+                ptrMaxIdx,
+                ptrOffset,
+                ptrRowidx,
+                ptrColidx,
+                ptrValues,
+                ptrB,
+                ptrC,
+                ptrDequantStats,
+                cnnz_rows,
+                cnnz,
+                crowsA,
+                crowsB,
+                ccolsB,
+            )
+        elif B.dtype == torch.int8:
+            lib.cspmm_coo_very_sparse_naive_int8(
+                ptrMaxCount,
+                ptrMaxIdx,
+                ptrOffset,
+                ptrRowidx,
+                ptrColidx,
+                ptrValues,
+                ptrB,
+                ptrC,
+                ptrDequantStats,
+                cnnz_rows,
+                cnnz,
+                crowsA,
+                crowsB,
+                ccolsB,
+            )
+        # else: assertion error
 
     return out
 
@@ -2459,18 +2443,6 @@ def vectorwise_quant(x, dim=1, quant_type="vector"):
             x[idx] = max1.expand_as(absx)[idx] * sign
             xq = torch.round(x / max1 * C).to(torch.int8)
         return xq, max1
-    else:
-        return None
-
-
-@deprecated(
-    "This function is deprecated and will be removed in a future release.",
-    category=FutureWarning,
-)
-def vectorwise_dequant(xq, max1, quant_type="vector"):
-    if quant_type == "vector":
-        x = (xq / C * max1).to(torch.float32)
-        return x
     else:
         return None
 

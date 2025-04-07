@@ -1,11 +1,22 @@
 import gc
+import random
 
+import numpy as np
 import pytest
 import torch
 
 
+def _set_seed():
+    torch.manual_seed(0)
+    torch.cuda.manual_seed_all(0)
+    torch.mps.manual_seed(0)
+    np.random.seed(0)
+    random.seed(0)
+
+
 def pytest_runtest_call(item):
     try:
+        _set_seed()
         item.runtest()
     except AssertionError as ae:
         if str(ae) == "Torch not compiled with CUDA enabled":

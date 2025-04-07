@@ -1,7 +1,7 @@
+from collections.abc import Iterable, Iterator
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Iterable, Iterator
 
 import torch
 
@@ -76,7 +76,7 @@ def is_relevant_candidate_env_var(env_var: str, value: str) -> bool:
     )
 
 
-def get_potentially_lib_path_containing_env_vars() -> Dict[str, str]:
+def get_potentially_lib_path_containing_env_vars() -> dict[str, str]:
     return {env_var: value for env_var, value in os.environ.items() if is_relevant_candidate_env_var(env_var, value)}
 
 

@@ -1,5 +1,6 @@
+from collections.abc import Sequence
 from math import prod
-from typing import Optional, Sequence, Tuple
+from typing import Optional
 
 import torch
 
@@ -131,7 +132,7 @@ torch.library.define(
 def _(
     A: torch.Tensor,
     threshold=0.0,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     out_row = torch.empty_like(A, dtype=torch.int8)
     out_col = torch.empty_like(A, dtype=torch.int8)
     row_stats = torch.empty(prod(A.shape[:-1]), device=A.device, dtype=torch.float32)
@@ -191,7 +192,7 @@ torch.library.define(
 @register_fake("bitsandbytes::quantize_4bit")
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
 
     n = A.numel()
@@ -235,7 +236,7 @@ torch.library.define("bitsandbytes::quantize_blockwise", "(Tensor A, Tensor code
 
 
 @register_fake("bitsandbytes::quantize_blockwise")
-def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> Tuple[torch.Tensor, torch.Tensor]:
+def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
     n = A.numel()
     blocks = -(n // -blocksize)

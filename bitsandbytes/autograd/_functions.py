@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from math import prod
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 import warnings
 from warnings import warn
 
@@ -55,7 +55,7 @@ class GlobalOutlierPooler:
 )
 def get_inverse_transform_indices(
     transform_tile: Callable[[torch.Tensor], torch.Tensor],
-    tile_size: Tuple[int, int],
+    tile_size: tuple[int, int],
 ):
     """
     Compute a permutation of indices that invert the specified (tiled) matrix transformation
@@ -82,6 +82,13 @@ def get_inverse_transform_indices(
         if d1 * d2 < 256**i:
             break  # if all indices fit in i bytes, stop early
     return permuted_tile_indices
+
+
+# torch.compiler.is_compiling() is available only in torch >= 2.3
+if hasattr(torch.compiler, "is_compiling"):
+    _is_compiling = torch.compiler.is_compiling
+else:
+    _is_compiling = torch._dynamo.is_compiling
 
 
 @deprecated(
@@ -174,7 +181,7 @@ class MatMul8bitLt(torch.autograd.Function):
         input_shape = A.shape
 
         # Cast A to fp16
-        if A.dtype != torch.float16:
+        if A.dtype != torch.float16 and not _is_compiling():
             warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
 
         if len(A.shape) == 3:
