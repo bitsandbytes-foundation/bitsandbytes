@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import ctypes as ct
 from typing import Optional
 
@@ -119,6 +120,10 @@ def _(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
     torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
+    torch._check(
+        A.dtype in [torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
+    )
 
     n = A.numel()
 
@@ -140,3 +145,39 @@ def _(
         packed = packed.squeeze().view(quant_storage).unsqueeze(1)
 
     return packed, absmax.float()
+
+
+@register_kernel("bitsandbytes::dequantize_4bit", "cpu")
+def _(
+    A: torch.Tensor,
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
+    torch._check(
+        dtype in [torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
+    )
+    torch._check(
+        A.dtype == torch.uint8,
+        lambda: f"Blockwise 4bit dequantization on CPU only supports uint8 storage, got {A.dtype}",
+    )
+
+    # Grab upper and lower nibbles. Using int64 for indexing in the LUT.
+    upper = (A >> 4).to(torch.int64)
+    lower = (A & 0x0F).to(torch.int64)
+
+    # Expand to blocks
+    blocks = torch.cat((upper, lower), dim=1).reshape(-1, blocksize)
+
+    # Dequantize
+    blocks = _NF4_QUANT_TABLE[blocks] * absmax[:, None]
+
+    # Reshape to original shape
+    blocks = blocks.reshape(-1, *shape[1:])
+
+    return blocks.to(dtype)
