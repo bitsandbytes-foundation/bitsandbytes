@@ -171,7 +171,11 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_dequantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "cpu":
-            pytest.skip("CPU implementation is not available")
+            if quant_type != "nf4":
+                pytest.skip("CPU implementation is only available for nf4")
+
+            if storage_dtype != torch.uint8:
+                pytest.skip("CPU implementation only supports uint8 storage")
 
         shape = (128, 128)
 
