@@ -30,12 +30,15 @@ jobs:
   build-shared-libs:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        os:
+          - ubuntu-22.04  # if you change this, also change the pattern in the build-wheels job to reflect this!
+          - macos-latest
+          - windows-latest
         arch: [x86_64, aarch64]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
-          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+          - os: ubuntu-22.04 # Temporary. Takes too long, not ready yet.
             arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
@@ -61,14 +64,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os:
+          # NOTE: The CUDA Docker image is hard-coded in the build script, so the Ubuntu version here only affects the runner, not the build environment:
+          - ubuntu-22.04
+          - windows-latest
         arch: [x86_64, aarch64]
         cuda_version:
           ["11.7.1", "11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1"]
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
-          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+          - os: ubuntu-22.04 # Temporary. Takes too long, not ready yet.
             arch: aarch64
     runs-on: ${{ matrix.os }} # One day, we could run them on native agents. Azure supports this now but it's planned only for Q3 2023 for hosted agents
     steps:
@@ -109,7 +115,10 @@ jobs:
       - build-shared-libs-cuda
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os:
+          - ubuntu-22.04
+          - macos-latest
+          - windows-latest
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
         # code. This ensures compatibility across Python versions, including Python 3.9, as compatibility is
         # dictated by the packaged code itself, not the Python version used for packaging.
@@ -118,7 +127,7 @@ jobs:
         exclude:
           - os: windows-latest # This probably requires arm64 Windows agents
             arch: aarch64
-          - os: ubuntu-latest # Temporary. Takes too long, not ready yet.
+          - os: ubuntu-22.04 # Temporary. Takes too long, not ready yet.
             arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
