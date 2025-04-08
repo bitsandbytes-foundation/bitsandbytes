@@ -63,11 +63,12 @@ def test_linear_no_igemmlt():
     ).to(linear.weight.dtype)
     linear_custom.bias = linear.bias
     linear_custom = linear_custom.to(device)
-    linear = linear.half().to(device)
+    # linear = linear.half().to(device)
+    linear = linear.to(device)
 
     x_ref = x.clone().to(device).requires_grad_(True)
     x_ours = x.clone().to(device).requires_grad_(True)
-    fx_ref = linear(x_ref).float()
+    fx_ref = linear(x_ref.float()).float()
     grad_proj = torch.randn_like(fx_ref)
     (fx_ref * grad_proj).mean().backward()
 

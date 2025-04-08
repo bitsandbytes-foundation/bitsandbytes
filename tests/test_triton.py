@@ -24,7 +24,7 @@ def test_switchback(vector_wise_quantization):
             switchback = (
                 SwitchBackLinear(dim, 4 * dim, vector_wise_quantization=vector_wise_quantization).to(device).half()
             )
-            baseline = Linear8bitLt(dim, 4 * dim)
+            baseline = Linear8bitLt(dim, 4 * dim, has_fp16_weights=False)
             baseline = baseline.to(device).half()
             switchback.weight.data.copy_(standard.weight)
             switchback.bias.data.copy_(standard.bias)
@@ -48,6 +48,9 @@ def test_switchback(vector_wise_quantization):
             err_sb = (out_standard - out_sb).abs().mean()
             err_baseline = (out_standard - out_baseline).abs().mean()
             print("OUT", err_sb, err_baseline)
+            import pdb
+            
+            pdb.set_trace()
             assert err_sb < 2 * err_baseline
 
             err_sb = (standard.bias.grad - switchback.bias.grad).abs().mean()

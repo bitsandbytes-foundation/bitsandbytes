@@ -196,7 +196,7 @@ def int8_linear_matmul_impl(
 
     # torch._int_mm is available on CPU since torch 2.4, XPU since torch 2.6
     if (A.device.type == "cpu" and _torch_version_prereq(2, 4)) or (
-        A.device.type == "xpu" and _torch_version_prereq(2, 6)
+        A.device.type == "xpu" and _torch_version_prereq(2, 6) and False
     ):
         C = torch._int_mm(A_reshaped, B.T).to(dtype)
     else:
