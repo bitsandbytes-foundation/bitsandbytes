@@ -344,6 +344,49 @@ class Params4bit(torch.nn.Parameter):
 
             return new_param
 
+    def __tensor_flatten__(self):
+        """Return data tensor and non-tensor context"""
+        ctx = {
+            "quant_state": self.quant_state,
+            "blocksize": self.blocksize,
+            "compress_statistics": self.compress_statistics,
+            "quant_type": self.quant_type,
+            "quant_storage": self.quant_storage,
+            "module": self.module,
+            "bnb_quantized": self.bnb_quantized,
+        }
+        return ["data"], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+        """Reconstruct Params4bit from components"""
+        data = inner_tensors["data"]
+        return Params4bit(
+            data,
+            requires_grad=data.requires_grad,
+            quant_state=ctx["quant_state"],
+            blocksize=ctx["blocksize"],
+            compress_statistics=ctx["compress_statistics"],
+            quant_type=ctx["quant_type"],
+            quant_storage=ctx["quant_storage"],
+            module=ctx["module"],
+            bnb_quantized=ctx["bnb_quantized"],
+        )
+
+    def detach(self):
+        """Create new instance preserving quantization state"""
+        return type(self)(
+            self.data.detach(),
+            requires_grad=self.requires_grad,
+            quant_state=self.quant_state,
+            blocksize=self.blocksize,
+            compress_statistics=self.compress_statistics,
+            quant_type=self.quant_type,
+            quant_storage=self.quant_storage,
+            module=self.module,
+            bnb_quantized=self.bnb_quantized,
+        )
+
 
 def fix_4bit_weight_quant_state_from_module(module: Union["Embedding4bit", "Linear4bit"]):
     if getattr(module.weight, "quant_state", None) is not None:
@@ -480,7 +523,7 @@ class Linear4bit(nn.Linear):
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
 
-        return bnb.matmul_4bit(x, self.weight.data, bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
+        return bnb.matmul_4bit(x, self.weight, bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):
