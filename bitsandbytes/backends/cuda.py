@@ -97,6 +97,9 @@ if lib and lib.compiled_with_cuda:
 
 
 class CUDABackend(Backend):
+    def device_synchronize(self):
+        torch.cuda.synchronize()
+
     def transform(
         self,
         A: torch.Tensor,

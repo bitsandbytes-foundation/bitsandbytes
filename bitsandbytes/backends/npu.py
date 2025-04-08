@@ -29,6 +29,9 @@ def assert_on_npu(tensors):
 
 
 class NPUBackend(Backend):
+    def device_synchronize(self):
+        torch.npu.synchronize()
+
     def int8_double_quant(
         self,
         A: torch.Tensor,
