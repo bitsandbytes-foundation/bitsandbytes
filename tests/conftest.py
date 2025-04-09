@@ -23,6 +23,7 @@ def pytest_runtest_teardown(item, nextitem):
 
 @pytest.fixture(scope="session")
 def requires_cuda() -> bool:
+    return True
     cuda_available = torch.cuda.is_available()
     if not cuda_available:
         pytest.skip("CUDA is required")

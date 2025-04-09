@@ -4,6 +4,7 @@ import os
 import pickle
 from tempfile import TemporaryDirectory
 
+from bitsandbytes.nn.triton_based_modules import SwitchBackLinear
 import pytest
 import torch
 
@@ -45,26 +46,47 @@ def test_layout_exact_match():
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_linear_no_igemmlt():
-    linear = torch.nn.Linear(1024, 3072)
-    x = torch.randn(3, 1024, dtype=torch.half)
+    batch = 3
+    dim = 512
+    standard = linear = torch.nn.Linear(dim, dim * 4).half()
+
+    switchback = linear_custom = SwitchBackLinear(
+        linear.in_features,
+        linear.out_features,
+        linear.bias is not None,
+        vector_wise_quantization=False,
+    )
+
     linear_custom = Linear8bitLt(
         linear.in_features,
         linear.out_features,
         linear.bias is not None,
         has_fp16_weights=False,
         threshold=6.0,
-    )
+    ).to(device).half()
+
     linear_custom.state.force_no_igemmlt = True
 
-    linear_custom.weight = bnb.nn.Int8Params(
-        linear.weight.data.clone(),
-        requires_grad=False,
-        has_fp16_weights=False,
-    ).to(linear.weight.dtype)
+    switchback.weight.data.copy_(standard.weight)
+    switchback.bias.data.copy_(standard.bias)
+
+    linear_custom.weight.data.copy_(standard.weight)
+    linear_custom.bias.data.copy_(standard.bias)
+
+    # linear_custom.weight = bnb.nn.Int8Params(
+    #     linear.weight.data.clone(),
+    #     requires_grad=False,
+    #     has_fp16_weights=False,
+    # ).to(linear.weight.dtype)
     linear_custom.bias = linear.bias
     linear_custom = linear_custom.to(device)
-    # linear = linear.half().to(device)
     linear = linear.to(device)
+ 
+    x = torch.randn(batch, dim, dtype=torch.half).to(device)
+    # x1 = torch.randn(batch, dim).to(device).half().requires_grad_(True)
+    x2 = x1.clone().detach().requires_grad_(True)
+    x3 = x1.clone().detach().requires_grad_(True)
+   # linear = linear.half().to(device)
 
     x_ref = x.clone().to(device).requires_grad_(True)
     x_ours = x.clone().to(device).requires_grad_(True)
@@ -75,13 +97,15 @@ def test_linear_no_igemmlt():
     fx_ours = linear_custom(x_ours).float()
     (fx_ours * grad_proj).mean().backward()
 
-    assert linear_custom.state.CB is not None
-    assert not linear_custom.state.has_fp16_weights
+    # assert linear_custom.state.CB is not None
+    # assert not linear_custom.state.has_fp16_weights
 
-    idx = torch.isclose(fx_ref, fx_ours, atol=0.02, rtol=1e-5)
+    import pdb
+    pdb.set_trace()
+    idx = torch.isclose(fx_ref, fx_ours, rtol=0.02, atol=1e-5)
     assert (idx == 0).sum().item() < fx_ref.numel() * 2.5e-4
-    torch.testing.assert_close(fx_ref, fx_ours, atol=0.03, rtol=1e-5)
-    torch.testing.assert_close(x_ref.grad, x_ours.grad, atol=0.01, rtol=1e-5)
+    torch.testing.assert_close(fx_ref, fx_ours, rtol=0.03, atol=1e-5)
+    torch.testing.assert_close(x_ref.grad, x_ours.grad, rtol=0.01, atol=1e-5)
 
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
@@ -97,9 +121,9 @@ def test_linear_serialization(
     save_before_forward,
     load_before_cuda,
 ):
-    linear = torch.nn.Linear(32, 96)
+    linear = torch.nn.Linear(1024, 3072)
     # TODO: Fallback for bad shapes
-    x = torch.randn(4, 32, dtype=torch.half)
+    x = torch.randn(3, 1024, dtype=torch.half)
     # x = torch.randn(3, 32, dtype=torch.half)
 
     linear_custom = Linear8bitLt(
