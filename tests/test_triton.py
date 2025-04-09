@@ -16,7 +16,7 @@ device = "xpu"
     reason="This test requires triton and a GPU with compute capability 8.0 or higher.",
 )
 @pytest.mark.parametrize("vector_wise_quantization", TRUE_FALSE)
-def test_switchback(vector_wise_quantization):
+def test_switchback(vector_wise_quantization, device):
     for dim in [512]:
         for batch in [13]:
             # send to device
@@ -79,7 +79,7 @@ def test_switchback(vector_wise_quantization):
     reason="This test requires triton and a GPU with compute capability 8.0 or higher.",
 )
 @pytest.mark.parametrize("vector_wise_quantization", TRUE_FALSE)
-def test_baseline(vector_wise_quantization):
+def test_baseline(vector_wise_quantization, device):
     for dim in [512]:
         for batch in [13]:
             # send to device

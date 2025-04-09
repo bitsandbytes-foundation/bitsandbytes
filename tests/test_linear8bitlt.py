@@ -23,14 +23,13 @@ from tests.helpers import (
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
 
-device = 'xpu'
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.skipif(
     not torch.cuda.is_available() or torch.cuda.get_device_capability() < (7, 5),
     reason="this test requires a turing-generation or newer GPU, see bitsandbytes docs",
 )
-def test_layout_exact_match():
+def test_layout_exact_match(device):
     x = (torch.randn(14336 * 3, 14336) * 10).to(torch.int8).to(device)
     for tile_size, order in ((8, 32), "col_turing"), ((32, 32), "col_ampere"):
         transform = lambda x: F.transform(x.to(device), from_order="row", to_order=order)[0].to(x.device)
@@ -45,7 +44,7 @@ def test_layout_exact_match():
 
 
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
-def test_linear_no_igemmlt():
+def test_linear_no_igemmlt(device):
     batch = 3
     dim = 512
     standard = linear = torch.nn.Linear(dim, dim * 4).half()
@@ -83,7 +82,7 @@ def test_linear_no_igemmlt():
     linear = linear.to(device)
  
     x = torch.randn(batch, dim, dtype=torch.half).to(device)
-    # x1 = torch.randn(batch, dim).to(device).half().requires_grad_(True)
+    x1 = torch.randn(batch, dim).to(device).half().requires_grad_(True)
     x2 = x1.clone().detach().requires_grad_(True)
     x3 = x1.clone().detach().requires_grad_(True)
    # linear = linear.half().to(device)
@@ -120,6 +119,7 @@ def test_linear_serialization(
     deserialize_before_cuda,
     save_before_forward,
     load_before_cuda,
+    device,
 ):
     linear = torch.nn.Linear(1024, 3072)
     # TODO: Fallback for bad shapes
@@ -211,7 +211,7 @@ def test_linear_serialization(
 
 
 @pytest.fixture
-def linear8bit(requires_cuda):
+def linear8bit(requires_cuda, device):
     linear = torch.nn.Linear(32, 96)
     linear_custom = Linear8bitLt(
         linear.in_features,

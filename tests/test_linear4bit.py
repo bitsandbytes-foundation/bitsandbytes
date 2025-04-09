@@ -22,10 +22,9 @@ storage = {
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE)
-def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage, save_before_forward):
+def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage, save_before_forward, device):
     original_dtype = torch.float16
     compute_dtype = None
-    device = "cuda"
     layer_shape = (300, 400)
 
     linear = torch.nn.Linear(*layer_shape, dtype=original_dtype, device="cpu")  # original layer
@@ -174,18 +173,18 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         assert size_ratio < target_compression, ratio_error_msg
 
 
-def test_copy_param():
+def test_copy_param(device):
     tensor = torch.tensor([1.0, 2.0, 3.0, 4.0])
-    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).cuda(0)
+    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).to(device)
 
     shallow_copy_param = copy.copy(param)
     assert param.quant_state is shallow_copy_param.quant_state
     assert param.data.data_ptr() == shallow_copy_param.data.data_ptr()
 
 
-def test_deepcopy_param():
+def test_deepcopy_param(device):
     tensor = torch.tensor([1.0, 2.0, 3.0, 4.0])
-    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).cuda(0)
+    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).to(device)
     dict_keys_before = set(param.__dict__.keys())
     copy_param = copy.deepcopy(param)
     dict_keys_after = set(param.__dict__.keys())
@@ -199,12 +198,12 @@ def test_deepcopy_param():
     assert dict_keys_before == dict_keys_copy
 
 
-def test_params4bit_real_serialization():
+def test_params4bit_real_serialization(device):
     original_tensor = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
     original_param = bnb.nn.Params4bit(data=original_tensor, quant_type="fp4")
     dict_keys_before = set(original_param.__dict__.keys())
 
-    original_param.cuda(0)  # move to CUDA to trigger quantization
+    original_param.to(device)  # move to CUDA to trigger quantization
 
     serialized_param = pickle.dumps(original_param)
     deserialized_param = pickle.loads(serialized_param)

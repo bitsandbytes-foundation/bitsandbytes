@@ -24,8 +24,8 @@ from tests.helpers import (
 torch.set_printoptions(precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000)
 k = 20
 
-SKIPT_4BIT_TESTS = True
-SKIPT_NONMUTLI_BACKEND = True
+SKIP_4BIT_TESTS = True
+SKIP_NONMUTLI_BACKEND = True
 
 def assert_all_approx_close(a, b, rtol=1e-3, atol=1e-3, count=0, throw=True):
     idx = torch.isclose(a, b, rtol=rtol, atol=atol)
@@ -101,9 +101,9 @@ def teardown():
 
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=["float", "half"])
-def test_estimate_quantiles(dtype):
+def test_estimate_quantiles(dtype, device):
     A = torch.rand(1024, 1024, device=device)
     A = A.to(dtype)
     code = F.estimate_quantiles(A)
@@ -120,12 +120,12 @@ def test_estimate_quantiles(dtype):
     assert (diff > 5e-02).sum().item() == 0
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
 @pytest.mark.parametrize("blocksize", get_blocksizes(HIP_ENVIRONMENT))
 @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
-def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed):
+def test_dynamic_blockwise_quantization(dtype, nested, blocksize, signed, device):
     diffs = []
     reldiffs = []
     for i in range(100):
@@ -226,12 +226,12 @@ methods = {
 }
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("dim1", [1024 * 2], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1024 * 16], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("quant_methods", methods.values(), ids=methods.keys())
 @pytest.mark.parametrize("batched", TRUE_FALSE, ids=id_formatter("batched"))
-def test_approx_igemm(dim1, dim2, quant_methods, batched):
+def test_approx_igemm(dim1, dim2, quant_methods, batched, device):
     dim1 = dim1 - (dim1 % 32)
     dim2 = dim2 - (dim2 % 32)
     errors = []
@@ -272,12 +272,12 @@ def test_stable_embedding():
     layer.reset_parameters()
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("hidden_dim", get_test_dims(32, 256, n=2), ids=id_formatter("hidden_dim"))
 @pytest.mark.parametrize("batch_dim", get_test_dims(16, 256, n=2), ids=id_formatter("batch_dim"))
 @pytest.mark.parametrize("seq_dim", get_test_dims(16, 256, n=2), ids=id_formatter("seq_dim"))
 @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
-def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
+def test_igemm(hidden_dim, batch_dim, transpose, seq_dim, device):
     hidden_dim = hidden_dim - (hidden_dim % 32)
     batch_dim = batch_dim - (batch_dim % 16)
     seq_dim = seq_dim - (seq_dim % 16)
@@ -316,11 +316,11 @@ def test_igemm(hidden_dim, batch_dim, transpose, seq_dim):
         torch.testing.assert_close(out.float(), out2)
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("seq_dim", get_test_dims(32, 512, n=3), ids=id_formatter("seq_dim"))
 @pytest.mark.parametrize("hidden_dim", get_test_dims(32, 1024 * 4, n=3), ids=id_formatter("hidden_dim"))
 @pytest.mark.parametrize("batch_dim", get_test_dims(2, 16, n=3), ids=id_formatter("batch_dim"))
-def test_dim3_igemm(seq_dim, hidden_dim, batch_dim):
+def test_dim3_igemm(seq_dim, hidden_dim, batch_dim, device):
     seq_dim = seq_dim - (seq_dim % 32)
     hidden_dim = hidden_dim - (hidden_dim % 32)
     batch_dim = batch_dim - (batch_dim % 2)
@@ -334,7 +334,7 @@ def test_dim3_igemm(seq_dim, hidden_dim, batch_dim):
         torch.testing.assert_close(out.float(), out2)
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("seq_dim", get_test_dims(32, 512, n=2), ids=id_formatter("seq_dim"))
 @pytest.mark.parametrize("hidden_dim", get_test_dims(32, 1024 * 4, n=2), ids=id_formatter("hidden_dim"))
 @pytest.mark.parametrize("batch_dim", get_test_dims(2, 16, n=2), ids=id_formatter("batch_dim"))
@@ -406,13 +406,13 @@ def test_minmax_igemm(seq_dim, hidden_dim, batch_dim, transpose):
     assert mean(relerrs) < 0.3
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=2), ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dim4", get_test_dims(32, 256, n=2), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
-def test_ibmm(dim1, dim2, dim3, dim4, transpose):
+def test_ibmm(dim1, dim2, dim3, dim4, transpose, device):
     dim2 = dim2 - (dim2 % 16)
     dim3 = dim3 - (dim3 % 16)
     dim4 = dim4 - (dim4 % 16)
@@ -436,16 +436,19 @@ def test_ibmm(dim1, dim2, dim3, dim4, transpose):
             out = F.igemm(A.permute([0, 2, 1]), B.permute([0, 2, 1]))
         torch.testing.assert_close(out.float(), out2.float())
 
-device = 'xpu'
 
+# TODO: how to pass our fixture
 @pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", [499, 512], ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dim4", [512], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2, 3), ids=id_formatter("dims"))
 @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
-@pytest.mark.parametrize("device", (device, 'cpu'), ids=id_formatter("device"))
-def test_int8_linear_matmul(dim1, dim2, dim3, dim4, dims, ldb, device):
+@pytest.mark.parametrize("compute_device", ('gpu', 'cpu'), ids=id_formatter("compute_device"))
+def test_int8_linear_matmul(dim1, dim2, dim3, dim4, dims, ldb, device, compute_device):
+    if compute_device == "cpu":
+        device = "cpu"
+
     if HIP_ENVIRONMENT and device == "cpu":
         pytest.skip("this test is not supported on ROCm yet")
 
@@ -460,7 +463,6 @@ def test_int8_linear_matmul(dim1, dim2, dim3, dim4, dims, ldb, device):
         C2 = F.int8_linear_matmul(A, B)
         torch.testing.assert_close(C1, C2.float())
 
-    
 
 
 @pytest.mark.parametrize("dim1", [32], ids=id_formatter("dim1"))
@@ -468,7 +470,7 @@ def test_int8_linear_matmul(dim1, dim2, dim3, dim4, dims, ldb, device):
 @pytest.mark.parametrize("dim3", [32], ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dim4", [32], ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-def test_int8_linear_matmul_half(dim1, dim2, dim3, dim4, dims):
+def test_int8_linear_matmul_half(dim1, dim2, dim3, dim4, dims, device):
     for i in range(k):
         if dims == 2:
             A = torch.normal(0, 0.5, size=(dim1, dim3), device=device).half()
@@ -493,7 +495,7 @@ def test_int8_linear_matmul_half(dim1, dim2, dim3, dim4, dims):
 @pytest.mark.parametrize("dim4", (64, 1024), ids=id_formatter("dim4"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
-def test_dequant_mm(dim1, dim4, dims, has_bias):
+def test_dequant_mm(dim1, dim4, dims, has_bias, device):
     inner = 128
     bias = None
     if has_bias:
@@ -559,12 +561,12 @@ def test_dequant_mm_cpu(dim1, dim4, dims, has_bias):
         torch.testing.assert_close(C3.float(), C4.float(), atol=0.05, rtol=0.1)
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("dim1", [1 * 1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1 * 1024], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
 @pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("decomp"))
-def test_colrow_absmax(dim1, dim2, dims, threshold):
+def test_colrow_absmax(dim1, dim2, dims, threshold, device):
     for i in range(k):
         A = torch.randn(dim1, dim2, device=device).half()
 
@@ -601,10 +603,12 @@ def test_colrow_absmax(dim1, dim2, dims, threshold):
 
 @pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("device", [device, "cpu"], ids=id_formatter("device"))
+@pytest.mark.parametrize("compute_device", ["gpu", "cpu"], ids=id_formatter("compute_device"))
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
-def test_int8_double_quant(dim1, dim2, device, dtype):
-    if device == "cuda" and dtype == torch.bfloat16:
+def test_int8_double_quant(dim1, dim2, dtype, compute_device, device):
+    if compute_device == "cpu":
+        device = "cpu"
+    if device == "cpu" and dtype == torch.bfloat16:
         pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
 
     for i in range(k):
@@ -647,7 +651,7 @@ def test_int8_double_quant(dim1, dim2, device, dtype):
         )
     ),
 )
-def test_integrated_int8_linear_matmul(dim1, dim4, inner):
+def test_integrated_int8_linear_matmul(dim1, dim4, inner, device):
     for i in range(k):
         A = torch.randn(dim1, inner, device=device).half()
         B = torch.randn(dim4, inner, device=device).half()
@@ -687,7 +691,7 @@ def test_integrated_int8_linear_matmul(dim1, dim4, inner):
     ),
 )
 @pytest.mark.skip("Row scale has some bugs for ampere")
-def test_igemmlt_row_scale(dim1, dim4, inner):
+def test_igemmlt_row_scale(dim1, dim4, inner, device):
     formatB = F.get_special_format_str()
     err1, err2, err3 = [], [], []
     relerr1, relerr2 = [], []
@@ -751,7 +755,7 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
     print(sum(err3) / len(err3))
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("dim1", get_test_dims(2, 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(2, 1024, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", [0], ids=id_formatter("dim3"))
@@ -761,7 +765,7 @@ def test_igemmlt_row_scale(dim1, dim4, inner):
 @pytest.mark.parametrize("orderOut", ["col32", "col_turing", "col_ampere"], ids=id_formatter("orderOut"))
 @pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
 @pytest.mark.deprecated
-def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose):
+def test_transform(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpose, device):
     for i in range(k):
         if dims == 2:
             A = torch.randint(10, 99, size=(dim1, dim2), device=device).to(dtype)
@@ -815,9 +819,12 @@ def test_transform_cpu(dim1, dim2, dim3, dims, dtype, orderA, orderOut, transpos
 
 @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("device", [device, "cpu"], ids=id_formatter("device"))
+@pytest.mark.parametrize("compute_device", ["gpu", "cpu"], ids=id_formatter("compute_device"))
 @pytest.mark.parametrize("dtype", [torch.half, torch.bfloat16], ids=id_formatter("dtype"))
-def test_coo_int8_vectorwise_quant(dim1, dim2, device, dtype):
+def test_coo_int8_vectorwise_quant(dim1, dim2, compute_device, dtype, device):
+    if compute_device == "cpu":
+        device = "cpu"
+
     if device == "cuda" and dtype == torch.bfloat16:
         pytest.skip("bfloat16 is not implemented for this operation on CUDA backend")
     threshold = 2.00
@@ -837,12 +844,12 @@ def test_coo_int8_vectorwise_quant(dim1, dim2, device, dtype):
             torch.testing.assert_close(A, A2, rtol=0.05, atol=1.5e-2)
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(1, 1 * 1024, n=2), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("transposed_B", TRUE_FALSE, ids=id_formatter("transposed_B"))
-def test_spmm_coo(dim1, dim2, transposed_B):
+def test_spmm_coo(dim1, dim2, transposed_B, device):
     threshold = 1.5
     dim3 = torch.randint(32, 128, size=(1,)).item()
     # dim3 = 17
@@ -870,10 +877,10 @@ def test_spmm_coo(dim1, dim2, transposed_B):
         assert_all_approx_close(out1, out2, rtol=0.01, atol=3.0e-2, count=30)
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.benchmark
-def test_spmm_bench():
+def test_spmm_bench(device):
     batch = 2
     model = 1024 * 1
     hidden = model * 4
@@ -914,11 +921,11 @@ def test_spmm_bench():
     print(tsp / t8)
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [256, 1024], ids=id_formatter("dim2"))
-def test_integrated_sparse_decomp(dim1, dim2):
+def test_integrated_sparse_decomp(dim1, dim2, device):
     threshold = 3.0
     for _ in range(k):
         A = torch.randn(dim1, dim2).to(device).half()
@@ -950,12 +957,13 @@ def test_integrated_sparse_decomp(dim1, dim2):
 
 
 # @pytest.mark.skipif(MUTLI_BACKEND, reason="Not part of multi-backend functionality")
-def test_matmuls():
+def test_matmuls(device):
     a = torch.randn(256, 512).half().to(device)
     b = torch.randn(256, 512).half().to(device)
     c1 = torch.matmul(a, b.t())
     c2 = bnb.matmul(a, b)
-    # c3 = bnb.matmul_cublas(a, b.t())
+    if device == "cuda":
+        c3 = bnb.matmul_cublas(a, b.t())
 
     err1 = torch.abs(c1 - c2).mean().item()
     # err2 = torch.abs(c1 - c3).mean().item()
@@ -964,12 +972,12 @@ def test_matmuls():
     # print(err1, err2)
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("dim1", [1 * 2048], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [12288], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dtype", [torch.float16], ids=describe_dtype)
 @pytest.mark.parametrize("out_func", ["zeros", "ones"], ids=id_formatter("out_func"))
-def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
+def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func, device):
     out_func = getattr(torch, out_func)
 
     threshold = 3.3
@@ -1026,7 +1034,7 @@ def test_spmm_coo_very_sparse(dim1, dim2, dtype, out_func):
     # print(time.time() - t0)
 
 
-def test_coo2csr():
+def test_coo2csr(device):
     threshold = 1
     A = torch.randn(128, 128).half().to(device)
     idx = torch.abs(A) >= threshold
@@ -1044,7 +1052,7 @@ def test_coo2csr():
     torch.testing.assert_close(A2[idx], csrA.values)
 
 
-def test_coo2csc():
+def test_coo2csc(device):
     threshold = 1
     A = torch.randn(128, 128).half().to(device)
     idx = torch.abs(A) >= threshold
@@ -1063,12 +1071,12 @@ def test_coo2csc():
     torch.testing.assert_close(A2.t()[idx], cscA.values)
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", [1 * 2048])
 @pytest.mark.parametrize("dim2", [2048])
 @pytest.mark.parametrize("dtype", [torch.int8])
-def test_spmm_coo_dequant(dim1, dim2, dtype):
+def test_spmm_coo_dequant(dim1, dim2, dtype, device):
     threshold = 6.0
     # threshold = 2.8
     # threshold = 0.0
@@ -1166,7 +1174,7 @@ def test_spmm_coo_dequant(dim1, dim2, dtype):
     print("partial matmul", time.time() - t0)
 
 
-def test_zeropoint():
+def test_zeropoint(device):
     def quant_zp(x):
         dtype = x.dtype
         x = x.float()
@@ -1253,9 +1261,12 @@ def test_zeropoint():
 
 
 @pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
-@pytest.mark.parametrize("device", [device, "cpu"])
+@pytest.mark.parametrize("compute_device", ["gpu", "cpu"])
 @pytest.mark.deprecated
-def test_extract_outliers(device):
+def test_extract_outliers(device, compute_device):
+    if compute_device == "cpu":
+        device = "cpu"
+
     for i in range(k):
         shapeA = (4096, 4096 * 4)
         idx = torch.unique(torch.randint(0, shapeA[1], size=(10,)).int()).to(device=device)
@@ -1302,7 +1313,7 @@ def test_blockwise_cpu_large():
             # print(sum(diffs)/len(diffs))
             # print(sum(reldiffs)/len(reldiffs))
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 def test_fp8_quant():
     for e_bits in range(1, 7):
         p_bits = 7 - e_bits
@@ -1351,7 +1362,7 @@ def test_fp8_quant():
         # print(3, sum(relerr)/len(relerr))
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 def test_few_bit_quant():
     # print('')
     for bits in range(2, 9):
@@ -1410,7 +1421,7 @@ def test_few_bit_quant():
     # assert False
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 def test_kbit_quantile_estimation():
     for i in range(100):
         data = torch.randn(1024, 1024, device=device)
@@ -1436,7 +1447,7 @@ def test_kbit_quantile_estimation():
             assert err < 0.035
 
 
-@pytest.mark.skipif(SKIPT_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.benchmark
 def test_bench_dequantization():
     a = torch.rand(1024, 1024, device=device).half()
@@ -1455,13 +1466,15 @@ def test_bench_dequantization():
     # print((time.time()-t0)/1e6)
 
 
-@pytest.mark.skipif(SKIPT_4BIT_TESTS, reason="Not testing 4bit yet")
+@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
 @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
-@pytest.mark.parametrize("device", [device, "cpu"])
-def test_4bit_quant(dtype, quant_type, blocksize, device):
+@pytest.mark.parametrize("compute_device", ["gpu", "cpu"])
+def test_4bit_quant(dtype, quant_type, blocksize, device, compute_device):
+    if compute_device == "cpu":
+        device = "cpu"
     vals = list(product([0, 1], repeat=4))
 
     code = {}
@@ -1517,7 +1530,7 @@ def test_4bit_quant(dtype, quant_type, blocksize, device):
         assert err.item() < math.log2(blocksize) * 8e-2
 
 
-@pytest.mark.skipif(SKIPT_4BIT_TESTS, reason="Not testing 4bit yet")
+@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
 def test_4bit_compressed_stats(quant_type):
     blocksizes = [128, 64] if not HIP_ENVIRONMENT else [128]
@@ -1553,7 +1566,7 @@ def test_4bit_compressed_stats(quant_type):
         # print(sum(errs2)/len(errs2), blocksize, quant_type)
 
 
-@pytest.mark.skipif(SKIPT_4BIT_TESTS, reason="Not testing 4bit yet")
+@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.parametrize("quant_type", ["nf4"])
 @pytest.mark.benchmark
 def test_bench_4bit_dequant(quant_type):
@@ -1601,7 +1614,7 @@ def test_normal_map_tree():
         # print(pivots)
 
 
-@pytest.mark.skipif(SKIPT_4BIT_TESTS, reason="Not testing 4bit yet")
+@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.skipif(
     HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64"
 )
@@ -1745,7 +1758,7 @@ def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
             assert maxratio < 1.02 and maxratio > 0.98
 
 
-@pytest.mark.skipif(SKIPT_4BIT_TESTS, reason="Not testing 4bit yet")
+@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
@@ -1813,7 +1826,7 @@ def test_managed():
     assert (A == 17 * (2**3)).sum().item() == n * n
 
 
-@pytest.mark.skipif(SKIPT_4BIT_TESTS, reason="Not testing 4bit yet")
+@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
 @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
@@ -1844,12 +1857,13 @@ def test_gemv_eye_4bit(storage_type, dtype, double_quant):
         # torch.testing.assert_close(A, C2, rtol=1e-5, atol=0.080)
 
 
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dim1", get_test_dims(1, 64, n=1), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(32, 128, n=1), ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", get_test_dims(32, 256, n=1), ids=id_formatter("dim3"))
 @pytest.mark.deprecated
-def test_vector_quant(dim1, dim2, dim3):
+def test_vector_quant(dim1, dim2, dim3, device):
     dim2 = dim2 - (dim2 % 16)
     dim3 = dim3 - (dim3 % 16)
     for i in range(k):
@@ -1860,8 +1874,9 @@ def test_vector_quant(dim1, dim2, dim3):
         assert_all_approx_close(A1, A, atol=0.01, rtol=0.1, count=int(n * 0.002))
 
 
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.deprecated
-def test_quantile_quantization():
+def test_quantile_quantization(device):
     for i in range(100):
         A1 = torch.randn(1024, 1024, device=device)
         code = F.estimate_quantiles(A1)
@@ -1879,8 +1894,9 @@ def test_quantile_quantization():
         assert diff < 0.001
 
 
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.deprecated
-def test_dynamic_quantization():
+def test_dynamic_quantization(device):
     diffs = []
     reldiffs = []
     for i in range(100):
@@ -1904,9 +1920,10 @@ def test_dynamic_quantization():
         assert diff < 0.004
 
 
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=["float", "half"])
 @pytest.mark.deprecated
-def test_percentile_clipping(gtype):
+def test_percentile_clipping(gtype, device):
     gnorm_vec1 = torch.zeros(100, device=device)
     gnorm_vec2 = torch.zeros(100, device=device)
     n = 4
@@ -1932,6 +1949,7 @@ def test_percentile_clipping(gtype):
         torch.testing.assert_close(gnorm1, gnorm2)
 
 
+@pytest.mark.skipif(SKIP_NONMUTLI_BACKEND, reason="Not part of multi-backend functionality")
 @pytest.mark.skipif(0 < BNB_HIP_VERSION < 601, reason="this test is supported on ROCm from 6.1")
 @pytest.mark.parametrize("dim1", get_test_dims(2, 256, n=2), ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", get_test_dims(2, 256, n=2), ids=id_formatter("dim2"))
