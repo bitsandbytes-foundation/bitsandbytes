@@ -1466,12 +1466,11 @@ def test_bench_dequantization():
     # print((time.time()-t0)/1e6)
 
 
-@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
 @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
-@pytest.mark.parametrize("compute_device", ["gpu", "cpu"])
+@pytest.mark.parametrize("compute_device", ["xpu"])
 def test_4bit_quant(dtype, quant_type, blocksize, device, compute_device):
     if compute_device == "cpu":
         device = "cpu"
@@ -1530,9 +1529,9 @@ def test_4bit_quant(dtype, quant_type, blocksize, device, compute_device):
         assert err.item() < math.log2(blocksize) * 8e-2
 
 
-@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-def test_4bit_compressed_stats(quant_type):
+@pytest.mark.parametrize("device", ["xpu"])
+def test_4bit_compressed_stats(quant_type, device):
     blocksizes = [128, 64] if not HIP_ENVIRONMENT else [128]
     for blocksize in blocksizes:
         errs1 = []
@@ -1566,10 +1565,11 @@ def test_4bit_compressed_stats(quant_type):
         # print(sum(errs2)/len(errs2), blocksize, quant_type)
 
 
-@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
+# @pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.parametrize("quant_type", ["nf4"])
+@pytest.mark.parametrize("device", ["xpu"])
 @pytest.mark.benchmark
-def test_bench_4bit_dequant(quant_type):
+def test_bench_4bit_dequant(quant_type, device):
     blocksize = 256
     a = torch.rand(1024 * 12 * 4, 1024 * 12, device=device).half()
     qa, SA = F.quantize_4bit(a, blocksize=blocksize, quant_type=quant_type)
@@ -1583,12 +1583,18 @@ def test_bench_4bit_dequant(quant_type):
     b = torch.randn(128, 1024 * 12, device=device).half()
 
     iters = 100
-    torch.cuda.synchronize()
+    if device == "cuda":
+        torch.cuda.synchronize()
+    elif device == "xpu":
+        torch.xpu.synchronize()
     t0 = time.time()
     for i in range(iters):
         F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
         # b.copy_(a)
-    torch.cuda.synchronize()
+    if device == "cuda":
+        torch.cuda.synchronize()
+    elif device == "xpu":
+        torch.xpu.synchronize()
     # print((time.time()-t0)/iters*1e6)
 
     # torch.cuda.synchronize()
@@ -1758,7 +1764,6 @@ def test_gemv_4bit(dtype, storage_type, quant_storage, double_quant, kind):
             assert maxratio < 1.02 and maxratio > 0.98
 
 
-@pytest.mark.skipif(SKIP_4BIT_TESTS, reason="Not testing 4bit yet")
 @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])

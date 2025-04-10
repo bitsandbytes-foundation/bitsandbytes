@@ -427,6 +427,88 @@ def dequant_8bit(A, offset, quant_state):
     absmax += offset
     return absmax
 
+import triton
+import triton.language as tl
+
+@triton.jit
+def dequant_kernel(a_ptr, c_ptr, quant_ptr, absmax_ptr, num_paired_elements,
+                   QUANT_BLOCK: tl.constexpr, SPLIT_SIZE: tl.constexpr):
+    PAIRED_QUANT_BLOCK = QUANT_BLOCK // 2
+
+    pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
+    block_start = pid * SPLIT_SIZE
+    offsets = block_start + tl.arange(0, SPLIT_SIZE)
+    mask = offsets < num_paired_elements
+
+    a = tl.load(a_ptr + offsets, mask)
+    a = a.to(tl.uint8, bitcast=True)
+
+    # higher 4bits from uint8 packed tensor
+    higher = (a & 0xf)
+    # lower 4bits
+    lower = a >> 4
+
+    # apply conversion
+    higher_nf4 = tl.load(quant_ptr + higher)
+    lower_nf4 = tl.load(quant_ptr + lower)
+
+    abs_blocks_lim = (
+        num_paired_elements // PAIRED_QUANT_BLOCK
+    ) * PAIRED_QUANT_BLOCK + num_paired_elements % PAIRED_QUANT_BLOCK
+    abs_offsets = offsets // PAIRED_QUANT_BLOCK
+    mask_blocked = offsets < abs_blocks_lim
+    absmax = tl.load(absmax_ptr + abs_offsets, mask_blocked)
+
+    # apply scales
+    mul_high = higher_nf4 * absmax
+    mul_low = lower_nf4 * absmax
+
+    out_dq = tl.interleave(mul_low, mul_high)
+
+    out_block_start = pid * SPLIT_SIZE * 2
+    offs = out_block_start + tl.arange(0, SPLIT_SIZE * 2)
+    mask = offs < num_paired_elements * 2
+    tl.store(c_ptr + offs, out_dq, mask)
+
+
+def dequant_nf4_fp16(A_nf4: torch.Tensor, out_B: torch.Tensor,
+                     quant_state_code: torch.Tensor, absmax: torch.Tensor,
+                     quant_blocksize):
+    DEVICE = triton.runtime.driver.active.get_active_torch_device()
+    A_nf4 = A_nf4.to(device=DEVICE)
+    out_B = out_B.to(device=DEVICE)
+    quant_state_code = quant_state_code.to(device=DEVICE)
+    absmax = absmax.to(device=DEVICE)
+    if A_nf4.dtype != torch.uint8:
+        print("[Warning] Forcing conversion of {A_nf4.dtype} to uint8.")
+        bytes_value = A_nf4.cpu().numpy().tobytes()
+        A_nf4 = torch.frombuffer(bytes_value,
+                                 dtype=torch.uint8).to(A_nf4.device)
+
+    # print("-----------\n")
+    # print("inp shape: ", A_nf4.shape)
+
+    # It's will be processed as an array, so
+    # actual length is row * col
+    # Elements are in uint8 format, so interleaved
+    # so total amount of data is 2 * elem_count
+    number_of_paired_elements = A_nf4.numel()
+    # we assume that split_size > quant_blocksize
+    split_size = 2048
+    # output written will be split_size * 2
+
+    grid = (number_of_paired_elements // split_size + 1, )
+    # print("grid: ", grid)
+    # print(" shapes: ", A_nf4.shape, out_B.shape, quant_state_code.shape,
+    #       absmax.shape)
+    # print(" grid: ", grid)
+    # print("absmax: ", absmax)
+    # print("-----------\n")
+    dequant_kernel[grid](A_nf4, out_B, quant_state_code, absmax,
+                         number_of_paired_elements, quant_blocksize,
+                         split_size)
+    return out_B
+
 
 # Compile will fail in torch.frombuffer
 # @_maybe_torch_compile
@@ -490,6 +572,14 @@ def dequantize_4bit_impl(
 
     if quant_state.nested:
         absmax = dequant_8bit(absmax, quant_state.offset, quant_state.state2)
+    
+    if out is None:
+            out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
+    out = dequant_nf4_fp16(A, out, quant_state.code, absmax, quant_state.blocksize)
+    if transpose:
+        out = out.t()
+
+    return out
 
     if ipex_cpu_only and _ipex_cpu_version_prereq(2, 5) and getattr(quant_state, "ipex", False):
         ipex_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(A, "nf4", quant_state.shape, 2)
@@ -514,7 +604,9 @@ def dequantize_4bit_impl(
     rem = n % blocksize
     has_rem = rem > 0
 
+    # print("Has rem? n - ", n, " blocksize - ", blocksize, " rem - ", rem )
     if has_rem:
+        # print("Has rem: n - ", n, " blocksize - ", blocksize, " rem - ", rem )
         if out is None:
             out = torch.empty(quant_state.shape, dtype=quant_state.dtype, device=A.device)
         out_reshaped = out.reshape(-1)
