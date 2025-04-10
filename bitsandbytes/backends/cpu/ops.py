@@ -28,7 +28,7 @@ def _(
     A: torch.Tensor,
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
-    dtype=torch.float16,
+    dtype: Optional[torch.dtype] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     torch._check(A.dtype == torch.int32, lambda: f"A must be int32, got {A.dtype}")
@@ -43,7 +43,7 @@ def _(
     if bias is not None:
         out += bias
 
-    return out.to(dtype)
+    return out.to(dtype or torch.float16)
 
 
 @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
