@@ -19,7 +19,7 @@ else:
 # Higher level op: int8 matmul + dequant + bias
 torch.library.define(
     "bitsandbytes::int8_scaled_mm",
-    "(Tensor A, Tensor B, Tensor row_stats, Tensor col_stats, Tensor? bias=None, ScalarType dtype=float16) -> Tensor",
+    "(Tensor A, Tensor B, Tensor row_stats, Tensor col_stats, Tensor? bias=None, ScalarType? dtype=None) -> Tensor",
 )
 
 
@@ -30,10 +30,10 @@ def _(
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
     bias: Optional[torch.Tensor] = None,
-    dtype=torch.float16,
+    dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
     shapeC = (*A.shape[:-1], B.shape[0])
-    return torch.empty(shapeC, device=A.device, dtype=dtype)
+    return torch.empty(shapeC, device=A.device, dtype=dtype or torch.float16)
 
 
 torch.library.define(
@@ -98,7 +98,7 @@ def _(A: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
 
 
 # Default PyTorch-native implementation
-@register_kernel("bitsandbytes::int8_vectorwise_dequant", None)
+@register_kernel("bitsandbytes::int8_vectorwise_dequant", "default")
 def _(A: torch.Tensor, stats: torch.Tensor):
     # To dequantize we divide by 127, or multiply by the reciprocal.
     return A * stats.view(-1, 1) * 7.874015718698502e-3
@@ -106,7 +106,7 @@ def _(A: torch.Tensor, stats: torch.Tensor):
 
 torch.library.define(
     "bitsandbytes::int8_mm_dequant",
-    "(Tensor A, Tensor row_stats, Tensor col_stats, ScalarType dtype=float16, Tensor? bias=None) -> Tensor",
+    "(Tensor A, Tensor row_stats, Tensor col_stats, ScalarType? dtype=None, Tensor? bias=None) -> Tensor",
 )
 
 
@@ -115,11 +115,11 @@ def _(
     A: torch.Tensor,
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
-    dtype=torch.float16,
+    dtype: Optional[torch.dtype] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     torch._check(A.dtype == torch.int32, lambda: "A must be int32")
-    return torch.empty_like(A, dtype=dtype)
+    return torch.empty_like(A, dtype=dtype or torch.float16)
 
 
 torch.library.define(
