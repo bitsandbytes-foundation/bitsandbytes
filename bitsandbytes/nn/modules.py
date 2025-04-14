@@ -223,18 +223,18 @@ class Params4bit(torch.nn.Parameter):
             data = torch.empty(0)
 
         # Handle FakeTensor creation during dynamo tracing
-        if torch._dynamo.is_compiling() and not isinstance(data, cls):
-            if isinstance(data, torch._subclasses.FakeTensor):
-                param = data.as_subclass(cls)
-                param.requires_grad = requires_grad
-                param.quant_state = quant_state
-                param.blocksize = blocksize
-                param.compress_statistics = compress_statistics
-                param.quant_type = quant_type
-                param.quant_storage = quant_storage
-                param.module = module
-                param.bnb_quantized = bnb_quantized
-                return param
+        # if torch._dynamo.is_compiling() and not isinstance(data, cls):
+        #     if isinstance(data, torch._subclasses.FakeTensor):
+        #         param = data.as_subclass(cls)
+        #         param.requires_grad = requires_grad
+        #         param.quant_state = quant_state
+        #         param.blocksize = blocksize
+        #         param.compress_statistics = compress_statistics
+        #         param.quant_type = quant_type
+        #         param.quant_storage = quant_storage
+        #         param.module = module
+        #         param.bnb_quantized = bnb_quantized
+        #         return param
 
         # Standard initialization for real tensors
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
@@ -356,63 +356,70 @@ class Params4bit(torch.nn.Parameter):
                 bnb_quantized=self.bnb_quantized,
             )
 
-    def __tensor_flatten__(self):
-        """Return data tensor and non-tensor context"""
-        ctx = {
-            "quant_state": self.quant_state,
-            "blocksize": self.blocksize,
-            "compress_statistics": self.compress_statistics,
-            "quant_type": self.quant_type,
-            "quant_storage": self.quant_storage,
-            "module": self.module,
-            "bnb_quantized": self.bnb_quantized,
-        }
-        return ["data"], ctx
+    # def __tensor_flatten__(self):
+    #     """Return data tensor and non-tensor context"""
+    #     ctx = {
+    #         "quant_state": self.quant_state,
+    #         "blocksize": self.blocksize,
+    #         "compress_statistics": self.compress_statistics,
+    #         "quant_type": self.quant_type,
+    #         "quant_storage": self.quant_storage,
+    #         "module": self.module,
+    #         "bnb_quantized": self.bnb_quantized,
+    #     }
+    #     return ["data"], ctx
 
-    @staticmethod
-    def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
-        """Reconstruct Params4bit from components"""
-        data = inner_tensors["data"]
+    # @staticmethod
+    # def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+    #     """Reconstruct Params4bit from components"""
+    #     data = inner_tensors["data"]
 
-        # Special handling for FakeTensor reconstruction
-        if isinstance(data, torch._subclasses.FakeTensor):
-            param = data.as_subclass(Params4bit)
-            param.blocksize = ctx["blocksize"]
-            param.compress_statistics = ctx["compress_statistics"]
-            param.quant_type = ctx["quant_type"]
-            param.quant_state = ctx["quant_state"]
-            param.quant_storage = ctx["quant_storage"]
-            param.module = ctx["module"]
-            param.bnb_quantized = ctx["bnb_quantized"]
-            return param
+    #     # Special handling for FakeTensor reconstruction
+    #     if isinstance(data, torch._subclasses.FakeTensor):
+    #         param = data.as_subclass(Params4bit)
+    #         param.blocksize = ctx["blocksize"]
+    #         param.compress_statistics = ctx["compress_statistics"]
+    #         param.quant_type = ctx["quant_type"]
+    #         param.quant_state = ctx["quant_state"]
+    #         param.quant_storage = ctx["quant_storage"]
+    #         param.module = ctx["module"]
+    #         param.bnb_quantized = ctx["bnb_quantized"]
+    #         return param
 
-        # Standard reconstruction for real tensors
-        return Params4bit(
-            data,
-            requires_grad=data.requires_grad,
-            quant_state=ctx["quant_state"],
-            blocksize=ctx["blocksize"],
-            compress_statistics=ctx["compress_statistics"],
-            quant_type=ctx["quant_type"],
-            quant_storage=ctx["quant_storage"],
-            module=ctx["module"],
-            bnb_quantized=ctx["bnb_quantized"],
-        )
+    #     # Standard reconstruction for real tensors
+    #     return Params4bit(
+    #         data,
+    #         requires_grad=data.requires_grad,
+    #         quant_state=ctx["quant_state"],
+    #         blocksize=ctx["blocksize"],
+    #         compress_statistics=ctx["compress_statistics"],
+    #         quant_type=ctx["quant_type"],
+    #         quant_storage=ctx["quant_storage"],
+    #         module=ctx["module"],
+    #         bnb_quantized=ctx["bnb_quantized"],
+    #     )
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        # Type preservation through ops
-        result = super().__torch_function__(func, types, args, kwargs or {})
-        if isinstance(result, torch.Tensor) and not isinstance(result, cls):
-            return result.as_subclass(cls)
-        return result
+        if kwargs is None:
+            kwargs = {}
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
 
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        # Delegate to FakeTensor implementation when needed
-        if any(isinstance(x, torch._subclasses.FakeTensor) for x in args):
-            return torch._C.DispatchKey.Fake(func(*args, **(kwargs or {})))
-        return super().__torch_dispatch__(func, types, args, kwargs)
+    # @classmethod
+    # def __torch_function__(cls, func, types, args=(), kwargs=None):
+    #     # Type preservation through ops
+    #     result = super().__torch_function__(func, types, args, kwargs or {})
+    #     if isinstance(result, torch.Tensor) and not isinstance(result, cls):
+    #         return result.as_subclass(cls)
+    #     return result
+
+    # @classmethod
+    # def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    #     # Delegate to FakeTensor implementation when needed
+    #     if any(isinstance(x, torch._subclasses.FakeTensor) for x in args):
+    #         return torch._C.DispatchKey.Fake(func(*args, **(kwargs or {})))
+    #     return super().__torch_dispatch__(func, types, args, kwargs)
 
     def detach(self):
         """Create new instance preserving quantization state"""
