@@ -222,6 +222,21 @@ class Params4bit(torch.nn.Parameter):
         if data is None:
             data = torch.empty(0)
 
+        # Handle FakeTensor creation during dynamo tracing
+        if torch._dynamo.is_compiling() and not isinstance(data, cls):
+            if isinstance(data, torch._subclasses.FakeTensor):
+                param = data.as_subclass(cls)
+                param.requires_grad = requires_grad
+                param.quant_state = quant_state
+                param.blocksize = blocksize
+                param.compress_statistics = compress_statistics
+                param.quant_type = quant_type
+                param.quant_storage = quant_storage
+                param.module = module
+                param.bnb_quantized = bnb_quantized
+                return param
+
+        # Standard initialization for real tensors
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
         self.blocksize = blocksize
         self.compress_statistics = compress_statistics
@@ -324,25 +339,22 @@ class Params4bit(torch.nn.Parameter):
     def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
 
     def to(self, *args, **kwargs):
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
 
         if device is not None and device.type == "cuda" and not self.bnb_quantized:
             return self._quantize(device)
         else:
-            if self.quant_state is not None:
-                self.quant_state.to(device)
-
-            new_param = Params4bit(
+            return Params4bit(
                 super().to(device=device, dtype=dtype, non_blocking=non_blocking),
                 requires_grad=self.requires_grad,
-                quant_state=self.quant_state,
+                quant_state=self.quant_state.to(device) if self.quant_state else None,
                 blocksize=self.blocksize,
                 compress_statistics=self.compress_statistics,
                 quant_type=self.quant_type,
                 quant_storage=self.quant_storage,
+                module=self.module,
+                bnb_quantized=self.bnb_quantized,
             )
-
-            return new_param
 
     def __tensor_flatten__(self):
         """Return data tensor and non-tensor context"""
@@ -361,6 +373,20 @@ class Params4bit(torch.nn.Parameter):
     def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
         """Reconstruct Params4bit from components"""
         data = inner_tensors["data"]
+
+        # Special handling for FakeTensor reconstruction
+        if isinstance(data, torch._subclasses.FakeTensor):
+            param = data.as_subclass(Params4bit)
+            param.blocksize = ctx["blocksize"]
+            param.compress_statistics = ctx["compress_statistics"]
+            param.quant_type = ctx["quant_type"]
+            param.quant_state = ctx["quant_state"]
+            param.quant_storage = ctx["quant_storage"]
+            param.module = ctx["module"]
+            param.bnb_quantized = ctx["bnb_quantized"]
+            return param
+
+        # Standard reconstruction for real tensors
         return Params4bit(
             data,
             requires_grad=data.requires_grad,
@@ -372,6 +398,21 @@ class Params4bit(torch.nn.Parameter):
             module=ctx["module"],
             bnb_quantized=ctx["bnb_quantized"],
         )
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        # Type preservation through ops
+        result = super().__torch_function__(func, types, args, kwargs or {})
+        if isinstance(result, torch.Tensor) and not isinstance(result, cls):
+            return result.as_subclass(cls)
+        return result
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # Delegate to FakeTensor implementation when needed
+        if any(isinstance(x, torch._subclasses.FakeTensor) for x in args):
+            return torch._C.DispatchKey.Fake(func(*args, **(kwargs or {})))
+        return super().__torch_dispatch__(func, types, args, kwargs)
 
     def detach(self):
         """Create new instance preserving quantization state"""
@@ -460,20 +501,35 @@ class Linear4bit(nn.Linear):
             bias (`bool`, defaults to `True`):
                 Whether the linear class uses the bias term as well.
         """
-        super().__init__(input_features, output_features, bias, device)
+        # Bypass nn.Linear's parameter initialization
+        super(nn.Linear, self).__init__()
+        self.in_features = input_features
+        self.out_features = output_features
+
+        # Manually register parameters
         self.weight = Params4bit(
-            self.weight.data,
+            torch.empty((output_features, input_features), dtype=quant_storage),
             requires_grad=False,
             compress_statistics=compress_statistics,
             quant_type=quant_type,
             quant_storage=quant_storage,
             module=self,
         )
-        # self.persistent_buffers = []  # TODO consider as way to save quant state
+
+        if bias:
+            self.bias = nn.Parameter(torch.empty(output_features))
+        else:
+            self.register_parameter("bias", None)
+
+        self.reset_parameters()
         self.compute_dtype = compute_dtype
         self.compute_type_is_set = False
         self.quant_state = None
         self.quant_storage = quant_storage
+
+    def reset_parameters(self):
+        # Disable standard initialization
+        pass
 
     def set_compute_type(self, x):
         if x.dtype in [torch.float32, torch.bfloat16]:
