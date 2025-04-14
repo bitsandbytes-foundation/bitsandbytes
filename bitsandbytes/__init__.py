@@ -4,6 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import sys
+
 import torch
 
 from . import _ops, research, utils
@@ -31,6 +33,30 @@ supported_torch_devices = {
 
 if torch.cuda.is_available():
     from .backends.cuda import ops as cuda_ops
+
+
+def _import_backends():
+    """
+    Discover and autoload all available backends installed as separate packages.
+    Packages with an entrypoint for "bitsandbytes.backends" will be loaded.
+    Inspired by PyTorch implementation: https://pytorch.org/tutorials/prototype/python_extension_autoload.html
+    """
+    from importlib.metadata import entry_points
+
+    if sys.version_info < (3, 10):
+        extensions = entry_points().get("bitsandbytes.backends", [])
+    else:
+        extensions = entry_points(group="bitsandbytes.backends")
+
+    for ext in extensions:
+        try:
+            entry = ext.load()
+            entry()
+        except Exception as e:
+            raise RuntimeError(f"bitsandbytes: failed to load backend {ext.name}: {e}") from e
+
+
+_import_backends()
 
 __pdoc__ = {
     "libbitsandbytes": False,
