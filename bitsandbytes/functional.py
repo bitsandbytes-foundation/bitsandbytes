@@ -584,7 +584,7 @@ class QuantState:
         self.state2 = state2
         self.nested = state2 is not None
 
-    def __get_item__(self, idx):
+    def __getitem__(self, idx):
         """
         ensures compatibility with older quant state scheme with nested lists.
         assumes the following layout:
