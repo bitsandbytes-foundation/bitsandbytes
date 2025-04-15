@@ -859,7 +859,16 @@ def dequantize_blockwise(
     if out is None:
         out = torch.empty(A.shape, dtype=quant_state.dtype, device=A.device)
 
-    if A.device.type != "cpu":
+    if A.device.type == "xpu":
+        backends[A.device.type].dequantize_blockwise(
+            A=A,
+            quant_state=quant_state,
+            absmax=absmax,
+            code=quant_state.code,
+            out=out,
+            blocksize=blocksize,
+            nested=quant_state.nested,)
+    elif A.device.type != "cpu":
         code = quant_state.code.to(A.device)
         supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]
         # Some AMD GPUs have warpsize 64
