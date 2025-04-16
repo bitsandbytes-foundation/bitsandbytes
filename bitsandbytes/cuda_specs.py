@@ -1,6 +1,6 @@
 import dataclasses
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
@@ -21,7 +21,7 @@ def get_compute_capabilities() -> list[tuple[int, int]]:
 
 
 @lru_cache(None)
-def get_cuda_version_tuple() -> Optional[Tuple[int, int]]:
+def get_cuda_version_tuple() -> Optional[tuple[int, int]]:
     """Get CUDA/HIP version as a tuple of (major, minor)."""
     try:
         if torch.version.cuda:
@@ -73,4 +73,3 @@ def get_cuda_specs() -> Optional[CUDASpecs]:
         )
     except Exception:
         return None
-    
