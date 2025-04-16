@@ -341,7 +341,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
         for i in range(gap):
             values.append(0)
     values.sort()
-    code = torch.Tensor(values)
+    code = torch.tensor(values)
     code /= code.max()
 
     return code
