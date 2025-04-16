@@ -20,15 +20,15 @@ from .nn import modules
 from .optim import adam
 
 # This is a signal for integrations with transformers/diffusers.
-# Eventually, we will remove this and check based on release version.
+# Eventually we may remove this but it is currently required for compatibility.
 features = {"multi-backend"}
 supported_torch_devices = {
-    "cuda",
     "cpu",
-    # "mps",
-    # "xpu",
-    # "hpu",
-    # "npu",
+    "cuda",  # NVIDIA/AMD GPU
+    "xpu",  # Intel GPU
+    "hpu",  # Gaudi
+    "npu",  # Ascend NPU
+    "mps",  # Apple Silicon
 }
 
 if torch.cuda.is_available():
