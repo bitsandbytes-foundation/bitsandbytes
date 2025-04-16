@@ -73,3 +73,4 @@ def get_cuda_specs() -> Optional[CUDASpecs]:
         )
     except Exception:
         return None
+    
