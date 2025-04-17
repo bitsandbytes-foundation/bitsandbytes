@@ -67,6 +67,7 @@ def test_linear_no_igemmlt(device):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
+@pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
 @pytest.mark.parametrize("serialize_before_forward", TRUE_FALSE, ids=id_formatter("serialize_before_forward"))
 @pytest.mark.parametrize("deserialize_before_cuda", TRUE_FALSE, ids=id_formatter("deserialize_before_cuda"))
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
@@ -74,6 +75,7 @@ def test_linear_no_igemmlt(device):
 def test_linear_serialization(
     device,
     has_fp16_weights,
+    threshold,
     serialize_before_forward,
     deserialize_before_cuda,
     save_before_forward,
@@ -92,7 +94,7 @@ def test_linear_serialization(
         linear.out_features,
         linear.bias is not None,
         has_fp16_weights=has_fp16_weights,
-        threshold=6.0,
+        threshold=threshold,
     )
 
     linear_custom.weight = bnb.nn.Int8Params(
@@ -137,7 +139,7 @@ def test_linear_serialization(
         linear.out_features,
         linear.bias is not None,
         has_fp16_weights=has_fp16_weights,
-        threshold=6.0,
+        threshold=threshold,
     )
 
     if deserialize_before_cuda:
