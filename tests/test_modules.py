@@ -71,8 +71,11 @@ def test_linear8bitlt_inference(device, threshold):
 
 
 # TODO: Remove support for training int8 weights
-@pytest.mark.deprecated
+@pytest.mark.parametrize("device", get_available_devices())
 def test_linear8bitlt_accumulated_gradient(device):
+    if device != "cuda":
+        pytest.skip("Only supported on CUDA")
+
     l1 = torch.nn.Sequential(*[bnb.nn.Linear8bitLt(32, 32).to(device).half() for i in range(2)])
     l2 = torch.nn.Sequential(*[torch.nn.Linear(32, 32).to(device).half() for i in range(2)])
     l1[0].weight.data.copy_(l2[0].weight.data)
@@ -114,8 +117,12 @@ def test_linear8bitlt_accumulated_gradient(device):
             assert_all_approx_close(l1[1].weight.grad, l2[1].weight.grad, rtol=1.05, atol=0.04, count=1)
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("threshold", [0.0, 2.0])
-def test_linear8bitlt_no_fp16_weights(threshold):
+def test_linear8bitlt_no_fp16_weights(device, threshold):
+    if device == "cpu":
+        pytest.xfail("Not yet supported on CPU")
+
     l1 = (
         bnb.nn.Linear8bitLt(
             32,
@@ -123,23 +130,23 @@ def test_linear8bitlt_no_fp16_weights(threshold):
             threshold=threshold,
             has_fp16_weights=False,
         )
-        .cuda()
+        .to(device)
         .half()
     )
     assert l1.weight.dtype == torch.int8
 
     l1.eval()
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = l1(b1)
         assert o1.dtype == torch.float16
 
-    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).cuda()
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).to(device)
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
 
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
         if threshold > 0:
@@ -147,12 +154,12 @@ def test_linear8bitlt_no_fp16_weights(threshold):
         if threshold > 0:
             assert mlp.fc2.state.idx is not None
 
-    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).cuda().half()
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).to(device).half()
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
 
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
         if threshold > 0:
@@ -160,10 +167,10 @@ def test_linear8bitlt_no_fp16_weights(threshold):
         if threshold > 0:
             assert mlp.fc2.state.idx is not None
 
-    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).half().cuda()
+    mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).half().to(device)
 
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
         if threshold > 0:
@@ -181,11 +188,11 @@ def test_linear8bitlt_no_fp16_weights(threshold):
             has_fp16_weights=False,
         )
         .half()
-        .to("cuda")
+        .to(device)
     )
 
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
         if threshold > 0:
@@ -194,8 +201,8 @@ def test_linear8bitlt_no_fp16_weights(threshold):
             assert mlp.fc2.state.idx is not None
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
-    assert mlp.fc1.weight.device.type == "cuda"
-    assert mlp.fc2.weight.device.type == "cuda"
+    assert mlp.fc1.weight.device.type == device
+    assert mlp.fc2.weight.device.type == device
 
     mlp = MLP8bit(
         32,
@@ -203,11 +210,11 @@ def test_linear8bitlt_no_fp16_weights(threshold):
         threshold=threshold,
         has_fp16_weights=False,
     )
-    w1, w2 = mlp.fc1.weight.clone().cuda(), mlp.fc2.weight.clone().cuda()  # grab weights before quantization,
+    w1, w2 = mlp.fc1.weight.clone().to(device), mlp.fc2.weight.clone().to(device)  # grab weights before quantization,
     mlp = mlp.cuda().half()  # and this line triggers quantization
 
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
         if threshold > 0:
@@ -217,10 +224,10 @@ def test_linear8bitlt_no_fp16_weights(threshold):
 
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
-    assert mlp.fc1.weight.device.type == "cuda"
-    assert mlp.fc2.weight.device.type == "cuda"
+    assert mlp.fc1.weight.device.type == device
+    assert mlp.fc2.weight.device.type == device
 
-    b1 = torch.randn(16, 8, 32, device="cuda", requires_grad=True, dtype=torch.half)
+    b1 = torch.randn(16, 8, 32, device=device, requires_grad=True, dtype=torch.half)
     o1 = mlp(b1)
     assert o1.dtype == torch.float16
     assert o1.requires_grad
@@ -236,33 +243,37 @@ def test_linear8bitlt_no_fp16_weights(threshold):
     assert (idx == 0).sum().item() <= b1.numel() * 0.005
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize(
     "module",
     [
         lambda n_in, n_out, bias=True: bnb.nn.Linear8bitLt(n_in, n_out, bias=bias, has_fp16_weights=False),
-        bnb.nn.LinearFP4,
+        bnb.nn.LinearNF4,
     ],
-    ids=["Int8Lt", "FP4"],
+    ids=["Int8Lt", "NF4"],
 )
-def test_linear_kbit_fp32_bias(module):
+def test_linear_kbit_fp32_bias(device, module):
+    if device == "cpu":
+        pytest.xfail("Not yet implemented on CPU")
+
     # casts model to fp16 -> int8 automatically
-    l1 = module(32, 64).cuda()
+    l1 = module(32, 64).to(device)
     assert l1.weight.dtype in [torch.int8, torch.uint8]
     assert l1.bias.dtype == torch.float32
 
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         # casts bias to fp32
         o1 = l1(b1)
         assert l1.bias.dtype == torch.float16
 
     # casts model to fp16 -> int8 automatically
-    l1 = module(32, 64, bias=False).cuda()
+    l1 = module(32, 64, bias=False).to(device)
     assert l1.weight.dtype in [torch.int8, torch.uint8]
     assert l1.bias is None
 
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device="cuda").half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = l1(b1)
         assert l1.bias is None
 
@@ -280,8 +291,12 @@ module_dict = {
 }
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("module", module_dict.values(), ids=module_dict.keys())
-def test_kbit_backprop(module):
+def test_kbit_backprop(device, module):
+    if device == "cpu":
+        pytest.xfail("Not yet implemented on CPU")
+
     b = 16
     dim1 = 36
     dim2 = 84
@@ -297,16 +312,16 @@ def test_kbit_backprop(module):
     kbit[1].weight.detach().copy_(ref[1].weight)
     kbit[0].bias.detach().copy_(ref[0].bias)
     kbit[1].bias.detach().copy_(ref[1].bias)
-    ref = ref.half().cuda()
-    kbit = kbit.half().cuda()
-    kbit = kbit.half().to("cuda")
+    ref = ref.half().to(device)
+    kbit = kbit.half().to(device)
+    kbit = kbit.half().to(device)
 
     errs1 = []
     errs2 = []
     relerrs1 = []
     relerrs2 = []
     for i in range(100):
-        batch = torch.randn(b, dim1).half().cuda()
+        batch = torch.randn(b, dim1, device=device, dtype=torch.float16)
         out1 = ref(batch)
         out2 = kbit(batch)
         out1.mean().backward()
@@ -339,6 +354,7 @@ def test_kbit_backprop(module):
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
 
 
+@pytest.mark.deprecated
 def test_fp8linear():
     b = 10
     h = 1024
@@ -369,6 +385,7 @@ def test_fp8linear():
     assert bgraderr < 0.00002
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("embedding_dim", [64, 65])
 @pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
 @pytest.mark.parametrize(
@@ -382,7 +399,10 @@ def test_fp8linear():
     ],
     ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
 )
-def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_storage):
+def test_embedding_lossless(device, embedding_class, input_shape, embedding_dim, quant_storage):
+    if device == "cpu":
+        pytest.xfail("Not yet supported on CPU")
+
     num_embeddings = 128
 
     src_weight = (torch.randn((num_embeddings, embedding_dim), dtype=torch.float32) > 0).to(
@@ -402,10 +422,10 @@ def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_s
 
     e.load_state_dict(emb_base.state_dict())
 
-    emb_base.cuda()
-    e.cuda()
+    emb_base.to(device)
+    e.to(device)
 
-    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device="cuda")
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device=device)
 
     torch.testing.assert_close(
         actual=e(input_tokens),
@@ -413,6 +433,7 @@ def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_s
     )
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("embedding_dim", [64, 65])
 @pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
 @pytest.mark.parametrize(
@@ -426,7 +447,10 @@ def test_embedding_lossless(embedding_class, input_shape, embedding_dim, quant_s
     ],
     ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
 )
-def test_embedding_error(embedding_class, input_shape, embedding_dim, quant_storage):
+def test_embedding_error(device, embedding_class, input_shape, embedding_dim, quant_storage):
+    if device == "cpu":
+        pytest.xfail("Not yet supported on CPU")
+
     is_8bit = embedding_class is bnb.nn.Embedding8bit
 
     num_embeddings = 128
@@ -446,10 +470,10 @@ def test_embedding_error(embedding_class, input_shape, embedding_dim, quant_stor
 
     e.load_state_dict(emb_base.state_dict())
 
-    emb_base.cuda()
-    e.cuda()
+    emb_base.to(device)
+    e.to(device)
 
-    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device="cuda")
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=input_shape, device=device)
 
     torch.testing.assert_close(
         actual=e(input_tokens),
@@ -459,46 +483,64 @@ def test_embedding_error(embedding_class, input_shape, embedding_dim, quant_stor
     )
 
 
-def test_4bit_linear_warnings():
+@pytest.mark.parametrize("device", get_available_devices())
+def test_4bit_linear_warnings(device):
+    if device == "cpu":
+        pytest.xfail("Not yet implemented on CPU")
+
     dim1 = 64
 
     with pytest.warns(UserWarning, match=r"inference or training"):
-        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
-        net = net.cuda()
-        inp = torch.rand(10, dim1).cuda().half()
+        net = nn.Sequential(
+            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
+        )
+        net = net.to(device)
+        inp = torch.rand(10, dim1, device=device, dtype=torch.float16)
         net(inp)
     with pytest.warns(UserWarning, match=r"inference."):
-        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
-        net = net.cuda()
-        inp = torch.rand(1, dim1).cuda().half()
+        net = nn.Sequential(
+            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
+        )
+        net = net.to(device)
+        inp = torch.rand(1, dim1, device=device, dtype=torch.float16)
         net(inp)
 
     with pytest.warns(UserWarning) as record:
-        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
-        net = net.cuda()
-        inp = torch.rand(10, dim1).cuda().half()
+        net = nn.Sequential(
+            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
+        )
+        net = net.to(device)
+        inp = torch.rand(10, dim1, device=device, dtype=torch.float16)
         net(inp)
 
-        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, compute_dtype=torch.float32) for i in range(10)])
-        net = net.cuda()
-        inp = torch.rand(1, dim1).cuda().half()
+        net = nn.Sequential(
+            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
+        )
+        net = net.to(device)
+        inp = torch.rand(1, dim1, device=device, dtype=torch.float16)
         net(inp)
 
     assert len(record) == 2
 
 
-def test_4bit_embedding_warnings():
+@pytest.mark.parametrize("device", get_available_devices())
+def test_4bit_embedding_warnings(device):
+    if device == "cpu":
+        pytest.xfail("Not yet implemented on CPU")
+
     num_embeddings = 128
     default_block_size = 64
 
     with pytest.warns(UserWarning, match=r"inference."):
-        net = bnb.nn.Embedding4bit(num_embeddings=num_embeddings, embedding_dim=default_block_size + 1)
-        net.cuda()
-        inp = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
+        net = bnb.nn.Embedding4bit(
+            num_embeddings=num_embeddings, embedding_dim=default_block_size + 1, quant_type="nf4"
+        )
+        net.to(device)
+        inp = torch.randint(low=0, high=num_embeddings, size=(1,), device=device)
         net(inp)
 
 
-def test_4bit_embedding_weight_fsdp_fix():
+def test_4bit_embedding_weight_fsdp_fix(requires_cuda):
     num_embeddings = 64
     embedding_dim = 32
 
@@ -515,7 +557,7 @@ def test_4bit_embedding_weight_fsdp_fix():
     assert module.weight.quant_state is not None
 
 
-def test_4bit_linear_weight_fsdp_fix():
+def test_4bit_linear_weight_fsdp_fix(requires_cuda):
     inp_size = 64
     out_size = 32
 
