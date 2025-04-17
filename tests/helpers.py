@@ -1,6 +1,7 @@
 import functools
 from io import BytesIO
 from itertools import product
+import os
 import random
 from typing import Any
 
@@ -16,6 +17,10 @@ BOOLEAN_TUPLES = list(product(TRUE_FALSE, repeat=2))  # all combinations of (boo
 
 @functools.cache
 def get_available_devices():
+    if "BNB_TEST_DEVICE" in os.environ:
+        # If the environment variable is set, use it directly.
+        return [os.environ["BNB_TEST_DEVICE"]]
+
     devices = ["cpu"]
 
     if hasattr(torch, "accelerator"):
