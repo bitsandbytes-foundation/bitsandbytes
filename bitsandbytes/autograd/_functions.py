@@ -210,36 +210,27 @@ class MatMul8bitLt(torch.autograd.Function):
                 # 2. Quantize B
                 state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
 
-        # Handle sparse decomposition. In some instances, we may have not found any
-        # outlier columns at all. In that case, we'll skip this part completely.
-        if state.threshold > 0.0 and outlier_cols is not None and outlier_cols.numel():
+        # Handle sparse decomposition
+        if state.threshold > 0.0:
             state.idx = outlier_cols
 
-            # Zero out the outliers in the transposed 8bit inputs.
-            if CAt is not None:
-                CAt[:, state.idx] = 0
+            # Mixed Int8 Matmul + Dequant + Bias
+            output, subA = torch.ops.bitsandbytes.int8_mixed_scaled_mm(
+                A,
+                CA,
+                state.CB,
+                SCA,
+                state.SCB,
+                outlier_cols,
+                bias,
+            )
 
-            # Extract the input outliers in original precision
-            subA = A[:, state.idx].contiguous()
-
-            # Extract the corresponding weights
-            if state.has_fp16_weights:
-                state.subB = B[:, state.idx].t()
-            else:
-                # To dequantize our weights associated with the input outliers,
-                # we want to divide by 127. It's however more performant to multiply
-                # by the reciprocal.
-                outliers = state.CB[:, state.idx]
-                state.subB = F.int8_vectorwise_dequant(outliers, state.SCB).to(A.dtype).t()
         else:
+            # Int8 Matmul + Dequant + Bias
+            output = torch.ops.bitsandbytes.int8_scaled_mm.default(
+                CA, state.CB, SCA, state.SCB, bias=bias, dtype=A.dtype
+            )
             subA = None
-
-        # 3. Int8 Matmul + Dequant + Bias
-        output = torch.ops.bitsandbytes.int8_scaled_mm.default(CA, state.CB, SCA, state.SCB, bias=bias, dtype=A.dtype)
-
-        # 4. Mixed-precision decomposition matmul
-        if subA is not None and state.subB is not None:
-            output = output.addmm(subA, state.subB)
 
         # 5. Save state
         ctx.state = state
