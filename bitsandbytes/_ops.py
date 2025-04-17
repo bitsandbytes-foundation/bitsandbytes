@@ -15,6 +15,32 @@ else:
     register_fake = torch.library.impl_abstract
     register_kernel = torch.library.impl
 
+# Int8 mixed precision matmul + dequant + bias
+torch.library.define(
+    "bitsandbytes::int8_mixed_scaled_mm",
+    "(Tensor A, Tensor CA, Tensor CB, Tensor SCA, Tensor SCB, Tensor? outlier_cols=None, Tensor? bias=None) -> (Tensor, Tensor?)",
+)
+
+
+@register_fake("bitsandbytes::int8_mixed_scaled_mm")
+def _(
+    A: torch.Tensor,
+    CA: torch.Tensor,
+    CB: torch.Tensor,
+    SCA: torch.Tensor,
+    SCB: torch.Tensor,
+    outlier_cols: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    shapeC = (*CA.shape[:-1], CB.shape[0])
+
+    out = torch.empty(shapeC, device=A.device, dtype=A.dtype)
+
+    outlier_cols = torch.library.get_ctx().new_dynamic_size()
+    subA = A.new_empty(outlier_cols, dtype=torch.int64)
+
+    return out, subA
+
 
 # Higher level op: int8 matmul + dequant + bias
 torch.library.define(
