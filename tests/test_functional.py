@@ -13,6 +13,7 @@ from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,
     describe_dtype,
+    get_available_devices,
     get_test_dims,
     id_formatter,
 )
@@ -87,15 +88,26 @@ class Timer:
 
 
 class Test8BitBlockwiseQuantizeFunctional:
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
     @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
     @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
-    def test_dynamic_blockwise_quantization(self, dtype, nested, blocksize, signed):
+    def test_dynamic_blockwise_quantization(self, device, dtype, nested, blocksize, signed):
+        if device == "cpu":
+            # This test is slow on CPU, so avoid atypical use cases.
+            if nested:
+                pytest.skip("Not a typical use case.")
+            if blocksize != 256:
+                pytest.skip("Only blocksize 256 is the typical one supported on CPU.")
+
+            if dtype != torch.float32:
+                pytest.xfail(f"CPU implementation currently only supports float32, got {dtype}")
+
         diffs = []
         reldiffs = []
         for i in range(100):
-            A1 = torch.randn(1024, 1024, device="cuda", dtype=dtype)
+            A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested)
             A2 = F.dequantize_blockwise(C, S)
             diff = torch.abs(A1 - A2).float()
@@ -113,7 +125,7 @@ class Test8BitBlockwiseQuantizeFunctional:
         diffs = []
         code = F.create_dynamic_map(signed=signed)
         for i in range(100):
-            A1 = torch.rand(1024, 1024, device="cuda", dtype=dtype)
+            A1 = torch.rand(1024, 1024, device=device, dtype=dtype)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested, code=code)
             A2 = F.dequantize_blockwise(C, S)
             diff = torch.abs(A1 - A2).float()
@@ -154,21 +166,27 @@ class Test8BitBlockwiseQuantizeFunctional:
                 # print(sum(diffs)/len(diffs))
                 # print(sum(reldiffs)/len(reldiffs))
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
     @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic", "quantile"])
-    def test_few_bit_quant(self, bits, method):
+    def test_few_bit_quant(self, device, bits, method):
+        if device == "cpu" and bits != 8:
+            pytest.skip("CPU implementation only supports 8 bits")
+
         abserrs = []
         relerrs = []
         code = None
         if method == "linear":
-            code = F.create_linear_map(True, total_bits=bits).cuda()
+            code = F.create_linear_map(True, total_bits=bits).to(device)
         elif method == "fp8":
             ebits = math.ceil(bits / 2)
             pbits = bits - ebits - 1
-            code = F.create_fp8_map(True, ebits, pbits, bits).cuda()
+            code = F.create_fp8_map(True, ebits, pbits, bits).to(device)
         elif method == "dynamic":
-            code = F.create_dynamic_map(True, bits - 0, bits).cuda()
+            code = F.create_dynamic_map(True, bits - 0, bits).to(device)
         elif method == "quantile":
+            if device != "cuda":
+                pytest.xfail("Quantile map only works on CUDA")
             values = torch.randn(2048, 2048, device="cuda")
             code = F.create_quantile_map(values, bits).cuda()
         # for some data types we have no zero
@@ -178,7 +196,7 @@ class Test8BitBlockwiseQuantizeFunctional:
         # print(method, (code==0).sum())
         assert code.numel() == 256
         for i in range(10):
-            values = torch.randn(1, 32, device="cuda")
+            values = torch.randn(1, 32, device=device)
             values /= values.abs().max()
             # values[values.abs() < 1e-6] += 1e-5
 
@@ -189,8 +207,8 @@ class Test8BitBlockwiseQuantizeFunctional:
                 q1.append(idx.item())
                 v1.append(code[idx].item())
 
-            q1 = torch.Tensor(q1).cuda()
-            v1 = torch.Tensor(v1).cuda()
+            q1 = torch.tensor(q1, device=device)
+            v1 = torch.tensor(v1, device=device)
 
             q2, S2 = F.quantize_blockwise(values, code=code)
             v2 = F.dequantize_blockwise(q2, S2)
@@ -206,15 +224,20 @@ class Test8BitBlockwiseQuantizeFunctional:
             else:
                 torch.testing.assert_close(q1, q2)
 
-    def test_fp8_quant(self):
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_fp8_quant(self, device):
+        # TODO
+        if device == "cpu":
+            pytest.skip("CPU implementation segfaults")
+
         for e_bits in range(1, 7):
             p_bits = 7 - e_bits
-            code = F.create_fp8_map(True, e_bits, p_bits).cuda()
+            code = F.create_fp8_map(True, e_bits, p_bits).to(device)
 
             abserr = []
             relerr = []
             for i in range(100):
-                A1 = torch.randn(1024, 1024, device="cuda")
+                A1 = torch.randn(1024, 1024, device=device)
                 C, SC = F.quantize_blockwise(A1, code=code)
                 A2 = F.dequantize_blockwise(C, SC)
                 diff = torch.abs(A1 - A2)
@@ -228,7 +251,7 @@ class Test8BitBlockwiseQuantizeFunctional:
             abserr = []
             relerr = []
             for i in range(100):
-                A1 = torch.rand(1024, 1024, device="cuda")
+                A1 = torch.rand(1024, 1024, device=device)
                 C, SC = F.quantize_blockwise(A1, code=code)
                 A2 = F.dequantize_blockwise(C, SC)
                 diff = torch.abs(A1 - A2)
@@ -242,7 +265,7 @@ class Test8BitBlockwiseQuantizeFunctional:
             abserr = []
             relerr = []
             for i in range(100):
-                A1 = torch.randn(1024, 1024, device="cuda")
+                A1 = torch.randn(1024, 1024, device=device)
                 C, SC = F.quantize_blockwise(A1)
                 A2 = F.dequantize_blockwise(C, SC)
                 diff = torch.abs(A1 - A2)
@@ -329,6 +352,7 @@ methods = {
 }
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
 class TestIGEMMFunctional:
     @pytest.mark.parametrize("dim1", [1024 * 2], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [1024 * 16], ids=id_formatter("dim2"))
@@ -532,36 +556,38 @@ class TestIGEMMFunctional:
 
 
 class TestLLMInt8Functional:
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
     @pytest.mark.parametrize("dim3", [499, 512], ids=id_formatter("dim3"))
     @pytest.mark.parametrize("dim4", [512], ids=id_formatter("dim4"))
     @pytest.mark.parametrize("dims", (2, 3), ids=id_formatter("dims"))
     @pytest.mark.parametrize("ldb", (0,), ids=id_formatter("ldb"))
-    def test_int8_linear_matmul(self, dim1, dim2, dim3, dim4, dims, ldb):
+    def test_int8_linear_matmul(self, device, dim1, dim2, dim3, dim4, dims, ldb):
         for i in range(k):
             if dims == 2:
-                A = torch.randint(-128, 127, size=(dim1, dim3), device="cuda").to(torch.int8)
+                A = torch.randint(-128, 127, size=(dim1, dim3), dtype=torch.int8, device=device)
             elif dims == 3:
-                A = torch.randint(-128, 127, size=(dim1, dim2, dim3), device="cuda").to(torch.int8)
-            B = torch.randint(-128, 127, size=(dim4, dim3), device="cuda").to(torch.int8)
+                A = torch.randint(-128, 127, size=(dim1, dim2, dim3), dtype=torch.int8, device=device)
+            B = torch.randint(-128, 127, size=(dim4, dim3), dtype=torch.int8, device=device)
             C1 = torch.matmul(A.float(), B.t().float())
 
             C2 = F.int8_linear_matmul(A, B)
             torch.testing.assert_close(C1, C2.float())
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [32], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [32], ids=id_formatter("dim2"))
     @pytest.mark.parametrize("dim3", [32], ids=id_formatter("dim3"))
     @pytest.mark.parametrize("dim4", [32], ids=id_formatter("dim4"))
     @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-    def test_int8_linear_matmul_half(self, dim1, dim2, dim3, dim4, dims):
+    def test_int8_linear_matmul_half(self, device, dim1, dim2, dim3, dim4, dims):
         for i in range(k):
             if dims == 2:
-                A = torch.normal(0, 0.5, size=(dim1, dim3), device="cuda").half()
+                A = torch.normal(0, 0.5, size=(dim1, dim3), device=device).half()
             elif dims == 3:
-                A = torch.normal(0, 0.5, size=(dim1, dim2, dim3), device="cuda").half()
-            B = torch.randn((dim4, dim3), device="cuda").half()
+                A = torch.normal(0, 0.5, size=(dim1, dim2, dim3), device=device).half()
+            B = torch.randn((dim4, dim3), device=device).half()
             torch.nn.init.xavier_uniform_(B)
             C1 = torch.matmul(A, B.t())
 
@@ -573,19 +599,20 @@ class TestLLMInt8Functional:
 
             torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", (64, 256), ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim4", (64, 1024), ids=id_formatter("dim4"))
     @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
     @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
-    def test_dequant_mm(self, dim1, dim4, dims, has_bias):
+    def test_dequant_mm(self, device, dim1, dim4, dims, has_bias):
         inner = 128
         bias = None
         if has_bias:
-            bias = torch.randn(dim4, device="cuda", dtype=torch.float16)
+            bias = torch.randn(dim4, device=device, dtype=torch.float16)
 
         for i in range(1):
-            A = torch.randn(dim1, inner, device="cuda")
-            B = torch.randn(dim4, inner, device="cuda")
+            A = torch.randn(dim1, inner, device=device)
+            B = torch.randn(dim4, inner, device=device)
             C1 = torch.matmul(A.half(), B.t().half())
             if has_bias:
                 C1 += bias
@@ -618,6 +645,7 @@ class TestLLMInt8Functional:
     @pytest.mark.parametrize("dim2", [1 * 1024], ids=id_formatter("dim2"))
     @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
     @pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("decomp"))
+    @pytest.mark.deprecated
     def test_colrow_absmax(self, dim1, dim2, dims, threshold):
         for i in range(k):
             A = torch.randn(dim1, dim2, device="cuda").half()
@@ -654,6 +682,7 @@ class TestLLMInt8Functional:
 
     @pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
+    @pytest.mark.deprecated
     def test_int8_double_quant(self, dim1, dim2):
         for i in range(k):
             A = torch.randn(dim1, dim2, device="cuda").half()
@@ -686,6 +715,7 @@ class TestLLMInt8Functional:
             torch.testing.assert_close(Srow.flatten().float(), statsA)
             torch.testing.assert_close(Scol.flatten().float(), statsAt)
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize(
         ("dim1", "dim4", "inner"),
         (
@@ -697,10 +727,10 @@ class TestLLMInt8Functional:
             )
         ),
     )
-    def test_integrated_int8_linear_matmul(self, dim1, dim4, inner):
+    def test_integrated_int8_linear_matmul(self, device, dim1, dim4, inner):
         for i in range(k):
-            A = torch.randn(dim1, inner, device="cuda").half()
-            B = torch.randn(dim4, inner, device="cuda").half()
+            A = torch.randn(dim1, inner, device=device).half()
+            B = torch.randn(dim4, inner, device=device).half()
 
             out1 = torch.matmul(A.half(), B.t().half())
 
@@ -724,12 +754,13 @@ class TestLLMInt8Functional:
             err2 = torch.abs(out1 - out3).mean().item()
             assert err2 <= err1 * 1.025
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
-    def test_coo_double_quant(self, dim1, dim2):
+    def test_coo_double_quant(self, device, dim1, dim2):
         threshold = 2.00
         for i in range(k):
-            A = torch.randn(dim1, dim2, device="cuda").half()
+            A = torch.randn(dim1, dim2, device=device).half()
 
             idx = torch.abs(A) >= threshold
             CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
@@ -743,12 +774,13 @@ class TestLLMInt8Functional:
                 A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
                 torch.testing.assert_close(A, A2, rtol=0.05, atol=1.5e-2)
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
-    def test_coo_int8_vectorwise_quant(self, dim1, dim2):
+    def test_coo_int8_vectorwise_quant(self, device, dim1, dim2):
         threshold = 3.00
         for i in range(k):
-            A = torch.randn(dim1, dim2, device="cuda").half()
+            A = torch.randn(dim1, dim2, device=device).half()
 
             idx = torch.abs(A) >= threshold
             CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
@@ -759,6 +791,7 @@ class TestLLMInt8Functional:
                 torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
 class TestSpMMFunctional:
     @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [128, 512], ids=id_formatter("dim2"))
@@ -1025,6 +1058,7 @@ class TestSpMMFunctional:
         print("partial matmul", time.time() - t0)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
 class TestSparseTensorFunctional:
     def test_coo2csr(self):
         threshold = 1
@@ -1063,11 +1097,12 @@ class TestSparseTensorFunctional:
 
 
 class TestQuantize4BitFunctional:
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
-    def test_4bit_quant(self, dtype, quant_type, blocksize):
-        A1 = torch.randn(1024, 1024, device="cuda", dtype=dtype)
+    def test_4bit_quant(self, device, dtype, quant_type, blocksize):
+        A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
         A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
 
@@ -1095,13 +1130,14 @@ class TestQuantize4BitFunctional:
             # 1024 => 0.8, 2048 => 0.88, 4096 => 0.96
             assert err.item() < math.log2(blocksize) * 8e-2
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128], ids=id_formatter("blocksize"))
-    def test_4bit_compressed_stats(self, quant_type, blocksize):
+    def test_4bit_compressed_stats(self, device, quant_type, blocksize):
         errs1 = []
         errs2 = []
         for i in range(10):
-            A1 = torch.randn(1024, 1024, device="cuda").half()
+            A1 = torch.randn(1024, 1024, device=device).half()
             q2, SA2 = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
             q3, SA3 = F.quantize_4bit(A1, blocksize=blocksize, compress_statistics=True, quant_type=quant_type)
             A2 = F.dequantize_4bit(q2, SA2, quant_type=quant_type)
@@ -1127,6 +1163,7 @@ class TestQuantize4BitFunctional:
 
     # @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
     @pytest.mark.parametrize("quant_type", ["nf4"])
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
     @pytest.mark.benchmark
     def test_bench_4bit_dequant(self, quant_type):
         blocksize = 256
@@ -1157,6 +1194,7 @@ class TestQuantize4BitFunctional:
         # torch.cuda.synchronize()
         # print((time.time()-t0)/iters*1e6)
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("double_quant", TRUE_FALSE, ids=lambda double_quant: f"DQ_{double_quant}")
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"])
     @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
@@ -1167,7 +1205,7 @@ class TestQuantize4BitFunctional:
         ids=describe_dtype,
     )
     @pytest.mark.parametrize("dim", [128, 256, 512, 1024], ids=id_formatter("dim"))
-    def test_gemv_4bit(self, dim, dtype, storage_type, quant_storage, double_quant, kind):
+    def test_gemv_4bit(self, device, dim, dtype, storage_type, quant_storage, double_quant, kind):
         errs1 = []
         errs2 = []
         errs3 = []
@@ -1180,17 +1218,17 @@ class TestQuantize4BitFunctional:
 
         for i in range(100):
             if kind == "fc1":
-                A = torch.randn(1, dim, dtype=dtype, device="cuda")
-                B = torch.randn(dim * 4, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
+                A = torch.randn(1, dim, dtype=dtype, device=device)
+                B = torch.randn(dim * 4, dim, dtype=dtype, device=device) / math.sqrt(dim)
             elif kind == "fc2":
-                A = torch.randn(1, 4 * dim, dtype=dtype, device="cuda")
-                B = torch.randn(dim, 4 * dim, dtype=dtype, device="cuda") / math.sqrt(dim)
+                A = torch.randn(1, 4 * dim, dtype=dtype, device=device)
+                B = torch.randn(dim, 4 * dim, dtype=dtype, device=device) / math.sqrt(dim)
             elif kind == "attn":
-                A = torch.randn(1, dim, dtype=dtype, device="cuda")
-                B = torch.randn(dim, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
+                A = torch.randn(1, dim, dtype=dtype, device=device)
+                B = torch.randn(dim, dim, dtype=dtype, device=device) / math.sqrt(dim)
             elif kind == "attn_packed":
-                A = torch.randn(1, dim, dtype=dtype, device="cuda")
-                B = torch.randn(dim * 3, dim, dtype=dtype, device="cuda") / math.sqrt(dim)
+                A = torch.randn(1, dim, dtype=dtype, device=device)
+                B = torch.randn(dim * 3, dim, dtype=dtype, device=device) / math.sqrt(dim)
 
             qB, state = F.quantize_4bit(
                 B,
@@ -1294,18 +1332,19 @@ class TestQuantize4BitFunctional:
             assert relratio < 1.04 and relratio > 0.96
             assert maxratio < 1.02 and maxratio > 0.98
 
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
     @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
-    def test_gemv_eye_4bit(self, storage_type, dtype, double_quant):
+    def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
         dims = 10
         torch.random.manual_seed(np.random.randint(0, 412424242))
         dims = get_test_dims(0, 8192, n=dims)
         dims = [dim + (64 - (dim % 64)) for dim in dims]
         # for dim in [576, 5120, 3520, 5184, 1280, 4992, 5312, 2048]:
         for dim in dims:
-            A = torch.normal(0, 0.1, size=(1, 1, dim), dtype=dtype, device="cuda")
-            B = torch.eye(dim, dtype=dtype, device="cuda")
+            A = torch.normal(0, 0.1, size=(1, 1, dim), dtype=dtype, device=device)
+            B = torch.eye(dim, dtype=dtype, device=device)
 
             qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant)
             C3 = torch.matmul(A, B.t())

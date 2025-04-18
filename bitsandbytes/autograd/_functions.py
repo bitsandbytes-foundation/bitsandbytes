@@ -284,7 +284,7 @@ class MatMul8bitLt(torch.autograd.Function):
                 dtype=torch.float16,
             )
 
-            if state.threshold > 0.0 and subA is not None:
+            if state.threshold > 0.0 and subA is not None and subA.numel() > 0:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:

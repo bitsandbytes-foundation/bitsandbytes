@@ -79,6 +79,12 @@ include = ["bitsandbytes*"]
 [tool.setuptools.dynamic]
 version = {attr = "bitsandbytes.__version__"}
 
+[tool.coverage.report]
+exclude_also = [
+    # exclude backward() functions from coverage, as they are invoked from C++
+    'def backward\(ctx'
+]
+
 [tool.pytest.ini_options]
 addopts = "-rP -m 'not slow and not benchmark and not deprecated'"
 #    ; --cov=bitsandbytes

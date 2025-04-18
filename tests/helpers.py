@@ -1,5 +1,7 @@
+import functools
 from io import BytesIO
 from itertools import product
+import os
 import random
 from typing import Any
 
@@ -11,6 +13,38 @@ test_dims_rng = random.Random(42)
 TRUE_FALSE = (True, False)
 BOOLEAN_TRIPLES = list(product(TRUE_FALSE, repeat=3))  # all combinations of (bool, bool, bool)
 BOOLEAN_TUPLES = list(product(TRUE_FALSE, repeat=2))  # all combinations of (bool, bool)
+
+
+@functools.cache
+def get_available_devices():
+    if "BNB_TEST_DEVICE" in os.environ:
+        # If the environment variable is set, use it directly.
+        return [os.environ["BNB_TEST_DEVICE"]]
+
+    devices = ["cpu"]
+
+    if hasattr(torch, "accelerator"):
+        # PyTorch 2.6+ - determine accelerator using agnostic API.
+        if torch.accelerator.is_available():
+            devices += [str(torch.accelerator.current_accelerator())]
+    else:
+        if torch.cuda.is_available():
+            devices += ["cuda"]
+
+        if torch.backends.mps.is_available():
+            devices += ["mps"]
+
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            devices += ["xpu"]
+
+        custom_backend_name = torch._C._get_privateuse1_backend_name()
+        custom_backend_module = getattr(torch, custom_backend_name, None)
+        custom_backend_is_available_fn = getattr(custom_backend_module, "is_available", None)
+
+        if custom_backend_is_available_fn and custom_backend_module.is_available():
+            devices += [custom_backend_name]
+
+    return devices
 
 
 def torch_save_to_buffer(obj):
