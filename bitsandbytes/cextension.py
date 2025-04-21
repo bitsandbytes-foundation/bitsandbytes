@@ -116,7 +116,10 @@ try:
 except Exception as e:
     lib = None
     if not is_ipex_available:
-        logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
+        logger.error(
+            f"Could not load bitsandbytes native library: {e}. If you use Intel CPU or XPU, please pip install intel_extension_for_pytorch",
+            exc_info=True,
+        )
         if torch.cuda.is_available():
             logger.warning(
                 f"""
