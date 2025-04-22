@@ -11,6 +11,7 @@ import bitsandbytes as bnb
 from bitsandbytes.nn.modules import Linear8bitLt
 from tests.helpers import (
     TRUE_FALSE,
+    get_available_devices,
     id_formatter,
     torch_load_from_buffer,
     torch_save_to_buffer,
@@ -19,7 +20,11 @@ from tests.helpers import (
 
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
-def test_linear_no_igemmlt():
+@pytest.mark.parametrize("device", get_available_devices())
+def test_linear_no_igemmlt(device):
+    if device == "cpu":
+        pytest.xfail("Not yet implemented on CPU")
+
     linear = torch.nn.Linear(1024, 3072)
     x = torch.randn(3, 1024, dtype=torch.half)
     linear_custom = Linear8bitLt(
@@ -29,6 +34,8 @@ def test_linear_no_igemmlt():
         has_fp16_weights=False,
         threshold=6.0,
     )
+
+    # TODO: Remove, this is no longer implemented
     linear_custom.state.force_no_igemmlt = True
 
     linear_custom.weight = bnb.nn.Int8Params(
@@ -37,11 +44,11 @@ def test_linear_no_igemmlt():
         has_fp16_weights=False,
     ).to(linear.weight.dtype)
     linear_custom.bias = linear.bias
-    linear_custom = linear_custom.cuda()
-    linear = linear.half().cuda()
+    linear_custom = linear_custom.to(device)
+    linear = linear.half().to(device)
 
-    x_ref = x.clone().cuda().requires_grad_(True)
-    x_ours = x.clone().cuda().requires_grad_(True)
+    x_ref = x.clone().to(device).requires_grad_(True)
+    x_ours = x.clone().to(device).requires_grad_(True)
     fx_ref = linear(x_ref).float()
     grad_proj = torch.randn_like(fx_ref)
     (fx_ref * grad_proj).mean().backward()
@@ -58,18 +65,25 @@ def test_linear_no_igemmlt():
     torch.testing.assert_close(x_ref.grad, x_ours.grad, atol=0.01, rtol=1e-5)
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
+@pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
 @pytest.mark.parametrize("serialize_before_forward", TRUE_FALSE, ids=id_formatter("serialize_before_forward"))
 @pytest.mark.parametrize("deserialize_before_cuda", TRUE_FALSE, ids=id_formatter("deserialize_before_cuda"))
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
 @pytest.mark.parametrize("load_before_cuda", TRUE_FALSE, ids=id_formatter("load_before_cuda"))
 def test_linear_serialization(
+    device,
     has_fp16_weights,
+    threshold,
     serialize_before_forward,
     deserialize_before_cuda,
     save_before_forward,
     load_before_cuda,
 ):
+    if device == "cpu":
+        pytest.xfail("Not yet implemented on CPU")
+
     linear = torch.nn.Linear(32, 96)
     # TODO: Fallback for bad shapes
     x = torch.randn(4, 32, dtype=torch.half)
@@ -80,7 +94,7 @@ def test_linear_serialization(
         linear.out_features,
         linear.bias is not None,
         has_fp16_weights=has_fp16_weights,
-        threshold=6.0,
+        threshold=threshold,
     )
 
     linear_custom.weight = bnb.nn.Int8Params(
@@ -89,7 +103,7 @@ def test_linear_serialization(
         has_fp16_weights=has_fp16_weights,
     )
     linear_custom.bias = linear.bias
-    linear_custom = linear_custom.cuda()
+    linear_custom = linear_custom.to(device)
 
     if serialize_before_forward:
         state_dict_8bit = linear_custom.state_dict()
@@ -125,7 +139,7 @@ def test_linear_serialization(
         linear.out_features,
         linear.bias is not None,
         has_fp16_weights=has_fp16_weights,
-        threshold=6.0,
+        threshold=threshold,
     )
 
     if deserialize_before_cuda:
@@ -135,7 +149,7 @@ def test_linear_serialization(
     if load_before_cuda:
         new_linear_custom2 = torch_load_from_buffer(bytes_8bit)
 
-    new_linear_custom = new_linear_custom.cuda()
+    new_linear_custom = new_linear_custom.to(device)
 
     if not deserialize_before_cuda:
         new_linear_custom.load_state_dict(new_state_dict, strict=True)
