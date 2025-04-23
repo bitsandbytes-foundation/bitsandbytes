@@ -22,6 +22,45 @@ def _(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor):
     _int8_linear_matmul_impl(A, B, out)
 
 
+@register_kernel("bitsandbytes::int8_mixed_scaled_mm", "cuda")
+def _(
+    A: torch.Tensor,
+    CA: torch.Tensor,
+    CB: torch.Tensor,
+    SCA: torch.Tensor,
+    SCB: torch.Tensor,
+    outlier_cols: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    subB = None
+
+    if outlier_cols is not None and outlier_cols.numel():
+        # Extract the inputs with outliers in original precision
+        subA = A[:, outlier_cols].contiguous()
+
+        # Dequantize the corresponding weight columns
+        subB = (
+            torch.ops.bitsandbytes.int8_vectorwise_dequant.default(CB[:, outlier_cols].contiguous(), SCB)
+            .to(A.dtype)
+            .t()
+        )
+
+        # TODO: if state.has_fp16_weights: subB = B[:, outlier_cols].t()
+
+    else:
+        # Needed for torch.compile when there are no outliers.
+        subA = torch.empty(0, device=A.device, dtype=A.dtype)
+
+    # Int8 Matmul + Dequant + Bias
+    output = torch.ops.bitsandbytes.int8_scaled_mm.default(CA, CB, SCA, SCB, bias=bias, dtype=A.dtype)
+
+    if subB is not None:
+        # Add the outlier columns back to the output
+        output = output.addmm(subA, subB)
+
+    return output, subA
+
+
 def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor):
     A, B = B, A
 
@@ -90,7 +129,7 @@ def _(
     A: torch.Tensor,
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
-    dtype=torch.float16,
+    dtype: Optional[torch.dtype] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     torch._check(A.dtype == torch.int32, lambda: f"A must be int32, got {A.dtype}")
@@ -121,7 +160,7 @@ def _(
     if bias is not None and bias.dtype != torch.float16:
         out.add_(bias)
 
-    return out.to(dtype)
+    return out.to(dtype or torch.float16)
 
 
 @register_kernel("bitsandbytes::int8_vectorwise_quant", "cuda")
@@ -143,6 +182,9 @@ def _(A: torch.Tensor, threshold=0.0):
 
         if outliers.any():
             outlier_cols = torch.argwhere(outliers.any(dim=0)).view(-1)
+        else:
+            # Needed for torch.compile support.
+            outlier_cols = torch.empty(0, device=A.device, dtype=torch.int64)
 
     with _cuda_device_of(A):
         lib.cint8_vector_quant(

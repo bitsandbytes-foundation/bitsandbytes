@@ -4,11 +4,11 @@ import pytest
 import torch
 
 import bitsandbytes
-from tests.helpers import TRUE_FALSE, id_formatter
+from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
 
 
 class TestLLMInt8Ops:
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_linear_matmul(self, device):
         A = torch.randint(-128, 127, (10, 20), dtype=torch.int8, device=device)
         B = torch.randint(-128, 127, (30, 20), dtype=torch.int8, device=device)
@@ -20,7 +20,7 @@ class TestLLMInt8Ops:
 
         torch.library.opcheck(torch.ops.bitsandbytes.int8_linear_matmul.default, (A, B))
 
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_linear_matmul_out(self, device):
         A = torch.randint(-128, 127, (10, 20), dtype=torch.int8, device=device)
         B = torch.randint(-128, 127, (30, 20), dtype=torch.int8, device=device)
@@ -35,7 +35,7 @@ class TestLLMInt8Ops:
         torch.library.opcheck(torch.ops.bitsandbytes.int8_linear_matmul.out, (A, B, out))
 
     @pytest.mark.parametrize("threshold", [0.0, 6.0])
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_vectorwise_quant(self, threshold, device):
         if device == "cpu":
             pytest.skip("CPU implementation is not available")
@@ -64,7 +64,7 @@ class TestLLMInt8Ops:
 
         torch.library.opcheck(torch.ops.bitsandbytes.int8_vectorwise_quant, (A, threshold))
 
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_mm_dequant(self, device):
         A = torch.randint(-128, 127, (256, 256), dtype=torch.int32, device=device)
         row_stats = torch.randn(256, dtype=torch.float32, device=device)
@@ -77,7 +77,7 @@ class TestLLMInt8Ops:
 
         torch.library.opcheck(torch.ops.bitsandbytes.int8_mm_dequant, (A, row_stats, col_stats))
 
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("has_bias", TRUE_FALSE)
     def test_int8_scaled_mm(self, device, dtype, has_bias):
@@ -96,7 +96,7 @@ class TestLLMInt8Ops:
 
 
 class TestInt8BlockwiseQuantOps:
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_quantize_blockwise(self, device, dtype, blocksize):
@@ -116,7 +116,7 @@ class TestInt8BlockwiseQuantOps:
 
         torch.library.opcheck(torch.ops.bitsandbytes.quantize_blockwise, (A, code, blocksize))
 
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_dequantize_blockwise(self, device, dtype, blocksize):
@@ -140,7 +140,7 @@ class TestInt8BlockwiseQuantOps:
 
 
 class Test4bitBlockwiseQuantOps:
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
@@ -164,7 +164,7 @@ class Test4bitBlockwiseQuantOps:
 
         torch.library.opcheck(torch.ops.bitsandbytes.quantize_4bit, (A, blocksize, quant_type, storage_dtype))
 
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
@@ -201,7 +201,7 @@ class Test4bitBlockwiseQuantOps:
             torch.ops.bitsandbytes.dequantize_4bit.default, (A, absmax, blocksize, quant_type, shape, dtype)
         )
 
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
