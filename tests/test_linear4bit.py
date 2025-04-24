@@ -24,8 +24,11 @@ storage = {
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
 def test_linear_serialization(device, quant_type, compress_statistics, bias, quant_storage, save_before_forward):
-    if device == "cpu" and quant_type == "fp4":
-        pytest.xfail("FP4 is not supported for CPU")
+    if device == "cpu":
+        if quant_type == "fp4":
+            pytest.xfail("FP4 is not supported for CPU")
+        if quant_storage != "uint8":
+            pytest.xfail("Only uint8 storage is supported for CPU")
 
     original_dtype = torch.float16
     compute_dtype = None
@@ -144,8 +147,9 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
     linear_q3 = torch_load_from_buffer(bytes_4bit)
 
     # Test moving to CPU and back to GPU
-    linear_q2.to("cpu")
-    linear_q2.to(device)
+    if device != "cpu":
+        linear_q2.to("cpu")
+        linear_q2.to(device)
     d = linear_qs(x)
     assert c.dtype == d.dtype
     assert c.device == d.device
