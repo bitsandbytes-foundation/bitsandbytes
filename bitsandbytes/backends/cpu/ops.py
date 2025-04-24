@@ -167,6 +167,8 @@ def _(
         lambda: f"Blockwise 4bit dequantization on CPU only supports uint8 storage, got {A.dtype}",
     )
 
+    A = A.view(-1, 1)
+
     # Grab upper and lower nibbles. Using int64 for indexing in the LUT.
     upper = (A >> 4).to(torch.int64)
     lower = (A & 0x0F).to(torch.int64)
@@ -181,3 +183,35 @@ def _(
     blocks = blocks.reshape(-1, *shape[1:])
 
     return blocks.to(dtype)
+
+
+@register_kernel("bitsandbytes::gemv_4bit", "cpu")
+def _(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    code: torch.Tensor,
+    blocksize: int,
+) -> torch.Tensor:
+    # TODO: We need to determine whether `code` is NF4, FP4, or other.
+    # Right now we assume NF4, as this is the only one supported on CPU.
+
+    B_dq = torch.ops.bitsandbytes.dequantize_4bit.default(
+        B,
+        absmax,
+        blocksize,
+        "nf4",
+        shape=shapeB,
+        dtype=A.dtype,
+    )
+
+    # User called gemv with B.t(), so we need to transpose it back.
+    # if B.shape[0] == 1:
+    #    B_dq = B_dq.t()
+
+    return torch.nn.functional.linear(
+        A,
+        B_dq,
+        bias=None,
+    )

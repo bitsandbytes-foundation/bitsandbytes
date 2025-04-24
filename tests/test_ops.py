@@ -37,9 +37,6 @@ class TestLLMInt8Ops:
     @pytest.mark.parametrize("threshold", [0.0, 6.0])
     @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_vectorwise_quant(self, threshold, device):
-        if device == "cpu":
-            pytest.skip("CPU implementation is not available")
-
         A = torch.randn(10, 20, dtype=torch.float16, device=device)
         A[1][0] = 1000.0
 
@@ -147,7 +144,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_quantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
-            pytest.skip("CPU implementation is only available for nf4")
+            pytest.xfail("CPU implementation is only available for nf4")
 
         if storage_dtype != torch.uint8:
             pytest.xfail("Known issue with storage_dtype != uint8")
@@ -172,10 +169,10 @@ class Test4bitBlockwiseQuantOps:
     def test_dequantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "cpu":
             if quant_type != "nf4":
-                pytest.skip("CPU implementation is only available for nf4")
+                pytest.xfail("CPU implementation is only available for nf4")
 
             if storage_dtype != torch.uint8:
-                pytest.skip("CPU implementation only supports uint8 storage")
+                pytest.xfail("CPU implementation only supports uint8 storage")
 
         shape = (128, 128)
 
@@ -208,7 +205,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "cpu":
-            pytest.skip("CPU implementation is not available")
+            pytest.xfail("CPU implementation is not available")
 
         out_features = 1024
         in_features = 256
