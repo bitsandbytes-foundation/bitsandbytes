@@ -6,7 +6,7 @@ declare cuda_targets
 
 set -xeuo pipefail
 
-if [[ -v cuda_targets ]; then
+if [[ -v cuda_targets ]]; then
     build_capability="${cuda_targets}"
 else
     # By default, target Maxwell through Hopper.
