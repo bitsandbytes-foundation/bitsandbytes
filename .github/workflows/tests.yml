@@ -5,6 +5,9 @@ on:
   push:
     branches: [testing-ci]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
@@ -31,7 +34,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lib_cpu_${{ matrix.os }}_${{ matrix.arch }}
-          path: output/*
+          path: output/${{ matrix.os }}/${{ matrix.arch }}/*
           retention-days: 7
 
   build-cuda:
@@ -72,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lib_cuda_${{matrix.cuda_version}}_${{ matrix.os }}_${{ matrix.arch }}
-          path: output/*
+          path: output/${{ matrix.os }}/${{ matrix.arch }}/*
           retention-days: 7
 
   cpu-tests:
@@ -87,15 +90,6 @@ jobs:
     env:
       BNB_TEST_DEVICE: cpu
     steps:
-      - name: Show CPU Information
-        shell: bash
-        run: |
-          if [[ $RUNNER_OS == 'Linux' ]]; then
-            lscpu
-          else
-            systeminfo | findstr /C:"Processor"
-          fi
-
       - uses: actions/checkout@v4
 
       - name: Download build artifact
@@ -153,6 +147,10 @@ jobs:
           name: lib_cuda_${{ matrix.cuda_version }}_${{ matrix.os }}_${{ matrix.arch }}
           path: bitsandbytes/
           merge-multiple: true
+
+      - name: Show files
+        run: ls -lR .
+        shell: bash
 
       - name: Setup Python
         uses: actions/setup-python@v5
