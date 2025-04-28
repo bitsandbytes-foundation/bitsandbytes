@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import ctypes as ct
 from typing import Optional
 
@@ -119,6 +120,10 @@ def _(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
     torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
+    torch._check(
+        A.dtype in [torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
+    )
 
     n = A.numel()
 
@@ -140,3 +145,73 @@ def _(
         packed = packed.squeeze().view(quant_storage).unsqueeze(1)
 
     return packed, absmax.float()
+
+
+@register_kernel("bitsandbytes::dequantize_4bit", "cpu")
+def _(
+    A: torch.Tensor,
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
+    torch._check(
+        dtype in [torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
+    )
+    torch._check(
+        A.dtype == torch.uint8,
+        lambda: f"Blockwise 4bit dequantization on CPU only supports uint8 storage, got {A.dtype}",
+    )
+
+    A = A.view(-1, 1)
+
+    # Grab upper and lower nibbles. Using int64 for indexing in the LUT.
+    upper = (A >> 4).to(torch.int64)
+    lower = (A & 0x0F).to(torch.int64)
+
+    # Expand to blocks
+    blocks = torch.cat((upper, lower), dim=1).reshape(-1, blocksize)
+
+    # Dequantize
+    blocks = _NF4_QUANT_TABLE[blocks] * absmax[:, None]
+
+    # Reshape to original shape
+    blocks = blocks.reshape(-1, *shape[1:])
+
+    return blocks.to(dtype)
+
+
+@register_kernel("bitsandbytes::gemv_4bit", "cpu")
+def _(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    code: torch.Tensor,
+    blocksize: int,
+) -> torch.Tensor:
+    # TODO: We need to determine whether `code` is NF4, FP4, or other.
+    # Right now we assume NF4, as this is the only one supported on CPU.
+
+    B_dq = torch.ops.bitsandbytes.dequantize_4bit.default(
+        B,
+        absmax,
+        blocksize,
+        "nf4",
+        shape=shapeB,
+        dtype=A.dtype,
+    )
+
+    # User called gemv with B.t(), so we need to transpose it back.
+    # if B.shape[0] == 1:
+    #    B_dq = B_dq.t()
+
+    return torch.nn.functional.linear(
+        A,
+        B_dq,
+        bias=None,
+    )

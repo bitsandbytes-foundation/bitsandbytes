@@ -779,7 +779,7 @@ def quantize_blockwise(
             state2=state2,
         )
     else:
-        quant_state = QuantState(absmax=_absmax, code=code, blocksize=blocksize, dtype=A.dtype)
+        quant_state = QuantState(absmax=_absmax, code=code.to(A.device), blocksize=blocksize, dtype=A.dtype)
 
     # TODO(matthewdouglas): Deprecate out kwarg
     out = out.copy_(_out) if out is not None else _out

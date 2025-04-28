@@ -32,9 +32,15 @@ TRANSPOSE_VALS = [(False, True), (False, False)]
 def test_matmullt(
     device, dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights, has_bias
 ):
-    if device != "cuda" and funcs[1] == bnb.research.switchback_bnb:
-        # TODO: Deprecate/remove?
-        pytest.skip("switchback_bnb only works on CUDA.")
+    if device != "cuda":
+        if funcs[1] == bnb.research.switchback_bnb:
+            # TODO: Deprecate/remove?
+            pytest.skip("switchback_bnb only works on CUDA.")
+
+        if req_grad[1]:
+            # This will be deprecated for CUDA in the future. We don't expect
+            # this to work on any other device.
+            pytest.skip("Deprecated feature with CUDA support only.")
 
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
@@ -171,7 +177,7 @@ def test_matmul_4bit(
     quant_type,
 ):
     if device == "cpu" and quant_type == "fp4":
-        pytest.skip("Only nf4 is supported on CPU")
+        pytest.xfail("Only nf4 is supported on CPU")
 
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)

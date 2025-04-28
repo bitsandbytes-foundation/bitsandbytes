@@ -22,9 +22,6 @@ from tests.helpers import (
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
 @pytest.mark.parametrize("device", get_available_devices())
 def test_linear_no_igemmlt(device):
-    if device == "cpu":
-        pytest.xfail("Not yet implemented on CPU")
-
     linear = torch.nn.Linear(1024, 3072)
     x = torch.randn(3, 1024, dtype=torch.half)
     linear_custom = Linear8bitLt(
@@ -81,8 +78,8 @@ def test_linear_serialization(
     save_before_forward,
     load_before_cuda,
 ):
-    if device == "cpu":
-        pytest.xfail("Not yet implemented on CPU")
+    if device != "cuda" and has_fp16_weights:
+        pytest.skip("has_fp16_weights is only supported on CUDA and is deprecated")
 
     linear = torch.nn.Linear(32, 96)
     # TODO: Fallback for bad shapes
@@ -111,7 +108,7 @@ def test_linear_serialization(
     if save_before_forward:
         bytes_8bit = torch_save_to_buffer(linear_custom)
 
-    x_first = x.clone().cuda().requires_grad_(True)
+    x_first = x.clone().to(device).requires_grad_(True)
     fx_first = linear_custom(x_first).float()
     grad_proj = torch.randn_like(fx_first)
     (fx_first * grad_proj).mean().backward()
@@ -157,11 +154,11 @@ def test_linear_serialization(
     if not load_before_cuda:
         new_linear_custom2 = torch_load_from_buffer(bytes_8bit)
 
-    x_second = x.clone().cuda().requires_grad_(True)
+    x_second = x.clone().to(device).requires_grad_(True)
     fx_second = new_linear_custom(x_second).float()
     (fx_second * grad_proj).mean().backward()
 
-    x_third = x.clone().cuda().requires_grad_(True)
+    x_third = x.clone().to(device).requires_grad_(True)
     fx_third = new_linear_custom2(x_third).float()
     (fx_third * grad_proj).mean().backward()
 
