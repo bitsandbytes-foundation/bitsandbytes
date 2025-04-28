@@ -61,7 +61,37 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
         lib.cget_managed_ptr.restype = ct.c_void_p
 
 
+class MockBNBNativeLibrary(BNBNativeLibrary):
+    """
+    Mock BNBNativeLibrary that raises an error when trying to use native library functionality without successfully loading the library.
+
+    Any method or attribute access will raise a RuntimeError with a message that points to the original error and provides troubleshooting steps.
+    """
+
+    def __init__(self, error_msg: str):
+        self.error_msg = error_msg
+
+    def __getattr__(self, name):
+        base_msg = "Attempted to use bitsandbytes native library functionality but it's not available.\n\n"
+        original_error = f"Original error: {self.error_msg}\n\n" if self.error_msg else ""
+        troubleshooting = (
+            "This typically happens when:\n"
+            "1. BNB doesn't ship with a pre-compiled binary for your CUDA version\n"
+            "2. The library wasn't compiled properly during installation\n"
+            "3. Missing CUDA dependencies\n"
+            "4. PyTorch/bitsandbytes version mismatch\n\n"
+            "Run 'python -m bitsandbytes' for diagnostics."
+        )
+        raise RuntimeError(base_msg + original_error + troubleshooting)
+
+    def __getitem__(self, name):
+        return self.__getattr__(name)
+
+
 def get_native_library() -> BNBNativeLibrary:
+    """
+    Load CUDA library XOR CPU, as the latter contains a subset of symbols of the former.
+    """
     binary_path = PACKAGE_DIR / f"libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}"
     cuda_specs = get_cuda_specs()
     if cuda_specs:
@@ -86,17 +116,22 @@ def get_native_library() -> BNBNativeLibrary:
 try:
     lib = get_native_library()
 except Exception as e:
-    lib = None
-    logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
+    error_msg = f"Could not load bitsandbytes native library: {e}"
+    logger.error(error_msg, exc_info=True)
+
+    diagnostic_help = ""
     if torch.cuda.is_available():
-        logger.warning(
-            """
-CUDA Setup failed despite CUDA being available. Please run the following command to get more information:
-
-python -m bitsandbytes
-
-Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
-to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
-and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
-""",
+        diagnostic_help = (
+            "CUDA Setup failed despite CUDA being available. "
+            "Please run the following command to get more information:\n\n"
+            "python -m bitsandbytes\n\n"
+            "Inspect the output of the command and see if you can locate CUDA libraries. "
+            "You might need to add them to your LD_LIBRARY_PATH. "
+            "If you suspect a bug, please take the information from the command and open an issue at:\n\n"
+            "https://github.com/bitsandbytes-foundation/bitsandbytes/issues\n\n"
+            "If you are using a custom CUDA version, you might need to set the BNB_CUDA_VERSION "
+            "environment variable to the correct version."
         )
+
+    # create a mock with error messaging as fallback
+    lib = MockBNBNativeLibrary(diagnostic_help)
