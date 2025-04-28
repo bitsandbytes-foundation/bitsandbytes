@@ -38,12 +38,8 @@ jobs:
     strategy:
       matrix:
         cuda_version: ["11.8.0", "12.8.1"]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: windows-2025
-            arch: x86_64
-
+        os: [ubuntu-22.04, windows-2025]
+        arch: [x86_64]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -57,6 +53,7 @@ jobs:
           cuda: ${{ matrix.cuda_version }}
           method: "network"
           sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
+          use-github-cache: false
 
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
@@ -91,6 +88,7 @@ jobs:
       BNB_TEST_DEVICE: cpu
     steps:
       - name: Show CPU Information
+        shell: bash
         run: |
           if [[ $RUNNER_OS == 'Linux' ]]; then
             lscpu
