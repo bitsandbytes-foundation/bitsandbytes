@@ -134,6 +134,11 @@ jobs:
           - cuda_version: "12.8.1"
             torch_version: "2.7.0"
             pypi_index: "https://download.pytorch.org/whl/cu128"
+        exclude:
+          # Our current T4 Windows runner has a driver too old (471.11)
+          # and cannot support CUDA 12+. Skip for now.
+          - os: windows-2025
+            cuda_version: "12.8.1"
     runs-on:
       labels: ${{ contains(matrix.os, 'windows') && 'CUDA-Windows-x64' || 'CUDA-Linux-x64' }}
     env:
