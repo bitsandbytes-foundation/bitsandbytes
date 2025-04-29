@@ -234,12 +234,48 @@ class Params4bit(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        # Avoid recursion by using torch's dispatch mechanism
+        # Get the function name for specific handling
+        func_name = func.__name__
+
+        # Handle specific functions that need special treatment
+        if func_name in ["chunk", "cat"]:
+            # Use DisableTorchDispatch to avoid infinite recursion
+            with torch._C._DisableTorchDispatch():
+                # Get the output from the original function
+                out = func(*args, **kwargs)
+
+            # For chunk, we need to convert each chunk to a Params4bit
+            if func_name == "chunk" and isinstance(args[0], Params4bit):
+                param4bit = args[0]
+                return tuple(
+                    Params4bit(
+                        chunk,
+                        quant_state=param4bit.quant_state,
+                        requires_grad=chunk.requires_grad
+                    )
+                    for chunk in out
+                )
+
+            # For cat, we check if any tensor in the input sequence is a Params4bit
+            elif func_name == "cat":
+                # The first argument to cat is the sequence of tensors
+                tensors = args[0]
+                params4bit_tensors = [t for t in tensors if isinstance(t, Params4bit)]
+                if params4bit_tensors:
+                    # Use the quant_state from the first Params4bit tensor
+                    param4bit = params4bit_tensors[0]
+                    return Params4bit(
+                        out,
+                        quant_state=param4bit.quant_state,
+                        requires_grad=out.requires_grad
+                    )
+
+        # Use DisableTorchDispatch for general case
         with torch._C._DisableTorchDispatch():
             # Get the output from the original function
             out = func(*args, **kwargs)
 
-        # Handle operations that return multiple tensors (like chunk)
+        # Handle operations that return multiple tensors
         if isinstance(out, tuple) and all(isinstance(x, torch.Tensor) for x in out):
             # Check if any of the input args is a Params4bit tensor
             params4bit_args = [arg for arg in args if isinstance(arg, Params4bit)]
