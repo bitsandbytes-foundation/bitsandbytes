@@ -7,7 +7,7 @@ import re
 import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
-from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs
+from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_cuda_version_tuple
 
 logger = logging.getLogger(__name__)
 
@@ -61,28 +61,71 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
         lib.cget_managed_ptr.restype = ct.c_void_p
 
 
+def get_available_cuda_binaries() -> list[str]:
+    """Get formatted CUDA versions from existing library files using cuda_specs logic"""
+    lib_pattern = f"libbitsandbytes_cuda*{DYNAMIC_LIBRARY_SUFFIX}"
+    versions = []
+    for lib in Path(__file__).parent.glob(lib_pattern):
+        match = re.search(r"cuda(\d{3})", lib.name)
+        if match:
+            ver_code = int(match.group(1))
+            major = ver_code // 10
+            minor = ver_code % 10
+            versions.append(f"{major}.{minor}")
+    return sorted(versions)
+
+
 class MockBNBNativeLibrary(BNBNativeLibrary):
     """
-    Mock BNBNativeLibrary that raises an error when trying to use native library functionality without successfully loading the library.
-
-    Any method or attribute access will raise a RuntimeError with a message that points to the original error and provides troubleshooting steps.
+    Mock BNBNativeLibrary that raises an error when trying to use native library
+    functionality without successfully loading the library.
+    Any method or attribute access will raise a RuntimeError with a message that
+    points to the original error and provides troubleshooting steps.
     """
 
     def __init__(self, error_msg: str):
         self.error_msg = error_msg
+        self.user_cuda_version = get_cuda_version_tuple()
 
     def __getattr__(self, name):
+        available_versions = get_available_cuda_binaries()
+        version_list = ", ".join(available_versions) if available_versions else "none"
+
+        user_ver = "Not detected"
+        if self.user_cuda_version:
+            user_ver = f"{self.user_cuda_version[0]}.{self.user_cuda_version[1]}"
+
+        override_value = os.environ.get("BNB_CUDA_VERSION", None)
+        override_info = (
+            f"\nCUDA version overridden with BNB_CUDA_VERSION={override_value} environment variable"
+            if override_value
+            else ""
+        )
+
+        note = "To make bitsandbytes work, the compiled version of the library must match the corresponding linked CUDA version. If you are using a CUDA version that doesn't come with a pre-compiled binary, the only solution is to compile the library from source."
+
+        cuda_info = (
+            f"Detected PyTorch CUDA version: {user_ver}\n"
+            f"Available pre-compiled bitsandbytes binaries for CUDA versions: {version_list}"
+            + override_info
+            + "\n\n"
+            + note
+            + "\n\n"
+        )
+
         base_msg = "Attempted to use bitsandbytes native library functionality but it's not available.\n\n"
         original_error = f"Original error: {self.error_msg}\n\n" if self.error_msg else ""
         troubleshooting = (
             "This typically happens when:\n"
             "1. BNB doesn't ship with a pre-compiled binary for your CUDA version\n"
-            "2. The library wasn't compiled properly during installation\n"
-            "3. Missing CUDA dependencies\n"
-            "4. PyTorch/bitsandbytes version mismatch\n\n"
-            "Run 'python -m bitsandbytes' for diagnostics."
+            "2. The library wasn't compiled properly during installation from source\n"
+            "3. Missing CUDA dependencies\n\n"
         )
-        raise RuntimeError(base_msg + original_error + troubleshooting)
+        err_msg = (
+            base_msg + troubleshooting + cuda_info + original_error + ("Run 'python -m bitsandbytes' for diagnostics.")
+        )
+
+        raise RuntimeError(err_msg)
 
     def __getitem__(self, name):
         return self.__getattr__(name)
@@ -117,7 +160,7 @@ try:
     lib = get_native_library()
 except Exception as e:
     error_msg = f"Could not load bitsandbytes native library: {e}"
-    logger.error(error_msg, exc_info=True)
+    logger.error(error_msg, exc_info=False)
 
     diagnostic_help = ""
     if torch.cuda.is_available():
