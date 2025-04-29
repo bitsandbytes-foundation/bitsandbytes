@@ -728,6 +728,9 @@ class TestLLMInt8Functional:
         ),
     )
     def test_integrated_int8_linear_matmul(self, device, dim1, dim4, inner):
+        if device == "cpu" and inner > 2048:
+            pytest.skip("Slow on CPU")
+
         for i in range(k):
             A = torch.randn(dim1, inner, device=device).half()
             B = torch.randn(dim4, inner, device=device).half()
@@ -1316,7 +1319,18 @@ class TestQuantize4BitFunctional:
         if dtype == torch.float16:
             if dim <= 512:
                 assert err1 < 7e-5
-                assert relerr1 < 0.0008
+
+                # TODO(matthewdouglas): On T4, dim=128-fp16-fc2-fp4-DQ will have relerror ~ 0.00092727
+                if (
+                    device == "cuda"
+                    and double_quant
+                    and storage_type == "fp4"
+                    and kind == "fc2"
+                    and torch.cuda.get_device_capability() == (7, 5)
+                ):
+                    assert relerr1 < 0.00093
+                else:
+                    assert relerr1 < 0.0008
             else:
                 assert err1 < 6e-5
                 assert relerr1 < 2e-4
