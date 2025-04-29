@@ -85,7 +85,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-2025]
         arch: [x86_64]
-        torch_version: ["2.4.1", "2.7.0"]
+        torch_version: ["2.7.0"]
     runs-on: ${{ matrix.os }}
     env:
       BNB_TEST_DEVICE: cpu
@@ -147,10 +147,6 @@ jobs:
           name: lib_cuda_${{ matrix.cuda_version }}_${{ matrix.os }}_${{ matrix.arch }}
           path: bitsandbytes/
           merge-multiple: true
-
-      - name: Show files
-        run: ls -lR .
-        shell: bash
 
       - name: Setup Python
         uses: actions/setup-python@v5
