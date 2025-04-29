@@ -2,11 +2,14 @@ name: Unit tests
 
 on:
   workflow_dispatch:
+  schedule:
+    # Every day at 02:15 AM UTC
+    - cron: "15 2 * * *"
   push:
     branches: [testing-ci]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -123,13 +126,13 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-2025]
         arch: [x86_64]
-        torch_version: ["2.4.1", "2.7.0"]
+        cuda_version: ["11.8.0", "12.8.1"]
         include:
-          - torch_version: "2.4.1"
-            cuda_version: "11.8.0"
+          - cuda_version: "11.8.0"
+            torch_version: "2.4.1"
             pypi_index: "https://download.pytorch.org/whl/cu118"
-          - torch_version: "2.7.0"
-            cuda_version: "12.8.1"
+          - cuda_version: "12.8.1"
+            torch_version: "2.7.0"
             pypi_index: "https://download.pytorch.org/whl/cu128"
     runs-on:
       labels: ${{ contains(matrix.os, 'windows') && 'CUDA-Windows-x64' || 'CUDA-Linux-x64' }}
