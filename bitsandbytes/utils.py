@@ -240,10 +240,16 @@ def enable_ipex_fusion(linear, x):
         )
     elif x.device.type == "xpu" and ipex_xpu and _ipex_xpu_version_prereq(2, 5):
         converted_weight = reverse_4bit_compress_format(linear.weight.data)
-        new_weight = converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
         new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
         new_zeros = None
         compensation = None
+        new_weight = converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
+        # ipex 2.7 requires new_scales is a list of tensors
+        if _ipex_xpu_version_prereq(2, 7):
+            new_scales = list(new_scales)
+            # ipex 2.7 can dequant converted_weight directly.
+            if linear.training or x.requires_grad == False:
+                new_weight = converted_weight
     else:
         raise ValueError(
             "Please check the device and ipex version. The device should be cpu or xpu while ipex version should >= 2.5"
