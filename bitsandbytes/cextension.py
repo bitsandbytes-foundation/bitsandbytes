@@ -89,12 +89,16 @@ def _format_cuda_error_message(
     original_error: str = "",
     requested_version: Optional[str] = None,
 ) -> str:
-    base_msg = "Attempted to use bitsandbytes native library functionality but it's not available.\n\n"
+    analysis = ""
+    no_cpu_lib_found = "libbitsandbytes_cpu.so: cannot open" in original_error
+    no_cuda_lib_found = requested_version not in available_versions
 
-    version_alert = ""
-    if requested_version not in available_versions:
+    if no_cpu_lib_found:
+        analysis = "🚨 Needed to load CPU-only bitsandbytes library, but it's not available 🚨\n\n"
+
+    elif no_cuda_lib_found:
         version_list_str = "\n  - " + "\n  - ".join(available_versions) if available_versions else "NONE"
-        version_alert = (
+        analysis = (
             f"🚨 CUDA VERSION MISMATCH 🚨\n"
             f"Requested CUDA version:          {requested_version}\n"
             f"Detected PyTorch CUDA version:   {user_cuda_version}\n"
@@ -107,11 +111,16 @@ def _format_cuda_error_message(
             "3. The installation will NOT work until you compile or choose a CUDA supported version\n\n"
         )
 
+    base_msg = "Attempted to use bitsandbytes native library functionality but it's not available.\n\n"
+
     troubleshooting = (
-        "This typically happens when:\n"
-        "1. bitsandbytes doesn't ship with a pre-compiled binary for your CUDA version\n"
+        "This typically happens when:\n1. bitsandbytes doesn't ship with a pre-compiled binary for your CUDA version\n"
+        if no_cuda_lib_found
+        else "1. You checked the code out from source and your torch installation doesn't detect CUDA on your machine\n"
         "2. The library wasn't compiled properly during installation from source\n"
         "3. Missing CUDA dependencies\n\n"
+        if no_cuda_lib_found
+        else ""
     )
 
     note = (
@@ -137,7 +146,7 @@ def _format_cuda_error_message(
         "   https://github.com/bitsandbytes-foundation/bitsandbytes/issues\n\n"
     )
 
-    return f"{version_alert}{base_msg}{troubleshooting}{note}{compile_instructions}{original_error}\n{diagnostics}"
+    return f"{analysis}{base_msg}{troubleshooting}{note}{compile_instructions}{original_error}\n{diagnostics}"
 
 
 class MockBNBNativeLibrary(BNBNativeLibrary):
