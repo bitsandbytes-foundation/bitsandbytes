@@ -306,6 +306,7 @@ class Params4bit(torch.nn.Parameter):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+<<<<<<< HEAD
 
         # Special handling for operations that need to preserve the Params4bit subclass
         with torch._C.DisableTorchFunctionSubclass():
@@ -345,6 +346,10 @@ class Params4bit(torch.nn.Parameter):
         else:
             # For other operations, return the result as is
             return result
+=======
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
+>>>>>>> 08e3ccd9c4bb698728b718a57f62449e4e462859
 
     def _quantize(self, device):
         w = self.data.contiguous().to(device)

@@ -1,0 +1,174 @@
+name: Unit tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every day at 02:15 AM UTC
+    - cron: "15 2 * * *"
+  push:
+    branches: [testing-ci]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build-cpu:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, windows-2025]
+        arch: [x86_64]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+
+      - name: Build C++
+        run: bash .github/scripts/build-cpu.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib_cpu_${{ matrix.os }}_${{ matrix.arch }}
+          path: output/${{ matrix.os }}/${{ matrix.arch }}/*
+          retention-days: 7
+
+  build-cuda:
+    strategy:
+      matrix:
+        cuda_version: ["11.8.0", "12.8.1"]
+        os: [ubuntu-22.04, windows-2025]
+        arch: [x86_64]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.23
+        if: startsWith(matrix.os, 'windows')
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: "network"
+          sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
+          use-github-cache: false
+
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+
+      # We're running on T4 only for now, so we only target sm75.
+      - name: Build C++ / CUDA
+        run: bash .github/scripts/build-cuda.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: x86_64
+          cuda_version: ${{ matrix.cuda_version }}
+          cuda_targets: "75"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib_cuda_${{matrix.cuda_version}}_${{ matrix.os }}_${{ matrix.arch }}
+          path: output/${{ matrix.os }}/${{ matrix.arch }}/*
+          retention-days: 7
+
+  cpu-tests:
+    needs: build-cpu
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2025]
+        arch: [x86_64]
+        torch_version: ["2.7.0"]
+    runs-on: ${{ matrix.os }}
+    env:
+      BNB_TEST_DEVICE: cpu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lib_cpu_${{ matrix.os }}_${{ matrix.arch }}
+          path: bitsandbytes/
+          merge-multiple: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+
+      - name: Install dependencies
+        run: |
+          pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[test]"
+          pip install pytest-cov
+
+      - name: Show installed packages
+        run: pip list
+
+      - name: Run tests
+        run: pytest
+
+  cuda-tests:
+    needs: build-cuda
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2025]
+        arch: [x86_64]
+        cuda_version: ["11.8.0", "12.8.1"]
+        include:
+          - cuda_version: "11.8.0"
+            torch_version: "2.4.1"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - cuda_version: "12.8.1"
+            torch_version: "2.7.0"
+            pypi_index: "https://download.pytorch.org/whl/cu128"
+        exclude:
+          # Our current T4 Windows runner has a driver too old (471.11)
+          # and cannot support CUDA 12+. Skip for now.
+          - os: windows-2025
+            cuda_version: "12.8.1"
+    runs-on:
+      labels: ${{ contains(matrix.os, 'windows') && 'CUDA-Windows-x64' || 'CUDA-Linux-x64' }}
+    env:
+      BNB_TEST_DEVICE: cuda
+    steps:
+      - name: Show GPU Information
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lib_cuda_${{ matrix.cuda_version }}_${{ matrix.os }}_${{ matrix.arch }}
+          path: bitsandbytes/
+          merge-multiple: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+
+      - name: Install dependencies
+        run: |
+          pip install torch==${{ matrix.torch_version }} --index-url ${{ matrix.pypi_index }}
+          pip install -e ".[test]"
+          pip install pytest-cov
+
+      - name: Show installed packages
+        run: pip list
+
+      - name: Run tests
+        run: pytest

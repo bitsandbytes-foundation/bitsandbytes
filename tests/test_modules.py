@@ -55,9 +55,6 @@ def assert_all_approx_close(a, b, atol=1e-8, rtol=1e-5, count=10):
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("threshold"))
 def test_linear8bitlt_inference(device, threshold):
-    if device == "cpu":
-        pytest.xfail("Not yet implemented on CPU")
-
     l1 = bnb.nn.Linear8bitLt(32, 64, threshold=threshold, has_fp16_weights=False).to(device).half()
     assert l1.weight.device.type == device
     assert l1.weight.dtype == torch.int8
@@ -120,9 +117,6 @@ def test_linear8bitlt_accumulated_gradient(device):
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("threshold", [0.0, 2.0])
 def test_linear8bitlt_no_fp16_weights(device, threshold):
-    if device == "cpu":
-        pytest.xfail("Not yet supported on CPU")
-
     l1 = (
         bnb.nn.Linear8bitLt(
             32,
@@ -211,7 +205,7 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
         has_fp16_weights=False,
     )
     w1, w2 = mlp.fc1.weight.clone().to(device), mlp.fc2.weight.clone().to(device)  # grab weights before quantization,
-    mlp = mlp.cuda().half()  # and this line triggers quantization
+    mlp = mlp.to(device).half()  # and this line triggers quantization
 
     for i in range(100):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
@@ -253,9 +247,6 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
     ids=["Int8Lt", "NF4"],
 )
 def test_linear_kbit_fp32_bias(device, module):
-    if device == "cpu":
-        pytest.xfail("Not yet implemented on CPU")
-
     # casts model to fp16 -> int8 automatically
     l1 = module(32, 64).to(device)
     assert l1.weight.dtype in [torch.int8, torch.uint8]
@@ -295,7 +286,7 @@ module_dict = {
 @pytest.mark.parametrize("module", module_dict.values(), ids=module_dict.keys())
 def test_kbit_backprop(device, module):
     if device == "cpu":
-        pytest.xfail("Not yet implemented on CPU")
+        pytest.xfail("Test is not yet supported on CPU")
 
     b = 16
     dim1 = 36
@@ -401,7 +392,10 @@ def test_fp8linear():
 )
 def test_embedding_lossless(device, embedding_class, input_shape, embedding_dim, quant_storage):
     if device == "cpu":
-        pytest.xfail("Not yet supported on CPU")
+        if embedding_class is bnb.nn.EmbeddingFP4:
+            pytest.xfail("FP4 is not supported for CPU")
+        if quant_storage is not None and quant_storage != torch.uint8:
+            pytest.xfail("CPU only supports uint8 storage for 4bit")
 
     num_embeddings = 128
 
@@ -449,7 +443,10 @@ def test_embedding_lossless(device, embedding_class, input_shape, embedding_dim,
 )
 def test_embedding_error(device, embedding_class, input_shape, embedding_dim, quant_storage):
     if device == "cpu":
-        pytest.xfail("Not yet supported on CPU")
+        if embedding_class is bnb.nn.EmbeddingFP4:
+            pytest.xfail("FP4 is not supported for CPU")
+        if quant_storage is not None and quant_storage != torch.uint8:
+            pytest.xfail("CPU only supports uint8 storage for 4bit")
 
     is_8bit = embedding_class is bnb.nn.Embedding8bit
 
@@ -486,7 +483,7 @@ def test_embedding_error(device, embedding_class, input_shape, embedding_dim, qu
 @pytest.mark.parametrize("device", get_available_devices())
 def test_4bit_linear_warnings(device):
     if device == "cpu":
-        pytest.xfail("Not yet implemented on CPU")
+        pytest.xfail("gemv_4bit op is not yet implemented on CPU")
 
     dim1 = 64
 
@@ -525,9 +522,6 @@ def test_4bit_linear_warnings(device):
 
 @pytest.mark.parametrize("device", get_available_devices())
 def test_4bit_embedding_warnings(device):
-    if device == "cpu":
-        pytest.xfail("Not yet implemented on CPU")
-
     num_embeddings = 128
     default_block_size = 64
 

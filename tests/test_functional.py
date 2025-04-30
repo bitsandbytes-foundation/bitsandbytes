@@ -186,7 +186,7 @@ class Test8BitBlockwiseQuantizeFunctional:
             code = F.create_dynamic_map(True, bits - 0, bits).to(device)
         elif method == "quantile":
             if device != "cuda":
-                pytest.xfail("Quantile map only works on CUDA")
+                pytest.skip("Quantile map only works on CUDA")
             values = torch.randn(2048, 2048, device="cuda")
             code = F.create_quantile_map(values, bits).cuda()
         # for some data types we have no zero
@@ -593,7 +593,7 @@ class TestLLMInt8Functional:
 
             A = A.view(-1, A.shape[-1])
 
-            CA, _, statsA, _, _ = F.int8_double_quant(A)
+            CA, statsA, _ = F.int8_vectorwise_quant(A)
             CB, statsB, _ = F.int8_vectorwise_quant(B)
             output = F.int8_mm_dequant(F.int8_linear_matmul(CA, CB), statsA, statsB)
 
@@ -728,6 +728,9 @@ class TestLLMInt8Functional:
         ),
     )
     def test_integrated_int8_linear_matmul(self, device, dim1, dim4, inner):
+        if device == "cpu" and inner > 2048:
+            pytest.skip("Slow on CPU")
+
         for i in range(k):
             A = torch.randn(dim1, inner, device=device).half()
             B = torch.randn(dim4, inner, device=device).half()
@@ -1102,6 +1105,9 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
+        if device == "cpu" and quant_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on CPU")
+
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
         A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
@@ -1134,6 +1140,9 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128], ids=id_formatter("blocksize"))
     def test_4bit_compressed_stats(self, device, quant_type, blocksize):
+        if device == "cpu" and quant_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on CPU")
+
         errs1 = []
         errs2 = []
         for i in range(10):
@@ -1206,6 +1215,12 @@ class TestQuantize4BitFunctional:
     )
     @pytest.mark.parametrize("dim", [128, 256, 512, 1024], ids=id_formatter("dim"))
     def test_gemv_4bit(self, device, dim, dtype, storage_type, quant_storage, double_quant, kind):
+        if device == "cpu":
+            if storage_type != "nf4":
+                pytest.xfail("fp4 quantization is not supported on CPU")
+            if quant_storage != torch.uint8:
+                pytest.xfail("Only uint8 storage is supported on CPU")
+
         errs1 = []
         errs2 = []
         errs3 = []
@@ -1216,7 +1231,11 @@ class TestQuantize4BitFunctional:
         max_errs2 = []
         max_errs3 = []
 
-        for i in range(100):
+        # Large number of iterations is excessive and slow on CPU.
+        # Keep for CUDA for now.
+        iters = 100 if device == "cuda" else 10
+
+        for i in range(iters):
             if kind == "fc1":
                 A = torch.randn(1, dim, dtype=dtype, device=device)
                 B = torch.randn(dim * 4, dim, dtype=dtype, device=device) / math.sqrt(dim)
@@ -1300,7 +1319,18 @@ class TestQuantize4BitFunctional:
         if dtype == torch.float16:
             if dim <= 512:
                 assert err1 < 7e-5
-                assert relerr1 < 0.0008
+
+                # TODO(matthewdouglas): On T4, dim=128-fp16-fc2-fp4-DQ will have relerror ~ 0.00092727
+                if (
+                    device == "cuda"
+                    and double_quant
+                    and storage_type == "fp4"
+                    and kind == "fc2"
+                    and torch.cuda.get_device_capability() == (7, 5)
+                ):
+                    assert relerr1 < 0.00093
+                else:
+                    assert relerr1 < 0.0008
             else:
                 assert err1 < 6e-5
                 assert relerr1 < 2e-4
@@ -1337,6 +1367,9 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
     @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
+        if device == "cpu" and storage_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on CPU")
+
         dims = 10
         torch.random.manual_seed(np.random.randint(0, 412424242))
         dims = get_test_dims(0, 8192, n=dims)

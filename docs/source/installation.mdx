@@ -311,20 +311,18 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 </hfoption>
 <hfoption id="Intel CPU + GPU">
 
-#### Intel CPU
+#### Intel CPU + XPU
 
 > [!TIP]
-> Intel CPU backend only supports building from source; for now, please follow the instructions below.
+> Intel CPU/XPU backend only supports building from source; for now, please follow the instructions below.
 
-Similar to the CUDA case, you can compile bitsandbytes from source for Linux and Windows systems.
+It does not need compile CPP codes, all required ops are in [intel_extension_for_pytorch](https://pytorch-extension.intel.com/), please follow the instruction to install ipex.
 
 The below commands are for Linux. For installing on Windows, please adapt the below commands according to the same pattern as described [the section above on compiling from source under the Windows tab](#cuda-compile).
 
 ```
-git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install intel_extension_for_pytorch
-cmake -DCOMPUTE_BACKEND=cpu -S .
-make
+git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
