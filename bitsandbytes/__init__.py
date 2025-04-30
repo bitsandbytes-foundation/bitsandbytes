@@ -21,7 +21,7 @@ from .optim import adam
 
 # This is a signal for integrations with transformers/diffusers.
 # Eventually we may remove this but it is currently required for compatibility.
-features = {"multi-backend"}
+features = {"multi_backend"}
 supported_torch_devices = {
     "cpu",
     "cuda",  # NVIDIA/AMD GPU

@@ -1,6 +1,7 @@
 import os
 from os.path import join
 import shutil
+import sys
 import time
 import uuid
 
@@ -168,6 +169,9 @@ optimizer_names_32bit = [
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097, 1], ids=id_formatter("dim2"))
 def test_optimizer32bit(requires_cuda, dim1, dim2, gtype, optim_name):
+    if optim_name.startswith("paged_") and sys.platform == "win32":
+        pytest.skip("Paged optimizers can have issues on Windows.")
+
     if gtype == torch.bfloat16 and optim_name in ["momentum", "rmsprop"]:
         pytest.skip()
     if dim1 == 1 and dim2 == 1:

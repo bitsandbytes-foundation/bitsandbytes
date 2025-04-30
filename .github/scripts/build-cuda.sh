@@ -2,14 +2,19 @@
 declare build_arch
 declare build_os
 declare cuda_version
+declare cuda_targets
 
 set -xeuo pipefail
 
-# By default, target Maxwell through Hopper.
-build_capability="50;52;60;61;70;75;80;86;89;90"
+if [[ -v cuda_targets ]]; then
+    build_capability="${cuda_targets}"
+else
+    # By default, target Maxwell through Hopper.
+    build_capability="50;52;60;61;70;75;80;86;89;90"
 
-# CUDA 12.8: Add sm100 and sm120; remove < sm75 to align with PyTorch 2.7+cu128 minimum
-[[ "${cuda_version}" == 12.8.* ]] && build_capability="75;80;86;89;90;100;120"
+    # CUDA 12.8: Add sm100 and sm120; remove < sm75 to align with PyTorch 2.7+cu128 minimum
+    [[ "${cuda_version}" == 12.8.* ]] && build_capability="75;80;86;89;90;100;120"
+fi
 
 [[ "${build_os}" = windows-* ]] && python3 -m pip install ninja
 

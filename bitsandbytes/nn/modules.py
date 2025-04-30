@@ -352,6 +352,13 @@ class Params4bit(torch.Tensor):
 
         return self
 
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
+
     def _quantize(self, device):
         w = self.data.contiguous().to(device)
         w_4bit, quant_state = bnb.functional.quantize_4bit(
@@ -555,7 +562,7 @@ class Linear4bit(nn.Linear):
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
 
-        return bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
+        return bnb.matmul_4bit(x, self.weight.data.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):
@@ -654,18 +661,27 @@ class Int8Params(torch.nn.Parameter):
         obj.has_fp16_weights = has_fp16_weights
         return obj
 
-    def cuda(self, device):
+    def _quantize(self, device):
         if self.has_fp16_weights:
-            return super().cuda(device)
-        else:
-            # We quantize the weight and store in 8bit row-major
-            B = self.data.contiguous().half().cuda(device)
-            CB, SCB, _ = bnb.functional.int8_vectorwise_quant(B)
-            self.data = CB
-            self.CB = CB
-            self.SCB = SCB
+            return super().to(device)
+
+        # We quantize the weight and store in 8bit row-major
+        B = self.data.contiguous().to(device=device, dtype=torch.float16)
+        CB, SCB, _ = bnb.functional.int8_vectorwise_quant(B)
+        self.data = CB
+        self.CB = CB
+        self.SCB = SCB
 
         return self
+
+    def cpu(self):
+        return self.to(device="cpu")
+
+    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+        return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
+
+    def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+        return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     def __deepcopy__(self, memo):
         # adjust this if new arguments are added to the constructor
@@ -696,8 +712,8 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None and device.type == "cuda" and self.data.device.type == "cpu":
-            return self.cuda(device)
+        if device is not None and device.type != "meta" and self.data.device.type == "cpu":
+            return self._quantize(device)
         else:
             new_param = Int8Params(
                 super().to(device=device, dtype=dtype, non_blocking=non_blocking),
