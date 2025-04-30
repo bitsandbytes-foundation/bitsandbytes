@@ -1,3 +1,4 @@
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 #
 # This source code is licensed under the MIT license found in the
@@ -206,110 +207,43 @@ class Embedding(torch.nn.Embedding):
         return emb
 
 
-class Params4bit(torch.Tensor):
-    @staticmethod
+import torch
+import copy
+from typing import Optional, Union, Any, TypeVar, Dict, Tuple
+from torch import device, dtype, Tensor
+
+# Assuming these are imported from bitsandbytes
+import bitsandbytes as bnb
+from bitsandbytes.functional import QuantState
+
+T = TypeVar('T', bound='Params4bit')
+
+class Params4bit(torch.nn.Parameter):
     def __new__(
         cls,
-        data,
-        quant_state=None,
-        requires_grad=False,
-        device=None,
-        dtype=None,
-    ):
+        data: Optional[torch.Tensor] = None,
+        requires_grad=False,  # quantized weights should be frozen by default
+        quant_state: Optional[QuantState] = None,
+        blocksize: int = 64,
+        compress_statistics: bool = True,
+        quant_type: str = "fp4",
+        quant_storage: torch.dtype = torch.uint8,
+        module: Optional["Linear4bit"] = None,
+        bnb_quantized: bool = False,
+    ) -> "Params4bit":
         if data is None:
             data = torch.empty(0)
 
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
+        self.blocksize = blocksize
+        self.compress_statistics = compress_statistics
+        self.quant_type = quant_type
         self.quant_state = quant_state
-        self.quant_storage = data.dtype
+        self.quant_storage = quant_storage
+        self.bnb_quantized = bnb_quantized
         self.data = data
-
+        self.module = module
         return self
-
-    def __repr__(self):
-        return f"Params4bit(size={tuple(self.shape)}, dtype={self.dtype}, device={self.device})"
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-
-        # Get the function name for specific handling
-        func_name = func.__name__
-
-        # Handle specific functions that need special treatment
-        if func_name in ["chunk", "cat"]:
-            # Use DisableTorchDispatch to avoid infinite recursion
-            with torch._C._DisableTorchDispatch():
-                # Get the output from the original function
-                out = func(*args, **kwargs)
-
-            # For chunk, we need to convert each chunk to a Params4bit
-            if func_name == "chunk" and isinstance(args[0], Params4bit):
-                param4bit = args[0]
-                return tuple(
-                    Params4bit(
-                        chunk,
-                        quant_state=param4bit.quant_state,
-                        requires_grad=chunk.requires_grad
-                    )
-                    for chunk in out
-                )
-
-            # For cat, we check if any tensor in the input sequence is a Params4bit
-            elif func_name == "cat":
-                # The first argument to cat is the sequence of tensors
-                tensors = args[0]
-                params4bit_tensors = [t for t in tensors if isinstance(t, Params4bit)]
-                if params4bit_tensors:
-                    # Use the quant_state from the first Params4bit tensor
-                    param4bit = params4bit_tensors[0]
-                    return Params4bit(
-                        out,
-                        quant_state=param4bit.quant_state,
-                        requires_grad=out.requires_grad
-                    )
-
-        # Use DisableTorchDispatch for general case
-        with torch._C._DisableTorchDispatch():
-            # Get the output from the original function
-            out = func(*args, **kwargs)
-
-        # Handle operations that return multiple tensors
-        if isinstance(out, tuple) and all(isinstance(x, torch.Tensor) for x in out):
-            # Check if any of the input args is a Params4bit tensor
-            params4bit_args = [arg for arg in args if isinstance(arg, Params4bit)]
-            if params4bit_args:
-                # Get the first Params4bit tensor for its attributes
-                param4bit = params4bit_args[0]
-
-                # Convert each output tensor to Params4bit
-                return tuple(
-                    Params4bit(
-                        x,
-                        quant_state=param4bit.quant_state,
-                        requires_grad=x.requires_grad
-                    ) if isinstance(x, torch.Tensor) and not isinstance(x, Params4bit) else x
-                    for x in out
-                )
-
-        # For single tensor operations
-        elif isinstance(out, torch.Tensor) and not isinstance(out, Params4bit):
-            # Check if any of the input args is a Params4bit tensor
-            params4bit_args = [arg for arg in args if isinstance(arg, Params4bit)]
-            if params4bit_args:
-                # Get the first Params4bit tensor for its attributes
-                param4bit = params4bit_args[0]
-
-                # Convert the output tensor to Params4bit
-                return Params4bit(
-                    out,
-                    quant_state=param4bit.quant_state,
-                    requires_grad=out.requires_grad
-                )
-
-        # For other types of operations, return the original output
-        return out
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -319,8 +253,14 @@ class Params4bit(torch.Tensor):
 
     def __setstate__(self, state):
         self.requires_grad = state["requires_grad"]
+        self.blocksize = state["blocksize"]
+        self.compress_statistics = state["compress_statistics"]
+        self.quant_type = state["quant_type"]
+        self.quant_state = state["quant_state"]
         self.data = state["data"]
         self.quant_storage = state["quant_storage"]
+        self.bnb_quantized = state["bnb_quantized"]
+        self.module = state["module"]
 
     def __deepcopy__(self, memo):
         new_instance = type(self).__new__(type(self))
@@ -343,14 +283,68 @@ class Params4bit(torch.Tensor):
         quantized_stats: dict[str, Any],
         requires_grad: bool = False,
         device="cuda",
+        module: Optional["Linear4bit"] = None,
         **kwargs,
     ) -> "Params4bit":
         self = torch.Tensor._make_subclass(cls, data.to(device))
         self.requires_grad = requires_grad
         self.quant_state = QuantState.from_dict(qs_dict=quantized_stats, device=device)
+        self.blocksize = self.quant_state.blocksize
+        self.compress_statistics = self.quant_state.nested
+        self.quant_type = self.quant_state.quant_type
+        self.bnb_quantized = True
+
         self.quant_storage = data.dtype
+        self.module = module
+
+        if self.module is not None:
+            self.module.quant_state = self.quant_state
 
         return self
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        # Special handling for operations that need to preserve the Params4bit subclass
+        with torch._C.DisableTorchFunctionSubclass():
+            result = func(*args, **kwargs)
+
+        # For operations that return tensors or tuple of tensors,
+        # wrap the result back as Params4bit objects
+        if func in [torch.chunk, torch.split, torch.Tensor.chunk, torch.Tensor.split]:
+            # For functions that return tuple of tensors
+            return tuple(
+                cls(
+                    data=chunk,
+                    requires_grad=args[0].requires_grad if hasattr(args[0], 'requires_grad') else False,
+                    quant_state=args[0].quant_state if hasattr(args[0], 'quant_state') else None,
+                    blocksize=args[0].blocksize if hasattr(args[0], 'blocksize') else 64,
+                    compress_statistics=args[0].compress_statistics if hasattr(args[0], 'compress_statistics') else True,
+                    quant_type=args[0].quant_type if hasattr(args[0], 'quant_type') else "fp4",
+                    quant_storage=args[0].quant_storage if hasattr(args[0], 'quant_storage') else torch.uint8,
+                    module=args[0].module if hasattr(args[0], 'module') else None,
+                    bnb_quantized=args[0].bnb_quantized if hasattr(args[0], 'bnb_quantized') else False,
+                )
+                for chunk in result
+            )
+        elif isinstance(result, torch.Tensor) and not isinstance(result, cls):
+            # For functions that return a single tensor
+            return cls(
+                data=result,
+                requires_grad=args[0].requires_grad if hasattr(args[0], 'requires_grad') else False,
+                quant_state=args[0].quant_state if hasattr(args[0], 'quant_state') else None,
+                blocksize=args[0].blocksize if hasattr(args[0], 'blocksize') else 64,
+                compress_statistics=args[0].compress_statistics if hasattr(args[0], 'compress_statistics') else True,
+                quant_type=args[0].quant_type if hasattr(args[0], 'quant_type') else "fp4",
+                quant_storage=args[0].quant_storage if hasattr(args[0], 'quant_storage') else torch.uint8,
+                module=args[0].module if hasattr(args[0], 'module') else None,
+                bnb_quantized=args[0].bnb_quantized if hasattr(args[0], 'bnb_quantized') else False,
+            )
+        else:
+            # For other operations, return the result as is
+            return result
 
     def _quantize(self, device):
         w = self.data.contiguous().to(device)
@@ -363,6 +357,8 @@ class Params4bit(torch.Tensor):
         )
         self.data = w_4bit
         self.quant_state = quant_state
+        if self.module is not None:
+            self.module.quant_state = quant_state
         self.bnb_quantized = True
         return self
 
@@ -374,20 +370,6 @@ class Params4bit(torch.Tensor):
 
     def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
         return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
-
-    @overload
-    def to(
-        self: T,
-        device: Optional[Union[int, device]] = ...,
-        dtype: Optional[Union[dtype, str]] = ...,
-        non_blocking: bool = ...,
-    ) -> T: ...
-
-    @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T: ...
-
-    @overload
-    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
 
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
@@ -409,8 +391,6 @@ class Params4bit(torch.Tensor):
             )
 
             return new_param
-
-
 def fix_4bit_weight_quant_state_from_module(module: Union["Embedding4bit", "Linear4bit"]):
     if getattr(module.weight, "quant_state", None) is not None:
         return
@@ -422,18 +402,9 @@ def fix_4bit_weight_quant_state_from_module(module: Union["Embedding4bit", "Line
 
     # the quant state got lost when the parameter got converted. This happens for example for fsdp
     # since we registered the module, we can recover the state here
+    assert module.weight.shape[1] == 1
     if not isinstance(module.weight, Params4bit):
-        # For FSDP, the weight may have been chunked, so we need to reconstruct it
-        module.weight = Params4bit(
-            module.weight,
-            quant_storage=module.quant_storage,
-            bnb_quantized=True,
-            quant_state=getattr(module, "quant_state", None),
-            blocksize=getattr(module, "blocksize", 64),
-            compress_statistics=getattr(module, "compress_statistics", True),
-            quant_type=getattr(module, "quant_type", "fp4"),
-        )
-
+        module.weight = Params4bit(module.weight, quant_storage=module.quant_storage, bnb_quantized=True)
     module.weight.quant_state = module.quant_state
 
 
@@ -555,7 +526,7 @@ class Linear4bit(nn.Linear):
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
 
-        return bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
+        return bnb.matmul_4bit(x, self.weight.data.t(), bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):
@@ -654,18 +625,27 @@ class Int8Params(torch.nn.Parameter):
         obj.has_fp16_weights = has_fp16_weights
         return obj
 
-    def cuda(self, device):
+    def _quantize(self, device):
         if self.has_fp16_weights:
-            return super().cuda(device)
-        else:
-            # We quantize the weight and store in 8bit row-major
-            B = self.data.contiguous().half().cuda(device)
-            CB, SCB, _ = bnb.functional.int8_vectorwise_quant(B)
-            self.data = CB
-            self.CB = CB
-            self.SCB = SCB
+            return super().to(device)
+
+        # We quantize the weight and store in 8bit row-major
+        B = self.data.contiguous().to(device=device, dtype=torch.float16)
+        CB, SCB, _ = bnb.functional.int8_vectorwise_quant(B)
+        self.data = CB
+        self.CB = CB
+        self.SCB = SCB
 
         return self
+
+    def cpu(self):
+        return self.to(device="cpu")
+
+    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+        return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
+
+    def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+        return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     def __deepcopy__(self, memo):
         # adjust this if new arguments are added to the constructor
@@ -696,8 +676,8 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None and device.type == "cuda" and self.data.device.type == "cpu":
-            return self.cuda(device)
+        if device is not None and device.type != "meta" and self.data.device.type == "cpu":
+            return self._quantize(device)
         else:
             new_param = Int8Params(
                 super().to(device=device, dtype=dtype, non_blocking=non_blocking),
@@ -839,7 +819,7 @@ class Embedding4bit(nn.Embedding):
         ).view(-1, 1)
         assert output_4bit.shape == (input.numel() * self.embedding_dim // 2, 1)
 
-        blocks_per_emb = self.embedding_dim // self.weight.quant_state.blocksize
+        blocks_per_emb = self.embedding_dim // self.weight.blocksize
 
         absmax = self.weight.quant_state.absmax
         assert absmax.shape == (self.num_embeddings * blocks_per_emb,)
@@ -1132,44 +1112,3 @@ class SwitchBackLinearBnb(nn.Linear):
             self.init_8bit_state()
 
         out = bnb.matmul_mixed(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
-
-# Add this after the Params4bit class definition, outside the class
-# Create a function that will be used to preserve Params4bit instances during chunking
-def _chunk_preserving_params4bit(input, *args, **kwargs):
-    """Custom implementation of chunk that preserves Params4bit tensor type."""
-    # Use the original chunk operation
-    chunks = torch._C._VariableFunctions.chunk(input, *args, **kwargs)
-
-    # If the input is a Params4bit tensor, convert chunks back to Params4bit
-    if isinstance(input, Params4bit):
-        quant_state = input.quant_state
-        # Create a new list of chunks that are Params4bit tensors
-        return tuple(Params4bit(chunk, quant_state=quant_state) for chunk in chunks)
-
-    # Otherwise, return the original chunks
-    return chunks
-
-# Replace the original torch.chunk with our custom implementation
-original_chunk = torch.chunk
-torch.chunk = _chunk_preserving_params4bit
-
-# Add this after the _chunk_preserving_params4bit function definition
-def _cat_preserving_params4bit(tensors, *args, **kwargs):
-    """Custom implementation of cat that preserves Params4bit tensor type."""
-    # Use the original cat operation
-    result = torch._C._VariableFunctions.cat(tensors, *args, **kwargs)
-
-    # Check if any of the input tensors is a Params4bit
-    params4bit_tensors = [t for t in tensors if isinstance(t, Params4bit)]
-    if params4bit_tensors:
-        # Get the quant_state from the first Params4bit tensor
-        quant_state = params4bit_tensors[0].quant_state
-        # Convert the result to Params4bit
-        return Params4bit(result, quant_state=quant_state)
-
-    # Otherwise, return the original result
-    return result
-
-# Replace the original torch.cat with our custom implementation
-original_cat = torch.cat
-torch.cat = _cat_preserving_params4bit
