@@ -30,15 +30,15 @@ jobs:
   build-shared-libs:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest, ubuntu-22.04-arm]
-        arch: [x86_64, aarch64]
-        exclude:
-          - os: windows-latest
-            arch: aarch64
+        include:
           - os: ubuntu-22.04
-            arch: aarch64
-          - os: ubuntu-22.04-arm 
             arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-latest
+            arch: x86_64
+          - os: macos-latest
+            arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -63,13 +63,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, ubuntu-22.04-arm]
-        arch: [x86_64, aarch64]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-latest
+            arch: x86_64
         cuda_version:
           ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1"]
-        exclude:
-          - os: windows-latest
-            arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -105,19 +107,19 @@ jobs:
       - build-shared-libs-cuda
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest, ubuntu-22.04-arm]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-latest
+            arch: x86_64
+          - os: macos-latest
+            arch: arm64
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
         # code. This ensures compatibility across Python versions, including Python 3.9, as compatibility is
         # dictated by the packaged code itself, not the Python version used for packaging.
         python-version: ["3.10"]
-        arch: [x86_64, aarch64]
-        exclude:
-          - os: windows-latest
-            arch: aarch64
-          - os: ubuntu-22.04
-            arch: aarch64
-          - os: ubuntu-22.04-arm 
-            arch: x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
