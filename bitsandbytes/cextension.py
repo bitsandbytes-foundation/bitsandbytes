@@ -19,7 +19,9 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
 
     The library is not guaranteed to exist at the returned path.
     """
-    library_name = f"libbitsandbytes_cuda{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
+
+    prefix = "rocm" if torch.version.hip else "cuda"
+    library_name = f"libbitsandbytes_{prefix}{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
 
     override_value = os.environ.get("BNB_CUDA_VERSION")
     if override_value:
@@ -76,7 +78,7 @@ def get_native_library() -> BNBNativeLibrary:
 
     logger.warning(
         "The installed version of bitsandbytes was compiled without GPU support. "
-        "8-bit optimizers, 8-bit multiplication, and GPU quantization are unavailable.",
+        "8-bit optimizers and GPU quantization are unavailable.",
     )
     return BNBNativeLibrary(dll)
 

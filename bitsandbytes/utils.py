@@ -1,7 +1,6 @@
 import json
 import shlex
 import subprocess
-from typing import Tuple
 
 import torch
 
@@ -104,7 +103,7 @@ def find_outlier_dims(weight, reduction_dim=0, zscore=4.0, topk=None, rdm=False)
     return idx
 
 
-def execute_and_return(command_string: str) -> Tuple[str, str]:
+def execute_and_return(command_string: str) -> tuple[str, str]:
     def _decode(subprocess_err_out_tuple):
         return tuple(to_decode.decode("UTF-8").strip() for to_decode in subprocess_err_out_tuple)
 

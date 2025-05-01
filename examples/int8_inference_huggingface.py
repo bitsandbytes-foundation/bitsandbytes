@@ -8,7 +8,7 @@ text = "Hamburg is in which country?\n"
 tokenizer = LlamaTokenizer.from_pretrained(model_name)
 input_ids = tokenizer(text, return_tensors="pt").input_ids
 
-max_memory = f"{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB"
+max_memory = f"{int(torch.cuda.mem_get_info()[0] / 1024**3) - 2}GB"
 
 n_gpus = torch.cuda.device_count()
 max_memory = {i: max_memory for i in range(n_gpus)}

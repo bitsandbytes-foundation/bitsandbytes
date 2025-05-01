@@ -7,7 +7,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
-from tests.helpers import TRUE_FALSE, torch_load_from_buffer, torch_save_to_buffer
+from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, torch_load_from_buffer, torch_save_to_buffer
 
 storage = {
     "uint8": torch.uint8,
@@ -17,15 +17,21 @@ storage = {
 }
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
-@pytest.mark.parametrize("bias", TRUE_FALSE)
-@pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
+@pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("save_before_forward", TRUE_FALSE)
-def test_linear_serialization(quant_type, compress_statistics, bias, quant_storage, save_before_forward):
+@pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
+def test_linear_serialization(device, quant_type, compress_statistics, bias, quant_storage, save_before_forward):
+    if device == "cpu":
+        if quant_type == "fp4":
+            pytest.xfail("FP4 is not supported for CPU")
+        if quant_storage != "uint8":
+            pytest.xfail("Only uint8 storage is supported for CPU")
+
     original_dtype = torch.float16
     compute_dtype = None
-    device = "cuda"
     layer_shape = (300, 400)
 
     linear = torch.nn.Linear(*layer_shape, dtype=original_dtype, device="cpu")  # original layer
@@ -52,7 +58,7 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
     # restoring from state_dict:
     bias_data2 = sd.pop("bias", None)
     weight_data2 = sd.pop("weight")
-    weight2 = bnb.nn.Params4bit.from_prequantized(quantized_stats=sd, data=weight_data2)
+    weight2 = bnb.nn.Params4bit.from_prequantized(quantized_stats=sd, data=weight_data2, device=device)
 
     # creating new layer with same params:
     linear_q2 = bnb.nn.Linear4bit(
@@ -141,8 +147,9 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
     linear_q3 = torch_load_from_buffer(bytes_4bit)
 
     # Test moving to CPU and back to GPU
-    linear_q2.to("cpu")
-    linear_q2.to(device)
+    if device != "cpu":
+        linear_q2.to("cpu")
+        linear_q2.to(device)
     d = linear_qs(x)
     assert c.dtype == d.dtype
     assert c.device == d.device
@@ -174,18 +181,50 @@ def test_linear_serialization(quant_type, compress_statistics, bias, quant_stora
         assert size_ratio < target_compression, ratio_error_msg
 
 
-def test_copy_param():
-    tensor = torch.tensor([1.0, 2.0, 3.0, 4.0])
-    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).cuda(0)
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+def test_copy_param(device, quant_type, blocksize, compress_statistics):
+    if device == "cpu":
+        if compress_statistics:
+            pytest.skip("Currently segfaults on CPU")
+        if quant_type == "fp4":
+            pytest.xfail("FP4 not supported on CPU")
+
+    tensor = torch.linspace(1, blocksize, blocksize)
+    param = bnb.nn.Params4bit(
+        data=tensor,
+        quant_type=quant_type,
+        blocksize=blocksize,
+        compress_statistics=compress_statistics,
+        requires_grad=False,
+    ).to(device)
 
     shallow_copy_param = copy.copy(param)
     assert param.quant_state is shallow_copy_param.quant_state
     assert param.data.data_ptr() == shallow_copy_param.data.data_ptr()
 
 
-def test_deepcopy_param():
-    tensor = torch.tensor([1.0, 2.0, 3.0, 4.0])
-    param = bnb.nn.Params4bit(data=tensor, requires_grad=False).cuda(0)
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
+    if device == "cpu":
+        if compress_statistics:
+            pytest.skip("Currently segfaults on CPU")
+        if quant_type == "fp4":
+            pytest.xfail("FP4 not supported on CPU")
+
+    tensor = torch.linspace(1, blocksize, blocksize)
+    param = bnb.nn.Params4bit(
+        data=tensor,
+        quant_type=quant_type,
+        blocksize=blocksize,
+        compress_statistics=compress_statistics,
+        requires_grad=False,
+    ).to(device)
     dict_keys_before = set(param.__dict__.keys())
     copy_param = copy.deepcopy(param)
     dict_keys_after = set(param.__dict__.keys())
@@ -199,12 +238,27 @@ def test_deepcopy_param():
     assert dict_keys_before == dict_keys_copy
 
 
-def test_params4bit_real_serialization():
-    original_tensor = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
-    original_param = bnb.nn.Params4bit(data=original_tensor, quant_type="fp4")
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
+    if device == "cpu":
+        if compress_statistics:
+            pytest.skip("Currently segfaults on CPU")
+        if quant_type == "fp4":
+            pytest.xfail("FP4 not supported on CPU")
+
+    original_tensor = torch.linspace(1, blocksize, blocksize, dtype=torch.float32)
+    original_param = bnb.nn.Params4bit(
+        data=original_tensor,
+        quant_type=quant_type,
+        blocksize=blocksize,
+        compress_statistics=compress_statistics,
+    )
     dict_keys_before = set(original_param.__dict__.keys())
 
-    original_param.cuda(0)  # move to CUDA to trigger quantization
+    original_param.to(device)  # change device to trigger quantization
 
     serialized_param = pickle.dumps(original_param)
     deserialized_param = pickle.loads(serialized_param)
