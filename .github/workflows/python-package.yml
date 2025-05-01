@@ -63,6 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -107,6 +108,7 @@ jobs:
       - build-shared-libs-cuda
     strategy:
       matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]
         include:
           - os: ubuntu-22.04
             arch: x86_64
