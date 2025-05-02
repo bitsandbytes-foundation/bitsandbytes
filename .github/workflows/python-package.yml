@@ -30,16 +30,15 @@ jobs:
   build-shared-libs:
     strategy:
       matrix:
-        os:
-          - ubuntu-22.04  # if you change this, also change the pattern in the build-wheels job to reflect this!
-          - macos-latest
-          - windows-latest
-        arch: [x86_64, aarch64]
-        exclude:
-          - os: windows-latest # This probably requires arm64 Windows agents
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
             arch: aarch64
-          - os: ubuntu-22.04 # Temporary. Takes too long, not ready yet.
-            arch: aarch64
+          - os: windows-latest
+            arch: x86_64
+          - os: macos-latest
+            arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -64,25 +63,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          # NOTE: The CUDA Docker image is hard-coded in the build script, so the Ubuntu version here only affects the runner, not the build environment:
-          - ubuntu-22.04
-          - windows-latest
-        arch: [x86_64, aarch64]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-latest
+            arch: x86_64
         cuda_version:
           ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1"]
-        exclude:
-          - os: windows-latest # This probably requires arm64 Windows agents
-            arch: aarch64
-          - os: ubuntu-22.04 # Temporary. Takes too long, not ready yet.
-            arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        # Linux: We use Docker to build cross platform Cuda (aarch64 is built in emulation)
-      - name: Set up Docker multiarch
-        if: startsWith(matrix.os, 'ubuntu')
-        uses: docker/setup-qemu-action@v3
         # Windows: We install Cuda on the agent (slow)
       - uses: Jimver/cuda-toolkit@v0.2.22
         if: startsWith(matrix.os, 'windows')
@@ -115,20 +108,20 @@ jobs:
       - build-shared-libs-cuda
     strategy:
       matrix:
-        os:
-          - ubuntu-22.04
-          - macos-latest
-          - windows-latest
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-latest
+            arch: x86_64
+          - os: macos-latest
+            arch: arm64
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
         # code. This ensures compatibility across Python versions, including Python 3.9, as compatibility is
         # dictated by the packaged code itself, not the Python version used for packaging.
         python-version: ["3.10"]
-        arch: [x86_64, aarch64]
-        exclude:
-          - os: windows-latest # This probably requires arm64 Windows agents
-            arch: aarch64
-          - os: ubuntu-22.04 # Temporary. Takes too long, not ready yet.
-            arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -193,7 +186,7 @@ jobs:
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
       - name: Create release and upload artifacts
-        uses: softprops/action-gh-release@v2.0.8
+        uses: softprops/action-gh-release@v2.2.1
         with:
           files: wheels/*.whl
           prerelease: true
