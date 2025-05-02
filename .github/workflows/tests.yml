@@ -23,7 +23,7 @@ jobs:
             arch: x86_64
           - os: ubuntu-22.04-arm
             arch: aarch64
-          - os: windows-latest
+          - os: windows-2025
             arch: x86_64
     runs-on: ${{ matrix.os }}
     steps:
@@ -56,7 +56,7 @@ jobs:
             arch: x86_64
           - os: ubuntu-22.04-arm
             arch: aarch64
-          - os: windows-latest
+          - os: windows-2025
             arch: x86_64
     runs-on: ${{ matrix.os }}
 
