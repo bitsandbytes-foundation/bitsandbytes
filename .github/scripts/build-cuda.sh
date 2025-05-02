@@ -11,8 +11,8 @@ if [[ -v cuda_targets ]]; then
 elif [ "${build_arch}" = "aarch64" ]; then
     build_capability="75;80;90"
 
-    # CUDA 12.8: Add sm100 and sm120
-    [[ "${cuda_version}" == 12.8.* ]] && build_capability="75;80;90;100;120"
+    # CUDA 12.8: Add sm100
+    [[ "${cuda_version}" == 12.8.* ]] && build_capability="75;80;90;100"
 else
     # By default, target Maxwell through Hopper.
     build_capability="50;52;60;61;70;75;80;86;89;90"
