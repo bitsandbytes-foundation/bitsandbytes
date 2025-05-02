@@ -198,16 +198,23 @@ jobs:
 
   audit-wheels:
     needs: build-wheels
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.os }}
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
     steps:
       - uses: actions/checkout@v4
-      - name: Download all wheels
+      - name: Download wheel
         uses: actions/download-artifact@v4
         with:
-          merge-multiple: true
-          pattern: "bdist_wheel_*"
+          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
           path: wheels/
       - name: Set up Python
         uses: actions/setup-python@v5
