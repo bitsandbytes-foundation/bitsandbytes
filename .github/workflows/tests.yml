@@ -17,8 +17,14 @@ jobs:
   build-cpu:
     strategy:
       matrix:
-        os: [ubuntu-22.04, windows-2025]
-        arch: [x86_64]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-latest
+            arch: x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,8 +50,14 @@ jobs:
     strategy:
       matrix:
         cuda_version: ["11.8.0", "12.8.1"]
-        os: [ubuntu-22.04, windows-2025]
-        arch: [x86_64]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-latest
+            arch: x86_64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -70,7 +82,7 @@ jobs:
         run: bash .github/scripts/build-cuda.sh
         env:
           build_os: ${{ matrix.os }}
-          build_arch: x86_64
+          build_arch: ${{ matrix.arch }}
           cuda_version: ${{ matrix.cuda_version }}
           cuda_targets: "75"
 
@@ -86,9 +98,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-2025]
-        arch: [x86_64]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
         torch_version: ["2.7.0"]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-2025
+            arch: x86_64
     runs-on: ${{ matrix.os }}
     env:
       BNB_TEST_DEVICE: cpu
