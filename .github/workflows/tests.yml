@@ -94,6 +94,7 @@ jobs:
           retention-days: 7
 
   cpu-tests:
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
     strategy:
       fail-fast: false
@@ -138,6 +139,7 @@ jobs:
         run: pytest
 
   cuda-tests:
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cuda
     strategy:
       fail-fast: false
