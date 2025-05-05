@@ -31,14 +31,93 @@ bitsandbytes has the following minimum requirements for all platforms:
 
 * Python 3.9+
 * [PyTorch](https://pytorch.org/get-started/locally/) 2.2+
+  * _Note: While we aim to provide wide backwards compatibility, we recommend using the latest version of PyTorch for the best experience._
 
-Platform specific requirements are detailed below:
-#### Linux x86-64
-* glibc >= 2.24
+#### Accelerator support:
 
-#### Windows x86-64
-* Windows Server 2019+ or Windows 11+
+<table>
+  <thead>
+    <tr>
+      <th>Platform</th>
+      <th>Accelerator</th>
+      <th>Hardware Requirements</th>
+      <th>Support Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td colspan="4">🐧 <strong>Linux</strong></td>
+    </tr>
+    <tr>
+      <td align="right">x86-64</td>
+      <td>◻️ CPU</td>
+      <td></td>
+      <td>〰️ Partial Support</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟩 NVIDIA GPU</td>
+      <td>SM50+ minimum<br>SM75+ recommended</td>
+      <td>✅ Full Support *</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟥 AMD GPU</td>
+      <td>gfx90a, gfx942, gfx1100</td>
+      <td>🚧</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟦 Intel XPU</td>
+      <td>TBD</td>
+      <td>🚧</td>
+    </tr>
+    <tr>
+      <td align="right">aarch64</td>
+      <td>CPU</td>
+      <td></td>
+      <td>〰️ Partial Support</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟩 NVIDIA GPU</td>
+      <td>SM75, SM80, SM90, SM100</td>
+      <td>✅ Full Support *</td>
+    </tr>
+    <tr>
+      <td colspan="4">🪟 <strong>Windows</strong></td>
+    </tr>
+    <tr>
+      <td align="right">x86-64</td>
+      <td>◻️ CPU</td>
+      <td>AVX2</td>
+      <td>〰️ Partial Support</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟩 NVIDIA GPU</td>
+      <td>SM50+ minimum<br>SM75+ recommended</td>
+      <td>✅ Full Support *</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟦 Intel XPU</td>
+      <td>TBD</td>
+      <td>🚧</td>
+    </tr>
+    <tr>
+      <td colspan="4">🍎 <strong>macOS</strong></td>
+    </tr>
+    <tr>
+      <td align="right">arm64</td>
+      <td>◻️ CPU / Metal</td>
+      <td>Apple M1+</td>
+      <td>❌ Under consideration</td>
+    </tr>
+  </tbody>
+</table>
 
+\* Accelerated INT8 requires SM75+.
 
 ## :book: Documentation
 * [Official Documentation](https://huggingface.co/docs/bitsandbytes/main)
