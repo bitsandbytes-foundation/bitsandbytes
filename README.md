@@ -73,8 +73,13 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>🚧</td>
     </tr>
     <tr>
+      <td></td>
+      <td>🟦 Intel HPU</td>
+      <td>Gaudi1, Gaudi2, Gaudi3</td>
+      <td>🚧</td>
+    <tr>
       <td align="right">aarch64</td>
-      <td>CPU</td>
+      <td>◻️ CPU</td>
       <td></td>
       <td>〰️ Partial Support</td>
     </tr>
