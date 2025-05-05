@@ -5,8 +5,6 @@ on:
   schedule:
     # Every day at 02:15 AM UTC
     - cron: "15 2 * * *"
-  push:
-    branches: [testing-ci]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
