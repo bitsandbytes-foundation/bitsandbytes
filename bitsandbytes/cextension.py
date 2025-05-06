@@ -93,10 +93,23 @@ def parse_cuda_version(version_str: str) -> str:
 
 class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
     """
-    Mock BNBNativeLibrary that raises an error when trying to use native library
-    functionality without successfully loading the library.
-    Any method or attribute access will raise a RuntimeError with a message that
-    points to the original error and provides troubleshooting steps.
+    Mock library handler that defers errors until native methods are called.
+
+    This class serves as a fallback when the native bitsandbytes library fails to load.
+    It captures the original error and generates detailed troubleshooting guidance.
+
+    Key behaviors:
+    - Allows attribute access and method assignment without immediate errors
+    - Throws a RuntimeError with diagnostic information only when a native method is called, as otherwise it would error out on import, breaking backward compatibility
+    - Handles both missing CUDA dependencies and version mismatch scenarios
+
+    Error scenarios covered:
+    1. Missing shared library dependencies (e.g., libcudart.so not in LD_LIBRARY_PATH or through PyTorch CUDA installation)
+    2. CUDA version mismatch between PyTorch and available pre-compiled binaries
+    3. Completely missing pre-compiled binaries when CUDA is detected
+    4. Custom BNB_CUDA_VERSION override but mismatch
+    5. CPU-only installation attempts when GPU functionality is requested
+
     """
 
     def __init__(self, error_msg: str):
