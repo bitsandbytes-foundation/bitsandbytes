@@ -45,11 +45,19 @@ class BNBNativeLibrary:
     def __init__(self, lib: ct.CDLL):
         self._lib = lib
 
-    def __getattr__(self, item):
-        return getattr(self._lib, item)
+    def __getattr__(self, name):
+        def throw_on_call(*args, **kwargs):
+            if hasattr(self._lib, name):
+                return getattr(self._lib, name)(*args, **kwargs)
+            raise RuntimeError(
+                f"Method '{name}' not available in CPU-only version of bitsandbytes.\n"
+                "Reinstall with GPU support or use CUDA-enabled hardware."
+            )
+
+        return throw_on_call
 
     def __getitem__(self, item):
-        return getattr(self._lib, item)
+        return self.__getattr__(item)
 
 
 class CudaBNBNativeLibrary(BNBNativeLibrary):
@@ -221,8 +229,12 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
         )
 
     def __getattr__(self, name):
-        """Raise error with detailed message when any attribute is accessed"""
-        raise RuntimeError(f"{self.formatted_error}Native code method attempted to access: lib.{name}()")
+        """Return a dummy function that throws when called, rather than on attribute access"""
+
+        def throw_on_call(*args, **kwargs):
+            raise RuntimeError(f"{self.formatted_error}Native code method attempted to call: lib.{name}()")
+
+        return throw_on_call
 
     def __getitem__(self, name):
         return self.__getattr__(name)
