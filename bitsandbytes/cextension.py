@@ -135,16 +135,18 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
         elif no_cuda_lib_found:
             version_list_str = "\n  - " + "\n  - ".join(available_versions) if available_versions else "NONE"
             analysis = (
-                f"\n🚨 CUDA VERSION MISMATCH 🚨\n"
-                f"Requested CUDA version:          {requested_version}\n"
-                f"Detected PyTorch CUDA version:   {user_cuda_version}\n"
-                f"Available pre-compiled versions: {version_list_str}\n\n"
-                "This means:\n"
-                "The version you're trying to use is NOT distributed with this package\n\n"
+                (
+                    f"\n🚨 CUDA VERSION MISMATCH 🚨\n"
+                    f"Requested CUDA version:          {requested_version}\n"
+                    f"Detected PyTorch CUDA version:   {user_cuda_version}\n"
+                    f"Available pre-compiled versions: {version_list_str}\n\n"
+                    "This means:\n"
+                    "The version you're trying to use is NOT distributed with this package\n\n"
+                )
                 if available_versions
-                else "1. You're not using the package but checked-out the source code\n"
-                "2. You MUST compile from source for this specific CUDA version\n"
-                "3. The installation will NOT work until you compile or choose a CUDA supported version via export BNB_CUDA_VERSION=<version>\n\n"
+                else "\n🚨 Forgot to compile the bitsandbytes library? 🚨\n"
+                "1. You're not using the package but checked-out the source code\n"
+                "2. You MUST compile from source\n\n"
             )
 
         base_msg = "Attempted to use bitsandbytes native library functionality but it's not available.\n\n"
