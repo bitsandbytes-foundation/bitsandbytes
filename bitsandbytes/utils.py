@@ -48,59 +48,6 @@ def reverse_4bit_compress_format(weight):
     return out
 
 
-def enable_ipex_fusion(linear, x):
-    from bitsandbytes.backends.cpu_xpu_common import (
-        _ipex_cpu_version_prereq,
-        _ipex_xpu_version_prereq,
-        dequant_8bit,
-        ipex_cpu,
-        ipex_xpu,
-    )
-
-    quant_state = linear.weight.quant_state
-
-    if quant_state.nested:
-        quant_state.absmax = dequant_8bit(quant_state.absmax, quant_state.offset, quant_state.state2)
-        quant_state.nested = False
-        delattr(quant_state, "state2")
-
-    if x.device.type == "cpu" and ipex_cpu and _ipex_cpu_version_prereq(2, 5):
-        converted_weight = reverse_4bit_compress_format(linear.weight.data)
-        new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
-            converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
-            "nf4",
-            quant_state.shape,  # weight shape
-            quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
-            None,  # zero_points
-            None,  # bias
-            None,  # batch_size
-            quant_state.blocksize,
-            2,
-        )
-    elif x.device.type == "xpu" and ipex_xpu and _ipex_xpu_version_prereq(2, 5):
-        converted_weight = reverse_4bit_compress_format(linear.weight.data)
-        new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
-        new_zeros = None
-        compensation = None
-        new_weight = converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
-        # ipex 2.7 requires new_scales is a list of tensors
-        if _ipex_xpu_version_prereq(2, 7):
-            new_scales = list(new_scales)
-            # ipex 2.7 can dequant converted_weight directly.
-            if linear.training or x.requires_grad == False:
-                new_weight = converted_weight
-    else:
-        raise ValueError(
-            "Please check the device and ipex version. The device should be cpu or xpu while ipex version should >= 2.5"
-        )
-
-    linear.weight.data = new_weight.data
-    linear.weight.quant_state.ipex = True
-    linear.weight.quant_state.new_scales = new_scales
-    linear.weight.quant_state.new_zeros = new_zeros
-    linear.weight.quant_state.compensation = compensation
-
-
 class OutlierTracer:
     _instance = None
 

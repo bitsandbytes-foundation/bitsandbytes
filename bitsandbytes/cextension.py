@@ -84,18 +84,26 @@ def get_native_library() -> BNBNativeLibrary:
 
 
 try:
+    # to support Intel CPU/GPU (XPU) backend
     import intel_extension_for_pytorch as ipex
 
-    assert ipex._C._has_xpu()
-    is_ipex_xpu_available = True
-except Exception:
-    is_ipex_xpu_available = False
+    ipex_cpu = ipex if ipex._C._has_cpu() else None
+    ipex_xpu = ipex if ipex._C._has_xpu() else None
+except BaseException:
+    ipex_cpu = None
+    ipex_xpu = None
+
 
 try:
     lib = get_native_library()
+    if not ipex_cpu:
+        logger.warning(
+            "The installed version of bitsandbytes was compiled without IPEX support. "
+            "You can install ipex by running `pip install intel_extension_for_pytorch`to get better performance if you use the Intel CPU.",
+        )
 except Exception as e:
     lib = None
-    if not is_ipex_xpu_available:
+    if not ipex_xpu:
         logger.error(
             f"Could not load bitsandbytes native library: {e}. If you use Intel CPU or XPU, please pip install intel_extension_for_pytorch by following the instruction in https://pytorch-extension.intel.com/installation.\n",
             exc_info=True,

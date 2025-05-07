@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, reverse_4bit_compress_format, unpack_tensor_to_dict
 
-from .cextension import lib
+from .cextension import ipex_cpu, ipex_xpu, lib
 
 name2qmap = {}
 
@@ -2536,3 +2536,49 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type="vector"):
         return x.to(dtype)
     else:
         return None
+
+
+def enable_ipex_fusion(linear, x):
+    quant_state = linear.weight.quant_state
+
+    if quant_state.nested:
+        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+        absmax += quant_state.offset
+        if absmax.dtype != torch.float32:
+            absmax = absmax.float()
+
+        quant_state.absmax = absmax
+        quant_state.nested = False
+        delattr(quant_state, "state2")
+
+    if x.device.type == "cpu" and ipex_cpu:
+        converted_weight = reverse_4bit_compress_format(linear.weight.data)
+        new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
+            converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
+            "nf4",
+            quant_state.shape,  # weight shape
+            quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
+            None,  # zero_points
+            None,  # bias
+            None,  # batch_size
+            quant_state.blocksize,
+            2,
+        )
+    elif x.device.type == "xpu" and ipex_xpu:
+        new_weight = reverse_4bit_compress_format(linear.weight.data)
+        new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
+        new_zeros = None
+        compensation = None
+        new_scales = list(new_scales)
+        if not linear.training and not x.requires_grad:
+            new_weight = new_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
+    else:
+        raise ValueError(
+            "Please check the device and ipex version. The device should be cpu or xpu while ipex version should >= 2.7"
+        )
+
+    linear.weight.data = new_weight.data
+    linear.weight.quant_state.ipex = True
+    linear.weight.quant_state.new_scales = new_scales
+    linear.weight.quant_state.new_zeros = new_zeros
+    linear.weight.quant_state.compensation = compensation

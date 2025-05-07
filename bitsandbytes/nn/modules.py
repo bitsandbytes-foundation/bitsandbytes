@@ -11,12 +11,11 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.functional import QuantState
+from bitsandbytes.functional import QuantState, enable_ipex_fusion
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
     INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
     OutlierTracer,
-    enable_ipex_fusion,
     reverse_4bit_compress_format,
 )
 
@@ -677,6 +676,8 @@ class Int8Params(torch.nn.Parameter):
         if device is not None and device.type != "meta" and self.data.device.type == "cpu":
             if device.type != "cpu" or self.data.dtype != torch.int8:
                 return self._quantize(device)
+            elif self.data.dtype == torch.int8 and device.type in ("cpu", "xpu"):
+                self.CB = self.data
 
         new_param = Int8Params(
             super().to(device=device, dtype=dtype, non_blocking=non_blocking),
