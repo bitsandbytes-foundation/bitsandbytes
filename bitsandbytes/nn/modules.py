@@ -675,17 +675,18 @@ class Int8Params(torch.nn.Parameter):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if device is not None and device.type != "meta" and self.data.device.type == "cpu":
-            return self._quantize(device)
-        else:
-            new_param = Int8Params(
-                super().to(device=device, dtype=dtype, non_blocking=non_blocking),
-                requires_grad=self.requires_grad,
-                has_fp16_weights=self.has_fp16_weights,
-            )
-            new_param.CB = self.CB
-            new_param.SCB = self.SCB
+            if device.type != "cpu" or self.data.dtype != torch.int8:
+                return self._quantize(device)
 
-            return new_param
+        new_param = Int8Params(
+            super().to(device=device, dtype=dtype, non_blocking=non_blocking),
+            requires_grad=self.requires_grad,
+            has_fp16_weights=self.has_fp16_weights,
+        )
+        new_param.CB = self.CB
+        new_param.SCB = self.SCB
+
+        return new_param
 
 
 def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
