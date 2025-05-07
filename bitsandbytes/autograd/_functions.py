@@ -298,6 +298,29 @@ class MatMul8bitLt(torch.autograd.Function):
         return grad_A, grad_B, None, grad_bias, None
 
 
+class MatMul8bitFp(torch.autograd.Function):
+    # For Intel CPU and XPU, the double quant has many unsafe operations which will breaks the finetune.
+    # We'd like to use dequant + matmul to run finetune currently.
+
+    @staticmethod
+    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
+        CB = B.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0)).t()
+        output = torch.matmul(A, CB).to(A.dtype)
+        ctx.state = state
+        ctx.dtype_A = A.dtype
+        ctx.grad_shape = A.shape
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        state = ctx.state
+        B = state.CxB if state.CxB is not None else state.CB
+        CB = B.to(ctx.dtype_A).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+        grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
+
+        return grad_A, None, None, None, None
+
+
 class MatMul4Bit(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
@@ -366,6 +389,8 @@ def matmul(
     state = state or MatmulLtState()
     if threshold > 0.0:
         state.threshold = threshold
+    if A.device.type in ("cpu", "xpu") and state.is_training:
+        return MatMul8bitFp.apply(A, B, out, bias, state)
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
@@ -377,6 +402,16 @@ def matmul_4bit(
     bias: Optional[torch.Tensor] = None,
 ):
     assert quant_state is not None
+
+    if A.device.type in ("cpu", "xpu") and A.requires_grad == False:
+        if getattr(quant_state, "ipex", False):
+            B = B.t() if B.dim() == 2 else B
+            out = F.gemv_4bit(A, B, out, state=quant_state)
+            if bias is not None:
+                out += bias
+            return out
+        else:
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
 
     if A.numel() == A.shape[-1] and A.requires_grad == False:
         if A.shape[-1] % quant_state.blocksize != 0:

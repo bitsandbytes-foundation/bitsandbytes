@@ -13,7 +13,7 @@ import torch
 from torch import Tensor
 from typing_extensions import deprecated
 
-from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
+from bitsandbytes.utils import pack_dict_to_tensor, reverse_4bit_compress_format, unpack_tensor_to_dict
 
 from .cextension import lib
 
@@ -1123,6 +1123,15 @@ def dequantize_4bit(
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
+    # IPEX format is different, we need extra process.
+    if getattr(quant_state, "ipex", False) and quant_type == "nf4":
+        if A.device.type == "xpu":
+            out = torch.ops.torch_ipex.dequantize_4bit(A, "nf4", quant_state.shape, absmax, None, blocksize).t()
+            return out
+        elif A.device.type == "cpu":
+            ipex_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(A, "nf4", quant_state.shape, 2)
+            A = reverse_4bit_compress_format(ipex_weight.reshape(-1)).reshape(1, -1)
+
     if out is not None:
         torch.ops.bitsandbytes.dequantize_4bit.out(
             A, absmax, quant_state.blocksize, quant_state.quant_type, quant_state.shape, quant_state.dtype, out=out
@@ -1709,6 +1718,25 @@ def gemv_4bit(
     absmax = state.absmax
     if state.nested:
         absmax = dequantize_blockwise(absmax, state.state2) + state.offset
+
+    if getattr(state, "ipex", False) and state.quant_type == "nf4":
+        # compute_dtype: 1 indicates fp16, 2 indicates bf16
+        compute_dtype = 2 if A.dtype == torch.bfloat16 else 1
+        out = torch.ops.torch_ipex.woq_linear(
+            A,
+            B,
+            "nf4",
+            state.shape,
+            state.new_scales,
+            state.new_zeros,
+            None,
+            None,
+            state.blocksize,
+            compute_dtype,
+            1,
+            state.compensation,
+        )
+        return out
 
     if out is not None:
         torch.ops.bitsandbytes.gemv_4bit.out(

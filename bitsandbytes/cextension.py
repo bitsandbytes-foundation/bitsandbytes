@@ -84,19 +84,31 @@ def get_native_library() -> BNBNativeLibrary:
 
 
 try:
+    import intel_extension_for_pytorch as ipex
+
+    assert ipex._C._has_xpu()
+    is_ipex_xpu_available = True
+except Exception:
+    is_ipex_xpu_available = False
+
+try:
     lib = get_native_library()
 except Exception as e:
     lib = None
-    logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
-    if torch.cuda.is_available():
-        logger.warning(
-            """
-CUDA Setup failed despite CUDA being available. Please run the following command to get more information:
-
-python -m bitsandbytes
-
-Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
-to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
-and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
-""",
+    if not is_ipex_xpu_available:
+        logger.error(
+            f"Could not load bitsandbytes native library: {e}. If you use Intel CPU or XPU, please pip install intel_extension_for_pytorch by following the instruction in https://pytorch-extension.intel.com/installation.\n",
+            exc_info=True,
         )
+        if torch.cuda.is_available():
+            logger.warning(
+                """
+    CUDA Setup failed despite CUDA being available. Please run the following command to get more information:
+
+    python -m bitsandbytes
+
+    Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
+    to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
+    and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
+    """,
+            )
