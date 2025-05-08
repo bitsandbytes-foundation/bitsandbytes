@@ -154,7 +154,7 @@ def quantize_blockwise_kernel(
 
 def quantize_blockwise_with_code_triton(A, blocksize, code):
     n = A.numel()
-    blocks = (n + blocksize - 1) // blocksize # amount of blocks (with remainder)
+    blocks = (n + blocksize - 1) // blocksize  # amount of blocks (with remainder)
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
     quantized = torch.empty_like(A, dtype=torch.uint8)
 
