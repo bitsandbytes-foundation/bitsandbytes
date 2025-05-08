@@ -1378,6 +1378,8 @@ class TestQuantize4BitFunctional:
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
         if device == "cpu" and storage_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
+        if device == "xpu" and storage_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on XPU")
 
         dims = 10
         torch.random.manual_seed(np.random.randint(0, 412424242))
