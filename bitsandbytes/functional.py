@@ -1006,7 +1006,7 @@ def quantize_4bit(
     """
     input_shape = A.shape
 
-    _out, _absmax = torch.ops.bitsandbytes.quantize_4bit.default(
+    _out, _absmax = torch.ops.bitsandbytes.quantize_4bit(
         A,
         blocksize,
         quant_type,
@@ -1128,7 +1128,7 @@ def dequantize_4bit(
             A, absmax, quant_state.blocksize, quant_state.quant_type, quant_state.shape, quant_state.dtype, out=out
         )
     else:
-        out = torch.ops.bitsandbytes.dequantize_4bit.default(
+        out = torch.ops.bitsandbytes.dequantize_4bit(
             A,
             absmax,
             quant_state.blocksize,

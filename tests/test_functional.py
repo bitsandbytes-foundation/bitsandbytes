@@ -1107,6 +1107,8 @@ class TestQuantize4BitFunctional:
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
+        if device == "xpu" and quant_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on XPU")
 
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
@@ -1142,6 +1144,8 @@ class TestQuantize4BitFunctional:
     def test_4bit_compressed_stats(self, device, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
+        if device == "xpu" and quant_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on XPU")
 
         errs1 = []
         errs2 = []
