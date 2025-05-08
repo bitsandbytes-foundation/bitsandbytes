@@ -5,12 +5,7 @@ import torch
 import triton
 import triton.language as tl
 
-import ctypes as ct
-
-from bitsandbytes.functional import get_ptr
-
 from ..._ops import register_kernel
-from ...cextension import lib
 
 # torch._int_mm for s8@s8->s32 is supported on CPU from torch 2.4+.
 # However, we can overflow if we use this without AVX512_VNNI support.
@@ -25,6 +20,7 @@ from ...cextension import lib
 #             A.reshape(-1, A.shape[-1]),
 #             B.t(),
 #         ).reshape(*A.shape[:-1], B.shape[0])
+
 
 # @triton.autotune(
 #     configs=[
@@ -77,6 +73,7 @@ def dequant_8bit_kernel(
     mask = offs < num_paired_elements
     tl.store(c_ptr + offs, out_dq, mask)
 
+
 def dequant_int8_fp16(
     A_nf4: torch.Tensor,
     quant_state_code: torch.Tensor,
@@ -95,13 +92,13 @@ def dequant_int8_fp16(
     )
     return out
 
+
 def quantize_blockwise_with_code(A, blocksize, code):
     n = A.numel()
-    blocks = (n + blocksize - 1) // blocksize  # Количество блоков (с учетом остатков)
+    blocks = (n + blocksize - 1) // blocksize
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
 
-    # Нормализация данных
-    A_reshaped = A.reshape(-1)  # Преобразуем в 1D
+    A_reshaped = A.reshape(-1)
     quantized = torch.zeros_like(A_reshaped, dtype=torch.uint8, device=A.device)
 
     for i in range(blocks):
@@ -120,6 +117,7 @@ def quantize_blockwise_with_code(A, blocksize, code):
         quantized[start:end] = torch.argmin(diff, dim=-1).to(torch.uint8)
 
     return quantized, absmax
+
 
 @triton.jit
 def quantize_blockwise_kernel(
@@ -153,9 +151,10 @@ def quantize_blockwise_kernel(
 
     tl.store(out_ptr + offsets, quantized, mask=mask)
 
+
 def quantize_blockwise_with_code_triton(A, blocksize, code):
     n = A.numel()
-    blocks = (n + blocksize - 1) // blocksize  # Количество блоков
+    blocks = (n + blocksize - 1) // blocksize # amount of blocks (with remainder)
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
     quantized = torch.empty_like(A, dtype=torch.uint8)
 
@@ -172,6 +171,7 @@ def quantize_blockwise_with_code_triton(A, blocksize, code):
     )
 
     return quantized, absmax
+
 
 @register_kernel("bitsandbytes::quantize_blockwise", "xpu")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
