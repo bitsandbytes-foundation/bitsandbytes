@@ -1224,6 +1224,11 @@ class TestQuantize4BitFunctional:
                 pytest.xfail("fp4 quantization is not supported on CPU")
             if quant_storage != torch.uint8:
                 pytest.xfail("Only uint8 storage is supported on CPU")
+        if device == "xpu":
+            if storage_type != "nf4":
+                pytest.xfail("fp4 quantization is not supported on XPU")
+            if quant_storage != torch.uint8:
+                pytest.xfail("Only uint8 storage is supported on XPU")
 
         errs1 = []
         errs2 = []

@@ -5,6 +5,8 @@ import torch
 import triton
 import triton.language as tl
 
+import ctypes as ct
+
 from bitsandbytes.functional import get_ptr
 
 from ..._ops import register_kernel
@@ -93,6 +95,84 @@ def dequant_int8_fp16(
     )
     return out
 
+def quantize_blockwise_with_code(A, blocksize, code):
+    n = A.numel()
+    blocks = (n + blocksize - 1) // blocksize  # Количество блоков (с учетом остатков)
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+
+    # Нормализация данных
+    A_reshaped = A.reshape(-1)  # Преобразуем в 1D
+    quantized = torch.zeros_like(A_reshaped, dtype=torch.uint8, device=A.device)
+
+    for i in range(blocks):
+        start = i * blocksize
+        end = min(start + blocksize, n)
+        block = A_reshaped[start:end]
+
+        absmax[i] = block.abs().max()
+        if absmax[i] == 0:
+            continue
+
+        block_normalized = block / absmax[i]
+        block_normalized = torch.clamp(block_normalized, -1, 1)
+
+        diff = torch.abs(block_normalized.unsqueeze(-1) - code)
+        quantized[start:end] = torch.argmin(diff, dim=-1).to(torch.uint8)
+
+    return quantized, absmax
+
+@triton.jit
+def quantize_blockwise_kernel(
+    A_ptr,
+    code_ptr,
+    absmax_ptr,
+    out_ptr,
+    n_elements,
+    BLOCK_SIZE: tl.constexpr,
+    CODE_SIZE: tl.constexpr,
+):
+    block_idx = tl.program_id(0)
+    thread_idx = tl.arange(0, BLOCK_SIZE)
+
+    start_idx = block_idx * BLOCK_SIZE
+    offsets = start_idx + thread_idx
+
+    mask = offsets < n_elements
+    A = tl.load(A_ptr + offsets, mask=mask, other=0.0)
+
+    absmax = tl.max(tl.abs(A), axis=0)
+    tl.store(absmax_ptr + block_idx, absmax)
+
+    A_normalized = A / absmax
+    A_normalized = tl.clamp(A_normalized, -1.0, 1.0)
+
+    code = tl.load(code_ptr + tl.arange(0, CODE_SIZE))
+
+    diff = tl.abs(A_normalized[:, None] - code[None, :])
+    quantized = tl.argmin(diff, axis=1).to(tl.uint8)
+
+    tl.store(out_ptr + offsets, quantized, mask=mask)
+
+def quantize_blockwise_with_code_triton(A, blocksize, code):
+    n = A.numel()
+    blocks = (n + blocksize - 1) // blocksize  # Количество блоков
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+    quantized = torch.empty_like(A, dtype=torch.uint8)
+
+    # grid = lambda META: (triton.cdiv(number_of_paired_elements, SPLIT_SIZE), )
+    grid = (blocks,)
+    quantize_blockwise_kernel[grid](
+        A_ptr=A,
+        code_ptr=code,
+        absmax_ptr=absmax,
+        out_ptr=quantized,
+        n_elements=n,
+        BLOCK_SIZE=blocksize,
+        CODE_SIZE=code.numel(),
+    )
+
+    return quantized, absmax
+
 @register_kernel("bitsandbytes::quantize_blockwise", "xpu")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
@@ -104,14 +184,8 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
     out = torch.empty_like(A, dtype=torch.uint8)
 
-    lib.cquantize_blockwise_xpu_fp32(
-        get_ptr(code),
-        get_ptr(A),
-        get_ptr(absmax),
-        get_ptr(out),
-        ct.c_longlong(blocksize),
-        ct.c_longlong(n),
-    )
+    # quant_ref(code, A, absmax, out, blocksize, n)
+    out, absmax = quantize_blockwise_with_code_triton(A, blocksize, code)
 
     return out, absmax
 
