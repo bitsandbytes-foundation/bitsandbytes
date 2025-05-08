@@ -5,7 +5,10 @@ import torch
 import triton
 import triton.language as tl
 
+from bitsandbytes.functional import get_ptr
+
 from ..._ops import register_kernel
+from ...cextension import lib
 
 # torch._int_mm for s8@s8->s32 is supported on CPU from torch 2.4+.
 # However, we can overflow if we use this without AVX512_VNNI support.
@@ -21,48 +24,114 @@ from ..._ops import register_kernel
 #             B.t(),
 #         ).reshape(*A.shape[:-1], B.shape[0])
 
+# @triton.autotune(
+#     configs=[
+#         triton.Config({'SPLIT_SIZE': 64}),
+#         triton.Config({'SPLIT_SIZE': 128}),
+#         triton.Config({'SPLIT_SIZE': 256}),
+#         triton.Config({'SPLIT_SIZE': 512}),
+#         triton.Config({'SPLIT_SIZE': 1024}),
+#         triton.Config({'SPLIT_SIZE': 2048}),
+#         triton.Config({'SPLIT_SIZE': 4096}),
+#         triton.Config({'SPLIT_SIZE': 8192}),
+#         triton.Config({'SPLIT_SIZE': 16384}),
+#     ],
+#     key=['SPLIT_SIZE'],
+# )
+@triton.jit
+def dequant_8bit_kernel(
+    a_ptr,
+    c_ptr,
+    quant_ptr,
+    absmax_ptr,
+    # bias_ptr,
+    num_paired_elements,
+    QUANT_BLOCK: tl.constexpr,
+    SPLIT_SIZE: tl.constexpr,
+):
+    pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
+    block_start = pid * SPLIT_SIZE
+    offsets = block_start + tl.arange(0, SPLIT_SIZE)
+    mask = offsets < num_paired_elements
 
-# @register_kernel("bitsandbytes::quantize_blockwise", "xpu")
-# def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
-#     torch._check_is_size(blocksize)
-#     torch._check(A.dtype == torch.float32, lambda: f"A must be float32 on xpu, got {A.dtype}")
+    a = tl.load(a_ptr + offsets, mask)
+    a = a.to(tl.uint8, bitcast=True)
 
-#     n = A.numel()
-#     blocks = -(n // -blocksize)
+    # bias = tl.load(bias_ptr)
 
-#     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
-#     out = torch.empty_like(A, dtype=torch.uint8)
+    # apply conversion
+    scaled_int8 = tl.load(quant_ptr + a, mask)
 
-#     lib.cquantize_blockwise_xpu_fp32(
-#         get_ptr(code),
-#         get_ptr(A),
-#         get_ptr(absmax),
-#         get_ptr(out),
-#         ct.c_longlong(blocksize),
-#         ct.c_longlong(n),
-#     )
+    abs_blocks_lim = (num_paired_elements // QUANT_BLOCK) * QUANT_BLOCK + num_paired_elements % QUANT_BLOCK
+    abs_offsets = offsets // QUANT_BLOCK
+    mask_blocked = offsets < abs_blocks_lim
 
-#     return out, absmax
+    absmax = tl.load(absmax_ptr + abs_offsets, mask_blocked)
+    # apply scales
+    out_dq = scaled_int8 * absmax
+    # out_dq = out_dq + bias
+
+    offs = block_start + tl.arange(0, SPLIT_SIZE)
+    mask = offs < num_paired_elements
+    tl.store(c_ptr + offs, out_dq, mask)
+
+def dequant_int8_fp16(
+    A_nf4: torch.Tensor,
+    quant_state_code: torch.Tensor,
+    absmax: torch.Tensor,
+    out: torch.Tensor,
+    quant_blocksize: int = 64,
+):
+    number_of_paired_elements = A_nf4.numel()
+    # we assume that split_size > quant_blocksize
+
+    SPLIT_SIZE = 256
+    # grid = lambda META: (triton.cdiv(number_of_paired_elements, META["SPLIT_SIZE"]), )
+    grid = (triton.cdiv(number_of_paired_elements, SPLIT_SIZE),)
+    dequant_8bit_kernel[grid](
+        A_nf4, out, quant_state_code, absmax, number_of_paired_elements, quant_blocksize, SPLIT_SIZE
+    )
+    return out
+
+@register_kernel("bitsandbytes::quantize_blockwise", "xpu")
+def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check_is_size(blocksize)
+    torch._check(A.dtype == torch.float32, lambda: f"A must be float32 on xpu, got {A.dtype}")
+
+    n = A.numel()
+    blocks = -(n // -blocksize)
+
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+    out = torch.empty_like(A, dtype=torch.uint8)
+
+    lib.cquantize_blockwise_xpu_fp32(
+        get_ptr(code),
+        get_ptr(A),
+        get_ptr(absmax),
+        get_ptr(out),
+        ct.c_longlong(blocksize),
+        ct.c_longlong(n),
+    )
+
+    return out, absmax
 
 
-# @register_kernel("bitsandbytes::dequantize_blockwise", "xpu")
-# def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
-#     torch._check_is_size(blocksize)
-#     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
-#     torch._check(dtype == torch.float32, lambda: f"dtype must be float32 on xpu, got {dtype}")
+@register_kernel("bitsandbytes::dequantize_blockwise", "xpu")
+def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
+    torch._check(dtype == torch.float32, lambda: f"dtype must be float32 on xpu, got {dtype}")
 
-#     out = torch.empty_like(A, dtype=dtype)
+    out = torch.empty_like(A, dtype=dtype, device=A.device)
+    dequant_int8_fp16(
+        A,
+        code,
+        absmax,
+        out,
+        blocksize,
+    )
 
-#     lib.cdequantize_blockwise_xpu_fp32(
-#         get_ptr(code),
-#         get_ptr(A),
-#         get_ptr(absmax),
-#         get_ptr(out),
-#         ct.c_longlong(blocksize),
-#         ct.c_longlong(A.numel()),
-#     )
-
-#     return out
+    return out
 
 
 _NF4_QUANT_TABLE = torch.tensor(
