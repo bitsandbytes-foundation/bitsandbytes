@@ -179,9 +179,20 @@ jobs:
           # exclude macos wheels for now
           find tmp/ -type f -name '*.whl' ! -name '*macos*' -print0 | while IFS= read -r -d '' wheel; do
             wheel_filename=$(basename "$wheel")
-            # Remove the gith hash, e.g. `+1234567`, for a stable download link on the multi-backend pre-release
-            cleaned_filename=$(echo "$wheel_filename" | sed -E 's/\+[0-9a-f]{7}-/-/g')
-            mv "$wheel" "wheels/$cleaned_filename"
+            if [[ $wheel_filename == *linux*x86_64* ]]; then
+              mv "$wheel" wheels/bnb-linux-x86_64.whl
+            elif [[ $wheel_filename == *linux*aarch64* ]]; then
+              mv "$wheel" wheels/bnb-linux-aarch64.whl
+            elif [[ $wheel_filename == *macosx*x86_64* ]]; then
+              mv "$wheel" wheels/bnb-macos-x86_64.whl
+            elif [[ $wheel_filename == *macosx*arm64* ]]; then
+              mv "$wheel" wheels/bnb-macos-arm64.whl
+            elif [[ $wheel_filename == *win*amd64* ]]; then
+              mv "$wheel" wheels/bnb-windows-x86_64.whl
+            else
+              echo "Unknown wheel format: $wheel_filename"
+              exit 1
+            fi
           done
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
