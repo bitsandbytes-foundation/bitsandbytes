@@ -1124,7 +1124,7 @@ def dequantize_4bit(
             absmax = absmax.float()
 
     # IPEX format is different, we need extra process.
-    if getattr(quant_state, "ipex", False) and quant_type == "nf4":
+    if getattr(quant_state, "ipex", False) and quant_state.quant_type == "nf4":
         if A.device.type == "xpu":
             out = torch.ops.torch_ipex.dequantize_4bit(A, "nf4", quant_state.shape, absmax, None, blocksize).t()
             return out
