@@ -1,15 +1,11 @@
 from collections.abc import Sequence
-import ctypes as ct
 
 import torch
+
 import triton
 import triton.language as tl
 
-
-from bitsandbytes.functional import get_ptr
-
 from ..._ops import register_kernel
-from ...cextension import lib
 
 # torch._int_mm for s8@s8->s32 is supported on CPU from torch 2.4+.
 # However, we can overflow if we use this without AVX512_VNNI support.
@@ -125,6 +121,7 @@ def _(
 
     return packed, absmax.float()
 
+
 # @triton.autotune(
 #     configs=[
 #         # triton.Config({'SPLIT_SIZE': 64}),
@@ -206,6 +203,7 @@ def _(
     _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
     return out
 
+
 @register_kernel("bitsandbytes::dequantize_4bit.out", "xpu")
 def _(
     A: torch.Tensor,
@@ -219,6 +217,7 @@ def _(
     torch._check(out.shape == shape, lambda: f"Expected out.shape == {shape}, got {out.shape}")
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
     _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
+
 
 def _dequantize_4bit_impl(
     A: torch.Tensor,
@@ -238,9 +237,8 @@ def _dequantize_4bit_impl(
     SPLIT_SIZE = 512
     # grid = lambda META: (triton.cdiv(number_of_paired_elements, SPLIT_SIZE), )
     grid = (triton.cdiv(number_of_paired_elements, SPLIT_SIZE),)
-    dequant_4bit_kernel[grid](
-        A, out, _NF4_QUANT_TABLE, absmax, number_of_paired_elements, blocksize, SPLIT_SIZE
-    )
+    dequant_4bit_kernel[grid](A, out, _NF4_QUANT_TABLE, absmax, number_of_paired_elements, blocksize, SPLIT_SIZE)
+
 
 @register_kernel("bitsandbytes::gemv_4bit", "xpu")
 def _(
