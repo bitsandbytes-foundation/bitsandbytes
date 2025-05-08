@@ -178,8 +178,8 @@ jobs:
           mkdir -p wheels/
 
           # The whole point of the continuous release is to have a stable download link and the only way to have a PEP 440–compliant wheel name
-          # is to use a stable placeholder version. Otherwise, pip won't let you install the wheel. The cool thing is that we can now install the 
-          # wheel directly from the GH pre-release which gets updated continuously, e.g. 
+          # is to use a stable placeholder version. Otherwise, pip won't let you install the wheel. The cool thing is that we can now install the
+          # wheel directly from the GH pre-release which gets updated continuously, e.g.
           # `pip install https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl`
           STABLE_PLACEHOLDER_VERSION="1.33.7.preview"
 
