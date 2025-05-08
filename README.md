@@ -1,21 +1,11 @@
 <p align="center"><img src="https://avatars.githubusercontent.com/u/175231607?s=200&v=4" alt=""></p>
 <h1 align="center">bitsandbytes</h1>
 <p align="center">
-    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/main/LICENSE">
-        <img alt="License" src="https://img.shields.io/github/license/bitsandbytes-foundation/bitsandbytes.svg?color=blue">
-    </a>
-    <a href="https://pepy.tech/project/bitsandbytes">
-        <img alt="Downloads" src="https://static.pepy.tech/badge/bitsandbytes/month">
-    </a>
-    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/actions/workflows/tests.yml">
-        <img alt="Nightly Unit Tests" src="https://img.shields.io/github/actions/workflow/status/bitsandbytes-foundation/bitsandbytes/tests.yml?logo=github&label=Nightly%20Tests">
-    </a>
-    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/releases">
-        <img alt="GitHub Release" src="https://img.shields.io/github/v/release/bitsandbytes-foundation/bitsandbytes">
-    </a>
-    <a href="https://pypi.org/project/bitsandbytes/">
-        <img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/bitsandbytes">
-    </a>
+    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/bitsandbytes-foundation/bitsandbytes.svg?color=blue"></a>
+    <a href="https://pepy.tech/project/bitsandbytes"><img alt="Downloads" src="https://static.pepy.tech/badge/bitsandbytes/month"></a>
+    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/actions/workflows/tests.yml"><img alt="Nightly Unit Tests" src="https://img.shields.io/github/actions/workflow/status/bitsandbytes-foundation/bitsandbytes/tests.yml?logo=github&label=Nightly%20Tests"></a>
+    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/bitsandbytes-foundation/bitsandbytes"></a>
+    <a href="https://pypi.org/project/bitsandbytes/"><img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/bitsandbytes"></a>
 </p>
 
 `bitsandbytes` enables accessible large language models via k-bit quantization for PyTorch. We provide three main features for dramatically reducing memory consumption for inference and training:
