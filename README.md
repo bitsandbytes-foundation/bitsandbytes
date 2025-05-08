@@ -64,19 +64,26 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>🟥 AMD GPU</td>
       <td>gfx90a, gfx942, gfx1100</td>
-      <td>🚧</td>
+      <td>🚧 In Development</td>
     </tr>
     <tr>
       <td></td>
       <td>🟦 Intel XPU</td>
-      <td>TBD</td>
-      <td>🚧</td>
+      <td>
+        Data Center GPU Max Series (Ponte Vecchio) <br>
+        Arc A-Series (Alchemist) <br>
+        Arc B-Series (Battlemage)
+      </td>
+      <td>🚧 In Development</td>
     </tr>
+    <!--
     <tr>
       <td></td>
       <td>🟦 Intel HPU</td>
       <td>Gaudi1, Gaudi2, Gaudi3</td>
       <td>🚧</td>
+    </tr>
+    --->
     <tr>
       <td align="right">aarch64</td>
       <td>◻️ CPU</td>
@@ -107,8 +114,11 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟦 Intel XPU</td>
-      <td>TBD</td>
-      <td>🚧</td>
+      <td>
+        Arc A-Series (Alchemist) <br>
+        Arc B-Series (Battlemage)
+      </td>
+      <td>🚧 In Development</td>
     </tr>
     <tr>
       <td colspan="4">🍎 <strong>macOS</strong></td>
