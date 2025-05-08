@@ -11,7 +11,7 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.functional import QuantState, enable_ipex_fusion
+from bitsandbytes.functional import QuantState, enable_ipex_fusion, ipex_cpu, ipex_xpu
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
     INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
@@ -502,7 +502,7 @@ class Linear4bit(nn.Linear):
 
     def forward(self, x: torch.Tensor):
         # Check if ipex fusion can be used
-        if not self.ipex_linear_is_set:
+        if not self.ipex_linear_is_set and (ipex_cpu or ipex_xpu):
             self.set_ipex_linear(x)
             self.ipex_linear_is_set = True
 

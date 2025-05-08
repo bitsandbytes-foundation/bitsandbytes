@@ -112,6 +112,29 @@ _NF4_QUANT_TABLE = torch.tensor(
     dtype=torch.float32,
     device="cpu",
 )
+_FP4_QUANT_TABLE = torch.tensor(
+    [
+        0.0000,
+        0.0052,
+        0.6667,
+        1.0000,
+        0.3333,
+        0.5000,
+        0.1667,
+        0.2500,
+        0.0000,
+        -0.0052,
+        -0.6667,
+        -1.0000,
+        -0.3333,
+        -0.5000,
+        -0.1667,
+        -0.2500,
+    ],
+    dtype=torch.float32,
+    device="cpu",
+)
+CODE = {"nf4": _NF4_QUANT_TABLE, "fp4": _FP4_QUANT_TABLE}
 
 
 @register_kernel("bitsandbytes::quantize_4bit", "cpu")
@@ -119,24 +142,32 @@ def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
-    torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
+    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4 on CPU, got {quant_type}")
     torch._check(
         A.dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
     )
 
     n = A.numel()
+    blocks = n // blocksize
+    blocks += 1 if n % blocksize > 0 else 0
+    rem = n % blocksize
+    has_rem = rem > 0
 
-    # TODO: Support when weight matrix is not divisible by blocksize
-    torch._check(n % blocksize == 0, lambda: f"n must be divisible by blocksize, got {n} and {blocksize}")
-
-    # Divide into blocks and normalize
-    blocks = A.reshape(-1, blocksize)
-    absmax = blocks.abs().max(dim=1).values.float()
-    scaled = blocks / absmax.unsqueeze(-1)
-
+    # Scale tensor to [-1, 1]
+    absmax = torch.zeros((blocks,), device=A.device, dtype=A.dtype)
+    A_reshaped = A.reshape(n)
+    A_com_reshaped = A_reshaped[: n - rem].reshape(n // blocksize, blocksize)
+    absmax[: blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=-1)[0]
+    scaled = torch.clamp(A_com_reshaped * (1 / absmax[: blocks - has_rem].view(-1, 1)), -1, 1)
+    scaled = scaled.reshape(-1)
+    if has_rem:
+        absmax[-1] = torch.abs(A_reshaped[n - rem :]).max()
+        scaled_rem = torch.clamp(A_reshaped[n - rem :] * (1 / absmax[-1]), -1, 1)
+        scaled = torch.cat([scaled, scaled_rem], dim=0)
     # Quantize with the lookup table
-    quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - _NF4_QUANT_TABLE), dim=-1, keepdim=True).to(torch.uint8)
+    quant_table = CODE[quant_type]
+    quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - quant_table), dim=-1, keepdim=True).to(torch.uint8)
 
     # Pack two quantized values per byte
     packed = quantized[::2] << 4 | quantized[1::2]
@@ -157,32 +188,47 @@ def _(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     torch._check_is_size(blocksize)
-    torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
+    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4 on CPU, got {quant_type}")
     torch._check(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
     )
-    torch._check(
-        A.dtype == torch.uint8,
-        lambda: f"Blockwise 4bit dequantization on CPU only supports uint8 storage, got {A.dtype}",
-    )
 
-    A = A.view(-1, 1)
+    # Enable non uint8 dtype
+    device = A.device
+    if A.dtype != torch.uint8:
+        bytes_value = A.cpu().numpy().tobytes()
+        A = torch.frombuffer(bytes_value, dtype=torch.uint8).to(device)
 
-    # Grab upper and lower nibbles. Using int64 for indexing in the LUT.
-    upper = (A >> 4).to(torch.int64)
-    lower = (A & 0x0F).to(torch.int64)
+    A = A.reshape(-1)
+    # Map nf4 to [-1, 1]
+    out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
+    n = out_dq.numel()
+    out_dq[1::2] = A & 0xF
+    out_dq[::2] = A >> 4
+    # code is fp32, cast to dtype to avoid the mismatch issue
+    code = CODE[quant_type].to(dtype)
+    out_dq = code[out_dq]
 
-    # Expand to blocks
-    blocks = torch.cat((upper, lower), dim=1).reshape(-1, blocksize)
+    # Apply scales
+    if out_dq.numel() != n:
+        assert out_dq.numel() == n + 1
+        out_dq = torch.narrow(out_dq, 0, 0, n)
+    blocks = n // blocksize
+    blocks += 1 if n % blocksize > 0 else 0
+    rem = n % blocksize
+    has_rem = rem > 0
 
-    # Dequantize
-    blocks = _NF4_QUANT_TABLE[blocks] * absmax[:, None]
+    out = torch.empty(shape, dtype=dtype, device=A.device).reshape(-1)
+    if has_rem:
+        out[: n - rem] = (out_dq[: n - rem].view(-1, blocksize) * absmax[: blocks - has_rem].view(-1, 1)).reshape(-1)
+        out[n - rem :] = out_dq[n - rem :] * absmax[-1]
+    else:
+        out = out_dq.view(-1, blocksize) * absmax.view(-1, 1)
 
-    # Reshape to original shape
-    blocks = blocks.reshape(-1, *shape[1:])
+    out = out.reshape(-1, *shape[1:]).to(dtype)
 
-    return blocks.to(dtype)
+    return out
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "cpu")
@@ -194,17 +240,13 @@ def _(
     code: torch.Tensor,
     blocksize: int,
 ) -> torch.Tensor:
-    # TODO: We need to determine whether `code` is NF4, FP4, or other.
-    # Right now we assume NF4, as this is the only one supported on CPU.
-
-    B_dq = torch.ops.bitsandbytes.dequantize_4bit.default(
-        B,
-        absmax,
-        blocksize,
-        "nf4",
-        shape=shapeB,
-        dtype=A.dtype,
-    )
+    # Applied from dequantize_4bit
+    B = B.view(-1, 1)
+    upper = (B >> 4).to(torch.int64)
+    lower = (B & 0x0F).to(torch.int64)
+    blocks = torch.cat((upper, lower), dim=1).reshape(-1, blocksize)
+    B_dq = code[blocks] * absmax[:, None]
+    B_dq = B_dq.reshape(-1, *shapeB[1:]).to(A.dtype)
 
     # User called gemv with B.t(), so we need to transpose it back.
     # if B.shape[0] == 1:
