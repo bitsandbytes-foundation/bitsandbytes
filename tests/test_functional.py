@@ -1107,6 +1107,8 @@ class TestQuantize4BitFunctional:
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
+        if device == "xpu" and quant_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on XPU")
 
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
@@ -1142,6 +1144,8 @@ class TestQuantize4BitFunctional:
     def test_4bit_compressed_stats(self, device, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
+        if device == "xpu" and quant_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on XPU")
 
         errs1 = []
         errs2 = []
@@ -1220,6 +1224,11 @@ class TestQuantize4BitFunctional:
                 pytest.xfail("fp4 quantization is not supported on CPU")
             if quant_storage != torch.uint8:
                 pytest.xfail("Only uint8 storage is supported on CPU")
+        if device == "xpu":
+            if storage_type != "nf4":
+                pytest.xfail("fp4 quantization is not supported on XPU")
+            if quant_storage != torch.uint8:
+                pytest.xfail("Only uint8 storage is supported on XPU")
 
         errs1 = []
         errs2 = []
@@ -1369,6 +1378,8 @@ class TestQuantize4BitFunctional:
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
         if device == "cpu" and storage_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
+        if device == "xpu" and storage_type != "nf4":
+            pytest.xfail("fp4 quantization is not supported on XPU")
 
         dims = 10
         torch.random.manual_seed(np.random.randint(0, 412424242))
