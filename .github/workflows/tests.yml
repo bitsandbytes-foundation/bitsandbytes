@@ -134,7 +134,7 @@ jobs:
         run: pip list
 
       - name: Run tests
-        run: pytest
+        run: pytest --durations=100
 
   cuda-tests:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
@@ -189,4 +189,4 @@ jobs:
         run: pip list
 
       - name: Run tests
-        run: pytest
+        run: pytest --durations=100

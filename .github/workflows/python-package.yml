@@ -176,13 +176,25 @@ jobs:
       - name: Move and rename wheel files with pattern replacement
         run: |
           mkdir -p wheels/
+
+          # The whole point of the continuous release is to have a stable download link and the only way to have a PEP 440–compliant wheel name
+          # is to use a stable placeholder version. Otherwise, pip won't let you install the wheel. The cool thing is that we can now install the
+          # wheel directly from the GH pre-release which gets updated continuously, e.g.
+          # `pip install https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl`
+          STABLE_PLACEHOLDER_VERSION="1.33.7.preview"
+
           # exclude macos wheels for now
           find tmp/ -type f -name '*.whl' ! -name '*macos*' -print0 | while IFS= read -r -d '' wheel; do
             wheel_filename=$(basename "$wheel")
-            # Remove the gith hash, e.g. `+1234567`, for a stable download link on the multi-backend pre-release
-            cleaned_filename=$(echo "$wheel_filename" | sed -E 's/\+[0-9a-f]{7}-/-/g')
-            mv "$wheel" "wheels/$cleaned_filename"
+
+            # Strip off the original version
+            rest=${wheel_filename#bitsandbytes-*-}
+            new_name="bitsandbytes-${STABLE_PLACEHOLDER_VERSION}-${rest}"
+
+            echo "Renaming $wheel_filename → $new_name"
+            mv "$wheel" "wheels/${new_name}"
           done
+
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
       - name: Create release and upload artifacts
