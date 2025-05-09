@@ -337,7 +337,7 @@ class MatMul8bitFp(torch.autograd.Function):
             # compute grad_bias first before changing grad_output dtype
             grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
 
-         # Cast grad_output to fp16
+        # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
