@@ -1125,7 +1125,7 @@ def dequantize_4bit(
 
     # IPEX format is different, we need extra process.
     if getattr(quant_state, "ipex", False) and quant_state.quant_type == "nf4":
-        return torch.ops.bitsandbytes.dequantize_4bit_ipex(
+        return torch.ops.bitsandbytes.dequantize_nf4_ipex(
             A,
             absmax,
             quant_state.blocksize,
