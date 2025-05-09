@@ -39,9 +39,7 @@ def outlier_hook(module, input):
 
 
 # convert btw standard 4-bit compression format and ipex compression format
-def reverse_4bit_compress_format(weight):
-    out_1 = torch.empty(weight.size(0), dtype=torch.int32, device=weight.device)
-    out_2 = torch.empty(weight.size(0), dtype=torch.int32, device=weight.device)
+def _reverse_4bit_compress_format(weight: torch.Tensor):
     out_1 = (weight & 0xF0) >> 4
     out_2 = (weight & 0xF) << 4
     out = out_1 | out_2

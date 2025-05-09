@@ -13,7 +13,7 @@ import torch
 from torch import Tensor
 from typing_extensions import deprecated
 
-from bitsandbytes.utils import pack_dict_to_tensor, reverse_4bit_compress_format, unpack_tensor_to_dict
+from bitsandbytes.utils import _reverse_4bit_compress_format, pack_dict_to_tensor, unpack_tensor_to_dict
 
 from .cextension import ipex_cpu, ipex_xpu, lib
 
@@ -1125,12 +1125,14 @@ def dequantize_4bit(
 
     # IPEX format is different, we need extra process.
     if getattr(quant_state, "ipex", False) and quant_state.quant_type == "nf4":
-        if A.device.type == "xpu":
-            out = torch.ops.torch_ipex.dequantize_4bit(A, "nf4", quant_state.shape, absmax, None, blocksize).t()
-            return out
-        elif A.device.type == "cpu":
-            ipex_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(A, "nf4", quant_state.shape, 2)
-            A = reverse_4bit_compress_format(ipex_weight.reshape(-1)).reshape(1, -1)
+        return torch.ops.bitsandbytes.dequantize_4bit_ipex(
+            A,
+            absmax,
+            quant_state.blocksize,
+            quant_state.quant_type,
+            quant_state.shape,
+            quant_state.dtype,
+        )
 
     if out is not None:
         torch.ops.bitsandbytes.dequantize_4bit.out(
@@ -2538,7 +2540,7 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type="vector"):
         return None
 
 
-def enable_ipex_fusion(linear, x):
+def _enable_ipex_fusion(linear: torch.nn.Module, x: torch.Tensor):
     quant_state = linear.weight.quant_state
 
     if quant_state.nested:
@@ -2552,7 +2554,7 @@ def enable_ipex_fusion(linear, x):
         delattr(quant_state, "state2")
 
     if x.device.type == "cpu" and ipex_cpu:
-        converted_weight = reverse_4bit_compress_format(linear.weight.data)
+        converted_weight = _reverse_4bit_compress_format(linear.weight.data)
         new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
             converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
             "nf4",
@@ -2565,7 +2567,7 @@ def enable_ipex_fusion(linear, x):
             2,
         )
     elif x.device.type == "xpu" and ipex_xpu:
-        new_weight = reverse_4bit_compress_format(linear.weight.data)
+        new_weight = _reverse_4bit_compress_format(linear.weight.data)
         new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
         new_zeros = None
         compensation = None

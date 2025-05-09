@@ -11,12 +11,12 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.functional import QuantState, enable_ipex_fusion, ipex_cpu, ipex_xpu
+from bitsandbytes.functional import QuantState, _enable_ipex_fusion, ipex_cpu, ipex_xpu
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
     INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
     OutlierTracer,
-    reverse_4bit_compress_format,
+    _reverse_4bit_compress_format,
 )
 
 T = TypeVar("T", bound="torch.nn.Module")
@@ -477,9 +477,9 @@ class Linear4bit(nn.Linear):
                 original_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(
                     self.weight, "nf4", self.weight.quant_state.shape, 2
                 )
-                self.weight.data = reverse_4bit_compress_format(original_weight.data)
+                self.weight.data = _reverse_4bit_compress_format(original_weight.data)
             elif self.weight.device.type == "xpu":
-                self.weight.data = reverse_4bit_compress_format(self.weight.data.reshape(1, -1))
+                self.weight.data = _reverse_4bit_compress_format(self.weight.data.reshape(1, -1))
 
             self.weight.quant_state.ipex = False
             self.ipex_linear_is_set = False
@@ -498,7 +498,7 @@ class Linear4bit(nn.Linear):
             and self.weight.quant_state.quant_type == "nf4"
         ):
             if x.device.type == "xpu" or (x.device.type == "cpu" and not self.training and x.requires_grad == False):
-                enable_ipex_fusion(self, x)
+                _enable_ipex_fusion(self, x)
 
     def forward(self, x: torch.Tensor):
         # Check if ipex fusion can be used
@@ -521,7 +521,8 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        weight = self.weight.t() if len(self.weight.shape) == 2 else self.weight
+        # IPEX CPU will change weight to 4D so don't need transpose
+        weight = self.weight.t() if self.weight.dim() == 2 else self.weight
 
         return bnb.matmul_4bit(x, weight, bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
 

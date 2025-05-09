@@ -300,6 +300,9 @@ class MatMul8bitLt(torch.autograd.Function):
 
 class MatMul8bitFp(torch.autograd.Function):
     # For Intel CPU and XPU, the double quant has many unsafe operations which will breaks the finetune.
+    # Moreover, the MatMul8bitLt is much slower than MatMul8bitFp in finetune.
+    # The MatMul8bitLt has more mechanisms in computing grad.
+    # We don't have fast kernel for quant/dequant 8bit in CPU/XPU, so it's very slow.
     # We'd like to use dequant + matmul to run finetune currently.
 
     @staticmethod
@@ -313,10 +316,11 @@ class MatMul8bitFp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        state = ctx.state
-        B = state.CxB if state.CxB is not None else state.CB
-        CB = B.to(ctx.dtype_A).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
-        grad_A = torch.matmul(grad_output, CB).view(ctx.grad_shape).to(ctx.dtype_A)
+        if ctx.state.CB is not None:
+            CB = ctx.CB.to(ctx.dtype_A, copy=True).mul_(ctx.state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+            grad_A = torch.matmul(grad_output.to(ctx.dtype_A), CB).view(ctx.grad_shape)
+        else:
+            raise Exception("State must contain CB matrix for backward")
 
         return grad_A, None, None, None, None
 
@@ -405,6 +409,7 @@ def matmul_4bit(
 
     if A.device.type in ("cpu", "xpu") and A.requires_grad == False:
         if getattr(quant_state, "ipex", False):
+            # IPEX CPU will change weight to 4D so don't need transpose
             B = B.t() if B.dim() == 2 else B
             out = F.gemv_4bit(A, B, out, state=quant_state)
             if bias is not None:
