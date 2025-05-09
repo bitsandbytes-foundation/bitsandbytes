@@ -1129,7 +1129,6 @@ def dequantize_4bit(
             A,
             absmax,
             quant_state.blocksize,
-            quant_state.quant_type,
             quant_state.shape,
             quant_state.dtype,
         )
