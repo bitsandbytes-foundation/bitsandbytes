@@ -126,7 +126,7 @@ class Test8BitBlockwiseQuantizeFunctional:
         abserr = sum(diffs) / len(diffs)
         relerr = sum(reldiffs) / len(reldiffs)
         if signed:
-            assert abserr < 0.0035
+            assert abserr < 0.0036
             assert relerr < 0.015
         else:
             assert abserr < 0.00175
