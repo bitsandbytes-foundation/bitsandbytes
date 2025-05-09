@@ -84,19 +84,39 @@ def get_native_library() -> BNBNativeLibrary:
 
 
 try:
+    # to support Intel CPU/GPU (XPU) backend
+    import intel_extension_for_pytorch as ipex
+
+    ipex_cpu = ipex if ipex._C._has_cpu() else None
+    ipex_xpu = ipex if ipex._C._has_xpu() else None
+except BaseException:
+    ipex_cpu = None
+    ipex_xpu = None
+
+
+try:
     lib = get_native_library()
+    if not ipex_cpu:
+        logger.warning(
+            "The installed version of bitsandbytes was compiled without IPEX support. "
+            "You can install ipex by running `pip install intel_extension_for_pytorch`to get better performance if you use the Intel CPU.",
+        )
 except Exception as e:
     lib = None
-    logger.error(f"Could not load bitsandbytes native library: {e}", exc_info=True)
-    if torch.cuda.is_available():
-        logger.warning(
-            """
-CUDA Setup failed despite CUDA being available. Please run the following command to get more information:
-
-python -m bitsandbytes
-
-Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
-to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
-and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
-""",
+    if not ipex_xpu:
+        logger.error(
+            f"Could not load bitsandbytes native library: {e}. If you use Intel CPU or XPU, please pip install intel_extension_for_pytorch by following the instruction in https://pytorch-extension.intel.com/installation.\n",
+            exc_info=True,
         )
+        if torch.cuda.is_available():
+            logger.warning(
+                """
+    CUDA Setup failed despite CUDA being available. Please run the following command to get more information:
+
+    python -m bitsandbytes
+
+    Inspect the output of the command and see if you can locate CUDA libraries. You might need to add them
+    to your LD_LIBRARY_PATH. If you suspect a bug, please take the information from python -m bitsandbytes
+    and open an issue at: https://github.com/bitsandbytes-foundation/bitsandbytes/issues
+    """,
+            )
