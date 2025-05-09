@@ -13,21 +13,6 @@ from bitsandbytes.diagnostics.utils import print_dedented, print_header
 
 
 def sanity_check():
-    from bitsandbytes.cextension import lib
-
-    if lib is None:
-        print_dedented(
-            """
-            Couldn't load the bitsandbytes library, likely due to missing binaries.
-            Please ensure bitsandbytes is properly installed.
-
-            For source installations, compile the binaries with `cmake -DCOMPUTE_BACKEND=cuda -S .`.
-            See the documentation for more details if needed.
-
-            Trying a simple check anyway, but this will likely fail...
-            """,
-        )
-
     from bitsandbytes.optim import Adam
 
     p = torch.nn.Parameter(torch.rand(10, 10).cuda())
@@ -67,12 +52,15 @@ def main():
         print("SUCCESS!")
         print("Installation was successful!")
         return
-    except ImportError:
-        print(
-            f"WARNING: {__package__} is currently running as CPU-only!\n"
-            "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
-            f"If you think that this is so erroneously,\nplease report an issue!",
-        )
+    except RuntimeError as e:
+        if "not available in CPU-only" in str(e):
+            print(
+                f"WARNING: {__package__} is currently running as CPU-only!\n"
+                "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
+                f"If you think that this is so erroneously,\nplease report an issue!",
+            )
+        else:
+            raise e
     except Exception:
         traceback.print_exc()
     print_dedented(
