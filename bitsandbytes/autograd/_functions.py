@@ -307,22 +307,51 @@ class MatMul8bitFp(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
-        CB = B.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0)).t()
-        output = torch.matmul(A, CB).to(A.dtype)
+        if state.has_fp16_weights or state.CB is None:
+            has_grad = getattr(B, "grad", None) is not None
+            is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
+            if is_transposed:
+                B = B.contiguous()
+
+            if (state.is_training and not has_grad) or state.CB is None or state.SCB is None:
+                state.reset_grads()
+                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
+                B = state.CB
+
+        CB = state.CB.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+        output = torch.nn.functional.linear(A, CB, bias)
         ctx.state = state
         ctx.dtype_A = A.dtype
         ctx.grad_shape = A.shape
+        ctx.A = A
+        ctx.dtype_bias = None if bias is None else bias.dtype
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.state.CB is not None:
-            CB = ctx.CB.to(ctx.dtype_A, copy=True).mul_(ctx.state.SCB.unsqueeze(1).mul(1.0 / 127.0))
-            grad_A = torch.matmul(grad_output.to(ctx.dtype_A), CB).view(ctx.grad_shape)
-        else:
-            raise Exception("State must contain CB matrix for backward")
+        req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
+        A = ctx.A
+        state = ctx.state
+        grad_A = grad_B = grad_bias = None
+        if req_gradBias:
+            # compute grad_bias first before changing grad_output dtype
+            grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
 
-        return grad_A, None, None, None, None
+         # Cast grad_output to fp16
+        if len(grad_output.shape) == 3:
+            grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+
+        if req_gradB:
+            grad_B = torch.matmul(A, grad_output.t())
+
+        if req_gradA:
+            if state.CB is not None:
+                CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+                grad_A = torch.matmul(grad_output.to(ctx.dtype_A), CB).view(ctx.grad_shape)
+            else:
+                raise Exception("State must contain CB matrix for backward")
+
+        return grad_A, grad_B, None, grad_bias, None
 
 
 class MatMul4Bit(torch.autograd.Function):
