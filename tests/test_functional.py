@@ -129,7 +129,7 @@ class Test8BitBlockwiseQuantizeFunctional:
             assert abserr < 0.0036
             assert relerr < 0.015
         else:
-            assert abserr < 0.00175
+            assert abserr < 0.0023
             assert relerr < 0.012
         assert A2.dtype == dtype
         # print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))

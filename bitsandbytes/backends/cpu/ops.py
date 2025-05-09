@@ -203,6 +203,9 @@ def _(
     # Enable non uint8 dtype
     device = A.device
     if A.dtype != torch.uint8:
+        if A.dtype == torch.bfloat16:
+            # Numpy does not support bfloat16
+            A = A.view(torch.float16)
         bytes_value = A.cpu().numpy().tobytes()
         A = torch.frombuffer(bytes_value, dtype=torch.uint8).to(device)
 
@@ -247,12 +250,8 @@ def _(
     blocksize: int,
 ) -> torch.Tensor:
     # Applied from dequantize_4bit
-    B = B.view(-1, 1)
-    upper = (B >> 4).to(torch.int64)
-    lower = (B & 0x0F).to(torch.int64)
-    blocks = torch.cat((upper, lower), dim=1).reshape(-1, blocksize)
-    B_dq = code[blocks] * absmax[:, None]
-    B_dq = B_dq.reshape(-1, *shapeB[1:]).to(A.dtype)
+    quant_type = "nf4" if code[1] > 0 else "fp4"
+    B_dq = torch.ops.bitsandbytes.dequantize_4bit.default(B, absmax, blocksize, quant_type, shapeB, A.dtype)
 
     # User called gemv with B.t(), so we need to transpose it back.
     # if B.shape[0] == 1:
