@@ -139,7 +139,11 @@ class Test8BitBlockwiseQuantizeFunctional:
         # print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
         # print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
 
-    def test_blockwise_cpu_large(self):
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_blockwise_cpu_large(self, device):
+        if device == "xpu":
+            pytest.skip("XPU will not build CPU C++ codes")
+
         diffs = []
         reldiffs = []
         batch = 128

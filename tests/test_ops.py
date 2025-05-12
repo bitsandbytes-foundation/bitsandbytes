@@ -154,7 +154,7 @@ class Test4bitBlockwiseQuantOps:
         assert absmax.dtype == torch.float32
 
         # TODO: Enable it
-        if device == "cpu" and storage_dtype == torch.bfloat16:
+        if device in ("cpu", "xpu") and storage_dtype == torch.bfloat16:
             pytest.skip("CPU bf16 storage_dtype will fail on torch op check")
 
         torch.library.opcheck(torch.ops.bitsandbytes.quantize_4bit.default, (A, blocksize, quant_type, storage_dtype))
