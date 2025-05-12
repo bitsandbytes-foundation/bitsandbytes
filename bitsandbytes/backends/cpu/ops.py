@@ -155,25 +155,26 @@ def _(
     )
 
     n = A.numel()
-    blocks = n // blocksize
-    blocks += 1 if n % blocksize > 0 else 0
+    full_blocks = n // blocksize
     rem = n % blocksize
-    has_rem = rem > 0
-
-    # Scale tensor to [-1, 1]
+    blocks = full_blocks + 1 if rem else full_blocks
     absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-    A_reshaped = A.reshape(n)
-    A_com_reshaped = A_reshaped[: n - rem].reshape(n // blocksize, blocksize)
-    absmax[: blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=-1)[0]
-    scaled = torch.clamp(A_com_reshaped * (1 / absmax[: blocks - has_rem].view(-1, 1)), -1, 1)
-    scaled = scaled.reshape(-1)
-    if has_rem:
-        absmax[-1] = torch.abs(A_reshaped[n - rem :]).max()
-        scaled_rem = torch.clamp(A_reshaped[n - rem :] * (1 / absmax[-1]), -1, 1)
+    A_flattened = A.reshape(n)
+
+    # Scale full blocks of the tensor to [-1, 1]
+    A_full_blocks = A_flattened[: n - rem].reshape(n // blocksize, blocksize)
+    absmax[:full_blocks] = torch.abs(A_full_blocks).max(dim=-1)[0]
+    scaled = torch.clamp(A_full_blocks * (1 / absmax[:full_blocks].view(-1, 1)), -1, 1).reshape(-1)
+
+    # Scale any partial block
+    if rem:
+        A_rem = A_flattened[-rem:]
+        absmax[-1] = torch.abs(A_rem).max()
+        scaled_rem = torch.clamp(A_rem * (1 / absmax[-1]), -1, 1)
         scaled = torch.cat([scaled, scaled_rem], dim=0)
+
     # Quantize with the lookup table
-    quant_table = CODE[quant_type]
-    quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - quant_table), dim=-1, keepdim=True).to(torch.uint8)
+    quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - CODE[quant_type]), dim=-1, keepdim=True).to(torch.uint8)
 
     # Pack two quantized values per byte
     packed = quantized[::2] << 4 | quantized[1::2]
