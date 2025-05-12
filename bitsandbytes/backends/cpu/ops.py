@@ -33,7 +33,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     if A.dtype == torch.float32:
         blocks = -(n // -blocksize)
 
-        absmax = torch.empty((blocks,), device=A.device, dtype=A.dtype)
+        absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
         out = torch.empty_like(A, dtype=torch.uint8)
 
         lib.cquantize_blockwise_cpu_fp32(
@@ -48,7 +48,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
         rem = n % blocksize
         has_rem = rem > 0
         blocks = n // blocksize + has_rem
-        absmax = torch.zeros((blocks,), device=A.device, dtype=A.dtype)
+        absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
         A_reshaped = A.reshape(n)
         A_com = A_reshaped[: n - rem]
         A_com_reshaped = A_com.reshape(n // blocksize, blocksize)
@@ -161,7 +161,7 @@ def _(
     has_rem = rem > 0
 
     # Scale tensor to [-1, 1]
-    absmax = torch.zeros((blocks,), device=A.device, dtype=A.dtype)
+    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
     A_reshaped = A.reshape(n)
     A_com_reshaped = A_reshaped[: n - rem].reshape(n // blocksize, blocksize)
     absmax[: blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=-1)[0]
@@ -201,13 +201,8 @@ def _(
     )
 
     # Enable non uint8 dtype
-    device = A.device
     if A.dtype != torch.uint8:
-        if A.dtype == torch.bfloat16:
-            # Numpy does not support bfloat16
-            A = A.view(torch.float16)
-        bytes_value = A.cpu().numpy().tobytes()
-        A = torch.frombuffer(bytes_value, dtype=torch.uint8).to(device)
+        A = A.view(torch.uint8)
 
     A = A.reshape(-1)
     # Map nf4 to [-1, 1]
@@ -250,7 +245,7 @@ def _(
     blocksize: int,
 ) -> torch.Tensor:
     # Applied from dequantize_4bit
-    quant_type = "nf4" if code[1] > 0 else "fp4"
+    quant_type = "fp4" if code[1] > 0 else "nf4"
     B_dq = torch.ops.bitsandbytes.dequantize_4bit.default(B, absmax, blocksize, quant_type, shapeB, A.dtype)
 
     # User called gemv with B.t(), so we need to transpose it back.

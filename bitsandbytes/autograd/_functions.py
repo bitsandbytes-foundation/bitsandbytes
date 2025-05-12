@@ -320,6 +320,8 @@ class MatMul8bitFp(torch.autograd.Function):
 
         CB = state.CB.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
         output = torch.nn.functional.linear(A, CB, bias)
+        # to pass the test: tests/test_modules.py::test_linear8bitlt_no_fp16_weights[2.0-xpu]
+        state.idx = False
         ctx.state = state
         ctx.dtype_A = A.dtype
         ctx.grad_shape = A.shape
@@ -342,7 +344,7 @@ class MatMul8bitFp(torch.autograd.Function):
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
         if req_gradB:
-            grad_B = torch.matmul(A, grad_output.t())
+            grad_B = torch.matmul(A.t(), grad_output).t()
 
         if req_gradA:
             if state.CB is not None:

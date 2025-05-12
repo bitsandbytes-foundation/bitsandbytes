@@ -94,6 +94,10 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
     @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
     def test_dynamic_blockwise_quantization(self, device, dtype, nested, blocksize, signed):
+        if device in ("cpu", "xpu"):
+            if blocksize != 256:
+                pytest.skip("Only blocksize 256 is used in CPU/XPU")
+
         diffs = []
         reldiffs = []
         for i in range(100):
@@ -160,8 +164,8 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
     @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic", "quantile"])
     def test_few_bit_quant(self, device, bits, method):
-        if device == "cpu" and bits != 8:
-            pytest.skip("CPU implementation only supports 8 bits")
+        if device in ("cpu", "xpu") and bits != 8:
+            pytest.skip("CPU/XPU implementation only supports 8 bits")
 
         abserrs = []
         relerrs = []

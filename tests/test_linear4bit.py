@@ -180,7 +180,7 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
-    tensor = torch.linspace(1, blocksize, blocksize)
+    tensor = torch.randn(300, 400)
     param = bnb.nn.Params4bit(
         data=tensor,
         quant_type=quant_type,
@@ -199,7 +199,7 @@ def test_copy_param(device, quant_type, blocksize, compress_statistics):
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
-    tensor = torch.linspace(1, blocksize, blocksize)
+    tensor = torch.randn(300, 400)
     param = bnb.nn.Params4bit(
         data=tensor,
         quant_type=quant_type,
@@ -225,7 +225,7 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
-    original_tensor = torch.linspace(1, blocksize, blocksize, dtype=torch.float32)
+    original_tensor = torch.randn(300, 400)
     original_param = bnb.nn.Params4bit(
         data=original_tensor,
         quant_type=quant_type,
