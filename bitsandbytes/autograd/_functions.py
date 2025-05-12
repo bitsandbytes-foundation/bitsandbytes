@@ -425,7 +425,7 @@ def matmul(
     if threshold > 0.0:
         state.threshold = threshold
     # MatMul8bitLt is slower because no fast kernel for quant/dequant 8bit in CPU/XPU
-    if A.device.type in ("cpu", "xpu") and state.is_training and getattr(state, "ipex", False):
+    if A.device.type in ("cpu", "xpu") and state.is_training:
         return MatMul8bitFp.apply(A, B, out, bias, state)
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
