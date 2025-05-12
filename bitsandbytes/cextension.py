@@ -302,8 +302,8 @@ try:
             "You can install ipex by running `pip install intel_extension_for_pytorch`to get better performance if you use the Intel CPU.",
         )
 except Exception as e:
+    error_msg = str(e)
     if not ipex_xpu:
-        error_msg = str(e)
         logger.error(f"bitsandbytes library load error: {error_msg}\n", exc_info=True)
 
     # create a mock with error messaging as fallback
