@@ -15,7 +15,7 @@ jobs:
   build-cpu:
     strategy:
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -23,6 +23,8 @@ jobs:
             arch: aarch64
           - os: windows-2025
             arch: x86_64
+          - os: macos-15
+            arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
         torch_version: ["2.7.0"]
         include:
           - os: ubuntu-22.04
@@ -106,6 +108,8 @@ jobs:
             arch: aarch64
           - os: windows-2025
             arch: x86_64
+          - os: macos-15
+            arch: arm64
     runs-on: ${{ matrix.os }}
     env:
       BNB_TEST_DEVICE: cpu

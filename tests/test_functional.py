@@ -94,7 +94,11 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
     @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
     def test_dynamic_blockwise_quantization(self, device, dtype, nested, blocksize, signed):
+        iters = 100
+
         if device == "cpu":
+            iters = 10
+
             # This test is slow on CPU, so avoid atypical use cases.
             if nested:
                 pytest.skip("Not a typical use case.")
@@ -106,7 +110,7 @@ class Test8BitBlockwiseQuantizeFunctional:
 
         diffs = []
         reldiffs = []
-        for i in range(100):
+        for i in range(iters):
             A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested)
             A2 = F.dequantize_blockwise(C, S)
@@ -116,15 +120,13 @@ class Test8BitBlockwiseQuantizeFunctional:
             reldiffs.append(reldiff.mean().item())
         abserr = sum(diffs) / len(diffs)
         relerr = sum(reldiffs) / len(reldiffs)
-        # print('nested=', nested, 'randn', blocksize, 'dtype', dtype, sum(diffs)/len(diffs))
-        # print('nested=', nested, 'randn', blocksize, 'dtype', dtype, sum(reldiffs)/len(reldiffs))
         assert abserr < 0.011
         assert relerr < 0.018
         assert A2.dtype == dtype
 
         diffs = []
         code = F.create_dynamic_map(signed=signed)
-        for i in range(100):
+        for i in range(iters):
             A1 = torch.rand(1024, 1024, device=device, dtype=dtype)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested, code=code)
             A2 = F.dequantize_blockwise(C, S)
@@ -142,29 +144,29 @@ class Test8BitBlockwiseQuantizeFunctional:
             assert abserr < 0.00175
             assert relerr < 0.012
         assert A2.dtype == dtype
-        # print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(diffs)/len(diffs))
-        # print('signed=', signed, 'nested=', nested, 'rand', blocksize, sum(reldiffs)/len(reldiffs))
 
-    def test_blockwise_cpu_large(self):
+    @pytest.mark.skipif("cpu" not in get_available_devices(), reason="CPU is required")
+    @pytest.mark.parametrize("hidden", [128])
+    @pytest.mark.parametrize("blocksize", [4096, 16384])
+    def test_blockwise_cpu_large(self, hidden, blocksize):
         diffs = []
         reldiffs = []
         batch = 128
         seq = 128
-        for hidden in [128]:  # , 14336]:
-            for blocksize in [4096, 16384]:
-                for i in range(2):
-                    A1 = torch.randn(batch, seq, hidden, device="cpu")
-                    t0 = time.time()
-                    C, S = F.quantize_blockwise(A1, blocksize=blocksize)
-                    A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
-                    print(time.time() - t0)
-                    diff = torch.abs(A1 - A2)
-                    reldiff = diff / torch.abs(A1 + 1e-8)
-                    diffs.append(diff.mean().item())
-                    reldiffs.append(reldiff.mean().item())
-                    assert diffs[-1] < 0.011
-                # print(sum(diffs)/len(diffs))
-                # print(sum(reldiffs)/len(reldiffs))
+
+        for i in range(2):
+            A1 = torch.randn(batch, seq, hidden, device="cpu")
+            t0 = time.time()
+            C, S = F.quantize_blockwise(A1, blocksize=blocksize)
+            A2 = F.dequantize_blockwise(C, S, blocksize=blocksize)
+            print(time.time() - t0)
+            diff = torch.abs(A1 - A2)
+            reldiff = diff / torch.abs(A1 + 1e-8)
+            diffs.append(diff.mean().item())
+            reldiffs.append(reldiff.mean().item())
+            assert diffs[-1] < 0.011
+        # print(sum(diffs)/len(diffs))
+        # print(sum(reldiffs)/len(reldiffs))
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
