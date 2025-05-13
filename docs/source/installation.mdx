@@ -316,15 +316,12 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 > [!TIP]
 > Intel CPU/XPU backend only supports building from source; for now, please follow the instructions below.
 
-It requires [intel_extension_for_pytorch](https://pytorch-extension.intel.com/), please follow the instruction to install ipex.
+If you are using Intel CPU on Linux or Intel XPU on Linux/Windows, please follow the [instruction](https://pytorch-extension.intel.com/) or the following command to install intel_extension_for_pytorch so you can get better performance.
 
-The below commands are for Linux. The ipex does not support Windows.
-
-1. Install intel_extension_for_pytorch
 CPU: `pip install intel_extension_for_pytorch`
 XPU: `pip install intel_extension_for_pytorch --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/`
 
-2. Install bitsandbytes:
+1. Install bitsandbytes:
 CPU: Need to build CPU C++ codes
 ```
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -337,7 +334,7 @@ XPU:
 pip install git+https://github.com/bitsandbytes-foundation/bitsandbytes.git
 ```
 
-3. Install bitsandbytes-intel:
+2. Install bitsandbytes-intel:
 `pip install git+https://github.com/bitsandbytes-foundation/bitsandbytes-intel.git`
 
 </hfoption>
