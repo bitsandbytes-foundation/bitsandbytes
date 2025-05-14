@@ -104,13 +104,14 @@ jobs:
         include:
           - os: ubuntu-22.04
             arch: x86_64
+            runner: banb-aws-general-8-plus-use1-public-80
           - os: ubuntu-22.04-arm
             arch: aarch64
           - os: windows-2025
             arch: x86_64
           - os: macos-15
             arch: arm64
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner || matrix.os }}
     env:
       BNB_TEST_DEVICE: cpu
     steps:
@@ -156,13 +157,22 @@ jobs:
           - cuda_version: "12.8.1"
             torch_version: "2.7.0"
             pypi_index: "https://download.pytorch.org/whl/cu128"
+
+          # L4 runners
+          - os: ubuntu-22.04
+            runner: bandb-aws-g6-4xlarge-plus-use1-public-80
+
+          # T4 runners
+          - os: ubuntu-22.04
+            runner: CUDA-Linux-x64
+          - os: windows-2025
+            runner: CUDA-Windows-x64
         exclude:
           # Our current T4 Windows runner has a driver too old (471.11)
           # and cannot support CUDA 12+. Skip for now.
           - os: windows-2025
             cuda_version: "12.8.1"
-    runs-on:
-      labels: ${{ contains(matrix.os, 'windows') && 'CUDA-Windows-x64' || 'bandb-aws-g6-4xlarge-plus-use1-public-80' }}
+    runs-on: ${{ matrix.runner }}
     env:
       BNB_TEST_DEVICE: cuda
     steps:
