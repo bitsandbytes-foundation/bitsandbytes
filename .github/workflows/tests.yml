@@ -149,6 +149,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-2025]
         arch: [x86_64]
+        gpu: [T4, L4]
         cuda_version: ["11.8.0", "12.8.1"]
         include:
           - cuda_version: "11.8.0"
@@ -160,18 +161,25 @@ jobs:
 
           # L4 runners
           - os: ubuntu-22.04
+            gpu: L4
             runner: bandb-aws-g6-4xlarge-plus-use1-public-80
 
           # T4 runners
           - os: ubuntu-22.04
+            gpu: T4
             runner: CUDA-Linux-x64
           - os: windows-2025
+            gpu: T4
             runner: CUDA-Windows-x64
         exclude:
           # Our current T4 Windows runner has a driver too old (471.11)
           # and cannot support CUDA 12+. Skip for now.
           - os: windows-2025
             cuda_version: "12.8.1"
+
+          # No Windows L4 runners.
+          - os: windows-2025
+            gpu: L4
     runs-on: ${{ matrix.runner }}
     env:
       BNB_TEST_DEVICE: cuda
