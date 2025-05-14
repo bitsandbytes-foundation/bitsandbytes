@@ -24,13 +24,16 @@ fi
 [[ "${build_os}" = windows-* ]] && python3 -m pip install ninja
 
 if [ "${build_os:0:6}" == ubuntu ]; then
-    image=nvidia/cuda:${cuda_version}-devel-ubuntu22.04
+    # We'll use Rocky Linux 8 in order to maintain manylinux 2.24 compatibility.
+    image="nvidia/cuda:${cuda_version}-devel-rockylinux8"
     echo "Using image $image"
-    docker run --platform "linux/$build_arch" -i -w /src -v "$PWD:/src" "$image" sh -c \
-        "apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
-    && cmake -DPTXAS_VERBOSE=1 -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" . \
-    && cmake --build ."
+
+    docker run -i -w /src -v "$PWD:/src" "$image" bash -c \
+        "dnf update -y \
+        && dnf install cmake gcc-toolset-11 -y \
+        && source scl_source enable gcc-toolset-11 \
+        && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" . \
+        && cmake --build . --config Release"
 else
     pip install cmake==3.28.3
     cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY="${build_capability}" -DCMAKE_BUILD_TYPE=Release -S .

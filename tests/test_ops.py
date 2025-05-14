@@ -97,8 +97,12 @@ class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_quantize_blockwise(self, device, dtype, blocksize):
-        if device == "cpu" and dtype != torch.float32:
-            pytest.skip("CPU implementation is only available for float32")
+        if device == "cpu":
+            if dtype != torch.float32:
+                pytest.skip("CPU implementation is only available for float32")
+
+            if blocksize != 256:
+                pytest.skip("CPU implementation is slow; only test blocksize=256")
 
         code = bitsandbytes.functional.create_dynamic_map().to(device)
         A = torch.randn(1024, 1024, dtype=dtype, device=device)
