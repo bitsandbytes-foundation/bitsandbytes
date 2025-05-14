@@ -77,14 +77,14 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
 
-      # We're running on T4 only for now, so we only target sm75.
+      # Target just the architectures used for our runners.
       - name: Build C++ / CUDA
         run: bash .github/scripts/build-cuda.sh
         env:
           build_os: ${{ matrix.os }}
           build_arch: ${{ matrix.arch }}
           cuda_version: ${{ matrix.cuda_version }}
-          cuda_targets: "75"
+          cuda_targets: "75;89"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -162,7 +162,7 @@ jobs:
           - os: windows-2025
             cuda_version: "12.8.1"
     runs-on:
-      labels: ${{ contains(matrix.os, 'windows') && 'CUDA-Windows-x64' || 'CUDA-Linux-x64' }}
+      labels: ${{ contains(matrix.os, 'windows') && 'CUDA-Windows-x64' || 'bandb-aws-g6-4xlarge-plus-use1-public-80' }}
     env:
       BNB_TEST_DEVICE: cuda
     steps:
