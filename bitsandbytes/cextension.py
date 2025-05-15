@@ -296,15 +296,10 @@ except BaseException:
 
 try:
     lib = get_native_library()
-    if not ipex_cpu:
-        logger.warning(
-            "The installed version of bitsandbytes was compiled without IPEX support. "
-            "You can install ipex by running `pip install intel_extension_for_pytorch`to get better performance if you use the Intel CPU.",
-        )
 except Exception as e:
     error_msg = str(e)
-    if not ipex_xpu:
-        logger.error(f"bitsandbytes library load error: {error_msg}\n", exc_info=True)
+    if not (ipex_cpu or ipex_xpu):
+        logger.error(f"bitsandbytes library load error: {error_msg}\n If you are using Intel CPU/XPU, please install intel_extension_for_pytorch to enable required ops", exc_info=True)
 
     # create a mock with error messaging as fallback
     lib = ErrorHandlerMockBNBNativeLibrary(error_msg)
