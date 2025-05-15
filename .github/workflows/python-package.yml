@@ -171,8 +171,10 @@ jobs:
           path: tmp/
           pattern: "bdist_wheel_*"
           merge-multiple: true
+  
       - name: Inspect tmp directory after downloading artifacts
         run: ls -alFR tmp/
+  
       - name: Move and rename wheel files with pattern replacement
         run: |
           mkdir -p wheels/
@@ -197,12 +199,49 @@ jobs:
 
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
-      - name: Create release and upload artifacts
+  
+      - name: Delete old pre-release (if exists)
+        run: |
+          gh release delete continuous-release_main --cleanup-tag -y || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate pip install commands for release body
+        run: |
+          cat > body.md << 'ENDOFMARKDOWN'
+          ## Latest `main` Wheel Pre-release
+
+          This pre-release contains the latest development wheels for all supported platforms, rebuilt automatically on every commit to the `main` branch.
+
+          **How to install:**  
+          Pick the correct command for your platform and run it in your terminal:
+
+          ENDOFMARKDOWN
+
+          for whl in wheels/*.whl; do
+            fname=$(basename "$whl")
+            url="https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/$fname"
+            echo "\`\`\`sh" >> body.md
+            echo "pip install $url" >> body.md
+            echo "\`\`\`" >> body.md
+            echo "" >> body.md
+          done
+
+          cat >> body.md << 'ENDOFMARKDOWN'
+          > **Note:**  
+          > These wheels are updated automatically with every commit to `main` and become available as soon as the [python-package.yml](.github/workflows/python-package.yml) workflow finishes.
+          ENDOFMARKDOWN
+
+          # for debugging:
+          cat body.md
+
+      - name: Create new pre-release and upload artifacts
         uses: softprops/action-gh-release@v2.2.1
         with:
           files: wheels/*.whl
           prerelease: true
           name: Latest `main` wheel
+          body_path: body.md
           tag_name: continuous-release_main
           make_latest: false
           draft: false
