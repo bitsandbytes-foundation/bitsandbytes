@@ -6,10 +6,28 @@
 #if BUILD_CUDA
 #include <ops.cuh>
 #endif
+#if BUILD_HIP
+#include <ops_hip.cuh>
+#endif
 #if BUILD_MPS
 // #include <mps_ops.h>
 #endif
 #include <cpu_ops.h>
+
+// Compatibility between HIP/CUDA APIs
+#if BUILD_HIP
+#define cudaStream_t                          hipStream_t
+#define __nv_bfloat16                         hip_bfloat16
+#define cublasLtHandle_t                      hipblasLtHandle_t
+#define ContextCusparse                       ContextHipsparse
+#define cusparseHandle_t                      hipsparseHandle_t
+#define cudaMallocManaged                     hipMallocManaged
+#define cudaMemAttachHost                     hipMemAttachHost
+#define cudaPeekAtLastError                   hipPeekAtLastError
+#define cudaDeviceGetAttribute                hipDeviceGetAttribute
+#define cudaDevAttrConcurrentManagedAccess    hipDeviceAttributeConcurrentManagedAccess
+#define cudaMemPrefetchAsync                  hipMemPrefetchAsync
+#endif
 
 // We cannot call templated code from C, so we wrap the template in a C compatible call here if necessary.
 // We use macro functions to expand all the different optimizers. Looks ugly, and is ugly, but its better than to
@@ -18,7 +36,7 @@
 //                               UNMANGLED CALLS
 //===================================================================================
 
-#if BUILD_CUDA
+#if BUILD_CUDA || BUILD_HIP
 void estimateQuantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles<float>(A, code, offset, n); }
 void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles<half>(A, code, offset, n); }
 
@@ -168,7 +186,7 @@ void spmm_coo_very_sparse_naive_int8(int *max_count, int *max_idx, int *offset_r
 
 extern "C"
 {
-#if BUILD_CUDA
+#if BUILD_CUDA || BUILD_HIP
 	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
 	void cestimate_quantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles_fp16(A, code, offset, n); }
 	void cquantize(float *code, float *A, unsigned char *out, int n){ quantize(code, A, out, n); }
