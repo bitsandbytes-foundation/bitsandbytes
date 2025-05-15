@@ -299,7 +299,10 @@ try:
 except Exception as e:
     error_msg = str(e)
     if not (ipex_cpu or ipex_xpu):
-        logger.error(f"bitsandbytes library load error: {error_msg}\n If you are using Intel CPU/XPU, please install intel_extension_for_pytorch to enable required ops", exc_info=True)
+        logger.error(
+            f"bitsandbytes library load error: {error_msg}\n If you are using Intel CPU/XPU, please install intel_extension_for_pytorch to enable required ops",
+            exc_info=True,
+        )
 
     # create a mock with error messaging as fallback
     lib = ErrorHandlerMockBNBNativeLibrary(error_msg)
