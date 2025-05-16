@@ -171,8 +171,17 @@ jobs:
           path: tmp/
           pattern: "bdist_wheel_*"
           merge-multiple: true
+
       - name: Inspect tmp directory after downloading artifacts
-        run: ls -alFR tmp/
+        run: |
+          ls -alFR tmp/
+          WHEEL_COUNT=$(find tmp/ -type f -name "*.whl" | wc -l)
+          echo "Found $WHEEL_COUNT wheel files"
+          if [ "$WHEEL_COUNT" -eq 0 ]; then
+            echo "::error::No wheel files found in tmp directory! Cannot proceed with release."
+            exit 1
+          fi
+
       - name: Move and rename wheel files with pattern replacement
         run: |
           mkdir -p wheels/
@@ -197,16 +206,74 @@ jobs:
 
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
-      - name: Create release and upload artifacts
+
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+      - name: Delete old pre-release (if exists)
+        run: |
+          cd repo && gh release delete continuous-release_main --cleanup-tag -y
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ensure tag exists
+        run: |
+          cd repo
+          git tag -f continuous-release_main
+          git push -f origin continuous-release_main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate pip install commands for release body
+        run: |
+          cat > body.md << 'ENDOFMARKDOWN'
+          ## Latest `main` pre-release wheel
+
+          This pre-release contains the latest development wheels for all supported platforms, rebuilt automatically on every commit to the `main` branch.
+
+          **How to install:**
+          Pick the correct command for your platform and run it in your terminal:
+
+          ENDOFMARKDOWN
+
+          for whl in wheels/*.whl; do
+            fname=$(basename "$whl")
+            url="https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/$fname"
+
+            if [[ "$fname" == *"manylinux_2_24_x86_64"* ]]; then
+              echo "### Linux (x86_64)" >> body.md
+            elif [[ "$fname" == *"manylinux_2_24_aarch64"* ]]; then
+              echo "### Linux (ARM/aarch64)" >> body.md
+            elif [[ "$fname" == *"win_amd64"* ]]; then
+              echo "### Windows (x86_64)" >> body.md
+            else
+              echo "### Other platform" >> body.md
+            fi
+
+            echo "\`\`\`sh" >> body.md
+            echo "pip install $url" >> body.md
+            echo "\`\`\`" >> body.md
+            echo "" >> body.md
+          done
+
+          cat >> body.md << 'ENDOFMARKDOWN'
+          > **Note:**
+          > These wheels are updated automatically with every commit to `main` and become available as soon as the [python-package.yml](.github/workflows/python-package.yml) workflow finishes.
+          ENDOFMARKDOWN
+
+          # for debugging:
+          cat body.md
+
+      - name: Create new pre-release and upload artifacts
         uses: softprops/action-gh-release@v2.2.1
         with:
           files: wheels/*.whl
           prerelease: true
           name: Latest `main` wheel
+          body_path: body.md
           tag_name: continuous-release_main
           make_latest: false
           draft: false
-          target_commitish: ${{ github.sha }}
 
   audit-wheels:
     needs: build-wheels
