@@ -171,10 +171,10 @@ jobs:
           path: tmp/
           pattern: "bdist_wheel_*"
           merge-multiple: true
-  
+
       - name: Inspect tmp directory after downloading artifacts
         run: ls -alFR tmp/
-  
+
       - name: Move and rename wheel files with pattern replacement
         run: |
           mkdir -p wheels/
@@ -199,10 +199,11 @@ jobs:
 
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
-  
+
+      - uses: actions/checkout@v4
       - name: Delete old pre-release (if exists)
         run: |
-          gh release delete continuous-release_main --cleanup-tag -y || true
+          gh release delete continuous-release_main --cleanup-tag -y
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -213,7 +214,7 @@ jobs:
 
           This pre-release contains the latest development wheels for all supported platforms, rebuilt automatically on every commit to the `main` branch.
 
-          **How to install:**  
+          **How to install:**
           Pick the correct command for your platform and run it in your terminal:
 
           ENDOFMARKDOWN
@@ -228,7 +229,7 @@ jobs:
           done
 
           cat >> body.md << 'ENDOFMARKDOWN'
-          > **Note:**  
+          > **Note:**
           > These wheels are updated automatically with every commit to `main` and become available as soon as the [python-package.yml](.github/workflows/python-package.yml) workflow finishes.
           ENDOFMARKDOWN
 
