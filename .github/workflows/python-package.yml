@@ -173,7 +173,14 @@ jobs:
           merge-multiple: true
 
       - name: Inspect tmp directory after downloading artifacts
-        run: ls -alFR tmp/
+        run: |
+          ls -alFR tmp/
+          WHEEL_COUNT=$(find wheels -type f -name "*.whl" | wc -l)
+          echo "Found $WHEEL_COUNT wheel files"
+          if [ "$WHEEL_COUNT" -eq 0 ]; then
+            echo "::error::No wheel files found in wheels directory! Cannot proceed with release."
+            exit 1
+          fi
 
       - name: Move and rename wheel files with pattern replacement
         run: |
@@ -201,9 +208,11 @@ jobs:
         run: ls -alFR wheels/
 
       - uses: actions/checkout@v4
+        with:
+          path: repo
       - name: Delete old pre-release (if exists)
         run: |
-          gh release delete continuous-release_main --cleanup-tag -y
+          cd repo && gh release delete continuous-release_main --cleanup-tag -y
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
