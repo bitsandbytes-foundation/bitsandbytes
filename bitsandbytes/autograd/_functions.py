@@ -300,11 +300,10 @@ class MatMul8bitLt(torch.autograd.Function):
 
 
 class MatMul8bitFp(torch.autograd.Function):
-    # For Intel CPU and XPU, the double quant has many unsafe operations which will breaks the finetune.
-    # Moreover, the MatMul8bitLt is much slower than MatMul8bitFp in finetune.
-    # The MatMul8bitLt has more mechanisms in computing grad.
+    # For Intel CPU and XPU MatMul8bitFp is much faster (~3x) than MatMul8bitLt in finetune.
+    # Because the MatMul8bitLt has more mechanisms in computing grad.
     # We don't have fast kernel for quant/dequant 8bit in CPU/XPU, so it's very slow.
-    # We'd like to use dequant + matmul to run finetune currently.
+    # We'd like to use dequant + matmul to run finetune with good performance.
 
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
