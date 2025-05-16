@@ -216,6 +216,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Ensure tag exists
+        run: |
+          cd repo
+          git tag -f continuous-release_main
+          git push -f origin continuous-release_main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Generate pip install commands for release body
         run: |
           cat > body.md << 'ENDOFMARKDOWN'
@@ -266,7 +274,6 @@ jobs:
           tag_name: continuous-release_main
           make_latest: false
           draft: false
-          target_commitish: ${{ github.sha }}
 
   audit-wheels:
     needs: build-wheels
