@@ -171,7 +171,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-2025]
         arch: [x86_64]
-        gpu: [T4, L4]
+        gpu: [T4, L40S]
         cuda_version: ["11.8.0", "12.8.1"]
         include:
           - cuda_version: "11.8.0"
@@ -181,15 +181,15 @@ jobs:
             torch_version: "2.7.0"
             pypi_index: "https://download.pytorch.org/whl/cu128"
 
-          # L4 runners
+          # L40S runners
           - os: ubuntu-22.04
-            gpu: L4
-            runner: bandb-aws-g6-4xlarge-plus-use1-public-80
+            gpu: L40S
+            runner: bandb-aws-g6e-4xlarge-plus-use1-public-80
 
           # T4 runners
           - os: ubuntu-22.04
             gpu: T4
-            runner: CUDA-Linux-x64
+            runner: bandb-aws-g4dn-4xlarge-plus-use1-public-80
           - os: windows-2025
             gpu: T4
             runner: CUDA-Windows-x64
@@ -199,9 +199,9 @@ jobs:
           - os: windows-2025
             cuda_version: "12.8.1"
 
-          # No Windows L4 runners.
+          # No Windows L40S runners.
           - os: windows-2025
-            gpu: L4
+            gpu: L40S
     runs-on: ${{ matrix.runner }}
     env:
       BNB_TEST_DEVICE: cuda
