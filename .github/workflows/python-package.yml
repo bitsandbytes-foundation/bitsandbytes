@@ -219,7 +219,7 @@ jobs:
       - name: Generate pip install commands for release body
         run: |
           cat > body.md << 'ENDOFMARKDOWN'
-          ## Latest `main` Wheel Pre-release
+          ## Latest `main` pre-release wheel
 
           This pre-release contains the latest development wheels for all supported platforms, rebuilt automatically on every commit to the `main` branch.
 
@@ -231,6 +231,17 @@ jobs:
           for whl in wheels/*.whl; do
             fname=$(basename "$whl")
             url="https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/$fname"
+
+            if [[ "$fname" == *"manylinux_2_24_x86_64"* ]]; then
+              echo "### Linux (x86_64)" >> body.md
+            elif [[ "$fname" == *"manylinux_2_24_aarch64"* ]]; then
+              echo "### Linux (ARM/aarch64)" >> body.md
+            elif [[ "$fname" == *"win_amd64"* ]]; then
+              echo "### Windows (x86_64)" >> body.md
+            else
+              echo "### Other platform" >> body.md
+            fi
+
             echo "\`\`\`sh" >> body.md
             echo "pip install $url" >> body.md
             echo "\`\`\`" >> body.md
