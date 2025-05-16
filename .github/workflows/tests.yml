@@ -141,6 +141,28 @@ jobs:
       - name: Run tests
         run: pytest --durations=100
 
+  cuda-aarch64-tests:
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    needs: build-cuda
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04-arm]
+        arch: [aarch64]
+        torch_version: ["2.7.0"]
+        cuda_version: ["11.8.0", "12.8.1"]
+
+    runs-on: bandb-aws-g5g-4xlarge-plus-use1-public-80
+    env:
+      BNB_TEST_DEVICE: cuda
+    steps:
+      - name: Show GPU Information
+        run: nvidia-smi
+
+      - name: Show pip packages
+        run: pip list
+
+
   cuda-tests:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cuda
