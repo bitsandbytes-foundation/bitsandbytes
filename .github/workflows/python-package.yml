@@ -175,10 +175,10 @@ jobs:
       - name: Inspect tmp directory after downloading artifacts
         run: |
           ls -alFR tmp/
-          WHEEL_COUNT=$(find wheels -type f -name "*.whl" | wc -l)
+          WHEEL_COUNT=$(find tmp/ -type f -name "*.whl" | wc -l)
           echo "Found $WHEEL_COUNT wheel files"
           if [ "$WHEEL_COUNT" -eq 0 ]; then
-            echo "::error::No wheel files found in wheels directory! Cannot proceed with release."
+            echo "::error::No wheel files found in tmp directory! Cannot proceed with release."
             exit 1
           fi
 
