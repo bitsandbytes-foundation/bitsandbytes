@@ -49,7 +49,7 @@ jobs:
   build-cuda:
     strategy:
       matrix:
-        cuda_version: ["11.8.0", "12.8.1"]
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1"]
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
         include:
           - os: ubuntu-22.04
