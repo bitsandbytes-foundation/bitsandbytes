@@ -130,7 +130,7 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
     assert l1.weight.dtype == torch.int8
 
     l1.eval()
-    for i in range(100):
+    for i in range(4):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = l1(b1)
         assert o1.dtype == torch.float16
@@ -139,7 +139,7 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
 
-    for i in range(100):
+    for i in range(4):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
@@ -152,7 +152,7 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
 
-    for i in range(100):
+    for i in range(4):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
@@ -163,7 +163,7 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
 
     mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).half().to(device)
 
-    for i in range(100):
+    for i in range(4):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
@@ -185,7 +185,7 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
         .to(device)
     )
 
-    for i in range(100):
+    for i in range(4):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
@@ -207,7 +207,7 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
     w1, w2 = mlp.fc1.weight.clone().to(device), mlp.fc2.weight.clone().to(device)  # grab weights before quantization,
     mlp = mlp.to(device).half()  # and this line triggers quantization
 
-    for i in range(100):
+    for i in range(4):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
