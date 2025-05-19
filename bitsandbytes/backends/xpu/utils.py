@@ -1,6 +1,5 @@
 import torch
 
-
 # Should be sorted to use binary search
 _NF4_QUANT_TABLE = torch.tensor(
     [
