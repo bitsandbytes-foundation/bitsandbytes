@@ -929,39 +929,6 @@ class TestSpMMFunctional:
         # torch.cuda.synchronize()
         # print(time.time() - t0)
 
-    @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
-    @pytest.mark.parametrize("dim2", [256, 1024], ids=id_formatter("dim2"))
-    @pytest.mark.skip("No longer supported")
-    def test_integrated_sparse_decomp(self, dim1, dim2):
-        threshold = 3.0
-        for _ in range(k):
-            A = torch.randn(dim1, dim2).cuda().half()
-            w1 = torch.randn(dim1, dim2).cuda().half()
-            out1 = torch.matmul(A, w1.t())
-
-            Cw1, statsw1, _ = F.int8_vectorwise_quant(w1)
-            CA, statsA, _ = F.int8_vectorwise_quant(A)
-
-            out1_32 = F.int8_linear_matmul(CA, Cw1)
-            out2 = F.int8_mm_dequant(out1_32, statsA, statsw1)
-
-            # CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
-            CA, _, statsA, _, coo_tensor = F.double_quant(A, threshold=threshold)
-
-            out1_32 = F.int8_linear_matmul(CA, Cw1)
-            out3 = F.int8_mm_dequant(out1_32, statsA, statsw1)
-
-            assert coo_tensor is not None
-
-            out4 = F.spmm_coo(coo_tensor, w1.t())
-            # idx = torch.unique(coo_tensor._indices()[1]).long()
-            # out4 = torch.matmul(A, w1.t())
-            out5 = out3 + out4
-
-            err1 = torch.abs(out1 - out2).mean().item()
-            err2 = torch.abs(out1 - out5).mean().item()
-            assert err2 < err1
-
     @pytest.mark.parametrize("dim1", [1 * 2048])
     @pytest.mark.parametrize("dim2", [2048])
     @pytest.mark.parametrize("dtype", [torch.int8])
