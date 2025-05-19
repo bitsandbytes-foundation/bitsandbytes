@@ -259,6 +259,14 @@ jobs:
           cat >> body.md << 'ENDOFMARKDOWN'
           > **Note:**
           > These wheels are updated automatically with every commit to `main` and become available as soon as the [python-package.yml](.github/workflows/python-package.yml) workflow finishes.
+
+          The version number is replaced with 1.33.7-preview in order to keep the link stable, this however does not affect the installed version at all:
+          ```
+          > pip install https://.../bitsandbytes-1.33.7-preview-py3-none-manylinux_2_24_x86_64.whl
+          Collecting bitsandbytes==1.33.7rc0
+          ...
+          Successfully installed bitsandbytes-0.46.0.dev0
+          ```
           ENDOFMARKDOWN
 
           # for debugging:
