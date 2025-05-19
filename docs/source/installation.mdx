@@ -23,10 +23,10 @@ Welcome to the installation guide for the `bitsandbytes` library! This document 
 The library can be built using CUDA Toolkit versions as old as **11.6** on Windows and **11.4** on Linux.
 
 | **Feature**                     | **CC Required** | **Example Hardware Requirement**            |
-|---------------------------------|---------------------------------------------------------------|
-| LLM.int8()                      | 7.5+ | Turing (RTX 20 series, T4) or newer GPUs               |
-| 8-bit optimizers/quantization   | 5.0+ | Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs * |
-| NF4/FP4 quantization            | 5.0+ | Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs * |
+|---------------------------------|-----------------|---------------------------------------------|
+| LLM.int8()                      | 7.5+            | Turing (RTX 20 series, T4) or newer GPUs             |
+| 8-bit optimizers/quantization   | 5.0+            | Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs |
+| NF4/FP4 quantization            | 5.0+            | Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs |
 
 > [!WARNING]
 > Support for Maxwell GPUs is deprecated and will be removed in a future release. For the best results, a Turing generation device or newer is recommended.
@@ -41,7 +41,8 @@ The currently distributed `bitsandbytes` packages are built with the following c
 |--------------------|------------------|----------------------|--------------
 | **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm50, sm60, sm75, sm80, sm86, sm89, sm90, sm100, sm120
 | **Linux x86-64**   | 12.8             | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
-| **Linux aarch64**  | 11.8 - 12.8      | GCC 11.2             | sm75, sm80, sm90, sm100
+| **Linux aarch64**  | 11.8 - 12.6      | GCC 11.2             | sm75, sm80, sm90
+| **Linux aarch64**  | 12.8             | GCC 11.2             | sm75, sm80, sm90, sm100
 | **Windows x86-64** | 11.8 - 12.8      | MSVC 19.43+ (VS2022) | sm50, sm60, sm75, sm80, sm86, sm89, sm90, sm100, sm120
 
 Use `pip` or `uv` to install:
@@ -53,7 +54,7 @@ pip install bitsandbytes
 ### Compile from source[[cuda-compile]]
 
 > [!TIP]
-> Don't hesitate to compile from source! The process is pretty straight forward and resilient. This might be needed for older CUDA Toolkit versions or Linux distributions, or other less common configurations/
+> Don't hesitate to compile from source! The process is pretty straight forward and resilient. This might be needed for older CUDA Toolkit versions or Linux distributions, or other less common configurations.
 
 For Linux and Windows systems, compiling from source allows you to customize the build configurations. See below for detailed platform-specific instructions (see the `CMakeLists.txt` if you want to check the specifics and explore some additional options):
 
@@ -68,7 +69,7 @@ For example, to install a compiler and CMake on Ubuntu:
 apt-get install -y build-essential cmake
 ```
 
-You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we test with is **11.8**.
+You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide. The current minimum supported CUDA Toolkit version that we test with is **11.8**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -78,12 +79,12 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 ```
 
 > [!TIP]
-> If you have multiple versions of CUDA installed or installed it in a non-standard location, please refer to CMake CUDA documentation for how to configure the CUDA compiler.
+> If you have multiple versions of the CUDA Toolkit installed or it is in a non-standard location, please refer to CMake CUDA documentation for how to configure the CUDA compiler.
 
 </hfoption>
 <hfoption id="Windows">
 
-Windows systems require Visual Studio with C++ support as well as an installation of the CUDA SDK.
+Compilation from source on Windows systems require Visual Studio with C++ support as well as an installation of the CUDA Toolkit.
 
 To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we test with is **11.8**.
 
@@ -106,7 +107,7 @@ If you would like to use new features even before they are officially released a
 <hfoptions id="OS">
 <hfoption id="Linux">
 
-```
+```bash
 # Note: if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 
 # x86_64 (most users)
@@ -119,7 +120,7 @@ pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsand
 </hfoption>
 <hfoption id="Windows">
 
-```
+```bash
 # Note: if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-win_amd64.whl
 ```
@@ -129,7 +130,7 @@ pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsand
 
 ## Deprecated: Multi-Backend Preview[[multi-backend]]
 
-> [!TIP]
+> [!WARNING]
 > This functionality existed as an early technical preview and is not recommended for production use. We are in the process of upstreaming improved support for AMD and Intel hardware into the main project.
 
 We provide an early preview of support for AMD and Intel hardware as part of a development branch.
@@ -149,7 +150,7 @@ For each supported backend, follow the respective instructions below:
 
 To use this preview version of `bitsandbytes` with `transformers`, be sure to install:
 
-```
+```bash
 pip install "transformers>=4.45.1"
 ```
 
@@ -204,7 +205,7 @@ pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsan
 <hfoption id="Windows">
 This wheel provides support for the Intel XPU platform.
 
-```
+```bash
 # Note, if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl'
 ```
@@ -243,7 +244,7 @@ It does not need compile CPP codes, all required ops are in [intel_extension_for
 
 The below commands are for Linux. For installing on Windows, please adapt the below commands according to the same pattern as described [the section above on compiling from source under the Windows tab](#cuda-compile).
 
-```
+```bash
 pip install intel_extension_for_pytorch
 git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
@@ -255,7 +256,7 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 
 Please refer to [the official Ascend installations instructions](https://www.hiascend.com/document/detail/zh/Pytorch/60RC3/configandinstg/instg/insg_0001.html) for guidance on how to install the necessary `torch_npu` dependency.
 
-```
+```bash
 # Install bitsandbytes from source
 # Clone bitsandbytes repo, Ascend NPU backend is currently enabled on multi-backend-refactor branch
 git clone -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
