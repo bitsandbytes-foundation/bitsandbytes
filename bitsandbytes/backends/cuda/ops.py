@@ -1,14 +1,15 @@
 from collections.abc import Sequence
 import ctypes as ct
 from math import prod
-from typing import Optional
+from typing import Optional 
 
 import torch
 
 from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, _get_tensor_stream, get_ptr
 
 from ..._ops import register_kernel
-from ...cextension import lib
+from ...cextension import lib, HIP_ENVIRONMENT 
+
 
 
 @register_kernel("bitsandbytes::int8_linear_matmul", "cuda")
@@ -83,7 +84,6 @@ def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor
             )
 
     return out
-
 
 @register_kernel("bitsandbytes::int8_mm_dequant", "cuda")
 def _(
@@ -164,7 +164,7 @@ def _(A: torch.Tensor, threshold=0.0):
         out_row[:, outlier_cols] = 0
 
     return out_row, row_stats, outlier_cols
-
+           
 
 @register_kernel("bitsandbytes::int8_double_quant", "cuda")
 def _(
@@ -210,35 +210,67 @@ def _get_col_absmax(
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-    torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
-
-    n = A.numel()
-    blocks = -(n // -blocksize)
-    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
-    out = torch.empty_like(A, dtype=torch.uint8)
-
-    with _cuda_device_of(A):
-        args = (
-            get_ptr(code),
-            get_ptr(A),
-            get_ptr(absmax),
-            get_ptr(out),
-            ct.c_int32(blocksize),
-            ct.c_int(A.numel()),
-        )
-
-        if A.dtype == torch.float16:
-            lib.cquantize_blockwise_fp16(*args)
-        elif A.dtype == torch.bfloat16:
-            lib.cquantize_blockwise_bf16(*args)
-        elif A.dtype == torch.float32:
-            lib.cquantize_blockwise_fp32(*args)
-        else:
-            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
-
-    return out, absmax
-
+    
+    device = A.device  
+    device_type = device.type  
+      
+    if device_type == 'cuda':  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])  
+    elif device_type == 'hip' and HIP_ENVIRONMENT:  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
+      
+    torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")  
+  
+    n = A.numel()  
+    blocks = -(n // -blocksize)  
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)  
+    out = torch.empty_like(A, dtype=torch.uint8)  
+  
+    if device_type == 'cuda' or (device_type == 'hip' and HIP_ENVIRONMENT):  
+        with _cuda_device_of(A):  
+            args = (  
+                get_ptr(code),  
+                get_ptr(A),  
+                get_ptr(absmax),  
+                get_ptr(out),  
+                ct.c_int32(blocksize),  
+                ct.c_int(A.numel()),  
+            )  
+  
+            if A.dtype == torch.float16:  
+                lib.cquantize_blockwise_fp16(*args)  
+            elif A.dtype == torch.bfloat16:  
+                lib.cquantize_blockwise_bf16(*args)  
+            elif A.dtype == torch.float32:  
+                lib.cquantize_blockwise_fp32(*args)  
+            else:  
+                raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")  
+    elif device_type == 'cpu':  
+        cpu_kernel_func = getattr(lib, 'cquantize_blockwise_cpu_fp32', None)  
+        if cpu_kernel_func:  
+            A_cpu = A.to(torch.float32) if A.dtype != torch.float32 else A  
+            code_cpu = code.to('cpu')  
+            absmax_cpu = torch.empty(absmax.shape, device='cpu', dtype=torch.float32)  
+            out_cpu = torch.empty(out.shape, device='cpu', dtype=torch.uint8)  
+              
+            cpu_kernel_func(  
+                get_ptr(code_cpu),   
+                get_ptr(A_cpu),   
+                get_ptr(absmax_cpu),   
+                get_ptr(out_cpu),  
+                ct.c_longlong(blocksize),   
+                ct.c_longlong(A_cpu.numel())  
+            )  
+              
+            out.copy_(out_cpu)  
+            absmax.copy_(absmax_cpu)  
+        else:  
+            raise NotImplementedError("CPU blockwise quantization requires C extension support")  
+    else:  
+        raise NotImplementedError(f"Blockwise quantization not implemented for {device_type}")  
+  
+    return out, absmax      
+    
 
 @register_kernel("bitsandbytes::dequantize_blockwise", "cuda")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
@@ -252,7 +284,7 @@ def _(
     A: torch.Tensor,
     absmax: torch.Tensor,
     code: torch.Tensor,
-    blocksize: int,
+    blocksize: int,               
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
@@ -264,76 +296,116 @@ def _(
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
-    torch._check(
-        dtype in [torch.float16, torch.bfloat16, torch.float32],
-        lambda: f"Blockwise dequantization only supports 16bit/32bit floating types, got {dtype}",
-    )
 
-    with _cuda_device_of(A):
-        args = (
-            get_ptr(code),
-            get_ptr(A),
-            get_ptr(absmax),
-            get_ptr(out),
-            ct.c_int(blocksize),
-            ct.c_int(A.numel()),
-            _get_tensor_stream(A),
-        )
-
-        if dtype == torch.float16:
-            lib.cdequantize_blockwise_fp16(*args)
-        elif dtype == torch.bfloat16:
-            lib.cdequantize_blockwise_bf16(*args)
-        elif dtype == torch.float32:
-            lib.cdequantize_blockwise_fp32(*args)
-
+    device = A.device  
+    device_type = device.type  
+      
+    if device_type == 'cuda':  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])  
+    elif device_type == 'hip' and HIP_ENVIRONMENT:  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
+          
+    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")  
+    torch._check(  
+        dtype in [torch.float16, torch.bfloat16, torch.float32],  
+        lambda: f"Blockwise dequantization only supports 16bit/32bit floating types, got {dtype}",  
+    )  
+  
+    if device_type == 'cuda' or (device_type == 'hip' and HIP_ENVIRONMENT):  
+        with _cuda_device_of(A):  
+            args = (  
+                get_ptr(code),  
+                get_ptr(A),  
+                get_ptr(absmax),  
+                get_ptr(out),  
+                ct.c_int(blocksize),  
+                ct.c_int(A.numel()),  
+                _get_tensor_stream(A),  
+            )  
+  
+            if dtype == torch.float16:  
+                lib.cdequantize_blockwise_fp16(*args)  
+            elif dtype == torch.bfloat16:  
+                lib.cdequantize_blockwise_bf16(*args)  
+            elif dtype == torch.float32:  
+                lib.cdequantize_blockwise_fp32(*args)  
+    elif device_type == 'cpu':   
+        cpu_kernel_func = getattr(lib, 'cdequantize_blockwise_cpu_fp32', None)  
+        if cpu_kernel_func:  
+            code_cpu = code.to('cpu')  
+            A_cpu = A.to('cpu')  
+            absmax_cpu = absmax.to('cpu')  
+            out_cpu = torch.empty(out.shape, dtype=torch.float32, device='cpu')  
+              
+            cpu_kernel_func(  
+                get_ptr(code_cpu),  
+                get_ptr(A_cpu),  
+                get_ptr(absmax_cpu),  
+                get_ptr(out_cpu),  
+                ct.c_longlong(blocksize),  
+                ct.c_longlong(A.numel())  
+            )  
+              
+            out.copy_(out_cpu.to(dtype))  
+        else:  
+            raise NotImplementedError("CPU blockwise dequantization requires C extension support")  
+    else:  
+        raise NotImplementedError(f"Blockwise dequantization not implemented for {device_type}")  
 
 @register_kernel("bitsandbytes::quantize_4bit", "cuda")
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-    torch._check(quant_type in ["fp4", "nf4"])
-    torch._check(
-        A.dtype in [torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
-    )
 
-    n = A.numel()
-    blocks = -(n // -blocksize)
-    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
-    out = torch.empty(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)
-
-    with _cuda_device_of(A):
-        args = (
-            None,
-            get_ptr(A),
-            get_ptr(absmax),
-            get_ptr(out),
-            ct.c_int32(blocksize),
-            ct.c_int(n),
-        )
-
-        if A.dtype == torch.bfloat16:
-            if quant_type == "fp4":
-                lib.cquantize_blockwise_bf16_fp4(*args)
-            else:
-                lib.cquantize_blockwise_bf16_nf4(*args)
-        elif A.dtype == torch.float16:
-            if quant_type == "fp4":
-                lib.cquantize_blockwise_fp16_fp4(*args)
-            else:
-                lib.cquantize_blockwise_fp16_nf4(*args)
-        elif A.dtype == torch.float32:
-            if quant_type == "fp4":
-                lib.cquantize_blockwise_fp32_fp4(*args)
-            else:
-                lib.cquantize_blockwise_fp32_nf4(*args)
-
-    return out, absmax
-
+    device = A.device  
+    device_type = device.type  
+      
+    if device_type == 'cuda':  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])  
+    elif device_type == 'hip' or HIP_ENVIRONMENT:  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
+          
+    torch._check(quant_type in ["fp4", "nf4"])  
+    torch._check(  
+        A.dtype in [torch.bfloat16, torch.float16, torch.float32],  
+        lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",  
+    )  
+  
+    n = A.numel()  
+    blocks = -(n // -blocksize)  
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)  
+    out = torch.empty(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)  
+  
+    if device_type == 'cuda' or (device_type == 'hip' and HIP_ENVIRONMENT):  
+        with _cuda_device_of(A):  
+            args = (  
+                None,  
+                get_ptr(A),  
+                get_ptr(absmax),  
+                get_ptr(out),  
+                ct.c_int32(blocksize),  
+                ct.c_int(n),  
+            )  
+  
+            if A.dtype == torch.bfloat16:  
+                if quant_type == "fp4":  
+                    lib.cquantize_blockwise_bf16_fp4(*args)  
+                else:  
+                    lib.cquantize_blockwise_bf16_nf4(*args)  
+            elif A.dtype == torch.float16:  
+                if quant_type == "fp4":  
+                    lib.cquantize_blockwise_fp16_fp4(*args)  
+                else:  
+                    lib.cquantize_blockwise_fp16_nf4(*args)  
+            elif A.dtype == torch.float32:  
+                if quant_type == "fp4":  
+                    lib.cquantize_blockwise_fp32_fp4(*args)  
+                else:  
+                    lib.cquantize_blockwise_fp32_nf4(*args)  
+    else:  
+        raise NotImplementedError(f"4-bit quantization not implemented for {device_type}")  
+  
+    return out, absmax  
 
 @register_kernel("bitsandbytes::dequantize_4bit", "cuda")
 def _(
@@ -347,6 +419,7 @@ def _(
     out = torch.empty(shape, dtype=dtype, device=A.device)
     _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
     return out
+    
 
 
 @register_kernel("bitsandbytes::dequantize_4bit.out", "cuda")
@@ -359,52 +432,62 @@ def _(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
+
     torch._check(out.shape == shape, lambda: f"Expected out.shape == {shape}, got {out.shape}")
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
     _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
 
-
-def _dequantize_4bit_impl(
-    A: torch.Tensor,
-    absmax: torch.Tensor,
-    blocksize: int,
-    quant_type: str,
-    dtype: torch.dtype,
-    out: torch.Tensor,
-) -> None:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-    torch._check(quant_type in ["fp4", "nf4"])
-    torch._check(
-        dtype in [torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
-    )
-
-    with _cuda_device_of(A):
-        args = (
-            None,
-            get_ptr(A),
-            get_ptr(absmax),
-            get_ptr(out),
-            ct.c_int(blocksize),
-            ct.c_int(out.numel()),
-            _get_tensor_stream(A),
-        )
-
-        if out.dtype == torch.bfloat16:
-            if quant_type == "fp4":
-                lib.cdequantize_blockwise_bf16_fp4(*args)
-            else:
-                lib.cdequantize_blockwise_bf16_nf4(*args)
-        elif out.dtype == torch.float16:
-            if quant_type == "fp4":
-                lib.cdequantize_blockwise_fp16_fp4(*args)
-            else:
-                lib.cdequantize_blockwise_fp16_nf4(*args)
-        elif out.dtype == torch.float32:
-            if quant_type == "fp4":
-                lib.cdequantize_blockwise_fp32_fp4(*args)
-            else:
-                lib.cdequantize_blockwise_fp32_nf4(*args)
+def _dequantize_4bit_impl(  
+    A: torch.Tensor,  
+    absmax: torch.Tensor,  
+    blocksize: int,  
+    quant_type: str,  
+    dtype: torch.dtype,  
+    out: torch.Tensor,  
+) -> None:  
+    device = A.device  
+    device_type = device.type  
+      
+    if device_type == 'cuda':  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])  
+    elif device_type == 'hip' and HIP_ENVIRONMENT:  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
+          
+    torch._check(quant_type in ["fp4", "nf4"])  
+    torch._check(  
+        dtype in [torch.bfloat16, torch.float16, torch.float32],  
+        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",  
+    )  
+  
+    if device_type == 'cuda' or (device_type == 'hip' and HIP_ENVIRONMENT):  
+        with _cuda_device_of(A):  
+            args = (  
+                None,  
+                get_ptr(A),  
+                get_ptr(absmax),  
+                get_ptr(out),  
+                ct.c_int(blocksize),  
+                ct.c_int(out.numel()),  
+                _get_tensor_stream(A),  
+            )  
+  
+            if out.dtype == torch.bfloat16:  
+                if quant_type == "fp4":  
+                    lib.cdequantize_blockwise_bf16_fp4(*args)  
+                else:  
+                    lib.cdequantize_blockwise_bf16_nf4(*args)  
+            elif out.dtype == torch.float16:  
+                if quant_type == "fp4":  
+                    lib.cdequantize_blockwise_fp16_fp4(*args)  
+                else:  
+                    lib.cdequantize_blockwise_fp16_nf4(*args)  
+            elif out.dtype == torch.float32:  
+                if quant_type == "fp4":  
+                    lib.cdequantize_blockwise_fp32_fp4(*args)  
+                else:  
+                    lib.cdequantize_blockwise_fp32_nf4(*args)  
+    else:  
+        raise NotImplementedError(f"4-bit dequantization not implemented for {device_type}")  
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "cuda")
@@ -457,7 +540,7 @@ def _gemv_4bit_impl(
         B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32],
         lambda: f"B must be backed by storage of type uint8, bfloat16, float16, or float32, got {B.dtype}",
     )
-    torch._check(absmax.dtype == torch.float32, lambda: f"absmax must be float32, got {absmax.dtype}")
+    torch._check(absmax.dtype == torch.float32, lambda: f"absmax must be float32, got {absmax.dtype}")                      
     torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
 
     m = ct.c_int32(shapeB[0])
