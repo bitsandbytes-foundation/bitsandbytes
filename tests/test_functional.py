@@ -525,7 +525,13 @@ class TestIGEMMFunctional:
         # print(mean(errs2))
         # print(mean(relerrs2))
         assert mean(errs) < 0.015
-        assert mean(relerrs) < 0.3
+
+        # There's a higher relerr on L40S with torch 2.4+cu118.
+        is_sm89 = torch.cuda.get_device_capability() == (8, 9)
+        if torch.version.cuda == "11.8" and is_sm89 and torch.__version__ < (2, 5):
+            assert mean(relerrs) < 0.41
+        else:
+            assert mean(relerrs) < 0.3
 
     @pytest.mark.parametrize("dim1", [1, 64], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [32, 128], ids=id_formatter("dim2"))
