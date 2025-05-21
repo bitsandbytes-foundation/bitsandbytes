@@ -220,7 +220,8 @@ def _(
         scaled = torch.cat([scaled, scaled_rem], dim=0)
 
     # Quantize with the lookup table
-    quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - CODE[quant_type]), dim=-1, keepdim=True).to(torch.uint8)
+    code = CODE[quant_type].to(scaled.device).to(scaled.dtype)
+    quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - code), dim=-1, keepdim=True).to(torch.uint8)
 
     # Pack two quantized values per byte
     packed = quantized[::2] << 4 | quantized[1::2]
@@ -258,7 +259,7 @@ def _(
     out_dq[1::2] = A & 0xF
     out_dq[::2] = A >> 4
     # code is fp32, cast to dtype to avoid the mismatch issue
-    code = CODE[quant_type].to(dtype)
+    code = CODE[quant_type].to(dtype).to(A.device)
     out_dq = code[out_dq]
 
     # Apply scales
