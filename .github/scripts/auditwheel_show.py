@@ -22,7 +22,7 @@ def main():
             print(audit_wheel_output.stdout)
 
         if audit_wheel_output.stderr:
-            print(f"**Error:**\n```{audit_wheel_output.stderr}```")
+            print(f"**Error:**\n```\n{audit_wheel_output.stderr}\n```")
 
         print("---")
 

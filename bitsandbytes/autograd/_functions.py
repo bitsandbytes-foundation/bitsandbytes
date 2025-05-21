@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from math import prod
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 import warnings
 from warnings import warn
 
@@ -49,9 +49,13 @@ class GlobalOutlierPooler:
         return torch.Tensor(list(self.outliers)).to(torch.int64)
 
 
+@deprecated(
+    "This function is deprecated and will be removed in a future release.",
+    category=FutureWarning,
+)
 def get_inverse_transform_indices(
     transform_tile: Callable[[torch.Tensor], torch.Tensor],
-    tile_size: Tuple[int, int],
+    tile_size: tuple[int, int],
 ):
     """
     Compute a permutation of indices that invert the specified (tiled) matrix transformation
@@ -80,6 +84,17 @@ def get_inverse_transform_indices(
     return permuted_tile_indices
 
 
+# torch.compiler.is_compiling() is available only in torch >= 2.3
+if hasattr(torch.compiler, "is_compiling"):
+    _is_compiling = torch.compiler.is_compiling
+else:
+    _is_compiling = torch._dynamo.is_compiling
+
+
+@deprecated(
+    "This function is deprecated and will be removed in a future release.",
+    category=FutureWarning,
+)
 def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -> torch.Tensor:
     """
     Undo a tiled permutation such as turing or ampere layout
@@ -98,152 +113,9 @@ def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -
     return outputs.reshape(rows, cols).contiguous()
 
 
-@deprecated(
-    "MatMul8bit is deprecated and will be removed in a future release. Please use MatMul8bitLt instead.",
-    category=FutureWarning,
-)
-class MatMul8bit(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, A, B, out=None, quant_type="vector", precision=None):
-        if precision is None:
-            precision = [8, 8, 8]
-        if precision[0] != 8:
-            with torch.no_grad():
-                output = torch.matmul(A, B)
-        else:
-            if len(B.shape) == 2:
-                dim = 0
-            else:
-                dim = 1
-            qA, SA = F.vectorwise_quant(A, dim=-1, quant_type=quant_type)
-            qB, SB = F.vectorwise_quant(B, dim=dim, quant_type=quant_type)
-            iout = F.igemm(qA, qB)
-            output = F.vectorwise_mm_dequant(iout, SA, SB, A.dtype, quant_type)
-
-        if A.requires_grad or B.requires_grad:
-            ctx.save_for_backward(A, B)
-
-        ctx.quant_type = quant_type
-        ctx.precision = precision
-
-        return output
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        A, B = ctx.saved_tensors
-        quant_type = ctx.quant_type
-        precision = ctx.precision
-        grad_A = grad_B = None
-
-        if B.requires_grad:
-            if len(A.shape) == 3:
-                dims = [0, 1]
-                # bsi -> ibs
-                permute_dim = [0, 2, 1]
-            else:
-                dims = [0]
-                # bs -> sb
-                permute_dim = [1, 0]
-
-            if precision[1] != 8:
-                with torch.no_grad():
-                    grad_B = torch.matmul(A.permute(permute_dim), grad_output)
-            else:
-                if len(B.shape) == 2 and len(A.shape) == 3:
-                    grad_output = grad_output.contiguous()
-                    if not grad_output.is_contiguous():
-                        grad_output.contiguous()
-                    qgrad_output, S1 = F.vectorwise_quant(
-                        grad_output.view(-1, grad_output.shape[2]),
-                        dim=0,
-                        quant_type=quant_type,
-                    )
-                    if not A.is_contiguous():
-                        A = A.contiguous()
-                    qA, S2 = F.vectorwise_quant(A.view(-1, A.shape[2]), dim=0, quant_type=quant_type)
-                    igrad_B = F.igemm(qA.t(), qgrad_output)
-                    grad_B = F.vectorwise_mm_dequant(igrad_B, S2.t(), S1, grad_output.dtype, quant_type)
-                else:
-                    qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
-                    qA, S2 = F.vectorwise_quant(A, dim=dims, quant_type=quant_type)
-                    igrad_B = F.igemm(qA.permute(permute_dim), qgrad_output)
-                    grad_B = F.vectorwise_mm_dequant(
-                        igrad_B,
-                        S2.permute(permute_dim),
-                        S1,
-                        grad_output.dtype,
-                        quant_type,
-                    )
-
-        if A.requires_grad:
-            if len(grad_output.shape) == 3:
-                dims = [2]
-            else:
-                dims = [1]
-
-            if len(B.shape) == 3:
-                # bio -> boi
-                permute_dim = [0, 2, 1]
-                dim_B = dims
-            else:
-                # io -> oi
-                permute_dim = [1, 0]
-                dim_B = [1]
-
-            if precision[2] != 8:
-                with torch.no_grad():
-                    grad_A = torch.matmul(grad_output, B.permute(permute_dim))
-            else:
-                qgrad_output, S1 = F.vectorwise_quant(grad_output, dim=dims, quant_type=quant_type)
-                qB, S3 = F.vectorwise_quant(B, dim=dim_B, quant_type=quant_type)
-                igrad_A = F.igemm(qgrad_output, qB.permute(permute_dim))
-                grad_A = F.vectorwise_mm_dequant(
-                    igrad_A,
-                    S1,
-                    S3.permute(permute_dim),
-                    grad_output.dtype,
-                    quant_type,
-                )
-
-        return grad_A, grad_B, None, None, None
-
-
-mm_cublas = MatMul8bit.apply
-bmm_cublas = MatMul8bit.apply
-matmul_cublas = MatMul8bit.apply
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def supports_igemmlt(device: torch.device) -> bool:
-    """check if this device supports the optimized int8 kernel"""
-    if torch.cuda.get_device_capability(device=device) < (7, 5):
-        return False
-    device_name = torch.cuda.get_device_name(device=device)
-    nvidia16_models = ("GTX 1630", "GTX 1650", "GTX 1660")  # https://en.wikipedia.org/wiki/GeForce_16_series
-    if any(model_name in device_name for model_name in nvidia16_models):
-        return False  # these devices are technically cuda 7.5-capable, but they lack tensor cores
-    return True
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def _get_tile_size(format):
-    assert format in (
-        "col_turing",
-        "col_ampere",
-    ), f"please find this assert and manually enter tile size for {format}"
-    return (8, 32) if format == "col_turing" else (32, 32)
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def get_tile_inds(format, device):
-    transform = lambda x: F.transform(x.to(device), from_order="row", to_order=format)[0].to(x.device)
-    with torch.no_grad():
-        return get_inverse_transform_indices(transform, _get_tile_size(format)).to(device)
-
-
 @dataclass
 class MatmulLtState:
-    _tile_indices: Optional[torch.Tensor] = None
+    _tile_indices: Optional[torch.Tensor] = None  # TODO: remove
 
     force_no_igemmlt: bool = False
 
@@ -279,9 +151,7 @@ class MatmulLtState:
 
     @property
     def tile_indices(self):
-        if self._tile_indices is None:
-            self._tile_indices = get_tile_inds(self.formatB, self.CxB.device)
-        return self._tile_indices
+        raise ValueError("tile_indices is no longer supported.")
 
 
 class MatMul8bitLt(torch.autograd.Function):
@@ -311,7 +181,7 @@ class MatMul8bitLt(torch.autograd.Function):
         input_shape = A.shape
 
         # Cast A to fp16
-        if A.dtype != torch.float16:
+        if A.dtype != torch.float16 and not _is_compiling():
             warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
 
         if len(A.shape) == 3:
@@ -340,50 +210,34 @@ class MatMul8bitLt(torch.autograd.Function):
                 # 2. Quantize B
                 state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
 
-        # Handle sparse decomposition. In some instances, we may have not found any
-        # outlier columns at all. In that case, we'll skip this part completely.
-        if state.threshold > 0.0 and outlier_cols is not None and outlier_cols.numel():
+        # Handle sparse decomposition
+        if state.threshold > 0.0:
             state.idx = outlier_cols
 
-            # Zero out the outliers in the transposed 8bit inputs.
-            if CAt is not None:
-                CAt[:, state.idx] = 0
+            # Mixed Int8 Matmul + Dequant + Bias
+            output, subA = torch.ops.bitsandbytes.int8_mixed_scaled_mm(
+                A,
+                CA,
+                state.CB,
+                SCA,
+                state.SCB,
+                outlier_cols,
+                bias,
+            )
 
-            # Extract the input outliers in original precision
-            subA = A[:, state.idx].contiguous()
-
-            # Extract the corresponding weights
-            if state.has_fp16_weights:
-                state.subB = B[:, state.idx].t()
-            else:
-                # To dequantize our weights associated with the input outliers,
-                # we want to divide by 127. It's however more performant to multiply
-                # by the reciprocal.
-                outliers = state.CB[:, state.idx]
-                state.subB = (outliers.t() * state.SCB * 7.874015718698502e-3).to(A.dtype)
         else:
+            # Int8 Matmul + Dequant + Bias
+            output = torch.ops.bitsandbytes.int8_scaled_mm.default(
+                CA, state.CB, SCA, state.SCB, bias=bias, dtype=A.dtype
+            )
             subA = None
-
-        # 3. Int8 Matmul
-        out32 = F.int8_linear_matmul(CA, state.CB)
-
-        # Dequantize matmul result
-        if bias is None or bias.dtype == torch.float16:
-            # we apply the fused bias here
-            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=bias).to(A.dtype)
-        else:  # apply bias separately
-            # TODO: Fused bias for fp32/bf16?
-            output = F.int8_mm_dequant(out32, SCA, state.SCB, bias=None).to(A.dtype).add_(bias)
-
-        # 4. Mixed-precision decomposition matmul
-        if subA is not None and state.subB is not None:
-            output = output.addmm(subA, state.subB)
 
         # 5. Save state
         ctx.state = state
 
         ctx.grad_shape = input_shape
-        ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
+        ctx.dtype_A = A.dtype
+        ctx.dtype_bias = None if bias is None else bias.dtype
 
         if any(ctx.needs_input_grad[:2]):
             ctx.tensors = (CAt, subA, A)
@@ -423,9 +277,15 @@ class MatMul8bitLt(torch.autograd.Function):
         if req_gradB:
             Cgrad, _, _, SCgradt, _ = F.int8_double_quant(grad_output.to(torch.float16))
 
-            gradB32 = F.int8_linear_matmul(Cgrad.t().contiguous(), CAt.t())
-            grad_B = F.int8_mm_dequant(gradB32, SCgradt, SCAt)
-            if state.threshold > 0.0 and subA is not None:
+            grad_B = torch.ops.bitsandbytes.int8_scaled_mm.default(
+                Cgrad.t().contiguous(),
+                CAt.t(),
+                SCgradt,
+                SCAt,
+                dtype=torch.float16,
+            )
+
+            if state.threshold > 0.0 and subA is not None and subA.numel() > 0:
                 grad_B[:, idx] += torch.matmul(grad_output.t(), subA)
 
         if req_gradA:

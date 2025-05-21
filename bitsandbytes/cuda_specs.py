@@ -1,41 +1,75 @@
 import dataclasses
-from typing import List, Optional, Tuple
+from functools import lru_cache
+from typing import Optional
 
 import torch
 
 
 @dataclasses.dataclass(frozen=True)
 class CUDASpecs:
-    highest_compute_capability: Tuple[int, int]
+    highest_compute_capability: tuple[int, int]
     cuda_version_string: str
-    cuda_version_tuple: Tuple[int, int]
+    cuda_version_tuple: tuple[int, int]
 
     @property
     def has_imma(self) -> bool:
-        return self.highest_compute_capability >= (7, 5)
+        return torch.version.hip or self.highest_compute_capability >= (7, 5)
 
 
-def get_compute_capabilities() -> List[Tuple[int, int]]:
+def get_compute_capabilities() -> list[tuple[int, int]]:
     return sorted(torch.cuda.get_device_capability(torch.cuda.device(i)) for i in range(torch.cuda.device_count()))
 
 
-def get_cuda_version_tuple() -> Tuple[int, int]:
-    # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART____VERSION.html#group__CUDART____VERSION
-    major, minor = map(int, torch.version.cuda.split("."))
-    return major, minor
+@lru_cache(None)
+def get_cuda_version_tuple() -> Optional[tuple[int, int]]:
+    """Get CUDA/HIP version as a tuple of (major, minor)."""
+    try:
+        if torch.version.cuda:
+            version_str = torch.version.cuda
+        elif torch.version.hip:
+            version_str = torch.version.hip
+        else:
+            return None
+
+        parts = version_str.split(".")
+        if len(parts) >= 2:
+            return tuple(map(int, parts[:2]))
+        return None
+    except (AttributeError, ValueError, IndexError):
+        return None
 
 
-def get_cuda_version_string() -> str:
-    major, minor = get_cuda_version_tuple()
-    return f"{major}{minor}"
+def get_cuda_version_string() -> Optional[str]:
+    """Get CUDA/HIP version as a string."""
+    version_tuple = get_cuda_version_tuple()
+    if version_tuple is None:
+        return None
+    major, minor = version_tuple
+    return f"{major * 10 + minor}"
 
 
 def get_cuda_specs() -> Optional[CUDASpecs]:
+    """Get CUDA/HIP specifications."""
     if not torch.cuda.is_available():
         return None
 
-    return CUDASpecs(
-        highest_compute_capability=(get_compute_capabilities()[-1]),
-        cuda_version_string=(get_cuda_version_string()),
-        cuda_version_tuple=get_cuda_version_tuple(),
-    )
+    try:
+        compute_capabilities = get_compute_capabilities()
+        if not compute_capabilities:
+            return None
+
+        version_tuple = get_cuda_version_tuple()
+        if version_tuple is None:
+            return None
+
+        version_string = get_cuda_version_string()
+        if version_string is None:
+            return None
+
+        return CUDASpecs(
+            highest_compute_capability=compute_capabilities[-1],
+            cuda_version_string=version_string,
+            cuda_version_tuple=version_tuple,
+        )
+    except Exception:
+        return None

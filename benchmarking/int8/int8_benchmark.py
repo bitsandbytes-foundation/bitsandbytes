@@ -65,4 +65,4 @@ for i in range(5):
 print("=" * 40)
 print(f"Example:\n{tokenizer.decode(generated_ids[0])}")
 print("=" * 40)
-print(f"Speed: {num/(time.time() - time_1)}token/s")
+print(f"Speed: {num / (time.time() - time_1)}token/s")

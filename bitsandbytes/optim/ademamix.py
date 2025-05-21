@@ -1,5 +1,6 @@
+from collections.abc import Iterable
 import math
-from typing import Iterable, Literal, Optional, Tuple
+from typing import Literal, Optional
 
 import torch
 
@@ -16,7 +17,7 @@ class _ReferenceAdEMAMix(torch.optim.Optimizer):
         self,
         params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 5.0,
         eps: float = 1e-8,
         weight_decay: float = 1e-2,  # default 0.0 or 1e-2?
@@ -108,7 +109,7 @@ class AdEMAMix(Optimizer2State):
         self,
         params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 5.0,
         t_alpha: Optional[int] = None,
         t_beta3: Optional[int] = None,
@@ -151,7 +152,7 @@ class AdEMAMix(Optimizer2State):
         elif config["optim_bits"] == 8:
             dtype = torch.uint8
         else:
-            raise NotImplementedError(f'Amount of optimizer bits not supported: {config["optim_bits"]}')
+            raise NotImplementedError(f"Amount of optimizer bits not supported: {config['optim_bits']}")
 
         if p.numel() < config["min_8bit_size"]:
             dtype = torch.float32
@@ -165,8 +166,9 @@ class AdEMAMix(Optimizer2State):
             self.name2qmap["dynamic"] = state["qmap1"] = self.name2qmap["dynamic"].to(p.device)
             self.name2qmap["udynamic"] = state["qmap2"] = self.name2qmap["udynamic"].to(p.device)
 
+            blocksize = 256
             n = p.numel()
-            blocks = (n // 256) + bool(n % 256)
+            blocks = (n // blocksize) + bool(n % blocksize)
 
             state["absmax1"] = torch.zeros((2, blocks), dtype=torch.float32, device=p.device)
             state["absmax2"] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)
@@ -274,7 +276,7 @@ class AdEMAMix8bit(AdEMAMix):
         self,
         params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 5.0,
         t_alpha: Optional[int] = None,
         t_beta3: Optional[int] = None,
@@ -303,7 +305,7 @@ class PagedAdEMAMix8bit(AdEMAMix8bit):
         self,
         params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 5.0,
         t_alpha: Optional[int] = None,
         t_beta3: Optional[int] = None,
@@ -330,7 +332,7 @@ class PagedAdEMAMix(AdEMAMix):
         self,
         params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 5.0,
         t_alpha: Optional[int] = None,
         t_beta3: Optional[int] = None,
@@ -359,7 +361,7 @@ class AdEMAMix32bit(Optimizer2State):
         self,
         params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 5.0,
         t_alpha: Optional[int] = None,
         t_beta3: Optional[int] = None,
@@ -392,7 +394,7 @@ class PagedAdEMAMix32bit(AdEMAMix32bit):
         self,
         params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 5.0,
         t_alpha: Optional[int] = None,
         t_beta3: Optional[int] = None,

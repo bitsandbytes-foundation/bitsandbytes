@@ -1,7 +1,9 @@
+import functools
 from io import BytesIO
 from itertools import product
+import os
 import random
-from typing import Any, List
+from typing import Any
 
 import torch
 
@@ -13,6 +15,38 @@ BOOLEAN_TRIPLES = list(product(TRUE_FALSE, repeat=3))  # all combinations of (bo
 BOOLEAN_TUPLES = list(product(TRUE_FALSE, repeat=2))  # all combinations of (bool, bool)
 
 
+@functools.cache
+def get_available_devices():
+    if "BNB_TEST_DEVICE" in os.environ:
+        # If the environment variable is set, use it directly.
+        return [os.environ["BNB_TEST_DEVICE"]]
+
+    devices = ["cpu"]
+
+    if hasattr(torch, "accelerator"):
+        # PyTorch 2.6+ - determine accelerator using agnostic API.
+        if torch.accelerator.is_available():
+            devices += [str(torch.accelerator.current_accelerator())]
+    else:
+        if torch.cuda.is_available():
+            devices += ["cuda"]
+
+        if torch.backends.mps.is_available():
+            devices += ["mps"]
+
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            devices += ["xpu"]
+
+        custom_backend_name = torch._C._get_privateuse1_backend_name()
+        custom_backend_module = getattr(torch, custom_backend_name, None)
+        custom_backend_is_available_fn = getattr(custom_backend_module, "is_available", None)
+
+        if custom_backend_is_available_fn and custom_backend_module.is_available():
+            devices += [custom_backend_name]
+
+    return devices
+
+
 def torch_save_to_buffer(obj):
     buffer = BytesIO()
     torch.save(obj, buffer)
@@ -22,12 +56,12 @@ def torch_save_to_buffer(obj):
 
 def torch_load_from_buffer(buffer):
     buffer.seek(0)
-    obj = torch.load(buffer)
+    obj = torch.load(buffer, weights_only=False)
     buffer.seek(0)
     return obj
 
 
-def get_test_dims(min: int, max: int, *, n: int) -> List[int]:
+def get_test_dims(min: int, max: int, *, n: int) -> list[int]:
     return [test_dims_rng.randint(min, max) for _ in range(n)]
 
 
@@ -36,6 +70,8 @@ def format_with_label(label: str, value: Any) -> str:
         formatted = "T" if value else "F"
     elif isinstance(value, (list, tuple)) and all(isinstance(v, bool) for v in value):
         formatted = "".join("T" if b else "F" for b in value)
+    elif isinstance(value, torch.dtype):
+        formatted = describe_dtype(value)
     else:
         formatted = str(value)
     return f"{label}={formatted}"

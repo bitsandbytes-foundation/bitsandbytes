@@ -27,9 +27,9 @@ The latest version of the distributed `bitsandbytes` package is built with the f
 
 | **OS**      | **CUDA Toolkit** | **Host Compiler**         |
 |-------------|------------------|----------------------|
-| **Linux**   | 11.7 - 12.3      | GCC 11.4             |
+| **Linux**   | 11.8 - 12.3      | GCC 11.4             |
 |             | 12.4 - 12.8      | GCC 13.2             |
-| **Windows** | 11.7 - 12.8      | MSVC 19.42+ (VS2022) |
+| **Windows** | 11.8 - 12.8      | MSVC 19.42+ (VS2022) |
 
 For CUDA systems, ensure your hardware meets the following requirements:
 
@@ -57,7 +57,12 @@ If you would like to use new feature even before they are officially released an
 
 ```
 # Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
-pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-0.44.2.dev0-py3-none-manylinux_2_24_x86_64.whl'
+
+# x86_64 (most users)
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl
+
+# ARM/aarch64
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_aarch64.whl
 ```
 
 </hfoption>
@@ -65,7 +70,7 @@ pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsan
 
 ```
 # Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
-pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-macosx_13_1_arm64.whl'
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-win_amd64.whl
 ```
 </hfoption>
 </hfoptions>
@@ -88,17 +93,7 @@ For example, to install a compiler and CMake on Ubuntu:
 apt-get install -y build-essential cmake
 ```
 
-You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide from NVIDIA. The current expected CUDA Toolkit version is **11.1+** and it is recommended to install **GCC >= 7.3** and required to have at least **GCC >= 6**.
-
-Refer to the following table if you're using another CUDA Toolkit version.
-
-| CUDA Toolkit |  GCC  |
-|--------------|-------|
-| >= 11.4.1    | >= 11 |
-| >= 12.0      | >= 12 |
-| >= 12.4      | >= 13 |
-
-Now to install the bitsandbytes package from source, run the following commands:
+You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version is **11.8**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -115,13 +110,7 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 
 Windows systems require Visual Studio with C++ support as well as an installation of the CUDA SDK.
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA.
-
-Refer to the following table if you're using another CUDA Toolkit version.
-
-| CUDA Toolkit | MSVC |
-|---|---|
-| >= 11.6 | 19.30+ (VS2022) |
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version is **11.8**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -149,7 +138,7 @@ Then locally install the CUDA version you need with this script from bitsandbyte
 ```bash
 wget https://raw.githubusercontent.com/bitsandbytes-foundation/bitsandbytes/main/install_cuda.sh
 # Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
-#   CUDA_VERSION in {110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122, 123, 124, 125, 126, 128}
+#   CUDA_VERSION in {118, 120, 121, 122, 123, 124, 125, 126, 128}
 #   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True
 
 # For example, the following installs CUDA 12.6 to ~/local/cuda-12.6 and exports the path to your .bashrc
@@ -174,7 +163,7 @@ export BNB_CUDA_VERSION=126
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-12.6
 ```
 
-3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 11.7) and a different bitsandbytes library is loaded.
+3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 12.6) and a different bitsandbytes library is loaded.
 
 ## Multi-backend Support (Alpha Release)[[multi-backend]]
 
@@ -327,20 +316,18 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 </hfoption>
 <hfoption id="Intel CPU + GPU">
 
-#### Intel CPU
+#### Intel CPU + XPU
 
 > [!TIP]
-> Intel CPU backend only supports building from source; for now, please follow the instructions below.
+> Intel CPU/XPU backend only supports building from source; for now, please follow the instructions below.
 
-Similar to the CUDA case, you can compile bitsandbytes from source for Linux and Windows systems.
+It does not need compile CPP codes, all required ops are in [intel_extension_for_pytorch](https://pytorch-extension.intel.com/), please follow the instruction to install ipex.
 
 The below commands are for Linux. For installing on Windows, please adapt the below commands according to the same pattern as described [the section above on compiling from source under the Windows tab](#cuda-compile).
 
 ```
-git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install intel_extension_for_pytorch
-cmake -DCOMPUTE_BACKEND=cpu -S .
-make
+git clone --depth 1 -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 

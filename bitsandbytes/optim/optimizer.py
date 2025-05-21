@@ -450,7 +450,7 @@ class Optimizer2State(Optimizer8bit):
         elif config["optim_bits"] == 8:
             dtype = torch.uint8
         else:
-            raise NotImplementedError(f'Amount of optimizer bits not supported: {config["optim_bits"]}')
+            raise NotImplementedError(f"Amount of optimizer bits not supported: {config['optim_bits']}")
 
         if p.numel() < config["min_8bit_size"]:
             dtype = torch.float32
@@ -475,9 +475,9 @@ class Optimizer2State(Optimizer8bit):
             state["qmap2"] = self.name2qmap["udynamic"]
 
             if config["block_wise"]:
+                blocksize = 256
                 n = p.numel()
-                blocks = n // 256
-                blocks += 1 if n % 256 > 0 else 0
+                blocks = (n // blocksize) + bool(n % blocksize)
 
                 state["absmax1"] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)
                 state["absmax2"] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)
@@ -677,7 +677,7 @@ class Optimizer1State(Optimizer8bit):
         elif config["optim_bits"] == 8:
             dtype = torch.uint8
         else:
-            raise NotImplementedError(f'Amount of optimizer bits not supported: {config["optim_bits"]}')
+            raise NotImplementedError(f"Amount of optimizer bits not supported: {config['optim_bits']}")
 
         if p.numel() < config["min_8bit_size"]:
             dtype = torch.float32
@@ -697,9 +697,9 @@ class Optimizer1State(Optimizer8bit):
             state["qmap1"] = self.name2qmap["dynamic"]
 
             if config["block_wise"]:
+                blocksize = 256
                 n = p.numel()
-                blocks = n // 256
-                blocks += 1 if n % 256 > 0 else 0
+                blocks = (n // blocksize) + bool(n % blocksize)
 
                 state["absmax1"] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)
             else:
