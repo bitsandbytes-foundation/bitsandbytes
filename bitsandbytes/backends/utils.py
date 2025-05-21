@@ -31,7 +31,7 @@ _NF4_QUANT_TABLE = torch.tensor(
         1.0,
     ],
     dtype=torch.float32,
-    device="cpu",
+    device="xpu" if torch.xpu.is_available() else "cpu", # Only cpu/xpu use this table for now.
 )
 _FP4_QUANT_TABLE = torch.tensor(
     [
@@ -53,6 +53,6 @@ _FP4_QUANT_TABLE = torch.tensor(
         -0.2500,
     ],
     dtype=torch.float32,
-    device="cpu",
+    device="xpu" if torch.xpu.is_available() else "cpu", # Only cpu/xpu use this table for now.
 )
 CODE = {"nf4": _NF4_QUANT_TABLE, "fp4": _FP4_QUANT_TABLE}
