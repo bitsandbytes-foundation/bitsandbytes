@@ -1,4 +1,3 @@
-
 from collections.abc import Sequence
 import ctypes as ct
 from math import prod
