@@ -353,7 +353,7 @@ def _(
     
     is_on_gpu([A, out, absmax])
     
-    if device_type == 'cuda' or (device_type == 'hip' and HIP_ENVIRONMENT):  
+    if device_type == 'cuda' or (device_type == 'hip' or HIP_ENVIRONMENT):  
         with _cuda_device_of(A):  
             args = (  
                 None,  
@@ -438,7 +438,7 @@ def _dequantize_4bit_impl(
   
     is_on_gpu([A, absmax, out])
     
-    if device_type == 'cuda' or (device_type == 'hip' and HIP_ENVIRONMENT):  
+    if device_type == 'cuda' or (device_type == 'hip' or HIP_ENVIRONMENT):  
         with _cuda_device_of(A):  
             args = (  
                 None,  
