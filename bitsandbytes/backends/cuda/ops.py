@@ -5,7 +5,7 @@ from typing import Optional
 
 import torch
 
-from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, _get_tensor_stream, get_ptr, is_on_gpu
+from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, _get_tensor_stream, get_ptr
 
 from ..._ops import register_kernel
 from ...cextension import lib, HIP_ENVIRONMENT 
