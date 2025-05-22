@@ -13,39 +13,6 @@ except ImportError as e:
     triton_available = False
 
 
-# torch compile:
-# 1.53s call     tests/test_functional.py::Test8BitBlockwiseQuantizeFunctional::test_dynamic_blockwise_quantization[signed=F-256-nested=T-bf16-xpu]
-#
-# triton:
-# 1.07s call     tests/test_functional.py::Test8BitBlockwiseQuantizeFunctional::test_dynamic_blockwise_quantization[signed=F-256-nested=T-bf16-xpu]
-@torch.compile
-def quantize_blockwise_torch(A, code, blocksize):
-    n = A.numel()
-    blocks = -(n // -blocksize)
-
-    absmax = torch.empty((blocks,), device=A.device, dtype=A.dtype)
-    quantized_out = torch.empty_like(A.flatten(), dtype=torch.uint8)
-
-    rem = n % blocksize
-    has_rem = rem > 0
-    blocks = n // blocksize + has_rem
-    A_reshaped = A.reshape(n)
-    A_com = A_reshaped[: n - rem]
-    A_com_reshaped = A_com.reshape(n // blocksize, blocksize)
-    absmax[: blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=-1)[0]
-    scaled_A = torch.clamp(A_com_reshaped / absmax[: blocks - has_rem].view(-1, 1), -1, 1)
-    scaled_A = scaled_A.reshape(-1)
-    if has_rem:
-        absmax[-1] = torch.abs(A_reshaped[n - rem :]).max()
-        scaled_A_rem = torch.clamp((A_reshaped[n - rem :] / absmax[-1]), -1, 1)
-        scaled_A = torch.cat([scaled_A, scaled_A_rem], dim=0)
-
-    diff = torch.abs(scaled_A.unsqueeze(-1) - code.to(scaled_A.device))
-    quantized_out = torch.argmin(diff, dim=-1).to(torch.uint8).to(scaled_A.device).reshape(A.shape)
-    quantized_out = quantized_out.reshape(A.shape)
-    return quantized_out, absmax
-
-
 def quantize_blockwise(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
     # torch._check(A.dtype == torch.float32, lambda: f"A must be float32 on xpu, got {A.dtype}")
@@ -97,33 +64,6 @@ def dequantize_blockwise_inplace(
         out,
         blocksize,
     )
-
-
-# torch compile
-# 1.01s call     tests/test_functional.py::TestQuantize4BitFunctional::test_4bit_quant[64-fp4-fp32-xpu]
-#
-# triton
-# 0.80s call     tests/test_functional.py::TestQuantize4BitFunctional::test_4bit_quant[64-fp4-fp32-xpu]
-@torch.compile
-def quantize_4bit_torch(
-    A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
-) -> tuple[torch.Tensor, torch.Tensor]:
-    # Divide into blocks and normalize
-    blocks = A.reshape(-1, blocksize)
-    absmax = blocks.abs().max(dim=1).values.float()
-    scaled = blocks / absmax.unsqueeze(-1)
-    if quant_type == "fp4":
-        quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - _FP4_QUANT_TABLE), dim=-1, keepdim=True).to(
-            torch.uint8
-        )
-    else:
-        quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - _NF4_QUANT_TABLE), dim=-1, keepdim=True).to(
-            torch.uint8
-        )
-    packed = quantized[::2] << 4 | quantized[1::2]
-    if quant_storage != torch.uint8:
-        packed = packed.squeeze().view(quant_storage).unsqueeze(1)
-    return packed, absmax.float()
 
 
 def quantize_4bit(

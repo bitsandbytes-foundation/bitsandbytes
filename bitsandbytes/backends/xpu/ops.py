@@ -12,13 +12,11 @@ except ImportError as e:
 
 if triton_available:
     register_kernel("bitsandbytes::quantize_blockwise", "xpu")(triton_ops.quantize_blockwise)
-    # register_kernel("bitsandbytes::quantize_blockwise", "xpu")(quantize_blockwise_torch)
     register_kernel("bitsandbytes::dequantize_blockwise.out", "xpu")(triton_ops.dequantize_blockwise_inplace)
     register_kernel("bitsandbytes::dequantize_blockwise", "xpu")(triton_ops.dequantize_blockwise)
     register_kernel("bitsandbytes::quantize_4bit", "xpu")(triton_ops.quantize_4bit)
     register_kernel("bitsandbytes::dequantize_4bit.out", "xpu")(triton_ops.dequantize_4bit_inplace)
     register_kernel("bitsandbytes::dequantize_4bit", "xpu")(triton_ops.dequantize_4bit)
     register_kernel("bitsandbytes::gemv_4bit", "xpu")(triton_ops.gemv_4bit)
-    # register_kernel("bitsandbytes::gemv_4bit.out", "xpu")(triton_ops.gemv_4bit_inpalce)
 else:
     warnings.warn("XPU available, but trtion package is missing.")

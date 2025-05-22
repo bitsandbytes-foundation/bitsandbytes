@@ -7,40 +7,23 @@ import triton.language as tl
 from .utils import _FP4_QUANT_TABLE, _NF4_QUANT_TABLE
 
 
-# @triton.autotune(
-#     configs=[
-#         triton.Config({'SPLIT_SIZE': 64}),
-#         triton.Config({'SPLIT_SIZE': 128}),
-#         triton.Config({'SPLIT_SIZE': 256}),
-#         triton.Config({'SPLIT_SIZE': 512}),
-#         triton.Config({'SPLIT_SIZE': 1024}),
-#         triton.Config({'SPLIT_SIZE': 2048}),
-#         triton.Config({'SPLIT_SIZE': 4096}),
-#         triton.Config({'SPLIT_SIZE': 8192}),
-#         triton.Config({'SPLIT_SIZE': 16384}),
-#     ],
-#     key=['SPLIT_SIZE'],
-# )
 @triton.jit
 def dequant_8bit_kernel(
     a_ptr,
     c_ptr,
     quant_ptr,
     absmax_ptr,
-    # bias_ptr,
     num_paired_elements,
     QUANT_BLOCK: tl.constexpr,
     SPLIT_SIZE: tl.constexpr,
 ):
-    pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
+    pid = tl.program_id(axis=0)
     block_start = pid * SPLIT_SIZE
     offsets = block_start + tl.arange(0, SPLIT_SIZE)
     mask = offsets < num_paired_elements
 
     a = tl.load(a_ptr + offsets, mask)
     a = a.to(tl.uint8, bitcast=True)
-
-    # bias = tl.load(bias_ptr)
 
     # apply conversion
     scaled_int8 = tl.load(quant_ptr + a, mask)
@@ -52,7 +35,6 @@ def dequant_8bit_kernel(
     absmax = tl.load(absmax_ptr + abs_offsets, mask_blocked)
     # apply scales
     out_dq = scaled_int8 * absmax
-    # out_dq = out_dq + bias
 
     offs = block_start + tl.arange(0, SPLIT_SIZE)
     mask = offs < num_paired_elements
@@ -79,19 +61,7 @@ def dequant_int8_blockwise(
 
 @triton.autotune(
     configs=[
-        # triton.Config({'SPLIT_NUM_BLOCKS': 1, 'grf_mode': 'large'}, num_stages=2, num_warps=32),
-        # triton.Config({'SPLIT_NUM_BLOCKS': 1, 'grf_mode': 'auto'}, num_stages=2, num_warps=32),
-        # triton.Config({'SPLIT_NUM_BLOCKS': 1, 'grf_mode': 'large'}, num_stages=4, num_warps=32),
-        #
         triton.Config({"SPLIT_NUM_BLOCKS": 1, "grf_mode": "auto"}, num_stages=4, num_warps=32),
-        #
-        # triton.Config({"SPLIT_NUM_BLOCKS": 2, "grf_mode": "large"}, num_stages=2, num_warps=32),
-        # # triton.Config({'SPLIT_NUM_BLOCKS': 2, 'grf_mode': 'large'}, num_stages=4, num_warps=32),
-        # triton.Config({"SPLIT_NUM_BLOCKS": 2, "grf_mode": "auto"}, num_stages=2, num_warps=32),
-        # triton.Config({"SPLIT_NUM_BLOCKS": 2, "grf_mode": "auto"}, num_stages=4, num_warps=32),
-        # triton.Config({"SPLIT_NUM_BLOCKS": 4, "grf_mode": "large"}, num_stages=2, num_warps=32),
-        # triton.Config({"SPLIT_NUM_BLOCKS": 4, "grf_mode": "large"}, num_stages=4, num_warps=32),
-        # triton.Config({'SPLIT_NUM_BLOCKS': 8, 'grf_mode': 'large'}, num_stages=2, num_warps=32),
     ],
     key=["BLOCK_SIZE"],
 )
@@ -123,9 +93,6 @@ def quantize_blockwise_kernel(
 
     A_normalized = A_reshaped / absmax[:, None]
     A_normalized = tl.clamp(A_normalized, -1.0, 1.0)
-
-    # This can be fruitful, but compiler should preload it
-    # code = tl.load(code_ptr + tl.arange(0, CODE_SIZE))
 
     lower_pivot = tl.zeros((SPLIT_NUM_BLOCKS, BLOCK_SIZE), dtype=tl.int32)
     upper_pivot = tl.full((SPLIT_NUM_BLOCKS, BLOCK_SIZE), CODE_SIZE - 1, dtype=tl.int32)
@@ -176,24 +143,6 @@ def unite_2_int4(x, y):
     return (x & 0xF) | (y << 4)
 
 
-# @triton.autotune(
-#     configs=[
-#         # triton.Config({'SPLIT_NUM_BLOCKS': 1, 'grf_mode': 'large'}, num_stages=2, num_warps=32),
-#         # triton.Config({'SPLIT_NUM_BLOCKS': 1, 'grf_mode': 'auto'}, num_stages=2, num_warps=32),
-#         # triton.Config({'SPLIT_NUM_BLOCKS': 1, 'grf_mode': 'large'}, num_stages=4, num_warps=32),
-#         #
-#         triton.Config({"SPLIT_NUM_BLOCKS": 1, "grf_mode": "auto"}, num_stages=4, num_warps=32),
-#         #
-#         # triton.Config({"SPLIT_NUM_BLOCKS": 2, "grf_mode": "large"}, num_stages=2, num_warps=32),
-#         # # triton.Config({'SPLIT_NUM_BLOCKS': 2, 'grf_mode': 'large'}, num_stages=4, num_warps=32),
-#         # triton.Config({"SPLIT_NUM_BLOCKS": 2, "grf_mode": "auto"}, num_stages=2, num_warps=32),
-#         # triton.Config({"SPLIT_NUM_BLOCKS": 2, "grf_mode": "auto"}, num_stages=4, num_warps=32),
-#         # triton.Config({"SPLIT_NUM_BLOCKS": 4, "grf_mode": "large"}, num_stages=2, num_warps=32),
-#         # triton.Config({"SPLIT_NUM_BLOCKS": 4, "grf_mode": "large"}, num_stages=4, num_warps=32),
-#         # triton.Config({'SPLIT_NUM_BLOCKS': 8, 'grf_mode': 'large'}, num_stages=2, num_warps=32),
-#     ],
-#     key=["BLOCK_SIZE"],
-# )
 @triton.jit
 def quantize_4bit_blockwise_kernel(
     A_ptr,
@@ -261,11 +210,6 @@ def quantize_4bit_blockwise_triton(A, blocksize, code, blocks, absmax, quantized
 
     split_num_blocks = 1
     grid = (triton.cdiv(blocks, split_num_blocks),)
-    # grid = (1, )
-    # grid = lambda META: (triton.cdiv(blocks, META["SPLIT_NUM_BLOCKS"]),)
-    # print(" blocksize, split_num_blocks: ", blocksize, split_num_blocks)
-    # print(" blocksize, split_num_blocks: ", blocksize, split_num_blocks*2)
-    # print("A shape: ", A.shape, " numel: ", n, " blocks: ", blocks)
     quantize_4bit_blockwise_kernel[grid](
         A_ptr=A,
         code_ptr=code,
@@ -280,20 +224,6 @@ def quantize_4bit_blockwise_triton(A, blocksize, code, blocks, absmax, quantized
     return quantized_out, absmax
 
 
-# @triton.autotune(
-#     configs=[
-#         # triton.Config({'SPLIT_SIZE': 64}),
-#         # triton.Config({'SPLIT_SIZE': 128}),
-#         # triton.Config({'SPLIT_SIZE': 256}),
-#         triton.Config({'SPLIT_SIZE': 512}),
-#         # triton.Config({'SPLIT_SIZE': 1024}),
-#         # triton.Config({'SPLIT_SIZE': 2048}),
-#         # triton.Config({'SPLIT_SIZE': 4096}),
-#         # triton.Config({'SPLIT_SIZE': 8192}),
-#         # triton.Config({'SPLIT_SIZE': 16384}),
-#     ],
-#     key=['SPLIT_SIZE'],
-# )
 @triton.jit
 def dequant_4bit_kernel(
     a_ptr, c_ptr, quant_ptr, absmax_ptr, num_paired_elements, QUANT_BLOCK: tl.constexpr, SPLIT_SIZE: tl.constexpr
