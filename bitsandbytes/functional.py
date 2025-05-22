@@ -754,13 +754,11 @@ def quantize_blockwise(
         if "dynamic" not in name2qmap:  
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)  
         code = name2qmap["dynamic"]  
-  
-    device_type = A.device.type  
-    if device_type in ["cuda", "hip"]:  
-        if not HIP_ENVIRONMENT:  
-            assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
-        else:  
-            assert blocksize in [4096, 2048, 1024, 512, 256, 128]
+
+    if HIP_ENVIRONMENT:  
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128]            
+    else:  
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64] 
   
     _out, _absmax = torch.ops.bitsandbytes.quantize_blockwise.default(  
         A,  
@@ -839,15 +837,15 @@ def dequantize_blockwise(
     if quant_state is None:  
         quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=torch.float32)  
   
-    device_type = A.device.type  
-    if device_type in ["cuda", "hip"]:  
+    if HIP_ENVIRONMENT:  
+        supported_blocksizes = [4096, 2048, 1024, 512, 256, 128]  
+    else:  
         supported_blocksizes = [4096, 2048, 1024, 512, 256, 128, 64]  
-        if HIP_ENVIRONMENT:  
-            supported_blocksizes = supported_blocksizes[:-1]             
-        if quant_state.blocksize not in supported_blocksizes:  
-            raise ValueError(  
-                f"The blocksize of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}" 
-            )  
+          
+    if quant_state.blocksize not in supported_blocksizes:  
+        raise ValueError(  
+            f"The blocksize of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}"  
+        )  
   
     absmax = quant_state.absmax  
     if quant_state.nested:  
