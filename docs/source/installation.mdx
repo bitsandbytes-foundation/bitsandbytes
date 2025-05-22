@@ -1,9 +1,6 @@
 # Installation Guide
 
-Welcome to the installation guide for the `bitsandbytes` library! This document provides step-by-step instructions to install `bitsandbytes` across various platforms and hardware configurations. The library primarily supports CUDA-based GPUs, but the team is actively working on enabling support for additional backends like AMD ROCm and Intel XPU.
-
-> [!TIP]
-> For a high-level overview of backend support and compatibility, see the [Multi-backend Support](#multi-backend) section.
+Welcome to the installation guide for the `bitsandbytes` library! This document provides step-by-step instructions to install `bitsandbytes` across various platforms and hardware configurations. The library primarily supports CUDA-based GPUs, but the team is actively working on enabling support for additional backends like CPU, AMD ROCm, Intel XPU, and Gaudi HPU.
 
 ## Table of Contents
 
@@ -11,7 +8,7 @@ Welcome to the installation guide for the `bitsandbytes` library! This document 
   - [Installation via PyPI](#cuda-pip)
   - [Compile from Source](#cuda-compile)
   - [Preview Wheels from `main`](#cuda-preview)
-- [Deprecated: Multi-Backend Preview](#multi-backend)
+- [Multi-Backend Preview](#multi-backend)
   - [Supported Backends](#multi-backend-supported-backends)
   - [Pre-requisites](#multi-backend-pre-requisites)
   - [Installation](#multi-backend-pip)
@@ -39,7 +36,7 @@ The currently distributed `bitsandbytes` packages are built with the following c
 
 | **OS**             | **CUDA Toolkit** | **Host Compiler**    | **Targets**
 |--------------------|------------------|----------------------|--------------
-| **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm50, sm60, sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm50, sm60, sm75, sm80, sm86, sm89, sm90
 | **Linux x86-64**   | 12.8             | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
 | **Linux aarch64**  | 11.8 - 12.6      | GCC 11.2             | sm75, sm80, sm90
 | **Linux aarch64**  | 12.8             | GCC 11.2             | sm75, sm80, sm90, sm100
@@ -129,7 +126,7 @@ pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsand
 </hfoptions>
 
 
-## Deprecated: Multi-Backend Preview[[multi-backend]]
+## Multi-Backend Preview[[multi-backend]]
 
 > [!WARNING]
 > This functionality existed as an early technical preview and is not recommended for production use. We are in the process of upstreaming improved support for AMD and Intel hardware into the main project.
