@@ -728,11 +728,9 @@ def quantize_blockwise(
     nested=False,  
 ) -> tuple[torch.Tensor, QuantState]:  
     """Quantize a tensor in blocks of values.  
-  
     The input tensor is quantized by dividing it into blocks of `blocksize` values.  
     The the absolute maximum value within these blocks is calculated for scaling  
     the non-linear quantization.  
-  
     Args:  
         A (`torch.Tensor`): The input tensor. Supports `float16`, `bfloat16`, or `float32` datatypes.  
         code (`torch.Tensor`, *optional*):  
@@ -744,10 +742,8 @@ def quantize_blockwise(
             The size of the blocks. Defaults to 4096.  
             Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.  
         nested (`bool`, *optional*): Whether to additionally quantize the absmax values. Defaults to False.  
-  
     Raises:  
         ValueError: Raised when the input data type is not supported.  
-  
     Returns:  
         `Tuple[torch.Tensor, QuantState]`: A tuple containing the quantization results.  
         - `torch.Tensor`: The quantized tensor.  
@@ -759,61 +755,23 @@ def quantize_blockwise(
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)  
         code = name2qmap["dynamic"]  
   
-    if absmax is None:  
-        n = A.numel()  
-        blocks = -(n // -blocksize)  
-        absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)  
-  
-    if out is None:  
-        out = torch.zeros_like(A, dtype=torch.uint8)  
-  
     device_type = A.device.type  
-  
-    if device_type == "cpu":  
-        code = code.cpu()  
-        lib.cquantize_blockwise_cpu_fp32(  
-            get_ptr(code),  
-            get_ptr(A),  
-            get_ptr(absmax),  
-            get_ptr(out),  
-            ct.c_longlong(blocksize),  
-            ct.c_longlong(A.numel()),  
-        )  
-    elif device_type in ["cuda", "hip"]:  
+    if device_type in ["cuda", "hip"]:  
         if not HIP_ENVIRONMENT:  
-            assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]  
+            assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]
         else:  
-            assert blocksize in [4096, 2048, 1024, 512, 256, 128]  
+            assert blocksize in [4096, 2048, 1024, 512, 256, 128]
   
-        code = code.to(A.device)  
-  
-        is_on_gpu([A, out, absmax])  
-  
-        with _cuda_device_of(A):  
-            args = (  
-                get_ptr(code),  
-                get_ptr(A),  
-                get_ptr(absmax),  
-                get_ptr(out),  
-                ct.c_int32(blocksize),  
-                ct.c_int(A.numel()),  
-            )  
-  
-            if A.dtype == torch.float16:  
-                lib.cquantize_blockwise_fp16(*args)  
-            elif A.dtype == torch.bfloat16:  
-                lib.cquantize_blockwise_bf16(*args)  
-            elif A.dtype == torch.float32:  
-                lib.cquantize_blockwise_fp32(*args)  
-            else:  
-                raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")  
-    else:  
-        raise RuntimeError(f"Device type {device_type} not supported for quantization")  
+    _out, _absmax = torch.ops.bitsandbytes.quantize_blockwise.default(  
+        A,  
+        code.to(A.device),  
+        blocksize,  
+    )  
   
     if nested:  
-        offset = absmax.mean()  
-        absmax -= offset  
-        qabsmax, state2 = quantize_blockwise(absmax, blocksize=blocksize, nested=False)  
+        offset = _absmax.mean()  
+        _absmax -= offset  
+        qabsmax, state2 = quantize_blockwise(_absmax, blocksize=blocksize, nested=False)  
         quant_state = QuantState(  
             absmax=qabsmax,  
             code=code,  
@@ -823,11 +781,18 @@ def quantize_blockwise(
             state2=state2,  
         )  
     else:  
-        quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=A.dtype)  
+        quant_state = QuantState(absmax=_absmax, code=code.to(A.device), blocksize=blocksize, dtype=A.dtype)  
   
-    return out, quant_state 
-
-
+    # TODO(matthewdouglas): Deprecate out kwarg  
+    out = out.copy_(_out) if out is not None else _out  
+  
+    # TODO(matthewdouglas): Deprecate absmax kwarg  
+    if absmax is not None:  
+        quant_state.absmax = absmax.copy_(quant_state.absmax)  
+  
+    return out, quant_state  
+  
+  
 def dequantize_blockwise(  
     A: torch.Tensor,  
     quant_state: Optional[QuantState] = None,  
@@ -838,11 +803,9 @@ def dequantize_blockwise(
     nested=False,  
 ) -> torch.Tensor:  
     """Dequantize a tensor in blocks of values.  
-  
     The input tensor is dequantized by dividing it into blocks of `blocksize` values.  
     The the absolute maximum value within these blocks is used for scaling  
     the non-linear dequantization.  
-  
     Args:  
         A (`torch.Tensor`): The quantized input tensor.  
         quant_state ([`QuantState`], *optional*):  
@@ -860,10 +823,8 @@ def dequantize_blockwise(
             The size of the blocks. Defaults to 4096.  
             Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.  
             Ignored when `quant_state` is provided.  
-  
     Raises:  
         ValueError: Raised when the input data type is not supported.  
-  
     Returns:  
         `torch.Tensor`:  
             The dequantized tensor. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.  
@@ -878,6 +839,16 @@ def dequantize_blockwise(
     if quant_state is None:  
         quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=torch.float32)  
   
+    device_type = A.device.type  
+    if device_type in ["cuda", "hip"]:  
+        supported_blocksizes = [4096, 2048, 1024, 512, 256, 128, 64]  
+        if HIP_ENVIRONMENT:  
+            supported_blocksizes = supported_blocksizes[:-1]             
+        if quant_state.blocksize not in supported_blocksizes:  
+            raise ValueError(  
+                f"The blocksize of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}" 
+            )  
+  
     absmax = quant_state.absmax  
     if quant_state.nested:  
         absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)  
@@ -885,56 +856,24 @@ def dequantize_blockwise(
         if absmax.dtype != torch.float32:  
             absmax = absmax.float()  
   
-    if out is None:  
-        out = torch.empty(A.shape, dtype=quant_state.dtype, device=A.device)  
-  
-    device_type = A.device.type
-      
-    if device_type == "cpu":  
-        code = quant_state.code.cpu()  
-        lib.cdequantize_blockwise_cpu_fp32(  
-            get_ptr(code),  
-            get_ptr(A),  
-            get_ptr(quant_state.absmax),  
-            get_ptr(out),  
-            ct.c_longlong(quant_state.blocksize),  
-            ct.c_longlong(A.numel()),  
+    if out is not None:  
+        torch.ops.bitsandbytes.dequantize_blockwise.out(  
+            A,  
+            absmax,  
+            quant_state.code.to(A.device),  
+            quant_state.blocksize,  
+            quant_state.dtype,  
+            out=out,  
         )  
-    elif device_type in ["cuda", "hip"]:  
-        code = quant_state.code.to(A.device)  
-        supported_blocksizes = [2048, 4096, 1024, 512, 256, 128, 64]  
-        if HIP_ENVIRONMENT:  
-            supported_blocksizes = supported_blocksizes[:-1]  
-        if quant_state.blocksize not in supported_blocksizes:  
-            raise ValueError(  
-                f"The blocksize of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}",  
-            )  
+        return out  
   
-        is_on_gpu([A, absmax, out])  
-  
-        with _cuda_device_of(A):  
-            args = (  
-                get_ptr(quant_state.code),  
-                get_ptr(A),  
-                get_ptr(absmax),  
-                get_ptr(out),  
-                ct.c_int(quant_state.blocksize),  
-                ct.c_int(A.numel()),  
-                _get_tensor_stream(A),  
-            )  
-  
-            if out.dtype == torch.float16:  
-                lib.cdequantize_blockwise_fp16(*args)  
-            elif out.dtype == torch.bfloat16:  
-                lib.cdequantize_blockwise_bf16(*args)  
-            elif out.dtype == torch.float32:  
-                lib.cdequantize_blockwise_fp32(*args)  
-            else:  
-                raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")  
-    else:  
-        raise RuntimeError(f"Device type {device_type} not supported for dequantization")  
-  
-    return out  
+    return torch.ops.bitsandbytes.dequantize_blockwise.default(  
+        A,  
+        absmax,  
+        quant_state.code.to(A.device),  
+        quant_state.blocksize,  
+        quant_state.dtype,  
+    )  
 
 
 def get_4bit_type(typename, device=None, blocksize=64):
