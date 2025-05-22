@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-import warnings
 
 import torch
 
@@ -240,4 +239,3 @@ def gemv_4bit(
         B_dq,
         bias=None,
     )
-
