@@ -59,7 +59,7 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> t
     triton_kernels.quantize_blockwise_triton(A, blocksize, code, blocks, absmax, out)
     out = out.reshape(A.shape)
 
-    return out, absmax
+    return out, absmax.float()
 
 
 def dequantize_blockwise(
