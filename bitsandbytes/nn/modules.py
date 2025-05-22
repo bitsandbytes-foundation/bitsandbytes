@@ -442,7 +442,7 @@ class Linear4bit(nn.Linear):
         )
         # self.persistent_buffers = []  # TODO consider as way to save quant state
         self.compute_dtype = compute_dtype
-        self.compute_type_is_set = False
+        self.compute_type_is_set = False if compute_dtype is None else True
         self.quant_state = None
         self.quant_storage = quant_storage
         self.ipex_linear_is_set = False
