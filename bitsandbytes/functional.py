@@ -858,8 +858,8 @@ def dequantize_blockwise(
         torch.ops.bitsandbytes.dequantize_blockwise.out(  
             A,  
             absmax,  
-            quant_state.code.to(A.device),  
-            quant_state.blocksize,  
+            code.to(A.device),  
+            blocksize,  
             quant_state.dtype,  
             out=out,  
         )  
