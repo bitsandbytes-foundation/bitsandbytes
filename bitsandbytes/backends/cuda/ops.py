@@ -11,7 +11,6 @@ from ..._ops import register_kernel
 from ...cextension import lib, HIP_ENVIRONMENT 
 
 
-
 @register_kernel("bitsandbytes::int8_linear_matmul", "cuda")
 def _(A: torch.Tensor, B: torch.Tensor):
     out = torch.empty((*A.shape[:-1], B.shape[0]), device=A.device, dtype=torch.int32)
@@ -78,12 +77,9 @@ def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor
         ldb = ct.c_int32(ldb)
         ldc = ct.c_int32(ldc)
         stream = _get_tensor_stream(A)
-
-        if dtype == torch.int32:     
-            has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
-        else:
-            has_error = lib.cigemmlt_8(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
-            
+        
+        has_error = lib.cigemmlt_32(ctx, m, n, k, ptrA, ptrB, ptrC, ptrRowScale, lda, ldb, ldc, stream)
+        
     if has_error:
         if has_error == 100:
             # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
@@ -95,6 +91,7 @@ def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor
             )
 
     return out
+
 
 @register_kernel("bitsandbytes::int8_mm_dequant", "cuda")
 def _(
@@ -384,6 +381,7 @@ def _(
   
     return out, absmax  
 
+
 @register_kernel("bitsandbytes::dequantize_4bit", "cuda")
 def _(
     A: torch.Tensor,
@@ -397,7 +395,6 @@ def _(
     _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
     return out
     
-
 
 @register_kernel("bitsandbytes::dequantize_4bit.out", "cuda")
 def _(
@@ -495,7 +492,6 @@ def _(
     )
     torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
     _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
-
 
 def _gemv_4bit_impl(
     A: torch.Tensor,
