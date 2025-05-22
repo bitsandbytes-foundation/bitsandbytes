@@ -53,7 +53,7 @@
       title: RMSprop
     - local: reference/optim/sgd
       title: SGD
-  - title: k-bit quantizers
+  - title: Modules
     sections:
     - local: reference/nn/linear8bit
       title: LLM.int8()
