@@ -55,8 +55,6 @@ def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor
     if lda % 4 != 0:
         result = torch.matmul(B.float(), A.float().t()).to(torch.int32)
         return out.copy_(result)  
-
-    is_on_gpu([A, B, out]) 
     
     with _cuda_device_of(A):
         ctx = CUBLAS_Context.get_instance().get_context(A.device)
@@ -114,8 +112,6 @@ def _(
     # TODO(matthewdouglas): Consider supporting bf16 fused bias
     ptrBias = get_ptr(bias) if bias is not None and bias.dtype == torch.float16 else None
     
-    is_on_gpu([A, row_stats, col_stats, out, bias])   
-
     with _cuda_device_of(A):
         lib.cdequant_mm_int32_fp16(
             ptrA, ptrRowStats, ptrColStats, ptrOut, ptrBias, numRows, numCols, _get_tensor_stream(A)
@@ -133,8 +129,6 @@ def _(A: torch.Tensor, threshold=0.0):
     torch._check(A.dtype == torch.float16, lambda: f"A must be float16, got {A.dtype}")
     torch._check(threshold >= 0.0, lambda: "threshold must be non-negative")
     
-    is_on_gpu([A])    
-
     rows = prod(A.shape[:-1])
     cols = A.shape[-1]
 
@@ -231,9 +225,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     blocks = -(n // -blocksize)  
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)  
     out = torch.empty_like(A, dtype=torch.uint8)  
-    
-    is_on_gpu([A, out, absmax])
-    
+     
     if device_type == 'cuda' or (device_type == 'hip' or HIP_ENVIRONMENT):  
         with _cuda_device_of(A):  
             args = (  
@@ -295,9 +287,7 @@ def _dequantize_blockwise_impl(
         dtype in [torch.float16, torch.bfloat16, torch.float32],  
         lambda: f"Blockwise dequantization only supports 16bit/32bit floating types, got {dtype}",  
     )  
-    
-    is_on_gpu([A, absmax, out])
-    
+       
     if device_type == 'cuda' or (device_type == 'hip' or HIP_ENVIRONMENT):  
         with _cuda_device_of(A):  
             args = (  
@@ -341,9 +331,7 @@ def _(
     blocks = -(n // -blocksize)  
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)  
     out = torch.empty(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)  
-    
-    is_on_gpu([A, out, absmax])
-    
+        
     if device_type == 'cuda' or (device_type == 'hip' or HIP_ENVIRONMENT):  
         with _cuda_device_of(A):  
             args = (  
@@ -370,8 +358,6 @@ def _(
                     lib.cquantize_blockwise_fp32_fp4(*args)  
                 else:  
                     lib.cquantize_blockwise_fp32_nf4(*args)  
-    else:  
-        raise NotImplementedError(f"4-bit quantization not implemented for {device_type}")  
   
     return out, absmax  
 
@@ -400,10 +386,10 @@ def _(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-
     torch._check(out.shape == shape, lambda: f"Expected out.shape == {shape}, got {out.shape}")
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
     _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
+
 
 def _dequantize_4bit_impl(  
     A: torch.Tensor,  
@@ -426,9 +412,7 @@ def _dequantize_4bit_impl(
         dtype in [torch.bfloat16, torch.float16, torch.float32],  
         lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",  
     )  
-  
-    is_on_gpu([A, absmax, out])
-    
+      
     if device_type == 'cuda' or (device_type == 'hip' or HIP_ENVIRONMENT):  
         with _cuda_device_of(A):  
             args = (  
@@ -456,8 +440,6 @@ def _dequantize_4bit_impl(
                     lib.cdequantize_blockwise_fp32_fp4(*args)  
                 else:  
                     lib.cdequantize_blockwise_fp32_nf4(*args)  
-    else:  
-        raise NotImplementedError(f"4-bit dequantization not implemented for {device_type}")  
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "cuda")
@@ -520,8 +502,6 @@ def _gemv_4bit_impl(
     ldb = ct.c_int32((A.shape[-1] + 1) // 2)
     ldc = m
     
-    is_on_gpu([B, A, out, absmax])
-
     stream = _get_tensor_stream(A)
 
     with _cuda_device_of(A):
