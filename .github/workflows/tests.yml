@@ -93,14 +93,15 @@ jobs:
           path: output/${{ matrix.os }}/${{ matrix.arch }}/*
           retention-days: 7
 
-  cpu-tests:
+  test-cpu:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
-        torch_version: ["2.6.0", "2.7.0"]
+        # Test with the oldest supported torch version and the two newest.
+        torch_version: ["2.2.2", "2.6.0", "2.7.0"]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -144,7 +145,7 @@ jobs:
       - name: Run tests
         run: pytest --durations=100
 
-  # cuda-aarch64-tests:
+  # test-cuda-aarch64:
   #   if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
   #   needs: build-cuda
   #   strategy:
@@ -167,7 +168,7 @@ jobs:
 
 
 
-  cuda-tests:
+  test-cuda:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cuda
     strategy:
@@ -179,7 +180,7 @@ jobs:
         cuda_version: ["11.8.0", "12.6.3", "12.8.1"]
         include:
           - cuda_version: "11.8.0"
-            torch_version: "2.4.1"
+            torch_version: "2.2.2"
             pypi_index: "https://download.pytorch.org/whl/cu118"
           - cuda_version: "12.6.3"
             torch_version: "2.6.0"
