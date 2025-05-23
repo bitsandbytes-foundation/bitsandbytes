@@ -8,6 +8,7 @@ import torch
 from typing_extensions import deprecated
 
 import bitsandbytes.functional as F
+from bitsandbytes.functional import ipex_cpu, ipex_xpu
 
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
@@ -298,6 +299,63 @@ class MatMul8bitLt(torch.autograd.Function):
         return grad_A, grad_B, None, grad_bias, None
 
 
+class MatMul8bitFp(torch.autograd.Function):
+    # For Intel CPU and XPU MatMul8bitFp is much faster (~3x) than MatMul8bitLt in finetune.
+    # Because the MatMul8bitLt has more mechanisms in computing grad.
+    # We don't have fast kernel for quant/dequant 8bit in CPU/XPU, so it's very slow.
+    # We'd like to use dequant + matmul to run finetune with good performance.
+
+    @staticmethod
+    def forward(ctx, A, B, out=None, bias=None, state=MatmulLtState):
+        if state.has_fp16_weights or state.CB is None:
+            has_grad = getattr(B, "grad", None) is not None
+            is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
+            if is_transposed:
+                B = B.contiguous()
+
+            if (state.is_training and not has_grad) or state.CB is None or state.SCB is None:
+                state.reset_grads()
+                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
+                B = state.CB
+
+        CB = state.CB.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+        output = torch.nn.functional.linear(A, CB, bias)
+        # to pass the test: tests/test_modules.py::test_linear8bitlt_no_fp16_weights[2.0-xpu]
+        state.idx = False
+        ctx.state = state
+        ctx.dtype_A = A.dtype
+        ctx.grad_shape = A.shape
+        ctx.A = A
+        ctx.dtype_bias = None if bias is None else bias.dtype
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
+        A = ctx.A
+        state = ctx.state
+        grad_A = grad_B = grad_bias = None
+        if req_gradBias:
+            # compute grad_bias first before changing grad_output dtype
+            grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
+
+        # Cast grad_output to fp16
+        if len(grad_output.shape) == 3:
+            grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+
+        if req_gradB:
+            grad_B = torch.matmul(A.t(), grad_output).t()
+
+        if req_gradA:
+            if state.CB is not None:
+                CB = state.CB.to(ctx.dtype_A, copy=True).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
+                grad_A = torch.matmul(grad_output.to(ctx.dtype_A), CB).view(ctx.grad_shape)
+            else:
+                raise Exception("State must contain CB matrix for backward")
+
+        return grad_A, grad_B, None, grad_bias, None
+
+
 class MatMul4Bit(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
     # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
@@ -366,6 +424,10 @@ def matmul(
     state = state or MatmulLtState()
     if threshold > 0.0:
         state.threshold = threshold
+    # MatMul8bitLt is slower because no fast kernel for quant/dequant 8bit in CPU/XPU
+    if state.is_training:
+        if (A.device.type == "cpu" and ipex_cpu) or (A.device.type == "xpu" and ipex_xpu):
+            return MatMul8bitFp.apply(A, B, out, bias, state)
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
@@ -377,6 +439,17 @@ def matmul_4bit(
     bias: Optional[torch.Tensor] = None,
 ):
     assert quant_state is not None
+
+    if A.device.type in ("cpu", "xpu") and A.requires_grad == False:
+        if getattr(quant_state, "ipex", False):
+            # IPEX CPU will change weight to 4D so don't need transpose
+            B = B.t() if B.dim() == 2 else B
+            out = F.gemv_4bit(A, B, out, state=quant_state)
+            if bias is not None:
+                out += bias
+            return out
+        else:
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
 
     if A.numel() == A.shape[-1] and A.requires_grad == False:
         if A.shape[-1] % quant_state.blocksize != 0:
