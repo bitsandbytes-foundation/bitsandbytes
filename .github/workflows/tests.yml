@@ -108,10 +108,17 @@ jobs:
             runner: banb-aws-general-8-plus-use1-public-80
           - os: ubuntu-22.04-arm
             arch: aarch64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+            torch_version: "2.3.1"
           - os: windows-2025
             arch: x86_64
           - os: macos-15
             arch: arm64
+        exclude:
+          - os: ubuntu-22.04-arm
+            torch_version: "2.2.2"
+
     runs-on: ${{ matrix.runner || matrix.os }}
     env:
       BNB_TEST_DEVICE: cpu
