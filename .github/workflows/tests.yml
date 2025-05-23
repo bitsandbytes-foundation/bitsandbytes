@@ -110,7 +110,7 @@ jobs:
             arch: aarch64
           - os: ubuntu-22.04-arm
             arch: aarch64
-            torch_version: "2.3.1"
+            torch_version: "2.4.1"
           - os: windows-2025
             arch: x86_64
           - os: macos-15
