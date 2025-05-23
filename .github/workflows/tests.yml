@@ -136,6 +136,11 @@ jobs:
           pip install -e ".[test]"
           pip install pytest-cov
 
+      # We need to downgrade to numpy<2 for torch<2.3 compatibility.
+      - name: Downgrade NumPy
+        if: startsWith(matrix.torch_version, '2.2.')
+        run: pip install "numpy<2"
+
       - name: Show installed packages
         run: pip list
 
@@ -238,6 +243,11 @@ jobs:
           pip install torch==${{ matrix.torch_version }} --index-url ${{ matrix.pypi_index }}
           pip install -e ".[test]"
           pip install pytest-cov
+
+        # We need to downgrade to numpy<2 for torch<2.3 compatibility.
+      - name: Downgrade NumPy
+        if: startsWith(matrix.torch_version, '2.2.')
+        run: pip install "numpy<2"
 
       - name: Show installed packages
         run: pip list
