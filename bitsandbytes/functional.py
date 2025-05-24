@@ -986,7 +986,7 @@ def quantize_4bit(
     A: torch.Tensor,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=64, 
+    blocksize=64,
     compress_statistics=False,
     quant_type="fp4",
     quant_storage=torch.uint8,
