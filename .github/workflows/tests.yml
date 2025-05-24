@@ -137,6 +137,10 @@ jobs:
         with:
           python-version: 3.9
 
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl for torch.compile
+
       - name: Install dependencies
         run: |
           pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/cpu
@@ -201,18 +205,40 @@ jobs:
             torch_version: "2.7.0"
             pypi_index: "https://download.pytorch.org/whl/cu128"
 
-          # L40S runners
+
+          # Linux L40S runners
           - os: ubuntu-22.04
             gpu: L40S
             runner: bandb-aws-g6e-4xlarge-plus-use1-public-80
 
-          # T4 runners
+          # Linux T4 runners
           - os: ubuntu-22.04
             gpu: T4
             runner: bandb-aws-g4dn-4xlarge-plus-use1-public-80
+
+          # Specific Windows runners using cu118
           - os: windows-2025
+            arch: x86_64
             gpu: T4
             runner: CUDA-Windows-x64
+            cuda_version: "11.8.0"
+            torch_version: "2.2.0"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - os: windows-2025
+            arch: x86_64
+            gpu: T4
+            runner: CUDA-Windows-x64
+            cuda_version: "11.8.0"
+            torch_version: "2.6.0"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - os: windows-2025
+            arch: x86_64
+            gpu: T4
+            runner: CUDA-Windows-x64
+            cuda_version: "11.8.0"
+            torch_version: "2.7.0"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+
         exclude:
           # Our current T4 Windows runner has a driver too old (471.11)
           # and cannot support CUDA 12+. Skip for now.
