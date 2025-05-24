@@ -287,6 +287,8 @@ module_dict = {
 def test_kbit_backprop(device, module):
     if device == "cpu":
         pytest.xfail("Test is not yet supported on CPU")
+    if device == "xpu":
+        pytest.xfail("Missing int8_double_quant implementation XPU")
 
     b = 16
     dim1 = 36
