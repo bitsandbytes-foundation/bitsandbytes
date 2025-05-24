@@ -224,3 +224,58 @@ def test_linear8bit_serialization(linear8bit):
     # check for a bug where SCB and CB were not copied
     assert (linear8bit.weight.SCB == deserialized.weight.SCB).all()
     assert (linear8bit.weight.CB == deserialized.weight.CB).all()
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
+@pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
+@pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
+@pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
+@pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
+def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
+    dim = 256
+    batch_size = 16
+
+    torch.compiler.reset()
+
+    torch._dynamo.config.patch()
+    # Create a small network with Linear8bitLt layers
+    net = torch.nn.Sequential(
+        *[bnb.nn.Linear8bitLt(dim, dim, bias=bias, has_fp16_weights=False, threshold=threshold) for _ in range(4)]
+    ).to(device)
+
+    dynamic_output_shapes = fullgraph and threshold > 0
+    with torch._dynamo.config.patch("capture_dynamic_output_shape_ops", dynamic_output_shapes):
+        # Create input tensor
+        x = torch.randn(batch_size, dim, dtype=torch.float16, device=device)
+
+        # Get reference output before compilation
+        with torch.no_grad():
+            ref_output = net(x)
+
+        # Compile the model
+        compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode)
+
+        # Get output from compiled model
+        with torch.no_grad():
+            compiled_output = compiled_net(x)
+
+        # Check outputs match
+        assert compiled_output.shape == ref_output.shape
+        assert compiled_output.device == ref_output.device
+        assert compiled_output.dtype == ref_output.dtype
+        torch.testing.assert_close(compiled_output, ref_output)
+
+        # Test with gradients. Currently only works with threshold=0.
+        if threshold == 0:
+            x.requires_grad_(True)
+            y1 = net(x).sum()
+            y1.backward()
+            grad_ref = x.grad.clone()
+
+            x.grad = None
+            y2 = compiled_net(x).sum()
+            y2.backward()
+            grad_compiled = x.grad.clone()
+
+            torch.testing.assert_close(grad_compiled, grad_ref)
