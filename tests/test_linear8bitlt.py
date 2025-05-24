@@ -234,6 +234,9 @@ def test_linear8bit_serialization(linear8bit):
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
 def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
+    if device == "cuda" and platform.system() == "Windows":
+        pytest.skip("Triton is not officially supported on Windows")
+
     dim = 256
     batch_size = 16
 
