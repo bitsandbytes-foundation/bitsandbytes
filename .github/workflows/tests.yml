@@ -129,6 +129,10 @@ jobs:
         with:
           python-version: 3.9
 
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl for torch.compile
+
       - name: Install dependencies
         run: |
           pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/cpu
@@ -187,6 +191,15 @@ jobs:
           - cuda_version: "12.8.1"
             torch_version: "2.7.0"
             pypi_index: "https://download.pytorch.org/whl/cu128"
+
+          # Add torch 2.7+cu118 for Windows.
+          - os: windows-2025
+            arch: x86_64
+            gpu: T4
+            runner: CUDA-Windows-x64
+            cuda_version: "11.8.0"
+            torch_version: "2.7.0"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
 
           # L40S runners
           - os: ubuntu-22.04

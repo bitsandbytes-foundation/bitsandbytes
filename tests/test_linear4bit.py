@@ -1,6 +1,7 @@
 import copy
 import os
 import pickle
+import platform
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -298,6 +299,16 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
 
     if fullgraph and torch.__version__ < (2, 8):
         pytest.skip("fullgraph mode requires torch 2.8 or higher")
+
+    # Has a strange regression on Linux aarch64 CPU in torch==2.6.0 when fullgraph=False.
+    if (
+        not fullgraph
+        and device == "cpu"
+        and platform.machine() == "aarch64"
+        and platform.system() == "Linux"
+        and ((2, 7) > torch.__version__ >= (2, 6))
+    ):
+        pytest.xfail("Regression in torch==2.6.0 on Linux aarch64 CPU")
 
     dim = 256
     batch_size = 16

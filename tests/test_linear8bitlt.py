@@ -2,6 +2,7 @@ from contextlib import nullcontext
 import copy
 import os
 import pickle
+import platform
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -238,7 +239,6 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
 
     torch.compiler.reset()
 
-    torch._dynamo.config.patch()
     # Create a small network with Linear8bitLt layers
     net = torch.nn.Sequential(
         *[bnb.nn.Linear8bitLt(dim, dim, bias=bias, has_fp16_weights=False, threshold=threshold) for _ in range(4)]
@@ -267,7 +267,15 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
         torch.testing.assert_close(compiled_output, ref_output)
 
         # Test with gradients. Currently only works with threshold=0.
-        if threshold == 0:
+        # Has a strange regression on Linux aarch64 CPU in torch==2.6.0.
+        is_broken_platform = (
+            device == "cpu"
+            and platform.machine() == "aarch64"
+            and platform.system() == "Linux"
+            and ((2, 7) > torch.__version__ >= (2, 6))
+        )
+
+        if threshold == 0 and not is_broken_platform:
             x.requires_grad_(True)
             y1 = net(x).sum()
             y1.backward()
