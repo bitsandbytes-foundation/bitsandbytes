@@ -1,91 +1,65 @@
 # Installation Guide
 
-Welcome to the installation guide for the `bitsandbytes` library! This document provides step-by-step instructions to install `bitsandbytes` across various platforms and hardware configurations. The library primarily supports CUDA-based GPUs, but the team is actively working on enabling support for additional backends like AMD ROCm, Intel, and Apple Silicon.
-
-> [!TIP]
-> For a high-level overview of backend support and compatibility, see the [Multi-backend Support](#multi-backend) section.
+Welcome to the installation guide for the `bitsandbytes` library! This document provides step-by-step instructions to install `bitsandbytes` across various platforms and hardware configurations. The library primarily supports CUDA-based GPUs, but the team is actively working on enabling support for additional backends like CPU, AMD ROCm, Intel XPU, and Gaudi HPU.
 
 ## Table of Contents
 
 - [CUDA](#cuda)
   - [Installation via PyPI](#cuda-pip)
   - [Compile from Source](#cuda-compile)
-- [Multi-backend Support (Alpha Release)](#multi-backend)
+  - [Preview Wheels from `main`](#cuda-preview)
+- [Multi-Backend Preview](#multi-backend)
   - [Supported Backends](#multi-backend-supported-backends)
   - [Pre-requisites](#multi-backend-pre-requisites)
   - [Installation](#multi-backend-pip)
   - [Compile from Source](#multi-backend-compile)
-- [PyTorch CUDA Versions](#pytorch-cuda-versions)
 
 ## CUDA[[cuda]]
 
-`bitsandbytes` is currently only supported on CUDA GPUs for CUDA versions **11.0 - 12.8**. However, there's an ongoing multi-backend effort under development, which is currently in alpha. If you're interested in providing feedback or testing, check out [the multi-backend section below](#multi-backend).
+`bitsandbytes` is currently supported on NVIDIA GPUs with [Compute Capability](https://developer.nvidia.com/cuda-gpus) 5.0+.
+The library can be built using CUDA Toolkit versions as old as **11.6** on Windows and **11.4** on Linux.
 
-### Supported CUDA Configurations[[cuda-pip]]
-
-The latest version of the distributed `bitsandbytes` package is built with the following configurations:
-
-| **OS**      | **CUDA Toolkit** | **Host Compiler**         |
-|-------------|------------------|----------------------|
-| **Linux**   | 11.8 - 12.3      | GCC 11.4             |
-|             | 12.4 - 12.8      | GCC 13.2             |
-| **Windows** | 11.8 - 12.8      | MSVC 19.42+ (VS2022) |
-
-For CUDA systems, ensure your hardware meets the following requirements:
-
-| **Feature**                     | **Minimum Hardware Requirement**                              |
-|---------------------------------|---------------------------------------------------------------|
-| LLM.int8()                      | NVIDIA Turing (RTX 20 series, T4) or newer GPUs               |
-| 8-bit optimizers/quantization   | NVIDIA Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs * |
-| NF4/FP4 quantization            | NVIDIA Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs * |
+| **Feature**                     | **CC Required** | **Example Hardware Requirement**            |
+|---------------------------------|-----------------|---------------------------------------------|
+| LLM.int8()                      | 7.5+            | Turing (RTX 20 series, T4) or newer GPUs             |
+| 8-bit optimizers/quantization   | 5.0+            | Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs |
+| NF4/FP4 quantization            | 5.0+            | Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs |
 
 > [!WARNING]
-> `bitsandbytes >= 0.45.0` no longer supports Kepler GPUs.
->
 > Support for Maxwell GPUs is deprecated and will be removed in a future release. For the best results, a Turing generation device or newer is recommended.
+
+### Installation via PyPI[[cuda-pip]]
+
+This is the most straightforward and recommended installation option.
+
+The currently distributed `bitsandbytes` packages are built with the following configurations:
+
+| **OS**             | **CUDA Toolkit** | **Host Compiler**    | **Targets**
+|--------------------|------------------|----------------------|--------------
+| **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm50, sm60, sm75, sm80, sm86, sm89, sm90
+| **Linux x86-64**   | 12.8             | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Linux aarch64**  | 11.8 - 12.6      | GCC 11.2             | sm75, sm80, sm90
+| **Linux aarch64**  | 12.8             | GCC 11.2             | sm75, sm80, sm90, sm100
+| **Windows x86-64** | 11.8 - 12.6      | MSVC 19.43+ (VS2022) | sm50, sm60, sm75, sm80, sm86, sm89, sm90
+| **Windows x86-64** | 12.8             | MSVC 19.43+ (VS2022) | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+
+Use `pip` or `uv` to install:
 
 ```bash
 pip install bitsandbytes
 ```
 
-### `pip install` pre-built wheel from latest `main` commit
-
-If you would like to use new feature even before they are officially released and help us test them, feel free to install the wheel directly from our CI (*the wheel links will remain stable!*):
-
-<hfoptions id="OS">
-<hfoption id="Linux">
-
-```
-# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
-
-# x86_64 (most users)
-pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl
-
-# ARM/aarch64
-pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_aarch64.whl
-```
-
-</hfoption>
-<hfoption id="Windows">
-
-```
-# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
-pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-win_amd64.whl
-```
-</hfoption>
-</hfoptions>
-
 ### Compile from source[[cuda-compile]]
 
 > [!TIP]
-> Don't hesitate to compile from source! The process is pretty straight forward and resilient. This might be needed for older CUDA versions or other less common configurations, which we don't support out of the box due to package size.
+> Don't hesitate to compile from source! The process is pretty straight forward and resilient. This might be needed for older CUDA Toolkit versions or Linux distributions, or other less common configurations.
 
 For Linux and Windows systems, compiling from source allows you to customize the build configurations. See below for detailed platform-specific instructions (see the `CMakeLists.txt` if you want to check the specifics and explore some additional options):
 
 <hfoptions id="source">
 <hfoption id="Linux">
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.). It is recommended to use GCC 9 or newer.
 
 For example, to install a compiler and CMake on Ubuntu:
 
@@ -93,7 +67,7 @@ For example, to install a compiler and CMake on Ubuntu:
 apt-get install -y build-essential cmake
 ```
 
-You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version is **11.8**.
+You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide. The current minimum supported CUDA Toolkit version that we test with is **11.8**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -103,14 +77,14 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 ```
 
 > [!TIP]
-> If you have multiple versions of CUDA installed or installed it in a non-standard location, please refer to CMake CUDA documentation for how to configure the CUDA compiler.
+> If you have multiple versions of the CUDA Toolkit installed or it is in a non-standard location, please refer to CMake CUDA documentation for how to configure the CUDA compiler.
 
 </hfoption>
 <hfoption id="Windows">
 
-Windows systems require Visual Studio with C++ support as well as an installation of the CUDA SDK.
+Compilation from source on Windows systems require Visual Studio with C++ support as well as an installation of the CUDA Toolkit.
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version is **11.8**.
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we test with is **11.8**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -124,78 +98,46 @@ Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com
 </hfoption>
 </hfoptions>
 
-### PyTorch CUDA versions[[pytorch-cuda-versions]]
+### Preview Wheels from `main`[[cuda-preview]]
 
-Some bitsandbytes features may need a newer CUDA version than the one currently supported by PyTorch binaries from Conda and pip. In this case, you should follow these instructions to load a precompiled bitsandbytes binary.
+If you would like to use new features even before they are officially released and help us test them, feel free to install the wheel directly from our CI (*the wheel links will remain stable!*):
 
-1. Determine the path of the CUDA version you want to use. Common paths include:
-
-* `/usr/local/cuda`
-* `/usr/local/cuda-XX.X` where `XX.X` is the CUDA version number
-
-Then locally install the CUDA version you need with this script from bitsandbytes:
+<hfoptions id="OS">
+<hfoption id="Linux">
 
 ```bash
-wget https://raw.githubusercontent.com/bitsandbytes-foundation/bitsandbytes/main/install_cuda.sh
-# Syntax cuda_install CUDA_VERSION INSTALL_PREFIX EXPORT_TO_BASH
-#   CUDA_VERSION in {118, 120, 121, 122, 123, 124, 125, 126, 128}
-#   EXPORT_TO_BASH in {0, 1} with 0=False and 1=True
+# Note: if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 
-# For example, the following installs CUDA 12.6 to ~/local/cuda-12.6 and exports the path to your .bashrc
+# x86_64 (most users)
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl
 
-bash install_cuda.sh 126 ~/local 1
+# ARM/aarch64
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_aarch64.whl
 ```
-
-2. Set the environment variables `BNB_CUDA_VERSION` and `LD_LIBRARY_PATH` by manually overriding the CUDA version installed by PyTorch.
-
-> [!TIP]
-> It is recommended to add the following lines to the `.bashrc` file to make them permanent.
-
-```bash
-export BNB_CUDA_VERSION=<VERSION>
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<PATH>
-```
-
-For example, to use a local install path:
-
-```bash
-export BNB_CUDA_VERSION=126
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/YOUR_USERNAME/local/cuda-12.6
-```
-
-3. Now when you launch bitsandbytes with these environment variables, the PyTorch CUDA version is overridden by the new CUDA version (in this example, version 12.6) and a different bitsandbytes library is loaded.
-
-## Multi-backend Support (Alpha Release)[[multi-backend]]
-
-> [!TIP]
-> This functionality is currently in preview and not yet production-ready. We very much welcome community feedback, contributions and leadership on topics like Apple Silicon as well as other less common accellerators! For more information, see [this guide on multi-backend support](./non_cuda_backends).
-
-**Link to give us feedback** (bugs, install issues, perf results, requests, etc.)**:**
-
-<hfoptions id="platform">
-<hfoption id="ROCm">
-
-[**Multi-backend refactor: Alpha release (AMD ROCm ONLY)**](https://github.com/bitsandbytes-foundation/bitsandbytes/discussions/1339)
 
 </hfoption>
-<hfoption id="Intel CPU+GPU">
+<hfoption id="Windows">
 
-[**Multi-backend refactor: Alpha release (INTEL ONLY)**](https://github.com/bitsandbytes-foundation/bitsandbytes/discussions/1338)
-
-</hfoption>
-<hfoption id="Apple Silicon / Metal (MPS)">
-
-[**Github Discussion space on coordinating the kickoff of MPS backend development**](https://github.com/bitsandbytes-foundation/bitsandbytes/discussions/1340)
-
+```bash
+# Note: if you don't want to reinstall our dependencies, append the `--no-deps` flag!
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-win_amd64.whl
+```
 </hfoption>
 </hfoptions>
+
+
+## Multi-Backend Preview[[multi-backend]]
+
+> [!WARNING]
+> This functionality existed as an early technical preview and is not recommended for production use. We are in the process of upstreaming improved support for AMD and Intel hardware into the main project.
+
+We provide an early preview of support for AMD and Intel hardware as part of a development branch.
 
 ### Supported Backends[[multi-backend-supported-backends]]
 
 | **Backend** | **Supported Versions** | **Python versions** | **Architecture Support** | **Status** |
 |-------------|------------------------|---------------------------|-------------------------|------------|
 | **AMD ROCm** | 6.1+                   | 3.10+                     | minimum CDNA - `gfx90a`, RDNA - `gfx1100` | Alpha      |
-| **Apple Silicon (MPS)** | WIP                        | 3.10+                     | M1/M2 chips                    | Planned    |
 | **Intel CPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
 | **Intel GPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
 | **Ascend NPU** | 2.1.0+ (`torch_npu`)         | 3.10+                     | Ascend NPU | Experimental |
@@ -204,9 +146,9 @@ For each supported backend, follow the respective instructions below:
 
 ### Pre-requisites[[multi-backend-pre-requisites]]
 
-To use bitsandbytes non-CUDA backends, be sure to install:
+To use this preview version of `bitsandbytes` with `transformers`, be sure to install:
 
-```
+```bash
 pip install "transformers>=4.45.1"
 ```
 
@@ -218,33 +160,26 @@ pip install "transformers>=4.45.1"
 >
 > Other supported versions that don't come with pre-compiled binaries [can be compiled for with these instructions](#multi-backend-compile).
 >
-> **Windows is not supported for the ROCm backend**; also not WSL2 to our knowledge.
+> **Windows is not supported for the ROCm backend**
 
 > [!TIP]
 > If you would like to install ROCm and PyTorch on bare metal, skip the Docker steps and refer to ROCm's official guides at [ROCm installation overview](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/tutorial/install-overview.html#rocm-install-overview) and [Installing PyTorch for ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/3rd-party/pytorch-install.html#using-wheels-package) (Step 3 of wheels build for quick installation). Special note: please make sure to get the respective ROCm-specific PyTorch wheel for the installed ROCm version, e.g. `https://download.pytorch.org/whl/nightly/rocm6.2/`!
 
 ```bash
-# Create a docker container with latest ROCm image, which includes ROCm libraries
-docker pull rocm/dev-ubuntu-22.04:6.1.2-complete
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video rocm/dev-ubuntu-22.04:6.1.2-complete
+# Create a docker container with the ROCm image, which includes ROCm libraries
+docker pull rocm/dev-ubuntu-22.04:6.3.4-complete
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video rocm/dev-ubuntu-22.04:6.3.4-complete
 apt-get update && apt-get install -y git && cd home
 
 # Install pytorch compatible with above ROCm version
-pip install torch --index-url https://download.pytorch.org/whl/rocm6.1/
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.3/
 ```
 
 </hfoption>
-<hfoption id="Intel CPU + GPU">
+<hfoption id="Intel XPU">
 
-Compatible hardware and functioning `import intel_extension_for_pytorch as ipex` capable environment with Python `3.10` as the minimum requirement.
-
-Please refer to [the official Intel installations instructions](https://intel.github.io/intel-extension-for-pytorch/index.html#installation?platform=cpu&version=v2.4.0%2bcpu&os=linux%2fwsl2) for guidance on how to pip install the necessary `intel_extension_for_pytorch` dependency.
-
-</hfoption>
-<hfoption id="Apple Silicon (MPS)">
-
-> [!TIP]
-> Apple Silicon support is still a WIP. Please visit and write us in [this Github Discussion space on coordinating the kickoff of MPS backend development](https://github.com/bitsandbytes-foundation/bitsandbytes/discussions/1340) and coordinate a community-led effort to implement this backend.
+* A compatible PyTorch version with Intel XPU support is required. It is recommended to use the latest stable release. See [Getting Started on Intel GPU](https://docs.pytorch.org/docs/stable/notes/get_start_xpu.html) for guidance.
+* The [Intel Extension for PyTorch](https://intel.github.io/intel-extension-for-pytorch/xpu/latest/) is recommended for performance improvements.
 
 </hfoption>
 </hfoptions>
@@ -257,36 +192,20 @@ You can install the pre-built wheels for each backend, or compile from source fo
 
 <hfoptions id="platform">
 <hfoption id="Linux">
+This wheel provides support for ROCm and Intel XPU platforms.
 
 ```
-# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
+# Note, if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl'
 ```
 
 </hfoption>
 <hfoption id="Windows">
+This wheel provides support for the Intel XPU platform.
 
-```
-# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
+```bash
+# Note, if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-win_amd64.whl'
-```
-
-</hfoption>
-<hfoption id="Ascend NPU">
-
-Compatible hardware and functioning `import torch_npu` capable environment with Python `3.10` as the minimum requirement.
-
-Please refer to [the official Ascend installations instructions](https://www.hiascend.com/document/detail/zh/Pytorch/60RC3/configandinstg/instg/insg_0001.html) for guidance on how to pip install the necessary `torch_npu` dependency.
-
-</hfoption>
-<hfoption id="Mac">
-
-> [!WARNING]
-> bitsandbytes does not yet support Apple Silicon / Metal with a dedicated backend. However, the build infrastructure is in place and the below pip install will eventually provide Apple Silicon support as it becomes available on the `multi-backend-refactor` branch based on community contributions.
-
-```
-# Note, if you don't want to reinstall BNBs dependencies, append the `--no-deps` flag!
-pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-macosx_13_1_arm64.whl'
 ```
 
 </hfoption>
@@ -299,7 +218,7 @@ pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsan
 
 #### AMD GPU
 
-bitsandbytes is fully supported from ROCm 6.1 onwards (currently in alpha release).
+bitsandbytes is supported from ROCm 6.1 - ROCm 6.4.
 
 ```bash
 # Install bitsandbytes from source
@@ -318,8 +237,6 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 
 #### Intel CPU + XPU
 
-> [!TIP]
-> Intel CPU/XPU backend only supports building from source; for now, please follow the instructions below.
 
 If you are using Intel CPU on Linux or Intel XPU on Linux/Windows, please follow the [instruction](https://pytorch-extension.intel.com/) or the following command to install intel_extension_for_pytorch so you can get better performance.
 
@@ -344,11 +261,9 @@ pip install git+https://github.com/bitsandbytes-foundation/bitsandbytes.git
 
 #### Ascend NPU
 
-> [!TIP]
-> Ascend NPU backend only supports building from source; for now, please follow the instructions below.
+Please refer to [the official Ascend installations instructions](https://www.hiascend.com/document/detail/zh/Pytorch/60RC3/configandinstg/instg/insg_0001.html) for guidance on how to install the necessary `torch_npu` dependency.
 
-
-```
+```bash
 # Install bitsandbytes from source
 # Clone bitsandbytes repo, Ascend NPU backend is currently enabled on multi-backend-refactor branch
 git clone -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -359,14 +274,5 @@ cmake -DCOMPUTE_BACKEND=npu -S .
 make
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
-
-
-</hfoption>
-<hfoption id="Apple Silicon (MPS)">
-
-#### Apple Silicon
-
-WIP
-
 </hfoption>
 </hfoptions>

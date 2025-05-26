@@ -367,7 +367,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     # these are additional items that come from the case
     # where all the exponent bits are zero and no
     # indicator bit is present
-    non_sign_bits = total_bits - (1 if signed else 1)
+    non_sign_bits = total_bits - 1
     additional_items = 2 ** (non_sign_bits - max_exponent_bits) - 1
     for i in range(max_exponent_bits):
         fraction_items = int(
@@ -771,14 +771,14 @@ def quantize_blockwise(
         qabsmax, state2 = quantize_blockwise(_absmax, blocksize=blocksize, nested=False)
         quant_state = QuantState(
             absmax=qabsmax,
-            code=code,
+            code=code.to(A.device, copy=True),
             blocksize=blocksize,
             dtype=A.dtype,
             offset=offset,
             state2=state2,
         )
     else:
-        quant_state = QuantState(absmax=_absmax, code=code.to(A.device), blocksize=blocksize, dtype=A.dtype)
+        quant_state = QuantState(absmax=_absmax, code=code.to(A.device, copy=True), blocksize=blocksize, dtype=A.dtype)
 
     # TODO(matthewdouglas): Deprecate out kwarg
     out = out.copy_(_out) if out is not None else _out
