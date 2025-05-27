@@ -1,4 +1,5 @@
 import ctypes as ct
+import functools
 import logging
 import os
 from pathlib import Path
@@ -29,10 +30,8 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
         library_name = re.sub(r"cuda\d+", f"cuda{override_value}", library_name, count=1)
         logger.warning(
             f"WARNING: BNB_CUDA_VERSION={override_value} environment variable detected; loading {library_name}.\n"
-            "This can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n"
+            "This can be used to load a bitsandbytes version built with a CUDA version that is different from the PyTorch CUDA version.\n"
             "If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n"
-            "If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n"
-            "For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n",
         )
 
     return PACKAGE_DIR / library_name
@@ -45,10 +44,14 @@ class BNBNativeLibrary:
     def __init__(self, lib: ct.CDLL):
         self._lib = lib
 
+    @functools.cache  # noqa: B019
     def __getattr__(self, name):
+        fn = getattr(self._lib, name, None)
+
+        if fn is not None:
+            return fn
+
         def throw_on_call(*args, **kwargs):
-            if hasattr(self._lib, name):
-                return getattr(self._lib, name)(*args, **kwargs)
             raise RuntimeError(
                 f"Method '{name}' not available in CPU-only version of bitsandbytes.\n"
                 "Reinstall with GPU support or use CUDA-enabled hardware."
