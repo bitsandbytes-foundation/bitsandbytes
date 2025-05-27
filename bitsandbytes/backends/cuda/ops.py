@@ -3,7 +3,7 @@ import ctypes as ct
 from math import prod  
 from typing import Optional   
   
-import torch  
+import torch 
   
 from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, _get_tensor_stream, get_ptr  
   
