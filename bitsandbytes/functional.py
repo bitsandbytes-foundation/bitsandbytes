@@ -968,12 +968,12 @@ def quantize_fp4(
     A: torch.Tensor,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=64,
+    blocksize=None,
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "fp4", quant_storage)
 
 
@@ -981,12 +981,12 @@ def quantize_nf4(
     A: torch.Tensor,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=64,
+    blocksize=None,
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "nf4", quant_storage)
 
 
@@ -994,7 +994,7 @@ def quantize_4bit(
     A: torch.Tensor,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=64,
+    blocksize=None,
     compress_statistics=False,
     quant_type="fp4",
     quant_storage=torch.uint8,
@@ -1023,8 +1023,8 @@ def quantize_4bit(
         - [`QuantState`]: The state object used to undo the quantization.
     """
     
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
         
     input_shape = A.shape
 
@@ -1076,10 +1076,10 @@ def dequantize_fp4(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
+    blocksize: Optional[int] = None,
 ) -> torch.Tensor:
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -1088,10 +1088,10 @@ def dequantize_nf4(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
+    blocksize: Optional[int] = None,
 ) -> torch.Tensor:
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 
@@ -1100,7 +1100,7 @@ def dequantize_4bit(
     quant_state: Optional[QuantState] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 64,
+    blocksize: Optional[int] = None,
     quant_type="fp4",
 ) -> torch.Tensor:
     """Dequantizes a packed 4-bit quantized tensor.
@@ -1130,8 +1130,8 @@ def dequantize_4bit(
         `torch.Tensor`: The dequantized tensor.
     """
     
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
+    if blocksize is None:
+        blocksize = 64 if not HIP_ENVIRONMENT else 128
         
     if quant_state is None:
         assert absmax is not None and out is not None
