@@ -287,10 +287,25 @@ def get_native_library() -> BNBNativeLibrary:
 
 
 try:
+    # to support Intel CPU/GPU (XPU) backend
+    import intel_extension_for_pytorch as ipex
+
+    ipex_cpu = ipex if ipex._C._has_cpu() else None
+    ipex_xpu = ipex if ipex._C._has_xpu() else None
+except BaseException:
+    ipex_cpu = None
+    ipex_xpu = None
+
+
+try:
     lib = get_native_library()
 except Exception as e:
     error_msg = str(e)
-    logger.error(f"bitsandbytes library load error: {error_msg}\n", exc_info=True)
+    if not (ipex_cpu or ipex_xpu):
+        logger.error(
+            f"bitsandbytes library load error: {error_msg}\n If you are using Intel CPU/XPU, please install intel_extension_for_pytorch to enable required ops",
+            exc_info=True,
+        )
 
     # create a mock with error messaging as fallback
     lib = ErrorHandlerMockBNBNativeLibrary(error_msg)

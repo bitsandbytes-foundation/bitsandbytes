@@ -38,6 +38,14 @@ def outlier_hook(module, input):
             hook.remove()
 
 
+# convert btw standard 4-bit compression format and ipex compression format
+def _reverse_4bit_compress_format(weight: torch.Tensor):
+    out_1 = (weight & 0xF0) >> 4
+    out_2 = (weight & 0xF) << 4
+    out = out_1 | out_2
+    return out
+
+
 class OutlierTracer:
     _instance = None
 

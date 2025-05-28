@@ -180,9 +180,6 @@ def test_matmul_4bit(
     compress_statistics,
     quant_type,
 ):
-    if device == "cpu" and quant_type == "fp4":
-        pytest.xfail("Only nf4 is supported on CPU")
-
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
     if has_bias == False:
