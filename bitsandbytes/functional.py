@@ -1022,6 +1022,7 @@ def quantize_4bit(
         - `torch.Tensor`: The quantized tensor with packed 4-bit values.
         - [`QuantState`]: The state object used to undo the quantization.
     """
+    
     if HIP_ENVIRONMENT:  
         blocksize = 128
         
