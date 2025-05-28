@@ -299,9 +299,6 @@ class MatMul8bitLt(torch.autograd.Function):
 
 
 class MatMul4Bit(torch.autograd.Function):
-    # forward is the same, but we added the fallback for pre-turing GPUs
-    # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
-
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, quant_state: Optional[F.QuantState] = None):
         # default of pytorch behavior if inputs are empty
@@ -319,7 +316,15 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
+        # Use linear function which correctly handles 1D and 2D inputs
+        result = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
+
+        # If out is provided, resize it if necessary and copy the result
+        if out is not None:
+            if out.shape != result.shape:
+                out.resize_(result.shape)
+            out.copy_(result)
+            result = out
 
         # 3. Save state
         ctx.state = quant_state
@@ -330,7 +335,7 @@ class MatMul4Bit(torch.autograd.Function):
         else:
             ctx.tensors = (None, None)
 
-        return output
+        return result
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -385,9 +390,14 @@ def matmul_4bit(
             )
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
         else:
-            out = F.gemv_4bit(A, B.t(), out, state=quant_state)
+            # For 1D case, we'll use the MatMul4Bit implementation which correctly handles out parameter
+            if out is not None and A.dim() == 1:
+                return MatMul4Bit.apply(A, B, out, bias, quant_state)
+
+            # For other cases, use gemv_4bit
+            result = F.gemv_4bit(A, B.t(), out, state=quant_state)
             if bias is not None:
-                out += bias
-            return out
+                result += bias
+            return result
     else:
         return MatMul4Bit.apply(A, B, out, bias, quant_state)

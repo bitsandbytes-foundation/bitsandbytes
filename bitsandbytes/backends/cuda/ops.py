@@ -427,11 +427,18 @@ def _(
     blocksize: int,
     out: torch.Tensor,
 ) -> None:
+    expected_shape = (*A.shape[:-1], shapeB[0])
+
+    if len(A.shape) == 1 and len(out.shape) == 2 and out.shape[0] == 1:
+        out = out.view(shapeB[0])
+        expected_shape = (shapeB[0],)
+
     torch._check(
-        out.shape == (*A.shape[:-1], shapeB[0]),
-        lambda: f"Expected out.shape == {(*A.shape[:-1], shapeB[0])}, got {out.shape}",
+        out.shape == expected_shape,
+        lambda: f"Expected out.shape == {expected_shape}, got {out.shape}",
     )
     torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
+
     _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
 
 
@@ -445,10 +452,13 @@ def _gemv_4bit_impl(
     out: torch.Tensor,
 ) -> None:
     torch._check_is_size(blocksize)
-    torch._check(
-        A.numel() == A.size(-1),
-        lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}",
-    )
+
+    is_1d = A.dim() == 1
+    if is_1d:
+        A_reshaped = A.view(1, -1)
+    else:
+        A_reshaped = A
+
     torch._check(
         A.dtype in [torch.float16, torch.bfloat16, torch.float32],
         lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
@@ -465,10 +475,15 @@ def _gemv_4bit_impl(
     k = ct.c_int32(shapeB[1])
 
     lda = m
-    ldb = ct.c_int32((A.shape[-1] + 1) // 2)
+    ldb = ct.c_int32((A_reshaped.shape[-1] + 1) // 2)
     ldc = m
 
     stream = _get_tensor_stream(A)
+
+    if is_1d and out.dim() > 1:
+        out_view = out.view(-1)
+    else:
+        out_view = out
 
     with _cuda_device_of(A):
         if A.dtype == torch.float16:
