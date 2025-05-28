@@ -6,7 +6,10 @@ import torch
 from ..._ops import register_kernel
 from ..utils import ipex_xpu
 
-if torch.__version__ >= (2, 7):
+# With default torch, error:
+#  NotImplementedError: The operator 'aten::_int_mm' for XPU
+if ipex_xpu and torch.__version__ >= (2, 7):
+
     @register_kernel("bitsandbytes::int8_linear_matmul", "xpu")
     def _(A: torch.Tensor, B: torch.Tensor):
         return torch._int_mm(
@@ -16,6 +19,7 @@ if torch.__version__ >= (2, 7):
 
 
 if ipex_xpu:
+
     @register_kernel("bitsandbytes::dequantize_nf4_ipex", "xpu")
     def _(
         A: torch.Tensor,
