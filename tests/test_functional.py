@@ -8,7 +8,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
-from bitsandbytes.cextension import HIP_ENVIRONMENT
+from bitsandbytes.cextension import HIP_ENVIRONMENT, ROCM_GPU_ARCH
 from bitsandbytes import functional as F
 from tests.helpers import (
     BOOLEAN_TUPLES,
@@ -1373,7 +1373,8 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
     @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
     @pytest.mark.skipif(
-        HIP_ENVIRONMENT, reason="this test is not supported on ROCm with gfx90a architecture yet"
+        HIP_ENVIRONMENT and ROCM_GPU_ARCH == "gfx90a",
+        reason="this test is not supported on ROCm with gfx90a architecture yet",
     )
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
         if device == "cpu" and storage_type != "nf4":
