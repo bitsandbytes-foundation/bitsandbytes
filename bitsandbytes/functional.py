@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import lib
+from .cextension import lib, HIP_ENVIRONMENT
 
 name2qmap = {}
 
@@ -758,6 +758,11 @@ def quantize_blockwise(
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
         code = name2qmap["dynamic"]
+        
+    if HIP_ENVIRONMENT:  
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128]            
+    else:  
+        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64]   
 
     _out, _absmax = torch.ops.bitsandbytes.quantize_blockwise.default(
         A,
@@ -839,6 +844,16 @@ def dequantize_blockwise(
 
     if quant_state is None:
         quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=torch.float32)
+        
+    if HIP_ENVIRONMENT:  
+        supported_blocksizes = [4096, 2048, 1024, 512, 256, 128]  
+    else:  
+        supported_blocksizes = [4096, 2048, 1024, 512, 256, 128, 64]  
+          
+    if quant_state.blocksize not in supported_blocksizes:  
+        raise ValueError(  
+            f"The blocksize of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}"  
+        )
 
     absmax = quant_state.absmax
     if quant_state.nested:
@@ -957,6 +972,8 @@ def quantize_fp4(
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
+    if HIP_ENVIRONMENT:  
+        blocksize = 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "fp4", quant_storage)
 
 
@@ -968,6 +985,8 @@ def quantize_nf4(
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
+    if HIP_ENVIRONMENT:  
+        blocksize = 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "nf4", quant_storage)
 
 
@@ -1003,6 +1022,9 @@ def quantize_4bit(
         - `torch.Tensor`: The quantized tensor with packed 4-bit values.
         - [`QuantState`]: The state object used to undo the quantization.
     """
+    if HIP_ENVIRONMENT:  
+        blocksize = 128
+        
     input_shape = A.shape
 
     _out, _absmax = torch.ops.bitsandbytes.quantize_4bit.default(
@@ -1055,6 +1077,8 @@ def dequantize_fp4(
     out: Optional[torch.Tensor] = None,
     blocksize: int = 64,
 ) -> torch.Tensor:
+    if HIP_ENVIRONMENT:  
+        blocksize = 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -1065,6 +1089,8 @@ def dequantize_nf4(
     out: Optional[torch.Tensor] = None,
     blocksize: int = 64,
 ) -> torch.Tensor:
+    if HIP_ENVIRONMENT:  
+        blocksize = 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 
@@ -1102,6 +1128,10 @@ def dequantize_4bit(
     Returns:
         `torch.Tensor`: The dequantized tensor.
     """
+    
+    if HIP_ENVIRONMENT:  
+        blocksize = 128
+        
     if quant_state is None:
         assert absmax is not None and out is not None
 
