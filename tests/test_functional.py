@@ -1373,7 +1373,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
     @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
     @pytest.mark.skipif(
-        HIP_ENVIRONMENT, reason="this test is not supported on ROCm with gfx90a architecture yet",
+        HIP_ENVIRONMENT, reason="this test is not supported on ROCm with gfx90a architecture yet"
     )
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
         if device == "cpu" and storage_type != "nf4":
