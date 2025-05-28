@@ -76,8 +76,6 @@ class Adam8bit(Optimizer2State):
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=0,
-        amsgrad=False,
-        optim_bits=32,
         args=None,
         min_8bit_size=4096,
         percentile_clipping=100,
@@ -98,10 +96,6 @@ class Adam8bit(Optimizer2State):
                 The epsilon value prevents division by zero in the optimizer.
             weight_decay (`float`, defaults to 0.0):
                 The weight decay value for the optimizer.
-            amsgrad (`bool`, defaults to `False`):
-                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
-            optim_bits (`int`, defaults to 32):
-                The number of bits of the optimizer state.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
