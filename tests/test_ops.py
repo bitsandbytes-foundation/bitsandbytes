@@ -4,7 +4,7 @@ import pytest
 import torch
 
 import bitsandbytes
-from bitsandbytes.functional import ipex_cpu, ipex_xpu
+from bitsandbytes.functional import ipex_xpu
 from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
 
 # torch.library.opcheck is only available in torch 2.4 and later.
