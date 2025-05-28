@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import lib, HIP_ENVIRONMENT 
+from .cextension import lib
 
 name2qmap = {}
 
@@ -719,159 +719,152 @@ class QuantState:
         )
 
 
-def quantize_blockwise(  
-    A: torch.Tensor,  
-    code: Optional[torch.Tensor] = None,  
-    absmax: Optional[torch.Tensor] = None,  
-    out: Optional[torch.Tensor] = None,  
-    blocksize=4096,  
-    nested=False,  
-) -> tuple[torch.Tensor, QuantState]:  
-    """Quantize a tensor in blocks of values.  
-    The input tensor is quantized by dividing it into blocks of `blocksize` values.  
-    The the absolute maximum value within these blocks is calculated for scaling  
-    the non-linear quantization.  
-    Args:  
-        A (`torch.Tensor`): The input tensor. Supports `float16`, `bfloat16`, or `float32` datatypes.  
-        code (`torch.Tensor`, *optional*):  
-            A mapping describing the low-bit data type. Defaults to a signed 8-bit dynamic type.  
-            For more details, see  (8-Bit Approximations for Parallelism in Deep Learning)[https://arxiv.org/abs/1511.04561].  
-        absmax (`torch.Tensor`, *optional*): A tensor to use to store the absmax values.  
-        out (`torch.Tensor`, *optional*): A tensor to use to store the result.  
-        blocksize (`int`, *optional*):  
-            The size of the blocks. Defaults to 4096.  
-            Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.  
-        nested (`bool`, *optional*): Whether to additionally quantize the absmax values. Defaults to False.  
-    Raises:  
-        ValueError: Raised when the input data type is not supported.  
-    Returns:  
-        `Tuple[torch.Tensor, QuantState]`: A tuple containing the quantization results.  
-        - `torch.Tensor`: The quantized tensor.  
-        - [`QuantState`]: The state object used to undo the quantization.  
-    """  
-  
-    if code is None:  
-        if "dynamic" not in name2qmap:  
-            name2qmap["dynamic"] = create_dynamic_map().to(A.device)  
-        code = name2qmap["dynamic"]  
+def quantize_blockwise(
+    A: torch.Tensor,
+    code: Optional[torch.Tensor] = None,
+    absmax: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    blocksize=4096,
+    nested=False,
+) -> tuple[torch.Tensor, QuantState]:
+    """Quantize a tensor in blocks of values.
 
-    if HIP_ENVIRONMENT:  
-        assert blocksize in [4096, 2048, 1024, 512, 256, 128]            
-    else:  
-        assert blocksize in [4096, 2048, 1024, 512, 256, 128, 64] 
-  
-    _out, _absmax = torch.ops.bitsandbytes.quantize_blockwise.default(  
-        A,  
-        code.to(A.device),  
-        blocksize,  
-    )  
-  
-    if nested:  
-        offset = _absmax.mean()  
-        _absmax -= offset  
-        qabsmax, state2 = quantize_blockwise(_absmax, blocksize=blocksize, nested=False)  
-        quant_state = QuantState(  
-            absmax=qabsmax,  
-            code=code,  
-            blocksize=blocksize,  
-            dtype=A.dtype,  
-            offset=offset,  
-            state2=state2,  
-        )  
-    else:  
-        quant_state = QuantState(absmax=_absmax, code=code.to(A.device), blocksize=blocksize, dtype=A.dtype)  
-  
-    # TODO(matthewdouglas): Deprecate out kwarg  
-    out = out.copy_(_out) if out is not None else _out  
-  
-    # TODO(matthewdouglas): Deprecate absmax kwarg  
-    if absmax is not None:  
-        quant_state.absmax = absmax.copy_(quant_state.absmax)  
-  
-    return out, quant_state  
-  
-  
-def dequantize_blockwise(  
-    A: torch.Tensor,  
-    quant_state: Optional[QuantState] = None,  
-    absmax: Optional[torch.Tensor] = None,  
-    code: Optional[torch.Tensor] = None,  
-    out: Optional[torch.Tensor] = None,  
-    blocksize: int = 4096,  
-    nested=False,  
-) -> torch.Tensor:  
-    """Dequantize a tensor in blocks of values.  
-    The input tensor is dequantized by dividing it into blocks of `blocksize` values.  
-    The the absolute maximum value within these blocks is used for scaling  
-    the non-linear dequantization.  
-    Args:  
-        A (`torch.Tensor`): The quantized input tensor.  
-        quant_state ([`QuantState`], *optional*):  
-            The quantization state as returned by [`quantize_blockwise`].  
-            Required if `absmax` is not provided.  
-        absmax (`torch.Tensor`, *optional*):  
-            A tensor containing the scaling values.  
-            Required if `quant_state` is not provided and ignored otherwise.  
-        code (`torch.Tensor`, *optional*):  
-            A mapping describing the low-bit data type. Defaults to a signed 8-bit dynamic type.  
-            For more details, see  (8-Bit Approximations for Parallelism in Deep Learning)[https://arxiv.org/abs/1511.04561].  
-            Ignored when `quant_state` is provided.  
-        out (`torch.Tensor`, *optional*): A tensor to use to store the result.  
-        blocksize (`int`, *optional*):  
-            The size of the blocks. Defaults to 4096.  
-            Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.  
-            Ignored when `quant_state` is provided.  
-    Raises:  
-        ValueError: Raised when the input data type is not supported.  
-    Returns:  
-        `torch.Tensor`:  
-            The dequantized tensor. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.  
-    """  
-  
-    assert quant_state is not None or absmax is not None  
-    if code is None and quant_state is None:  
-        if "dynamic" not in name2qmap:  
-            name2qmap["dynamic"] = create_dynamic_map().to(A.device)  
-        code = name2qmap["dynamic"]  
-  
-    if quant_state is None:  
-        quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=torch.float32)  
-  
-    if HIP_ENVIRONMENT:  
-        supported_blocksizes = [4096, 2048, 1024, 512, 256, 128]  
-    else:  
-        supported_blocksizes = [4096, 2048, 1024, 512, 256, 128, 64]  
-          
-    if quant_state.blocksize not in supported_blocksizes:  
-        raise ValueError(  
-            f"The blocksize of {quant_state.blocksize} is not supported. Supported values: {supported_blocksizes}"  
-        )  
-  
-    absmax = quant_state.absmax  
-    if quant_state.nested:  
-        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)  
-        absmax += quant_state.offset  
-        if absmax.dtype != torch.float32:  
-            absmax = absmax.float()  
-  
-    if out is not None:  
-        torch.ops.bitsandbytes.dequantize_blockwise.out(  
-            A,  
-            absmax,  
-            code.to(A.device),  
-            blocksize,  
-            quant_state.dtype,  
-            out=out,  
-        )  
-        return out  
-  
-    return torch.ops.bitsandbytes.dequantize_blockwise.default(  
-        A,  
-        absmax,  
-        quant_state.code.to(A.device),  
-        quant_state.blocksize,  
-        quant_state.dtype,  
-    )  
+    The input tensor is quantized by dividing it into blocks of `blocksize` values.
+    The the absolute maximum value within these blocks is calculated for scaling
+    the non-linear quantization.
+
+    Args:
+        A (`torch.Tensor`): The input tensor. Supports `float16`, `bfloat16`, or `float32` datatypes.
+        code (`torch.Tensor`, *optional*):
+            A mapping describing the low-bit data type. Defaults to a signed 8-bit dynamic type.
+            For more details, see  (8-Bit Approximations for Parallelism in Deep Learning)[https://arxiv.org/abs/1511.04561].
+        absmax (`torch.Tensor`, *optional*): A tensor to use to store the absmax values.
+        out (`torch.Tensor`, *optional*): A tensor to use to store the result.
+        blocksize (`int`, *optional*):
+            The size of the blocks. Defaults to 4096.
+            Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
+        nested (`bool`, *optional*): Whether to additionally quantize the absmax values. Defaults to False.
+
+    Raises:
+        ValueError: Raised when the input data type is not supported.
+
+    Returns:
+        `Tuple[torch.Tensor, QuantState]`: A tuple containing the quantization results.
+        - `torch.Tensor`: The quantized tensor.
+        - [`QuantState`]: The state object used to undo the quantization.
+    """
+
+    if code is None:
+        if "dynamic" not in name2qmap:
+            name2qmap["dynamic"] = create_dynamic_map().to(A.device)
+        code = name2qmap["dynamic"]
+
+    _out, _absmax = torch.ops.bitsandbytes.quantize_blockwise.default(
+        A,
+        code.to(A.device),
+        blocksize,
+    )
+
+    if nested:
+        offset = _absmax.mean()
+        _absmax -= offset
+        qabsmax, state2 = quantize_blockwise(_absmax, blocksize=blocksize, nested=False)
+        quant_state = QuantState(
+            absmax=qabsmax,
+            code=code,
+            blocksize=blocksize,
+            dtype=A.dtype,
+            offset=offset,
+            state2=state2,
+        )
+    else:
+        quant_state = QuantState(absmax=_absmax, code=code.to(A.device), blocksize=blocksize, dtype=A.dtype)
+
+    # TODO(matthewdouglas): Deprecate out kwarg
+    out = out.copy_(_out) if out is not None else _out
+
+    # TODO(matthewdouglas): Deprecate absmax kwarg
+    if absmax is not None:
+        quant_state.absmax = absmax.copy_(quant_state.absmax)
+
+    return out, quant_state
+
+
+def dequantize_blockwise(
+    A: torch.Tensor,
+    quant_state: Optional[QuantState] = None,
+    absmax: Optional[torch.Tensor] = None,
+    code: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    blocksize: int = 4096,
+    nested=False,
+) -> torch.Tensor:
+    """Dequantize a tensor in blocks of values.
+
+    The input tensor is dequantized by dividing it into blocks of `blocksize` values.
+    The the absolute maximum value within these blocks is used for scaling
+    the non-linear dequantization.
+
+    Args:
+        A (`torch.Tensor`): The quantized input tensor.
+        quant_state ([`QuantState`], *optional*):
+            The quantization state as returned by [`quantize_blockwise`].
+            Required if `absmax` is not provided.
+        absmax (`torch.Tensor`, *optional*):
+            A tensor containing the scaling values.
+            Required if `quant_state` is not provided and ignored otherwise.
+        code (`torch.Tensor`, *optional*):
+            A mapping describing the low-bit data type. Defaults to a signed 8-bit dynamic type.
+            For more details, see  (8-Bit Approximations for Parallelism in Deep Learning)[https://arxiv.org/abs/1511.04561].
+            Ignored when `quant_state` is provided.
+        out (`torch.Tensor`, *optional*): A tensor to use to store the result.
+        blocksize (`int`, *optional*):
+            The size of the blocks. Defaults to 4096.
+            Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
+            Ignored when `quant_state` is provided.
+
+    Raises:
+        ValueError: Raised when the input data type is not supported.
+
+    Returns:
+        `torch.Tensor`:
+            The dequantized tensor. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.
+    """
+
+    assert quant_state is not None or absmax is not None
+    if code is None and quant_state is None:
+        if "dynamic" not in name2qmap:
+            name2qmap["dynamic"] = create_dynamic_map().to(A.device)
+        code = name2qmap["dynamic"]
+
+    if quant_state is None:
+        quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=torch.float32)
+
+    absmax = quant_state.absmax
+    if quant_state.nested:
+        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+        absmax += quant_state.offset
+        if absmax.dtype != torch.float32:
+            absmax = absmax.float()
+
+    if out is not None:
+        torch.ops.bitsandbytes.dequantize_blockwise.out(
+            A,
+            absmax,
+            code.to(A.device),
+            blocksize,
+            quant_state.dtype,
+            out=out,
+        )
+        return out
+
+    return torch.ops.bitsandbytes.dequantize_blockwise.default(
+        A,
+        absmax,
+        quant_state.code.to(A.device),
+        quant_state.blocksize,
+        quant_state.dtype,
+    )
 
 
 def get_4bit_type(typename, device=None, blocksize=64):
@@ -964,8 +957,6 @@ def quantize_fp4(
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "fp4", quant_storage)
 
 
@@ -977,8 +968,6 @@ def quantize_nf4(
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "nf4", quant_storage)
 
 
@@ -1014,9 +1003,6 @@ def quantize_4bit(
         - `torch.Tensor`: The quantized tensor with packed 4-bit values.
         - [`QuantState`]: The state object used to undo the quantization.
     """
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
-    
     input_shape = A.shape
 
     _out, _absmax = torch.ops.bitsandbytes.quantize_4bit.default(
@@ -1069,8 +1055,6 @@ def dequantize_fp4(
     out: Optional[torch.Tensor] = None,
     blocksize: int = 64,
 ) -> torch.Tensor:
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -1081,8 +1065,6 @@ def dequantize_nf4(
     out: Optional[torch.Tensor] = None,
     blocksize: int = 64,
 ) -> torch.Tensor:
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 
@@ -1120,10 +1102,6 @@ def dequantize_4bit(
     Returns:
         `torch.Tensor`: The dequantized tensor.
     """
-    
-    if HIP_ENVIRONMENT:  
-        blocksize = 128
-          
     if quant_state is None:
         assert absmax is not None and out is not None
 
