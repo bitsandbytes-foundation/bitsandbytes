@@ -83,7 +83,7 @@ def quantize_4bit(
     n = A.numel()
 
     # TODO: Support when weight matrix is not divisible by blocksize
-    torch._check(n % blocksize == 0, lambda: f"n must be divisible by blocksize, got {n} and {blocksize}")
+    # torch._check(n % blocksize == 0, lambda: f"n must be divisible by blocksize, got {n} and {blocksize}")
 
     blocks = -(n // -(blocksize * 2))
 
