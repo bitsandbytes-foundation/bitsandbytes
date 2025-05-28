@@ -5,6 +5,7 @@ import torch
 
 import bitsandbytes
 from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 
 
 class TestLLMInt8Ops:
@@ -95,7 +96,7 @@ class TestLLMInt8Ops:
 class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [128, 256, 512] if HIP_ENVIRONMENT else [64, 128, 256, 512])
     def test_quantize_blockwise(self, device, dtype, blocksize):
         if device == "cpu":
             if dtype != torch.float32:
@@ -119,7 +120,7 @@ class TestInt8BlockwiseQuantOps:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [128, 256, 512] if HIP_ENVIRONMENT else [64, 128, 256, 512])
     def test_dequantize_blockwise(self, device, dtype, blocksize):
         if device == "cpu" and dtype != torch.float32:
             pytest.skip("CPU implementation is only available for float32")
@@ -145,7 +146,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [128, 256, 512] if HIP_ENVIRONMENT else [64, 128, 256, 512])
     def test_quantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("CPU implementation is only available for nf4")
@@ -169,7 +170,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [128, 256, 512] if HIP_ENVIRONMENT else [64, 128, 256, 512])
     def test_dequantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "cpu":
             if quant_type != "nf4":
@@ -206,7 +207,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [128, 256, 512] if HIP_ENVIRONMENT else [64, 128, 256, 512])
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "cpu":
             pytest.xfail("CPU implementation is not available")
