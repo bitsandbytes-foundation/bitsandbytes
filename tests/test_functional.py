@@ -148,7 +148,7 @@ class Test8BitBlockwiseQuantizeFunctional:
 
     @pytest.mark.skipif("cpu" not in get_available_devices(), reason="CPU is required")
     @pytest.mark.parametrize("hidden", [128])
-    @pytest.mark.parametrize("blocksize", [4096, 16384] if not HIP_ENVIRONMENT else [4096])
+    @pytest.mark.parametrize("blocksize", [4096, 16384])
     def test_blockwise_cpu_large(self, hidden, blocksize):
         diffs = []
         reldiffs = []
