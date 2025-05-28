@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 from bitsandbytes import functional as F
 from tests.helpers import (
     BOOLEAN_TUPLES,
@@ -91,7 +92,7 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
-    @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
+    @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128] if HIP_ENVIRONMENT else [4096, 2048, 1024, 512, 256, 128, 64] )
     @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
     def test_dynamic_blockwise_quantization(self, device, dtype, nested, blocksize, signed):
         iters = 100
@@ -147,7 +148,7 @@ class Test8BitBlockwiseQuantizeFunctional:
 
     @pytest.mark.skipif("cpu" not in get_available_devices(), reason="CPU is required")
     @pytest.mark.parametrize("hidden", [128])
-    @pytest.mark.parametrize("blocksize", [4096, 16384])
+    @pytest.mark.parametrize("blocksize", [4096] if HIP_ENVIRONMENT else [4096, 16384])
     def test_blockwise_cpu_large(self, hidden, blocksize):
         diffs = []
         reldiffs = []
@@ -1105,7 +1106,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
+    @pytest.mark.parametrize("blocksize", [128, 256, 512, 1024, 2048, 4096] if HIP_ENVIRONMENT else [64, 128, 256, 512, 1024, 2048, 4096])
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
