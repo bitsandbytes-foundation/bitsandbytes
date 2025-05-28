@@ -8,7 +8,7 @@ from typing import Optional
 import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
-from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_cuda_version_tuple
+from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_cuda_version_tuple, get_rocm_gpu_arch
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +297,8 @@ def get_native_library() -> BNBNativeLibrary:
     )
     return BNBNativeLibrary(dll)
 
+
+ROCM_GPU_ARCH = get_rocm_gpu_arch()
 
 try:
     if torch.version.hip:
