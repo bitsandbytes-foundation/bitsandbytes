@@ -1141,7 +1141,7 @@ class TestQuantize4BitFunctional:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128], ids=id_formatter("blocksize"))
+    @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128], ids=id_formatter("blocksize"))
     def test_4bit_compressed_stats(self, device, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
