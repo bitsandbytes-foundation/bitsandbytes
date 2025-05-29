@@ -299,13 +299,13 @@ except BaseException:
 
 try:
     if hasattr(torch, "xpu") and torch.xpu.is_available():
-        if not (ipex_cpu or ipex_xpu):
+        if not ipex_xpu:
             logger.warning(
                 "Detected Intel XPU but no Intel Extension for PyTorch (IPEX) installed. "
                 "IPEX is recommended for Intel XPU support in bitsandbytes to get better performance. "
                 "Please check the installation doc to install `intel_extension_for_pytorch`. "
             )
-        lib = ErrorHandlerMockBNBNativeLibrary("XPU does not need native library")
+        lib = None
     else:
         lib = get_native_library()
 except Exception as e:
