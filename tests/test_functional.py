@@ -796,7 +796,7 @@ class TestLLMInt8Functional:
                 A[:, outlier_cols] = 0
                 torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
 class TestSpMMFunctional:
     @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
