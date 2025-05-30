@@ -11,6 +11,7 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
