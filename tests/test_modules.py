@@ -5,6 +5,7 @@ import torch
 from torch import nn
 
 import bitsandbytes as bnb
+from bitsandbytes.backends.utils import triton_available
 from bitsandbytes.functional import ipex_xpu
 from tests.helpers import get_available_devices, id_formatter
 
@@ -288,7 +289,7 @@ module_dict = {
 def test_kbit_backprop(device, module):
     if device == "cpu":
         pytest.xfail("Test is not yet supported on CPU")
-    if device == "xpu" and ipex_xpu:
+    if device == "xpu" and module == bnb.nn.Linear8bitLt and not ipex_xpu and triton_available:
         pytest.xfail("Missing int8_double_quant implementation in Triton for XPU")
 
     b = 16

@@ -2,19 +2,13 @@ from collections.abc import Sequence
 
 import torch
 
+from . import triton_kernels
+
 # currently codes unused, kept for reference
 # Should be the same for quant/dequant
 # from bitsandbytes.functional import get_4bit_type
 # _FP4_QUANT_TABLE = get_4bit_type("fp4", device="xpu")
 # _NF4_QUANT_TABLE = get_4bit_type("nf4", device="xpu")
-
-try:
-    from . import triton_kernels
-
-    triton_available = True
-except ImportError as e:
-    print("Import error:", e)
-    triton_available = False
 
 
 def quantize_blockwise(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:

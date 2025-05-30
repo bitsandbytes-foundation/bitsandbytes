@@ -4,7 +4,7 @@ import warnings
 import torch
 
 from ..._ops import register_kernel
-from ..utils import ipex_xpu
+from ..utils import ipex_xpu, triton_available
 
 # With default torch, error:
 #  NotImplementedError: The operator 'aten::_int_mm' for XPU
@@ -52,23 +52,16 @@ if ipex_xpu:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
 
         return out.reshape(shape)
-else:
+elif triton_available:
     # IPEX should be faster for xpu, so at first checking if it is available.
-    try:
-        from ..triton import ops as triton_ops
+    from ..triton import ops as triton_ops
 
-        triton_available = True
-    except ImportError as e:
-        print("Import error:", e)
-        triton_available = False
-
-    if triton_available:
-        register_kernel("bitsandbytes::quantize_blockwise", "xpu")(triton_ops.quantize_blockwise)
-        register_kernel("bitsandbytes::dequantize_blockwise.out", "xpu")(triton_ops.dequantize_blockwise_inplace)
-        register_kernel("bitsandbytes::dequantize_blockwise", "xpu")(triton_ops.dequantize_blockwise)
-        register_kernel("bitsandbytes::quantize_4bit", "xpu")(triton_ops.quantize_4bit)
-        register_kernel("bitsandbytes::dequantize_4bit.out", "xpu")(triton_ops.dequantize_4bit_inplace)
-        register_kernel("bitsandbytes::dequantize_4bit", "xpu")(triton_ops.dequantize_4bit)
-        register_kernel("bitsandbytes::gemv_4bit", "xpu")(triton_ops.gemv_4bit)
-    else:
-        warnings.warn("XPU available, but trtion package is missing.")
+    register_kernel("bitsandbytes::quantize_blockwise", "xpu")(triton_ops.quantize_blockwise)
+    register_kernel("bitsandbytes::dequantize_blockwise.out", "xpu")(triton_ops.dequantize_blockwise_inplace)
+    register_kernel("bitsandbytes::dequantize_blockwise", "xpu")(triton_ops.dequantize_blockwise)
+    register_kernel("bitsandbytes::quantize_4bit", "xpu")(triton_ops.quantize_4bit)
+    register_kernel("bitsandbytes::dequantize_4bit.out", "xpu")(triton_ops.dequantize_4bit_inplace)
+    register_kernel("bitsandbytes::dequantize_4bit", "xpu")(triton_ops.dequantize_4bit)
+    register_kernel("bitsandbytes::gemv_4bit", "xpu")(triton_ops.gemv_4bit)
+else:
+    warnings.warn("XPU available, but nor ipex or trtion package is found.")
