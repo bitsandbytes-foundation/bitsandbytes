@@ -303,7 +303,11 @@ def _dequantize_blockwise_impl(
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    if HIP_ENVIRONMENT:  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
+    else:  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+        
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(
         A.dtype in [torch.bfloat16, torch.float16, torch.float32],
@@ -381,7 +385,11 @@ def _dequantize_4bit_impl(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    if HIP_ENVIRONMENT:  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
+    else:  
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+        
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
