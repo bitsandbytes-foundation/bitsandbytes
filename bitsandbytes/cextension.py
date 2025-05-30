@@ -301,9 +301,8 @@ try:
     if hasattr(torch, "xpu") and torch.xpu.is_available():
         if not ipex_xpu:
             logger.warning(
-                "Detected Intel XPU but no Intel Extension for PyTorch (IPEX) installed. "
-                "IPEX is recommended for Intel XPU support in bitsandbytes to get better performance. "
-                "Please check the installation doc to install `intel_extension_for_pytorch`. "
+                "Detected Intel XPU but no Intel Extension for PyTorch (IPEX) installed. Triton implementation will be used."
+                "Please check the installation doc to install `intel_extension_for_pytorch` to get better performance."
             )
         lib = None
     else:
