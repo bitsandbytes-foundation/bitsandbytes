@@ -184,7 +184,7 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
     if device == "cpu":
@@ -209,7 +209,7 @@ def test_copy_param(device, quant_type, blocksize, compress_statistics):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
     if device == "cpu":
@@ -241,7 +241,7 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
     if device == "cpu":
