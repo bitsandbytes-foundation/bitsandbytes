@@ -303,9 +303,9 @@ class Optimizer8bit(torch.optim.Optimizer):
         config["eps"] = group["eps"]
         config["weight_decay"] = group["weight_decay"]
         config["lr"] = group["lr"]
-        config["alpha"] = group.get("alpha")
-        config["t_alpha"] = group.get("t_alpha")
-        config["t_beta3"] = group.get("t_beta3")
+        config["alpha"] = group.get("alpha", 0.0)
+        config["t_alpha"] = group.get("t_alpha", 0)
+        config["t_beta3"] = group.get("t_beta3", 0)
         config["optim_bits"] = self.args.optim_bits
         config["min_8bit_size"] = self.args.min_8bit_size
         config["percentile_clipping"] = self.args.percentile_clipping
@@ -475,9 +475,9 @@ class Optimizer2State(Optimizer8bit):
             state["qmap2"] = self.name2qmap["udynamic"]
 
             if config["block_wise"]:
+                blocksize = 256
                 n = p.numel()
-                blocks = n // 256
-                blocks += 1 if n % 256 > 0 else 0
+                blocks = (n // blocksize) + bool(n % blocksize)
 
                 state["absmax1"] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)
                 state["absmax2"] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)
@@ -530,7 +530,7 @@ class Optimizer2State(Optimizer8bit):
                 state["state2"],
                 config["betas"][1],
                 config["betas"][2] if len(config["betas"]) >= 3 else 0.0,
-                config["alpha"],
+                config.get("alpha", 0.0),
                 config["weight_decay"],
                 gnorm_scale,
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
@@ -575,7 +575,7 @@ class Optimizer2State(Optimizer8bit):
                 config["betas"][0],
                 config["betas"][1],
                 config["betas"][2] if len(config["betas"]) >= 3 else 0.0,
-                config["alpha"],
+                config.get("alpha", 0.0),
                 config["eps"],
                 step,
                 config["lr"],
@@ -697,9 +697,9 @@ class Optimizer1State(Optimizer8bit):
             state["qmap1"] = self.name2qmap["dynamic"]
 
             if config["block_wise"]:
+                blocksize = 256
                 n = p.numel()
-                blocks = n // 256
-                blocks += 1 if n % 256 > 0 else 0
+                blocks = (n // blocksize) + bool(n % blocksize)
 
                 state["absmax1"] = torch.zeros((blocks,), dtype=torch.float32, device=p.device)
             else:

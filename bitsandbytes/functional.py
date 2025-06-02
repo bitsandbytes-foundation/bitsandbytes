@@ -13,108 +13,107 @@ import torch
 from torch import Tensor
 from typing_extensions import deprecated
 
-from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
+from bitsandbytes.utils import _reverse_4bit_compress_format, pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import lib
+from .cextension import ipex_cpu, ipex_xpu, lib
 
 name2qmap = {}
 
-if lib and lib.compiled_with_cuda:
-    """C FUNCTIONS FOR OPTIMIZERS"""
-    str2optimizer32bit = {
-        "adam": (
-            lib.cadam32bit_grad_fp32,
-            lib.cadam32bit_grad_fp16,
-            lib.cadam32bit_grad_bf16,
-        ),
-        "momentum": (
-            lib.cmomentum32bit_grad_32,
-            lib.cmomentum32bit_grad_16,
-        ),
-        "rmsprop": (
-            lib.crmsprop32bit_grad_32,
-            lib.crmsprop32bit_grad_16,
-        ),
-        "lion": (
-            lib.clion32bit_grad_fp32,
-            lib.clion32bit_grad_fp16,
-            lib.clion32bit_grad_bf16,
-        ),
-        "adagrad": (
-            lib.cadagrad32bit_grad_32,
-            lib.cadagrad32bit_grad_16,
-        ),
-        "lamb": (
-            lib.cadam32bit_grad_fp32,
-            lib.cadam32bit_grad_fp16,
-            lib.cadam32bit_grad_bf16,
-        ),
-        "ademamix": (
-            lib.cademamix32bit_grad_fp32,
-            lib.cademamix32bit_grad_fp16,
-            lib.cademamix32bit_grad_bf16,
-        ),
-    }
+"""C FUNCTIONS FOR OPTIMIZERS"""
+str2optimizer32bit = {
+    "adam": (
+        lib.cadam32bit_grad_fp32,
+        lib.cadam32bit_grad_fp16,
+        lib.cadam32bit_grad_bf16,
+    ),
+    "momentum": (
+        lib.cmomentum32bit_grad_32,
+        lib.cmomentum32bit_grad_16,
+    ),
+    "rmsprop": (
+        lib.crmsprop32bit_grad_32,
+        lib.crmsprop32bit_grad_16,
+    ),
+    "lion": (
+        lib.clion32bit_grad_fp32,
+        lib.clion32bit_grad_fp16,
+        lib.clion32bit_grad_bf16,
+    ),
+    "adagrad": (
+        lib.cadagrad32bit_grad_32,
+        lib.cadagrad32bit_grad_16,
+    ),
+    "lamb": (
+        lib.cadam32bit_grad_fp32,
+        lib.cadam32bit_grad_fp16,
+        lib.cadam32bit_grad_bf16,
+    ),
+    "ademamix": (
+        lib.cademamix32bit_grad_fp32,
+        lib.cademamix32bit_grad_fp16,
+        lib.cademamix32bit_grad_bf16,
+    ),
+}
 
-    str2optimizer8bit = {
-        "adam": (
-            lib.cadam_static_8bit_grad_32,
-            lib.cadam_static_8bit_grad_16,
-        ),
-        "momentum": (
-            lib.cmomentum_static_8bit_grad_32,
-            lib.cmomentum_static_8bit_grad_16,
-        ),
-        "rmsprop": (
-            lib.crmsprop_static_8bit_grad_32,
-            lib.crmsprop_static_8bit_grad_16,
-        ),
-        "lion": (
-            lib.clion_static_8bit_grad_32,
-            lib.clion_static_8bit_grad_16,
-        ),
-        "lamb": (
-            lib.cadam_static_8bit_grad_32,
-            lib.cadam_static_8bit_grad_16,
-        ),
-        "lars": (
-            lib.cmomentum_static_8bit_grad_32,
-            lib.cmomentum_static_8bit_grad_16,
-        ),
-    }
+str2optimizer8bit = {
+    "adam": (
+        lib.cadam_static_8bit_grad_32,
+        lib.cadam_static_8bit_grad_16,
+    ),
+    "momentum": (
+        lib.cmomentum_static_8bit_grad_32,
+        lib.cmomentum_static_8bit_grad_16,
+    ),
+    "rmsprop": (
+        lib.crmsprop_static_8bit_grad_32,
+        lib.crmsprop_static_8bit_grad_16,
+    ),
+    "lion": (
+        lib.clion_static_8bit_grad_32,
+        lib.clion_static_8bit_grad_16,
+    ),
+    "lamb": (
+        lib.cadam_static_8bit_grad_32,
+        lib.cadam_static_8bit_grad_16,
+    ),
+    "lars": (
+        lib.cmomentum_static_8bit_grad_32,
+        lib.cmomentum_static_8bit_grad_16,
+    ),
+}
 
-    str2optimizer8bit_blockwise = {
-        "adam": (
-            lib.cadam_8bit_blockwise_grad_fp32,
-            lib.cadam_8bit_blockwise_grad_fp16,
-            lib.cadam_8bit_blockwise_grad_bf16,
-        ),
-        "momentum": (
-            lib.cmomentum_8bit_blockwise_grad_fp32,
-            lib.cmomentum_8bit_blockwise_grad_fp16,
-            lib.cmomentum_8bit_blockwise_grad_bf16,
-        ),
-        "rmsprop": (
-            lib.crmsprop_8bit_blockwise_grad_fp32,
-            lib.crmsprop_8bit_blockwise_grad_fp16,
-            lib.crmsprop_8bit_blockwise_grad_bf16,
-        ),
-        "lion": (
-            lib.clion_8bit_blockwise_grad_fp32,
-            lib.clion_8bit_blockwise_grad_fp16,
-            lib.clion_8bit_blockwise_grad_bf16,
-        ),
-        "adagrad": (
-            lib.cadagrad_8bit_blockwise_grad_fp32,
-            lib.cadagrad_8bit_blockwise_grad_fp16,
-            lib.cadagrad_8bit_blockwise_grad_bf16,
-        ),
-        "ademamix": (
-            lib.cademamix_8bit_blockwise_grad_fp32,
-            lib.cademamix_8bit_blockwise_grad_fp16,
-            lib.cademamix_8bit_blockwise_grad_bf16,
-        ),
-    }
+str2optimizer8bit_blockwise = {
+    "adam": (
+        lib.cadam_8bit_blockwise_grad_fp32,
+        lib.cadam_8bit_blockwise_grad_fp16,
+        lib.cadam_8bit_blockwise_grad_bf16,
+    ),
+    "momentum": (
+        lib.cmomentum_8bit_blockwise_grad_fp32,
+        lib.cmomentum_8bit_blockwise_grad_fp16,
+        lib.cmomentum_8bit_blockwise_grad_bf16,
+    ),
+    "rmsprop": (
+        lib.crmsprop_8bit_blockwise_grad_fp32,
+        lib.crmsprop_8bit_blockwise_grad_fp16,
+        lib.crmsprop_8bit_blockwise_grad_bf16,
+    ),
+    "lion": (
+        lib.clion_8bit_blockwise_grad_fp32,
+        lib.clion_8bit_blockwise_grad_fp16,
+        lib.clion_8bit_blockwise_grad_bf16,
+    ),
+    "adagrad": (
+        lib.cadagrad_8bit_blockwise_grad_fp32,
+        lib.cadagrad_8bit_blockwise_grad_fp16,
+        lib.cadagrad_8bit_blockwise_grad_bf16,
+    ),
+    "ademamix": (
+        lib.cademamix_8bit_blockwise_grad_fp32,
+        lib.cademamix_8bit_blockwise_grad_fp16,
+        lib.cademamix_8bit_blockwise_grad_bf16,
+    ),
+}
 
 
 class GlobalPageManager:
@@ -341,7 +340,7 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
         for i in range(gap):
             values.append(0)
     values.sort()
-    code = torch.Tensor(values)
+    code = torch.tensor(values)
     code /= code.max()
 
     return code
@@ -368,7 +367,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     # these are additional items that come from the case
     # where all the exponent bits are zero and no
     # indicator bit is present
-    non_sign_bits = total_bits - (1 if signed else 1)
+    non_sign_bits = total_bits - 1
     additional_items = 2 ** (non_sign_bits - max_exponent_bits) - 1
     for i in range(max_exponent_bits):
         fraction_items = int(
@@ -584,7 +583,7 @@ class QuantState:
         self.state2 = state2
         self.nested = state2 is not None
 
-    def __get_item__(self, idx):
+    def __getitem__(self, idx):
         """
         ensures compatibility with older quant state scheme with nested lists.
         assumes the following layout:
@@ -772,14 +771,14 @@ def quantize_blockwise(
         qabsmax, state2 = quantize_blockwise(_absmax, blocksize=blocksize, nested=False)
         quant_state = QuantState(
             absmax=qabsmax,
-            code=code,
+            code=code.to(A.device, copy=True),
             blocksize=blocksize,
             dtype=A.dtype,
             offset=offset,
             state2=state2,
         )
     else:
-        quant_state = QuantState(absmax=_absmax, code=code, blocksize=blocksize, dtype=A.dtype)
+        quant_state = QuantState(absmax=_absmax, code=code.to(A.device, copy=True), blocksize=blocksize, dtype=A.dtype)
 
     # TODO(matthewdouglas): Deprecate out kwarg
     out = out.copy_(_out) if out is not None else _out
@@ -852,8 +851,8 @@ def dequantize_blockwise(
         torch.ops.bitsandbytes.dequantize_blockwise.out(
             A,
             absmax,
-            code.to(A.device),
-            blocksize,
+            quant_state.code.to(A.device),
+            quant_state.blocksize,
             quant_state.dtype,
             out=out,
         )
@@ -1122,6 +1121,16 @@ def dequantize_4bit(
         absmax += quant_state.offset
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
+
+    # IPEX format is different, we need extra process.
+    if getattr(quant_state, "ipex", False) and quant_state.quant_type == "nf4":
+        return torch.ops.bitsandbytes.dequantize_nf4_ipex(
+            A,
+            absmax,
+            quant_state.blocksize,
+            quant_state.shape,
+            quant_state.dtype,
+        )
 
     if out is not None:
         torch.ops.bitsandbytes.dequantize_4bit.out(
@@ -1709,6 +1718,25 @@ def gemv_4bit(
     absmax = state.absmax
     if state.nested:
         absmax = dequantize_blockwise(absmax, state.state2) + state.offset
+
+    if getattr(state, "ipex", False) and state.quant_type == "nf4":
+        # compute_dtype: 1 indicates fp16, 2 indicates bf16
+        compute_dtype = 2 if A.dtype == torch.bfloat16 else 1
+        out = torch.ops.torch_ipex.woq_linear(
+            A,
+            B,
+            "nf4",
+            state.shape,
+            state.new_scales,
+            state.new_zeros,
+            None,
+            None,
+            state.blocksize,
+            compute_dtype,
+            1,
+            state.compensation,
+        )
+        return out
 
     if out is not None:
         torch.ops.bitsandbytes.gemv_4bit.out(
@@ -2508,3 +2536,49 @@ def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half, quant_type="vector"):
         return x.to(dtype)
     else:
         return None
+
+
+def _enable_ipex_fusion(linear: torch.nn.Module, x: torch.Tensor):
+    quant_state = linear.weight.quant_state
+
+    if quant_state.nested:
+        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+        absmax += quant_state.offset
+        if absmax.dtype != torch.float32:
+            absmax = absmax.float()
+
+        quant_state.absmax = absmax
+        quant_state.nested = False
+        delattr(quant_state, "state2")
+
+    if x.device.type == "cpu" and ipex_cpu:
+        converted_weight = _reverse_4bit_compress_format(linear.weight.data)
+        new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
+            converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
+            "nf4",
+            quant_state.shape,  # weight shape
+            quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
+            None,  # zero_points
+            None,  # bias
+            None,  # batch_size
+            quant_state.blocksize,
+            2,
+        )
+    elif x.device.type == "xpu" and ipex_xpu:
+        new_weight = _reverse_4bit_compress_format(linear.weight.data)
+        new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
+        new_zeros = None
+        compensation = None
+        new_scales = list(new_scales)
+        if not linear.training and not x.requires_grad:
+            new_weight = new_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
+    else:
+        raise ValueError(
+            "Please check the device and ipex version. The device should be cpu or xpu while ipex version should >= 2.7"
+        )
+
+    linear.weight.data = new_weight.data
+    linear.weight.quant_state.ipex = True
+    linear.weight.quant_state.new_scales = new_scales
+    linear.weight.quant_state.new_zeros = new_zeros
+    linear.weight.quant_state.compensation = compensation

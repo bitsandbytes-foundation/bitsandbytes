@@ -1,0 +1,292 @@
+name: Unit tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every day at 02:15 AM UTC
+    - cron: "15 2 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build-cpu:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-2025
+            arch: x86_64
+          - os: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+
+      - name: Build C++
+        run: bash .github/scripts/build-cpu.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib_cpu_${{ matrix.os }}_${{ matrix.arch }}
+          path: output/${{ matrix.os }}/${{ matrix.arch }}/*
+          retention-days: 7
+
+  build-cuda:
+    strategy:
+      matrix:
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1"]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: windows-2025
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.23
+        if: startsWith(matrix.os, 'windows')
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: "network"
+          sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
+          use-github-cache: false
+
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+
+      # Target just the architectures used for our runners.
+      - name: Build C++ / CUDA
+        run: bash .github/scripts/build-cuda.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+          cuda_version: ${{ matrix.cuda_version }}
+          cuda_targets: "75;89"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib_cuda_${{matrix.cuda_version}}_${{ matrix.os }}_${{ matrix.arch }}
+          path: output/${{ matrix.os }}/${{ matrix.arch }}/*
+          retention-days: 7
+
+  test-cpu:
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    needs: build-cpu
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
+        # Test with the oldest supported torch version and the two newest.
+        torch_version: ["2.2.2", "2.6.0", "2.7.0"]
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+            runner: banb-aws-general-8-plus-use1-public-80
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+            torch_version: "2.5.1"
+          - os: windows-2025
+            arch: x86_64
+          - os: macos-15
+            arch: arm64
+        exclude:
+          - os: ubuntu-22.04-arm
+            torch_version: "2.2.2"
+
+    runs-on: ${{ matrix.runner || matrix.os }}
+    env:
+      BNB_TEST_DEVICE: cpu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lib_cpu_${{ matrix.os }}_${{ matrix.arch }}
+          path: bitsandbytes/
+          merge-multiple: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl for torch.compile
+
+      - name: Install dependencies
+        run: |
+          pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[test]"
+          pip install pytest-cov
+
+      # We need to downgrade to numpy<2 for torch<2.3 compatibility.
+      - name: Downgrade NumPy
+        if: startsWith(matrix.torch_version, '2.2.')
+        run: pip install "numpy<2"
+
+      - name: Show installed packages
+        run: pip list
+
+      - name: Show environment information
+        run: python -m torch.utils.collect_env
+
+      - name: Run tests
+        run: pytest --durations=100
+
+  # test-cuda-aarch64:
+  #   if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+  #   needs: build-cuda
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       os: [ubuntu-22.04-arm]
+  #       arch: [aarch64]
+  #       torch_version: ["2.7.0"]
+  #       cuda_version: ["11.8.0", "12.8.1"]
+
+  #   runs-on: bandb-aws-g5g-4xlarge-plus-use1-public-80
+  #   env:
+  #     BNB_TEST_DEVICE: cuda
+  #   steps:
+  #     - name: Show GPU Information
+  #       run: nvidia-smi
+
+  #     - name: Show pip packages
+  #       run: pip list
+
+
+
+  test-cuda:
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    needs: build-cuda
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2025]
+        arch: [x86_64]
+        gpu: [T4, L40S]
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1"]
+        include:
+          - cuda_version: "11.8.0"
+            torch_version: "2.2.2"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - cuda_version: "12.6.3"
+            torch_version: "2.6.0"
+            pypi_index: "https://download.pytorch.org/whl/cu126"
+          - cuda_version: "12.8.1"
+            torch_version: "2.7.0"
+            pypi_index: "https://download.pytorch.org/whl/cu128"
+
+
+          # Linux L40S runners
+          - os: ubuntu-22.04
+            gpu: L40S
+            runner: bandb-aws-g6e-4xlarge-plus-use1-public-80
+
+          # Linux T4 runners
+          - os: ubuntu-22.04
+            gpu: T4
+            runner: bandb-aws-g4dn-4xlarge-plus-use1-public-80
+
+          # Specific Windows runners using cu118
+          - os: windows-2025
+            arch: x86_64
+            gpu: T4
+            runner: CUDA-Windows-x64
+            cuda_version: "11.8.0"
+            torch_version: "2.2.0"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - os: windows-2025
+            arch: x86_64
+            gpu: T4
+            runner: CUDA-Windows-x64
+            cuda_version: "11.8.0"
+            torch_version: "2.6.0"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - os: windows-2025
+            arch: x86_64
+            gpu: T4
+            runner: CUDA-Windows-x64
+            cuda_version: "11.8.0"
+            torch_version: "2.7.0"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+
+        exclude:
+          # Our current T4 Windows runner has a driver too old (471.11)
+          # and cannot support CUDA 12+. Skip for now.
+          - os: windows-2025
+            cuda_version: "12.8.1"
+          - os: windows-2025
+            cuda_version: "12.6.3"
+
+          # No Windows L40S runners.
+          - os: windows-2025
+            gpu: L40S
+    runs-on: ${{ matrix.runner }}
+    env:
+      BNB_TEST_DEVICE: cuda
+    steps:
+      - name: Show GPU Information
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lib_cuda_${{ matrix.cuda_version }}_${{ matrix.os }}_${{ matrix.arch }}
+          path: bitsandbytes/
+          merge-multiple: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+
+      - name: Install dependencies
+        run: |
+          pip install torch==${{ matrix.torch_version }} --index-url ${{ matrix.pypi_index }}
+          pip install -e ".[test]"
+          pip install pytest-cov
+
+        # We need to downgrade to numpy<2 for torch<2.3 compatibility.
+      - name: Downgrade NumPy
+        if: startsWith(matrix.torch_version, '2.2.')
+        run: pip install "numpy<2"
+
+      - name: Show installed packages
+        run: pip list
+
+      - name: Show environment information
+        run: python -m torch.utils.collect_env
+
+      - name: Run tests
+        run: pytest --durations=100

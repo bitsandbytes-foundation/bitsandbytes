@@ -4,6 +4,8 @@ from typing import Optional
 
 import torch
 
+from .cextension import ipex_cpu, ipex_xpu
+
 _IS_TORCH_GTE_24 = False
 
 if hasattr(torch.library, "register_fake"):
@@ -15,11 +17,37 @@ else:
     register_fake = torch.library.impl_abstract
     register_kernel = torch.library.impl
 
+# Int8 mixed precision matmul + dequant + bias
+torch.library.define(
+    "bitsandbytes::int8_mixed_scaled_mm",
+    "(Tensor A, Tensor CA, Tensor CB, Tensor SCA, Tensor SCB, Tensor? outlier_cols=None, Tensor? bias=None) -> (Tensor, Tensor?)",
+)
+
+
+@register_fake("bitsandbytes::int8_mixed_scaled_mm")
+def _(
+    A: torch.Tensor,
+    CA: torch.Tensor,
+    CB: torch.Tensor,
+    SCA: torch.Tensor,
+    SCB: torch.Tensor,
+    outlier_cols: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    shapeC = (*CA.shape[:-1], CB.shape[0])
+
+    out = torch.empty(shapeC, device=A.device, dtype=A.dtype)
+
+    outlier_cols = torch.library.get_ctx().new_dynamic_size()
+    subA = A.new_empty(outlier_cols, dtype=torch.int64)
+
+    return out, subA
+
 
 # Higher level op: int8 matmul + dequant + bias
 torch.library.define(
     "bitsandbytes::int8_scaled_mm",
-    "(Tensor A, Tensor B, Tensor row_stats, Tensor col_stats, Tensor? bias=None, ScalarType dtype=float16) -> Tensor",
+    "(Tensor A, Tensor B, Tensor row_stats, Tensor col_stats, Tensor? bias=None, ScalarType? dtype=None) -> Tensor",
 )
 
 
@@ -30,10 +58,10 @@ def _(
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
     bias: Optional[torch.Tensor] = None,
-    dtype=torch.float16,
+    dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
     shapeC = (*A.shape[:-1], B.shape[0])
-    return torch.empty(shapeC, device=A.device, dtype=dtype)
+    return torch.empty(shapeC, device=A.device, dtype=dtype or torch.float16)
 
 
 torch.library.define(
@@ -98,7 +126,7 @@ def _(A: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
 
 
 # Default PyTorch-native implementation
-@register_kernel("bitsandbytes::int8_vectorwise_dequant", None)
+@register_kernel("bitsandbytes::int8_vectorwise_dequant", "default")
 def _(A: torch.Tensor, stats: torch.Tensor):
     # To dequantize we divide by 127, or multiply by the reciprocal.
     return A * stats.view(-1, 1) * 7.874015718698502e-3
@@ -106,7 +134,7 @@ def _(A: torch.Tensor, stats: torch.Tensor):
 
 torch.library.define(
     "bitsandbytes::int8_mm_dequant",
-    "(Tensor A, Tensor row_stats, Tensor col_stats, ScalarType dtype=float16, Tensor? bias=None) -> Tensor",
+    "(Tensor A, Tensor row_stats, Tensor col_stats, ScalarType? dtype=None, Tensor? bias=None) -> Tensor",
 )
 
 
@@ -115,11 +143,11 @@ def _(
     A: torch.Tensor,
     row_stats: torch.Tensor,
     col_stats: torch.Tensor,
-    dtype=torch.float16,
+    dtype: Optional[torch.dtype] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     torch._check(A.dtype == torch.int32, lambda: "A must be int32")
-    return torch.empty_like(A, dtype=dtype)
+    return torch.empty_like(A, dtype=dtype or torch.float16)
 
 
 torch.library.define(
@@ -301,3 +329,22 @@ def _(
     )
     torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
     torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
+
+
+if ipex_cpu or ipex_xpu:
+    # Register the dequantize_nf4_ipex implementation
+    torch.library.define(
+        "bitsandbytes::dequantize_nf4_ipex",
+        "(Tensor A, Tensor absmax, int blocksize, int[] shape, ScalarType dtype) -> Tensor",
+    )
+
+    @register_fake("bitsandbytes::dequantize_nf4_ipex")
+    def _(
+        A: torch.Tensor,
+        absmax: torch.Tensor,
+        blocksize: int,
+        shape: Sequence[int],
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        torch._check_is_size(blocksize)
+        return torch.empty(shape, dtype=dtype, device=A.device)

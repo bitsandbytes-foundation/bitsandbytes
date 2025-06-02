@@ -4,6 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import sys
+
 import torch
 
 from . import _ops, research, utils
@@ -18,19 +20,46 @@ from .nn import modules
 from .optim import adam
 
 # This is a signal for integrations with transformers/diffusers.
-# Eventually, we will remove this and check based on release version.
-features = {"multi-backend"}
+# Eventually we may remove this but it is currently required for compatibility.
+features = {"multi_backend"}
 supported_torch_devices = {
-    "cuda",
     "cpu",
-    # "mps",
-    # "xpu",
-    # "hpu",
-    # "npu",
+    "cuda",  # NVIDIA/AMD GPU
+    "xpu",  # Intel GPU
+    "hpu",  # Gaudi
+    "npu",  # Ascend NPU
+    "mps",  # Apple Silicon
 }
 
 if torch.cuda.is_available():
     from .backends.cuda import ops as cuda_ops
+
+if torch.xpu.is_available():
+    from .backends.xpu import ops as xpu_ops
+
+
+def _import_backends():
+    """
+    Discover and autoload all available backends installed as separate packages.
+    Packages with an entrypoint for "bitsandbytes.backends" will be loaded.
+    Inspired by PyTorch implementation: https://pytorch.org/tutorials/prototype/python_extension_autoload.html
+    """
+    from importlib.metadata import entry_points
+
+    if sys.version_info < (3, 10):
+        extensions = entry_points().get("bitsandbytes.backends", [])
+    else:
+        extensions = entry_points(group="bitsandbytes.backends")
+
+    for ext in extensions:
+        try:
+            entry = ext.load()
+            entry()
+        except Exception as e:
+            raise RuntimeError(f"bitsandbytes: failed to load backend {ext.name}: {e}") from e
+
+
+_import_backends()
 
 __pdoc__ = {
     "libbitsandbytes": False,
@@ -38,4 +67,4 @@ __pdoc__ = {
     "optim.optimizer.MockArgs": False,
 }
 
-__version__ = "0.45.5.dev0"
+__version__ = "0.46.0"

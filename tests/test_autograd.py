@@ -6,12 +6,14 @@ from tests.helpers import (
     BOOLEAN_TRIPLES,
     TRUE_FALSE,
     describe_dtype,
+    get_available_devices,
     id_formatter,
 )
 
 TRANSPOSE_VALS = [(False, True), (False, False)]
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("dim1", [40], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [64, 0], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", [32], ids=id_formatter("dim3"))
@@ -27,32 +29,48 @@ TRANSPOSE_VALS = [(False, True), (False, False)]
 @pytest.mark.parametrize("transpose", TRANSPOSE_VALS, ids=id_formatter("transpose"))
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
-def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights, has_bias):
+def test_matmullt(
+    device, dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights, has_bias
+):
+    if device != "cuda":
+        if funcs[1] == bnb.research.switchback_bnb:
+            # TODO: Deprecate/remove?
+            pytest.skip("switchback_bnb only works on CUDA.")
+
+        if req_grad[1]:
+            # This will be deprecated for CUDA in the future. We don't expect
+            # this to work on any other device.
+            pytest.skip("Deprecated feature with CUDA support only.")
+
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
-    outlier_dim = torch.randint(0, dimA[1], size=(dimA[1] // 8,), device="cuda")
+    outlier_dim = torch.randint(0, dimA[1], size=(dimA[1] // 8,), device=device)
     if has_bias == False:
         req_grad = list(req_grad)
         req_grad[2] = False
 
+    if device == "cpu" and dtype != torch.float32 and has_fp16_weights and any(req_grad):
+        if torch.__version__ < (2, 6):
+            pytest.xfail("mse_loss bf16/fp16 on CPU is not supported in torch < 2.6")
+
     for i in range(3):
         # normal multiply
         if funcs[0] in [torch.mm, torch.matmul]:
-            A = torch.randn(size=dimA, device="cuda", requires_grad=req_grad[0], dtype=dtype)
+            A = torch.randn(size=dimA, device=device, requires_grad=req_grad[0], dtype=dtype)
             if decomp == 6.0:
                 with torch.no_grad():
                     A[:, outlier_dim] = 6.0
-            B = torch.randn(size=dimB, device="cuda", requires_grad=req_grad[1], dtype=dtype)
+            B = torch.randn(size=dimB, device=device, requires_grad=req_grad[1], dtype=dtype)
             target = torch.randn(
                 size=(dim2, dim4),
-                device="cuda",
+                device=device,
                 requires_grad=req_grad[1],
                 dtype=dtype,
             )
             bias = None
             bias2 = None
             if has_bias:
-                bias = torch.randn(dim4, device="cuda", dtype=dtype, requires_grad=req_grad[2])
+                bias = torch.randn(dim4, device=device, dtype=dtype, requires_grad=req_grad[2])
                 bias2 = bias.clone()
             torch.nn.init.xavier_uniform_(B)
             B2 = B.clone()
@@ -91,7 +109,8 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, dec
             if has_fp16_weights:
                 if any(req_grad):
                     out_bnb.data.copy_(out_torch)
-                    torch.cuda.synchronize()
+                    if device == "cuda":
+                        torch.cuda.synchronize()
                     loss_bnb = torch.nn.functional.mse_loss(out_bnb, target).mean()
                     loss_bnb.backward()
                     gradA1 = A.grad
@@ -135,6 +154,7 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, dec
                     torch.testing.assert_close(gradBias1, gradBias2)
 
 
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("dim1", [48], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [64, 0], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", [64], ids=id_formatter("dim3"))
@@ -147,6 +167,7 @@ def test_matmullt(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, dec
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 @pytest.mark.parametrize("quant_type", ["fp4", "nf4"], ids=id_formatter("quant_type"))
 def test_matmul_4bit(
+    device,
     dim1,
     dim2,
     dim3,
@@ -165,16 +186,19 @@ def test_matmul_4bit(
         req_grad = list(req_grad)
         req_grad[2] = False
 
+    if device == "cpu" and dtype != torch.float32 and any(req_grad) and torch.__version__ < (2, 6):
+        pytest.xfail("mse_loss fp16 on CPU is not supported in torch < 2.6")
+
     for i in range(3):
         # normal multiply
         if funcs[0] in [torch.mm, torch.matmul]:
-            A = torch.randn(size=dimA, device="cuda", requires_grad=req_grad[0], dtype=dtype)
-            B = torch.randn(size=dimB, device="cuda", requires_grad=req_grad[1], dtype=dtype)
-            target = torch.randn(size=(dim2, dim4), device="cuda", requires_grad=req_grad[1], dtype=dtype)
+            A = torch.randn(size=dimA, device=device, requires_grad=req_grad[0], dtype=dtype)
+            B = torch.randn(size=dimB, device=device, requires_grad=req_grad[1], dtype=dtype)
+            target = torch.randn(size=(dim2, dim4), device=device, requires_grad=req_grad[1], dtype=dtype)
             bias = None
             bias2 = None
             if has_bias:
-                bias = torch.randn(dim4, device="cuda", dtype=dtype, requires_grad=req_grad[2])
+                bias = torch.randn(dim4, device=device, dtype=dtype, requires_grad=req_grad[2])
                 bias2 = bias.clone()
             torch.nn.init.xavier_uniform_(B)
 
@@ -204,7 +228,8 @@ def test_matmul_4bit(
                 # assert err < 0.20
             if any(req_grad):
                 out_bnb.data.copy_(out_torch)
-                torch.cuda.synchronize()
+                if device == "cuda":
+                    torch.cuda.synchronize()
                 loss_bnb = torch.nn.functional.mse_loss(out_bnb, target).mean()
                 loss_bnb.backward()
                 gradA1 = A.grad

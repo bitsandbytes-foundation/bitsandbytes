@@ -93,8 +93,8 @@ if(BUILD_CUDA)
         )
     endif()
 
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.0")
-        message(FATAL_ERROR "CUDA Version < 11 is not supported")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.4")
+        message(FATAL_ERROR "CUDA Version < 11.4 is not supported")
     elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
         message(FATAL_ERROR "CUDA Version > 12 is not supported")
     endif()
@@ -103,35 +103,20 @@ if(BUILD_CUDA)
     if(CMAKE_VERSION VERSION_LESS "3.23.0")
         message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
 
-        # 11.x and 12.x both support these at a minimum.
-        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80)
+        # 11.4+ supports these at a minimum.
+        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
         set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
-
-        # CUDA 11.1 adds Ampere support for GA102-GA107.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.1")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 86)
-        endif()
-
-        # CUDA 11.4 adds Ampere support for GA10B.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.4")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 87)
-        endif()
 
         # CUDA 11.8 adds support for Ada and Hopper.
         if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
         endif()
-        # CUDA 12.7 adds support for Blackwell B100.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.7")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100)
-        endif()
 
-        # CUDA 12.8 adds support for RTX 50 Blackwell.
+        # CUDA 12.8 adds support for Blackwell.
         if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 101 120)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 101 120)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
         endif()
     endif()
 
