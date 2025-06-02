@@ -271,11 +271,14 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
 
         # Test with gradients. Currently only works with threshold=0.
         # Has a strange regression on Linux aarch64 CPU in torch==2.6.0.
+        # There is also an issue with torch==2.7.0 on x86-64 with IPEX.
         is_broken_platform = (
             device == "cpu"
-            and platform.machine() == "aarch64"
             and platform.system() == "Linux"
-            and ((2, 7) > torch.__version__ >= (2, 6))
+            and (
+                (platform.machine() == "aarch64" and (2, 6) <= torch.__version__ < (2, 7))
+                or (platform.machine() == "x86_64" and bnb.functional.ipex_cpu)
+            )
         )
 
         if threshold == 0 and not is_broken_platform:
