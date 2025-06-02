@@ -17,7 +17,6 @@ storage = {
     "float32": torch.float32,
 }
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
