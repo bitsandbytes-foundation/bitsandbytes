@@ -1,303 +1,346 @@
-name: Python package
-
-on:
-  push: {}
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/python-package.yml"
-      - "bitsandbytes/**"
-      - "csrc/**"
-      - "include/**"
-      - "tests/**"
-      - "CMakeLists.txt"
-      - "requirements*.txt"
-      - "setup.py"
-      - "pyproject.toml"
-  release:
-    types: [published]
-  workflow_dispatch: {} # Allow manual trigger
-  workflow_call: {} # Allow triggering from other worfkflows
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  ##
-  # This job matrix builds the non-CUDA versions of the libraries for all supported platforms.
-  ##
-  build-shared-libs:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-          - os: windows-latest
-            arch: x86_64
-          - os: macos-latest
-            arch: arm64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup MSVC
-        if: startsWith(matrix.os, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
-      - name: Build C++
-        run: bash .github/scripts/build-cpu.sh
-        env:
-          build_os: ${{ matrix.os }}
-          build_arch: ${{ matrix.arch }}
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: shared_library_${{ matrix.os }}_${{ matrix.arch }}
-          path: output/*
-          retention-days: 7
-  ##
-  # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
-  ##
-  build-shared-libs-cuda:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-          - os: windows-latest
-            arch: x86_64
-        cuda_version:
-          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1"]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@v0.2.22
-        if: startsWith(matrix.os, 'windows')
-        id: cuda-toolkit
-        with:
-          cuda: ${{ matrix.cuda_version }}
-          method: "network"
-          sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
-          linux-local-args: '["--toolkit"]'
-          use-github-cache: false
-      - name: Setup MSVC
-        if: startsWith(matrix.os, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
-      - name: Build C++
-        run: bash .github/scripts/build-cuda.sh
-        env:
-          build_os: ${{ matrix.os }}
-          build_arch: ${{ matrix.arch }}
-          cuda_version: ${{ matrix.cuda_version }}
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
-          path: output/*
-          retention-days: 7
-
-  build-wheels:
-    needs:
-      - build-shared-libs
-      - build-shared-libs-cuda
-    strategy:
-      matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-          - os: windows-latest
-            arch: x86_64
-          - os: macos-latest
-            arch: arm64
-        # The specific Python version is irrelevant in this context as we are only packaging non-C extension
-        # code. This ensures compatibility across Python versions, including Python 3.9, as compatibility is
-        # dictated by the packaged code itself, not the Python version used for packaging.
-        python-version: ["3.10"]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          pattern: "shared_library*_${{ matrix.os }}_${{ matrix.arch }}*"
-          path: output/
-      - name: Copy correct platform shared library
-        shell: bash
-        run: |
-          ls -lR output/
-          cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-      - run: pip install build wheel
-      - run: python -m build .
-      - name: Determine and Set Platform Tag, then Tag Wheel
-        shell: bash
-        run: |
-          PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ matrix.arch }}")
-          echo "PLATFORM_TAG=$PLATFORM_TAG"
-          wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
-          path: dist/bitsandbytes-*.whl
-          retention-days: 7
-
-  upload-pre-release-wheels:
-    name: Create release and upload artifacts
-    runs-on: ubuntu-latest
-    if: github.ref_name == 'main'
-    permissions:
-      contents: write
-    needs:
-      - build-wheels
-    steps:
-      - name: Download and rename artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: tmp/
-          pattern: "bdist_wheel_*"
-          merge-multiple: true
+name: Python package  
   
-      - name: Inspect tmp directory after downloading artifacts
-        run: ls -alFR tmp/
+on:  
+  push: {}  
+  pull_request:  
+    branches: [main]  
+    paths:  
+      - ".github/workflows/python-package.yml"  
+      - "bitsandbytes/**"  
+      - "csrc/**"  
+      - "include/**"  
+      - "tests/**"  
+      - "CMakeLists.txt"  
+      - "requirements*.txt"  
+      - "setup.py"  
+      - "pyproject.toml"  
+  release:  
+    types: [published]  
+  workflow_dispatch: {} # Allow manual trigger  
+  workflow_call: {} # Allow triggering from other worfkflows  
   
-      - name: Move and rename wheel files with pattern replacement
-        run: |
-          mkdir -p wheels/
-
-          # The whole point of the continuous release is to have a stable download link and the only way to have a PEP 440–compliant wheel name
-          # is to use a stable placeholder version. Otherwise, pip won't let you install the wheel. The cool thing is that we can now install the
-          # wheel directly from the GH pre-release which gets updated continuously, e.g.
-          # `pip install https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl`
-          STABLE_PLACEHOLDER_VERSION="1.33.7.preview"
-
-          # exclude macos wheels for now
-          find tmp/ -type f -name '*.whl' ! -name '*macos*' -print0 | while IFS= read -r -d '' wheel; do
-            wheel_filename=$(basename "$wheel")
-
-            # Strip off the original version
-            rest=${wheel_filename#bitsandbytes-*-}
-            new_name="bitsandbytes-${STABLE_PLACEHOLDER_VERSION}-${rest}"
-
-            echo "Renaming $wheel_filename → $new_name"
-            mv "$wheel" "wheels/${new_name}"
-          done
-
-      - name: Inspect wheels directory after renaming files
-        run: ls -alFR wheels/
+concurrency:  
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}  
+  cancel-in-progress: true  
   
-      - name: Delete old pre-release (if exists)
-        run: |
-          gh release delete continuous-release_main --cleanup-tag -y || true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Generate pip install commands for release body
-        run: |
-          cat > body.md << 'ENDOFMARKDOWN'
-          ## Latest `main` Wheel Pre-release
-
-          This pre-release contains the latest development wheels for all supported platforms, rebuilt automatically on every commit to the `main` branch.
-
-          **How to install:**  
-          Pick the correct command for your platform and run it in your terminal:
-
-          ENDOFMARKDOWN
-
-          for whl in wheels/*.whl; do
-            fname=$(basename "$whl")
-            url="https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/$fname"
-            echo "\`\`\`sh" >> body.md
-            echo "pip install $url" >> body.md
-            echo "\`\`\`" >> body.md
-            echo "" >> body.md
-          done
-
-          cat >> body.md << 'ENDOFMARKDOWN'
-          > **Note:**  
-          > These wheels are updated automatically with every commit to `main` and become available as soon as the [python-package.yml](.github/workflows/python-package.yml) workflow finishes.
-          ENDOFMARKDOWN
-
-          # for debugging:
-          cat body.md
-
-      - name: Create new pre-release and upload artifacts
-        uses: softprops/action-gh-release@v2.2.1
-        with:
-          files: wheels/*.whl
-          prerelease: true
-          name: Latest `main` wheel
-          body_path: body.md
-          tag_name: continuous-release_main
-          make_latest: false
-          draft: false
-          target_commitish: ${{ github.sha }}
-
-  audit-wheels:
-    needs: build-wheels
-    strategy:
-      matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-    runs-on: ${{ matrix.os }}
-    env:
-      PIP_DISABLE_PIP_VERSION_CHECK: 1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download wheel
-        uses: actions/download-artifact@v4
-        with:
-          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
-          path: wheels/
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install auditwheel
-      - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
-
-  publish-wheels:
-    name: Publish wheels to PyPI
-    needs: [build-wheels, audit-wheels]
-    runs-on: ubuntu-latest
-    if: |
-      github.repository == 'bitsandbytes-foundation/bitsandbytes'
-      && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
-    environment:
-      name: release
-      url: https://pypi.org/p/bitsandbytes
-    permissions:
-      id-token: write
-    steps:
-      - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist/
-          pattern: "bdist_wheel_*"
-          merge-multiple: true
-
-      - name: Remove macOS wheels
-        run: rm dist/*macos*
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          print-hash: true
+jobs:  
+  ##  
+  # This job matrix builds the non-CUDA versions of the libraries for all supported platforms.  
+  ##  
+  build-shared-libs:  
+    strategy:  
+      matrix:  
+        include:  
+          - os: ubuntu-22.04  
+            arch: x86_64  
+          - os: ubuntu-22.04-arm  
+            arch: aarch64  
+          - os: windows-latest  
+            arch: x86_64  
+          - os: macos-latest  
+            arch: arm64  
+    runs-on: ${{ matrix.os }}  
+    steps:  
+      - uses: actions/checkout@v4  
+      - name: Setup MSVC  
+        if: startsWith(matrix.os, 'windows')  
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl  
+      - name: Build C++  
+        run: bash .github/scripts/build-cpu.sh  
+        env:  
+          build_os: ${{ matrix.os }}  
+          build_arch: ${{ matrix.arch }}  
+      - name: Upload build artifact  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: shared_library_${{ matrix.os }}_${{ matrix.arch }}  
+          path: output/*  
+          retention-days: 7  
+  ##  
+  # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)  
+  ##  
+  build-shared-libs-cuda:  
+    strategy:  
+      fail-fast: false  
+      matrix:  
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest]  
+        include:  
+          - os: ubuntu-22.04  
+            arch: x86_64  
+          - os: ubuntu-22.04-arm  
+            arch: aarch64  
+          - os: windows-latest  
+            arch: x86_64  
+        cuda_version:  
+          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1"]  
+    runs-on: ${{ matrix.os }}  
+    steps:  
+      - uses: actions/checkout@v4  
+        # Windows: We install Cuda on the agent (slow)  
+      - uses: Jimver/cuda-toolkit@v0.2.22  
+        if: startsWith(matrix.os, 'windows')  
+        id: cuda-toolkit  
+        with:  
+          cuda: ${{ matrix.cuda_version }}  
+          method: "network"  
+          sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'  
+          linux-local-args: '["--toolkit"]'  
+          use-github-cache: false  
+      - name: Setup MSVC  
+        if: startsWith(matrix.os, 'windows')  
+        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl  
+      - name: Build C++  
+        run: bash .github/scripts/build-cuda.sh  
+        env:  
+          build_os: ${{ matrix.os }}  
+          build_arch: ${{ matrix.arch }}  
+          cuda_version: ${{ matrix.cuda_version }}  
+      - name: Upload build artifact  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}  
+          path: output/*  
+          retention-days: 7  
+  build-shared-libs-rocm:  
+    strategy:  
+      matrix:  
+        os: [ubuntu-22.04]  
+        arch: [x86_64]  
+        rocm_version:  
+          ["6.1.2", "6.2.4", "6.3.2"]  
+    runs-on: ${{ matrix.os }}  
+    steps:  
+      - uses: actions/checkout@v4  
+      - name: Set up Docker multiarch  
+        uses: docker/setup-qemu-action@v3  
+      - name: Clean up disk space  
+        run: |  
+          sudo rm -rf \  
+              /usr/share/dotnet \  
+              /opt/ghc \  
+              "/usr/local/share/boost" \  
+              "$AGENT_TOOLSDIRECTORY" \  
+              /opt/hostedtoolcache \  
+              /opt/google/chrome \  
+              /opt/microsoft/msedge \  
+              /opt/microsoft/powershell \  
+              /opt/pipx \  
+              /usr/lib/mono \  
+              /usr/local/julia* \  
+              /usr/local/lib/android \  
+              /usr/local/lib/node_modules \  
+              /usr/local/share/chromium \  
+              /usr/local/share/powershell \  
+              /usr/share/swift  
+      - name: Build C++  
+        run: bash .github/scripts/build-rocm.sh  
+        env:  
+          build_os: ${{ matrix.os }}  
+          build_arch: ${{ matrix.arch }}  
+          rocm_version: ${{ matrix.rocm_version }}  
+      - name: Upload build artifact  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}  
+          path: output/*  
+          retention-days: 7    
+  build-wheels:  
+    needs:  
+      - build-shared-libs  
+      - build-shared-libs-cuda  
+      - build-shared-libs-rocm  
+    strategy:  
+      matrix:  
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]  
+        include:  
+          - os: ubuntu-22.04  
+            arch: x86_64  
+          - os: ubuntu-22.04-arm  
+            arch: aarch64  
+          - os: windows-latest  
+            arch: x86_64  
+          - os: macos-latest  
+            arch: arm64  
+        # The specific Python version is irrelevant in this context as we are only packaging non-C extension  
+        # code. This ensures compatibility across Python versions, including Python 3.9, as compatibility is  
+        # dictated by the packaged code itself, not the Python version used for packaging.  
+        python-version: ["3.10"]  
+    runs-on: ${{ matrix.os }}  
+    steps:  
+      - uses: actions/checkout@v4  
+      - name: Download build artifacts  
+        uses: actions/download-artifact@v4  
+        with:  
+          merge-multiple: true  
+          pattern: "shared_library*_${{ matrix.os }}_${{ matrix.arch }}*"  
+          path: output/  
+      - name: Copy correct platform shared library  
+        shell: bash  
+        run: |  
+          ls -lR output/  
+          cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/  
+      - name: Set up Python ${{ matrix.python-version }}  
+        uses: actions/setup-python@v5  
+        with:  
+          python-version: ${{ matrix.python-version }}  
+          cache: pip  
+      - run: pip install build wheel  
+      - run: python -m build .  
+      - name: Determine and Set Platform Tag, then Tag Wheel  
+        shell: bash  
+        run: |  
+          PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ matrix.arch }}")  
+          echo "PLATFORM_TAG=$PLATFORM_TAG"  
+          wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl  
+      - name: Upload build artifact  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}  
+          path: dist/bitsandbytes-*.whl  
+          retention-days: 7  
+  
+  upload-pre-release-wheels:  
+    name: Create release and upload artifacts  
+    runs-on: ubuntu-latest  
+    if: github.ref_name == 'main'  
+    permissions:  
+      contents: write  
+    needs:  
+      - build-wheels  
+    steps:  
+      - name: Download and rename artifacts  
+        uses: actions/download-artifact@v4  
+        with:  
+          path: tmp/  
+          pattern: "bdist_wheel_*"  
+          merge-multiple: true  
+    
+      - name: Inspect tmp directory after downloading artifacts  
+        run: ls -alFR tmp/  
+    
+      - name: Move and rename wheel files with pattern replacement  
+        run: |  
+          mkdir -p wheels/  
+  
+          # The whole point of the continuous release is to have a stable download link and the only way to have a PEP 440–compliant wheel name  
+          # is to use a stable placeholder version. Otherwise, pip won't let you install the wheel. The cool thing is that we can now install the  
+          # wheel directly from the GH pre-release which gets updated continuously, e.g.  
+          # `pip install https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl`  
+          STABLE_PLACEHOLDER_VERSION="1.33.7.preview"  
+  
+          # exclude macos wheels for now  
+          find tmp/ -type f -name '*.whl' ! -name '*macos*' -print0 | while IFS= read -r -d '' wheel; do  
+            wheel_filename=$(basename "$wheel")  
+  
+            # Strip off the original version  
+            rest=${wheel_filename#bitsandbytes-*-}  
+            new_name="bitsandbytes-${STABLE_PLACEHOLDER_VERSION}-${rest}"  
+  
+            echo "Renaming $wheel_filename → $new_name"  
+            mv "$wheel" "wheels/${new_name}"  
+          done  
+  
+      - name: Inspect wheels directory after renaming files  
+        run: ls -alFR wheels/  
+    
+      - name: Delete old pre-release (if exists)  
+        run: |  
+          gh release delete continuous-release_main --cleanup-tag -y || true  
+        env:  
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
+  
+      - name: Generate pip install commands for release body  
+        run: |  
+          cat > body.md << 'ENDOFMARKDOWN'  
+          ## Latest `main` Wheel Pre-release  
+  
+          This pre-release contains the latest development wheels for all supported platforms, rebuilt automatically on every commit to the `main` branch.  
+  
+          **How to install:**    
+          Pick the correct command for your platform and run it in your terminal:  
+  
+          ENDOFMARKDOWN  
+  
+          for whl in wheels/*.whl; do  
+            fname=$(basename "$whl")  
+            url="https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/$fname"  
+            echo "\`\`\`sh" >> body.md  
+            echo "pip install $url" >> body.md  
+            echo "\`\`\`" >> body.md  
+            echo "" >> body.md  
+          done  
+  
+          cat >> body.md << 'ENDOFMARKDOWN'  
+          > **Note:**    
+          > These wheels are updated automatically with every commit to `main` and become available as soon as the [python-package.yml](.github/workflows/python-package.yml) workflow finishes.  
+          ENDOFMARKDOWN  
+  
+          # for debugging:  
+          cat body.md  
+  
+      - name: Create new pre-release and upload artifacts  
+        uses: softprops/action-gh-release@v2.2.1  
+        with:  
+          files: wheels/*.whl  
+          prerelease: true  
+          name: Latest `main` wheel  
+          body_path: body.md  
+          tag_name: continuous-release_main  
+          make_latest: false  
+          draft: false  
+          target_commitish: ${{ github.sha }}  
+  
+  audit-wheels:  
+    needs: build-wheels  
+    strategy:  
+      matrix:  
+        os: [ubuntu-22.04, ubuntu-22.04-arm]  
+        include:  
+          - os: ubuntu-22.04  
+            arch: x86_64  
+          - os: ubuntu-22.04-arm  
+            arch: aarch64  
+    runs-on: ${{ matrix.os }}  
+    env:  
+      PIP_DISABLE_PIP_VERSION_CHECK: 1  
+    steps:  
+      - uses: actions/checkout@v4  
+      - name: Download wheel  
+        uses: actions/download-artifact@v4  
+        with:  
+          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}  
+          path: wheels/  
+      - name: Set up Python  
+        uses: actions/setup-python@v5  
+        with:  
+          python-version: "3.12"  
+      - run: pip install auditwheel  
+      - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY  
+  
+  publish-wheels:  
+    name: Publish wheels to PyPI  
+    needs: [build-wheels, audit-wheels]  
+    runs-on: ubuntu-latest  
+    if: |  
+      github.repository == 'bitsandbytes-foundation/bitsandbytes'  
+      && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')  
+    environment:  
+      name: release  
+      url: https://pypi.org/p/bitsandbytes  
+    permissions:  
+      id-token: write  
+    steps:  
+      - name: Download distribution artifacts  
+        uses: actions/download-artifact@v4  
+        with:  
+          path: dist/  
+          pattern: "bdist_wheel_*"  
+          merge-multiple: true  
+  
+      - name: Remove macOS wheels  
+        run: rm dist/*macos*  
+  
+      - name: Publish to PyPI  
+        uses: pypa/gh-action-pypi-publish@release/v1  
+        with:  
+          print-hash: true  
