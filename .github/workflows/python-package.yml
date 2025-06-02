@@ -145,12 +145,12 @@ jobs:
           name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}  
           path: output/*  
           retention-days: 7  
-  
-  build-wheels:  
-    needs:  
-      - build-shared-libs  
-      - build-shared-libs-cuda  
-      - build-shared-libs-rocm 
+
+  build-wheels:
+    needs:
+      - build-shared-libs
+      - build-shared-libs-cuda
+      - build-shared-libs-rocm
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]
