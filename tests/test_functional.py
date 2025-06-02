@@ -1330,7 +1330,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
     @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
-        if dtype == torch.bfloat16 and torch.__version__ < (2, 3):
+        if device == "cpu" and dtype == torch.bfloat16 and torch.__version__ < (2, 3):
             pytest.skip("eye doe not support bfloat16 on CPU in torch < 2.3")
 
         dims = 10
