@@ -103,39 +103,16 @@ def _(
 
     n = A.numel()
 
-    blocks = n // blocksize
-    rem = n % blocksize
-    has_rem = rem > 0
-    if has_rem:
-        blocks += 1
+    # TODO: Support when weight matrix is not divisible by blocksize
+    torch._check(n % blocksize == 0, lambda: f"n must be divisible by blocksize, got {n} and {blocksize}")
 
-    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-    A_reshaped = A.reshape(n)  
+    # Divide into blocks and normalize
+    blocks = A.reshape(-1, blocksize)
+    absmax = blocks.abs().max(dim=1).values.float()
+    scaled = blocks / absmax.unsqueeze(-1)
 
-    if n >= blocksize:
-        A_com = A_reshaped[: n - rem]
-        A_com_reshaped = A_com.reshape(n // blocksize, blocksize)
-        absmax[:blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=1).values.float()
-        scaled_A = torch.clamp(A_com_reshaped * (1 / absmax[:blocks - has_rem].unsqueeze(-1)), -1, 1)
-        scaled_A = scaled_A.reshape(-1)
-
-        if has_rem:
-            absmax[-1] = torch.abs(A_reshaped[n - rem :]).max().float() 
-            scaled_A_rem = torch.clamp(A_reshaped[n - rem :] * (1 / absmax[-1]), -1, 1)
-            scaled_A = torch.cat([scaled_A, scaled_A_rem], dim=0)
-            
-        # Quantize with the lookup table    
-        quantized = torch.argmin(torch.abs(scaled_A.view(-1, 1) - _NF4_QUANT_TABLE), dim=-1, keepdim=True).to(torch.uint8)
-    else:
-        blocks = A.reshape(-1, blocksize)  
-        absmax = blocks.abs().max(dim=1).values.float()  
-        scaled_A = blocks / absmax.unsqueeze(-1) 
-
-        # Quantize with the lookup table
-        quantized = torch.argmin(torch.abs(scaled_A.view(-1, 1) - _NF4_QUANT_TABLE), dim=-1, keepdim=True).to(torch.uint8)
-
-    if quantized.numel() % 2 == 1:
-        quantized = torch.cat([quantized, torch.zeros((1, 1), device=A.device, dtype=torch.uint8)])
+    # Quantize with the lookup table
+    quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - _NF4_QUANT_TABLE), dim=-1, keepdim=True).to(torch.uint8)
 
     # Pack two quantized values per byte
     packed = quantized[::2] << 4 | quantized[1::2]
@@ -172,52 +149,16 @@ def _(
     upper = (A >> 4).to(torch.int64)
     lower = (A & 0x0F).to(torch.int64)
 
-    # Calculate the total number of elements in the original tensor
-    n = 1
-    for d in shape:
-        n *= d
+    # Expand to blocks
+    blocks = torch.cat((upper, lower), dim=1).reshape(-1, blocksize)
 
-    # Concatenate upper and lower nibbles
-    indices = torch.cat((upper, lower), dim=1).reshape(-1)
+    # Dequantize
+    blocks = _NF4_QUANT_TABLE[blocks] * absmax[:, None]
 
-    if indices.numel() > n:
-        indices = indices[:n]
+    # Reshape to original shape
+    blocks = blocks.reshape(-1, *shape[1:])
 
-    blocks = n // blocksize
-    rem = n % blocksize
-    has_rem = rem > 0
-    if has_rem:
-        blocks += 1
-
-    if has_rem:
-        out = torch.empty(shape, dtype=dtype, device=A.device)
-        out_reshaped = out.reshape(-1)
-
-        padded_indices = torch.zeros(blocks * blocksize, dtype=indices.dtype, device=indices.device)
-        padded_indices[:n] = indices
-        blocks_data = padded_indices.reshape(-1, blocksize)
-
-        # Dequantize full blocks
-        dequantized = _NF4_QUANT_TABLE[blocks_data]
-
-        # Apply scales to full blocks
-        out_reshaped[:n - rem] = (
-            dequantized[:blocks - 1].reshape(-1, blocksize) * absmax[:blocks - 1].view(-1, 1)
-        ).reshape(-1)
-
-        # Apply scale to remainder block
-        out_reshaped[n - rem:] = dequantized[blocks - 1, :rem] * absmax[-1]
-    else:
-        # Expand to blocks
-        blocks = torch.cat((upper, lower), dim=1).reshape(-1, blocksize)
-
-        # Dequantize
-        blocks = _NF4_QUANT_TABLE[blocks] * absmax[:, None]
-
-        # Reshape to original shape
-        out = blocks.reshape(-1, *shape[1:])
-
-    return out.to(dtype)
+    return blocks.to(dtype)
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "cpu")
