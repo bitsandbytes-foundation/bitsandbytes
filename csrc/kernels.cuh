@@ -106,10 +106,6 @@ template<typename T, int OPTIMIZER, int BLOCK_SIZE, int N_PER_TH> __global__ voi
 
 template<typename T, int BLOCK_SIZE, int NUM_VALS> __global__ void kPercentileClipping(T * __restrict__ g, float *gnorm_vec, int step, const int n);
 
-
-__global__ void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n);
-
-
 template <typename T, int SPMM_ITEMS, int BITS> __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out,  float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB);
 
 template <int ITEMS_PER_THREAD, int THREADS>__global__ void kdequant_mm_int32_fp16(

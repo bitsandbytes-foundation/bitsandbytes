@@ -18,15 +18,6 @@ using namespace BinSearch;
 using std::cout;
 using std::endl;
 
-void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n)
-{
-  int threads = 512;
-  int num_blocks = n/threads;
-  num_blocks = n % threads == 0 ? num_blocks : num_blocks + 1;
-  kHistogramScatterAdd2D<<<num_blocks, 512>>>(histogram, index1, index2, src, maxidx1, n);
-  CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
 template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
 {
   int num_blocks = n/4096;
