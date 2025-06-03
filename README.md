@@ -118,13 +118,13 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">arm64</td>
       <td>◻️ CPU</td>
       <td>Apple M1+</td>
-      <td>🛣️ Future Roadmap</td>
+      <td>🚧 In Development</td>
     </tr>
     <tr>
       <td></td>
       <td>⬜ Metal <br><code>mps</code></td>
       <td>Apple M1+</td>
-      <td>🛣️ Future Roadmap</td>
+      <td>🚧 In Development</td>
   </tbody>
 </table>
 
