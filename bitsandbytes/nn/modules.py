@@ -353,6 +353,7 @@ class Params4bit(torch.nn.Parameter):
                 compress_statistics=self.compress_statistics,
                 quant_type=self.quant_type,
                 quant_storage=self.quant_storage,
+                bnb_quantized=self.bnb_quantized,
             )
 
             return new_param
