@@ -1,8 +1,8 @@
 import dataclasses
+from functools import lru_cache
 import logging
 import re
 import subprocess
-from functools import lru_cache
 from typing import Optional
 
 import torch

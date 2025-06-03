@@ -4,8 +4,8 @@ import pytest
 import torch
 
 import bitsandbytes
-from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
 from bitsandbytes.cextension import HIP_ENVIRONMENT
+from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
 
 
 class TestLLMInt8Ops:

@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import lib, HIP_ENVIRONMENT
+from .cextension import HIP_ENVIRONMENT, lib
 
 name2qmap = {}
 
@@ -1007,10 +1007,10 @@ def quantize_4bit(
         - `torch.Tensor`: The quantized tensor with packed 4-bit values.
         - [`QuantState`]: The state object used to undo the quantization.
     """
-    
+
     if blocksize is None:
         blocksize = 64 if not HIP_ENVIRONMENT else 128
-        
+
     input_shape = A.shape
 
     _out, _absmax = torch.ops.bitsandbytes.quantize_4bit.default(
@@ -1114,10 +1114,10 @@ def dequantize_4bit(
     Returns:
         `torch.Tensor`: The dequantized tensor.
     """
-    
+
     if blocksize is None:
         blocksize = 64 if not HIP_ENVIRONMENT else 128
-        
+
     if quant_state is None:
         assert absmax is not None and out is not None
 

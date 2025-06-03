@@ -199,10 +199,10 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 	}
 }
 
-#define BLOCKSIZE_2STATE 256 
-#define NUM_2STATE 1 
-#define BLOCKSIZE_1STATE 256 
-#define NUM_1STATE 1 
+#define BLOCKSIZE_2STATE 256
+#define NUM_2STATE 1
+#define BLOCKSIZE_1STATE 256
+#define NUM_1STATE 1
 
 template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(
 	T* p,
@@ -443,7 +443,7 @@ static std::string hipError_to_string(const hipError_t ret)
 }
 
 template <int DTYPE_OUT, int SCALE_ROWS> int igemmlt(
-  hipblasLtHandle_t ltHandle, 
+  hipblasLtHandle_t ltHandle,
   int m, int n, int k,
   const int8_t *A,
   const int8_t *B,

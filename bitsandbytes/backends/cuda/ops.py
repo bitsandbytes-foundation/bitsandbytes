@@ -8,7 +8,7 @@ import torch
 from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, _get_tensor_stream, get_ptr
 
 from ..._ops import register_kernel
-from ...cextension import lib, HIP_ENVIRONMENT
+from ...cextension import HIP_ENVIRONMENT, lib
 
 
 @register_kernel("bitsandbytes::int8_linear_matmul", "cuda")
@@ -210,12 +210,12 @@ def _get_col_absmax(
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
-    
-    if HIP_ENVIRONMENT:  
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
-    else:  
+
+    if HIP_ENVIRONMENT:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+    else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-        
+
     torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
 
     n = A.numel()
@@ -269,11 +269,11 @@ def _(
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
-    if HIP_ENVIRONMENT:  
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
-    else:  
+    if HIP_ENVIRONMENT:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+    else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-        
+
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     torch._check(
         dtype in [torch.float16, torch.bfloat16, torch.float32],
@@ -303,11 +303,11 @@ def _dequantize_blockwise_impl(
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    if HIP_ENVIRONMENT:  
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
-    else:  
+    if HIP_ENVIRONMENT:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+    else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-        
+
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(
         A.dtype in [torch.bfloat16, torch.float16, torch.float32],
@@ -385,11 +385,11 @@ def _dequantize_4bit_impl(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-    if HIP_ENVIRONMENT:  
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])  
-    else:  
+    if HIP_ENVIRONMENT:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+    else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-        
+
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
