@@ -11,6 +11,7 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
@@ -212,7 +213,7 @@ class Params4bit(torch.nn.Parameter):
         data: Optional[torch.Tensor] = None,
         requires_grad=False,  # quantized weights should be frozen by default
         quant_state: Optional[QuantState] = None,
-        blocksize: int = 64,
+        blocksize: Optional[int] = None,
         compress_statistics: bool = True,
         quant_type: str = "fp4",
         quant_storage: torch.dtype = torch.uint8,
@@ -221,7 +222,10 @@ class Params4bit(torch.nn.Parameter):
     ) -> "Params4bit":
         if data is None:
             data = torch.empty(0)
-
+            
+        if blocksize is None:
+            blocksize = 64 if not HIP_ENVIRONMENT else 128
+            
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
         self.blocksize = blocksize
         self.compress_statistics = compress_statistics

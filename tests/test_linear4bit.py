@@ -7,6 +7,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, torch_load_from_buffer, torch_save_to_buffer
 
 storage = {
@@ -15,7 +16,6 @@ storage = {
     "bfloat16": torch.bfloat16,
     "float32": torch.float32,
 }
-
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
@@ -183,7 +183,7 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
     if device == "cpu":
@@ -208,7 +208,7 @@ def test_copy_param(device, quant_type, blocksize, compress_statistics):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
     if device == "cpu":
@@ -240,7 +240,7 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
     if device == "cpu":

@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import HIP_ENVIRONMENT, ROCM_GPU_ARCH
 from bitsandbytes import functional as F
 from tests.helpers import (
     BOOLEAN_TUPLES,
@@ -91,7 +92,7 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
-    @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64])
+    @pytest.mark.parametrize("blocksize", [4096, 2048, 1024, 512, 256, 128, 64] if not HIP_ENVIRONMENT else [4096, 2048, 1024, 512, 256, 128] )
     @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
     def test_dynamic_blockwise_quantization(self, device, dtype, nested, blocksize, signed):
         iters = 100
@@ -795,7 +796,7 @@ class TestLLMInt8Functional:
                 A[:, outlier_cols] = 0
                 torch.testing.assert_close(A * (idx == 0), A2, rtol=0.05, atol=1.5e-2)
 
-
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
 class TestSpMMFunctional:
     @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
@@ -1105,7 +1106,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096] if not HIP_ENVIRONMENT else [128, 256, 512, 1024, 2048, 4096])
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
@@ -1140,7 +1141,7 @@ class TestQuantize4BitFunctional:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128], ids=id_formatter("blocksize"))
+    @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128], ids=id_formatter("blocksize"))
     def test_4bit_compressed_stats(self, device, quant_type, blocksize):
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
@@ -1204,7 +1205,10 @@ class TestQuantize4BitFunctional:
         #    torch.matmul(b, a.t())
         # torch.cuda.synchronize()
         # print((time.time()-t0)/iters*1e6)
-
+    
+    @pytest.mark.skipif(
+        HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64"
+    )
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("double_quant", TRUE_FALSE, ids=lambda double_quant: f"DQ_{double_quant}")
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"])
@@ -1368,6 +1372,10 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
     @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
+    @pytest.mark.skipif(
+        HIP_ENVIRONMENT and ROCM_GPU_ARCH == "gfx90a",
+        reason="this test is not supported on ROCm with gfx90a architecture yet",
+    )
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
         if device == "cpu" and storage_type != "nf4":
             pytest.xfail("fp4 quantization is not supported on CPU")
