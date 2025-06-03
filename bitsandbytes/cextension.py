@@ -304,7 +304,8 @@ try:
                 "Detected Intel XPU but no Intel Extension for PyTorch (IPEX) installed. Triton implementation will be used."
                 "Please check the installation doc to install `intel_extension_for_pytorch` to get better performance."
             )
-        lib = None
+        # create a mock with error messaging as fallback
+        lib = ErrorHandlerMockBNBNativeLibrary("XPU does not need library loading")
     else:
         lib = get_native_library()
 except Exception as e:
