@@ -581,6 +581,13 @@ class TestLLMInt8Functional:
         x *= S2 / C
         return x.to(dtype)
 
+    @staticmethod
+    def vectorwise_quant(x, dim=1):
+        """Reference implementation"""
+        max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
+        xq = torch.round(x * (127.0 / max1)).to(torch.int8)
+        return xq, max1
+
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
@@ -642,8 +649,8 @@ class TestLLMInt8Functional:
             if has_bias:
                 C1 += bias
 
-            A1, maxA = F.vectorwise_quant(A, dim=1)
-            B1, maxB = F.vectorwise_quant(B, dim=1)
+            A1, maxA = self.vectorwise_quant(A, dim=1)
+            B1, maxB = self.vectorwise_quant(B, dim=1)
 
             C2 = F.int8_linear_matmul(A1, B1)
 
@@ -711,8 +718,8 @@ class TestLLMInt8Functional:
     def test_int8_double_quant(self, dim1, dim2):
         for i in range(k):
             A = torch.randn(dim1, dim2, device="cuda").half()
-            out_col1, Scol = F.vectorwise_quant(A, dim=0)
-            out_row1, Srow = F.vectorwise_quant(A, dim=1)
+            out_col1, Scol = self.vectorwise_quant(A, dim=0)
+            out_row1, Srow = self.vectorwise_quant(A, dim=1)
 
             CA, CAt, statsA, statsAt, _ = F.int8_double_quant(A)
 
@@ -764,8 +771,8 @@ class TestLLMInt8Functional:
 
             C1a, stats1a, _ = F.int8_vectorwise_quant(A)
             C2a, stats2a, _ = F.int8_vectorwise_quant(B)
-            A1, maxA = F.vectorwise_quant(A, dim=1)
-            B1, maxB = F.vectorwise_quant(B, dim=1)
+            A1, maxA = self.vectorwise_quant(A, dim=1)
+            B1, maxB = self.vectorwise_quant(B, dim=1)
 
             torch.testing.assert_close(maxA.flatten().float(), stats1a)
             torch.testing.assert_close(maxB.flatten().float(), stats2a)
@@ -909,8 +916,9 @@ class TestSpMMFunctional:
         else:
             B = torch.randn(dim2, dim2 * 4, device="cuda").half()
             torch.nn.init.xavier_uniform_(B)
-            B, SB = F.vectorwise_quant(B, quant_type="linear")
-            # B = torch.randint(-127, 127, size=(dim2, dim2*4), device='cuda').to(torch.int8)
+
+            SB = torch.abs(B).max().float()
+            B = torch.round(B / SB * 127).to(torch.int8)
 
         print("")
         idx = torch.abs(A) >= threshold
