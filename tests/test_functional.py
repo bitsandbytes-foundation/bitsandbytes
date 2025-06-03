@@ -564,6 +564,23 @@ class TestIGEMMFunctional:
 
 
 class TestLLMInt8Functional:
+    @staticmethod
+    def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half):
+        """Reference implementation for the F.int8_mm_dequant function."""
+        C = 127.0
+
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2:
+            S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2:
+            S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= S1 / C
+        else:
+            x *= S1 / C
+        x *= S2 / C
+        return x.to(dtype)
+
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
@@ -630,7 +647,7 @@ class TestLLMInt8Functional:
 
             C2 = F.int8_linear_matmul(A1, B1)
 
-            C4 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
+            C4 = self.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
             if has_bias:
                 C4 += bias
 
@@ -759,7 +776,7 @@ class TestLLMInt8Functional:
 
             C2 = F.int8_linear_matmul(A1, B1)
 
-            out3 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
+            out3 = self.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
 
             err1 = torch.abs(out1 - out2).mean().item()
             err2 = torch.abs(out1 - out3).mean().item()
