@@ -1,8 +1,8 @@
 import dataclasses
-import logging  
-import re  
-import subprocess
 from functools import lru_cache
+import logging
+import re
+import subprocess
 from typing import Optional
 
 import torch
@@ -78,25 +78,25 @@ def get_cuda_specs() -> Optional[CUDASpecs]:
         return None
 
 
-def get_rocm_gpu_arch() -> str:  
-    """Get ROCm GPU architecture."""  
-    logger = logging.getLogger(__name__)  
-    try:  
-        if torch.version.hip:  
-            result = subprocess.run(["rocminfo"], capture_output=True, text=True)  
-            match = re.search(r"Name:\s+gfx([a-zA-Z\d]+)", result.stdout)  
-            if match:  
-                return "gfx" + match.group(1)  
-            else:  
-                return "unknown"  
-        else:  
-            return "unknown"  
-    except Exception as e:  
-        logger.error(f"Could not detect ROCm GPU architecture: {e}")  
-        if torch.cuda.is_available():  
-            logger.warning(  
-                """  
-ROCm GPU architecture detection failed despite ROCm being available.  
-                """,  
-            )  
-        return "unknown"  
+def get_rocm_gpu_arch() -> str:
+    """Get ROCm GPU architecture."""
+    logger = logging.getLogger(__name__)
+    try:
+        if torch.version.hip:
+            result = subprocess.run(["rocminfo"], capture_output=True, text=True)
+            match = re.search(r"Name:\s+gfx([a-zA-Z\d]+)", result.stdout)
+            if match:
+                return "gfx" + match.group(1)
+            else:
+                return "unknown"
+        else:
+            return "unknown"
+    except Exception as e:
+        logger.error(f"Could not detect ROCm GPU architecture: {e}")
+        if torch.cuda.is_available():
+            logger.warning(
+                """
+ROCm GPU architecture detection failed despite ROCm being available.
+                """,
+            )
+        return "unknown"

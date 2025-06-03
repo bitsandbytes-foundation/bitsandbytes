@@ -102,10 +102,55 @@ jobs:
           path: output/*
           retention-days: 7
 
+  build-shared-libs-rocm:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04]
+        arch: [x86_64]
+        rocm_version:
+          ["6.1.2", "6.2.4", "6.3.2"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker multiarch
+        uses: docker/setup-qemu-action@v3
+      - name: Clean up disk space
+        run: |
+          sudo rm -rf \
+              /usr/share/dotnet \
+              /opt/ghc \
+              "/usr/local/share/boost" \
+              "$AGENT_TOOLSDIRECTORY" \
+              /opt/hostedtoolcache \
+              /opt/google/chrome \
+              /opt/microsoft/msedge \
+              /opt/microsoft/powershell \
+              /opt/pipx \
+              /usr/lib/mono \
+              /usr/local/julia* \
+              /usr/local/lib/android \
+              /usr/local/lib/node_modules \
+              /usr/local/share/chromium \
+              /usr/local/share/powershell \
+              /usr/share/swift
+      - name: Build C++
+        run: bash .github/scripts/build-rocm.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+          rocm_version: ${{ matrix.rocm_version }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}
+          path: output/*
+          retention-days: 7
+
   build-wheels:
     needs:
       - build-shared-libs
       - build-shared-libs-cuda
+      - build-shared-libs-rocm
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]
@@ -171,10 +216,10 @@ jobs:
           path: tmp/
           pattern: "bdist_wheel_*"
           merge-multiple: true
-  
+
       - name: Inspect tmp directory after downloading artifacts
         run: ls -alFR tmp/
-  
+
       - name: Move and rename wheel files with pattern replacement
         run: |
           mkdir -p wheels/
@@ -199,7 +244,7 @@ jobs:
 
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
-  
+
       - name: Delete old pre-release (if exists)
         run: |
           gh release delete continuous-release_main --cleanup-tag -y || true
@@ -213,7 +258,7 @@ jobs:
 
           This pre-release contains the latest development wheels for all supported platforms, rebuilt automatically on every commit to the `main` branch.
 
-          **How to install:**  
+          **How to install:**
           Pick the correct command for your platform and run it in your terminal:
 
           ENDOFMARKDOWN
@@ -228,7 +273,7 @@ jobs:
           done
 
           cat >> body.md << 'ENDOFMARKDOWN'
-          > **Note:**  
+          > **Note:**
           > These wheels are updated automatically with every commit to `main` and become available as soon as the [python-package.yml](.github/workflows/python-package.yml) workflow finishes.
           ENDOFMARKDOWN
 

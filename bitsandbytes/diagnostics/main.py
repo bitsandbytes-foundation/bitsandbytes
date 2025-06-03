@@ -43,7 +43,8 @@ def main():
         print(f"{BNB_BACKEND} specs:{cuda_specs}")
     if not torch.cuda.is_available():
         print(f"Torch says {BNB_BACKEND} is not available. Possible reasons:")
-        if not HIP_ENVIRONMENT: print(f"- {BNB_BACKEND} driver not installed")
+        if not HIP_ENVIRONMENT:
+            print(f"- {BNB_BACKEND} driver not installed")
         print(f"- {BNB_BACKEND} not installed")
         print(f"- You have multiple conflicting {BNB_BACKEND} libraries")
     if cuda_specs:

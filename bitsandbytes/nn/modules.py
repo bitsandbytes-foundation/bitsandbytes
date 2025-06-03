@@ -222,10 +222,10 @@ class Params4bit(torch.nn.Parameter):
     ) -> "Params4bit":
         if data is None:
             data = torch.empty(0)
-            
+
         if blocksize is None:
             blocksize = 64 if not HIP_ENVIRONMENT else 128
-            
+
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
         self.blocksize = blocksize
         self.compress_statistics = compress_statistics

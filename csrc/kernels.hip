@@ -532,7 +532,7 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
       absmax[i / BLOCK_SIZE] = local_abs_max;
     }
     __syncthreads();
-    
+
     local_abs_max = smem_absmax_value[0];
 
     if(STOCHASTIC)
@@ -610,7 +610,7 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * abs
       valid_items_load = min(TILE_SIZE, n - i);
       valid_items_store = valid_items_load;
     }
-    
+
     // Since blocksize will always be a power-of-2, we avoid more expensive
     // division by the blocksize and instead use a shift operation.
     // This is equivalent to (i+threadId.x*NUM_PER_TH)/blocksize.
@@ -811,7 +811,7 @@ __global__ void kOptimizer32bit2State(T* g, T* p,
       LoadFloat(temp_storage.loadf).Load(&(state2[i]), s2_vals, valid_items);
       __syncthreads();
       Load(temp_storage.load).Load(&(p[i]), p_vals, valid_items);
-      
+
       // Load additional state1 data for AdEMAMix
       // TODO: Make constexpr after updating min compiler
       if (OPTIMIZER == ADEMAMIX) {
@@ -1607,7 +1607,7 @@ kOptimizerStatic8bit2StateBlockwise(
     unsigned char c1s[N_PER_TH];
     unsigned char c2s[N_PER_TH];
     unsigned char c3s[N_PER_TH];
-    
+
     T g_vals[N_PER_TH];
     T p_vals[N_PER_TH];
     typedef hipcub::BlockLoad<T, BLOCK_SIZE/N_PER_TH, N_PER_TH, hipcub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
@@ -1712,7 +1712,7 @@ kOptimizerStatic8bit2StateBlockwise(
 
             new_local_abs_max1 = fmaxf(new_local_abs_max1, fabsf(s1_vals[j]));
             new_local_abs_max2 = fmaxf(new_local_abs_max2, fabsf(s2_vals[j]));
-        
+
             if (OPTIMIZER == ADEMAMIX) {
               new_local_abs_max3 = fmaxf(new_local_abs_max3, fabsf(s3_vals[j]));
             }
@@ -1776,7 +1776,7 @@ kOptimizerStatic8bit2StateBlockwise(
               } else {
 		p_vals[j] = (T)(((float)p_vals[j]) + ((step_size*(__fdividef(s1_vals[j],(sqrtf(s2_vals[j])+(correction2*eps)))))));
               }
-	
+
 	      if(weight_decay > 0.0f)
 									p_vals[j] = ((float)p_vals[j])*(1.0f-(lr*weight_decay));
 						}
@@ -2148,27 +2148,27 @@ __global__ void kdequant_mm_int32_fp16(
 
   int local_values[ITEMS_PER_THREAD];
   half local_output[ITEMS_PER_THREAD];
-  
+
   float local_rowStats[ITEMS_PER_THREAD];
   float local_colStats[ITEMS_PER_THREAD];
   float local_biasValue[ITEMS_PER_THREAD];
 
   typedef hipcub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, hipcub::BLOCK_LOAD_DIRECT> LoadInt32;
   __shared__ typename LoadInt32::TempStorage loadint32;
-  
+
   int row_idx, col_idx;
-  
+
   #pragma unroll ITEMS_PER_THREAD
   for(int j = 0; j < ITEMS_PER_THREAD; j++)
   {
        row_idx = (block_offset + thread_offset + j) / numCols;
        col_idx = (block_offset + thread_offset + j) % numCols;
-       
+
        local_colStats[j] = col_idx >= numCols ? 0.0f : colStats[col_idx];
-       local_rowStats[j] = row_idx >= numRows ? 0.0f : rowStats[row_idx]; 
+       local_rowStats[j] = row_idx >= numRows ? 0.0f : rowStats[row_idx];
        local_biasValue[j] = ((bias == nullptr) || (col_idx >= numCols)) ? 0.0f : __half2float(bias[col_idx]);
   }
- 
+
   // Each block loads THREADS * ITEMS_PER_THREAD values from A
   int valid_items = block_offset + THREADS * ITEMS_PER_THREAD < n_out
     ? THREADS * ITEMS_PER_THREAD
@@ -2188,7 +2188,7 @@ __global__ void kdequant_mm_int32_fp16(
     if (outIdx < n_out) {
       out[outIdx] = local_output[j];
     }
-  } 
+  }
 }
 
 #define DENORM 1.0f/127.0f
