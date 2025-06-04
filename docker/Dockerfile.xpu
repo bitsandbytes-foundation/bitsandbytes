@@ -1,0 +1,35 @@
+FROM intel/oneapi-basekit:2025.0.1-0-devel-ubuntu22.04 AS base
+SHELL ["/bin/bash", "-c"]
+
+ARG PYTHON_VER=3.11
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get remove -y python3.10 && apt-get autoremove -y
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y python$PYTHON_VER python$PYTHON_VER-dev python3-pip && \
+    ln -sf /usr/bin/python$PYTHON_VER /usr/bin/python3 && \
+    ln -sf /usr/bin/python3 /usr/bin/python && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get -y install apt-utils build-essential \
+    git vim numactl python3-dev wget google-perftools && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --upgrade pip
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu --no-cache-dir
+RUN pip install intel-extension-for-pytorch --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/ --no-cache-dir
+RUN pip install -U transformers accelerate peft pytest
+
+# install bitsandbytes
+RUN git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/ && \
+    pip install . && cd ../
+
+RUN touch /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+RUN echo "#!/bin/bash" >> /entrypoint.sh
+RUN echo "/bin/bash" >> /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
