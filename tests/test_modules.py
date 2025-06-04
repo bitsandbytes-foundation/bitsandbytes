@@ -5,8 +5,6 @@ import torch
 from torch import nn
 
 import bitsandbytes as bnb
-from bitsandbytes.backends.utils import triton_available
-from bitsandbytes.functional import ipex_xpu
 from tests.helpers import get_available_devices, id_formatter
 
 
@@ -287,7 +285,6 @@ module_dict = {
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("module", module_dict.values(), ids=module_dict.keys())
 def test_kbit_backprop(device, module):
-
     b = 16
     dim1 = 36
     dim2 = 84
