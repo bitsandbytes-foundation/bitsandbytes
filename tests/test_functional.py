@@ -170,7 +170,7 @@ class Test8BitBlockwiseQuantizeFunctional:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
-    @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic", "quantile"])
+    @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic"])
     def test_few_bit_quant(self, device, bits, method):
         if device in ("cpu", "xpu") and bits != 8:
             pytest.skip("CPU/XPU implementation only supports 8 bits")
@@ -186,11 +186,7 @@ class Test8BitBlockwiseQuantizeFunctional:
             code = F.create_fp8_map(True, ebits, pbits, bits).to(device)
         elif method == "dynamic":
             code = F.create_dynamic_map(True, bits - 0, bits).to(device)
-        elif method == "quantile":
-            if device != "cuda":
-                pytest.skip("Quantile map only works on CUDA")
-            values = torch.randn(2048, 2048, device="cuda")
-            code = F.create_quantile_map(values, bits).cuda()
+
         # for some data types we have no zero
         # for some data types we have one zero
         # for some data types we have two zeros

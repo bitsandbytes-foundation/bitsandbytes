@@ -19,9 +19,6 @@
 //===================================================================================
 
 #if BUILD_CUDA
-void estimateQuantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles<float>(A, code, offset, n); }
-void estimateQuantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles<half>(A, code, offset, n); }
-
 
 //void gemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
 //{ gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc, 32); }
@@ -169,8 +166,6 @@ void spmm_coo_very_sparse_naive_int8(int *max_count, int *max_idx, int *offset_r
 extern "C"
 {
 #if BUILD_CUDA
-	void cestimate_quantiles_fp32(float *A, float *code, float offset, int n){ estimateQuantiles_fp32(A, code, offset, n); }
-	void cestimate_quantiles_fp16(half *A, float *code, float offset, int n){ estimateQuantiles_fp16(A, code, offset, n); }
 	void cquantize(float *code, float *A, unsigned char *out, int n){ quantize(code, A, out, n); }
 	void cdequantize(float *code, unsigned char *A, float *out, int n, cudaStream_t stream){ dequantize(code, A, out, n, stream); }
 

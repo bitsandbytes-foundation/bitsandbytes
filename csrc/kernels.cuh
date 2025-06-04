@@ -10,8 +10,6 @@
 #define kernels
 
 
-template<typename T>__global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset, const T max_val, const int n);
-
 __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n);
 __global__ void kDequantize(float *code, unsigned char *A, float *out, const int n);
 

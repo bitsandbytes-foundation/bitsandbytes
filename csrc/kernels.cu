@@ -357,79 +357,6 @@ __device__ __forceinline__ unsigned char quantize_2D(float *__restrict__ quadran
     }
 }
 
-#define THREADS_ESTIMATE 512
-#define NUM_ESTIMATE 8
-#define BLOCK_ESTIMATE 4096
-
-template<typename T>
-__launch_bounds__(THREADS_ESTIMATE, 1)
-__global__ void kEstimateQuantiles(T *__restrict__ const A, float *code, const float offset, const T max_val, const int n)
-{
-  const int n_full = (BLOCK_ESTIMATE*(n/BLOCK_ESTIMATE)) + (n % BLOCK_ESTIMATE == 0 ? 0 : BLOCK_ESTIMATE);
-  int valid_items = (blockIdx.x+1 == gridDim.x) ? n - (blockIdx.x*BLOCK_ESTIMATE) : BLOCK_ESTIMATE;
-  const int base_idx = (blockIdx.x * BLOCK_ESTIMATE);
-  const float reciprocal_num_blocks = 1.0f/(n < 4096 ? 1.0f : (n/BLOCK_ESTIMATE));
-
-  T vals[NUM_ESTIMATE];
-
-  typedef cub::BlockRadixSort<T, THREADS_ESTIMATE, NUM_ESTIMATE, cub::NullType, 4, true, cub::BLOCK_SCAN_RAKING> BlockRadixSort;
-  typedef cub::BlockLoad<T, THREADS_ESTIMATE, NUM_ESTIMATE, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-
-  __shared__ union {
-      typename LoadFloat::TempStorage loadf;
-      typename BlockRadixSort::TempStorage sort;
-      int smem_qidx[BLOCK_ESTIMATE];
-  } temp_storage;
-
-  for (unsigned int i = base_idx; i < n_full; i += gridDim.x*BLOCK_ESTIMATE)
-  {
-      valid_items = n - i > BLOCK_ESTIMATE ? BLOCK_ESTIMATE : n - i;
-
-      // do not process half-blocks
-      if(valid_items < BLOCK_ESTIMATE && n > BLOCK_ESTIMATE){ continue; }
-
-      #pragma unroll 4
-      for(int j = 0; j < NUM_ESTIMATE; j++)
-          vals[j] = max_val;
-
-      __syncthreads();
-      LoadFloat(temp_storage.loadf).Load(&(A[i]), vals, valid_items);
-
-      #pragma unroll 4
-      for(int j = 0; j < NUM_ESTIMATE; j++)
-          vals[j] = ((float)vals[j]) * reciprocal_num_blocks;
-
-
-      __syncthreads();
-      // sort into striped pattern to mitigate bank conflicts
-      // striped pattern index for thread 0 [0, 1024, 2048, 3096]
-      // striped pattern index for thread 1 [1, 1025, 2049, 3097]
-      BlockRadixSort(temp_storage.sort).SortBlockedToStriped(vals);
-
-      __syncthreads();
-      for(int j = threadIdx.x; j < BLOCK_ESTIMATE; j+=blockDim.x)
-          temp_storage.smem_qidx[j] = -1;
-
-      __syncthreads();
-
-      if(threadIdx.x < 256)
-      {
-          float q_interval = (1.0f-(2.0f*offset))/255.0f;
-          int local_idx = round(((offset+(threadIdx.x*q_interval))*(valid_items-1)));
-          temp_storage.smem_qidx[local_idx] = threadIdx.x;
-      }
-
-      __syncthreads();
-
-      for(int i = threadIdx.x; i < BLOCK_ESTIMATE; i+=blockDim.x)
-      {
-          if(temp_storage.smem_qidx[i] != -1)
-              atomicAdd(&code[temp_storage.smem_qidx[i]], vals[i/THREADS_ESTIMATE]);
-      }
-  }
-}
-
-
 __launch_bounds__(TH, 4)
 __global__ void kQuantize(float * code, float * __restrict__ const A, unsigned char *out, const int n)
 {
@@ -2984,9 +2911,6 @@ template __global__ void kdequant_mm_int32_fp16<4, 512>(int *__restrict__ const 
 
 template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template __device__ unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
-
-template __global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n);
-template __global__ void kEstimateQuantiles(half *__restrict__ const A, float *code, const float offset, const half max_val, const int n);
 
 #define MAKE_PreconditionOptimizer32bit1State(oname, gtype) \
 template __global__ void kPreconditionOptimizer32bit1State<gtype, oname, 4096, 8>(gtype* g, gtype* p, \

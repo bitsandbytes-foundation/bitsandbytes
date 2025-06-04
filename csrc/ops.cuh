@@ -136,9 +136,6 @@ class ContextCusparse
 
 };
 
-
-template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n);
-
 void quantize(float *code, float *A, unsigned char *out, int n);
 void dequantize(float *code, unsigned char *A, float *out, int n, cudaStream_t stream);
 template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(float * code, T *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
