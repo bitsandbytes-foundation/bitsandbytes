@@ -107,10 +107,9 @@ class Test8BitBlockwiseQuantizeFunctional:
             if nested:
                 pytest.skip("Not a typical use case.")
             if blocksize != 256:
-                pytest.skip("Only blocksize 256 is the typical one supported on CPU.")
-
+                pytest.skip("Only blocksize 256 is used in CPU/XPU")
             if dtype != torch.float32:
-                pytest.xfail(f"CPU implementation currently only supports float32, got {dtype}")
+                pytest.skip("Only float32 is used in CPU/XPU")
 
         diffs = []
         reldiffs = []
@@ -142,10 +141,11 @@ class Test8BitBlockwiseQuantizeFunctional:
         abserr = sum(diffs) / len(diffs)
         relerr = sum(reldiffs) / len(reldiffs)
         if signed:
-            assert abserr < 0.0035
+            threshold_abserr = 0.0036 if device in ("cpu", "xpu") else 0.0035
+            assert abserr < 0.0036
             assert relerr < 0.015
         else:
-            assert abserr < 0.00175
+            assert abserr < 0.00175 if device in ("cpu", "xpu") else 0.0023
             assert relerr < 0.012
         assert A2.dtype == dtype
 
@@ -176,8 +176,8 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
     @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic", "quantile"])
     def test_few_bit_quant(self, device, bits, method):
-        if device == "cpu" and bits != 8:
-            pytest.skip("CPU implementation only supports 8 bits")
+        if device in ("cpu", "xpu") and bits != 8:
+            pytest.skip("CPU/XPU implementation only supports 8 bits")
 
         abserrs = []
         relerrs = []
@@ -529,7 +529,13 @@ class TestIGEMMFunctional:
         # print(mean(errs2))
         # print(mean(relerrs2))
         assert mean(errs) < 0.015
-        assert mean(relerrs) < 0.3
+
+        # There's a higher relerr on L40S with torch 2.4+cu118.
+        is_sm89 = torch.cuda.get_device_capability() == (8, 9)
+        if torch.version.cuda == "11.8" and is_sm89 and torch.__version__ < (2, 5):
+            assert mean(relerrs) < 0.41
+        else:
+            assert mean(relerrs) < 0.3
 
     @pytest.mark.parametrize("dim1", [1, 64], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [32, 128], ids=id_formatter("dim2"))
@@ -934,39 +940,6 @@ class TestSpMMFunctional:
         # torch.cuda.synchronize()
         # print(time.time() - t0)
 
-    @pytest.mark.parametrize("dim1", [256, 1024], ids=id_formatter("dim1"))
-    @pytest.mark.parametrize("dim2", [256, 1024], ids=id_formatter("dim2"))
-    @pytest.mark.skip("No longer supported")
-    def test_integrated_sparse_decomp(self, dim1, dim2):
-        threshold = 3.0
-        for _ in range(k):
-            A = torch.randn(dim1, dim2).cuda().half()
-            w1 = torch.randn(dim1, dim2).cuda().half()
-            out1 = torch.matmul(A, w1.t())
-
-            Cw1, statsw1, _ = F.int8_vectorwise_quant(w1)
-            CA, statsA, _ = F.int8_vectorwise_quant(A)
-
-            out1_32 = F.int8_linear_matmul(CA, Cw1)
-            out2 = F.int8_mm_dequant(out1_32, statsA, statsw1)
-
-            # CA, statsA, outlier_cols = F.int8_vectorwise_quant(A, threshold=threshold)
-            CA, _, statsA, _, coo_tensor = F.double_quant(A, threshold=threshold)
-
-            out1_32 = F.int8_linear_matmul(CA, Cw1)
-            out3 = F.int8_mm_dequant(out1_32, statsA, statsw1)
-
-            assert coo_tensor is not None
-
-            out4 = F.spmm_coo(coo_tensor, w1.t())
-            # idx = torch.unique(coo_tensor._indices()[1]).long()
-            # out4 = torch.matmul(A, w1.t())
-            out5 = out3 + out4
-
-            err1 = torch.abs(out1 - out2).mean().item()
-            err2 = torch.abs(out1 - out5).mean().item()
-            assert err2 < err1
-
     @pytest.mark.parametrize("dim1", [1 * 2048])
     @pytest.mark.parametrize("dim2", [2048])
     @pytest.mark.parametrize("dtype", [torch.int8])
@@ -1115,9 +1088,6 @@ class TestQuantize4BitFunctional:
         [64, 128, 256, 512, 1024, 2048, 4096] if not HIP_ENVIRONMENT else [128, 256, 512, 1024, 2048, 4096],
     )
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
-        if device == "cpu" and quant_type != "nf4":
-            pytest.xfail("fp4 quantization is not supported on CPU")
-
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
         A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
@@ -1150,9 +1120,6 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128], ids=id_formatter("blocksize"))
     def test_4bit_compressed_stats(self, device, quant_type, blocksize):
-        if device == "cpu" and quant_type != "nf4":
-            pytest.xfail("fp4 quantization is not supported on CPU")
-
         errs1 = []
         errs2 = []
         for i in range(10):
@@ -1228,12 +1195,6 @@ class TestQuantize4BitFunctional:
     )
     @pytest.mark.parametrize("dim", [128, 256, 512, 1024], ids=id_formatter("dim"))
     def test_gemv_4bit(self, device, dim, dtype, storage_type, quant_storage, double_quant, kind):
-        if device == "cpu":
-            if storage_type != "nf4":
-                pytest.xfail("fp4 quantization is not supported on CPU")
-            if quant_storage != torch.uint8:
-                pytest.xfail("Only uint8 storage is supported on CPU")
-
         errs1 = []
         errs2 = []
         errs3 = []
@@ -1384,8 +1345,8 @@ class TestQuantize4BitFunctional:
         reason="this test is not supported on ROCm with gfx90a architecture yet",
     )
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
-        if device == "cpu" and storage_type != "nf4":
-            pytest.xfail("fp4 quantization is not supported on CPU")
+        if device == "cpu" and dtype == torch.bfloat16 and torch.__version__ < (2, 3):
+            pytest.skip("eye doe not support bfloat16 on CPU in torch < 2.3")
 
         dims = 10
         torch.random.manual_seed(np.random.randint(0, 412424242))

@@ -1,0 +1,431 @@
+diff --cc .github/workflows/python-package.yml
+index 3673ac6,d3deb26..0000000
+--- a/.github/workflows/python-package.yml
++++ b/.github/workflows/python-package.yml
+@@@ -218,7 -173,14 +218,18 @@@ jobs
+            merge-multiple: true
+
+        - name: Inspect tmp directory after downloading artifacts
+++<<<<<<< HEAD
+ +        run: ls -alFR tmp/
+++=======
++         run: |
++           ls -alFR tmp/
++           WHEEL_COUNT=$(find tmp/ -type f -name "*.whl" | wc -l)
++           echo "Found $WHEEL_COUNT wheel files"
++           if [ "$WHEEL_COUNT" -eq 0 ]; then
++             echo "::error::No wheel files found in tmp directory! Cannot proceed with release."
++             exit 1
++           fi
+++>>>>>>> upstream/main
+
+        - name: Move and rename wheel files with pattern replacement
+          run: |
+@@@ -245,9 -207,20 +256,23 @@@
+        - name: Inspect wheels directory after renaming files
+          run: ls -alFR wheels/
+
+++<<<<<<< HEAD
+++=======
++       - uses: actions/checkout@v4
++         with:
++           path: repo
+++>>>>>>> upstream/main
+        - name: Delete old pre-release (if exists)
+          run: |
+-           gh release delete continuous-release_main --cleanup-tag -y || true
++           cd repo && gh release delete continuous-release_main --cleanup-tag -y
++         env:
++           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++
++       - name: Ensure tag exists
++         run: |
++           cd repo
++           git tag -f continuous-release_main
++           git push -f origin continuous-release_main
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+diff --cc bitsandbytes/cextension.py
+index 5283df9,b112df2..0000000
+--- a/bitsandbytes/cextension.py
++++ b/bitsandbytes/cextension.py
+@@@ -28,17 -28,10 +29,15 @@@ def get_cuda_bnb_library_path(cuda_spec
+      override_value = os.environ.get("BNB_CUDA_VERSION")
+      if override_value:
+          library_name = re.sub(r"cuda\d+", f"cuda{override_value}", library_name, count=1)
+ +        if torch.version.hip:
+ +            raise RuntimeError(
+ +                f"BNB_CUDA_VERSION={override_value} detected for ROCm!! \n"
+ +                f"Clear the variable and retry: export BNB_CUDA_VERSION=\n"
+ +            )
+          logger.warning(
+              f"WARNING: BNB_CUDA_VERSION={override_value} environment variable detected; loading {library_name}.\n"
+-             "This can be used to load a bitsandbytes version that is different from the PyTorch CUDA version.\n"
++             "This can be used to load a bitsandbytes version built with a CUDA version that is different from the PyTorch CUDA version.\n"
+              "If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n"
+-             "If you use the manual override make sure the right libcudart.so is in your LD_LIBRARY_PATH\n"
+-             "For example by adding the following to your .bashrc: export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path_to_cuda_dir/lib64\n",
+          )
+
+      return PACKAGE_DIR / library_name
+@@@ -296,14 -286,18 +299,28 @@@ def get_native_library() -> BNBNativeLi
+      return BNBNativeLibrary(dll)
+
+
+ +ROCM_GPU_ARCH = get_rocm_gpu_arch()
+ +
+  try:
+++<<<<<<< HEAD
+ +    if torch.version.hip:
+ +        HIP_ENVIRONMENT, BNB_BACKEND = True, "ROCm"
+ +    else:
+ +        HIP_ENVIRONMENT, BNB_BACKEND = False, "CUDA"
+ +
+++=======
++     # to support Intel CPU/GPU (XPU) backend
++     import intel_extension_for_pytorch as ipex
++
++     ipex_cpu = ipex if ipex._C._has_cpu() else None
++     ipex_xpu = ipex if ipex._C._has_xpu() else None
++ except BaseException:
++     ipex_cpu = None
++     ipex_xpu = None
++
++
++ try:
+++>>>>>>> upstream/main
+      lib = get_native_library()
+  except Exception as e:
+      error_msg = str(e)
+diff --cc bitsandbytes/diagnostics/cuda.py
+index b9db101,e763ef2..0000000
+--- a/bitsandbytes/diagnostics/cuda.py
++++ b/bitsandbytes/diagnostics/cuda.py
+@@@ -5,8 -5,7 +5,12 @@@ from pathlib import Pat
+
+  import torch
+
+++<<<<<<< HEAD
+ +from bitsandbytes.cextension import HIP_ENVIRONMENT, get_cuda_bnb_library_path
+ +from bitsandbytes.consts import NONPYTORCH_DOC_URL
+++=======
++ from bitsandbytes.cextension import get_cuda_bnb_library_path
+++>>>>>>> upstream/main
+  from bitsandbytes.cuda_specs import CUDASpecs
+  from bitsandbytes.diagnostics.utils import print_dedented
+
+@@@ -148,42 -127,8 +136,38 @@@ def _print_cuda_diagnostics(cuda_specs
+              """,
+          )
+
+-     # TODO:
+-     # (1) CUDA missing cases (no CUDA installed by CUDA driver (nvidia-smi accessible)
+-     # (2) Multiple CUDA versions installed
+-
+
+ -def print_cuda_runtime_diagnostics() -> None:
+ +def _print_hip_diagnostics(cuda_specs: CUDASpecs) -> None:
+ +    print(f"PyTorch settings found: ROCM_VERSION={cuda_specs.cuda_version_string}")
+ +
+ +    binary_path = get_cuda_bnb_library_path(cuda_specs)
+ +    if not binary_path.exists():
+ +        print_dedented(
+ +            f"""
+ +        Library not found: {binary_path}.
+ +        Maybe you need to compile it from source? If you compiled from source, check that ROCm version
+ +        in PyTorch Settings matches your ROCm install. If not, reinstall PyTorch for your ROCm version
+ +        and rebuild bitsandbytes.
+ +        """,
+ +        )
+ +
+ +    hip_major, hip_minor = cuda_specs.cuda_version_tuple
+ +    if (hip_major, hip_minor) < (6, 1):
+ +        print_dedented(
+ +            """
+ +            WARNING: bitsandbytes is fully supported only from ROCm 6.1.
+ +            """,
+ +        )
+ +
+ +
+ +def print_diagnostics(cuda_specs: CUDASpecs) -> None:
+ +    if HIP_ENVIRONMENT:
+ +        _print_hip_diagnostics(cuda_specs)
+ +    else:
+ +        _print_cuda_diagnostics(cuda_specs)
+ +
+ +
+ +def _print_cuda_runtime_diagnostics() -> None:
+      cudart_paths = list(find_cudart_libraries())
+      if not cudart_paths:
+          print("CUDA SETUP: WARNING! CUDA runtime files not found in any environmental path.")
+diff --cc bitsandbytes/diagnostics/main.py
+index bf31d79,aa4cb30..0000000
+--- a/bitsandbytes/diagnostics/main.py
++++ b/bitsandbytes/diagnostics/main.py
+@@@ -3,12 -5,11 +5,20 @@@ import tracebac
+
+  import torch
+
+++<<<<<<< HEAD
+ +from bitsandbytes.cextension import BNB_BACKEND, HIP_ENVIRONMENT
+ +from bitsandbytes.consts import PACKAGE_GITHUB_URL
+ +from bitsandbytes.cuda_specs import get_cuda_specs
+ +from bitsandbytes.diagnostics.cuda import (
+ +    print_diagnostics,
+ +    print_runtime_diagnostics,
+++=======
++ from bitsandbytes import __version__ as bnb_version
++ from bitsandbytes.consts import PACKAGE_GITHUB_URL
++ from bitsandbytes.cuda_specs import get_cuda_specs
++ from bitsandbytes.diagnostics.cuda import (
++     print_cuda_diagnostics,
+++>>>>>>> upstream/main
+  )
+  from bitsandbytes.diagnostics.utils import print_dedented, print_header
+
+@@@ -28,53 -41,77 +50,123 @@@ def sanity_check()
+      assert p1 != p2
+
+
++ def get_package_version(name: str) -> str:
++     try:
++         version = importlib.metadata.version(name)
++     except importlib.metadata.PackageNotFoundError:
++         version = "not found"
++     return version
++
++
++ def show_environment():
++     """Simple utility to print out environment information."""
++
++     print(f"Platform: {platform.platform()}")
++     if platform.system() == "Linux":
++         print(f"  libc: {'-'.join(platform.libc_ver())}")
++
++     print(f"Python: {platform.python_version()}")
++
++     print(f"PyTorch: {torch.__version__}")
++     print(f"  CUDA: {torch.version.cuda or 'N/A'}")
++     print(f"  HIP: {torch.version.hip or 'N/A'}")
++     print(f"  XPU: {getattr(torch.version, 'xpu', 'N/A') or 'N/A'}")
++
++     print("Related packages:")
++     for pkg in _RELATED_PACKAGES:
++         version = get_package_version(pkg)
++         print(f"  {pkg}: {version}")
++
++
+  def main():
+-     print_header("")
+-     print_header("BUG REPORT INFORMATION")
++     print_header(f"bitsandbytes v{bnb_version}")
++     show_environment()
+      print_header("")
+
+-     print_header("OTHER")
+      cuda_specs = get_cuda_specs()
+++<<<<<<< HEAD
+ +    if HIP_ENVIRONMENT:
+ +        rocm_specs = f" rocm_version_string='{cuda_specs.cuda_version_string}',"
+ +        rocm_specs += f" rocm_version_tuple={cuda_specs.cuda_version_tuple}"
+ +        print(f"{BNB_BACKEND} specs:{rocm_specs}")
+ +    else:
+ +        print(f"{BNB_BACKEND} specs:{cuda_specs}")
+ +    if not torch.cuda.is_available():
+ +        print(f"Torch says {BNB_BACKEND} is not available. Possible reasons:")
+ +        if not HIP_ENVIRONMENT:
+ +            print(f"- {BNB_BACKEND} driver not installed")
+ +        print(f"- {BNB_BACKEND} not installed")
+ +        print(f"- You have multiple conflicting {BNB_BACKEND} libraries")
+ +    if cuda_specs:
+ +        print_diagnostics(cuda_specs)
+ +    print_runtime_diagnostics()
+ +    print_header("")
+ +    print_header("DEBUG INFO END")
+ +    print_header("")
+ +    print(f"Checking that the library is importable and {BNB_BACKEND} is callable...")
+ +    try:
+ +        sanity_check()
+ +        print("SUCCESS!")
+ +        print("Installation was successful!")
+ +        return
+ +    except RuntimeError as e:
+ +        if "not available in CPU-only" in str(e):
+ +            print(
+ +                f"WARNING: {__package__} is currently running as CPU-only!\n"
+ +                "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
+ +                f"If you think that this is so erroneously,\nplease report an issue!",
+ +            )
+ +        else:
+ +            raise e
+ +    except Exception:
+ +        traceback.print_exc()
+ +    print_dedented(
+ +        f"""
+ +        Above we output some debug information.
+ +        Please provide this info when creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose
+ +        WARNING: Please be sure to sanitize sensitive info from the output before posting it.
+ +        """,
+ +    )
+ +    sys.exit(1)
+++=======
++
++     if cuda_specs:
++         print_cuda_diagnostics(cuda_specs)
++
++     # TODO: There's a lot of noise in this; needs improvement.
++     # print_cuda_runtime_diagnostics()
++
++     if not torch.cuda.is_available():
++         print("PyTorch says CUDA is not available. Possible reasons:")
++         print("1. CUDA driver not installed")
++         print("2. Using a CPU-only PyTorch build")
++         print("3. No GPU detected")
++
++     else:
++         print("Checking that the library is importable and CUDA is callable...")
++
++         try:
++             sanity_check()
++             print("SUCCESS!")
++             return
++         except RuntimeError as e:
++             if "not available in CPU-only" in str(e):
++                 print(
++                     f"WARNING: {__package__} is currently running as CPU-only!\n"
++                     "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
++                     f"If you think that this is so erroneously,\nplease report an issue!",
++                 )
++             else:
++                 raise e
++         except Exception:
++             traceback.print_exc()
++
++         print_dedented(
++             f"""
++             Above we output some debug information.
++             Please provide this info when creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose
++             WARNING: Please be sure to sanitize sensitive info from the output before posting it.
++             """,
++         )
++         sys.exit(1)
+++>>>>>>> upstream/main
+diff --cc bitsandbytes/functional.py
+index 9b7ce2d,ffb6668..0000000
+mode 100644,100755..100755
+--- a/bitsandbytes/functional.py
++++ b/bitsandbytes/functional.py
+@@@ -13,9 -13,9 +13,13 @@@ import torc
+  from torch import Tensor
+  from typing_extensions import deprecated
+
+- from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
++ from bitsandbytes.utils import _reverse_4bit_compress_format, pack_dict_to_tensor, unpack_tensor_to_dict
+
+++<<<<<<< HEAD
+ +from .cextension import HIP_ENVIRONMENT, lib
+++=======
++ from .cextension import ipex_cpu, ipex_xpu, lib
+++>>>>>>> upstream/main
+
+  name2qmap = {}
+
+diff --cc bitsandbytes/nn/modules.py
+index a2facac,e349cc8..0000000
+--- a/bitsandbytes/nn/modules.py
++++ b/bitsandbytes/nn/modules.py
+@@@ -11,8 -11,7 +11,12 @@@ from torch import Tensor, device, dtype
+  import torch.nn.functional as F
+
+  import bitsandbytes as bnb
+++<<<<<<< HEAD
+ +from bitsandbytes.cextension import HIP_ENVIRONMENT
+ +from bitsandbytes.functional import QuantState
+++=======
++ from bitsandbytes.functional import QuantState, _enable_ipex_fusion, ipex_cpu, ipex_xpu
+++>>>>>>> upstream/main
+  from bitsandbytes.optim import GlobalOptimManager
+  from bitsandbytes.utils import (
+      INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
+diff --cc tests/test_linear4bit.py
+index 60c1634,b5db2eb..0000000
+--- a/tests/test_linear4bit.py
++++ b/tests/test_linear4bit.py
+@@@ -7,8 -8,14 +8,19 @@@ import pytes
+  import torch
+
+  import bitsandbytes as bnb
+++<<<<<<< HEAD
+ +from bitsandbytes.cextension import HIP_ENVIRONMENT
+ +from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, torch_load_from_buffer, torch_save_to_buffer
+++=======
++ from tests.helpers import (
++     TRUE_FALSE,
++     describe_dtype,
++     get_available_devices,
++     id_formatter,
++     torch_load_from_buffer,
++     torch_save_to_buffer,
++ )
+++>>>>>>> upstream/main
+
+  storage = {
+      "uint8": torch.uint8,
+@@@ -184,16 -185,10 +190,10 @@@ def test_linear_serialization(device, q
+
+  @pytest.mark.parametrize("device", get_available_devices())
+  @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+ -@pytest.mark.parametrize("blocksize", [64, 128])
+ +@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
+  @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+  def test_copy_param(device, quant_type, blocksize, compress_statistics):
+-     if device == "cpu":
+-         if compress_statistics:
+-             pytest.skip("Currently segfaults on CPU")
+-         if quant_type == "fp4":
+-             pytest.xfail("FP4 not supported on CPU")
+-
+-     tensor = torch.linspace(1, blocksize, blocksize)
++     tensor = torch.randn(300, 400)
+      param = bnb.nn.Params4bit(
+          data=tensor,
+          quant_type=quant_type,
+@@@ -209,16 -204,10 +209,10 @@@
+
+  @pytest.mark.parametrize("device", get_available_devices())
+  @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+ -@pytest.mark.parametrize("blocksize", [64, 128])
+ +@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
+  @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+  def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
+-     if device == "cpu":
+-         if compress_statistics:
+-             pytest.skip("Currently segfaults on CPU")
+-         if quant_type == "fp4":
+-             pytest.xfail("FP4 not supported on CPU")
+-
+-     tensor = torch.linspace(1, blocksize, blocksize)
++     tensor = torch.randn(300, 400)
+      param = bnb.nn.Params4bit(
+          data=tensor,
+          quant_type=quant_type,
+@@@ -241,16 -230,10 +235,10 @@@
+
+  @pytest.mark.parametrize("device", get_available_devices())
+  @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+ -@pytest.mark.parametrize("blocksize", [64, 128])
+ +@pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
+  @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+  def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
+-     if device == "cpu":
+-         if compress_statistics:
+-             pytest.skip("Currently segfaults on CPU")
+-         if quant_type == "fp4":
+-             pytest.xfail("FP4 not supported on CPU")
+-
+-     original_tensor = torch.linspace(1, blocksize, blocksize, dtype=torch.float32)
++     original_tensor = torch.randn(300, 400)
+      original_param = bnb.nn.Params4bit(
+          data=original_tensor,
+          quant_type=quant_type,

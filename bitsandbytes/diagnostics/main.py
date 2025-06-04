@@ -1,8 +1,11 @@
+import importlib
+import platform
 import sys
 import traceback
 
 import torch
 
+from bitsandbytes import __version__ as bnb_version
 from bitsandbytes.cextension import BNB_BACKEND, HIP_ENVIRONMENT
 from bitsandbytes.consts import PACKAGE_GITHUB_URL
 from bitsandbytes.cuda_specs import get_cuda_specs
@@ -11,6 +14,18 @@ from bitsandbytes.diagnostics.cuda import (
     print_runtime_diagnostics,
 )
 from bitsandbytes.diagnostics.utils import print_dedented, print_header
+
+_RELATED_PACKAGES = [
+    "accelerate",
+    "diffusers",
+    "numpy",
+    "pip",
+    "peft",
+    "safetensors",
+    "transformers",
+    "triton",
+    "trl",
+]
 
 
 def sanity_check():
@@ -28,12 +43,39 @@ def sanity_check():
     assert p1 != p2
 
 
+def get_package_version(name: str) -> str:
+    try:
+        version = importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        version = "not found"
+    return version
+
+
+def show_environment():
+    """Simple utility to print out environment information."""
+
+    print(f"Platform: {platform.platform()}")
+    if platform.system() == "Linux":
+        print(f"  libc: {'-'.join(platform.libc_ver())}")
+
+    print(f"Python: {platform.python_version()}")
+
+    print(f"PyTorch: {torch.__version__}")
+    print(f"  CUDA: {torch.version.cuda or 'N/A'}")
+    print(f"  HIP: {torch.version.hip or 'N/A'}")
+    print(f"  XPU: {getattr(torch.version, 'xpu', 'N/A') or 'N/A'}")
+
+    print("Related packages:")
+    for pkg in _RELATED_PACKAGES:
+        version = get_package_version(pkg)
+        print(f"  {pkg}: {version}")
+
+
 def main():
-    print_header("")
-    print_header("BUG REPORT INFORMATION")
+    print_header(f"bitsandbytes v{bnb_version}")
+    show_environment()
     print_header("")
 
-    print_header("OTHER")
     cuda_specs = get_cuda_specs()
     if HIP_ENVIRONMENT:
         rocm_specs = f" rocm_version_string='{cuda_specs.cuda_version_string}',"
