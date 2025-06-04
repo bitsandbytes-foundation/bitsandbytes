@@ -188,15 +188,15 @@ pip install torch --index-url https://download.pytorch.org/whl/rocm6.3/
 
 You can install the pre-built wheels for each backend, or compile from source for custom configurations.
 
-#### Pre-built Wheel Installation (recommended)[[multi-backend-pip]]
+#### Pre-built Wheel Installation (recommended)
 
 <hfoptions id="platform">
 <hfoption id="Linux">
-This wheel provides support for ROCm and Intel XPU platforms.
+This wheel provides support for Intel XPU platforms.
 
 ```
 # Note, if you don't want to reinstall our dependencies, append the `--no-deps` flag!
-pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl'
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl --extra-index-url https://download.pytorch.org/whl/test/xpu
 ```
 
 </hfoption>
