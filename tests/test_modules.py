@@ -287,8 +287,6 @@ module_dict = {
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("module", module_dict.values(), ids=module_dict.keys())
 def test_kbit_backprop(device, module):
-    # if device == "xpu" and module == bnb.nn.Linear8bitLt and not ipex_xpu and triton_available:
-    #     pytest.xfail("Missing int8_double_quant implementation in Triton for XPU")
 
     b = 16
     dim1 = 36
