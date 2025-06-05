@@ -21,7 +21,8 @@ def _(
     torch._check_is_size(blocksize)
     torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4, got {quant_type}")
     torch._check(
-        dtype in (torch.bfloat16, torch.float32), lambda: f"4bit dequantization only bf16/f32, but got {dtype}"
+        A.dtype in [torch.bfloat16, torch.uint8],
+        lambda: f"quant_storage supports uint8 or bfloat16, but got {A.dtype}",
     )
     torch._check(A.dtype in [torch.bfloat16, torch.uint8], lambda: f"quant_storage supports uint8 or bfloat16, but got {A.dtype}")
 
