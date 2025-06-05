@@ -289,11 +289,6 @@ def test_global_config(requires_cuda, dim1, dim2, gtype):
 
 
 optimizer_names_8bit = [
-    # Non-blockwise optimizers are deprecated.
-    # "adam8bit",
-    # "lion8bit",
-    # "momentum8bit",
-    # "rmsprop8bit",
     "adam8bit_blockwise",
     "lion8bit_blockwise",
     "momentum8bit_blockwise",
@@ -310,11 +305,9 @@ optimizer_names_8bit = [
 def test_optimizer8bit(requires_cuda, dim1, dim2, gtype, optim_name):
     torch.set_printoptions(precision=6)
 
-    if gtype == torch.bfloat16 and "blockwise" not in optim_name:
-        pytest.skip()
-
     if dim1 == 1 and dim2 == 1:
         return
+
     p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
     p2 = p1.clone()
     p1 = p1.float()
@@ -349,39 +342,31 @@ def test_optimizer8bit(requires_cuda, dim1, dim2, gtype, optim_name):
 
         dequant_states = []
         for name1, name2, qmap, max_val in str2statenames[optim_name]:
-            # print(bnb_optimizer.state[p2][max_val], name1)
-            if "blockwise" in optim_name:
-                ## For AdEMAMix, we need to dequantize [p2][name2][0] and [p2][name2][1]
-                ## separately and then stack them. The qmap is shared, but absmax is also stacked.
-                if optim_name == "ademamix8bit_blockwise" and name1 == "m1_m2":
-                    m1 = F.dequantize_blockwise(
-                        code=bnb_optimizer.state[p2][qmap],
-                        absmax=bnb_optimizer.state[p2][max_val][0],
-                        A=bnb_optimizer.state[p2][name2][0],
-                        blocksize=blocksize,
-                    )
-                    m2 = F.dequantize_blockwise(
-                        code=bnb_optimizer.state[p2][qmap],
-                        absmax=bnb_optimizer.state[p2][max_val][1],
-                        A=bnb_optimizer.state[p2][name2][1],
-                        blocksize=blocksize,
-                    )
+            ## For AdEMAMix, we need to dequantize [p2][name2][0] and [p2][name2][1]
+            ## separately and then stack them. The qmap is shared, but absmax is also stacked.
+            if optim_name == "ademamix8bit_blockwise" and name1 == "m1_m2":
+                m1 = F.dequantize_blockwise(
+                    code=bnb_optimizer.state[p2][qmap],
+                    absmax=bnb_optimizer.state[p2][max_val][0],
+                    A=bnb_optimizer.state[p2][name2][0],
+                    blocksize=blocksize,
+                )
+                m2 = F.dequantize_blockwise(
+                    code=bnb_optimizer.state[p2][qmap],
+                    absmax=bnb_optimizer.state[p2][max_val][1],
+                    A=bnb_optimizer.state[p2][name2][1],
+                    blocksize=blocksize,
+                )
 
-                    s1 = torch.stack((m1, m2))
-
-                else:
-                    s1 = F.dequantize_blockwise(
-                        code=bnb_optimizer.state[p2][qmap],
-                        absmax=bnb_optimizer.state[p2][max_val],
-                        A=bnb_optimizer.state[p2][name2],
-                        blocksize=blocksize,
-                    )
+                s1 = torch.stack((m1, m2))
             else:
-                s1 = F.dequantize(
+                s1 = F.dequantize_blockwise(
                     code=bnb_optimizer.state[p2][qmap],
                     absmax=bnb_optimizer.state[p2][max_val],
                     A=bnb_optimizer.state[p2][name2],
+                    blocksize=blocksize,
                 )
+
             num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol) == 0
             # assert num_not_close.sum().item() < 20
             dequant_states.append(s1.clone())
@@ -414,39 +399,33 @@ def test_optimizer8bit(requires_cuda, dim1, dim2, gtype, optim_name):
                 torch.testing.assert_close(raws1cpy, bnb_optimizer.state[p2][name2])
                 torch.testing.assert_close(qmap1, bnb_optimizer.state[p2][qmap])
 
-                if "blockwise" in optim_name:
-                    ## For AdEMAMix, we need to dequantize [p2][name2][0] and [p2][name2][1]
-                    ## separately and then stack them. The qmap is shared, but absmax is also stacked.
-                    if optim_name == "ademamix8bit_blockwise" and name1 == "m1_m2":
-                        s1 = torch.stack(
-                            (
-                                F.dequantize_blockwise(
-                                    code=bnb_optimizer.state[p2][qmap],
-                                    absmax=bnb_optimizer.state[p2][max_val][0],
-                                    A=bnb_optimizer.state[p2][name2][0],
-                                    blocksize=blocksize,
-                                ),
-                                F.dequantize_blockwise(
-                                    code=bnb_optimizer.state[p2][qmap],
-                                    absmax=bnb_optimizer.state[p2][max_val][1],
-                                    A=bnb_optimizer.state[p2][name2][1],
-                                    blocksize=blocksize,
-                                ),
-                            )
+                ## For AdEMAMix, we need to dequantize [p2][name2][0] and [p2][name2][1]
+                ## separately and then stack them. The qmap is shared, but absmax is also stacked.
+                if optim_name == "ademamix8bit_blockwise" and name1 == "m1_m2":
+                    s1 = torch.stack(
+                        (
+                            F.dequantize_blockwise(
+                                code=bnb_optimizer.state[p2][qmap],
+                                absmax=bnb_optimizer.state[p2][max_val][0],
+                                A=bnb_optimizer.state[p2][name2][0],
+                                blocksize=blocksize,
+                            ),
+                            F.dequantize_blockwise(
+                                code=bnb_optimizer.state[p2][qmap],
+                                absmax=bnb_optimizer.state[p2][max_val][1],
+                                A=bnb_optimizer.state[p2][name2][1],
+                                blocksize=blocksize,
+                            ),
                         )
-                    else:
-                        s1 = F.dequantize_blockwise(
-                            code=bnb_optimizer.state[p2][qmap],
-                            absmax=bnb_optimizer.state[p2][max_val],
-                            A=bnb_optimizer.state[p2][name2],
-                            blocksize=blocksize,
-                        )
+                    )
                 else:
-                    s1 = F.dequantize(
+                    s1 = F.dequantize_blockwise(
                         code=bnb_optimizer.state[p2][qmap],
                         absmax=bnb_optimizer.state[p2][max_val],
                         A=bnb_optimizer.state[p2][name2],
+                        blocksize=blocksize,
                     )
+
                 torch.testing.assert_close(s1cpy, s1)
 
                 num_not_close = torch.isclose(torch_optimizer.state[p1][name1], s1, atol=atol, rtol=rtol) == 0
@@ -462,9 +441,6 @@ def test_optimizer8bit(requires_cuda, dim1, dim2, gtype, optim_name):
         torch.testing.assert_close(p1.to(gtype), p2)
         for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
             torch_optimizer.state[p1][name1].copy_(s.data)
-
-    # print(sum(errors)/len(errors))
-    # print(sum(relerrors)/len(relerrors))
 
 
 @pytest.mark.parametrize("optim_bits", [32, 8], ids=id_formatter("optim_bits"))
