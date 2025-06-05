@@ -170,7 +170,7 @@ class Test8BitBlockwiseQuantizeFunctional:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
-    @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic", "quantile"])
+    @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic"])
     def test_few_bit_quant(self, device, bits, method):
         if device in ("cpu", "xpu") and bits != 8:
             pytest.skip("CPU/XPU implementation only supports 8 bits")
@@ -186,11 +186,7 @@ class Test8BitBlockwiseQuantizeFunctional:
             code = F.create_fp8_map(True, ebits, pbits, bits).to(device)
         elif method == "dynamic":
             code = F.create_dynamic_map(True, bits - 0, bits).to(device)
-        elif method == "quantile":
-            if device != "cuda":
-                pytest.skip("Quantile map only works on CUDA")
-            values = torch.randn(2048, 2048, device="cuda")
-            code = F.create_quantile_map(values, bits).cuda()
+
         # for some data types we have no zero
         # for some data types we have one zero
         # for some data types we have two zeros
@@ -564,6 +560,30 @@ class TestIGEMMFunctional:
 
 
 class TestLLMInt8Functional:
+    @staticmethod
+    def vectorwise_mm_dequant(xq, S1, S2, dtype=torch.half):
+        """Reference implementation for the F.int8_mm_dequant function."""
+        C = 127.0
+
+        x = xq.float()
+        if len(S1.shape) == 3 and len(x.shape) == 2:
+            S1 = S1.squeeze(0)
+        if len(S2.shape) == 3 and len(x.shape) == 2:
+            S2 = S2.squeeze(0)
+        if len(S1.shape) == 2:
+            x *= S1 / C
+        else:
+            x *= S1 / C
+        x *= S2 / C
+        return x.to(dtype)
+
+    @staticmethod
+    def vectorwise_quant(x, dim=1):
+        """Reference implementation"""
+        max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
+        xq = torch.round(x * (127.0 / max1)).to(torch.int8)
+        return xq, max1
+
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
@@ -625,12 +645,12 @@ class TestLLMInt8Functional:
             if has_bias:
                 C1 += bias
 
-            A1, maxA = F.vectorwise_quant(A, dim=1)
-            B1, maxB = F.vectorwise_quant(B, dim=1)
+            A1, maxA = self.vectorwise_quant(A, dim=1)
+            B1, maxB = self.vectorwise_quant(B, dim=1)
 
             C2 = F.int8_linear_matmul(A1, B1)
 
-            C4 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
+            C4 = self.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
             if has_bias:
                 C4 += bias
 
@@ -694,8 +714,8 @@ class TestLLMInt8Functional:
     def test_int8_double_quant(self, dim1, dim2):
         for i in range(k):
             A = torch.randn(dim1, dim2, device="cuda").half()
-            out_col1, Scol = F.vectorwise_quant(A, dim=0)
-            out_row1, Srow = F.vectorwise_quant(A, dim=1)
+            out_col1, Scol = self.vectorwise_quant(A, dim=0)
+            out_row1, Srow = self.vectorwise_quant(A, dim=1)
 
             CA, CAt, statsA, statsAt, _ = F.int8_double_quant(A)
 
@@ -747,8 +767,8 @@ class TestLLMInt8Functional:
 
             C1a, stats1a, _ = F.int8_vectorwise_quant(A)
             C2a, stats2a, _ = F.int8_vectorwise_quant(B)
-            A1, maxA = F.vectorwise_quant(A, dim=1)
-            B1, maxB = F.vectorwise_quant(B, dim=1)
+            A1, maxA = self.vectorwise_quant(A, dim=1)
+            B1, maxB = self.vectorwise_quant(B, dim=1)
 
             torch.testing.assert_close(maxA.flatten().float(), stats1a)
             torch.testing.assert_close(maxB.flatten().float(), stats2a)
@@ -759,7 +779,7 @@ class TestLLMInt8Functional:
 
             C2 = F.int8_linear_matmul(A1, B1)
 
-            out3 = F.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
+            out3 = self.vectorwise_mm_dequant(C2.float(), maxA, maxB.t())
 
             err1 = torch.abs(out1 - out2).mean().item()
             err2 = torch.abs(out1 - out3).mean().item()
@@ -892,8 +912,9 @@ class TestSpMMFunctional:
         else:
             B = torch.randn(dim2, dim2 * 4, device="cuda").half()
             torch.nn.init.xavier_uniform_(B)
-            B, SB = F.vectorwise_quant(B, quant_type="linear")
-            # B = torch.randint(-127, 127, size=(dim2, dim2*4), device='cuda').to(torch.int8)
+
+            SB = torch.abs(B).max().float()
+            B = torch.round(B / SB * 127).to(torch.int8)
 
         print("")
         idx = torch.abs(A) >= threshold
@@ -1368,26 +1389,3 @@ def test_normal_map_tree():
         for i in idx:
             pivots.append((values[i - 1] + values[i]) / 2)
         # print(pivots)
-
-
-@pytest.mark.skip("Row scale has some bugs for ampere")
-def test_managed():
-    n = 32 * 10
-    A = F.get_paged(n, n, dtype=torch.float32)
-    B = F.get_paged(n, n, dtype=torch.uint8)
-    B2 = F.get_paged(n, n, dtype=torch.float32)
-    assert A.is_paged
-    assert B.is_paged
-    assert A.page_deviceid == 0
-    assert B.page_deviceid == 0
-    F.fill(A, 17.0)
-    F.fill(B, 17)
-    F.fill(B2, 2)
-    assert (A == 17).sum().item() == n * n
-    assert (B == 17).sum().item() == n * n
-    C = A * B.float()
-    assert (C == 289).sum().item() == n * n
-    F._mul(A, B2)
-    F._mul(A, B2)
-    F._mul(A, B2)
-    assert (A == 17 * (2**3)).sum().item() == n * n
