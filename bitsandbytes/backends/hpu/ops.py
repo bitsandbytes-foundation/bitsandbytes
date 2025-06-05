@@ -24,7 +24,6 @@ def _(
         A.dtype in [torch.bfloat16, torch.uint8],
         lambda: f"quant_storage supports uint8 or bfloat16, but got {A.dtype}",
     )
-    torch._check(A.dtype in [torch.bfloat16, torch.uint8], lambda: f"quant_storage supports uint8 or bfloat16, but got {A.dtype}")
 
     # Enable non uint8 dtype
     if A.dtype != torch.uint8:
