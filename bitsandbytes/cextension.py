@@ -301,8 +301,7 @@ try:
     if hasattr(torch, "xpu") and torch.xpu.is_available():
         if not ipex_xpu:
             logger.warning(
-                "Detected Intel XPU but no Intel Extension for PyTorch (IPEX) installed. Triton implementation will be used."
-                "Please check the installation doc to install `intel_extension_for_pytorch` to get better performance."
+                "Detected Intel XPU without intel_extension_for_pytorch installed. Triton implementation will be used."
             )
         # create a mock with error messaging as fallback
         lib = ErrorHandlerMockBNBNativeLibrary("XPU does not need library loading")
