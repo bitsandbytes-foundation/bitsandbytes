@@ -440,31 +440,23 @@ def test_4bit_linear_warnings(device):
     dim1 = 64
 
     with pytest.warns(UserWarning, match=r"inference or training"):
-        net = nn.Sequential(
-            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
-        )
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(10, dim1, device=device, dtype=torch.float16)
         net(inp)
     with pytest.warns(UserWarning, match=r"inference."):
-        net = nn.Sequential(
-            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
-        )
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(1, dim1, device=device, dtype=torch.float16)
         net(inp)
 
     with pytest.warns(UserWarning) as record:
-        net = nn.Sequential(
-            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
-        )
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(10, dim1, device=device, dtype=torch.float16)
         net(inp)
 
-        net = nn.Sequential(
-            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
-        )
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(1, dim1, device=device, dtype=torch.float16)
         net(inp)
