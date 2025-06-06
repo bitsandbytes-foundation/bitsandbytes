@@ -270,10 +270,7 @@ def test_params4bit_real_serialization(device, quant_type, blocksize, compress_s
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
 def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_statistics, bias, fullgraph, mode):
-    if device == "cpu" and quant_type == "fp4":
-        pytest.skip("FP4 is not supported for CPU")
-
-    if fullgraph and torch.__version__ < (2, 8):
+    if fullgraph and torch.__version__ < (2, 8, 0, "dev"):
         pytest.skip("fullgraph mode requires torch 2.8 or higher")
 
     if device == "cuda" and platform.system() == "Windows":
