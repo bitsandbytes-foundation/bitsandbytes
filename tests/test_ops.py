@@ -53,6 +53,7 @@ class TestLLMInt8Ops:
         assert out_row.dtype == torch.int8
         assert out_row.device == A.device
         assert row_stats.shape == (10,)
+        assert row_stats.dtype == torch.float32
         assert row_stats.device == A.device
 
         if threshold > 0.0:
