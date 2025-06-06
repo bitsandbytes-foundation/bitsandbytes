@@ -77,29 +77,25 @@ def main():
     print_header("")
 
     cuda_specs = get_cuda_specs()
-    if HIP_ENVIRONMENT:
-        rocm_specs = f" rocm_version_string='{cuda_specs.cuda_version_string}',"
-        rocm_specs += f" rocm_version_tuple={cuda_specs.cuda_version_tuple}"
-        print(f"{BNB_BACKEND} specs:{rocm_specs}")
-    else:
-        print(f"{BNB_BACKEND} specs:{cuda_specs}")
-    if not torch.cuda.is_available():
-        print(f"Torch says {BNB_BACKEND} is not available. Possible reasons:")
-        if not HIP_ENVIRONMENT:
-            print(f"- {BNB_BACKEND} driver not installed")
-        print(f"- {BNB_BACKEND} not installed")
-        print(f"- You have multiple conflicting {BNB_BACKEND} libraries")
+    
     if cuda_specs:
         print_diagnostics(cuda_specs)
-    print_runtime_diagnostics()
-    print_header("")
-    print_header("DEBUG INFO END")
-    print_header("")
-    print(f"Checking that the library is importable and {BNB_BACKEND} is callable...")
+
+    # TODO: There's a lot of noise in this; needs improvement.
+    # print_cuda_runtime_diagnostics()
+    
+    if not torch.cuda.is_available():
+        print(f"PyTorch says {BNB_BACKEND} is not available. Possible reasons:")
+        print(f"1. {BNB_BACKEND} driver not installed")
+        print(f"2. Using a CPU-only PyTorch build")
+        print(f"3. No GPU detected")
+
+    else:
+        print(f"Checking that the library is importable and {BNB_BACKEND} is callable...")
+
     try:
         sanity_check()
         print("SUCCESS!")
-        print("Installation was successful!")
         return
     except RuntimeError as e:
         if "not available in CPU-only" in str(e):
@@ -112,6 +108,7 @@ def main():
             raise e
     except Exception:
         traceback.print_exc()
+        
     print_dedented(
         f"""
         Above we output some debug information.
