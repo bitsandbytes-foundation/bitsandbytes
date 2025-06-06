@@ -42,9 +42,9 @@ if ipex_xpu:
         if dtype == torch.float16:
             ipex_xpu.xpu.bitsandbytes.cdequantize_blockwise_fp16(code, A, absmax, out, blocksize, A.numel())
         elif dtype == torch.bfloat16:
-            ipex_xpu.xpu.bitsandbytes.cdequantize_blockwise_bf16(code, A, absmax, out, blocksize, A.numel())
+            ipex_xpu.xpu.bitsandbytes.cdequantize_blockwise_bf16(code, A, absmax.float(), out, blocksize, A.numel())
         elif dtype == torch.float32:
-            ipex_xpu.xpu.bitsandbytes.cdequantize_blockwise_fp32(code, A, absmax, out, blocksize, A.numel())
+            ipex_xpu.xpu.bitsandbytes.cdequantize_blockwise_fp32(code, A, absmax.float(), out, blocksize, A.numel())
         else:
             raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
 
