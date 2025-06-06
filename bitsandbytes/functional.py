@@ -2320,7 +2320,7 @@ def _enable_ipex_fusion(linear: torch.nn.Module, x: torch.Tensor):
     quant_state = linear.weight.quant_state
 
     if quant_state.nested:
-        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2).to(x.dtype)
         absmax += quant_state.offset
         quant_state.absmax = absmax
         quant_state.nested = False
