@@ -104,8 +104,6 @@ class Test8BitBlockwiseQuantizeFunctional:
                 pytest.skip("Not a typical use case.")
             if blocksize != 256:
                 pytest.skip("Only blocksize 256 is used in CPU/XPU")
-            if dtype != torch.float32:
-                pytest.skip("Only float32 is used in CPU/XPU")
 
         diffs = []
         reldiffs = []
