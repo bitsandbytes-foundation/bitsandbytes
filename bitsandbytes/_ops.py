@@ -225,7 +225,7 @@ def _(
 
     n = A.numel()
     blocks = -(n // -blocksize)
-    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+    absmax = torch.empty((blocks,), device=A.device, dtype=A.dtype)
     out = torch.empty(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)
     return out, absmax
 
@@ -268,7 +268,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     torch._check_is_size(blocksize)
     n = A.numel()
     blocks = -(n // -blocksize)
-    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+    absmax = torch.empty((blocks,), device=A.device, dtype=A.dtype)
     out = torch.empty_like(A, dtype=torch.uint8)
     return out, absmax
 
