@@ -49,7 +49,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
         rem = n % blocksize
         has_rem = rem > 0
         blocks = n // blocksize + has_rem
-        absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
+        absmax = torch.zeros((blocks,), device=A.device, dtype=A.dtype)
         A_reshaped = A.reshape(n)
         A_com = A_reshaped[: n - rem]
         A_com_reshaped = A_com.reshape(n // blocksize, blocksize)

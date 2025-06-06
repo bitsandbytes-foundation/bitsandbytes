@@ -759,8 +759,6 @@ def dequantize_blockwise(
     if quant_state.nested:
         absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
         absmax += quant_state.offset
-        if absmax.dtype != torch.float32:
-            absmax = absmax.float()
 
     if out is not None:
         torch.ops.bitsandbytes.dequantize_blockwise.out(
@@ -1034,8 +1032,6 @@ def dequantize_4bit(
     if quant_state.nested:
         absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
         absmax += quant_state.offset
-        if absmax.dtype != torch.float32:
-            absmax = absmax.float()
 
     # IPEX format is different, we need extra process.
     if getattr(quant_state, "ipex", False) and quant_state.quant_type == "nf4":
@@ -1079,8 +1075,6 @@ def quantize(
         code = code.to(A.device)
 
     absmax = torch.abs(A).max()
-    if absmax.dtype != torch.float32:
-        absmax = absmax.float()
     inp = A / absmax
     out = quantize_no_absmax(inp, code, out)
     return out, (absmax, code)
@@ -2328,9 +2322,6 @@ def _enable_ipex_fusion(linear: torch.nn.Module, x: torch.Tensor):
     if quant_state.nested:
         absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
         absmax += quant_state.offset
-        if absmax.dtype != torch.float32:
-            absmax = absmax.float()
-
         quant_state.absmax = absmax
         quant_state.nested = False
         delattr(quant_state, "state2")
