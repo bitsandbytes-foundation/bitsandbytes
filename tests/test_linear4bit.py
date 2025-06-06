@@ -25,6 +25,9 @@ storage = {
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
 def test_linear_serialization(device, quant_type, compress_statistics, bias, quant_storage, save_before_forward):
+    if HIP_ENVIRONMENT and device == "cpu":
+        pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+        
     if device == "cpu":
         if quant_type == "fp4":
             pytest.xfail("FP4 is not supported for CPU")
@@ -187,6 +190,9 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
 @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
+    if HIP_ENVIRONMENT and device == "cpu":
+        pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+        
     if device == "cpu":
         if compress_statistics:
             pytest.skip("Currently segfaults on CPU")
@@ -212,6 +218,9 @@ def test_copy_param(device, quant_type, blocksize, compress_statistics):
 @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
+    if HIP_ENVIRONMENT and device == "cpu":
+        pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+        
     if device == "cpu":
         if compress_statistics:
             pytest.skip("Currently segfaults on CPU")
@@ -244,6 +253,9 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
+    if HIP_ENVIRONMENT and device == "cpu":
+        pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+        
     if device == "cpu":
         if compress_statistics:
             pytest.skip("Currently segfaults on CPU")
