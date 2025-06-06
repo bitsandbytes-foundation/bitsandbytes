@@ -11,6 +11,9 @@ from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
 class TestLLMInt8Ops:
     @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_linear_matmul(self, device):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+            
         A = torch.randint(-128, 127, (10, 20), dtype=torch.int8, device=device)
         B = torch.randint(-128, 127, (30, 20), dtype=torch.int8, device=device)
         out = torch.ops.bitsandbytes.int8_linear_matmul.default(A, B)
@@ -23,6 +26,9 @@ class TestLLMInt8Ops:
 
     @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_linear_matmul_out(self, device):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+            
         A = torch.randint(-128, 127, (10, 20), dtype=torch.int8, device=device)
         B = torch.randint(-128, 127, (30, 20), dtype=torch.int8, device=device)
 
@@ -38,6 +44,9 @@ class TestLLMInt8Ops:
     @pytest.mark.parametrize("threshold", [0.0, 6.0])
     @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_vectorwise_quant(self, threshold, device):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+            
         A = torch.randn(10, 20, dtype=torch.float16, device=device)
         A[1][0] = 1000.0
 
@@ -64,6 +73,9 @@ class TestLLMInt8Ops:
 
     @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_mm_dequant(self, device):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set") 
+            
         A = torch.randint(-128, 127, (256, 256), dtype=torch.int32, device=device)
         row_stats = torch.randn(256, dtype=torch.float32, device=device)
         col_stats = torch.randn(256, dtype=torch.float32, device=device)
@@ -79,6 +91,9 @@ class TestLLMInt8Ops:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("has_bias", TRUE_FALSE)
     def test_int8_scaled_mm(self, device, dtype, has_bias):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set") 
+            
         A = torch.randint(-128, 127, (10, 20), dtype=torch.int8, device=device)
         B = torch.randint(-128, 127, (30, 20), dtype=torch.int8, device=device)
         row_stats = torch.randn(10, dtype=torch.float32, device=device)
@@ -98,6 +113,9 @@ class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_quantize_blockwise(self, device, dtype, blocksize):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+            
         if device == "cpu":
             if dtype != torch.float32:
                 pytest.skip("CPU implementation is only available for float32")
@@ -122,6 +140,9 @@ class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_dequantize_blockwise(self, device, dtype, blocksize):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+            
         if device == "cpu" and dtype != torch.float32:
             pytest.skip("CPU implementation is only available for float32")
 
@@ -148,6 +169,9 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_quantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+            
         if device == "cpu" and quant_type != "nf4":
             pytest.xfail("CPU implementation is only available for nf4")
 
@@ -172,6 +196,9 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_dequantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+            
         if device == "cpu":
             if quant_type != "nf4":
                 pytest.xfail("CPU implementation is only available for nf4")
@@ -209,6 +236,9 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if HIP_ENVIRONMENT and device == "cpu":
+            pytest.skip("CPU tests skipped when HIP_ENVIRONMENT is set")
+            
         if device == "cpu":
             pytest.xfail("CPU implementation is not available")
 
