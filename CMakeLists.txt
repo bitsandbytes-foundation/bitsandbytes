@@ -3,7 +3,7 @@
 #   For  GCC: `cmake -B build . && cmake --build build`
 #   For MSVC: `cmake -B build . && cmake --build build --config Release`
 # You can also use the following options and variables
-#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, or `mps` to select the backend
+#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, `mps`, or `xpu` to select the backend
 #  - CUDA_VERSION: The expected CUDA version, for sanity checking. The actual version
 #                  is whatever CMake finds on your path.
 #  - COMPUTE_CAPABILITY: Which GPU Arch/Compute codes to provide to NVCC.
@@ -30,8 +30,8 @@ set(METAL_FILES csrc/mps_kernels.metal)
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, mps)")
-set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda mps)
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, mps, xpu)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda mps xpu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
@@ -48,17 +48,28 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
     endif()
     set(BUILD_CUDA ON)
     set(BUILD_MPS OFF)
+    set(BUILD_XPU OFF)
 elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
     set(BUILD_MPS ON)
+    set(BUILD_XPU OFF)
+elseif(${COMPUTE_BACKEND} STREQUAL "xpu")
+    if(APPLE)
+        message(FATAL_ERROR "XPU is not supported on macOS" )
+    endif()
+    set(BUILD_CUDA OFF)
+    set(BUILD_MPS OFF)
+    set(BUILD_XPU ON)
 else()
     set(BUILD_CUDA OFF)
     set(BUILD_MPS OFF)
+    set(BUILD_XPU OFF)
 endif()
 
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
 if(BUILD_CUDA)
     # NVCC normally will only work with MSVC up to 1939. VS2022 17.10+ starts using versions 1940+.
@@ -179,6 +190,14 @@ elseif(BUILD_MPS)
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+elseif(BUILD_XPU)
+    include(${PROJECT_SOURCE_DIR}/cmake/XPU.cmake)
+    include(${PROJECT_SOURCE_DIR}/cmake/XPUBuildFlags.cmake)
+
+    if(BUILD_TEST)
+        # Test SYCL building system
+        add_subdirectory(${PROJECT_SOURCE_DIR}/tests/sycl ${CMAKE_BINARY_DIR}/test_sycl)
+    endif()
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
