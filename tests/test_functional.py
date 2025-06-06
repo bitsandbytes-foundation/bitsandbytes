@@ -135,11 +135,10 @@ class Test8BitBlockwiseQuantizeFunctional:
         abserr = sum(diffs) / len(diffs)
         relerr = sum(reldiffs) / len(reldiffs)
         if signed:
-            threshold_abserr = 0.0036 if device in ("cpu", "xpu") else 0.0035
             assert abserr < 0.0036
             assert relerr < 0.015
         else:
-            assert abserr < 0.00175 if device in ("cpu", "xpu") else 0.0023
+            assert abserr < 0.0023
             assert relerr < 0.012
         assert A2.dtype == dtype
 
