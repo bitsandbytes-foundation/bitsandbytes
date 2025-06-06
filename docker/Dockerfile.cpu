@@ -20,14 +20,11 @@ RUN apt-get update && apt-get -y install apt-utils build-essential \
 
 RUN pip install --upgrade pip
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
-RUN pip install intel-extension-for-pytorch --no-cache-dir
-RUN pip install -U transformers accelerate peft pytest intel-openmp
+RUN pip install -U transformers accelerate peft pytest
 
 # install bitsandbytes
 RUN git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/ && \
     cmake -DCOMPUTE_BACKEND=cpu -S . && make && pip install . && cd ../
-
-ENV LD_PRELOAD=${LD_PRELOAD}:/usr/local/lib/libiomp5.so:/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4
 
 RUN touch /entrypoint.sh
 RUN chmod +x /entrypoint.sh
