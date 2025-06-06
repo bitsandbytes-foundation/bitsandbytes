@@ -101,7 +101,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
         # Test with the oldest supported torch version and the two newest.
-        torch_version: ["2.2.2", "2.6.0", "2.7.0"]
+        torch_version: ["2.2.2", "2.6.0", "2.7.1"]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -184,7 +184,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
           pip install intel_extension_for_pytorch==2.7.0 --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/cpu/us/
           pip install -e ".[test]"
           pip install pytest-cov
@@ -240,7 +240,7 @@ jobs:
             torch_version: "2.6.0"
             pypi_index: "https://download.pytorch.org/whl/cu126"
           - cuda_version: "12.8.1"
-            torch_version: "2.7.0"
+            torch_version: "2.7.1"
             pypi_index: "https://download.pytorch.org/whl/cu128"
 
 
@@ -274,7 +274,7 @@ jobs:
             gpu: T4
             runner: CUDA-Windows-x64
             cuda_version: "11.8.0"
-            torch_version: "2.7.0"
+            torch_version: "2.7.1"
             pypi_index: "https://download.pytorch.org/whl/cu118"
 
         exclude:

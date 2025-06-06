@@ -1,3 +1,6 @@
+import subprocess
+
+from packaging import version
 import torch
 
 try:
@@ -59,3 +62,23 @@ _FP4_QUANT_TABLE = torch.tensor(
     else "cpu",  # Only cpu/xpu use this table for now.
 )
 CODE = {"nf4": _NF4_QUANT_TABLE, "fp4": _FP4_QUANT_TABLE}
+
+
+def get_gaudi_sw_version():
+    """
+    Returns the installed version of Gaudi SW.
+    """
+    output = subprocess.run(
+        "pip list | grep habana-torch-plugin",
+        shell=True,
+        text=True,
+        capture_output=True,
+    )
+    # If grep return nothing
+    if not output.stdout.strip():
+        return None
+
+    return version.parse(output.stdout.split("\n")[0].split()[-1])
+
+
+GAUDI_SW_VER = get_gaudi_sw_version()
