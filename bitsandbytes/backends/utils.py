@@ -13,6 +13,15 @@ except BaseException:
     ipex_cpu = None
     ipex_xpu = None
 
+try:
+    import triton  # noqa: F401
+    import triton.language as tl  # noqa: F401
+
+    triton_available = True
+except ImportError as e:
+    triton_available = False
+
+
 _NF4_QUANT_TABLE = torch.tensor(
     [
         -1.0,
