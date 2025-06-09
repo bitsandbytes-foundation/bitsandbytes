@@ -25,13 +25,25 @@ bitsandbytes has the following minimum requirements for all platforms:
 
 #### Accelerator support:
 
+<small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
+[document in the v0.46.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.46.0/README.md#accelerator-support).
+</small>
+
+##### Legend:
+🚧 = In Development,
+〰️ = Partially Supported,
+✅ = Supported,
+❌ = Not Supported
+
 <table>
   <thead>
     <tr>
       <th>Platform</th>
       <th>Accelerator</th>
       <th>Hardware Requirements</th>
-      <th>Support Status</th>
+      <th>LLM.int8()</th>
+      <th>QLoRA 4-bit</th>
+      <th>8-bit Optimizers</th>
     </tr>
   </thead>
   <tbody>
@@ -42,13 +54,17 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">x86-64</td>
       <td>◻️ CPU</td>
       <td>AVX2</td>
-      <td>〰️ Partial Support</td>
+      <td>〰️</td>
+      <td>〰️</td>
+      <td>❌</td>
     </tr>
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
       <td>SM50+ minimum<br>SM75+ recommended</td>
-      <td>✅ Full Support</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -57,7 +73,9 @@ bitsandbytes has the following minimum requirements for all platforms:
         CDNA: gfx90a, gfx942<br>
         RDNA: gfx1100, gfx1200
       </td>
-      <td>🚧 In Development</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>🚧</td>
     </tr>
     <tr>
       <td></td>
@@ -67,25 +85,33 @@ bitsandbytes has the following minimum requirements for all platforms:
         Arc A-Series (Alchemist)<br>
         Arc B-Series (Battlemage)
       </td>
-      <td>🚧 In Development</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>🚧</td>
     </tr>
     <tr>
       <td></td>
       <td>🟪 Intel Gaudi <br><code>hpu</code></td>
       <td>Gaudi1, Gaudi2, Gaudi3</td>
-      <td>🚧 In Development</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>❌</td>
     </tr>
     <tr>
       <td align="right">aarch64</td>
       <td>◻️ CPU</td>
       <td></td>
-      <td>〰️ Partial Support</td>
+      <td>〰️</td>
+      <td>〰️</td>
+      <td>❌</td>
     </tr>
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
       <td>SM75, SM80, SM90, SM100</td>
-      <td>✅ Full Support</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td colspan="4">🪟 <strong>Windows 11 / Windows Server 2019+</strong></td>
@@ -94,13 +120,17 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">x86-64</td>
       <td>◻️ CPU</td>
       <td>AVX2</td>
-      <td>〰️ Partial Support</td>
+      <td>〰️</td>
+      <td>〰️</td>
+      <td>❌</td>
     </tr>
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
       <td>SM50+ minimum<br>SM75+ recommended</td>
-      <td>✅ Full Support</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -109,7 +139,9 @@ bitsandbytes has the following minimum requirements for all platforms:
         Arc A-Series (Alchemist) <br>
         Arc B-Series (Battlemage)
       </td>
-      <td>🚧 In Development</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>🚧</td>
     </tr>
     <tr>
       <td colspan="4">🍎 <strong>macOS 13.1+</strong></td>
@@ -118,13 +150,17 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">arm64</td>
       <td>◻️ CPU</td>
       <td>Apple M1+</td>
-      <td>🚧 In Development</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>❌</td>
     </tr>
     <tr>
       <td></td>
       <td>⬜ Metal <br><code>mps</code></td>
       <td>Apple M1+</td>
-      <td>🚧 In Development</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>❌</td>
   </tbody>
 </table>
 
