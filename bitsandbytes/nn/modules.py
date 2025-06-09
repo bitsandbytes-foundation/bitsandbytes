@@ -291,13 +291,6 @@ class Params4bit(torch.nn.Parameter):
 
         return self
 
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        with torch._C.DisableTorchFunctionSubclass():
-            return func(*args, **kwargs)
-
     def _quantize(self, device):
         w = self.data.contiguous().to(device)
         w_4bit, quant_state = bnb.functional.quantize_4bit(
@@ -455,14 +448,14 @@ class Linear4bit(nn.Linear):
             self.compute_dtype = x.dtype
         elif x.dtype == torch.float16:
             # we take the compoute dtype passed into the layer
-            if self.compute_dtype == torch.float32 and (x.numel() == x.shape[-1]):
+            if self.compute_dtype in [None, torch.float32] and (x.numel() == x.shape[-1]):
                 # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference when it could be fast
                 # warn the user about this
                 warnings.warn(
                     "Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference.",
                 )
                 warnings.filterwarnings("ignore", message=".*inference.")
-            if self.compute_dtype == torch.float32 and (x.numel() != x.shape[-1]):
+            if self.compute_dtype in [None, torch.float32] and (x.numel() != x.shape[-1]):
                 warnings.warn(
                     "Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference or training speed.",
                 )
