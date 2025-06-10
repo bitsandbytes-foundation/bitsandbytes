@@ -18,9 +18,9 @@ storage = {
 }
 
 
-@pytest.mark.parametrize(  
-    "device",  
-    [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],  
+@pytest.mark.parametrize(
+    "device",
+    [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
 )
 @pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
@@ -185,10 +185,10 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
         assert size_ratio < target_compression, ratio_error_msg
 
 
-@pytest.mark.parametrize(  
-    "device",  
-    [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],  
-) 
+@pytest.mark.parametrize(
+    "device",
+    [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
+)
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
@@ -213,9 +213,9 @@ def test_copy_param(device, quant_type, blocksize, compress_statistics):
     assert param.data.data_ptr() == shallow_copy_param.data.data_ptr()
 
 
-@pytest.mark.parametrize(  
-    "device",  
-    [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],  
+@pytest.mark.parametrize(
+    "device",
+    [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
 )
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
@@ -248,9 +248,9 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
     assert dict_keys_before == dict_keys_copy
 
 
-@pytest.mark.parametrize(  
-    "device",  
-    [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],  
+@pytest.mark.parametrize(
+    "device",
+    [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
 )
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128])
