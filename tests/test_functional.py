@@ -89,10 +89,7 @@ class Timer:
 
 
 class Test8BitBlockwiseQuantizeFunctional:
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
     @pytest.mark.parametrize(
@@ -175,10 +172,7 @@ class Test8BitBlockwiseQuantizeFunctional:
         # print(sum(diffs)/len(diffs))
         # print(sum(reldiffs)/len(reldiffs))
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
     @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic", "quantile"])
     def test_few_bit_quant(self, device, bits, method):
@@ -236,10 +230,7 @@ class Test8BitBlockwiseQuantizeFunctional:
             else:
                 torch.testing.assert_close(q1, q2)
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     def test_fp8_quant(self, device):
         # TODO
         if device == "cpu":
@@ -571,10 +562,7 @@ class TestIGEMMFunctional:
 
 
 class TestLLMInt8Functional:
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [128], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [256], ids=id_formatter("dim2"))
     @pytest.mark.parametrize("dim3", [499, 512], ids=id_formatter("dim3"))
@@ -593,10 +581,7 @@ class TestLLMInt8Functional:
             C2 = F.int8_linear_matmul(A, B)
             torch.testing.assert_close(C1, C2.float())
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [32], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [32], ids=id_formatter("dim2"))
     @pytest.mark.parametrize("dim3", [32], ids=id_formatter("dim3"))
@@ -620,10 +605,7 @@ class TestLLMInt8Functional:
 
             torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", (64, 256), ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim4", (64, 1024), ids=id_formatter("dim4"))
     @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
@@ -739,10 +721,7 @@ class TestLLMInt8Functional:
             torch.testing.assert_close(Srow.flatten().float(), statsA)
             torch.testing.assert_close(Scol.flatten().float(), statsAt)
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize(
         ("dim1", "dim4", "inner"),
         (
@@ -784,10 +763,7 @@ class TestLLMInt8Functional:
             err2 = torch.abs(out1 - out3).mean().item()
             assert err2 <= err1 * 1.025
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
     def test_coo_double_quant(self, device, dim1, dim2):
@@ -807,10 +783,7 @@ class TestLLMInt8Functional:
                 A2 = (CA.float() * statsA.unsqueeze(1) / 127).half()
                 torch.testing.assert_close(A, A2, rtol=0.05, atol=1.5e-2)
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dim1", [512, 2048], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [1024, 4096], ids=id_formatter("dim2"))
     def test_coo_int8_vectorwise_quant(self, device, dim1, dim2):
@@ -1134,10 +1107,7 @@ class TestSparseTensorFunctional:
 
 
 class TestQuantize4BitFunctional:
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize(
@@ -1176,10 +1146,7 @@ class TestQuantize4BitFunctional:
             # 1024 => 0.8, 2048 => 0.88, 4096 => 0.96
             assert err.item() < math.log2(blocksize) * 8e-2
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128], ids=id_formatter("blocksize"))
     def test_4bit_compressed_stats(self, device, quant_type, blocksize):
@@ -1249,10 +1216,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.skipif(
         HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64"
     )
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("double_quant", TRUE_FALSE, ids=lambda double_quant: f"DQ_{double_quant}")
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"])
     @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
@@ -1411,10 +1375,7 @@ class TestQuantize4BitFunctional:
             assert relratio < 1.04 and relratio > 0.96
             assert maxratio < 1.02 and maxratio > 0.98
 
-    @pytest.mark.parametrize(
-        "device",
-        [d for d in get_available_devices() if not (HIP_ENVIRONMENT and d == "cpu")],
-    )
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
     @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
