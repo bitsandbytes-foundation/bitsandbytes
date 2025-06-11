@@ -7,6 +7,8 @@ from typing import Any
 
 import torch
 
+from bitsandbytes.cextension import HIP_ENVIRONMENT
+
 test_dims_rng = random.Random(42)
 
 
@@ -21,7 +23,7 @@ def get_available_devices():
         # If the environment variable is set, use it directly.
         return [os.environ["BNB_TEST_DEVICE"]]
 
-    devices = ["cpu"]
+    devices = [] if HIP_ENVIRONMENT else ["cpu"]
 
     if hasattr(torch, "accelerator"):
         # PyTorch 2.6+ - determine accelerator using agnostic API.
