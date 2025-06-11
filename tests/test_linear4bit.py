@@ -1,13 +1,21 @@
 import copy
 import os
 import pickle
+import platform
 from tempfile import TemporaryDirectory
 
 import pytest
 import torch
 
 import bitsandbytes as bnb
-from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, torch_load_from_buffer, torch_save_to_buffer
+from tests.helpers import (
+    TRUE_FALSE,
+    describe_dtype,
+    get_available_devices,
+    id_formatter,
+    torch_load_from_buffer,
+    torch_save_to_buffer,
+)
 
 storage = {
     "uint8": torch.uint8,
@@ -24,12 +32,6 @@ storage = {
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
 def test_linear_serialization(device, quant_type, compress_statistics, bias, quant_storage, save_before_forward):
-    if device == "cpu":
-        if quant_type == "fp4":
-            pytest.xfail("FP4 is not supported for CPU")
-        if quant_storage != "uint8":
-            pytest.xfail("Only uint8 storage is supported for CPU")
-
     original_dtype = torch.float16
     compute_dtype = None
     layer_shape = (300, 400)
@@ -186,13 +188,7 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
-    if device == "cpu":
-        if compress_statistics:
-            pytest.skip("Currently segfaults on CPU")
-        if quant_type == "fp4":
-            pytest.xfail("FP4 not supported on CPU")
-
-    tensor = torch.linspace(1, blocksize, blocksize)
+    tensor = torch.randn(300, 400)
     param = bnb.nn.Params4bit(
         data=tensor,
         quant_type=quant_type,
@@ -211,13 +207,7 @@ def test_copy_param(device, quant_type, blocksize, compress_statistics):
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
-    if device == "cpu":
-        if compress_statistics:
-            pytest.skip("Currently segfaults on CPU")
-        if quant_type == "fp4":
-            pytest.xfail("FP4 not supported on CPU")
-
-    tensor = torch.linspace(1, blocksize, blocksize)
+    tensor = torch.randn(300, 400)
     param = bnb.nn.Params4bit(
         data=tensor,
         quant_type=quant_type,
@@ -243,13 +233,7 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
-    if device == "cpu":
-        if compress_statistics:
-            pytest.skip("Currently segfaults on CPU")
-        if quant_type == "fp4":
-            pytest.xfail("FP4 not supported on CPU")
-
-    original_tensor = torch.linspace(1, blocksize, blocksize, dtype=torch.float32)
+    original_tensor = torch.randn(300, 400)
     original_param = bnb.nn.Params4bit(
         data=original_tensor,
         quant_type=quant_type,
@@ -275,3 +259,82 @@ def test_params4bit_real_serialization(device, quant_type, blocksize, compress_s
     # there was a bug where deepcopy would modify the original object
     assert dict_keys_before == dict_keys_after
     assert dict_keys_before == dict_keys_deserialized
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("compute_dtype", [torch.bfloat16, torch.float32], ids=describe_dtype)
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+@pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
+@pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
+@pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
+@pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
+def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_statistics, bias, fullgraph, mode):
+    if fullgraph and torch.__version__ < (2, 8, 0, "dev"):
+        pytest.skip("fullgraph mode requires torch 2.8 or higher")
+
+    if device == "cuda" and platform.system() == "Windows":
+        pytest.skip("Triton is not officially supported on Windows")
+
+    # Has a strange regression on Linux aarch64 CPU in torch==2.6.0 when fullgraph=False.
+    if (
+        not fullgraph
+        and device == "cpu"
+        and platform.machine() == "aarch64"
+        and platform.system() == "Linux"
+        and ((2, 7) > torch.__version__ >= (2, 6))
+    ):
+        pytest.xfail("Regression in torch==2.6.0 on Linux aarch64 CPU")
+
+    dim = 256
+    batch_size = 16
+
+    torch.compiler.reset()
+
+    # Create a small network with Linear4bit layers
+    net = torch.nn.Sequential(
+        *[
+            bnb.nn.Linear4bit(
+                dim,
+                dim,
+                bias=bias,
+                compute_dtype=compute_dtype,
+                compress_statistics=compress_statistics,
+                quant_type=quant_type,
+            )
+            for _ in range(4)
+        ]
+    ).to(device)
+
+    # Create input tensor
+    x = torch.randn(batch_size, dim, dtype=compute_dtype, device=device)
+
+    # Get reference output before compilation
+    with torch.no_grad():
+        ref_output = net(x)
+
+    # Compile the model
+    compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode)
+
+    # Get output from compiled model
+    with torch.no_grad():
+        compiled_output = compiled_net(x)
+
+    # Check outputs match
+    assert compiled_output.shape == ref_output.shape
+    assert compiled_output.device == ref_output.device
+    assert compiled_output.dtype == ref_output.dtype
+    torch.testing.assert_close(compiled_output, ref_output)
+
+    # Test with gradients
+    x.requires_grad_(True)
+    y1 = net(x).sum()
+    y1.backward()
+    grad_ref = x.grad.clone()
+
+    x.grad = None
+    y2 = compiled_net(x).sum()
+    y2.backward()
+    grad_compiled = x.grad.clone()
+
+    torch.testing.assert_close(grad_compiled, grad_ref)

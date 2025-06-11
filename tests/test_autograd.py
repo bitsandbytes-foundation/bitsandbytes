@@ -49,6 +49,10 @@ def test_matmullt(
         req_grad = list(req_grad)
         req_grad[2] = False
 
+    if device == "cpu" and dtype != torch.float32 and has_fp16_weights and any(req_grad):
+        if torch.__version__ < (2, 6):
+            pytest.xfail("mse_loss bf16/fp16 on CPU is not supported in torch < 2.6")
+
     for i in range(3):
         # normal multiply
         if funcs[0] in [torch.mm, torch.matmul]:
@@ -176,14 +180,14 @@ def test_matmul_4bit(
     compress_statistics,
     quant_type,
 ):
-    if device == "cpu" and quant_type == "fp4":
-        pytest.xfail("Only nf4 is supported on CPU")
-
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
     if has_bias == False:
         req_grad = list(req_grad)
         req_grad[2] = False
+
+    if device == "cpu" and dtype != torch.float32 and any(req_grad) and torch.__version__ < (2, 6):
+        pytest.xfail("mse_loss fp16 on CPU is not supported in torch < 2.6")
 
     for i in range(3):
         # normal multiply

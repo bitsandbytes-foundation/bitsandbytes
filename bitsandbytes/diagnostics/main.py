@@ -1,15 +1,29 @@
+import importlib
+import platform
 import sys
 import traceback
 
 import torch
 
+from bitsandbytes import __version__ as bnb_version
 from bitsandbytes.consts import PACKAGE_GITHUB_URL
 from bitsandbytes.cuda_specs import get_cuda_specs
 from bitsandbytes.diagnostics.cuda import (
     print_cuda_diagnostics,
-    print_cuda_runtime_diagnostics,
 )
 from bitsandbytes.diagnostics.utils import print_dedented, print_header
+
+_RELATED_PACKAGES = [
+    "accelerate",
+    "diffusers",
+    "numpy",
+    "pip",
+    "peft",
+    "safetensors",
+    "transformers",
+    "triton",
+    "trl",
+]
 
 
 def sanity_check():
@@ -27,47 +41,77 @@ def sanity_check():
     assert p1 != p2
 
 
+def get_package_version(name: str) -> str:
+    try:
+        version = importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        version = "not found"
+    return version
+
+
+def show_environment():
+    """Simple utility to print out environment information."""
+
+    print(f"Platform: {platform.platform()}")
+    if platform.system() == "Linux":
+        print(f"  libc: {'-'.join(platform.libc_ver())}")
+
+    print(f"Python: {platform.python_version()}")
+
+    print(f"PyTorch: {torch.__version__}")
+    print(f"  CUDA: {torch.version.cuda or 'N/A'}")
+    print(f"  HIP: {torch.version.hip or 'N/A'}")
+    print(f"  XPU: {getattr(torch.version, 'xpu', 'N/A') or 'N/A'}")
+
+    print("Related packages:")
+    for pkg in _RELATED_PACKAGES:
+        version = get_package_version(pkg)
+        print(f"  {pkg}: {version}")
+
+
 def main():
-    print_header("")
-    print_header("BUG REPORT INFORMATION")
+    print_header(f"bitsandbytes v{bnb_version}")
+    show_environment()
     print_header("")
 
-    print_header("OTHER")
     cuda_specs = get_cuda_specs()
-    print("CUDA specs:", cuda_specs)
-    if not torch.cuda.is_available():
-        print("Torch says CUDA is not available. Possible reasons:")
-        print("1. CUDA driver not installed")
-        print("2. CUDA not installed")
-        print("3. You have multiple conflicting CUDA libraries")
+
     if cuda_specs:
         print_cuda_diagnostics(cuda_specs)
-    print_cuda_runtime_diagnostics()
-    print_header("")
-    print_header("DEBUG INFO END")
-    print_header("")
-    print("Checking that the library is importable and CUDA is callable...")
-    try:
-        sanity_check()
-        print("SUCCESS!")
-        print("Installation was successful!")
-        return
-    except RuntimeError as e:
-        if "not available in CPU-only" in str(e):
-            print(
-                f"WARNING: {__package__} is currently running as CPU-only!\n"
-                "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
-                f"If you think that this is so erroneously,\nplease report an issue!",
-            )
-        else:
-            raise e
-    except Exception:
-        traceback.print_exc()
-    print_dedented(
-        f"""
-        Above we output some debug information.
-        Please provide this info when creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose
-        WARNING: Please be sure to sanitize sensitive info from the output before posting it.
-        """,
-    )
-    sys.exit(1)
+
+    # TODO: There's a lot of noise in this; needs improvement.
+    # print_cuda_runtime_diagnostics()
+
+    if not torch.cuda.is_available():
+        print("PyTorch says CUDA is not available. Possible reasons:")
+        print("1. CUDA driver not installed")
+        print("2. Using a CPU-only PyTorch build")
+        print("3. No GPU detected")
+
+    else:
+        print("Checking that the library is importable and CUDA is callable...")
+
+        try:
+            sanity_check()
+            print("SUCCESS!")
+            return
+        except RuntimeError as e:
+            if "not available in CPU-only" in str(e):
+                print(
+                    f"WARNING: {__package__} is currently running as CPU-only!\n"
+                    "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
+                    f"If you think that this is so erroneously,\nplease report an issue!",
+                )
+            else:
+                raise e
+        except Exception:
+            traceback.print_exc()
+
+        print_dedented(
+            f"""
+            Above we output some debug information.
+            Please provide this info when creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose
+            WARNING: Please be sure to sanitize sensitive info from the output before posting it.
+            """,
+        )
+        sys.exit(1)

@@ -26,13 +26,19 @@ supported_torch_devices = {
     "cpu",
     "cuda",  # NVIDIA/AMD GPU
     "xpu",  # Intel GPU
-    "hpu",  # Gaudi
+    "hpu",  # Intel Gaudi
     "npu",  # Ascend NPU
     "mps",  # Apple Silicon
 }
 
 if torch.cuda.is_available():
     from .backends.cuda import ops as cuda_ops
+
+if hasattr(torch, "xpu") and torch.xpu.is_available():
+    from .backends.xpu import ops as xpu_ops
+
+if hasattr(torch, "hpu") and torch.hpu.is_available():
+    from .backends.hpu import ops as hpu_ops
 
 
 def _import_backends():
@@ -64,4 +70,4 @@ __pdoc__ = {
     "optim.optimizer.MockArgs": False,
 }
 
-__version__ = "0.46.0.dev0"
+__version__ = "0.47.0.dev0"
