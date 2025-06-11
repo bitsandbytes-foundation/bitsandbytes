@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from bitsandbytes.cextension import HIP_ENVIRONMENT 
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 
 test_dims_rng = random.Random(42)
 
