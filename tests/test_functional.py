@@ -137,11 +137,10 @@ class Test8BitBlockwiseQuantizeFunctional:
         abserr = sum(diffs) / len(diffs)
         relerr = sum(reldiffs) / len(reldiffs)
         if signed:
-            threshold_abserr = 0.0036 if device in ("cpu", "xpu") and (F.ipex_cpu or F.ipex_xpu) else 0.0035
             assert abserr < 0.0036
             assert relerr < 0.015
         else:
-            assert abserr < 0.00175 if device in ("cpu", "xpu") and (F.ipex_cpu or F.ipex_xpu) else 0.0023
+            assert abserr < 0.00175 if (device in "cpu") or (device in "xpu" and F.ipex_xpu) else 0.0023
             assert relerr < 0.012
         assert A2.dtype == dtype
 
@@ -172,8 +171,10 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
     @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic"])
     def test_few_bit_quant(self, device, bits, method):
-        if bits != 8 and (device == "cpu" or (device == "xpu" and F.ipex_xpu)):
-            pytest.skip("CPU/XPU implementation only supports 8 bits")
+        if device in "cpu" and bits != 8:
+            pytest.skip("CPU implementation only supports 8 bits")
+        if device in "xpu" and bits != 8 and F.ipex_xpu:
+            pytest.skip("XPU ipex implementation only supports 8 bits")
 
         abserrs = []
         relerrs = []
