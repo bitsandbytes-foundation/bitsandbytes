@@ -6,12 +6,11 @@ import traceback
 import torch
 
 from bitsandbytes import __version__ as bnb_version
-from bitsandbytes.cextension import BNB_BACKEND, HIP_ENVIRONMENT
+from bitsandbytes.cextension import BNB_BACKEND
 from bitsandbytes.consts import PACKAGE_GITHUB_URL
 from bitsandbytes.cuda_specs import get_cuda_specs
 from bitsandbytes.diagnostics.cuda import (
     print_diagnostics,
-    print_runtime_diagnostics,
 )
 from bitsandbytes.diagnostics.utils import print_dedented, print_header
 
@@ -77,18 +76,18 @@ def main():
     print_header("")
 
     cuda_specs = get_cuda_specs()
-    
+
     if cuda_specs:
         print_diagnostics(cuda_specs)
 
     # TODO: There's a lot of noise in this; needs improvement.
     # print_cuda_runtime_diagnostics()
-    
+
     if not torch.cuda.is_available():
         print(f"PyTorch says {BNB_BACKEND} is not available. Possible reasons:")
         print(f"1. {BNB_BACKEND} driver not installed")
-        print(f"2. Using a CPU-only PyTorch build")
-        print(f"3. No GPU detected")
+        print("2. Using a CPU-only PyTorch build")
+        print("3. No GPU detected")
 
     else:
         print(f"Checking that the library is importable and {BNB_BACKEND} is callable...")
@@ -108,7 +107,7 @@ def main():
             raise e
     except Exception:
         traceback.print_exc()
-        
+
     print_dedented(
         f"""
         Above we output some debug information.
