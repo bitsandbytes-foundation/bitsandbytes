@@ -278,7 +278,6 @@ jobs:
       - name: Show XPU Information
         run: |
           xpu-smi discovery
-          lspci
           apt-get install -y hwinfo
           hwinfo --display
 
