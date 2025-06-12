@@ -225,6 +225,18 @@ jobs:
   test-xpu:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
+    strategy:
+      fail-fast: false
+      matrix:
+        torch_version: ["2.6.0", "2.7.1"]
+        ipex: [true, false]
+        include:
+          - torch_version: "2.6.0"
+            ipex: true
+            ipex_version: "2.6.10+xpu"
+          - torch_version: "2.7.1"
+            ipex: true
+            ipex_version: "2.7.10+xpu"
     runs-on:
       group: bandb-itac-bmsprpvc1550-8-1gpu
     env:
@@ -237,7 +249,7 @@ jobs:
           echo "Memory: $(free -h)"
 
       - name: Show XPU Information
-        run: xpu-smi
+        run: xpu-smi discovery
 
       - uses: actions/checkout@v4
 
@@ -245,16 +257,23 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: lib_cpu_ubuntu-22.04_x86_64
+          path: bitsandbytes/
+          merge-multiple: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.9
 
+      - name: Install PyTorch
+        run: pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/xpu
+
+      - name: Install IPEX
+        if: matrix.ipex == true
+        run: pip install intel_extension_for_pytorch==${{ matrix.ipex_version }} --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+
       - name: Install dependencies
         run: |
-          pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/xpu
-
           pip install -e ".[test]"
           pip install pytest-cov
 
@@ -265,6 +284,8 @@ jobs:
         run: |
           python -m torch.utils.collect_env
           python -m bitsandbytes
+      - name: Run tests
+        run: pytest --durations=100
 
   test-cuda:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
