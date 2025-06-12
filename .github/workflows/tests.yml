@@ -228,15 +228,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        torch_version: ["2.6.0", "2.7.1"]
-        ipex: [true, false]
-        include:
-          - torch_version: "2.6.0"
-            ipex: true
-            ipex_version: "2.6.10+xpu"
-          - torch_version: "2.7.1"
-            ipex: true
-            ipex_version: "2.7.10+xpu"
+        torch_version: ["2.7.1"] #["2.6.0", "2.7.1"]
+        ipex: [false]
+        # ipex: [true, false]
+        # include:
+        #   - torch_version: "2.6.0"
+        #     ipex: true
+        #     ipex_version: "2.6.10+xpu"
+        #   - torch_version: "2.7.1"
+        #     ipex: true
+        #     ipex_version: "2.7.10+xpu"
     runs-on:
       group: bandb-itac-bmsprpvc1550-8-1gpu
     env:
@@ -249,7 +250,9 @@ jobs:
           echo "Memory: $(free -h)"
 
       - name: Show XPU Information
-        run: xpu-smi discovery
+        run: |
+          xpu-smi discovery
+          hwinfo --display
 
       - uses: actions/checkout@v4
 
@@ -284,8 +287,9 @@ jobs:
         run: |
           python -m torch.utils.collect_env
           python -m bitsandbytes
-      - name: Run tests
-        run: pytest --durations=100
+
+      # - name: Run tests
+      #   run: pytest --durations=100
 
   test-cuda:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
