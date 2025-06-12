@@ -231,8 +231,12 @@ jobs:
         torch_version: ["2.6.0"]
     runs-on:
       group: bandb-itac-bmemr-gaudi3-1gaudi
-    env:
-      BNB_TEST_DEVICE: hpu
+    container:
+      image: vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+      options: --runtime=habana --shm-size=64G --env HABANA_VISIBLE_DEVICES --env HABANA_VISIBLE_MODULES
+      env:
+        OMPI_MCA_btl_vader_single_copy_mechanism: none
+        BNB_TEST_DEVICE: hpu
     steps:
       - name: Show system information
         run: |
