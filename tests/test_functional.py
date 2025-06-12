@@ -1101,6 +1101,9 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
+        if device == "hpu" and quant_type != "nf4":
+            pytest.skip("fp4 dequantization is not supported on HPU")
+
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
         A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
@@ -1133,6 +1136,9 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128], ids=id_formatter("blocksize"))
     def test_4bit_compressed_stats(self, device, quant_type, blocksize):
+        if device == "hpu" and quant_type != "nf4":
+            pytest.skip("fp4 dequantization is not supported on HPU")
+
         errs1 = []
         errs2 = []
         for i in range(10):
@@ -1205,6 +1211,9 @@ class TestQuantize4BitFunctional:
     )
     @pytest.mark.parametrize("dim", [128, 256, 512, 1024], ids=id_formatter("dim"))
     def test_gemv_4bit(self, device, dim, dtype, storage_type, quant_storage, double_quant, kind):
+        if device == "hpu" and storage_type != "nf4":
+            pytest.skip("fp4 dequantization is not supported on HPU")
+
         errs1 = []
         errs2 = []
         errs3 = []
@@ -1353,6 +1362,9 @@ class TestQuantize4BitFunctional:
     def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
         if device == "cpu" and dtype == torch.bfloat16 and torch.__version__ < (2, 3):
             pytest.skip("eye doe not support bfloat16 on CPU in torch < 2.3")
+
+        if device == "hpu" and storage_type != "nf4":
+            pytest.skip("fp4 dequantization is not supported on HPU")
 
         dims = 10
         torch.random.manual_seed(np.random.randint(0, 412424242))
