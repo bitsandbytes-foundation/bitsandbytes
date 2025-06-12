@@ -278,7 +278,8 @@ jobs:
       - name: Show XPU Information
         run: |
           xpu-smi discovery
-          apt-get install -y hwinfo
+          sudo xpu-smi discovery
+          sudo apt-get install -y hwinfo
           hwinfo --display
 
       - uses: actions/checkout@v4
