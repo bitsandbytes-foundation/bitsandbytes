@@ -39,9 +39,9 @@ if hasattr(torch, "xpu") and torch.xpu.is_available():
     from .backends.xpu import ops as xpu_ops
 
 
-if importlib.util.find_spec("habana_frameworks.torch"):
+if importlib.util.find_spec("habana_frameworks") and importlib.util.find_spec("habana_frameworks.torch"):
     # In case not automatically imported
-    import habana_frameworks.torch # type: ignore # noqa: I001
+    import habana_frameworks.torch # noqa: I001
 
     if hasattr(torch, "hpu") and torch.hpu.is_available():
         from .backends.hpu import ops as hpu_ops
