@@ -1,0 +1,28 @@
+---
+BasedOnStyle: LLVM
+AlignAfterOpenBracket: BlockIndent
+BinPackArguments: true
+BinPackParameters: true
+BracedInitializerIndentWidth: 4
+ColumnLimit: 120
+Cpp11BracedListStyle: true
+IndentWidth: 4
+IndentWrappedFunctionNames: true
+PointerAlignment: Left
+SeparateDefinitionBlocks: Always
+Standard: c++17
+StatementMacros:
+  - 'MAKE_PreconditionOptimizer32bit1State'
+  - 'MAKE_PreconditionOptimizer32bit2State'
+  - 'MAKE_PreconditionStatic8bit1State'
+  - 'MAKE_PreconditionStatic8bit2State'
+  - 'MAKE_Optimizer32bit1State'
+  - 'MAKE_optimizerStatic8bit1State'
+  - 'MAKE_optimizerStatic8bit2State'
+  - 'MAKE_OptimizerStatic8bit1StateBlockwise'
+  - 'MAKE_OptimizerStatic8bit2StateBlockwise'
+  - 'MAKE_kQuantizeBlockwise'
+
+UseTab: Never
+
+...
