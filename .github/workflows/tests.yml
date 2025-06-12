@@ -222,6 +222,28 @@ jobs:
   #     - name: Show pip packages
   #       run: pip list
 
+  test-hpu:
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    needs: build-cpu
+    strategy:
+      fail-fast: false
+      matrix:
+        torch_version: ["2.6.0"]
+    runs-on:
+      group: bandb-itac-bmemr-gaudi3-1gaudi
+    env:
+      BNB_TEST_DEVICE: hpu
+    steps:
+      - name: Show system information
+        run: |
+          echo "OS: $(uname -a)"
+          echo "CPU: $(lscpu | grep 'Model name')"
+          echo "Memory: $(free -h)"
+
+      - name: Show HPU Information
+        run: |
+          hpu-smi
+
   test-xpu:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
@@ -252,6 +274,8 @@ jobs:
       - name: Show XPU Information
         run: |
           xpu-smi discovery
+          lspci
+          apt-get install -y hwinfo
           hwinfo --display
 
       - uses: actions/checkout@v4
