@@ -1211,8 +1211,8 @@ class TestQuantize4BitFunctional:
     )
     @pytest.mark.parametrize("dim", [128, 256, 512, 1024], ids=id_formatter("dim"))
     def test_gemv_4bit(self, device, dim, dtype, storage_type, quant_storage, double_quant, kind):
-        if device == "hpu" and storage_type != "nf4":
-            pytest.skip("fp4 dequantization is not supported on HPU")
+        if device == "hpu":
+            pytest.skip("gemv not supported on HPU")
 
         errs1 = []
         errs2 = []

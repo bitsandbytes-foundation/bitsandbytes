@@ -213,8 +213,8 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
-        if device == "hpu" and quant_type != "nf4":
-            pytest.skip("fp4 dequantization is not supported on HPU")
+        if device == "hpu":
+            pytest.skip("gemv not supported on HPU")
 
         out_features = 1024
         in_features = 256
