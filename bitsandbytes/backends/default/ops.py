@@ -154,7 +154,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     rem = n % blocksize
     has_rem = rem > 0
     blocks = n // blocksize + has_rem
-    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
+    absmax = torch.zeros((blocks,), device=A.device, dtype=A.dtype)
     A_reshaped = A.reshape(n)
     A_com = A_reshaped[: n - rem]
     A_com_reshaped = A_com.reshape(n // blocksize, blocksize)
@@ -204,7 +204,7 @@ def _(
     full_blocks = n // blocksize
     rem = n % blocksize
     blocks = full_blocks + 1 if rem else full_blocks
-    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
+    absmax = torch.zeros((blocks,), device=A.device, dtype=A.dtype)
     A_flattened = A.reshape(n)
 
     # Scale full blocks of the tensor to [-1, 1]
@@ -229,7 +229,7 @@ def _(
     if quant_storage != torch.uint8:
         packed = packed.squeeze().view(quant_storage).unsqueeze(1)
 
-    return packed, absmax.float()
+    return packed, absmax
 
 
 @register_kernel("bitsandbytes::dequantize_4bit", "default")
