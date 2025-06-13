@@ -4,6 +4,7 @@ import pytest
 import torch
 
 import bitsandbytes
+from bitsandbytes.functional import ipex_xpu
 from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
 
 # torch.library.opcheck is only available in torch 2.4 and later.
@@ -137,7 +138,7 @@ class TestInt8BlockwiseQuantOps:
         assert out.device == A.device
 
         # TODO: Enable it
-        if device == "xpu":
+        if device == "xpu" and ipex_xpu:
             pytest.skip("XPU implementation have torch.op inside torch.op, it will fail on op check")
 
         opcheck(torch.ops.bitsandbytes.dequantize_blockwise.default, (A, absmax, code, blocksize, dtype))
@@ -162,7 +163,7 @@ class Test4bitBlockwiseQuantOps:
         if storage_dtype != torch.uint8:
             pytest.xfail("opcheck fails for storage_dtype != torch.uint8")
 
-        opcheck(torch.ops.bitsandbytes.quantize_4bit, (A, blocksize, quant_type, storage_dtype))
+        opcheck(torch.ops.bitsandbytes.quantize_4bit.default, (A, blocksize, quant_type, storage_dtype))
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))

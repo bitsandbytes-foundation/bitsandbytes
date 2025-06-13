@@ -169,7 +169,7 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
     @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic"])
     def test_few_bit_quant(self, device, bits, method):
-        if device in ("cpu", "xpu") and bits != 8:
+        if bits != 8 and (device == "cpu" or (device == "xpu" and F.ipex_xpu)):
             pytest.skip("CPU/XPU implementation only supports 8 bits")
 
         abserrs = []
