@@ -22,6 +22,14 @@ StatementMacros:
   - 'MAKE_OptimizerStatic8bit1StateBlockwise'
   - 'MAKE_OptimizerStatic8bit2StateBlockwise'
   - 'MAKE_kQuantizeBlockwise'
+  - 'MAKE_BLOCKWISE8'
+  - 'MAKE_ELEMENTWISE_FUNC'
+  - 'CMAKE_ELEMENTWISE_FUNC'
+  - 'MAKE_FUNC8'
+  - 'MAKE_FUNC32'
+  - 'MAKE_CBLOCKWISE8'
+  - 'MAKE_CFUNC8'
+  - 'MAKE_CFUNC32'
 
 UseTab: Never
 
