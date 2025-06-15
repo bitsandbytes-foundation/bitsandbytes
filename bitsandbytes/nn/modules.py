@@ -496,9 +496,9 @@ class Linear4bit(nn.Linear):
 
     def forward(self, x: torch.Tensor):
         # Check if ipex fusion can be used
-        if not self.ipex_linear_is_set and (ipex_cpu or ipex_xpu):
-            self.set_ipex_linear(x)
-            self.ipex_linear_is_set = True
+        #if not self.ipex_linear_is_set and (ipex_cpu or ipex_xpu):
+        #    self.set_ipex_linear(x)
+        #    self.ipex_linear_is_set = True
 
         fix_4bit_weight_quant_state_from_module(self)
 
