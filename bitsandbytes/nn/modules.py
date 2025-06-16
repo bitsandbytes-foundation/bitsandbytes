@@ -11,12 +11,13 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.functional import QuantState, _enable_ipex_fusion, ipex_cpu
+from bitsandbytes.functional import QuantState, _enable_ipex_fusion
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
     INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
     OutlierTracer,
     _reverse_4bit_compress_format,
+    ipex_cpu,
 )
 
 T = TypeVar("T", bound="torch.nn.Module")

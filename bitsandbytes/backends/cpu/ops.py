@@ -4,10 +4,11 @@ import warnings
 
 import torch
 
-from bitsandbytes.functional import get_ptr, ipex_cpu
+from bitsandbytes.functional import get_ptr
 
 from ..._ops import register_kernel
 from ...cextension import lib
+from ..utils import ipex_cpu
 
 # torch._int_mm for s8@s8->s32 is supported on CPU from torch 2.4+.
 # However, we can overflow if we use this without AVX512_VNNI support.

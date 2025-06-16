@@ -4,6 +4,14 @@ import subprocess
 
 import torch
 
+try:
+    # to support Intel CPU backend
+    import intel_extension_for_pytorch as ipex
+
+    ipex_cpu = ipex if ipex._C._has_cpu() else None
+except BaseException:
+    ipex_cpu = None
+
 
 def outlier_hook(module, input):
     assert isinstance(module, torch.nn.Linear)
