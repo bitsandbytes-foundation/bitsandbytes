@@ -8,18 +8,16 @@ from bitsandbytes.functional import _get_tensor_stream, get_ptr
 
 from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
-from ..utils import ipex_xpu, triton_available
+from ..utils import triton_available
 
-# _int_mm is available in torch starting from 2.7 version,
-# but currently it's don't have xpu implementation.
-if ipex_xpu and torch.__version__ >= (2, 7):
-
-    @register_kernel("bitsandbytes::int8_linear_matmul", "xpu")
-    def _(A: torch.Tensor, B: torch.Tensor):
-        return torch._int_mm(
-            A.reshape(-1, A.shape[-1]),
-            B.t(),
-        ).reshape(*A.shape[:-1], B.shape[0])
+# TODO: Enable _int_mm in torch
+# if torch.__version__ >= (2, 9):
+#     @register_kernel("bitsandbytes::int8_linear_matmul", "xpu")
+#     def _(A: torch.Tensor, B: torch.Tensor):
+#         return torch._int_mm(
+#             A.reshape(-1, A.shape[-1]),
+#             B.t(),
+#         ).reshape(*A.shape[:-1], B.shape[0])
 
 
 def _dequantize_4bit_impl(
@@ -92,21 +90,21 @@ def _gemv_4bit_impl(
     blocksize: int,
     out: torch.Tensor,
 ) -> None:
-    # torch._check_is_size(blocksize)
-    # torch._check(
-    #    A.numel() == A.size(-1),
-    #    lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}",
-    # )
-    # torch._check(
-    #    A.dtype in [torch.float16, torch.bfloat16, torch.float32],
-    #    lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
-    # )
-    # torch._check(
-    #    B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32],
-    #    lambda: f"B must be backed by storage of type uint8, bfloat16, float16, or float32, got {B.dtype}",
-    # )
-    # torch._check(absmax.dtype == torch.float32, lambda: f"absmax must be float32, got {absmax.dtype}")
-    # torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
+    torch._check_is_size(blocksize)
+    torch._check(
+        A.numel() == A.size(-1),
+        lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}",
+    )
+    torch._check(
+        A.dtype in [torch.float16, torch.bfloat16, torch.float32],
+        lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
+    )
+    torch._check(
+        B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"B must be backed by storage of type uint8, bfloat16, float16, or float32, got {B.dtype}",
+    )
+    torch._check(absmax.dtype == torch.float32, lambda: f"absmax must be float32, got {absmax.dtype}")
+    torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
 
     m = ct.c_int32(shapeB[0])
     n = ct.c_int32(1)

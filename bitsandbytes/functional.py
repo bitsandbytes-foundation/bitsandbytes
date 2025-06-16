@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import _reverse_4bit_compress_format, pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import ipex_cpu, ipex_xpu, lib
+from .cextension import lib
 
 name2qmap = {}
 
@@ -1039,6 +1039,16 @@ def dequantize_4bit(
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
+    # IPEX format is different, we need extra process.
+    if getattr(quant_state, "ipex", False) and quant_state.quant_type == "nf4":
+        return torch.ops.bitsandbytes.dequantize_nf4_ipex(
+            A,
+            absmax,
+            quant_state.blocksize,
+            quant_state.shape,
+            quant_state.dtype,
+        )
+
     if out is not None:
         torch.ops.bitsandbytes.dequantize_4bit.out(
             A, absmax, quant_state.blocksize, quant_state.quant_type, quant_state.shape, quant_state.dtype, out=out
@@ -1606,6 +1616,25 @@ def gemv_4bit(
     absmax = state.absmax
     if state.nested:
         absmax = dequantize_blockwise(absmax, state.state2) + state.offset
+
+    if getattr(state, "ipex", False) and state.quant_type == "nf4":
+        # compute_dtype: 1 indicates fp16, 2 indicates bf16
+        compute_dtype = 2 if A.dtype == torch.bfloat16 else 1
+        out = torch.ops.torch_ipex.woq_linear(
+            A,
+            B,
+            "nf4",
+            state.shape,
+            state.new_scales,
+            state.new_zeros,
+            None,
+            None,
+            state.blocksize,
+            compute_dtype,
+            1,
+            state.compensation,
+        )
+        return out
 
     if out is not None:
         torch.ops.bitsandbytes.gemv_4bit.out(
@@ -2308,31 +2337,19 @@ def _enable_ipex_fusion(linear: torch.nn.Module, x: torch.Tensor):
         quant_state.nested = False
         delattr(quant_state, "state2")
 
-    if x.device.type == "cpu" and ipex_cpu:
-        converted_weight = _reverse_4bit_compress_format(linear.weight.data)
-        new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
-            converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
-            "nf4",
-            quant_state.shape,  # weight shape
-            quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
-            None,  # zero_points
-            None,  # bias
-            None,  # batch_size
-            quant_state.blocksize,
-            2,
-        )
-    elif x.device.type == "xpu" and ipex_xpu:
-        new_weight = _reverse_4bit_compress_format(linear.weight.data)
-        new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
-        new_zeros = None
-        compensation = None
-        new_scales = list(new_scales)
-        if not linear.training and not x.requires_grad:
-            new_weight = new_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
-    else:
-        raise ValueError(
-            "Please check the device and ipex version. The device should be cpu or xpu while ipex version should >= 2.7"
-        )
+    assert x.device.type == "cpu"
+    converted_weight = _reverse_4bit_compress_format(linear.weight.data)
+    new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
+        converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
+        "nf4",
+        quant_state.shape,  # weight shape
+        quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
+        None,  # zero_points
+        None,  # bias
+        None,  # batch_size
+        quant_state.blocksize,
+        2,
+    )
 
     linear.weight.data = new_weight.data
     linear.weight.quant_state.ipex = True

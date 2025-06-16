@@ -11,12 +11,13 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.functional import QuantState, _enable_ipex_fusion, ipex_cpu, ipex_xpu
+from bitsandbytes.functional import QuantState, _enable_ipex_fusion
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import (
     INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING,
     OutlierTracer,
     _reverse_4bit_compress_format,
+    ipex_cpu,
 )
 
 T = TypeVar("T", bound="torch.nn.Module")
@@ -472,8 +473,6 @@ class Linear4bit(nn.Linear):
                     self.weight, "nf4", self.weight.quant_state.shape, 2
                 )
                 self.weight.data = _reverse_4bit_compress_format(original_weight.data)
-            elif self.weight.device.type == "xpu":
-                self.weight.data = _reverse_4bit_compress_format(self.weight.data.reshape(1, -1))
 
             self.weight.quant_state.ipex = False
             self.ipex_linear_is_set = False
@@ -490,15 +489,17 @@ class Linear4bit(nn.Linear):
             and self.weight.data.dtype == torch.uint8
             and self.weight.quant_state.shape[1] % self.weight.quant_state.blocksize == 0
             and self.weight.quant_state.quant_type == "nf4"
+            and x.device.type == "cpu"
+            and not self.training
+            and not x.requires_grad
         ):
-            if x.device.type == "xpu" or (x.device.type == "cpu" and not self.training and x.requires_grad == False):
-                _enable_ipex_fusion(self, x)
+            _enable_ipex_fusion(self, x)
 
     def forward(self, x: torch.Tensor):
         # Check if ipex fusion can be used
-        #if not self.ipex_linear_is_set and (ipex_cpu or ipex_xpu):
-        #    self.set_ipex_linear(x)
-        #    self.ipex_linear_is_set = True
+        if not self.ipex_linear_is_set and ipex_cpu:
+            self.set_ipex_linear(x)
+            self.ipex_linear_is_set = True
 
         fix_4bit_weight_quant_state_from_module(self)
 
@@ -671,7 +672,7 @@ class Int8Params(torch.nn.Parameter):
         if device is not None and device.type != "meta" and self.data.device.type == "cpu":
             if device.type != "cpu" or self.data.dtype != torch.int8:
                 return self._quantize(device)
-            elif self.data.dtype == torch.int8 and device.type in ("cpu", "xpu") and (ipex_cpu or ipex_xpu):
+            elif self.data.dtype == torch.int8 and device.type == "cpu" and ipex_cpu:
                 self.CB = self.data
 
         new_param = Int8Params(
