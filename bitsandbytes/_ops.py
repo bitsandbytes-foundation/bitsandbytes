@@ -4,7 +4,7 @@ from typing import Optional
 
 import torch
 
-from .cextension import ipex_cpu, ipex_xpu
+from .cextension import ipex_cpu
 
 _IS_TORCH_GTE_24 = False
 
@@ -331,7 +331,7 @@ def _(
     torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
 
 
-if ipex_cpu or ipex_xpu:
+if ipex_cpu:
     # Register the dequantize_nf4_ipex implementation
     torch.library.define(
         "bitsandbytes::dequantize_nf4_ipex",

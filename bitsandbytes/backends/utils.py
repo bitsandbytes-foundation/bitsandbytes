@@ -8,10 +8,8 @@ try:
     import intel_extension_for_pytorch as ipex
 
     ipex_cpu = ipex if ipex._C._has_cpu() else None
-    ipex_xpu = ipex if ipex._C._has_xpu() else None
 except BaseException:
     ipex_cpu = None
-    ipex_xpu = None
 
 try:
     import triton  # noqa: F401
