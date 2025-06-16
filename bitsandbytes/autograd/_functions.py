@@ -8,7 +8,7 @@ import torch
 from typing_extensions import deprecated
 
 import bitsandbytes.functional as F
-from bitsandbytes.functional import ipex_cpu, ipex_xpu
+from bitsandbytes.functional import ipex_cpu
 
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
@@ -426,7 +426,7 @@ def matmul(
         state.threshold = threshold
     # MatMul8bitLt is slower because no fast kernel for quant/dequant 8bit in CPU/XPU
     if state.is_training:
-        if (A.device.type == "cpu" and ipex_cpu) or (A.device.type == "xpu" and ipex_xpu):
+        if (A.device.type == "cpu" and ipex_cpu) or (A.device.type == "xpu"):
             return MatMul8bitFp.apply(A, B, out, bias, state)
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
@@ -440,16 +440,16 @@ def matmul_4bit(
 ):
     assert quant_state is not None
 
-    #if A.device.type in ("cpu", "xpu") and A.requires_grad == False:
-    #    if getattr(quant_state, "ipex", False):
-    #        # IPEX CPU will change weight to 4D so don't need transpose
-    #        B = B.t() if B.dim() == 2 else B
-    #        out = F.gemv_4bit(A, B, out, state=quant_state)
-    #        if bias is not None:
-    #            out += bias
-    #        return out
-    #    else:
-    #        return MatMul4Bit.apply(A, B, out, bias, quant_state)
+    if A.device.type == "cpu" and A.requires_grad == False:
+        if getattr(quant_state, "ipex", False):
+            # IPEX CPU will change weight to 4D so don't need transpose
+            B = B.t() if B.dim() == 2 else B
+            out = F.gemv_4bit(A, B, out, state=quant_state)
+            if bias is not None:
+                out += bias
+            return out
+        else:
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
     if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "hpu":
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(
