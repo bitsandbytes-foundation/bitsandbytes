@@ -257,7 +257,8 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
             ref_output = net(x)
 
         # Compile the model
-        compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode)
+        compile_backend = "hpu_backend" if device == "hpu" else "inductor"
+        compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode, backend=compile_backend)
 
         # Get output from compiled model
         with torch.no_grad():

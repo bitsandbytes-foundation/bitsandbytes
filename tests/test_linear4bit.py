@@ -294,9 +294,6 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
 
-    if device == "hpu" and quant_type != "nf4":
-        pytest.skip("fp4 dequantization is not supported on HPU")
-
     # Has a strange regression on Linux aarch64 CPU in torch==2.6.0 when fullgraph=False.
     if (
         not fullgraph
