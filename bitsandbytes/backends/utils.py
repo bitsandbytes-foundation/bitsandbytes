@@ -4,14 +4,6 @@ from packaging import version
 import torch
 
 try:
-    # to support Intel CPU/XPU (IPEX) backend
-    import intel_extension_for_pytorch as ipex
-
-    ipex_cpu = ipex if ipex._C._has_cpu() else None
-except BaseException:
-    ipex_cpu = None
-
-try:
     import triton  # noqa: F401
     import triton.language as tl  # noqa: F401
 
