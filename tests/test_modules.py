@@ -298,7 +298,7 @@ def test_kbit_backprop(device, module):
 
     kbit = nn.Sequential(*[torch.nn.Linear(dim1, dim2), module(dim2, 128)])
 
-    if device == "hpu" and isinstance(kbit[1], bnb.nn.LinearFP4):
+    if device == "hpu" and isinstance(kbit[1], bnb.nn.Linear4bit) and kbit[1].weight.quant_type == "fp4":
         pytest.skip("FP4 is not supported on HPU")
 
     kbit[0].weight.detach().copy_(ref[0].weight)
