@@ -7,7 +7,7 @@ import ctypes as ct
 from ..._ops import register_kernel
 from ..utils import ipex_xpu, triton_available
 from bitsandbytes.functional import _get_tensor_stream, get_ptr
-from ...cextension import lib
+from ...cextension import lib, ErrorHandlerMockBNBNativeLibrary
 
 # _int_mm is available in torch starting from 2.7 version,
 # but currently it's don't have xpu implementation.
@@ -53,38 +53,6 @@ def _dequantize_4bit_impl(
         else:
             lib.cdequantize_blockwise_fp32_nf4(*args)
 
-@register_kernel("bitsandbytes::dequantize_4bit", "xpu")
-def _(
-    A: torch.Tensor,
-    absmax: torch.Tensor,
-    blocksize: int,
-    quant_type: str,
-    shape: Sequence[int],
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    out = torch.zeros(shape, dtype=dtype, device=A.device)
-    _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
-    return out
-
-@register_kernel("bitsandbytes::dequantize_blockwise", "xpu")
-def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
-    out = torch.empty_like(A, dtype=dtype)
-    _dequantize_blockwise_impl(A, absmax, code, blocksize, dtype, out=out)
-    return out
-
-@register_kernel("bitsandbytes::dequantize_blockwise.out", "xpu")
-def _(
-    A: torch.Tensor,
-    absmax: torch.Tensor,
-    code: torch.Tensor,
-    blocksize: int,
-    dtype: torch.dtype,
-    out: torch.Tensor,
-) -> None:
-    torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
-    torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
-    _dequantize_blockwise_impl(A, absmax, code, blocksize, dtype, out=out)
-
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
@@ -110,33 +78,6 @@ def _dequantize_blockwise_impl(
         lib.cdequantize_blockwise_bf16(*args)
     elif dtype == torch.float32:
          lib.cdequantize_blockwise_fp32(*args)
-
-@register_kernel("bitsandbytes::gemv_4bit", "xpu")
-def _(
-    A: torch.Tensor, B: torch.Tensor, shapeB: Sequence[int], absmax: torch.Tensor, code: torch.Tensor, blocksize: int
-) -> torch.Tensor:
-    shape = (*A.shape[:-1], shapeB[0])
-    out = torch.empty(shape, device=A.device, dtype=A.dtype)
-    _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
-    return out
-
-@register_kernel("bitsandbytes::gemv_4bit.out", "xpu")
-def _(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    shapeB: Sequence[int],
-    absmax: torch.Tensor,
-    code: torch.Tensor,
-    blocksize: int,
-    out: torch.Tensor,
-) -> None:
-    torch._check(
-        out.shape == (*A.shape[:-1], shapeB[0]),
-        lambda: f"Expected out.shape == {(*A.shape[:-1], shapeB[0])}, got {out.shape}",
-    )
-    torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
-    _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
-
 
 def _gemv_4bit_impl(
     A: torch.Tensor,
@@ -221,41 +162,65 @@ def _gemv_4bit_impl(
             stream,
         )
 
-# IPEX should be faster for xpu, so at first checking if it is available.
-if ipex_xpu:
-
-    @register_kernel("bitsandbytes::dequantize_nf4_ipex", "xpu")
+# SYCL should be faster for xpu, so at first checking if it is available.
+if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
+    @register_kernel("bitsandbytes::dequantize_4bit", "xpu")
     def _(
         A: torch.Tensor,
         absmax: torch.Tensor,
         blocksize: int,
+        quant_type: str,
         shape: Sequence[int],
         dtype: torch.dtype,
     ) -> torch.Tensor:
-        return torch.ops.torch_ipex.dequantize_4bit(A, "nf4", shape, absmax, None, blocksize).t().to(dtype)
+        out = torch.zeros(shape, dtype=dtype, device=A.device)
+        _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
+        return out
 
-#    @register_kernel("bitsandbytes::dequantize_blockwise", "xpu")
-#    def _(
-#        A: torch.Tensor,
-#        absmax: torch.Tensor,
-#        code: torch.Tensor,
-#        blocksize: int,
-#        dtype: torch.dtype,
-#    ) -> torch.Tensor:
-#        shape = A.shape
-#        out = torch.empty(A.reshape(-1).shape, dtype=dtype, device=A.device)
-#        # void cdequantize_blockwise_fp32(
-#        # float *code, unsigned char *A, float *absmax, float *out, int blocksize, const int n, cudaStream_t stream)
-#        if dtype == torch.float16:
-#            ipex_xpu.xpu.bitsandbytes.cdequantize_blockwise_fp16(code, A, absmax, out, blocksize, A.numel())
-#        elif dtype == torch.bfloat16:
-#            ipex_xpu.xpu.bitsandbytes.cdequantize_blockwise_bf16(code, A, absmax, out, blocksize, A.numel())
-#        elif dtype == torch.float32:
-#            ipex_xpu.xpu.bitsandbytes.cdequantize_blockwise_fp32(code, A, absmax, out, blocksize, A.numel())
-#        else:
-#            raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {out.dtype}")
-#
-#        return out.reshape(shape)
+    @register_kernel("bitsandbytes::dequantize_blockwise", "xpu")
+    def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
+        out = torch.empty_like(A, dtype=dtype)
+        _dequantize_blockwise_impl(A, absmax, code, blocksize, dtype, out=out)
+        return out
+
+    @register_kernel("bitsandbytes::dequantize_blockwise.out", "xpu")
+    def _(
+        A: torch.Tensor,
+        absmax: torch.Tensor,
+        code: torch.Tensor,
+        blocksize: int,
+        dtype: torch.dtype,
+        out: torch.Tensor,
+    ) -> None:
+        torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
+        torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
+        _dequantize_blockwise_impl(A, absmax, code, blocksize, dtype, out=out)
+
+    @register_kernel("bitsandbytes::gemv_4bit", "xpu")
+    def _(
+        A: torch.Tensor, B: torch.Tensor, shapeB: Sequence[int], absmax: torch.Tensor, code: torch.Tensor, blocksize: int
+    ) -> torch.Tensor:
+        shape = (*A.shape[:-1], shapeB[0])
+        out = torch.empty(shape, device=A.device, dtype=A.dtype)
+        _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
+        return out
+
+    @register_kernel("bitsandbytes::gemv_4bit.out", "xpu")
+    def _(
+        A: torch.Tensor,
+        B: torch.Tensor,
+        shapeB: Sequence[int],
+        absmax: torch.Tensor,
+        code: torch.Tensor,
+        blocksize: int,
+        out: torch.Tensor,
+    ) -> None:
+        torch._check(
+            out.shape == (*A.shape[:-1], shapeB[0]),
+            lambda: f"Expected out.shape == {(*A.shape[:-1], shapeB[0])}, got {out.shape}",
+        )
+        torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
+        _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
 elif triton_available:
     from ..triton import ops as triton_ops
 

@@ -377,7 +377,7 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype), bias)
+        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
 
         # 3. Save state
         ctx.state = quant_state
@@ -457,7 +457,7 @@ def matmul_4bit(
             )
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
         else:
-            out = F.gemv_4bit(A, B, out, state=quant_state)
+            out = F.gemv_4bit(A, B.t(), out, state=quant_state)
             if bias is not None:
                 out += bias
             return out
