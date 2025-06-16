@@ -11,10 +11,7 @@ from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
 from ..utils import triton_available
 
 # TODO: Enable _int_mm in torch
-# # _int_mm is available in torch starting from 2.7 version,
-# # but currently it's don't have xpu implementation.
-# if ipex_xpu and torch.__version__ >= (2, 7):
-
+# if torch.__version__ >= (2, 9):
 #     @register_kernel("bitsandbytes::int8_linear_matmul", "xpu")
 #     def _(A: torch.Tensor, B: torch.Tensor):
 #         return torch._int_mm(
