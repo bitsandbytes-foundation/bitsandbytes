@@ -439,7 +439,7 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
 
 def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
     # We use the raw stream for performance reasons.
-    if tensor.device.type == "xpu" and ipex_xpu:
+    if tensor.device.type == "xpu":
         return ct.c_void_p(torch._C._xpu_getCurrentRawStream(tensor.device.index))
     return ct.c_void_p(torch._C._cuda_getCurrentRawStream(tensor.device.index))
 
@@ -1039,16 +1039,6 @@ def dequantize_4bit(
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-    if A.device.type == "xpu" and quant_state.quant_type == "nf4":
-        return torch.ops.bitsandbytes.dequantize_4bit(
-            A,
-            absmax,
-            quant_state.blocksize,
-            quant_state.quant_type,
-            quant_state.shape,
-            quant_state.dtype,
-        )
-
     if out is not None:
         torch.ops.bitsandbytes.dequantize_4bit.out(
             A, absmax, quant_state.blocksize, quant_state.quant_type, quant_state.shape, quant_state.dtype, out=out
@@ -1616,34 +1606,6 @@ def gemv_4bit(
     absmax = state.absmax
     if state.nested:
         absmax = dequantize_blockwise(absmax, state.state2) + state.offset
-
-    #if getattr(state, "ipex", False) and state.quant_type == "nf4":
-    #    # compute_dtype: 1 indicates fp16, 2 indicates bf16
-    #    compute_dtype = 2 if A.dtype == torch.bfloat16 else 1
-    #    out = torch.ops.torch_ipex.woq_linear(
-    #        A,
-    #        B,
-    #        "nf4",
-    #        state.shape,
-    #        state.new_scales,
-    #        state.new_zeros,
-    #        None,
-    #        None,
-    #        state.blocksize,
-    #        compute_dtype,
-    #        1,
-    #        state.compensation,
-    #    )
-    #    return out
-    if A.device.type == "xpu":
-        return torch.ops.bitsandbytes.gemv_4bit(
-            A,
-            B,
-            state.shape,
-            absmax,
-            state.code,
-            state.blocksize,
-        )
 
     if out is not None:
         torch.ops.bitsandbytes.gemv_4bit.out(
