@@ -98,3 +98,14 @@ DTYPE_NAMES = {
 
 def describe_dtype(dtype: torch.dtype) -> str:
     return DTYPE_NAMES.get(dtype) or str(dtype).rpartition(".")[2]
+
+
+def is_supported_on_hpu(
+    quant_type: str = "nf4", dtype: torch.dtype = torch.bfloat16, quant_storage: torch.dtype = torch.uint8
+) -> bool:
+    """
+    Check if the given quant_type, dtype and quant_storage are supported on HPU.
+    """
+    if quant_type == "fp4" or dtype == torch.float16 or quant_storage not in (torch.uint8, torch.bfloat16):
+        return False
+    return True

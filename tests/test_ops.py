@@ -5,7 +5,7 @@ import torch
 
 import bitsandbytes
 from bitsandbytes.functional import ipex_xpu
-from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
+from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, is_supported_on_hpu
 
 # torch.library.opcheck is only available in torch 2.4 and later.
 # When testing with older versions, we will skip it as a no-op.
@@ -158,6 +158,9 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_quantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
         A = torch.randn(1024, 1024, dtype=dtype, device=device)
 
         out, absmax = torch.ops.bitsandbytes.quantize_4bit.default(A, blocksize, quant_type, storage_dtype)
@@ -179,6 +182,9 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_dequantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
         shape = (128, 128)
 
         n = prod(shape)
@@ -210,6 +216,9 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
         out_features = 1024
         in_features = 256
 
