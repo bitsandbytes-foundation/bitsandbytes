@@ -16,6 +16,7 @@ from tests.helpers import (
     get_available_devices,
     get_test_dims,
     id_formatter,
+    is_supported_on_hpu,
 )
 
 torch.set_printoptions(precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000)
@@ -1101,8 +1102,8 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512, 1024, 2048, 4096])
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
-        if device == "hpu" and quant_type != "nf4":
-            pytest.skip("fp4 dequantization is not supported on HPU")
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
+            pytest.skip("This configuration is not supported on HPU.")
 
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
@@ -1135,14 +1136,15 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128], ids=id_formatter("blocksize"))
-    def test_4bit_compressed_stats(self, device, quant_type, blocksize):
-        if device == "hpu" and quant_type != "nf4":
-            pytest.skip("fp4 dequantization is not supported on HPU")
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=describe_dtype)
+    def test_4bit_compressed_stats(self, device, quant_type, blocksize, dtype):
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
+            pytest.skip("FP4 quantization is not supported on HPU.")
 
         errs1 = []
         errs2 = []
         for i in range(10):
-            A1 = torch.randn(1024, 1024, device=device).half()
+            A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
             q2, SA2 = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
             q3, SA3 = F.quantize_4bit(A1, blocksize=blocksize, compress_statistics=True, quant_type=quant_type)
             A2 = F.dequantize_4bit(q2, SA2, quant_type=quant_type)
@@ -1211,8 +1213,8 @@ class TestQuantize4BitFunctional:
     )
     @pytest.mark.parametrize("dim", [128, 256, 512, 1024], ids=id_formatter("dim"))
     def test_gemv_4bit(self, device, dim, dtype, storage_type, quant_storage, double_quant, kind):
-        if device == "hpu":
-            pytest.skip("gemv not supported on HPU")
+        if device == "hpu" and not is_supported_on_hpu(storage_type, dtype, quant_storage):
+            pytest.skip("This configuration is not supported on HPU.")
 
         errs1 = []
         errs2 = []
@@ -1363,8 +1365,8 @@ class TestQuantize4BitFunctional:
         if device == "cpu" and dtype == torch.bfloat16 and torch.__version__ < (2, 3):
             pytest.skip("eye doe not support bfloat16 on CPU in torch < 2.3")
 
-        if device == "hpu" and storage_type != "nf4":
-            pytest.skip("fp4 dequantization is not supported on HPU")
+        if device == "hpu" and not is_supported_on_hpu(storage_type, dtype):
+            pytest.skip("This configuration is not supported on HPU.")
 
         dims = 10
         torch.random.manual_seed(np.random.randint(0, 412424242))

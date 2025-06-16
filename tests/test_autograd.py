@@ -8,6 +8,7 @@ from tests.helpers import (
     describe_dtype,
     get_available_devices,
     id_formatter,
+    is_supported_on_hpu,
 )
 
 TRANSPOSE_VALS = [(False, True), (False, False)]
@@ -189,8 +190,8 @@ def test_matmul_4bit(
     if device == "cpu" and dtype != torch.float32 and any(req_grad) and torch.__version__ < (2, 6):
         pytest.xfail("mse_loss fp16 on CPU is not supported in torch < 2.6")
 
-    if device == "hpu" and quant_type != "nf4":
-        pytest.skip("HPU only supports nf4")
+    if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
+        pytest.skip("This configuration is not supported on HPU.")
 
     for i in range(3):
         # normal multiply

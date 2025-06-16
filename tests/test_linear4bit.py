@@ -13,6 +13,7 @@ from tests.helpers import (
     describe_dtype,
     get_available_devices,
     id_formatter,
+    is_supported_on_hpu,
     torch_load_from_buffer,
     torch_save_to_buffer,
 )
@@ -27,12 +28,17 @@ storage = {
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
+@pytest.mark.parametrize("original_dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
-def test_linear_serialization(device, quant_type, compress_statistics, bias, quant_storage, save_before_forward):
-    original_dtype = torch.float16
+def test_linear_serialization(
+    device, quant_type, original_dtype, compress_statistics, bias, quant_storage, save_before_forward
+):
+    if device == "hpu" and not is_supported_on_hpu(quant_type, original_dtype, storage[quant_storage]):
+        pytest.skip("This configuration is not supported on HPU.")
+
     compute_dtype = None
     layer_shape = (300, 400)
 
@@ -188,6 +194,9 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
     tensor = torch.randn(300, 400)
     param = bnb.nn.Params4bit(
         data=tensor,
@@ -207,6 +216,9 @@ def test_copy_param(device, quant_type, blocksize, compress_statistics):
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
     tensor = torch.randn(300, 400)
     param = bnb.nn.Params4bit(
         data=tensor,
@@ -233,6 +245,9 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
     original_tensor = torch.randn(300, 400)
     original_param = bnb.nn.Params4bit(
         data=original_tensor,
@@ -270,6 +285,9 @@ def test_params4bit_real_serialization(device, quant_type, blocksize, compress_s
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
 def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_statistics, bias, fullgraph, mode):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
     if fullgraph and torch.__version__ < (2, 8, 0, "dev"):
         pytest.skip("fullgraph mode requires torch 2.8 or higher")
 
@@ -317,7 +335,8 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
         ref_output = net(x)
 
     # Compile the model
-    compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode)
+    compile_backend = "hpu_backend" if device == "hpu" else "inductor"
+    compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode, backend=compile_backend)
 
     # Get output from compiled model
     with torch.no_grad():

@@ -29,8 +29,6 @@ def _(
     if A.dtype != torch.uint8:
         A = A.view(torch.uint8)
 
-    transpose = False if len(A.shape) == 2 and A.shape[0] == 1 else True
-
     A = A.reshape(-1)
 
     if GAUDI_SW_VER and (GAUDI_SW_VER.major < 1 or GAUDI_SW_VER.minor < 22):
@@ -46,8 +44,5 @@ def _(
     )
 
     output = out_dq.reshape(shape)
-
-    if transpose:
-        output = output.t()
 
     return output
