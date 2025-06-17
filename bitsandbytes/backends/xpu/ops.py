@@ -57,13 +57,6 @@ def _dequantize_4bit_impl(
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
-    # torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
-    # torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
-    # torch._check(
-    #     dtype in [torch.float16, torch.bfloat16, torch.float32],
-    #     lambda: f"Blockwise dequantization only supports 16bit/32bit floating types, got {dtype}",
-    # )
-
     args = (
         get_ptr(code),
         get_ptr(A),
