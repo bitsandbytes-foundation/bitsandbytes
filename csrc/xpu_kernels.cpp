@@ -6,27 +6,46 @@
 
 #include <sycl/sycl.hpp>
 
-inline float dDequantizeFP4Tree(unsigned char val, float absmax) {
-  float sign = (val & 0b1000) == 8 ? -1.0f : 1.0f;
-  if ((val & 0b0100) == 4)                  // 0
-    if ((val & 0b0010) == 2)                // 01
-      if ((val & 0b0001) == 1)              // 111
-        return 0.25000000f * absmax * sign; // 1111
+inline float dDequantizeFP4Tree(unsigned char val) {
+  if ((val & 0b1000) == 8)
+    if ((val & 0b0100) == 4)
+      if ((val & 0b0010) == 2)
+        if ((val & 0b0001) == 1)
+          return -0.25000000f;
+        else
+          return -0.16666667f;
+      else if ((val & 0b0001) == 1)
+        return -0.50000000f;
       else
-        return 0.16666667f * absmax * sign; // 1110
-    else if ((val & 0b0001) == 1)           // 110
-      return 0.50000000f * absmax * sign;   // 1101
+        return -0.33333333f;
+    else if ((val & 0b0010) == 2)
+      if ((val & 0b0001) == 1)
+        return -1.00000000f;
+      else
+        return -0.66666667f;
+    else if ((val & 0b0001) == 1)
+      return -5.208333333e-03f;
     else
-      return 0.33333333f * absmax * sign; // 1100
-  else if ((val & 0b0010) == 2)           // 10
-    if ((val & 0b0001) == 1)              // 101
-      return 1.00000000f * absmax * sign; // 1011
+      return 0.00000000f;
+  else if ((val & 0b0100) == 4)
+    if ((val & 0b0010) == 2)
+      if ((val & 0b0001) == 1) 
+        return 0.25000000f;
+      else
+        return 0.16666667f;
+    else if ((val & 0b0001) == 1)
+      return 0.50000000f;
     else
-      return 0.66666667f * absmax * sign;    // 1010
-  else if ((val & 0b0001) == 1)              // 100
-    return 5.208333333e-03f * absmax * sign; // 1001
+      return 0.33333333f;
+  else if ((val & 0b0010) == 2)
+    if ((val & 0b0001) == 1)
+      return 1.00000000f;
+    else
+      return 0.66666667f;
+  else if ((val & 0b0001) == 1)
+    return 5.208333333e-03f;
   else
-    return 0.00000000f * absmax * sign; // 1000
+    return 0.00000000f;
 }
 
 inline float dDequantizeNF4(unsigned char val) {
@@ -123,10 +142,10 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
       vals[j] = code[qvals[j]] * local_abs_max;
     break;
   case FP4:
-    #pragma unroll NUM_PER_TH
+#pragma unroll NUM_PER_TH
     for(int j = 0; j < NUM_PER_TH; j++) {
-      vals[j*2] = dDequantizeFP4Tree(qvals[j] >> 4, local_abs_max);
-      vals[j*2 + 1] = dDequantizeFP4Tree(qvals[j] & 0x0F, local_abs_max);
+      vals[j * 2] = dDequantizeFP4Tree(qvals[j] >> 4) * local_abs_max;
+      vals[j * 2 + 1] = dDequantizeFP4Tree(qvals[j] & 0x0F) * local_abs_max;
     }
     break;
   case NF4:
