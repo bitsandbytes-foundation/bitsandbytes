@@ -123,16 +123,11 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
       vals[j] = code[qvals[j]] * local_abs_max;
     break;
   case FP4:
-    // TODO: check FP4 quant table in 'bitsandbytes/backends/utils.py', maybe
-    // not compitable with the dequant table.
-    //  #pragma unroll NUM_PER_TH
-    //  for(int j = 0; j < NUM_PER_TH; j++)
-    //  {
-    //    vals[j*2] = dDequantizeFP4Tree(qvals[j] >> 4, local_abs_max);
-    //    vals[j*2 + 1] = dDequantizeFP4Tree(qvals[j] & 0x0F, local_abs_max);
-    //  }
-    sycl::ext::oneapi::experimental::printf(
-        "FP4 is not supported by the current version.");
+    #pragma unroll NUM_PER_TH
+    for(int j = 0; j < NUM_PER_TH; j++) {
+      vals[j*2] = dDequantizeFP4Tree(qvals[j] >> 4, local_abs_max);
+      vals[j*2 + 1] = dDequantizeFP4Tree(qvals[j] & 0x0F, local_abs_max);
+    }
     break;
   case NF4:
 #pragma unroll NUM_PER_TH
