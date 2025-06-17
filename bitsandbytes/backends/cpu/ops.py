@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 import ctypes as ct
-import warnings
 
 import torch
 
@@ -119,7 +118,3 @@ if ipex_cpu:
             shape,
             dtype,
         )
-else:
-    warnings.warn(
-        "You can install intel_extension_for_pytorch to get better performance on NF4 if you are using Intel CPUs."
-    )
