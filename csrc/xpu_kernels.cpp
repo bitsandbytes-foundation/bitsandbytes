@@ -164,7 +164,7 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
 
 #define num_values_4bit 32
 template <typename T, int THREADS, int BITS, int SUBG_SIZE>
-SYCL_EXTERNAL void kgemm_4bit_inference_kernel(
+SYCL_EXTERNAL void kgemv_4bit_inference_kernel(
     int M, int N, int K, T *A, unsigned char *B, float *absmax,
     const float *datatype, T *out, int lda, int ldb, int ldc, int blocksize,
     sycl::local_ptr<T> quant_map, sycl::nd_item<1> &item) {
@@ -198,7 +198,7 @@ SYCL_EXTERNAL void kgemm_4bit_inference_kernel(
                        (31 - std::countl_zero((unsigned int)blocksize));
     local_absmax = absmax[absidx];
 
-    if (row_B < M) {
+    if (row_B < N) {
       if ((inner_idx_halved + num_values_8bit) < (K / 2)) {
         // this is the most important for performance considerations
         reinterpret_cast<sycl::vec<int, 4>(&)[num_values_8bit]>(
@@ -222,36 +222,25 @@ SYCL_EXTERNAL void kgemm_4bit_inference_kernel(
     for (int i = 0; i < 4; i++) {
 #pragma unroll
       for (int k = 0; k < num_values_8bit / 4; k++) {
-#if BNB_BF16_AVAILABLE
         local_B[k * 2] =
             quant_map[local_B_4bit[(i * num_values_8bit / 4) + k] >> 4] *
             local_absmax;
         local_B[k * 2 + 1] =
             quant_map[local_B_4bit[(i * num_values_8bit / 4) + k] & 0x0F] *
             local_absmax;
-#else
-        // bf16 multipliation not supported
-        local_B[k * 2] = T(
-            (float)quant_map[local_B_4bit[(i * num_values_8bit / 4) + k] >> 4] *
-            (float)local_absmax);
-        local_B[k * 2 + 1] = T(
-            (float)
-                quant_map[local_B_4bit[(i * num_values_8bit / 4) + k] & 0x0F] *
-            (float)local_absmax);
-#endif
       }
 
       if (inner_idx + (num_values_4bit / 4) + (i * num_values_4bit / 4) < K) {
         // this is also relatively important for performance
         if (BITS == 16) {
-          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit]>(local_A)[0] =
+          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit/4]>(local_A)[0] =
               reinterpret_cast<sycl::vec<int, 4> *>(
                   A)[inner_idx / (num_values_4bit / 4) + i];
         } else {
-          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit]>(local_A)[0] =
+          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit/4]>(local_A)[0] =
               reinterpret_cast<sycl::vec<int, 4> *>(
                   A)[inner_idx / (num_values_4bit / 8) + (2 * i) + 0];
-          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit]>(local_A)[1] =
+          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit/4]>(local_A)[1] =
               reinterpret_cast<sycl::vec<int, 4> *>(
                   A)[inner_idx / (num_values_4bit / 8) + (2 * i) + 1];
         }
@@ -277,15 +266,15 @@ SYCL_EXTERNAL void kgemm_4bit_inference_kernel(
   local_C =
       sycl::reduce_over_group(item.get_sub_group(), local_C, sycl::plus<>());
 
-  if (row_B < M && sg_lane == 0)
+  if (row_B < N && sg_lane == 0)
     out[row_B] = T(local_C);
 }
 
 template <typename T, int THREADS, int BITS, int SUBG_SIZE>
 SYCL_EXTERNAL void
-kgemm_4bit_inference<T, THREADS, BITS, SUBG_SIZE>::operator()(
+kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE>::operator()(
     sycl::nd_item<1> item) const {
-  kgemm_4bit_inference_kernel<T, THREADS, BITS, SUBG_SIZE>(
+  kgemv_4bit_inference_kernel<T, THREADS, BITS, SUBG_SIZE>(
       M, N, K, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, quant_map,
       item);
 }
@@ -306,6 +295,6 @@ template class kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 4,
                                     General8bit>;
 template class kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 4, NF4>;
 
-template class kgemm_4bit_inference<sycl::half, 128, 16, 32>;
-template class kgemm_4bit_inference<sycl::ext::oneapi::bfloat16, 128, 16, 32>;
-template class kgemm_4bit_inference<float, 128, 32, 32>;
+template class kgemv_4bit_inference<sycl::half, 128, 16, 32>;
+template class kgemv_4bit_inference<sycl::ext::oneapi::bfloat16, 128, 16, 32>;
+template class kgemv_4bit_inference<float, 128, 32, 32>;

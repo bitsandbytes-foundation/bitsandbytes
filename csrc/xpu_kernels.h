@@ -24,11 +24,11 @@ private:
 };
 
 template <typename T, int THREADS, int BITS, int SUBG_SIZE>
-class kgemm_4bit_inference {
+class kgemv_4bit_inference {
 public:
   SYCL_EXTERNAL void operator()(sycl::nd_item<1> item) const;
 
-  kgemm_4bit_inference(int M_, int N_, int K_, T *A_, unsigned char *B_,
+  kgemv_4bit_inference(int M_, int N_, int K_, T *A_, unsigned char *B_,
                        float *absmax_, const float *datatype_, T *out_,
                        int lda_, int ldb_, int ldc_, int blocksize_)
       : M(M_), N(N_), K(K_), A(A_), B(B_), absmax(absmax_), datatype(datatype_),

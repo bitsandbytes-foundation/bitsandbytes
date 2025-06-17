@@ -34,7 +34,7 @@ void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
 }
 
 template <typename T, int BITS>
-void gemm_4bit_inference(int m, int n, int k, T *A, unsigned char *B,
+void gemv_4bit_inference(int m, int n, int k, T *A, unsigned char *B,
                          float *absmax, float *datatype, T *out, int lda,
                          int ldb, int ldc, int blocksize, sycl::queue *stream) {
 
@@ -42,12 +42,12 @@ void gemm_4bit_inference(int m, int n, int k, T *A, unsigned char *B,
 
   size_t subgroup_size = 32;
   size_t workgroup_size = subgroup_size * 4;
-  size_t workgroup_num = (m + 3) / 4;
+  size_t workgroup_num = (n + 3) / 4;
 
   const int THREADS = 128;  // workgroup_size;
   const int SUBG_SIZE = 32; // subgroup_size;
 
-  kgemm_4bit_inference<T, THREADS, BITS, SUBG_SIZE> kfn(
+  kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE> kfn(
       m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize);
 
   sycl_comp_kernel_submit<decltype(kfn), 1, 32>(
@@ -95,15 +95,15 @@ template void dequantizeBlockwise<sycl::ext::oneapi::bfloat16, NF4>(
     sycl::ext::oneapi::bfloat16 *out, int blocksize, const int n,
     sycl::queue *stream);
 
-template void gemm_4bit_inference<sycl::half, 16>(
+template void gemv_4bit_inference<sycl::half, 16>(
     int m, int n, int k, sycl::half *A, unsigned char *B, float *absmax,
     float *datatype, sycl::half *out, int lda, int ldb, int ldc, int blocksize,
     sycl::queue *stream);
-template void gemm_4bit_inference<sycl::ext::oneapi::bfloat16, 16>(
+template void gemv_4bit_inference<sycl::ext::oneapi::bfloat16, 16>(
     int m, int n, int k, sycl::ext::oneapi::bfloat16 *A, unsigned char *B,
     float *absmax, float *datatype, sycl::ext::oneapi::bfloat16 *out, int lda,
     int ldb, int ldc, int blocksize, sycl::queue *stream);
-template void gemm_4bit_inference<float, 32>(int m, int n, int k, float *A,
+template void gemv_4bit_inference<float, 32>(int m, int n, int k, float *A,
                                              unsigned char *B, float *absmax,
                                              float *datatype, float *out,
                                              int lda, int ldb, int ldc,

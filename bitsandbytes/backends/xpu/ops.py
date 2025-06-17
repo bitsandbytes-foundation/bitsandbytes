@@ -90,8 +90,8 @@ def _gemv_4bit_impl(
     blocksize: int,
     out: torch.Tensor,
 ) -> None:
-    m = ct.c_int32(shapeB[0])
-    n = ct.c_int32(1)
+    m = ct.c_int32(1)
+    n = ct.c_int32(shapeB[0])
     k = ct.c_int32(shapeB[1])
 
     lda = m
@@ -100,7 +100,7 @@ def _gemv_4bit_impl(
 
     stream = _get_tensor_stream(A)
     if A.dtype == torch.float16:
-        lib.cgemm_4bit_inference_fp16(
+        lib.cgemv_4bit_inference_fp16(
             m,
             n,
             k,
@@ -116,7 +116,7 @@ def _gemv_4bit_impl(
             stream,
         )
     elif A.dtype == torch.bfloat16:
-        lib.cgemm_4bit_inference_bf16(
+        lib.cgemv_4bit_inference_bf16(
             m,
             n,
             k,
@@ -132,7 +132,7 @@ def _gemv_4bit_impl(
             stream,
         )
     elif A.dtype == torch.float32:
-        lib.cgemm_4bit_inference_fp32(
+        lib.cgemv_4bit_inference_fp32(
             m,
             n,
             k,

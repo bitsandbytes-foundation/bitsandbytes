@@ -352,25 +352,25 @@ void dequantizeBlockwise_bf16_nf4(
     dequantizeBlockwise<sycl::ext::oneapi::bfloat16, NF4>(NULL, A, absmax, out, blocksize, n, stream);
 }
 
-void gemm_4bit_inference_fp16(
+void gemv_4bit_inference_fp16(
     int m, int n, int k, sycl::half * A,  unsigned char* B,  float *absmax, float *datatype, sycl::half * out,
     int lda, int ldb, int ldc, int blocksize, sycl::queue* stream
 ) {
-    gemm_4bit_inference<sycl::half, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
+    gemv_4bit_inference<sycl::half, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
 }
 
-void gemm_4bit_inference_bf16(
+void gemv_4bit_inference_bf16(
     int m, int n, int k,  sycl::ext::oneapi::bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype,
     sycl::ext::oneapi::bfloat16 * out,  int lda, int ldb, int ldc, int blocksize, sycl::queue* stream
 ) {
-    gemm_4bit_inference<sycl::ext::oneapi::bfloat16, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
+    gemv_4bit_inference<sycl::ext::oneapi::bfloat16, 16>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
 }
 
-void gemm_4bit_inference_fp32(
+void gemv_4bit_inference_fp32(
     int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out, int lda,
     int ldb, int ldc, int blocksize, sycl::queue* stream
 ) {
-    gemm_4bit_inference<float, 32>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
+    gemv_4bit_inference<float, 32>(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
 }
 
 #endif
@@ -784,25 +784,25 @@ void cdequantize_blockwise_bf16_nf4(
     dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n, stream);
 }
 
-void cgemm_4bit_inference_fp16(
+void cgemv_4bit_inference_fp16(
     int m, int n, int k, sycl::half * A,  unsigned char* B,  float *absmax, float *datatype, sycl::half * out,
     int lda, int ldb, int ldc, int blocksize, sycl::queue* stream
 ) {
-    gemm_4bit_inference_fp16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
+    gemv_4bit_inference_fp16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
 }
 
-void cgemm_4bit_inference_bf16(
+void cgemv_4bit_inference_bf16(
     int m, int n, int k, sycl::ext::oneapi::bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype,
     sycl::ext::oneapi::bfloat16 * out,  int lda, int ldb, int ldc, int blocksize, sycl::queue* stream
 ) {
-    gemm_4bit_inference_bf16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
+    gemv_4bit_inference_bf16(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
 }
 
-void cgemm_4bit_inference_fp32(
+void cgemv_4bit_inference_fp32(
     int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out, int lda,
     int ldb, int ldc, int blocksize, sycl::queue* stream
 ) {
-    gemm_4bit_inference_fp32(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
+    gemv_4bit_inference_fp32(m, n, k, A, B, absmax,  datatype, out, lda, ldb, ldc, blocksize, stream);
 }
 
 #endif

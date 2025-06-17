@@ -42,7 +42,7 @@ template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
                          int workgroup_size, const int n, sycl::queue *stream);
 template <typename T, int BITS>
-void gemm_4bit_inference(int m, int n, int k, T *A, unsigned char *B,
+void gemv_4bit_inference(int m, int n, int k, T *A, unsigned char *B,
                          float *absmax, float *datatype, T *out, int lda,
                          int ldb, int ldc, int blocksize, sycl::queue *stream);
 
