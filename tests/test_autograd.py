@@ -234,6 +234,9 @@ def test_matmul_4bit(
                 out_bnb.data.copy_(out_torch)
                 if device == "cuda":
                     torch.cuda.synchronize()
+                elif device == "hpu":
+                    torch.hpu.synchronize()
+
                 loss_bnb = torch.nn.functional.mse_loss(out_bnb, target).mean()
                 loss_bnb.backward()
                 gradA1 = A.grad
