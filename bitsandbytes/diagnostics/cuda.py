@@ -6,7 +6,6 @@ from pathlib import Path
 import torch
 
 from bitsandbytes.cextension import HIP_ENVIRONMENT, get_cuda_bnb_library_path
-from bitsandbytes.consts import NONPYTORCH_DOC_URL
 from bitsandbytes.cuda_specs import CUDASpecs
 from bitsandbytes.diagnostics.utils import print_dedented
 
@@ -118,25 +117,9 @@ def _print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
     if not binary_path.exists():
         print_dedented(
             f"""
-        Library not found: {binary_path}. Maybe you need to compile it from source?
-        If you compiled from source, try again with `make CUDA_VERSION=DETECTED_CUDA_VERSION`,
-        for example, `make CUDA_VERSION=113`.
-
-        The CUDA version for the compile might depend on your conda install, if using conda.
-        Inspect CUDA version via `conda list | grep cuda`.
-        """,
-        )
-
-    cuda_major, cuda_minor = cuda_specs.cuda_version_tuple
-    if cuda_major < 11:
-        print_dedented(
-            """
-            WARNING: CUDA versions lower than 11 are currently not supported for LLM.int8().
-            You will be only to use 8-bit optimizers and quantization routines!
+            Library not found: {binary_path}. Maybe you need to compile it from source?
             """,
         )
-
-    print(f"To manually override the PyTorch CUDA version please see: {NONPYTORCH_DOC_URL}")
 
     # 7.5 is the minimum CC for int8 tensor cores
     if not cuda_specs.has_imma:
@@ -147,10 +130,6 @@ def _print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
             https://huggingface.co/blog/4bit-transformers-bitsandbytes
             """,
         )
-
-    # TODO:
-    # (1) CUDA missing cases (no CUDA installed by CUDA driver (nvidia-smi accessible)
-    # (2) Multiple CUDA versions installed
 
 
 def _print_hip_diagnostics(cuda_specs: CUDASpecs) -> None:

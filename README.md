@@ -25,104 +25,144 @@ bitsandbytes has the following minimum requirements for all platforms:
 
 #### Accelerator support:
 
+<small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
+[document in the v0.46.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.46.0/README.md#accelerator-support).
+</small>
+
+##### Legend:
+🚧 = In Development,
+〰️ = Partially Supported,
+✅ = Supported,
+❌ = Not Supported
+
 <table>
   <thead>
     <tr>
       <th>Platform</th>
       <th>Accelerator</th>
       <th>Hardware Requirements</th>
-      <th>Support Status</th>
+      <th>LLM.int8()</th>
+      <th>QLoRA 4-bit</th>
+      <th>8-bit Optimizers</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td colspan="4">🐧 <strong>Linux</strong></td>
-    </tr>
-    <tr>
-      <td align="right">x86-64</td>
-      <td>◻️ CPU</td>
-      <td></td>
-      <td>〰️ Partial Support</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>🟩 NVIDIA GPU</td>
-      <td>SM50+ minimum<br>SM75+ recommended</td>
-      <td>✅ Full Support *</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>🟥 AMD GPU</td>
-      <td>gfx90a, gfx942, gfx1100</td>
-      <td>🚧 In Development</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>🟦 Intel XPU</td>
-      <td>
-        Data Center GPU Max Series (Ponte Vecchio) <br>
-        Arc A-Series (Alchemist) <br>
-        Arc B-Series (Battlemage)
-      </td>
-      <td>🚧 In Development</td>
-    </tr>
-    <!--
-    <tr>
-      <td></td>
-      <td>🟦 Intel HPU</td>
-      <td>Gaudi1, Gaudi2, Gaudi3</td>
-      <td>🚧</td>
-    </tr>
-    --->
-    <tr>
-      <td align="right">aarch64</td>
-      <td>◻️ CPU</td>
-      <td></td>
-      <td>〰️ Partial Support</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>🟩 NVIDIA GPU</td>
-      <td>SM75, SM80, SM90, SM100</td>
-      <td>✅ Full Support *</td>
-    </tr>
-    <tr>
-      <td colspan="4">🪟 <strong>Windows</strong></td>
+      <td colspan="4">🐧 <strong>Linux, glibc >= 2.24</strong></td>
     </tr>
     <tr>
       <td align="right">x86-64</td>
       <td>◻️ CPU</td>
       <td>AVX2</td>
-      <td>〰️ Partial Support</td>
+      <td>〰️</td>
+      <td>〰️</td>
+      <td>❌</td>
     </tr>
     <tr>
       <td></td>
-      <td>🟩 NVIDIA GPU</td>
+      <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
       <td>SM50+ minimum<br>SM75+ recommended</td>
-      <td>✅ Full Support *</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
-      <td>🟦 Intel XPU</td>
+      <td>🟥 AMD GPU <br><code>cuda</code></td>
+      <td>
+        CDNA: gfx90a, gfx942<br>
+        RDNA: gfx1100, gfx1200
+      </td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>🚧</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟦 Intel GPU <br><code>xpu</code></td>
+      <td>
+        Data Center GPU Max Series<br>
+        Arc A-Series (Alchemist)<br>
+        Arc B-Series (Battlemage)
+      </td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>🚧</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟪 Intel Gaudi <br><code>hpu</code></td>
+      <td>Gaudi1, Gaudi2, Gaudi3</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>❌</td>
+    </tr>
+    <tr>
+      <td align="right">aarch64</td>
+      <td>◻️ CPU</td>
+      <td></td>
+      <td>〰️</td>
+      <td>〰️</td>
+      <td>❌</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
+      <td>SM75, SM80, SM90, SM100</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
+    </tr>
+    <tr>
+      <td colspan="4">🪟 <strong>Windows 11 / Windows Server 2019+</strong></td>
+    </tr>
+    <tr>
+      <td align="right">x86-64</td>
+      <td>◻️ CPU</td>
+      <td>AVX2</td>
+      <td>〰️</td>
+      <td>〰️</td>
+      <td>❌</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
+      <td>SM50+ minimum<br>SM75+ recommended</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟦 Intel GPU <br><code>xpu</code></td>
       <td>
         Arc A-Series (Alchemist) <br>
         Arc B-Series (Battlemage)
       </td>
-      <td>🚧 In Development</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>🚧</td>
     </tr>
     <tr>
-      <td colspan="4">🍎 <strong>macOS</strong></td>
+      <td colspan="4">🍎 <strong>macOS 13.1+</strong></td>
     </tr>
     <tr>
       <td align="right">arm64</td>
-      <td>◻️ CPU / Metal</td>
+      <td>◻️ CPU</td>
       <td>Apple M1+</td>
-      <td>❌ Under consideration</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>❌</td>
     </tr>
+    <tr>
+      <td></td>
+      <td>⬜ Metal <br><code>mps</code></td>
+      <td>Apple M1+</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>❌</td>
   </tbody>
 </table>
-
-\* Accelerated INT8 requires SM75+.
 
 ## :book: Documentation
 * [Official Documentation](https://huggingface.co/docs/bitsandbytes/main)
