@@ -315,12 +315,6 @@ void spmm_coo_very_sparse_naive_int8(
 
 extern "C" {
 #if BUILD_CUDA || BUILD_HIP
-void cestimate_quantiles_fp32(float* A, float* code, float offset, int n) {
-    estimateQuantiles_fp32(A, code, offset, n);
-}
-
-void cestimate_quantiles_fp16(half* A, float* code, float offset, int n) { estimateQuantiles_fp16(A, code, offset, n); }
-
 void cquantize(float* code, float* A, unsigned char* out, int n) { quantize(code, A, out, n); }
 
 void cdequantize(float* code, unsigned char* A, float* out, int n, cudaStream_t stream) {
