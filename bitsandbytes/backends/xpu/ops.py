@@ -10,15 +10,6 @@ from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
 from ..utils import triton_available
 
-# TODO: Enable _int_mm in torch
-# if torch.__version__ >= (2, 9):
-#     @register_kernel("bitsandbytes::int8_linear_matmul", "xpu")
-#     def _(A: torch.Tensor, B: torch.Tensor):
-#         return torch._int_mm(
-#             A.reshape(-1, A.shape[-1]),
-#             B.t(),
-#         ).reshape(*A.shape[:-1], B.shape[0])
-
 
 def _dequantize_4bit_impl(
     A: torch.Tensor,
