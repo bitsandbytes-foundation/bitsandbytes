@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 import bitsandbytes as bnb
-from tests.helpers import get_available_devices, id_formatter
+from tests.helpers import get_available_devices, id_formatter, is_supported_on_hpu
 
 
 class MockArgs:
@@ -276,9 +276,9 @@ module_dict = {
     "NF4": bnb.nn.LinearNF4,
     "FP4+C": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True),
     "NF4+C": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compress_statistics=True),
-    "NF4+fp32": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float32),
-    "NF4+fp16": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float16),
-    "NF4+bf16": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.bfloat16),
+    "NF4+fp32": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compute_dtype=torch.float32),
+    "NF4+fp16": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compute_dtype=torch.float16),
+    "NF4+bf16": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compute_dtype=torch.bfloat16),
 }
 
 
@@ -295,7 +295,12 @@ def test_kbit_backprop(device, module):
     torch.nn.init.kaiming_normal_(ref[0].weight)
     torch.nn.init.kaiming_normal_(ref[1].weight)
     ref[1].weight.requires_grad_(False)
+
     kbit = nn.Sequential(*[torch.nn.Linear(dim1, dim2), module(dim2, 128)])
+
+    if device == "hpu" and isinstance(kbit[1], bnb.nn.Linear4bit) and kbit[1].weight.quant_type == "fp4":
+        pytest.skip("FP4 is not supported on HPU")
+
     kbit[0].weight.detach().copy_(ref[0].weight)
     kbit[1].weight.detach().copy_(ref[1].weight)
     kbit[0].bias.detach().copy_(ref[0].bias)
@@ -358,6 +363,12 @@ def test_kbit_backprop(device, module):
     ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
 )
 def test_embedding_lossless(device, embedding_class, input_shape, embedding_dim, quant_storage):
+    if device == "hpu":
+        if embedding_class is bnb.nn.EmbeddingFP4:
+            pytest.skip("FP4 is not supported on HPU")
+        elif embedding_class is bnb.nn.EmbeddingNF4 and not is_supported_on_hpu("nf4", torch.float32, quant_storage):
+            pytest.skip("This configuration is not supported on HPU")
+
     num_embeddings = 128
 
     src_weight = (torch.randn((num_embeddings, embedding_dim), dtype=torch.float32) > 0).to(
@@ -403,6 +414,12 @@ def test_embedding_lossless(device, embedding_class, input_shape, embedding_dim,
     ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
 )
 def test_embedding_error(device, embedding_class, input_shape, embedding_dim, quant_storage):
+    if device == "hpu":
+        if embedding_class is bnb.nn.EmbeddingFP4:
+            pytest.skip("FP4 is not supported on HPU")
+        elif embedding_class is bnb.nn.EmbeddingNF4 and not is_supported_on_hpu("nf4", torch.float32, quant_storage):
+            pytest.skip("This configuration is not supported on HPU")
+
     is_8bit = embedding_class is bnb.nn.Embedding8bit
 
     num_embeddings = 128
