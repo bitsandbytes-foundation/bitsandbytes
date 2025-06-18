@@ -8,6 +8,7 @@ from tests.helpers import (
     describe_dtype,
     get_available_devices,
     id_formatter,
+    is_supported_on_hpu,
 )
 
 TRANSPOSE_VALS = [(False, True), (False, False)]
@@ -189,6 +190,9 @@ def test_matmul_4bit(
     if device == "cpu" and dtype != torch.float32 and any(req_grad) and torch.__version__ < (2, 6):
         pytest.xfail("mse_loss fp16 on CPU is not supported in torch < 2.6")
 
+    if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
+        pytest.skip("This configuration is not supported on HPU.")
+
     for i in range(3):
         # normal multiply
         if funcs[0] in [torch.mm, torch.matmul]:
@@ -230,6 +234,9 @@ def test_matmul_4bit(
                 out_bnb.data.copy_(out_torch)
                 if device == "cuda":
                     torch.cuda.synchronize()
+                elif device == "hpu":
+                    torch.hpu.synchronize()
+
                 loss_bnb = torch.nn.functional.mse_loss(out_bnb, target).mean()
                 loss_bnb.backward()
                 gradA1 = A.grad

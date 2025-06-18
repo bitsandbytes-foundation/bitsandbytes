@@ -1,3 +1,6 @@
+import subprocess
+
+from packaging import version
 import torch
 
 try:
@@ -9,6 +12,15 @@ try:
 except BaseException:
     ipex_cpu = None
     ipex_xpu = None
+
+try:
+    import triton  # noqa: F401
+    import triton.language as tl  # noqa: F401
+
+    triton_available = True
+except ImportError as e:
+    triton_available = False
+
 
 _NF4_QUANT_TABLE = torch.tensor(
     [
@@ -59,3 +71,23 @@ _FP4_QUANT_TABLE = torch.tensor(
     else "cpu",  # Only cpu/xpu use this table for now.
 )
 CODE = {"nf4": _NF4_QUANT_TABLE, "fp4": _FP4_QUANT_TABLE}
+
+
+def get_gaudi_sw_version():
+    """
+    Returns the installed version of Gaudi SW.
+    """
+    output = subprocess.run(
+        "pip list | grep habana-torch-plugin",
+        shell=True,
+        text=True,
+        capture_output=True,
+    )
+    # If grep return nothing
+    if not output.stdout.strip():
+        return None
+
+    return version.parse(output.stdout.split("\n")[0].split()[-1])
+
+
+GAUDI_SW_VER = get_gaudi_sw_version()
