@@ -37,11 +37,6 @@
 //===================================================================================
 
 #if BUILD_CUDA || BUILD_HIP
-void estimateQuantiles_fp32(float* A, float* code, float offset, int n) {
-    estimateQuantiles<float>(A, code, offset, n);
-}
-
-void estimateQuantiles_fp16(half* A, float* code, float offset, int n) { estimateQuantiles<half>(A, code, offset, n); }
 
 // void gemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
 //{ gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc, 32); }
