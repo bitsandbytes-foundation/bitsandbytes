@@ -178,10 +178,9 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
 
 #define num_values_4bit 32
 template <typename T, int THREADS, int BITS, int SUBG_SIZE>
-SYCL_EXTERNAL void kgemv_4bit_inference_kernel(
-    int M, int N, int K, T *A, unsigned char *B, float *absmax,
-    const float *datatype, T *out, int lda, int ldb, int ldc, int blocksize,
-    sycl::local_ptr<T> quant_map, sycl::nd_item<1> &item) {
+SYCL_EXTERNAL void
+kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE>::operator()(
+    sycl::nd_item<1> item) const {
   size_t idx = item.get_local_id();
   const int sg_idx = idx / SUBG_SIZE;
   const int sg_lane = idx % SUBG_SIZE;
@@ -268,8 +267,7 @@ SYCL_EXTERNAL void kgemv_4bit_inference_kernel(
             local_A[k] = T(0.0f);
       }
 
-// accumulate in float; small performance hit for Ampere, but lower error for
-// outputs
+// accumulate in float;
 #pragma unroll
       for (int k = 0; k < num_values_4bit / 4; k++) {
         local_C += (float)(local_A[k] * local_B[k]);
@@ -284,14 +282,6 @@ SYCL_EXTERNAL void kgemv_4bit_inference_kernel(
     out[row_B] = T(local_C);
 }
 
-template <typename T, int THREADS, int BITS, int SUBG_SIZE>
-SYCL_EXTERNAL void
-kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE>::operator()(
-    sycl::nd_item<1> item) const {
-  kgemv_4bit_inference_kernel<T, THREADS, BITS, SUBG_SIZE>(
-      M, N, K, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, quant_map,
-      item);
-}
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================

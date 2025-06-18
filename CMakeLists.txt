@@ -231,10 +231,6 @@ if(BUILD_XPU)
     set(SYCL_LINK_FLAGS "-fsycl;--offload-compress;-fsycl-targets=spir64_gen,spir64;-Xs;-device pvc,xe-lpg,ats-m150 -options ' -cl-intel-enable-auto-large-GRF-mode -cl-poison-unsupported-fp64-kernels -cl-intel-greater-than-4GB-buffer-required'")
     set(SYCL_COMPILE_FLAGS "-fsycl;-fhonor-nans;-fhonor-infinities;-fno-associative-math;-fno-approx-func;-fno-sycl-instrument-device-code;--offload-compress;-fsycl-targets=spir64_gen,spir64;")
 
-    target_link_libraries(bitsandbytes PUBLIC ${SYCL_LIBRARY})
-    target_include_directories(bitsandbytes PUBLIC ${SYCL_INCLUDE_DIR})
-    target_link_directories(bitsandbytes PUBLIC ${SYCL_LIBRARY_DIR})
-
     set_property(TARGET bitsandbytes PROPERTY CXX_STANDARD 20)
     target_compile_options(bitsandbytes PRIVATE ${SYCL_COMPILE_FLAGS})
     target_link_options(bitsandbytes PRIVATE ${SYCL_LINK_FLAGS})
