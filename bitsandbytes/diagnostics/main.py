@@ -92,27 +92,27 @@ def main():
     else:
         print(f"Checking that the library is importable and {BNB_BACKEND} is callable...")
 
-    try:
-        sanity_check()
-        print("SUCCESS!")
-        return
-    except RuntimeError as e:
-        if "not available in CPU-only" in str(e):
-            print(
-                f"WARNING: {__package__} is currently running as CPU-only!\n"
-                "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
-                f"If you think that this is so erroneously,\nplease report an issue!",
-            )
-        else:
-            raise e
-    except Exception:
-        traceback.print_exc()
+        try:
+            sanity_check()
+            print("SUCCESS!")
+            return
+        except RuntimeError as e:
+            if "not available in CPU-only" in str(e):
+                print(
+                    f"WARNING: {__package__} is currently running as CPU-only!\n"
+                    "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
+                    f"If you think that this is so erroneously,\nplease report an issue!",
+                )
+            else:
+                raise e
+        except Exception:
+            traceback.print_exc()
 
-    print_dedented(
-        f"""
-        Above we output some debug information.
-        Please provide this info when creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose
-        WARNING: Please be sure to sanitize sensitive info from the output before posting it.
-        """,
-    )
-    sys.exit(1)
+        print_dedented(
+            f"""
+            Above we output some debug information.
+            Please provide this info when creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose
+            WARNING: Please be sure to sanitize sensitive info from the output before posting it.
+            """,
+        )
+        sys.exit(1)
