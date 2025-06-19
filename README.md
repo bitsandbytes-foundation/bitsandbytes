@@ -48,14 +48,14 @@ bitsandbytes has the following minimum requirements for all platforms:
   </thead>
   <tbody>
     <tr>
-      <td colspan="4">🐧 <strong>Linux, glibc >= 2.24</strong></td>
+      <td colspan="6">🐧 <strong>Linux, glibc >= 2.24</strong></td>
     </tr>
     <tr>
       <td align="right">x86-64</td>
       <td>◻️ CPU</td>
       <td>AVX2</td>
-      <td>〰️</td>
-      <td>〰️</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>❌</td>
     </tr>
     <tr>
@@ -93,16 +93,16 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>🟪 Intel Gaudi <br><code>hpu</code></td>
       <td>Gaudi1, Gaudi2, Gaudi3</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>〰️</td>
       <td>❌</td>
     </tr>
     <tr>
       <td align="right">aarch64</td>
       <td>◻️ CPU</td>
       <td></td>
-      <td>〰️</td>
-      <td>〰️</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>❌</td>
     </tr>
     <tr>
@@ -114,14 +114,14 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>✅</td>
     </tr>
     <tr>
-      <td colspan="4">🪟 <strong>Windows 11 / Windows Server 2019+</strong></td>
+      <td colspan="6">🪟 <strong>Windows 11 / Windows Server 2019+</strong></td>
     </tr>
     <tr>
       <td align="right">x86-64</td>
       <td>◻️ CPU</td>
       <td>AVX2</td>
-      <td>〰️</td>
-      <td>〰️</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>❌</td>
     </tr>
     <tr>
@@ -144,7 +144,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>🚧</td>
     </tr>
     <tr>
-      <td colspan="4">🍎 <strong>macOS 13.1+</strong></td>
+      <td colspan="6">🍎 <strong>macOS 14+</strong></td>
     </tr>
     <tr>
       <td align="right">arm64</td>
