@@ -24,15 +24,6 @@ using namespace BinSearch;
 using std::cout;
 using std::endl;
 
-template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
-{
-  int num_blocks = n/4096;
-  num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
-	CUDA_CHECK_RETURN(hipMemset(code, 0, 256*sizeof(float)));
- hipLaunchKernelGGL(( kEstimateQuantiles<T>), dim3(num_blocks), dim3(512), 0, 0, A, code, offset, std::numeric_limits<T>::max(), n);
-  CUDA_CHECK_RETURN(hipPeekAtLastError());
-}
-
 void quantize(float *code, float *A, unsigned char *out, int n)
 {
   int num_blocks = n/1024;
