@@ -160,8 +160,6 @@ void optimizerStatic8bitBlockwise(
 
 template <typename T> void percentileClipping(T* g, float* gnorm_vec, int step, const int n);
 
-void histogramScatterAdd2D(float* histogram, int* index1, int* index2, float* src, int maxidx1, int n);
-
 void gemmex(
     Context* context, bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda,
     int ldb, int ldc
