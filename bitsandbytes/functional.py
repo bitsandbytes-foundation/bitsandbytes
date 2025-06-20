@@ -908,7 +908,7 @@ def quantize_4bit(
         absmax (`torch.Tensor`, *optional*): A tensor to use to store the absmax values.
         out (`torch.Tensor`, *optional*): A tensor to use to store the result.
         blocksize (`int`, *optional*):
-            The size of the blocks. Defaults to 64.
+            The size of the blocks. Defaults to 128 on ROCm and 64 otherwise.
             Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
         compress_statistics (`bool`, *optional*): Whether to additionally quantize the absmax values. Defaults to False.
         quant_type (`str`, *optional*): The data type to use: `nf4` or `fp4`. Defaults to `fp4`.
@@ -1019,7 +1019,7 @@ def dequantize_4bit(
             Required if `quant_state` is not provided and ignored otherwise.
         out (`torch.Tensor`, *optional*): A tensor to use to store the result.
         blocksize (`int`, *optional*):
-            The size of the blocks. Defaults to 64.
+            The size of the blocks. Defaults to 128 on ROCm and 64 otherwise.
             Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
         quant_type (`str`, *optional*): The data type to use: `nf4` or `fp4`. Defaults to `fp4`.
 
