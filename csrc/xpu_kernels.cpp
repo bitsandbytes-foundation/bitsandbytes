@@ -29,7 +29,7 @@ inline float dDequantizeFP4Tree(unsigned char val) {
       return 0.00000000f;
   else if ((val & 0b0100) == 4)
     if ((val & 0b0010) == 2)
-      if ((val & 0b0001) == 1) 
+      if ((val & 0b0001) == 1)
         return 0.25000000f;
       else
         return 0.16666667f;
@@ -98,21 +98,21 @@ template <typename T, int TILE_SIZE, int NUM_PER_TH, int DATA_TYPE>
 SYCL_EXTERNAL void
 kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
     sycl::nd_item<1> item) const {
-  const int base_idx = (item.get_group(0) * TILE_SIZE);
+  const int base_idx = item.get_group(0) * TILE_SIZE;
   size_t local_idx = item.get_local_id(0) * NUM_PER_TH;
   float local_abs_max = -FLT_MAX;
-  int valid_items_load = 0;
-  int valid_items_store = 0;
+  int local_load_idx = 0;
+  int local_store_idx = 0;
 
-  uint8_t qvals[NUM_PER_TH];                      // quantized data
-  T vals[NUM_PER_TH * ((DATA_TYPE > 0) ? 2 : 1)]; // dequantized data
+  uint8_t qvals[NUM_PER_TH];
+  T vals[NUM_PER_TH * ((DATA_TYPE > 0) ? 2 : 1)];
 
   if (DATA_TYPE > 0) {
-    valid_items_load = sycl::min(TILE_SIZE, (n + 1) / 2 - base_idx);
-    valid_items_store = sycl::min(TILE_SIZE * 2, n - base_idx * 2);
+    local_load_idx = sycl::min(TILE_SIZE, (n + 1) / 2 - base_idx);
+    local_store_idx = sycl::min(TILE_SIZE * 2, n - base_idx * 2);
   } else {
-    valid_items_load = sycl::min(TILE_SIZE, n - base_idx);
-    valid_items_store = valid_items_load;
+    local_load_idx = sycl::min(TILE_SIZE, n - base_idx);
+    local_store_idx = local_load_idx;
   }
 
   // Avoid expensive divsion by the blocksize (as blocksize will always be a
@@ -120,14 +120,14 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
   local_abs_max = absmax[(base_idx + local_idx) >>
                          (31 - std::countl_zero<unsigned int>(blocksize))];
 
-  if (local_idx + NUM_PER_TH < valid_items_load) {
+  if (local_idx + NUM_PER_TH < local_load_idx) {
     reinterpret_cast<sycl::vec<uint8_t, NUM_PER_TH>(&)[NUM_PER_TH]>(qvals)[0] =
         reinterpret_cast<sycl::vec<uint8_t, NUM_PER_TH> *>(
             A)[(base_idx + local_idx) / NUM_PER_TH];
   } else {
 #pragma unroll NUM_PER_TH
     for (int i = 0; i < NUM_PER_TH; i++) {
-      if (local_idx + i < valid_items_load) {
+      if (local_idx + i < local_load_idx) {
         qvals[i] = A[base_idx + local_idx + i];
       } else {
         qvals[i] = (uint8_t)0;
@@ -143,7 +143,7 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
     break;
   case FP4:
 #pragma unroll NUM_PER_TH
-    for(int j = 0; j < NUM_PER_TH; j++) {
+    for (int j = 0; j < NUM_PER_TH; j++) {
       vals[j * 2] = dDequantizeFP4Tree(qvals[j] >> 4) * local_abs_max;
       vals[j * 2 + 1] = dDequantizeFP4Tree(qvals[j] & 0x0F) * local_abs_max;
     }
@@ -159,7 +159,8 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
 
   const int local_dst_size = (DATA_TYPE > 0) ? NUM_PER_TH * 2 : NUM_PER_TH;
   int local_dst_idx = (DATA_TYPE > 0) ? local_idx * 2 : local_idx;
-  if (local_dst_size < valid_items_store) {
+
+  if (local_dst_idx + local_dst_size < local_store_idx) {
     reinterpret_cast<sycl::vec<T, local_dst_size> *>(
         out)[(((DATA_TYPE > 0) ? base_idx * 2 : base_idx) + local_dst_idx) /
              local_dst_size] =
@@ -168,7 +169,7 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
   } else {
 #pragma unroll NUM_PER_TH
     for (int i = 0; i < local_dst_size; i++) {
-      if (i < valid_items_store) {
+      if (local_dst_idx + i < local_store_idx) {
         out[((DATA_TYPE > 0) ? base_idx * 2 : base_idx) + local_dst_idx + i] =
             vals[i];
       }
@@ -176,16 +177,16 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
   }
 }
 
-#define num_values_4bit 32
-template <typename T, int THREADS, int BITS, int SUBG_SIZE>
+template <typename T, size_t GROUP_SIZE, size_t NUM_PER_THREAD,
+          size_t SUBG_SIZE, int BITS>
 SYCL_EXTERNAL void
-kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE>::operator()(
-    sycl::nd_item<1> item) const {
+kgemv_4bit_inference<T, GROUP_SIZE, NUM_PER_THREAD, SUBG_SIZE,
+                     BITS>::operator()(sycl::nd_item<1> item) const {
   size_t idx = item.get_local_id();
   const int sg_idx = idx / SUBG_SIZE;
   const int sg_lane = idx % SUBG_SIZE;
-  const int row_B =
-      (THREADS / SUBG_SIZE) * item.get_group().get_group_id() + sg_idx;
+  const int num_values_4bit = SUBG_SIZE;
+  const int row_B = NUM_PER_THREAD * item.get_group().get_group_id() + sg_idx;
   const int offset_B = ldb * row_B;
   const int num_values_8bit = num_values_4bit / 2;
   float local_C = 0.0f;
@@ -213,7 +214,6 @@ kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE>::operator()(
 
     if (row_B < N) {
       if ((inner_idx_halved + num_values_8bit) < (K / 2)) {
-        // this is the most important for performance considerations
         reinterpret_cast<sycl::vec<int, 4>(&)[num_values_8bit]>(
             local_B_4bit)[0] =
             reinterpret_cast<sycl::vec<int, 4> *>(
@@ -244,16 +244,18 @@ kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE>::operator()(
       }
 
       if (inner_idx + (num_values_4bit / 4) + (i * num_values_4bit / 4) < K) {
-        // this is also relatively important for performance
         if (BITS == 16) {
-          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit/4]>(local_A)[0] =
+          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit / 4]>(
+              local_A)[0] =
               reinterpret_cast<sycl::vec<int, 4> *>(
                   A)[inner_idx / (num_values_4bit / 4) + i];
         } else {
-          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit/4]>(local_A)[0] =
+          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit / 4]>(
+              local_A)[0] =
               reinterpret_cast<sycl::vec<int, 4> *>(
                   A)[inner_idx / (num_values_4bit / 8) + (2 * i) + 0];
-          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit/4]>(local_A)[1] =
+          reinterpret_cast<sycl::vec<int, 4>(&)[num_values_4bit / 4]>(
+              local_A)[1] =
               reinterpret_cast<sycl::vec<int, 4> *>(
                   A)[inner_idx / (num_values_4bit / 8) + (2 * i) + 1];
         }
@@ -267,7 +269,7 @@ kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE>::operator()(
             local_A[k] = T(0.0f);
       }
 
-// accumulate in float;
+// accumulate in float for accuracy;
 #pragma unroll
       for (int k = 0; k < num_values_4bit / 4; k++) {
         local_C += (float)(local_A[k] * local_B[k]);
@@ -299,6 +301,7 @@ template class kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 4,
                                     General8bit>;
 template class kDequantizeBlockwise<sycl::ext::oneapi::bfloat16, 512, 4, NF4>;
 
-template class kgemv_4bit_inference<sycl::half, 128, 16, 32>;
-template class kgemv_4bit_inference<sycl::ext::oneapi::bfloat16, 128, 16, 32>;
-template class kgemv_4bit_inference<float, 128, 32, 32>;
+template class kgemv_4bit_inference<sycl::half, 128, 4, 32, 16>;
+template class kgemv_4bit_inference<sycl::ext::oneapi::bfloat16, 128, 4, 32,
+                                    16>;
+template class kgemv_4bit_inference<float, 128, 4, 32, 32>;

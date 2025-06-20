@@ -23,7 +23,8 @@ private:
   const int n;
 };
 
-template <typename T, int THREADS, int BITS, int SUBG_SIZE>
+template <typename T, size_t GROUP_SIZE, size_t NUM_PER_THREAD,
+          size_t SUBG_SIZE, int BITS>
 class kgemv_4bit_inference {
 public:
   SYCL_EXTERNAL void operator()(sycl::nd_item<1> item) const;

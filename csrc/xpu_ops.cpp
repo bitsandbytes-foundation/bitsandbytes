@@ -4,8 +4,7 @@
 
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
-                         int blocksize /*block-quant-size*/, const int n,
-                         sycl::queue *stream) {
+                         int blocksize, const int n, sycl::queue *stream) {
   auto &queue = *stream;
   const int workgroup_size = 128;
   const int num_per_th = 4;
@@ -40,19 +39,17 @@ void gemv_4bit_inference(int m, int n, int k, T *A, unsigned char *B,
 
   auto &queue = *stream;
 
-  size_t subgroup_size = 32;
-  size_t workgroup_size = subgroup_size * 4;
-  size_t workgroup_num = (n + 3) / 4;
+  const size_t GROUP_SIZE = 128; // workgroup_size
+  const size_t SUBG_SIZE = 32;   // subgroup_size
+  const size_t NUM_PER_THREAD = GROUP_SIZE / SUBG_SIZE;
+  size_t workgroup_num = (n + NUM_PER_THREAD - 1) / NUM_PER_THREAD;
 
-  const int THREADS = 128;  // workgroup_size;
-  const int SUBG_SIZE = 32; // subgroup_size;
-
-  kgemv_4bit_inference<T, THREADS, BITS, SUBG_SIZE> kfn(
+  kgemv_4bit_inference<T, GROUP_SIZE, NUM_PER_THREAD, SUBG_SIZE, BITS> kfn(
       m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize);
 
-  sycl_comp_kernel_submit<decltype(kfn), 1, 32>(
-      sycl::nd_range<1>(sycl::range<1>(workgroup_size * workgroup_num),
-                        sycl::range<1>(workgroup_size)),
+  sycl_comp_kernel_submit<decltype(kfn), 1, SUBG_SIZE>(
+      sycl::nd_range<1>(sycl::range<1>(GROUP_SIZE * workgroup_num),
+                        sycl::range<1>(GROUP_SIZE)),
       queue, kfn);
 }
 
