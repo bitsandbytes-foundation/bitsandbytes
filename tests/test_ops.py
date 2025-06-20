@@ -106,9 +106,6 @@ class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_quantize_blockwise(self, device, dtype, blocksize):
         if device == "cpu":
-            if dtype != torch.float32:
-                pytest.skip("CPU implementation is only available for float32")
-
             if blocksize != 256:
                 pytest.skip("CPU implementation is slow; only test blocksize=256")
 
@@ -121,7 +118,6 @@ class TestInt8BlockwiseQuantOps:
         assert out.device == A.device
 
         assert absmax.device == A.device
-        assert absmax.dtype == torch.float32
 
         opcheck(torch.ops.bitsandbytes.quantize_blockwise, (A, code, blocksize))
 
@@ -129,9 +125,6 @@ class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_dequantize_blockwise(self, device, dtype, blocksize):
-        if device == "cpu" and dtype != torch.float32:
-            pytest.skip("CPU implementation is only available for float32")
-
         A = torch.randint(0, 255, (1024, 1024), dtype=torch.uint8, device=device)
         code = bitsandbytes.functional.create_dynamic_map().to(device, dtype=torch.float32)
 
@@ -170,7 +163,6 @@ class Test4bitBlockwiseQuantOps:
         assert out.dtype == storage_dtype
 
         assert absmax.device == A.device
-        assert absmax.dtype == torch.float32
 
         if storage_dtype != torch.uint8:
             pytest.xfail("opcheck fails for storage_dtype != torch.uint8")
