@@ -2899,9 +2899,6 @@ template __global__ void kdequant_mm_int32_fp16<4, 512>(int *__restrict__ const 
 template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
 template __device__ unsigned char dQuantize<1>(float* smem_code, const float rand, float x);
 
-template __global__ void kEstimateQuantiles(float *__restrict__ const A, float *code, const float offset, const float max_val, const int n);
-template __global__ void kEstimateQuantiles(half *__restrict__ const A, float *code, const float offset, const half max_val, const int n);
-
 #define MAKE_PreconditionOptimizer32bit1State(oname, gtype) \
 template __global__ void kPreconditionOptimizer32bit1State<gtype, oname, 4096, 8>(gtype* g, gtype* p, \
                 float* state1, float *unorm, \
