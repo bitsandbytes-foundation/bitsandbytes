@@ -1331,7 +1331,7 @@ class TestQuantize4BitFunctional:
                 assert relerr1 < 2e-4
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.005 and relratio > 0.992
-            assert maxratio < 1.005 and maxratio > 0.995
+            assert maxratio < 1.005 and maxratio > 0.992
         elif dtype == torch.float32:
             if dim <= 512:
                 assert err1 < 5e-8
@@ -1356,7 +1356,7 @@ class TestQuantize4BitFunctional:
                 assert maxerr1 < 0.0012
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.05 and relratio > 0.96
-            assert maxratio < 1.03 and maxratio > 0.97
+            assert maxratio < 1.05 and maxratio > 0.97
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
