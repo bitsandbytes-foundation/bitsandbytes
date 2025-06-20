@@ -103,9 +103,6 @@ __global__ void kOptimizerStatic8bit1StateBlockwise(
 template <typename T, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPercentileClipping(T* __restrict__ g, float* gnorm_vec, int step, const int n);
 
-__global__ void
-    kHistogramScatterAdd2D(float* histogram, int* index1, int* index2, float* src, const int maxidx1, const int n);
-
 template <typename T, int SPMM_ITEMS, int BITS>
 __global__ void kspmm_coo_very_sparse_naive(
     int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, T* B, half* out,
