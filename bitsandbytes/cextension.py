@@ -23,6 +23,7 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     """
 
     prefix = "rocm" if torch.version.hip else "cuda"
+    library_name = f"libbitsandbytes_{prefix}{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
 
     override_value = os.environ.get("BNB_CUDA_VERSION")
     if override_value:
