@@ -124,8 +124,6 @@ class ContextHipsparse {
     }
 };
 
-template <typename T> void estimateQuantiles(T* A, float* code, float offset, int n);
-
 void quantize(float* code, float* A, unsigned char* out, int n);
 void dequantize(float* code, unsigned char* A, float* out, int n, hipStream_t stream);
 template <typename T, int STOCHASTIC, int DATA_TYPE>
@@ -159,8 +157,6 @@ void optimizerStatic8bitBlockwise(
 );
 
 template <typename T> void percentileClipping(T* g, float* gnorm_vec, int step, const int n);
-
-void histogramScatterAdd2D(float* histogram, int* index1, int* index2, float* src, int maxidx1, int n);
 
 void gemmex(
     Context* context, bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda,

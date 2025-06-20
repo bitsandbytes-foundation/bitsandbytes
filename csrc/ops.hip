@@ -24,24 +24,6 @@ using namespace BinSearch;
 using std::cout;
 using std::endl;
 
-void histogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, int maxidx1, int n)
-{
-  int threads = 512;
-  int num_blocks = n/threads;
-  num_blocks = n % threads == 0 ? num_blocks : num_blocks + 1;
- hipLaunchKernelGGL(( kHistogramScatterAdd2D), dim3(num_blocks), dim3(512), 0, 0, histogram, index1, index2, src, maxidx1, n);
-  CUDA_CHECK_RETURN(hipPeekAtLastError());
-}
-
-template <typename T> void estimateQuantiles(T *A, float *code, float offset, int n)
-{
-  int num_blocks = n/4096;
-  num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
-	CUDA_CHECK_RETURN(hipMemset(code, 0, 256*sizeof(float)));
- hipLaunchKernelGGL(( kEstimateQuantiles<T>), dim3(num_blocks), dim3(512), 0, 0, A, code, offset, std::numeric_limits<T>::max(), n);
-  CUDA_CHECK_RETURN(hipPeekAtLastError());
-}
-
 void quantize(float *code, float *A, unsigned char *out, int n)
 {
   int num_blocks = n/1024;
@@ -751,9 +733,6 @@ template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *ma
 template int igemmlt<32, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream);
 template int igemmlt<8, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream);
 template int igemmlt<8, 1>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream);
-
-template void estimateQuantiles(half *A, float *code, float offset, int n);
-template void estimateQuantiles(float *A, float *code, float offset, int n);
 
 template void quantizeBlockwise<half, 1, General8bit>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
 template void quantizeBlockwise<half, 0, General8bit>(float * code, half *A, float *absmax, unsigned char *out, float* rand, int rand_offset, int blocksize, const int n);
