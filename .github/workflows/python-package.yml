@@ -102,10 +102,55 @@ jobs:
           path: output/*
           retention-days: 7
 
+  build-shared-libs-rocm:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04]
+        arch: [x86_64]
+        rocm_version:
+          ["6.1.2", "6.2.4", "6.3.2"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker multiarch
+        uses: docker/setup-qemu-action@v3
+      - name: Clean up disk space
+        run: |
+          sudo rm -rf \
+              /usr/share/dotnet \
+              /opt/ghc \
+              "/usr/local/share/boost" \
+              "$AGENT_TOOLSDIRECTORY" \
+              /opt/hostedtoolcache \
+              /opt/google/chrome \
+              /opt/microsoft/msedge \
+              /opt/microsoft/powershell \
+              /opt/pipx \
+              /usr/lib/mono \
+              /usr/local/julia* \
+              /usr/local/lib/android \
+              /usr/local/lib/node_modules \
+              /usr/local/share/chromium \
+              /usr/local/share/powershell \
+              /usr/share/swift
+      - name: Build C++
+        run: bash .github/scripts/build-rocm.sh
+        env:
+          build_os: ${{ matrix.os }}
+          build_arch: ${{ matrix.arch }}
+          rocm_version: ${{ matrix.rocm_version }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}
+          path: output/*
+          retention-days: 7
+
   build-wheels:
     needs:
       - build-shared-libs
       - build-shared-libs-cuda
+      - build-shared-libs-rocm
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]
@@ -173,6 +218,7 @@ jobs:
           merge-multiple: true
 
       - name: Inspect tmp directory after downloading artifacts
+
         run: |
           ls -alFR tmp/
           WHEEL_COUNT=$(find tmp/ -type f -name "*.whl" | wc -l)
@@ -210,6 +256,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: repo
+
       - name: Delete old pre-release (if exists)
         run: |
           cd repo && gh release delete continuous-release_main --cleanup-tag -y
