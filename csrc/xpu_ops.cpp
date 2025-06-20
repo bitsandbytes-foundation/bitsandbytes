@@ -10,7 +10,7 @@ void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out,
   const int num_per_th = 4;
   const int tile_size = workgroup_size * num_per_th;
   if (DATA_TYPE > 0) {
-    const int workgroup_num = (n + tile_size - 1) / tile_size / 2;
+    const int workgroup_num = (n + tile_size * 2  - 1) / (tile_size * 2);
     sycl::range<1> local_range{(size_t)workgroup_size};
     sycl::range<1> global_range{(size_t)workgroup_num * (size_t)workgroup_size};
     kDequantizeBlockwise<T, tile_size, num_per_th, DATA_TYPE> kfn(
