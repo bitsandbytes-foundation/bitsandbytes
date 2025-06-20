@@ -346,18 +346,6 @@ __device__ __forceinline__ unsigned char quantize_2D(float *__restrict__ quadran
     }
 }
 
-__global__ void kHistogramScatterAdd2D(float* histogram, int *index1, int *index2, float *src, const int maxidx1, const int n)
-{
-  const int tid = threadIdx.x + (blockDim.x*blockIdx.x);
-  const int numThreads = blockDim.x*gridDim.x;
-
-  for(int i = tid; i < n; i+=numThreads)
-  {
-      int idx = (index1[i]*maxidx1) + index2[i];
-      atomicAdd(&histogram[idx], src[i]);
-  }
-}
-
 #define THREADS_ESTIMATE 512
 #define NUM_ESTIMATE 8
 #define BLOCK_ESTIMATE 4096
