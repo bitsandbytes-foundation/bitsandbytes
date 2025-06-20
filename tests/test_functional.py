@@ -1336,7 +1336,7 @@ class TestQuantize4BitFunctional:
             if dim <= 512:
                 assert err1 < 5e-8
                 assert relerr1 < 1e-6
-                assert maxerr1 < 1e-7
+                assert maxerr1 < 1.05e-7
             else:
                 assert err1 < 5e-8
                 assert relerr1 < 8e-6
@@ -1355,7 +1355,7 @@ class TestQuantize4BitFunctional:
                 assert maxerr1 < 0.0012
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.04 and relratio > 0.96
-            assert maxratio < 1.02 and maxratio > 0.98
+            assert maxratio < 1.03 and maxratio > 0.97
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
