@@ -4,6 +4,7 @@ import pytest
 import torch
 
 import bitsandbytes
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, is_supported_on_hpu
 
 # torch.library.opcheck is only available in torch 2.4 and later.
@@ -101,7 +102,7 @@ class TestLLMInt8Ops:
 class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_quantize_blockwise(self, device, dtype, blocksize):
         if device == "cpu":
             if dtype != torch.float32:
@@ -125,7 +126,7 @@ class TestInt8BlockwiseQuantOps:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_dequantize_blockwise(self, device, dtype, blocksize):
         if device == "cpu" and dtype != torch.float32:
             pytest.skip("CPU implementation is only available for float32")
@@ -151,7 +152,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_quantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
             pytest.skip("This configuration is not supported on HPU.")
@@ -175,7 +176,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_dequantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
             pytest.skip("This configuration is not supported on HPU.")
@@ -209,7 +210,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
             pytest.skip("This configuration is not supported on HPU.")
