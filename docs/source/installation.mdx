@@ -192,11 +192,17 @@ You can install the pre-built wheels for each backend, or compile from source fo
 
 <hfoptions id="platform">
 <hfoption id="Linux">
-This wheel provides support for ROCm and Intel XPU platforms.
+This wheel provides support for ROCm platforms.
 
 ```
 # Note, if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 pip install --force-reinstall 'https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.44.1.dev0-py3-none-manylinux_2_24_x86_64.whl'
+```
+
+This wheel provides support for Intel XPU platforms.
+```
+# Note, if you don't want to reinstall our dependencies, append the `--no-deps` flag!
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl --extra-index-url https://download.pytorch.org/whl/test/xpu
 ```
 
 </hfoption>
@@ -241,9 +247,11 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 If you are using Intel CPU on Linux or Intel XPU on Linux/Windows, please follow the [instruction](https://pytorch-extension.intel.com/) or the following command to install intel_extension_for_pytorch so you can get better performance.
 
 CPU: `pip install intel_extension_for_pytorch`
+
 XPU: `pip install intel_extension_for_pytorch --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/`
 
 Install bitsandbytes:
+
 CPU: Need to build CPU C++ codes
 ```
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -255,6 +263,8 @@ XPU:
 ```
 pip install git+https://github.com/bitsandbytes-foundation/bitsandbytes.git
 ```
+
+You can also use docker by `docker build -f docker/Dockerfile.xpu -t bnb-xpu .` on XPU.
 
 </hfoption>
 <hfoption id="Ascend NPU">
