@@ -11,14 +11,14 @@ if [[ -v cuda_targets ]]; then
 elif [ "${build_arch}" = "aarch64" ]; then
     build_capability="75;80;90"
 
-    # CUDA 12.8: Add sm100
-    [[ "${cuda_version}" == 12.8.* ]] && build_capability="75;80;90;100"
+    # CUDA 12.8+: Add sm100/sm120
+    [[ "${cuda_version}" == 12.8.* || "${cuda_version}" == 12.9.* ]] && build_capability="75;80;90;100;120"
 else
     # By default, target Maxwell through Hopper.
     build_capability="50;52;60;61;70;75;80;86;89;90"
 
-    # CUDA 12.8: Add sm100 and sm120; remove < sm75 to align with PyTorch 2.7+cu128 minimum
-    [[ "${cuda_version}" == 12.8.* ]] && build_capability="75;80;86;89;90;100;120"
+    # CUDA 12.8+: Add sm100 and sm120; remove < sm75 to align with PyTorch 2.7+cu128 minimum
+    [[ "${cuda_version}" == 12.8.* || "${cuda_version}" == 12.9.* ]] && build_capability="75;80;86;89;90;100;120"
 fi
 
 [[ "${build_os}" = windows-* ]] && python3 -m pip install ninja
