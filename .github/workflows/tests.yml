@@ -317,7 +317,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --pre torch==${{ matrix.torch_version }} --index-url ${{ matrix.pypi_index }}
+          pip install --pre torch~=${{ matrix.torch_version }}.dev0 --index-url ${{ matrix.pypi_index }}
           pip install -e ".[test]"
           pip install pytest-cov
 
