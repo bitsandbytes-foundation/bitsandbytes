@@ -145,7 +145,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         shape: Sequence[int],
         dtype: torch.dtype,
     ) -> torch.Tensor:
-        out = torch.zeros(shape, dtype=dtype, device=A.device)
+        out = torch.empty(shape, dtype=dtype, device=A.device)
         _dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
         return out
 

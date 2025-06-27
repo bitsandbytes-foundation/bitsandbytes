@@ -2,11 +2,10 @@
 #include <bit>
 #include <cmath>
 #include <iostream>
-#include <unistd.h>
 
 #include <sycl/sycl.hpp>
 
-inline float dDequantizeFP4Tree(unsigned char val) {
+inline float dDequantizeFP4(unsigned char val) {
   if ((val & 0b1000) == 8)
     if ((val & 0b0100) == 4)
       if ((val & 0b0010) == 2)
@@ -144,8 +143,8 @@ kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(
   case FP4:
 #pragma unroll NUM_PER_TH
     for (int j = 0; j < NUM_PER_TH; j++) {
-      vals[j * 2] = dDequantizeFP4Tree(qvals[j] >> 4) * local_abs_max;
-      vals[j * 2 + 1] = dDequantizeFP4Tree(qvals[j] & 0x0F) * local_abs_max;
+      vals[j * 2] = dDequantizeFP4(qvals[j] >> 4) * local_abs_max;
+      vals[j * 2 + 1] = dDequantizeFP4(qvals[j] & 0x0F) * local_abs_max;
     }
     break;
   case NF4:
