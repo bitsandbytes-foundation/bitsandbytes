@@ -23,15 +23,19 @@ class ExtBuildPy(build_py):
         try:
             self.run_command("build_cmake")
         except DistutilsModuleError:
-            warn("scikit-build-core not installed, CMake will not be invoked automatically. "
-                 "Please install scikit-build-core or run CMake manually to build extensions.")
+            warn(
+                "scikit-build-core not installed, CMake will not be invoked automatically. "
+                "Please install scikit-build-core or run CMake manually to build extensions."
+            )
         super().run()
 
 
-setup(version="0.47.0.dev0",
-      packages=find_packages(),
-      distclass=BinaryDistribution,
-      cmake_source_dir=".",
-      cmdclass={
-          "build_py": ExtBuildPy,
-      })
+setup(
+    version="0.47.0.dev0",
+    packages=find_packages(),
+    distclass=BinaryDistribution,
+    cmake_source_dir=".",
+    cmdclass={
+        "build_py": ExtBuildPy,
+    },
+)
