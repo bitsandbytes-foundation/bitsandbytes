@@ -15,3 +15,6 @@ ea7c14f8ef64924f2d0ff80df3cdabf2c7299848
 
 # CHANGELOG: to reverse chron order + mdformat
 4743ff0d43e04e4cc3e5d8b9e7cd016c0defa36d
+
+# Apply clang-format
+4955d136ae083c2be1236d8915913166e1790aad

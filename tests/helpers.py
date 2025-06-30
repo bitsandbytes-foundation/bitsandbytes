@@ -7,6 +7,8 @@ from typing import Any
 
 import torch
 
+from bitsandbytes.cextension import HIP_ENVIRONMENT
+
 test_dims_rng = random.Random(42)
 
 
@@ -21,7 +23,7 @@ def get_available_devices():
         # If the environment variable is set, use it directly.
         return [os.environ["BNB_TEST_DEVICE"]]
 
-    devices = ["cpu"]
+    devices = [] if HIP_ENVIRONMENT else ["cpu"]
 
     if hasattr(torch, "accelerator"):
         # PyTorch 2.6+ - determine accelerator using agnostic API.
@@ -98,3 +100,14 @@ DTYPE_NAMES = {
 
 def describe_dtype(dtype: torch.dtype) -> str:
     return DTYPE_NAMES.get(dtype) or str(dtype).rpartition(".")[2]
+
+
+def is_supported_on_hpu(
+    quant_type: str = "nf4", dtype: torch.dtype = torch.bfloat16, quant_storage: torch.dtype = torch.uint8
+) -> bool:
+    """
+    Check if the given quant_type, dtype and quant_storage are supported on HPU.
+    """
+    if quant_type == "fp4" or dtype == torch.float16 or quant_storage not in (torch.uint8, torch.bfloat16):
+        return False
+    return True

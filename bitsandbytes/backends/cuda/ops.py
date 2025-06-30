@@ -8,7 +8,7 @@ import torch
 from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, _get_tensor_stream, get_ptr
 
 from ..._ops import register_kernel
-from ...cextension import lib
+from ...cextension import HIP_ENVIRONMENT, lib
 
 
 @register_kernel("bitsandbytes::int8_linear_matmul", "cuda")
@@ -210,7 +210,12 @@ def _get_col_absmax(
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+
+    if HIP_ENVIRONMENT:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+    else:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+
     torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
 
     n = A.numel()
@@ -264,7 +269,11 @@ def _(
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    if HIP_ENVIRONMENT:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+    else:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     torch._check(
         dtype in [torch.float16, torch.bfloat16, torch.float32],
@@ -294,7 +303,11 @@ def _dequantize_blockwise_impl(
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    if HIP_ENVIRONMENT:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+    else:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(
         A.dtype in [torch.bfloat16, torch.float16, torch.float32],
@@ -372,7 +385,11 @@ def _dequantize_4bit_impl(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    if HIP_ENVIRONMENT:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+    else:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
@@ -445,20 +462,22 @@ def _gemv_4bit_impl(
     out: torch.Tensor,
 ) -> None:
     torch._check_is_size(blocksize)
-    torch._check(
-        A.numel() == A.size(-1),
-        lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}",
-    )
-    torch._check(
-        A.dtype in [torch.float16, torch.bfloat16, torch.float32],
-        lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
-    )
-    torch._check(
-        B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"B must be backed by storage of type uint8, bfloat16, float16, or float32, got {B.dtype}",
-    )
-    torch._check(absmax.dtype == torch.float32, lambda: f"absmax must be float32, got {absmax.dtype}")
-    torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
+
+    # Note: these checks are not strictly necessary, and cost more than they are worth, so they are commented out for now.
+    # torch._check(
+    #     A.numel() == A.size(-1),
+    #     lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}",
+    # )
+    # torch._check(
+    #     A.dtype in [torch.float16, torch.bfloat16, torch.float32],
+    #     lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
+    # )
+    # torch._check(
+    #     B.dtype in [torch.uint8, torch.bfloat16, torch.float16, torch.float32],
+    #     lambda: f"B must be backed by storage of type uint8, bfloat16, float16, or float32, got {B.dtype}",
+    # )
+    # torch._check(absmax.dtype == torch.float32, lambda: f"absmax must be float32, got {absmax.dtype}")
+    # torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
 
     m = ct.c_int32(shapeB[0])
     n = ct.c_int32(1)

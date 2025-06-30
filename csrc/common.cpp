@@ -26,10 +26,12 @@ void quantize_block(const quantize_block_args& args) {
         if (idx < 255) {
             float dist_left = fabs(normed_value - (args.code[idx]));
             float dist_right = fabs(normed_value - (args.code[idx + 1]));
-            if (dist_right < dist_left) { idx += 1; }
+            if (dist_right < dist_left) {
+                idx += 1;
+            }
         }
 
         // 5. store index
-        args.out[i] = (unsigned char) idx;
+        args.out[i] = (unsigned char)idx;
     }
 }

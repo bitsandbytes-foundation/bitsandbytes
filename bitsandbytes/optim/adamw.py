@@ -2,6 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+
 from bitsandbytes.optim.optimizer import Optimizer2State
 
 
@@ -25,7 +26,7 @@ class AdamW(Optimizer2State):
         Base AdamW optimizer.
 
         Arguments:
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             lr (`float`, defaults to 1e-3):
                 The learning rate.
@@ -86,7 +87,7 @@ class AdamW8bit(Optimizer2State):
         8-bit AdamW optimizer.
 
         Arguments:
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             lr (`float`, defaults to 1e-3):
                 The learning rate.
@@ -98,8 +99,10 @@ class AdamW8bit(Optimizer2State):
                 The weight decay value for the optimizer.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+                Note: This parameter is not supported in AdamW8bit and must be False.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
+                Note: This parameter is not used in AdamW8bit as it always uses 8-bit optimization.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
@@ -111,6 +114,15 @@ class AdamW8bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
+        # Validate unsupported parameters
+        if amsgrad:
+            raise ValueError("AdamW8bit does not support amsgrad=True")
+
+        if optim_bits != 32:
+            # We allow the default value of 32 to maintain compatibility with the function signature,
+            # but any other value is invalid since AdamW8bit always uses 8-bit optimization
+            raise ValueError("AdamW8bit only supports optim_bits=32 (default value for compatibility)")
+
         super().__init__(
             "adam",
             params,
@@ -118,7 +130,7 @@ class AdamW8bit(Optimizer2State):
             betas,
             eps,
             weight_decay,
-            8,
+            8,  # Hardcoded to 8 bits
             args,
             min_8bit_size,
             percentile_clipping,
@@ -147,7 +159,7 @@ class AdamW32bit(Optimizer2State):
         32-bit AdamW optimizer.
 
         Arguments:
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             lr (`float`, defaults to 1e-3):
                 The learning rate.
@@ -207,7 +219,7 @@ class PagedAdamW(Optimizer2State):
         Paged AdamW optimizer.
 
         Arguments:
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             lr (`float`, defaults to 1e-3):
                 The learning rate.
@@ -229,8 +241,6 @@ class PagedAdamW(Optimizer2State):
                 Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
             block_wise (`bool`, defaults to `True`):
                 Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
-            is_paged (`bool`, defaults to `False`):
-                Whether the optimizer is a paged optimizer or not.
         """
         super().__init__(
             "adam",
@@ -267,7 +277,7 @@ class PagedAdamW8bit(Optimizer2State):
         Paged 8-bit AdamW optimizer.
 
         Arguments:
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             lr (`float`, defaults to 1e-3):
                 The learning rate.
@@ -279,8 +289,10 @@ class PagedAdamW8bit(Optimizer2State):
                 The weight decay value for the optimizer.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+                Note: This parameter is not supported in PagedAdamW8bit and must be False.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
+                Note: This parameter is not used in PagedAdamW8bit as it always uses 8-bit optimization.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
@@ -289,9 +301,16 @@ class PagedAdamW8bit(Optimizer2State):
                 Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
             block_wise (`bool`, defaults to `True`):
                 Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
-            is_paged (`bool`, defaults to `False`):
-                Whether the optimizer is a paged optimizer or not.
         """
+        # Validate unsupported parameters
+        if amsgrad:
+            raise ValueError("PagedAdamW8bit does not support amsgrad=True")
+
+        if optim_bits != 32:
+            # We allow the default value of 32 to maintain compatibility with the function signature,
+            # but any other value is invalid since PagedAdamW8bit always uses 8-bit optimization
+            raise ValueError("PagedAdamW8bit only supports optim_bits=32 (default value for compatibility)")
+
         super().__init__(
             "adam",
             params,
@@ -299,7 +318,7 @@ class PagedAdamW8bit(Optimizer2State):
             betas,
             eps,
             weight_decay,
-            8,
+            8,  # Hardcoded to 8 bits
             args,
             min_8bit_size,
             percentile_clipping,
@@ -327,7 +346,7 @@ class PagedAdamW32bit(Optimizer2State):
         Paged 32-bit AdamW optimizer.
 
         Arguments:
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             lr (`float`, defaults to 1e-3):
                 The learning rate.
@@ -349,8 +368,6 @@ class PagedAdamW32bit(Optimizer2State):
                 Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
             block_wise (`bool`, defaults to `True`):
                 Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
-            is_paged (`bool`, defaults to `False`):
-                Whether the optimizer is a paged optimizer or not.
         """
         super().__init__(
             "adam",
