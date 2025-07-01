@@ -71,11 +71,11 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>🟥 AMD GPU <br><code>cuda</code></td>
       <td>
         CDNA: gfx90a, gfx942<br>
-        RDNA: gfx1100, gfx1200
+        RDNA: gfx1100
       </td>
-      <td>🚧</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>〰️</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -85,8 +85,8 @@ bitsandbytes has the following minimum requirements for all platforms:
         Arc A-Series (Alchemist)<br>
         Arc B-Series (Battlemage)
       </td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>🚧</td>
     </tr>
     <tr>
@@ -108,7 +108,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
-      <td>SM75, SM80, SM90, SM100</td>
+      <td>SM75+</td>
       <td>✅</td>
       <td>✅</td>
       <td>✅</td>
@@ -139,8 +139,8 @@ bitsandbytes has the following minimum requirements for all platforms:
         Arc A-Series (Alchemist) <br>
         Arc B-Series (Battlemage)
       </td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>🚧</td>
     </tr>
     <tr>
