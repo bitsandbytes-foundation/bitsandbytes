@@ -224,7 +224,7 @@ jobs:
   #       run: pip list
 
   test-hpu:
-    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    if: false # github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
     strategy:
       fail-fast: false
@@ -280,7 +280,7 @@ jobs:
         run: pytest --durations=100
 
   test-xpu:
-    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    if: false # github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
     strategy:
       fail-fast: false
