@@ -263,10 +263,19 @@ pip install git+https://github.com/bitsandbytes-foundation/bitsandbytes.git
 
 Please refer to [the official Ascend installations instructions](https://www.hiascend.com/document/detail/zh/Pytorch/60RC3/configandinstg/instg/insg_0001.html) for guidance on how to install the necessary `torch_npu` dependency.
 
+> **Before building on Ascend NPU:**
+> Make sure to source the CANN environment script (adjust path based on your installation):
+>
+> ```bash
+> source /usr/local/Ascend/ascend-toolkit/set_env.sh
+> ```
+>
+> CANN toolkit can be downloaded from: [https://www.hiascend.com/zh/developer/download/community/result?module=cann](https://www.hiascend.com/zh/developer/download/community/result?module=cann)
+
 ```bash
 # Install bitsandbytes from source
-# Clone bitsandbytes repo, Ascend NPU backend is currently enabled on multi-backend-refactor branch
-git clone -b multi-backend-refactor https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+# Clone bitsandbytes repo, Ascend NPU backend is currently enabled on main branch
+git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 
 # Compile & install
 apt-get install -y build-essential cmake  # install build tools dependencies, unless present
