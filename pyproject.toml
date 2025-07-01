@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools >= 63.0.0"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core", "setuptools >= 63.0.0"]
+build-backend = "scikit_build_core.setuptools.build_meta"
 
 [project]
 name = "bitsandbytes"
