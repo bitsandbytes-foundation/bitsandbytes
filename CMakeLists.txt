@@ -28,11 +28,12 @@ set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
 set(HIP_FILES csrc/ops.hip csrc/kernels.hip)
 set(MPS_FILES csrc/mps_ops.mm)
 set(METAL_FILES csrc/mps_kernels.metal)
+set(NPU_FILES csrc/npu_ops.cpp)
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, mps)")
-set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps)
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, mps, npu)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps npu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
@@ -50,6 +51,7 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
     set(BUILD_CUDA ON)
     set(BUILD_HIP OFF)
     set(BUILD_MPS OFF)
+    set(BUILD_NPU OFF)
 elseif(${COMPUTE_BACKEND} STREQUAL "hip")
     if(APPLE)
         message(FATAL_ERROR "HIP is not supported on macOS" )
@@ -57,6 +59,7 @@ elseif(${COMPUTE_BACKEND} STREQUAL "hip")
     set(BUILD_CUDA OFF)
     set(BUILD_HIP ON)
     set(BUILD_MPS OFF)
+    set(BUILD_NPU OFF)
 elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
@@ -64,10 +67,20 @@ elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     set(BUILD_CUDA OFF)
     set(BUILD_HIP OFF)
     set(BUILD_MPS ON)
+    set(BUILD_NPU OFF)
+elseif(${COMPUTE_BACKEND} STREQUAL "npu")
+    if(APPLE)
+        message(FATAL_ERROR "HIP is not supported on macOS" )
+    endif()
+    set(BUILD_CUDA OFF)
+    set(BUILD_HIP OFF)
+    set(BUILD_MPS OFF)
+    set(BUILD_NPU ON)
 else()
     set(BUILD_CUDA OFF)
     set(BUILD_HIP OFF)
     set(BUILD_MPS OFF)
+    set(BUILD_NPU OFF)
 endif()
 
 
@@ -217,6 +230,39 @@ elseif(BUILD_MPS)
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+elseif(BUILD_NPU)
+    list(APPEND SRC_FILES ${NPU_FILES})
+    execute_process(
+        COMMAND bash -c "npu-smi info|awk -F' ' 'NF > 0 && NR==7 {print $3}'"
+        OUTPUT_VARIABLE npu_info
+        RESULT_VARIABLE npu_result
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if("${npu_info}" STREQUAL "" OR ${npu_result})
+        message(FATAL_ERROR "Auto-detech ascend soc type failed, please specify manually or check ascend device working normally.")
+    endif()
+
+    set(SOC_VERSION "Ascend${npu_info}" CACHE STRING "system on chip type")
+
+    # ${KERNEL_FILES} are used to compile library, push files written by ascendc in ${KERNEL_FILES}.
+    # ref to cmake/npu.cmake ascendc_library, cmake/cpu.cmake add_library
+    # file(GLOB KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/csrc/npu_kernels.cpp)
+    file(GLOB KERNEL_FILES csrc/npu_kernels.cpp)
+
+    if(EXISTS $ENV{ASCEND_HOME_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+        set(ASCENDC_CMAKE_DIR $ENV{ASCEND_HOME_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+    elseif(EXISTS $ENV{ASCEND_HOME_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+        set(ASCENDC_CMAKE_DIR $ENV{ASCEND_HOME_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+    else()
+        message(FATAL_ERROR "ascendc_kernel_cmake does not exist, please check whether the can package is installed")
+    endif()
+    include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
+
+    # ascendc_library use to add kernel file to generate ascendc library
+    ascendc_library(ascendc_kernels_npu STATIC ${KERNEL_FILES})
+
+    string(APPEND BNB_OUTPUT_NAME "_npu")
+    add_compile_definitions(BUILD_NPU)
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
@@ -234,7 +280,11 @@ endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
-target_compile_features(bitsandbytes PUBLIC cxx_std_14)
+if(BUILD_NPU)
+    target_compile_features(bitsandbytes PUBLIC cxx_std_17)
+else()
+    target_compile_features(bitsandbytes PUBLIC cxx_std_14)
+endif()
 target_include_directories(bitsandbytes PUBLIC csrc include)
 
 
@@ -284,6 +334,10 @@ endif()
 if(BUILD_MPS)
     add_dependencies(bitsandbytes metallib)
     target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
+endif()
+if(BUILD_NPU)
+    target_compile_options(bitsandbytes PRIVATE -O2 -std=c++17)
+    target_link_libraries(bitsandbytes PRIVATE $<BUILD_INTERFACE:host_intf_pub> ascendc_kernels_npu)
 endif()
 
 if(WIN32)
