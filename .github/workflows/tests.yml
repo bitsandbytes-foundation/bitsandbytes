@@ -144,7 +144,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch~=${{ matrix.torch_version }}.dev0 --index-url https://download.pytorch.org/whl/${{ (matrix.torch_version == '2.8.0' && 'test/cpu') || (matrix.torch_version == '2.9.0' && 'nightly/cpu') || '/cpu' }}
+          pip install torch~=${{ matrix.torch_version }}.dev0 --index-url https://download.pytorch.org/whl/${{ (matrix.torch_version == '2.8.0' && 'test/cpu') || (matrix.torch_version == '2.9.0' && 'nightly/cpu') || 'cpu' }}
           pip install -e ".[test]"
           pip install pytest-cov
 
