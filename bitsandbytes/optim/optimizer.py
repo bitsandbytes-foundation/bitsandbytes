@@ -10,6 +10,7 @@ from typing import Optional
 import torch
 
 import bitsandbytes.functional as F
+from bitsandbytes.utils import sync_gpu
 
 
 class MockArgs:
@@ -289,11 +290,11 @@ class Optimizer8bit(torch.optim.Optimizer):
 
                 self.prefetch_state(p)
                 self.update_step(group, p, gindex, pindex)
-                torch.cuda.synchronize()
+                sync_gpu(p)
         if self.is_paged:
             # all paged operations are asynchronous, we need
             # to sync to make sure all tensors are in the right state
-            torch.cuda.synchronize()
+            sync_gpu(loss)
 
         return loss
 
