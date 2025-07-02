@@ -303,19 +303,27 @@ def get_native_library() -> BNBNativeLibrary:
 
 ROCM_GPU_ARCH = get_rocm_gpu_arch()
 
-try:
-    if torch.version.hip:
-        HIP_ENVIRONMENT, BNB_BACKEND = True, "ROCm"
-    else:
-        HIP_ENVIRONMENT, BNB_BACKEND = False, "CUDA"
+HIP_ENVIRONMENT = False
+BNB_BACKEND = "CPU"
+if torch.version.hip:
+    HIP_ENVIRONMENT = True
+    BNB_BACKEND = "ROCm"
+elif torch.cuda.is_available():
+    BNB_BACKEND = "CUDA"
+elif torch._C._has_xpu:
+    BNB_BACKEND = "XPU"
 
+try:
     lib = get_native_library()
 except Exception as e:
-    error_msg = str(e)
-    logger.error(
-        f"bitsandbytes library load error: {error_msg}",
-        exc_info=True,
-    )
+    if BNB_BACKEND in ("CPU", "XPU"):
+        lib = ErrorHandlerMockBNBNativeLibrary("XPU/CPU can run without native library.")
+    else:
+        error_msg = str(e)
+        logger.error(
+            f"bitsandbytes library load error: {error_msg}",
+            exc_info=True,
+        )
 
-    # create a mock with error messaging as fallback
-    lib = ErrorHandlerMockBNBNativeLibrary(error_msg)
+        # create a mock with error messaging as fallback
+        lib = ErrorHandlerMockBNBNativeLibrary(error_msg)
