@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 import ctypes as ct
-import warnings
+import logging
 
 import torch
 
@@ -9,6 +9,8 @@ from bitsandbytes.functional import _get_tensor_stream, get_ptr
 from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
 from ..utils import triton_available
+
+logger = logging.getLogger(__name__)
 
 
 def _dequantize_4bit_impl(
@@ -135,6 +137,7 @@ def _gemv_4bit_impl(
 
 # SYCL should be faster for xpu, so at first checking if it is available.
 if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
+    logger.info("Loading sycl bitsandbytes kernels for XPU")
 
     @register_kernel("bitsandbytes::dequantize_4bit", "xpu")
     def _(
@@ -201,6 +204,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
         _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
 elif triton_available:
+    logger.info("Loading triton bitsandbytes kernels for XPU")
     from ..triton import ops as triton_ops
 
     register_kernel("bitsandbytes::quantize_blockwise", "xpu")(triton_ops.quantize_blockwise)
@@ -211,6 +215,4 @@ elif triton_available:
     register_kernel("bitsandbytes::dequantize_4bit", "xpu")(triton_ops.dequantize_4bit)
     register_kernel("bitsandbytes::gemv_4bit", "xpu")(triton_ops.gemv_4bit)
 else:
-    warnings.warn(
-        "XPU available but no native library or triton packages found. Please follow the installation instructions in the documentation."
-    )
+    logger.warning("Loading pytorch bitsandbytes kernels for XPU because no native library or triton packages found.")
