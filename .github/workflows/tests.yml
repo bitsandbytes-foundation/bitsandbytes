@@ -49,8 +49,8 @@ jobs:
   build-cuda:
     strategy:
       matrix:
-        cuda_version: ["11.8.0", "12.6.3", "12.8.1"]
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1", "12.9.1"]
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -58,13 +58,14 @@ jobs:
             arch: aarch64
           - os: windows-2025
             arch: x86_64
+            cuda_version: "11.8.0"
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.23
+        uses: Jimver/cuda-toolkit@c35baa1a18fd1fc9dcf47c5bd839bf30559c0bc3 # v0.2.24
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
@@ -193,7 +194,7 @@ jobs:
         os: [ubuntu-22.04, windows-2025]
         arch: [x86_64]
         gpu: [T4, L40S]
-        cuda_version: ["11.8.0", "12.6.3", "12.8.1"]
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1", "12.9.1"]
         include:
           - cuda_version: "11.8.0"
             torch_version: "2.2.2"
@@ -204,6 +205,9 @@ jobs:
           - cuda_version: "12.8.1"
             torch_version: "2.7.0"
             pypi_index: "https://download.pytorch.org/whl/cu128"
+          - cuda_version: "12.9.1"
+            torch_version: "2.8.0"
+            pypi_index: "https://download.pytorch.org/whl/nightly/cu129"
 
 
           # Linux L40S runners
@@ -236,12 +240,14 @@ jobs:
             gpu: T4
             runner: CUDA-Windows-x64
             cuda_version: "11.8.0"
-            torch_version: "2.7.0"
+            torch_version: "2.7.1"    # Note: this is the last PyTorch release supporting CUDA 11.8.
             pypi_index: "https://download.pytorch.org/whl/cu118"
 
         exclude:
           # Our current T4 Windows runner has a driver too old (471.11)
           # and cannot support CUDA 12+. Skip for now.
+          - os: windows-2025
+            cuda_version: "12.9.1"
           - os: windows-2025
             cuda_version: "12.8.1"
           - os: windows-2025
@@ -273,7 +279,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch==${{ matrix.torch_version }} --index-url ${{ matrix.pypi_index }}
+          pip install --pre torch~=${{ matrix.torch_version }}.dev0 --index-url ${{ matrix.pypi_index }}
           pip install -e ".[test]"
           pip install pytest-cov
 

@@ -72,16 +72,17 @@ jobs:
           - os: windows-latest
             arch: x86_64
         cuda_version:
-          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1"]
+          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@v0.2.22
+      - uses: Jimver/cuda-toolkit@c35baa1a18fd1fc9dcf47c5bd839bf30559c0bc3 # v0.2.24
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
-          cuda: ${{ matrix.cuda_version }}
+          # Temporary: Use CUDA 12.9.0 for Windows until 12.9.1 is supported with this action.
+          cuda: ${{ matrix.cuda_version == '12.9.1' && '12.9.0' || matrix.cuda_version }}
           method: "network"
           sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
           linux-local-args: '["--toolkit"]'

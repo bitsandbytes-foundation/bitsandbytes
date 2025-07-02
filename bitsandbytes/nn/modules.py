@@ -290,13 +290,6 @@ class Params4bit(torch.nn.Parameter):
 
         return self
 
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        with torch._C.DisableTorchFunctionSubclass():
-            return func(*args, **kwargs)
-
     def _quantize(self, device):
         w = self.data.contiguous().to(device)
         w_4bit, quant_state = bnb.functional.quantize_4bit(
@@ -353,6 +346,7 @@ class Params4bit(torch.nn.Parameter):
                 compress_statistics=self.compress_statistics,
                 quant_type=self.quant_type,
                 quant_storage=self.quant_storage,
+                bnb_quantized=self.bnb_quantized,
             )
 
             return new_param
