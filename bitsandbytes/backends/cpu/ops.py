@@ -1,13 +1,14 @@
-from collections.abc import Sequence
 import ctypes as ct
+import logging
 
 import torch
 
 from bitsandbytes.functional import get_ptr
 
 from ..._ops import register_kernel
-from ...cextension import lib
-from ...utils import ipex_cpu
+from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
+
+logger = logging.getLogger(__name__)
 
 # torch._int_mm for s8@s8->s32 is supported on CPU from torch 2.4+.
 # However, we can overflow if we use this without AVX512_VNNI support.
@@ -24,97 +25,80 @@ if torch.__version__ >= (2, 6):
         ).reshape(*A.shape[:-1], B.shape[0])
 
 
-@register_kernel("bitsandbytes::quantize_blockwise", "cpu")
-def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check_is_size(blocksize)
+if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
+    logger.info("Loading C++ bitsandbytes kernels for CPU")
 
-    n = A.numel()
+    @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
+    def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
+        torch._check_is_size(blocksize)
 
-    # Only FP32 has c++ kernrl
-    if A.dtype == torch.float32:
-        blocks = -(n // -blocksize)
+        n = A.numel()
 
-        absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
-        out = torch.empty_like(A, dtype=torch.uint8)
+        # Only FP32 has c++ kernrl
+        if A.dtype == torch.float32:
+            blocks = -(n // -blocksize)
 
-        lib.cquantize_blockwise_cpu_fp32(
-            get_ptr(code),
-            get_ptr(A),
-            get_ptr(absmax),
-            get_ptr(out),
-            ct.c_longlong(blocksize),
-            ct.c_longlong(n),
-        )
-    else:
-        rem = n % blocksize
-        has_rem = rem > 0
-        blocks = n // blocksize + has_rem
-        absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-        A_reshaped = A.reshape(n)
-        A_com = A_reshaped[: n - rem]
-        A_com_reshaped = A_com.reshape(n // blocksize, blocksize)
-        absmax[: blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=-1)[0]
-        scaled_A = torch.clamp(A_com_reshaped * (1 / absmax[: blocks - has_rem].view(-1, 1)), -1, 1)
-        scaled_A = scaled_A.reshape(-1)
-        if has_rem:
-            absmax[-1] = torch.abs(A_reshaped[n - rem :]).max()
-            scaled_A_rem = torch.clamp(A_reshaped[n - rem :] * (1 / absmax[-1]), -1, 1)
-            scaled_A = torch.cat([scaled_A, scaled_A_rem], dim=0)
+            absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+            out = torch.empty_like(A, dtype=torch.uint8)
 
-        diff = torch.abs(scaled_A.unsqueeze(-1) - code.to(scaled_A.device))
-        out = torch.argmin(diff, dim=-1).to(torch.uint8).to(scaled_A.device).reshape(A.shape)
+            lib.cquantize_blockwise_cpu_fp32(
+                get_ptr(code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_longlong(blocksize),
+                ct.c_longlong(n),
+            )
+        else:
+            rem = n % blocksize
+            has_rem = rem > 0
+            blocks = n // blocksize + has_rem
+            absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
+            A_reshaped = A.reshape(n)
+            A_com = A_reshaped[: n - rem]
+            A_com_reshaped = A_com.reshape(n // blocksize, blocksize)
+            absmax[: blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=-1)[0]
+            scaled_A = torch.clamp(A_com_reshaped * (1 / absmax[: blocks - has_rem].view(-1, 1)), -1, 1)
+            scaled_A = scaled_A.reshape(-1)
+            if has_rem:
+                absmax[-1] = torch.abs(A_reshaped[n - rem :]).max()
+                scaled_A_rem = torch.clamp(A_reshaped[n - rem :] * (1 / absmax[-1]), -1, 1)
+                scaled_A = torch.cat([scaled_A, scaled_A_rem], dim=0)
 
-    return out, absmax
+            diff = torch.abs(scaled_A.unsqueeze(-1) - code.to(scaled_A.device))
+            out = torch.argmin(diff, dim=-1).to(torch.uint8).to(scaled_A.device).reshape(A.shape)
 
+        return out, absmax
 
-@register_kernel("bitsandbytes::dequantize_blockwise", "cpu")
-def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
-    torch._check_is_size(blocksize)
-    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
-
-    # Only FP32 has c++ kernrl
-    if dtype == torch.float32:
-        out = torch.empty_like(A, dtype=dtype)
-
-        lib.cdequantize_blockwise_cpu_fp32(
-            get_ptr(code),
-            get_ptr(A),
-            get_ptr(absmax),
-            get_ptr(out),
-            ct.c_longlong(blocksize),
-            ct.c_longlong(A.numel()),
-        )
-    else:
-        out = code[A.reshape(-1).int()]
-        blocks = out.shape[-1] // blocksize
-        res = out.shape[-1] % blocksize
-        if res != 0:
-            out = torch.nn.functional.pad(out, (0, blocksize - res), mode="constant", value=0)
-        out = (out.view(-1, blocksize) * absmax.view(-1, 1)).to(dtype).reshape(-1)
-        out = out[: blocks * blocksize + res]
-        out = out.reshape(A.shape)
-
-    return out
-
-
-if ipex_cpu:
-    from bitsandbytes.utils import _reverse_4bit_compress_format
-
-    @register_kernel("bitsandbytes::dequantize_nf4_ipex", "cpu")
+    @register_kernel("bitsandbytes::dequantize_blockwise", "cpu")
     def _(
-        A: torch.Tensor,
-        absmax: torch.Tensor,
-        blocksize: int,
-        shape: Sequence[int],
-        dtype: torch.dtype,
+        A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype
     ) -> torch.Tensor:
-        ipex_weight = torch.ops.ipex_prepack.woq_linear_unpack_weight(A, "nf4", shape, 2)
-        A = _reverse_4bit_compress_format(ipex_weight.reshape(-1)).reshape(1, -1)
-        return torch.ops.bitsandbytes.dequantize_4bit.default(
-            A,
-            absmax,
-            blocksize,
-            "nf4",
-            shape,
-            dtype,
-        )
+        torch._check_is_size(blocksize)
+        torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
+
+        # Only FP32 has c++ kernrl
+        if dtype == torch.float32:
+            out = torch.empty_like(A, dtype=dtype)
+
+            lib.cdequantize_blockwise_cpu_fp32(
+                get_ptr(code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_longlong(blocksize),
+                ct.c_longlong(A.numel()),
+            )
+        else:
+            out = code[A.reshape(-1).int()]
+            blocks = out.shape[-1] // blocksize
+            res = out.shape[-1] % blocksize
+            if res != 0:
+                out = torch.nn.functional.pad(out, (0, blocksize - res), mode="constant", value=0)
+            out = (out.view(-1, blocksize) * absmax.view(-1, 1)).to(dtype).reshape(-1)
+            out = out[: blocks * blocksize + res]
+            out = out.reshape(A.shape)
+
+        return out
+else:
+    logger.warning("Loading pytorch bitsandbytes kernels for CPU because no native library found.")
