@@ -642,9 +642,8 @@ class Int8Params(torch.nn.Parameter):
         if device is not None and device.type != "meta" and self.data.device.type == "cpu":
             if device.type != "cpu" or self.data.dtype != torch.int8:
                 return self._quantize(device)
-            # TODO: Need to verify if this is needed.
-            # elif self.data.dtype == torch.int8 and device.type == "cpu":
-            #     self.CB = self.data
+            elif self.data.dtype == torch.int8 and device.type == "cpu":
+                self.CB = self.data
 
         new_param = Int8Params(
             super().to(device=device, dtype=dtype, non_blocking=non_blocking),
