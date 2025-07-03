@@ -138,8 +138,8 @@ We provide an early preview of support for AMD and Intel hardware as part of a d
 | **Backend** | **Supported Versions** | **Python versions** | **Architecture Support** | **Status** |
 |-------------|------------------------|---------------------------|-------------------------|------------|
 | **AMD ROCm** | 6.1+                   | 3.10+                     | minimum CDNA - `gfx90a`, RDNA - `gfx1100` | Alpha      |
-| **Intel CPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
-| **Intel GPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
+| **Intel CPU** | v2.4.0+                  | 3.10+                     | Intel CPU | Alpha |
+| **Intel GPU** | v2.7.0+                  | 3.10+                     | Intel GPU | Experimental |
 | **Ascend NPU** | 2.1.0+ (`torch_npu`)         | 3.10+                     | Ascend NPU | Experimental |
 
 For each supported backend, follow the respective instructions below:
@@ -179,7 +179,6 @@ pip install torch --index-url https://download.pytorch.org/whl/rocm6.3/
 <hfoption id="Intel XPU">
 
 * A compatible PyTorch version with Intel XPU support is required. It is recommended to use the latest stable release. See [Getting Started on Intel GPU](https://docs.pytorch.org/docs/stable/notes/get_start_xpu.html) for guidance.
-* The [Intel Extension for PyTorch](https://intel.github.io/intel-extension-for-pytorch/xpu/latest/) is recommended for performance improvements.
 
 </hfoption>
 </hfoptions>
@@ -235,9 +234,9 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 </hfoption>
 <hfoption id="Intel CPU + GPU">
 
-#### Intel CPU + XPU
+#### Intel CPU + GPU(XPU)
 
-CPU needs to build CPU C++ codes, while xpu needs to build sycl codes.
+CPU needs to build CPU C++ codes, while XPU needs to build sycl codes.
 Run `export bnb_device=xpu` if you are using xpu, run `export bnb_device=cpu` if you are using cpu.
 ```
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -245,7 +244,6 @@ cmake -DCOMPUTE_BACKEND=$bnb_device -S .
 make
 pip install -e .
 ```
-Note: You can run `pip install intel_extension_for_pytorch to get better performance on CPU`
 
 
 </hfoption>

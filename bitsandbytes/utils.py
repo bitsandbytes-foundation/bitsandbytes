@@ -4,14 +4,6 @@ import subprocess
 
 import torch
 
-try:
-    # to support Intel CPU backend
-    import intel_extension_for_pytorch as ipex
-
-    ipex_cpu = ipex if ipex._C._has_cpu() else None
-except BaseException:
-    ipex_cpu = None
-
 
 def outlier_hook(module, input):
     assert isinstance(module, torch.nn.Linear)
@@ -44,14 +36,6 @@ def outlier_hook(module, input):
     else:
         for hook in tracer.hooks:
             hook.remove()
-
-
-# convert btw standard 4-bit compression format and ipex compression format
-def _reverse_4bit_compress_format(weight: torch.Tensor):
-    out_1 = (weight & 0xF0) >> 4
-    out_2 = (weight & 0xF) << 4
-    out = out_1 | out_2
-    return out
 
 
 class OutlierTracer:
