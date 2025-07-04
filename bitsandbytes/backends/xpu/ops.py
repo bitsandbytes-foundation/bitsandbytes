@@ -137,7 +137,7 @@ def _gemv_4bit_impl(
 
 # SYCL should be faster for xpu, so at first checking if it is available.
 if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
-    logger.info("Loading sycl bitsandbytes kernels for XPU")
+    logger.info("Register sycl bitsandbytes kernels for XPU")
 
     @register_kernel("bitsandbytes::dequantize_4bit", "xpu")
     def _(
@@ -204,7 +204,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
         _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
 elif triton_available:
-    logger.info("Loading triton bitsandbytes kernels for XPU")
+    logger.info("Register triton bitsandbytes kernels for XPU")
     from ..triton import ops as triton_ops
 
     register_kernel("bitsandbytes::quantize_blockwise", "xpu")(triton_ops.quantize_blockwise)
@@ -215,4 +215,4 @@ elif triton_available:
     register_kernel("bitsandbytes::dequantize_4bit", "xpu")(triton_ops.dequantize_4bit)
     register_kernel("bitsandbytes::gemv_4bit", "xpu")(triton_ops.gemv_4bit)
 else:
-    logger.warning("Loading pytorch bitsandbytes kernels for XPU because no native library or triton packages found.")
+    logger.warning("Register pytorch bitsandbytes kernels for XPU because no native library or triton packages found.")
