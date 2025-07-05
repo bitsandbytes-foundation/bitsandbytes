@@ -209,14 +209,15 @@ elseif(BUILD_MPS)
 
     string(APPEND BNB_OUTPUT_NAME "_mps")
     add_compile_definitions(BUILD_MPS)
-    file(MAKE_DIRECTORY "build")
-    add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"
-                COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_FILES}
-                COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
-                DEPENDS "${METAL_FILES}"
+    add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/bitsandbytes/bitsandbytes.metallib"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/metal_build"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bitsandbytes"
+                COMMAND xcrun metal -c -o "${CMAKE_BINARY_DIR}/metal_build/bitsandbytes.air" "${CMAKE_SOURCE_DIR}/${METAL_FILES}"
+                COMMAND xcrun metallib "${CMAKE_BINARY_DIR}/metal_build/bitsandbytes.air" -o "${CMAKE_BINARY_DIR}/bitsandbytes/bitsandbytes.metallib"
+                DEPENDS "${CMAKE_SOURCE_DIR}/${METAL_FILES}"
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
-    add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+    add_custom_target(metallib DEPENDS "${CMAKE_BINARY_DIR}/bitsandbytes/bitsandbytes.metallib")
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
