@@ -1,0 +1,1 @@
+"""MPS (Metal Performance Shaders) backend for Apple Silicon."""

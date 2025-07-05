@@ -38,6 +38,8 @@ if torch.cuda.is_available():
 if hasattr(torch, "xpu") and torch.xpu.is_available():
     from .backends.xpu import ops as xpu_ops
 
+if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    from .backends.mps import ops as mps_ops
 
 if importlib.util.find_spec("habana_frameworks") and importlib.util.find_spec("habana_frameworks.torch"):
     # In case not automatically imported

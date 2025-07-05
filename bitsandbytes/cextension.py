@@ -22,8 +22,14 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     The library is not guaranteed to exist at the returned path.
     """
 
-    prefix = "rocm" if torch.version.hip else "cuda"
-    library_name = f"libbitsandbytes_{prefix}{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
+    if torch.version.hip:
+        prefix = "rocm"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        prefix = "mps"
+    else:
+        prefix = "cuda"
+    
+    library_name = f"libbitsandbytes_{prefix}{cuda_specs.cuda_version_string if prefix != 'mps' else ''}{DYNAMIC_LIBRARY_SUFFIX}"
 
     override_value = os.environ.get("BNB_CUDA_VERSION")
     if override_value:
@@ -270,12 +276,23 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
 
 def get_native_library() -> BNBNativeLibrary:
     """
-    Load CUDA library XOR CPU, as the latter contains a subset of symbols of the former.
+    Load CUDA library XOR CPU XOR MPS, as they contain different symbols for different backends.
     """
     cuda_specs = get_cuda_specs()
     binary_path = PACKAGE_DIR / f"libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}"
 
-    if cuda_specs:
+    # Check for MPS first on Apple Silicon
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        mps_binary_path = PACKAGE_DIR / f"libbitsandbytes_mps{DYNAMIC_LIBRARY_SUFFIX}"
+        if mps_binary_path.exists():
+            binary_path = mps_binary_path
+        else:
+            logger.warning(
+                "MPS is available but no MPS-compiled bitsandbytes library found. "
+                "Falling back to CPU implementation. For optimal performance, "
+                "compile bitsandbytes with MPS support: cmake -DCOMPUTE_BACKEND=mps"
+            )
+    elif cuda_specs:
         cuda_binary_path = get_cuda_bnb_library_path(cuda_specs)
 
         if not cuda_binary_path.exists():
@@ -313,6 +330,8 @@ except BaseException:
 try:
     if torch.version.hip:
         HIP_ENVIRONMENT, BNB_BACKEND = True, "ROCm"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        HIP_ENVIRONMENT, BNB_BACKEND = False, "MPS"
     else:
         HIP_ENVIRONMENT, BNB_BACKEND = False, "CUDA"
 
