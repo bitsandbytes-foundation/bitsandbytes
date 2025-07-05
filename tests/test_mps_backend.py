@@ -84,11 +84,10 @@ class TestBitsandbytesMPSImport:
 class TestMPSTensorOperations:
     """Test basic tensor operations on MPS device."""
     
-    @pytest.fixture(autouse=True)
     def setup_mps(self):
         """Setup for MPS tests - skip if not available."""
         if not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
-            pytest.skip("MPS not available")
+            raise pytest.skip.Exception("MPS not available")
         self.device = torch.device("mps")
     
     def test_basic_tensor_math(self):
@@ -141,11 +140,10 @@ class TestMPSTensorOperations:
 class TestMPSQuantizationOperations:
     """Test quantization operations with MPS backend."""
     
-    @pytest.fixture(autouse=True)
     def setup_quantization(self):
         """Setup for quantization tests."""
         if not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
-            pytest.skip("MPS not available")
+            raise pytest.skip.Exception("MPS not available")
         self.device = torch.device("mps")
     
     def test_mps_kernel_registration(self):
@@ -250,11 +248,10 @@ class TestMPSErrorHandling:
 class TestMPSIntegration:
     """Test integration with typical bitsandbytes workflows."""
     
-    @pytest.fixture(autouse=True)
     def setup_integration(self):
         """Setup for integration tests."""
         if not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
-            pytest.skip("MPS not available")
+            raise pytest.skip.Exception("MPS not available")
         self.device = torch.device("mps")
     
     def test_linear_layer_simulation(self):
@@ -349,24 +346,25 @@ def run_comprehensive_test_suite():
             test_instance = test_class()
             
             # Run setup if exists
-            if hasattr(test_instance, 'setup_mps'):
-                try:
-                    test_instance.setup_mps()
-                except pytest.skip.Exception as e:
-                    print(f"⏭️  {method_name}: SKIPPED - {e}")
-                    continue
-            elif hasattr(test_instance, 'setup_quantization'):
-                try:
-                    test_instance.setup_quantization()
-                except pytest.skip.Exception as e:
-                    print(f"⏭️  {method_name}: SKIPPED - {e}")
-                    continue
-            elif hasattr(test_instance, 'setup_integration'):
-                try:
-                    test_instance.setup_integration()
-                except pytest.skip.Exception as e:
-                    print(f"⏭️  {method_name}: SKIPPED - {e}")
-                    continue
+            setup_methods = ['setup_mps', 'setup_quantization', 'setup_integration']
+            setup_failed = False
+            
+            for setup_method in setup_methods:
+                if hasattr(test_instance, setup_method):
+                    try:
+                        getattr(test_instance, setup_method)()
+                        break  # Setup successful, continue with test
+                    except pytest.skip.Exception as e:
+                        print(f"⏭️  {method_name}: SKIPPED - {e}")
+                        setup_failed = True
+                        break
+                    except Exception as e:
+                        print(f"❌ {method_name}: SETUP FAILED - {e}")
+                        setup_failed = True
+                        break
+            
+            if setup_failed:
+                continue
             
             try:
                 method = getattr(test_instance, method_name)
