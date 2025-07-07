@@ -94,7 +94,7 @@ inline float dDequantizeNF4(unsigned char val) {
 }
 
 template <typename T, int TILE_SIZE, int NUM_PER_TH, int DATA_TYPE>
-SYCL_EXTERNAL void kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(sycl::and_item<1> item) const {
+SYCL_EXTERNAL void kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(sycl::nd_item<1> item) const {
     const int base_idx = item.get_group(0) * TILE_SIZE;
     size_t local_idx = item.get_local_id(0) * NUM_PER_TH;
     float local_abs_max = -FLT_MAX;
@@ -172,7 +172,7 @@ SYCL_EXTERNAL void kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::op
 
 template <typename T, size_t GROUP_SIZE, size_t NUM_PER_THREAD, size_t SUBG_SIZE, int BITS>
 SYCL_EXTERNAL void
-    kgemv_4bit_inference<T, GROUP_SIZE, NUM_PER_THREAD, SUBG_SIZE, BITS>::operator()(sycl::and_item<1> item) const {
+    kgemv_4bit_inference<T, GROUP_SIZE, NUM_PER_THREAD, SUBG_SIZE, BITS>::operator()(sycl::nd_item<1> item) const {
     size_t idx = item.get_local_id();
     const int sg_idx = idx / SUBG_SIZE;
     const int sg_lane = idx % SUBG_SIZE;

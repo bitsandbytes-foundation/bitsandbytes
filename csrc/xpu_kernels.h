@@ -6,7 +6,7 @@
 
 template <typename T, int TILE_SIZE, int NUM_PER_TH, int DATA_TYPE> class kDequantizeBlockwise {
   public:
-    SYCL_EXTERNAL void operator()(sycl::and_item<1> item) const;
+    SYCL_EXTERNAL void operator()(sycl::nd_item<1> item) const;
 
     kDequantizeBlockwise(float* code_, uint8_t* A_, float* absmax_, T* out_, const int blocksize_, const int n_)
         : code(code_), A(A_), absmax(absmax_), out(out_), blocksize(blocksize_), n(n_) {}
@@ -22,7 +22,7 @@ template <typename T, int TILE_SIZE, int NUM_PER_TH, int DATA_TYPE> class kDequa
 
 template <typename T, size_t GROUP_SIZE, size_t NUM_PER_THREAD, size_t SUBG_SIZE, int BITS> class kgemv_4bit_inference {
   public:
-    SYCL_EXTERNAL void operator()(sycl::and_item<1> item) const;
+    SYCL_EXTERNAL void operator()(sycl::nd_item<1> item) const;
 
     kgemv_4bit_inference(
         int M_, int N_, int K_, T* A_, unsigned char* B_, float* absmax_, const float* datatype_, T* out_, int lda_,

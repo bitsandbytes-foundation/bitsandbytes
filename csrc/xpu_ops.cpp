@@ -16,7 +16,7 @@ void dequantizeBlockwise(
         sycl::range<1> global_range{(size_t)workgroup_num * (size_t)workgroup_size};
         kDequantizeBlockwise<T, tile_size, num_per_th, DATA_TYPE> kfn(code, A, absmax, out, blocksize / 2, n);
         sycl_kernel_submit<decltype(kfn), 1, 32>(
-            sycl::and_range<1>(sycl::range<1>(global_range), sycl::range<1>(local_range)), queue, kfn
+            sycl::nd_range<1>(sycl::range<1>(global_range), sycl::range<1>(local_range)), queue, kfn
         );
     } else {
         const int workgroup_num = (n + tile_size - 1) / tile_size;
@@ -24,7 +24,7 @@ void dequantizeBlockwise(
         sycl::range<1> global_range{(size_t)workgroup_num * (size_t)workgroup_size};
         kDequantizeBlockwise<T, tile_size, num_per_th, DATA_TYPE> kfn(code, A, absmax, out, blocksize, n);
         sycl_kernel_submit<decltype(kfn), 1, 32>(
-            sycl::and_range<1>(sycl::range<1>(global_range), sycl::range<1>(local_range)), queue, kfn
+            sycl::nd_range<1>(sycl::range<1>(global_range), sycl::range<1>(local_range)), queue, kfn
         );
     }
 }
@@ -47,7 +47,7 @@ void gemv_4bit_inference(
     );
 
     sycl_comp_kernel_submit<decltype(kfn), 1, SUBG_SIZE>(
-        sycl::and_range<1>(sycl::range<1>(GROUP_SIZE * workgroup_num), sycl::range<1>(GROUP_SIZE)), queue, kfn
+        sycl::nd_range<1>(sycl::range<1>(GROUP_SIZE * workgroup_num), sycl::range<1>(GROUP_SIZE)), queue, kfn
     );
 }
 

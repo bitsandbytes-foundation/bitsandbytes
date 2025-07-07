@@ -12,14 +12,14 @@
 #include <sycl/sycl.hpp>
 
 template <typename ker_t, int dim, int subgroup_size>
-static inline void sycl_kernel_submit(sycl::and_range<dim> range, sycl::queue q, ker_t ker) {
+static inline void sycl_kernel_submit(sycl::nd_range<dim> range, sycl::queue q, ker_t ker) {
     auto cgf = [&](::sycl::handler& cgh)
                    [[sycl::reqd_sub_group_size(subgroup_size)]] { cgh.parallel_for<ker_t>(range, ker); };
     q.submit(cgf);
 }
 
 template <typename ker_t, int dim, int subgroup_size>
-static inline void sycl_comp_kernel_submit(sycl::and_range<dim> range, sycl::queue q, ker_t ker) {
+static inline void sycl_comp_kernel_submit(sycl::nd_range<dim> range, sycl::queue q, ker_t ker) {
     auto cgf = [&](::sycl::handler& cgh) [[sycl::reqd_sub_group_size(subgroup_size)]] {
         ker.sycl_ker_local_memory_creation(cgh);
         cgh.parallel_for<ker_t>(range, ker);

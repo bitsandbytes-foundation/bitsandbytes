@@ -1238,8 +1238,8 @@ class TestQuantize4BitFunctional:
         max_errs3 = []
 
         # Large number of iterations is excessive and slow on CPU.
-        # Keep for CUDA for now.
-        iters = 100 if device == "cuda" else 10
+        # Keep for CUDA/XPU for now.
+        iters = 10 if device == "cpu" else 100
 
         for i in range(iters):
             if kind == "fc1":
