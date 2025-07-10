@@ -11,7 +11,7 @@ import torch
 
 import bitsandbytes as bnb
 import bitsandbytes.functional as F
-from tests.helpers import describe_dtype, id_formatter
+from tests.helpers import describe_dtype, id_formatter, get_accelerator_devices, synchronize_device
 
 # import apex
 
@@ -164,11 +164,18 @@ optimizer_names_32bit = [
 ]
 
 
+@pytest.mark.parametrize("device", get_accelerator_devices())
 @pytest.mark.parametrize("optim_name", optimizer_names_32bit, ids=id_formatter("opt"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097, 1], ids=id_formatter("dim2"))
-def test_optimizer32bit(requires_cuda, dim1, dim2, gtype, optim_name):
+def test_optimizer32bit(device, dim1, dim2, gtype, optim_name):
+    if device not in ["cuda", "xpu"]:
+        pytest.skip()
+
+    if device == "xpu" and optim_name not in ["adam"]:
+        pytest.skip("XPU does not support this optimizer.")
+
     if optim_name.startswith("paged_") and sys.platform == "win32":
         pytest.skip("Paged optimizers can have issues on Windows.")
 
@@ -176,7 +183,7 @@ def test_optimizer32bit(requires_cuda, dim1, dim2, gtype, optim_name):
         pytest.skip()
     if dim1 == 1 and dim2 == 1:
         return
-    p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
+    p1 = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.1
     p2 = p1.clone()
     p1 = p1.float()
 
@@ -191,7 +198,7 @@ def test_optimizer32bit(requires_cuda, dim1, dim2, gtype, optim_name):
         atol, rtol = 1e-4, 1e-3
 
     for i in range(k):
-        g = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.01
+        g = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.01
         p1.grad = g.clone().float()
         p2.grad = g.clone()
 
@@ -201,7 +208,7 @@ def test_optimizer32bit(requires_cuda, dim1, dim2, gtype, optim_name):
         for name1, name2 in str2statenames[optim_name]:
             torch.testing.assert_close(
                 torch_optimizer.state[p1][name1],
-                bnb_optimizer.state[p2][name2].cuda(),
+                bnb_optimizer.state[p2][name2].to(device),
                 atol=atol,
                 rtol=rtol,
             )
@@ -244,10 +251,14 @@ def test_optimizer32bit(requires_cuda, dim1, dim2, gtype, optim_name):
             assert bnb_optimizer.state[p2]["unorm_vec"] > 0.0
 
 
+@pytest.mark.parametrize("device", get_accelerator_devices())
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
-def test_global_config(requires_cuda, dim1, dim2, gtype):
+def test_global_config(device, dim1, dim2, gtype):
+    if device not in ["cuda", "xpu"]:
+        pytest.skip()
+
     if dim1 == 1 and dim2 == 1:
         return
     p1 = torch.randn(dim1, dim2, device="cpu", dtype=gtype) * 0.1
@@ -263,9 +274,9 @@ def test_global_config(requires_cuda, dim1, dim2, gtype):
     bnb.optim.GlobalOptimManager.get_instance().override_config(p3, "optim_bits", 8)
 
     bnb.optim.GlobalOptimManager.get_instance().register_parameters([p1, p2, p3])
-    p1 = p1.cuda()
-    p2 = p2.cuda()
-    p3 = p3.cuda()
+    p1 = p1.to(device)
+    p2 = p2.to(device)
+    p3 = p3.to(device)
 
     adam2 = bnb.optim.Adam([p1, p2, p3], lr, (beta1, beta2), eps)
 
@@ -275,9 +286,9 @@ def test_global_config(requires_cuda, dim1, dim2, gtype):
         atol, rtol = 1e-4, 1e-3
 
     for i in range(50):
-        g1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1 + 0.001
-        g2 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1 + 0.001
-        g3 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1 + 0.001
+        g1 = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.1 + 0.001
+        g2 = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.1 + 0.001
+        g3 = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.1 + 0.001
         p1.grad = g1
         p2.grad = g2
         p3.grad = g3
@@ -298,17 +309,24 @@ optimizer_names_8bit = [
 ]
 
 
+@pytest.mark.parametrize("device", get_accelerator_devices())
 @pytest.mark.parametrize("optim_name", optimizer_names_8bit, ids=id_formatter("opt"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
-def test_optimizer8bit(requires_cuda, dim1, dim2, gtype, optim_name):
+def test_optimizer8bit(device, dim1, dim2, gtype, optim_name):
+    if device not in ["cuda", "xpu"]:
+        pytest.skip()
+
+    if device == "xpu" and optim_name not in ["adam8bit_blockwise"]:
+        pytest.skip("XPU does not support this optimizer.")
+
     torch.set_printoptions(precision=6)
 
     if dim1 == 1 and dim2 == 1:
         return
 
-    p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
+    p1 = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.1
     p2 = p1.clone()
     p1 = p1.float()
     blocksize = 256
@@ -330,7 +348,7 @@ def test_optimizer8bit(requires_cuda, dim1, dim2, gtype, optim_name):
     relerrors = []
 
     for i in range(50):
-        g = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.01
+        g = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.01
         p1.grad = g.clone().float()
         p2.grad = g.clone()
 
@@ -544,30 +562,37 @@ optimizer_names_benchmark = [
 ]
 
 
+@pytest.mark.parametrize("device", get_accelerator_devices())
 @pytest.mark.parametrize("dim1", [4096], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [4096], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.bfloat16, torch.float16], ids=describe_dtype)
 @pytest.mark.parametrize("optim_name", optimizer_names_benchmark, ids=id_formatter("opt"))
 @pytest.mark.benchmark
-def test_benchmark_blockwise(dim1, dim2, gtype, optim_name):
+def test_benchmark_blockwise(device, dim1, dim2, gtype, optim_name):
+    if device not in ["cuda", "xpu"]:
+        pytest.skip()
+
+    if device == "xpu" and optim_name not in ["adam8bit_blockwise"]:
+        pytest.skip("XPU does not support this optimizer.")
+
     if dim1 == 1 and dim2 == 1:
         return
-    p1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1
+    p1 = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.1
 
     bnb_optimizer = str2optimizers[optim_name][1]([p1])
 
-    g = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.01
+    g = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.01
     p1.grad = g
     total_steps = 500
     for i in range(total_steps):
         if i == total_steps // 5:
             # 100 iterations for burn-in
-            torch.cuda.synchronize()
+            synchronize_device(device)
             t0 = time.time()
 
         bnb_optimizer.step()
 
-    torch.cuda.synchronize()
+    synchronize_device(device)
     s = time.time() - t0
     print("")
     params = (total_steps - total_steps // 5) * dim1 * dim2

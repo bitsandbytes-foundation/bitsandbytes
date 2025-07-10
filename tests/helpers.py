@@ -49,6 +49,18 @@ def get_available_devices():
     return devices
 
 
+@functools.cache
+def get_accelerator_devices():
+    return [device for device in get_available_devices() if device != "cpu"]
+
+
+def synchronize_device(device: str = "cuda"):
+    if device == "cuda":
+        torch.cuda.synchronize()
+    elif device == "xpu":
+        torch.xpu.synchronize()
+
+
 def torch_save_to_buffer(obj):
     buffer = BytesIO()
     torch.save(obj, buffer)

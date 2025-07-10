@@ -9,6 +9,7 @@ import torch
 def _set_seed():
     torch.manual_seed(0)
     torch.cuda.manual_seed_all(0)
+    torch.xpu.manual_seed_all(0)
     torch.mps.manual_seed(0)
     np.random.seed(0)
     random.seed(0)
@@ -34,6 +35,8 @@ def pytest_runtest_teardown(item, nextitem):
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if torch.xpu.is_available():
+        torch.xpu.empty_cache()
 
 
 @pytest.fixture(scope="session")

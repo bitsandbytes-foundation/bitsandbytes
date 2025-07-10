@@ -805,7 +805,7 @@ def Optimizer32bit2State_kernel(
     # Calculating update
     denom = libdevice.sqrt(v_new) + eps * correction2
     step_size = -lr * correction2 / correction1
-    update = update_scale * step_size * m_new / denom
+    update = update_scale * step_size * (m_new / denom)
 
     # Applying update and weight decay
     p_new = tl.where(non_zero_mask, p + update, p)
@@ -912,4 +912,3 @@ def OptimizerStatic8bit2StateBlockwise_kernel(
     tl.store(state2_ptr + offsets, quantized_v, mask=mask)
     tl.store(absmax1_ptr + pid, absmax_m, mask=True)
     tl.store(absmax2_ptr + pid, absmax_v, mask=True)
-
