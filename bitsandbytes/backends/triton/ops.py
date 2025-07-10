@@ -192,11 +192,6 @@ def optimizer32bit_triton(
     """
     Triton's 32-bit optimizer currently only supports adam
     """
-
-    assert p.dtype in [torch.float16, torch.float32, torch.bfloat16], "Unsupported parameter dtype."
-    assert g.dtype == p.dtype, "Gradient and parameter must have the same dtype."
-    assert state1.dtype == torch.float and state2.dtype == torch.float, "States must be float."
-
     if optimizer_name == 'adam':
         if max_unorm > 0.0:
             with torch_accelerator_module.device(g.device):
@@ -233,11 +228,6 @@ def optimizer8bit_blockwise_triton(
     """
     Triton's 8-bit optimizer currently only supports adam
     """
-    assert p.dtype in [torch.float16, torch.float32, torch.bfloat16], "Unsupported parameter dtype."
-    assert g.dtype == p.dtype, "Gradient and parameter must have the same dtype."
-    assert state1.dtype == torch.uint8 and state2.dtype == torch.uint8, "States must be uint8."
-    assert qmap1.numel() == qmap2.numel(), "Quantization codebooks must have the same size."
-
     if optimizer_name == 'adam':
         with torch_accelerator_module.device(g.device):
             grid = (triton.cdiv(n_elements, block_size),)
