@@ -3,6 +3,14 @@ import torch
 import triton
 import triton.language as tl
 
+import warnings
+if torch.xpu.is_available():
+    from triton.language.extra.intel import libdevice
+elif torch.cuda.is_available():
+    from triton.language.extra.cuda import libdevice
+else:
+    warnings.warn("No supported device (XPU or CUDA) is available. optimizer32bit_triton and optimizer8bit_blockwise_triton will not be available!")
+
 
 # @triton.autotune(
 #     configs=[
@@ -711,3 +719,197 @@ def quantize_4bit_blockwise_kernel(
     out_offsets = block_start_idx * BLOCK_SIZE // 2 + tl.arange(0, SPLIT_NUM_BLOCKS * BLOCK_SIZE)
     out_mask = out_offsets < n_elements // 2
     tl.store(out_ptr + out_offsets, packed_flat, mask=out_mask)
+
+
+@triton.jit
+def PreconditionOptimizer32bit2State_kernel(
+    g_ptr, state1_ptr, state2_ptr, unorm_ptr,
+    beta1, beta2, eps, step, gnorm_scale, n_elems,
+    BLOCK_SIZE: tl.constexpr
+):
+    pid = tl.program_id(0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elems
+
+    # Loading gradient values
+    g = tl.load(g_ptr + offsets, mask=mask, other=0.0)
+    g = g * gnorm_scale  # Apply gradient scaling
+
+    # Loading optimizer states
+    m = tl.load(state1_ptr + offsets, mask=mask, other=0.0)
+    v = tl.load(state2_ptr + offsets, mask=mask, other=0.0)
+
+    # Updating first and second moment estimates
+    m_new = m * beta1 + (1 - beta1) * g
+    v_new = v * beta2 + (1 - beta2) * (g * g)
+
+    # Calculating bias correction
+    correction1 = 1.0 - libdevice.pow(beta1, step)
+    correction2 = 1.0 - libdevice.pow(beta2, step)
+    m_hat = m_new / correction1
+    v_hat = v_new / correction2
+
+    # Calculating update and its square
+    update = m_hat / (libdevice.sqrt(v_hat) + eps)
+    update_sq = update * update
+
+    # Reducing the sum of squared updates within the block
+    block_sum = tl.sum(update_sq, axis=0)
+    tl.atomic_add(unorm_ptr, block_sum)  # Atomically add to global unorm
+
+
+@triton.jit
+def Optimizer32bit2State_kernel(
+    g_ptr, p_ptr, state1_ptr, state2_ptr, unorm_ptr, 
+    max_unorm, param_norm, beta1, beta2, beta3, alpha, 
+    eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n_elems,
+    BLOCK_SIZE: tl.constexpr
+):
+    pid = tl.program_id(0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elems
+
+    # Calculate the update scaling factor
+    update_scale = 1.0
+    if max_unorm > 0.0 and unorm_ptr is not None:
+        unorm_val = libdevice.sqrt(tl.load(unorm_ptr))  # Calculate actual unorm
+        clip_val = max_unorm * param_norm
+        update_scale = tl.where(unorm_val > clip_val, clip_val / unorm_val, 1.0)
+
+    # Loading data
+    g = tl.load(g_ptr + offsets, mask=mask, other=0.0)
+    p = tl.load(p_ptr + offsets, mask=mask, other=0.0)
+    m = tl.load(state1_ptr + offsets, mask=mask, other=0.0)
+    v = tl.load(state2_ptr + offsets, mask=mask, other=0.0)
+    g_scaled = g * gnorm_scale
+
+    # Calculating bias correction
+    correction1 = 1.0 - libdevice.pow(beta1, step)
+    correction2 = libdevice.sqrt(1.0 - libdevice.pow(beta2, step))
+
+    # Handling skip_zeros flag
+    non_zero_mask = mask
+    if skip_zeros:
+        non_zero_mask = mask & (g != 0.0)
+
+    # Updating first and second moment estimates
+    m_new = tl.where(non_zero_mask,
+                    m * beta1 + (1 - beta1) * g_scaled,
+                    m)
+    v_new = tl.where(non_zero_mask,
+                    v * beta2 + (1 - beta2) * (g_scaled * g_scaled),
+                    v)
+
+    # Calculating update
+    denom = libdevice.sqrt(v_new) + eps * correction2
+    step_size = -lr * correction2 / correction1
+    update = update_scale * step_size * m_new / denom
+
+    # Applying update and weight decay
+    p_new = tl.where(non_zero_mask, p + update, p)
+    if weight_decay > 0.0:
+        p_new = tl.where(non_zero_mask, p_new * (1.0 - lr * weight_decay), p_new)
+
+    # Storing results (original states)
+    tl.store(p_ptr + offsets, p_new, mask=mask)
+    tl.store(state1_ptr + offsets, m_new, mask=mask)
+    tl.store(state2_ptr + offsets, v_new, mask=mask)
+
+
+@triton.jit
+def OptimizerStatic8bit2StateBlockwise_kernel(
+    p_ptr, g_ptr, state1_ptr, state2_ptr, absmax1_ptr, absmax2_ptr, qmap1_ptr, qmap2_ptr,
+    beta1, beta2, eps, step, lr, weight_decay, gnorm_scale, skip_zeros,
+    n_elements, code_size,
+    BLOCK_SIZE: tl.constexpr,
+):
+    # Program ID and offsets for block-wise processing
+    pid = tl.program_id(0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+
+    # Load gradient and parameter
+    g = tl.load(g_ptr + offsets, mask=mask, other=0.0)
+    p = tl.load(p_ptr + offsets, mask=mask, other=0.0)
+
+    # Apply gradient norm scaling
+    g = g * gnorm_scale
+
+    # Skip updates if gradient is zero and skip_zeros is True
+    non_zero_mask = mask
+    if skip_zeros:
+        non_zero_mask = mask & (g != 0.0)
+
+    # Load and dequantize state1 (m)
+    state1 = tl.load(state1_ptr + offsets, mask=mask, other=0).to(tl.uint8)
+    absmax1 = tl.load(absmax1_ptr + pid)
+    m = tl.load(qmap1_ptr + state1, mask=mask, other=0.0) * absmax1
+
+    # Load and dequantize state2 (v)
+    state2 = tl.load(state2_ptr + offsets, mask=mask, other=0).to(tl.uint8)
+    absmax2 = tl.load(absmax2_ptr + pid)
+    v = tl.load(qmap2_ptr + state2, mask=mask, other=0.0) * absmax2
+
+    # Adam update step
+    m_new = tl.where(non_zero_mask, beta1 * m + (1 - beta1) * g, m)
+    v_new = tl.where(non_zero_mask, beta2 * v + (1 - beta2) * (g * g), v)
+
+    # Bias correction
+    m_hat = m_new / (1 - libdevice.pow(beta1, step))
+    v_hat = v_new / (1 - libdevice.pow(beta2, step))
+
+    # Update parameter
+    p_new = tl.where(non_zero_mask, p - lr * m_hat / (libdevice.sqrt(v_hat) + eps), p)
+
+    # Apply weight decay
+    if weight_decay > 0.0:
+        p_new = tl.where(non_zero_mask, p_new * (1.0 - lr * weight_decay), p_new)
+
+    # Quantize m_new
+    absmax_m = tl.max(libdevice.abs(m_new), axis=0)
+    m_normalized = m_new / absmax_m
+    m_normalized = tl.clamp(m_normalized, -1.0, 1.0)
+    lower_pivot = tl.zeros((BLOCK_SIZE,), dtype=tl.int32)
+    upper_pivot = tl.full((BLOCK_SIZE,), code_size - 1, dtype=tl.int32)
+    for _ in range(8):  # ceil(log2(code_size)) = 8 for code_size=256
+        pivot = (lower_pivot + upper_pivot) // 2
+        val = tl.load(qmap1_ptr + pivot, mask=mask, other=0.0)
+        is_higher = m_normalized > val
+        lower_pivot = tl.where(is_higher, pivot, lower_pivot)
+        upper_pivot = tl.where(is_higher, upper_pivot, pivot)
+    lower_val = tl.load(qmap1_ptr + lower_pivot, mask=mask, other=0.0)
+    upper_val = tl.load(qmap1_ptr + upper_pivot, mask=mask, other=0.0)
+    lower_dist = libdevice.abs(m_normalized - lower_val)
+    upper_dist = libdevice.abs(m_normalized - upper_val)
+    quantized_m = tl.where(lower_dist <= upper_dist, lower_pivot, upper_pivot).to(tl.uint8)
+    quantized_m = tl.where(non_zero_mask, quantized_m, state1)
+
+    # Quantize v_new
+    absmax_v = tl.max(libdevice.abs(v_new), axis=0)
+    v_normalized = v_new / absmax_v
+    v_normalized = tl.clamp(v_normalized, -1.0, 1.0)
+    lower_pivot = tl.zeros((BLOCK_SIZE,), dtype=tl.int32)
+    upper_pivot = tl.full((BLOCK_SIZE,), code_size - 1, dtype=tl.int32)
+    for _ in range(8):  # ceil(log2(code_size)) = 8 for code_size=256
+        pivot = (lower_pivot + upper_pivot) // 2
+        val = tl.load(qmap2_ptr + pivot, mask=mask, other=0.0)
+        is_higher = v_normalized > val
+        lower_pivot = tl.where(is_higher, pivot, lower_pivot)
+        upper_pivot = tl.where(is_higher, upper_pivot, pivot)
+    lower_val = tl.load(qmap2_ptr + lower_pivot, mask=mask, other=0.0)
+    upper_val = tl.load(qmap2_ptr + upper_pivot, mask=mask, other=0.0)
+    lower_dist = libdevice.abs(v_normalized - lower_val)
+    upper_dist = libdevice.abs(v_normalized - upper_val)
+    quantized_v = tl.where(lower_dist <= upper_dist, lower_pivot, upper_pivot).to(tl.uint8)
+    quantized_v = tl.where(non_zero_mask, quantized_v, state2)
+
+    # Store results
+    tl.store(p_ptr + offsets, p_new, mask=mask)
+    tl.store(state1_ptr + offsets, quantized_m, mask=mask)
+    tl.store(state2_ptr + offsets, quantized_v, mask=mask)
+    tl.store(absmax1_ptr + pid, absmax_m, mask=True)
+    tl.store(absmax2_ptr + pid, absmax_v, mask=True)
+

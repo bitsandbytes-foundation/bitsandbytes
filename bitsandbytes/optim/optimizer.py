@@ -258,6 +258,14 @@ class Optimizer8bit(torch.optim.Optimizer):
                         self.mng.index2config[(gindex, pindex)] = self.mng.pid2config[id(p)]
                         found = True
 
+    def synchronize_device(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        elif torch.xpu.is_available():
+            torch.xpu.synchronize()
+        else:
+            raise RuntimeError("No supported device available for synchronization (CUDA or XPU required).")
+
     @torch.no_grad()
     def step(self, closure=None):
         """Perform a single optimization step.
@@ -289,11 +297,12 @@ class Optimizer8bit(torch.optim.Optimizer):
 
                 self.prefetch_state(p)
                 self.update_step(group, p, gindex, pindex)
-                torch.cuda.synchronize()
+                self.synchronize_device()
+
         if self.is_paged:
             # all paged operations are asynchronous, we need
             # to sync to make sure all tensors are in the right state
-            torch.cuda.synchronize()
+            self.synchronize_device()
 
         return loss
 

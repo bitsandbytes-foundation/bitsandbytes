@@ -15,6 +15,8 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import _reverse_4bit_compress_format, pack_dict_to_tensor, unpack_tensor_to_dict
 
+from bitsandbytes.backends.triton import ops as triton_ops
+
 from .cextension import HIP_ENVIRONMENT, ipex_cpu, ipex_xpu, lib
 
 name2qmap = {}
@@ -197,7 +199,7 @@ else:
 
     def _cuda_device_of(a: torch.Tensor):
         return contextlib.nullcontext()
-
+    
 
 def get_paged(*shape, dtype=torch.float32, device=FIRST_CUDA_DEVICE):
     num_bytes = dtype.itemsize * prod(shape)
@@ -402,7 +404,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
 
 
 def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
-    """Verifies that the input tensors are all on the same device.
+    """Verifies that the input tensors are all on the same cuda device.
 
     An input tensor may also be marked as `paged`, in which case the device placement is ignored.
 
@@ -435,6 +437,42 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
             f"Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}",
         )
     return on_gpu
+
+
+def is_on_xpu(tensors: Iterable[Optional[torch.Tensor]]):
+    """Verifies that the input tensors are all on the same XPU device.
+
+    An input tensor may also be marked as `paged`, in which case the device placement is ignored.
+
+    Args:
+        tensors (`Iterable[Optional[torch.Tensor]]`): A list of tensors to verify.
+
+    Raises:
+        `RuntimeError`: Raised when the verification fails.
+
+    Returns:
+        `Literal[True]`
+    """
+
+    on_xpu = True
+    xpu_ids = set()
+
+    for t in tensors:
+        # NULL pointers and paged tensors are OK.
+        if t is not None and not getattr(t, "is_paged", False):
+            on_xpu &= t.is_xpu
+            xpu_ids.add(t.device.index)
+
+    if not on_xpu:
+        raise RuntimeError(
+            f"All input tensors need to be on the same XPU, but found some tensors to not be on an XPU:\n {[(t.shape, t.device) for t in tensors]}",
+        )
+
+    if len(xpu_ids) > 1:
+        raise RuntimeError(
+            f"Input tensors need to be on the same XPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}",
+        )
+    return on_xpu
 
 
 def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
@@ -1247,46 +1285,59 @@ def optimizer_update_32bit(
     skip_zeros : bool
         Whether to skip zero-valued gradients or not (default: False).
     """
-
     param_norm = 0.0
     if max_unorm > 0.0:
         param_norm = torch.norm(p.data.float())
 
-    optim_func = None
-    if g.dtype == torch.float32:
-        optim_func = str2optimizer32bit[optimizer_name][0]
-    elif g.dtype == torch.float16:
-        optim_func = str2optimizer32bit[optimizer_name][1]
-    elif g.dtype == torch.bfloat16 and len(str2optimizer32bit[optimizer_name]) == 3:
-        optim_func = str2optimizer32bit[optimizer_name][2]
+    if torch.xpu.is_available():
+        is_on_xpu([g, p, state1, state2, unorm_vec])
+
+        triton_ops.optimizer32bit_triton(
+            optimizer_name,
+            g, p, state1, state2, unorm_vec,
+            max_unorm, param_norm,
+            beta1, beta2, beta3,
+            alpha, eps, weight_decay,
+            step, lr, gnorm_scale,
+            skip_zeros, g.numel(),
+        )
+
     else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
+        optim_func = None
+        if g.dtype == torch.float32:
+            optim_func = str2optimizer32bit[optimizer_name][0]
+        elif g.dtype == torch.float16:
+            optim_func = str2optimizer32bit[optimizer_name][1]
+        elif g.dtype == torch.bfloat16 and len(str2optimizer32bit[optimizer_name]) == 3:
+            optim_func = str2optimizer32bit[optimizer_name][2]
+        else:
+            raise ValueError(
+                f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
+            )
 
-    is_on_gpu([g, p, state1, state2, unorm_vec])
+        is_on_gpu([g, p, state1, state2, unorm_vec])
 
-    with _cuda_device_of(g):
-        optim_func(
-            get_ptr(g),
-            get_ptr(p),
-            get_ptr(state1),
-            get_ptr(state2),
-            get_ptr(unorm_vec),
-            ct.c_float(max_unorm),
-            ct.c_float(param_norm),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(beta3),
-            ct.c_float(alpha),
-            ct.c_float(eps),
-            ct.c_float(weight_decay),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
+        with _cuda_device_of(g):
+            optim_func(
+                get_ptr(g),
+                get_ptr(p),
+                get_ptr(state1),
+                get_ptr(state2),
+                get_ptr(unorm_vec),
+                ct.c_float(max_unorm),
+                ct.c_float(param_norm),
+                ct.c_float(beta1),
+                ct.c_float(beta2),
+                ct.c_float(beta3),
+                ct.c_float(alpha),
+                ct.c_float(eps),
+                ct.c_float(weight_decay),
+                ct.c_int32(step),
+                ct.c_float(lr),
+                ct.c_float(gnorm_scale),
+                ct.c_bool(skip_zeros),
+                ct.c_int32(g.numel()),
+            )
 
 
 @deprecated(
@@ -1447,47 +1498,63 @@ def optimizer_update_8bit_blockwise(
     gnorm_scale: float = 1.0,
     skip_zeros=False,
 ) -> None:
-    optim_func = None
 
-    if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
-    elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
-    elif (
-        g.dtype == torch.bfloat16
-        and state1.dtype == torch.uint8
-        and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
-    ):
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
+    if torch.xpu.is_available():
+        is_on_xpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
+
+        triton_ops.optimizer8bit_blockwise_triton(
+            optimizer_name,
+            g, p, state1, state2,
+            beta1, beta2, beta3, alpha,
+            eps, step, lr,
+            qmap1, qmap2,
+            absmax1, absmax2,
+            weight_decay, gnorm_scale,
+            skip_zeros, g.numel(),
+        )
+
     else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
+        optim_func = None
 
-    is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
+        if g.dtype == torch.float32 and state1.dtype == torch.uint8:
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
+        elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
+        elif (
+            g.dtype == torch.bfloat16
+            and state1.dtype == torch.uint8
+            and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
+        ):
+            optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
+        else:
+            raise ValueError(
+                f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
+            )
 
-    with _cuda_device_of(g):
-        optim_func(
-            get_ptr(p),
-            get_ptr(g),
-            get_ptr(state1),
-            get_ptr(state2),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(beta3),
-            ct.c_float(alpha),
-            ct.c_float(eps),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            get_ptr(qmap1),
-            get_ptr(qmap2),
-            get_ptr(absmax1),
-            get_ptr(absmax2),
-            ct.c_float(weight_decay),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
+        is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
+
+        with _cuda_device_of(g):
+            optim_func(
+                get_ptr(p),
+                get_ptr(g),
+                get_ptr(state1),
+                get_ptr(state2),
+                ct.c_float(beta1),
+                ct.c_float(beta2),
+                ct.c_float(beta3),
+                ct.c_float(alpha),
+                ct.c_float(eps),
+                ct.c_int32(step),
+                ct.c_float(lr),
+                get_ptr(qmap1),
+                get_ptr(qmap2),
+                get_ptr(absmax1),
+                get_ptr(absmax2),
+                ct.c_float(weight_decay),
+                ct.c_float(gnorm_scale),
+                ct.c_bool(skip_zeros),
+                ct.c_int32(g.numel()),
+            )
 
 
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)

@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 
 import torch
+import triton
 
 from . import triton_kernels
 
@@ -175,3 +176,81 @@ def gemv_4bit(
         B_dq_triton,
         bias=None,
     )
+
+
+def optimizer32bit_triton(
+    optimizer_name: str,
+    g: torch.Tensor, p: torch.Tensor, 
+    state1: torch.Tensor, state2: torch.Tensor,
+    unorm: torch.Tensor,
+    max_unorm: float, param_norm: float,
+    beta1: float, beta2: float, beta3: float,
+    alpha: float, eps: float, weight_decay: float,
+    step: int, lr: float, gnorm_scale: float,
+    skip_zeros: bool, n_elems: int, block_size: int = 256,
+) -> None:
+    """
+    Triton's 32-bit optimizer currently only supports adam
+    """
+
+    assert p.dtype in [torch.float16, torch.float32, torch.bfloat16], "Unsupported parameter dtype."
+    assert g.dtype == p.dtype, "Gradient and parameter must have the same dtype."
+    assert state1.dtype == torch.float and state2.dtype == torch.float, "States must be float."
+
+    if optimizer_name == 'adam':
+        if max_unorm > 0.0:
+            with torch_accelerator_module.device(g.device):
+                grid = (triton.cdiv(n_elems, block_size),)
+                triton_kernels.PreconditionOptimizer32bit2State_kernel[grid](
+                    g, state1, state2, unorm,
+                    beta1, beta2, eps, step, gnorm_scale, n_elems,
+                    BLOCK_SIZE=block_size
+                )
+        
+        with torch_accelerator_module.device(g.device):
+            grid = (triton.cdiv(n_elems, block_size),)
+            triton_kernels.Optimizer32bit2State_kernel[grid](
+                g, p, state1, state2, unorm,
+                max_unorm, param_norm, beta1, beta2, beta3, alpha,
+                eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n_elems,
+                BLOCK_SIZE=block_size
+            )
+    else:
+        raise ValueError(f"Unknown optimizer type: {optimizer_name}")
+
+
+def optimizer8bit_blockwise_triton(
+    optimizer_name: str,
+    g: torch.Tensor, p: torch.Tensor,
+    state1: torch.Tensor, state2: torch.Tensor,
+    beta1: float, beta2: float, beta3: float,
+    alpha: float, eps: float, step: int, lr: float,
+    qmap1: torch.Tensor, qmap2: torch.Tensor,
+    absmax1: torch.Tensor, absmax2: torch.Tensor,
+    weight_decay: float, gnorm_scale: float,
+    skip_zeros: bool, n_elements: int, block_size: int = 256,
+) -> None:
+    """
+    Triton's 8-bit optimizer currently only supports adam
+    """
+    assert p.dtype in [torch.float16, torch.float32, torch.bfloat16], "Unsupported parameter dtype."
+    assert g.dtype == p.dtype, "Gradient and parameter must have the same dtype."
+    assert state1.dtype == torch.uint8 and state2.dtype == torch.uint8, "States must be uint8."
+    assert qmap1.numel() == qmap2.numel(), "Quantization codebooks must have the same size."
+
+    if optimizer_name == 'adam':
+        with torch_accelerator_module.device(g.device):
+            grid = (triton.cdiv(n_elements, block_size),)
+            triton_kernels.OptimizerStatic8bit2StateBlockwise_kernel[grid](
+                p_ptr=p, g_ptr=g,
+                state1_ptr=state1, state2_ptr=state2,
+                absmax1_ptr=absmax1, absmax2_ptr=absmax2,
+                qmap1_ptr=qmap1, qmap2_ptr=qmap2,
+                beta1=beta1, beta2=beta2,
+                eps=eps, step=step, lr=lr,
+                weight_decay=weight_decay, gnorm_scale=gnorm_scale,
+                skip_zeros=skip_zeros, n_elements=n_elements,
+                code_size=qmap1.numel(), BLOCK_SIZE=block_size,
+            )
+    else:
+        raise ValueError(f"Unknown optimizer type: {optimizer_name}")
