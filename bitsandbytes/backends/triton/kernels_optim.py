@@ -5,8 +5,8 @@ import torch
 
 import triton
 import triton.language as tl
-from triton.language.extra import libdevice
 
+# from triton.language.extra import libdevice
 from .kernels_8bit_quant import (
     dequant_8bit_blockwise,
     dequant_8bit_kernel_util,
@@ -419,6 +419,8 @@ def _optimizer_update_1state_8bit_blockwise_triton_kernel(
     alpha,
     eps: tl.constexpr,
     step,
+    beta1_step,
+    beta2_step,
     lr,
     qmap1_ptr,
     qmap2_ptr,
@@ -502,6 +504,8 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
     alpha,
     eps: tl.constexpr,
     step,
+    beta1_step,
+    beta2_step,
     lr,
     qmap1_ptr,
     qmap2_ptr,
@@ -537,8 +541,12 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
         s1 = s1 * beta1 + (1.0 - beta1) * g
         s2 = s2 * beta2 + (1.0 - beta2) * g * g
 
-        bias_correction1 = 1.0 - libdevice.pow(beta1, step)
-        bias_correction2 = 1.0 - libdevice.pow(beta2, step)
+        # In torch=2.7 on XPU there is an issue with libdevice.pow, leading to an error.
+        # For backwards compatibility we precompute the bias correction factors.
+        # bias_correction1 = 1.0 - libdevice.pow(beta1, step)
+        # bias_correction2 = 1.0 - libdevice.pow(beta2, step)
+        bias_correction1 = 1.0 - beta1_step
+        bias_correction2 = 1.0 - beta2_step
 
         if weight_decay > 0.0:
             p *= 1.0 - lr * weight_decay
@@ -562,7 +570,12 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
         # AdEMAMix has a stacked state1 (m1, m2) and state2 (nu)
         m1 = dequant_8bit_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
         m2 = dequant_8bit_kernel_util(
-            state1_ptr + n_elements, offsets, qmap1_ptr, absmax1_ptr + n_elements // BLOCK_SIZE_N, mask, BLOCK_SIZE_N
+            state1_ptr + n_elements,
+            offsets,
+            qmap1_ptr,
+            absmax1_ptr + n_elements // BLOCK_SIZE_N,
+            mask,
+            BLOCK_SIZE_N,
         )
         nu = dequant_8bit_kernel_util(state2_ptr, offsets, qmap2_ptr, absmax2_ptr, mask, BLOCK_SIZE_N)
 
@@ -570,8 +583,12 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
         m2 = m2 * beta3 + (1.0 - beta3) * g
         nu = nu * beta2 + (1.0 - beta2) * g * g
 
-        bias_correction1 = 1.0 - libdevice.pow(beta1, step)
-        bias_correction2 = tl.sqrt(1.0 - libdevice.pow(beta2, step))
+        # In torch=2.7 on XPU there is an issue with libdevice.pow, leading to an error.
+        # For backwards compatibility we precompute the bias correction factors.
+        # bias_correction1 = 1.0 - libdevice.pow(beta1, step)
+        # bias_correction2 = tl.sqrt(1.0 - libdevice.pow(beta2, step))
+        bias_correction1 = 1.0 - beta1_step
+        bias_correction2 = tl.sqrt(1.0 - beta2_step)
 
         update = (m1 / bias_correction1 + alpha * m2) / (tl.sqrt(nu) / bias_correction2 + eps)
 
@@ -590,18 +607,32 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
 
         m2_codes, new_absmax_m2 = quantize_8bit_blockwise_core(m2, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
         tl.store(state1_ptr + n_elements + offsets, m2_codes, mask=mask)
-        tl.store(absmax1_ptr + block_start_idx + tl.arange(0, N_PER_TH) + n_elements // BLOCK_SIZE_N, new_absmax_m2)
+        tl.store(
+            absmax1_ptr + block_start_idx + tl.arange(0, N_PER_TH) + n_elements // BLOCK_SIZE_N,
+            new_absmax_m2,
+        )
 
         nu_codes, new_absmax_nu = quantize_8bit_blockwise_core(nu, qmap2_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
         tl.store(state2_ptr + offsets, nu_codes, mask=mask)
         tl.store(absmax2_ptr + block_start_idx + tl.arange(0, N_PER_TH), new_absmax_nu)
 
 
-def optimizer_update_1state_8bit_blockwise(
-    p: torch.Tensor,
+name2optimizer_fn = {
+    "momentum": _optimizer_update_1state_8bit_blockwise_triton_kernel,
+    "rmsprop": _optimizer_update_1state_8bit_blockwise_triton_kernel,
+    "adagrad": _optimizer_update_1state_8bit_blockwise_triton_kernel,
+    "adam": _optimizer_update_2state_8bit_blockwise_triton_kernel,
+    "lion": _optimizer_update_1state_8bit_blockwise_triton_kernel,
+    "ademamix": _optimizer_update_2state_8bit_blockwise_triton_kernel,
+}
+
+
+def optimizer_update_8bit_blockwise_impl(
+    optimizer_name: str,
     g: torch.Tensor,
+    p: torch.Tensor,
     state1: torch.Tensor,
-    state2: torch.Tensor,
+    state2: Optional[torch.Tensor],
     beta1: float,
     beta2: float,
     beta3: float,
@@ -610,79 +641,18 @@ def optimizer_update_1state_8bit_blockwise(
     step: int,
     lr: float,
     qmap1: torch.Tensor,
-    qmap2: torch.Tensor,
+    qmap2: Optional[torch.Tensor],
     absmax1: torch.Tensor,
-    absmax2: torch.Tensor,
+    absmax2: Optional[torch.Tensor],
     weight_decay: float = 0.0,
     gnorm_scale: float = 1.0,
     skip_zeros=False,
-    n: int = 0,  # Deprecated: n is ignored, p.numel() is used instead.
-    *,
-    optimizer_id: int,
-):
+) -> None:
     if skip_zeros:
         raise NotImplementedError("skip_zeros is not supported on XPU yet")
 
-    BLOCK_SIZE = 256
-    if n % BLOCK_SIZE != 0:
-        raise ValueError(f"Matrix size ({n}) must be a multiple of BLOCK_SIZE ({BLOCK_SIZE}) for block-wise updates.")
-    N_PER_TH = 1  # Number of blocks processed per thread.
-    grid = (triton.cdiv(p.numel(), BLOCK_SIZE * N_PER_TH),)
-
-    _optimizer_update_1state_8bit_blockwise_triton_kernel[grid](
-        p,
-        g,
-        state1,
-        state2,
-        beta1,
-        beta2,
-        beta3,
-        alpha,
-        eps,
-        step,
-        lr,
-        qmap1,
-        qmap2,
-        absmax1,
-        absmax2,
-        weight_decay,
-        gnorm_scale,
-        p.numel(),
-        BLOCK_SIZE_N=BLOCK_SIZE,
-        N_PER_TH=N_PER_TH,
-        OPTIMIZER_ID=optimizer_id,
-        num_warps=2,
-    )
-
-
-def optimizer_update_2state_8bit_blockwise(
-    p: torch.Tensor,
-    g: torch.Tensor,
-    state1: torch.Tensor,
-    state2: torch.Tensor,
-    beta1: float,
-    beta2: float,
-    beta3: float,
-    alpha: float,
-    eps: float,
-    step: int,
-    lr: float,
-    qmap1: torch.Tensor,
-    qmap2: torch.Tensor,
-    absmax1: torch.Tensor,
-    absmax2: torch.Tensor,
-    weight_decay: float = 0.0,
-    gnorm_scale: float = 1.0,
-    skip_zeros=False,
-    n: int = 0,  # Deprecated: n is ignored, p.numel() is used instead.
-    *,
-    optimizer_id: int,
-):
-    if skip_zeros:
-        raise NotImplementedError("skip_zeros is not supported on XPU yet")
-
-    if optimizer_id == ADEMAMIX:
-        # Handle AdEMAMix's stacked state tensors
+    if optimizer_name == "ademamix":
+        # Handle AdEMAMIX's stacked state tensors
         if state1.dim() < 2 or state1.shape[0] != 2:
             raise ValueError(
                 f"For ademamix, state1 must be a stacked tensor of shape (2, ...), but got {state1.shape}"
@@ -695,8 +665,15 @@ def optimizer_update_2state_8bit_blockwise(
     BLOCK_SIZE = 256
     N_PER_TH = 1  # Number of blocks processed per thread.
     grid = (triton.cdiv(p.numel(), BLOCK_SIZE * N_PER_TH),)
+    fn = name2optimizer_fn[optimizer_name]
+    optimizer_id = name2optimizer_id[optimizer_name]
 
-    _optimizer_update_2state_8bit_blockwise_triton_kernel[grid](
+    # In torch=2.7 on XPU there is an issue with libdevice.pow, leading to an error.
+    # For backwards compatibility we precompute the bias correction factors.
+    beta1_step = beta1**step
+    beta2_step = beta2**step
+
+    fn[grid](
         p,
         g,
         state1,
@@ -707,6 +684,8 @@ def optimizer_update_2state_8bit_blockwise(
         alpha,
         eps,
         step,
+        beta1_step,
+        beta2_step,
         lr,
         qmap1,
         qmap2,

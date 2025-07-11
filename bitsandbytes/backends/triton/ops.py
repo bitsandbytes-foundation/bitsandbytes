@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from functools import partial
+from typing import Optional
 
 import torch
 
@@ -170,25 +170,85 @@ def gemv_4bit(
         )
 
 
-# optimizer_update_8bit_blockwise = kernels_optim.optimizer_update_8bit_blockwise_pytorch
-# optimizer_update_8bit_blockwise = torch.compile(kernels_optim.optimizer_update_8bit_blockwise_pytorch) # 60ms
-# optimizer_update_8bit_blockwise = kernels_optim.optimizer_update_8bit_blockwise_triton_quant #2.8ms
-# optimizer_update_8bit_blockwise = torch.compile(kernels_optim.optimizer_update_8bit_blockwise_triton_quant) # 2.3ms
+# optimizer_update_8bit_blockwise_impl = kernels_optim.optimizer_update_8bit_blockwise_pytorch
+# optimizer_update_8bit_blockwise_impl = torch.compile(kernels_optim.optimizer_update_8bit_blockwise_pytorch) # 60ms
+# optimizer_update_8bit_blockwise_impl = kernels_optim.optimizer_update_8bit_blockwise_triton_quant #2.8ms
+# optimizer_update_8bit_blockwise_impl = torch.compile(kernels_optim.optimizer_update_8bit_blockwise_triton_quant) # 2.3ms
+optimizer_update_8bit_blockwise_impl = kernels_optim.optimizer_update_8bit_blockwise_impl  # ~0.95ms for adam
 
-# adam_8bit_blockwise_grad = partial(optimizer_update_8bit_blockwise, optimizer_name="adam")
-# momentum_8bit_blockwise_grad = partial(optimizer_update_8bit_blockwise, optimizer_name="momentum")
-# rmsprop_8bit_blockwise_grad = partial(optimizer_update_8bit_blockwise, optimizer_name="rmsprop")
-# lion_8bit_blockwise_grad = partial(optimizer_update_8bit_blockwise, optimizer_name="lion")
-# adagrad_8bit_blockwise_grad = partial(optimizer_update_8bit_blockwise, optimizer_name="adagrad")
-# ademamix_8bit_blockwise_grad = partial(optimizer_update_8bit_blockwise, optimizer_name="ademamix")
 
-# ~0.95ms for adam
-update_1state = kernels_optim.optimizer_update_1state_8bit_blockwise
-update_2state = kernels_optim.optimizer_update_2state_8bit_blockwise
-momentum_8bit_blockwise_grad = partial(update_1state, optimizer_id=kernels_optim.name2optimizer_id["momentum"])
-rmsprop_8bit_blockwise_grad = partial(update_1state, optimizer_id=kernels_optim.name2optimizer_id["rmsprop"])
-lion_8bit_blockwise_grad = partial(update_1state, optimizer_id=kernels_optim.name2optimizer_id["lion"])
-adagrad_8bit_blockwise_grad = partial(update_1state, optimizer_id=kernels_optim.name2optimizer_id["adagrad"])
+def optimizer_update_8bit_blockwise(
+    optimizer_name: str,
+    g: torch.Tensor,
+    p: torch.Tensor,
+    state1: torch.Tensor,
+    state2: Optional[torch.Tensor],
+    beta1: float,
+    beta2: float,
+    beta3: float,
+    alpha: float,
+    eps: float,
+    step: int,
+    lr: float,
+    qmap1: torch.Tensor,
+    qmap2: Optional[torch.Tensor],
+    absmax1: torch.Tensor,
+    absmax2: Optional[torch.Tensor],
+    weight_decay: float = 0.0,
+    gnorm_scale: float = 1.0,
+    skip_zeros=False,
+) -> None:
+    torch._check(
+        g.numel() == p.numel(),
+        lambda: f"g and p must have the same number of elements, got {g.numel()} and {p.numel()}",
+    )
+    compute_dtypes = [torch.float16, torch.bfloat16, torch.float32]
 
-ademamix_8bit_blockwise_grad = partial(update_2state, optimizer_id=kernels_optim.name2optimizer_id["ademamix"])
-adam_8bit_blockwise_grad = partial(update_2state, optimizer_id=kernels_optim.name2optimizer_id["adam"])
+    torch._check(
+        g.dtype in compute_dtypes,
+        lambda: f"g must be bfloat16, float16, or float32, got {g.dtype}",
+    )
+    torch._check(
+        g.dtype == p.dtype,
+        lambda: f"Expected all tensors to have the same dtype, got g.dtype={g.dtype}, p.dtype={p.dtype}",
+    )
+    torch._check(
+        state1.dtype == torch.uint8,
+        lambda: f"state1 must be uint8, got {state1.dtype}",
+    )
+    torch._check(
+        qmap1.dtype == absmax1.dtype == torch.float32,
+        lambda: f"Expected qmap1 and absmax1 to be float32, got qmap1.dtype={qmap1.dtype}, absmax1.dtype={absmax1.dtype}",
+    )
+    if state2 is not None:
+        torch._check(
+            state2.dtype == torch.uint8,
+            lambda: f"state2 must be uint8, got {state2.dtype}",
+        )
+        torch._check(
+            qmap2.dtype == absmax2.dtype == torch.float32,
+            lambda: f"Expected qmap2 and absmax2 to be float32, got qmap2.dtype={qmap2.dtype}, absmax2.dtype={absmax2.dtype}",
+        )
+
+    with torch_accelerator_module.device(state1.device):
+        optimizer_update_8bit_blockwise_impl(
+            optimizer_name=optimizer_name,
+            g=g,
+            p=p,
+            state1=state1,
+            state2=state2,
+            beta1=beta1,
+            beta2=beta2,
+            beta3=beta3,
+            alpha=alpha,
+            eps=eps,
+            step=step,
+            lr=lr,
+            qmap1=qmap1,
+            qmap2=qmap2,
+            absmax1=absmax1,
+            absmax2=absmax2,
+            weight_decay=weight_decay,
+            gnorm_scale=gnorm_scale,
+            skip_zeros=skip_zeros,
+        )
