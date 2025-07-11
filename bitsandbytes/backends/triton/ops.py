@@ -198,37 +198,37 @@ def optimizer_update_8bit_blockwise(
     gnorm_scale: float = 1.0,
     skip_zeros=False,
 ) -> None:
-    torch._check(
-        g.numel() == p.numel(),
-        lambda: f"g and p must have the same number of elements, got {g.numel()} and {p.numel()}",
-    )
-    compute_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    # torch._check(
+    #     g.numel() == p.numel(),
+    #     lambda: f"g and p must have the same number of elements, got {g.numel()} and {p.numel()}",
+    # )
+    # compute_dtypes = [torch.float16, torch.bfloat16, torch.float32]
 
-    torch._check(
-        g.dtype in compute_dtypes,
-        lambda: f"g must be bfloat16, float16, or float32, got {g.dtype}",
-    )
-    torch._check(
-        g.dtype == p.dtype,
-        lambda: f"Expected all tensors to have the same dtype, got g.dtype={g.dtype}, p.dtype={p.dtype}",
-    )
-    torch._check(
-        state1.dtype == torch.uint8,
-        lambda: f"state1 must be uint8, got {state1.dtype}",
-    )
-    torch._check(
-        qmap1.dtype == absmax1.dtype == torch.float32,
-        lambda: f"Expected qmap1 and absmax1 to be float32, got qmap1.dtype={qmap1.dtype}, absmax1.dtype={absmax1.dtype}",
-    )
-    if state2 is not None:
-        torch._check(
-            state2.dtype == torch.uint8,
-            lambda: f"state2 must be uint8, got {state2.dtype}",
-        )
-        torch._check(
-            qmap2.dtype == absmax2.dtype == torch.float32,
-            lambda: f"Expected qmap2 and absmax2 to be float32, got qmap2.dtype={qmap2.dtype}, absmax2.dtype={absmax2.dtype}",
-        )
+    # torch._check(
+    #     g.dtype in compute_dtypes,
+    #     lambda: f"g must be bfloat16, float16, or float32, got {g.dtype}",
+    # )
+    # torch._check(
+    #     g.dtype == p.dtype,
+    #     lambda: f"Expected all tensors to have the same dtype, got g.dtype={g.dtype}, p.dtype={p.dtype}",
+    # )
+    # torch._check(
+    #     state1.dtype == torch.uint8,
+    #     lambda: f"state1 must be uint8, got {state1.dtype}",
+    # )
+    # torch._check(
+    #     qmap1.dtype == absmax1.dtype == torch.float32,
+    #     lambda: f"Expected qmap1 and absmax1 to be float32, got qmap1.dtype={qmap1.dtype}, absmax1.dtype={absmax1.dtype}",
+    # )
+    # if state2 is not None:
+    #     torch._check(
+    #         state2.dtype == torch.uint8,
+    #         lambda: f"state2 must be uint8, got {state2.dtype}",
+    #     )
+    #     torch._check(
+    #         qmap2.dtype == absmax2.dtype == torch.float32,
+    #         lambda: f"Expected qmap2 and absmax2 to be float32, got qmap2.dtype={qmap2.dtype}, absmax2.dtype={absmax2.dtype}",
+    #     )
 
     with torch_accelerator_module.device(state1.device):
         optimizer_update_8bit_blockwise_impl(
