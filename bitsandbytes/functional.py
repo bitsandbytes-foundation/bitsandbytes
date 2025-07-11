@@ -199,7 +199,7 @@ else:
 
     def _cuda_device_of(a: torch.Tensor):
         return contextlib.nullcontext()
-    
+
 
 def get_paged(*shape, dtype=torch.float32, device=FIRST_CUDA_DEVICE):
     num_bytes = dtype.itemsize * prod(shape)
