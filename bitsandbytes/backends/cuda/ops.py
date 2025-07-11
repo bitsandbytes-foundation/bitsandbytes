@@ -579,7 +579,7 @@ def _optimizer_update_8bit_blockwise_impl(
     g: torch.Tensor,
     p: torch.Tensor,
     state1: torch.Tensor,
-    state2: Optional[torch.nsor],
+    state2: Optional[torch.Tensor],
     beta1: float,
     beta2: float,
     beta3: float,
