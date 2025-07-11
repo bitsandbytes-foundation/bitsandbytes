@@ -209,3 +209,10 @@ def unpack_tensor_to_dict(tensor_data):
 
 LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING = {"row": 0, "col32": 1, "col_turing": 2, "col_ampere": 3}
 INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING = {val: name for (name, val) in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.items()}
+
+
+def sync_gpu(t: torch.Tensor):
+    if t.device.type == "cuda":
+        torch.cuda.synchronize()
+    elif t.device.type == "xpu":
+        torch.xpu.synchronize()
