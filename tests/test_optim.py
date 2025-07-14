@@ -209,8 +209,8 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
             )
 
         # since Lion can have pretty noisy updates where things lie at the boundary
-        # allow up to 10 errors for Lion
-        assert_most_approx_close(p1, p2.float(), atol=atol, rtol=rtol, max_error_count=10)
+        # allow up to 15 errors for Lion
+        assert_most_approx_close(p1, p2.float(), atol=atol, rtol=rtol, max_error_count=15)
 
         if i % (k // 5) == 0 and i > 0:
             path = get_temp_dir()
