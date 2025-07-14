@@ -114,7 +114,6 @@ def optimizer_update_8bit_blockwise_pytorch(
     gnorm_scale: float,
     skip_zeros: bool,
     # ADEMIX
-    n: int,
     *,
     optimizer_name: str,
 ) -> None:
@@ -262,7 +261,6 @@ def optimizer_update_8bit_blockwise_triton_quant(
     gnorm_scale: float,
     skip_zeros: bool,
     # ADEMIX
-    n: int,
     *,
     optimizer_name: str,
 ) -> None:
@@ -627,7 +625,7 @@ name2optimizer_fn = {
 }
 
 
-def optimizer_update_8bit_blockwise_impl(
+def optimizer_update_8bit_blockwise_triton_impl(
     optimizer_name: str,
     g: torch.Tensor,
     p: torch.Tensor,
@@ -699,3 +697,10 @@ def optimizer_update_8bit_blockwise_impl(
         OPTIMIZER_ID=optimizer_id,
         num_warps=2,
     )
+
+
+# optimizer_update_8bit_blockwise_impl = optimizer_update_8bit_blockwise_pytorch
+# optimizer_update_8bit_blockwise_impl = torch.compile(optimizer_update_8bit_blockwise_pytorch_impl)
+# optimizer_update_8bit_blockwise_impl = optimizer_update_8bit_blockwise_triton_quant
+# optimizer_update_8bit_blockwise_impl = torch.compile(optimizer_update_8bit_blockwise_triton_quant)
+optimizer_update_8bit_blockwise_impl = optimizer_update_8bit_blockwise_triton_impl
