@@ -20,41 +20,6 @@ from .cextension import HIP_ENVIRONMENT, ipex_cpu, ipex_xpu, lib
 name2qmap = {}
 
 """C FUNCTIONS FOR OPTIMIZERS"""
-str2optimizer32bit = {
-    "adam": (
-        lib.cadam32bit_grad_fp32,
-        lib.cadam32bit_grad_fp16,
-        lib.cadam32bit_grad_bf16,
-    ),
-    "momentum": (
-        lib.cmomentum32bit_grad_32,
-        lib.cmomentum32bit_grad_16,
-    ),
-    "rmsprop": (
-        lib.crmsprop32bit_grad_32,
-        lib.crmsprop32bit_grad_16,
-    ),
-    "lion": (
-        lib.clion32bit_grad_fp32,
-        lib.clion32bit_grad_fp16,
-        lib.clion32bit_grad_bf16,
-    ),
-    "adagrad": (
-        lib.cadagrad32bit_grad_32,
-        lib.cadagrad32bit_grad_16,
-    ),
-    "lamb": (
-        lib.cadam32bit_grad_fp32,
-        lib.cadam32bit_grad_fp16,
-        lib.cadam32bit_grad_bf16,
-    ),
-    "ademamix": (
-        lib.cademamix32bit_grad_fp32,
-        lib.cademamix32bit_grad_fp16,
-        lib.cademamix32bit_grad_bf16,
-    ),
-}
-
 str2optimizer8bit = {
     "adam": (
         lib.cadam_static_8bit_grad_32,
@@ -79,39 +44,6 @@ str2optimizer8bit = {
     "lars": (
         lib.cmomentum_static_8bit_grad_32,
         lib.cmomentum_static_8bit_grad_16,
-    ),
-}
-
-str2optimizer8bit_blockwise = {
-    "adam": (
-        lib.cadam_8bit_blockwise_grad_fp32,
-        lib.cadam_8bit_blockwise_grad_fp16,
-        lib.cadam_8bit_blockwise_grad_bf16,
-    ),
-    "momentum": (
-        lib.cmomentum_8bit_blockwise_grad_fp32,
-        lib.cmomentum_8bit_blockwise_grad_fp16,
-        lib.cmomentum_8bit_blockwise_grad_bf16,
-    ),
-    "rmsprop": (
-        lib.crmsprop_8bit_blockwise_grad_fp32,
-        lib.crmsprop_8bit_blockwise_grad_fp16,
-        lib.crmsprop_8bit_blockwise_grad_bf16,
-    ),
-    "lion": (
-        lib.clion_8bit_blockwise_grad_fp32,
-        lib.clion_8bit_blockwise_grad_fp16,
-        lib.clion_8bit_blockwise_grad_bf16,
-    ),
-    "adagrad": (
-        lib.cadagrad_8bit_blockwise_grad_fp32,
-        lib.cadagrad_8bit_blockwise_grad_fp16,
-        lib.cadagrad_8bit_blockwise_grad_bf16,
-    ),
-    "ademamix": (
-        lib.cademamix_8bit_blockwise_grad_fp32,
-        lib.cademamix_8bit_blockwise_grad_fp16,
-        lib.cademamix_8bit_blockwise_grad_bf16,
     ),
 }
 
@@ -422,8 +354,8 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
     for t in tensors:
         # NULL pointers and paged tensors are OK.
         if t is not None and not getattr(t, "is_paged", False):
-            on_gpu &= t.is_cuda
-            gpu_ids.add(t.device.index)
+            on_gpu &= t.device.type != "cpu"
+            gpu_ids.add((t.device.type, t.device.index))
 
     if not on_gpu:
         raise RuntimeError(
@@ -1252,41 +1184,27 @@ def optimizer_update_32bit(
     if max_unorm > 0.0:
         param_norm = torch.norm(p.data.float())
 
-    optim_func = None
-    if g.dtype == torch.float32:
-        optim_func = str2optimizer32bit[optimizer_name][0]
-    elif g.dtype == torch.float16:
-        optim_func = str2optimizer32bit[optimizer_name][1]
-    elif g.dtype == torch.bfloat16 and len(str2optimizer32bit[optimizer_name]) == 3:
-        optim_func = str2optimizer32bit[optimizer_name][2]
-    else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
-
     is_on_gpu([g, p, state1, state2, unorm_vec])
-
-    with _cuda_device_of(g):
-        optim_func(
-            get_ptr(g),
-            get_ptr(p),
-            get_ptr(state1),
-            get_ptr(state2),
-            get_ptr(unorm_vec),
-            ct.c_float(max_unorm),
-            ct.c_float(param_norm),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(beta3),
-            ct.c_float(alpha),
-            ct.c_float(eps),
-            ct.c_float(weight_decay),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
+    torch.ops.bitsandbytes.optimizer_update_32bit(
+        optimizer_name,
+        g,
+        p,
+        state1,
+        state2,
+        unorm_vec,
+        max_unorm,
+        param_norm,
+        beta1,
+        beta2,
+        beta3,
+        alpha,
+        eps,
+        weight_decay,
+        step,
+        lr,
+        gnorm_scale,
+        skip_zeros,
+    )
 
 
 @deprecated(
@@ -1449,45 +1367,29 @@ def optimizer_update_8bit_blockwise(
 ) -> None:
     optim_func = None
 
-    if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
-    elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
-    elif (
-        g.dtype == torch.bfloat16
-        and state1.dtype == torch.uint8
-        and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
-    ):
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
-    else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
-
     is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
 
-    with _cuda_device_of(g):
-        optim_func(
-            get_ptr(p),
-            get_ptr(g),
-            get_ptr(state1),
-            get_ptr(state2),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(beta3),
-            ct.c_float(alpha),
-            ct.c_float(eps),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            get_ptr(qmap1),
-            get_ptr(qmap2),
-            get_ptr(absmax1),
-            get_ptr(absmax2),
-            ct.c_float(weight_decay),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
+    torch.ops.bitsandbytes.optimizer_update_8bit_blockwise(
+        optimizer_name,
+        g,
+        p,
+        state1,
+        state2,
+        beta1,
+        beta2,
+        beta3,
+        alpha,
+        eps,
+        step,
+        lr,
+        qmap1,
+        qmap2,
+        absmax1,
+        absmax2,
+        weight_decay,
+        gnorm_scale,
+        skip_zeros,
+    )
 
 
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
