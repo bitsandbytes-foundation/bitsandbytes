@@ -21,7 +21,7 @@ BOOLEAN_TUPLES = list(product(TRUE_FALSE, repeat=2))  # all combinations of (boo
 def get_available_devices(no_cpu=False):
     if "BNB_TEST_DEVICE" in os.environ:
         # If the environment variable is set, use it directly.
-        return [os.environ["BNB_TEST_DEVICE"]]
+        return [d for d in os.environ["BNB_TEST_DEVICE"] if d.lower() != "cpu"]
 
     devices = [] if HIP_ENVIRONMENT else ["cpu"] if not no_cpu else []
 
