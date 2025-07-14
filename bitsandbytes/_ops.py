@@ -351,6 +351,49 @@ if ipex_cpu or ipex_xpu:
 
 
 torch.library.define(
+    "bitsandbytes::optimizer_update_32bit",
+    "(str optimizer_name, Tensor g, Tensor p, Tensor state1, Tensor! state2, Tensor! unorm_vec, float max_unorm, float param_norm, float beta1, float beta2, float beta3, float alpha, float eps, float weight_decay, int step, float lr, float gnorm_scale, bool skip_zeros) -> ()",
+)
+
+
+@register_fake("bitsandbytes::optimizer_update_32bit")
+def _(
+    optimizer_name: str,
+    g: torch.Tensor,
+    p: torch.Tensor,
+    state1: torch.Tensor,
+    state2: Optional[torch.Tensor],
+    unorm_vec: Optional[torch.Tensor],
+    max_unorm: float,
+    param_norm: float,
+    beta1: float,
+    beta2: float,
+    beta3: float,
+    alpha: float,
+    eps: float,
+    weight_decay: float,
+    step: int,
+    lr: float,
+    gnorm_scale: float,
+    skip_zeros=False,
+) -> None:
+    torch._check(
+        g.numel() == p.numel(),
+        lambda: f"g and p must have the same number of elements, got {g.numel()} and {p.numel()}",
+    )
+    compute_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+
+    torch._check(
+        g.dtype in compute_dtypes,
+        lambda: f"g must be bfloat16, float16, or float32, got {g.dtype}",
+    )
+    torch._check(
+        g.dtype == p.dtype,
+        lambda: f"Expected all tensors to have the same dtype, got g.dtype={g.dtype}, p.dtype={p.dtype}",
+    )
+
+
+torch.library.define(
     "bitsandbytes::optimizer_update_8bit_blockwise",
     "(str optimizer_name, Tensor g, Tensor p, Tensor state1, Tensor! state2, float beta1, float beta2, float beta3, float alpha, float eps, int step, float lr, Tensor qmap1, Tensor! qmap2, Tensor absmax1, Tensor! absmax2, float weight_decay, float gnorm_scale, bool skip_zeros) -> ()",
 )

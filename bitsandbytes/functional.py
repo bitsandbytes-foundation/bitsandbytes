@@ -20,41 +20,6 @@ from .cextension import HIP_ENVIRONMENT, ipex_cpu, ipex_xpu, lib
 name2qmap = {}
 
 """C FUNCTIONS FOR OPTIMIZERS"""
-str2optimizer32bit = {
-    "adam": (
-        lib.cadam32bit_grad_fp32,
-        lib.cadam32bit_grad_fp16,
-        lib.cadam32bit_grad_bf16,
-    ),
-    "momentum": (
-        lib.cmomentum32bit_grad_32,
-        lib.cmomentum32bit_grad_16,
-    ),
-    "rmsprop": (
-        lib.crmsprop32bit_grad_32,
-        lib.crmsprop32bit_grad_16,
-    ),
-    "lion": (
-        lib.clion32bit_grad_fp32,
-        lib.clion32bit_grad_fp16,
-        lib.clion32bit_grad_bf16,
-    ),
-    "adagrad": (
-        lib.cadagrad32bit_grad_32,
-        lib.cadagrad32bit_grad_16,
-    ),
-    "lamb": (
-        lib.cadam32bit_grad_fp32,
-        lib.cadam32bit_grad_fp16,
-        lib.cadam32bit_grad_bf16,
-    ),
-    "ademamix": (
-        lib.cademamix32bit_grad_fp32,
-        lib.cademamix32bit_grad_fp16,
-        lib.cademamix32bit_grad_bf16,
-    ),
-}
-
 str2optimizer8bit = {
     "adam": (
         lib.cadam_static_8bit_grad_32,
@@ -1219,41 +1184,27 @@ def optimizer_update_32bit(
     if max_unorm > 0.0:
         param_norm = torch.norm(p.data.float())
 
-    optim_func = None
-    if g.dtype == torch.float32:
-        optim_func = str2optimizer32bit[optimizer_name][0]
-    elif g.dtype == torch.float16:
-        optim_func = str2optimizer32bit[optimizer_name][1]
-    elif g.dtype == torch.bfloat16 and len(str2optimizer32bit[optimizer_name]) == 3:
-        optim_func = str2optimizer32bit[optimizer_name][2]
-    else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
-
     is_on_gpu([g, p, state1, state2, unorm_vec])
-
-    with _cuda_device_of(g):
-        optim_func(
-            get_ptr(g),
-            get_ptr(p),
-            get_ptr(state1),
-            get_ptr(state2),
-            get_ptr(unorm_vec),
-            ct.c_float(max_unorm),
-            ct.c_float(param_norm),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(beta3),
-            ct.c_float(alpha),
-            ct.c_float(eps),
-            ct.c_float(weight_decay),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
+    torch.ops.bitsandbytes.optimizer_update_32bit(
+        optimizer_name,
+        g,
+        p,
+        state1,
+        state2,
+        unorm_vec,
+        max_unorm,
+        param_norm,
+        beta1,
+        beta2,
+        beta3,
+        alpha,
+        eps,
+        weight_decay,
+        step,
+        lr,
+        gnorm_scale,
+        skip_zeros,
+    )
 
 
 @deprecated(
