@@ -610,7 +610,7 @@ str2optimizer8bit_blockwise = {
 }
 
 
-def optimizer_update_32bit(
+def _optimizer_update_32bit_impl(
     optimizer_name: str,
     g: torch.Tensor,
     p: torch.Tensor,
@@ -763,3 +763,4 @@ def _optimizer_update_8bit_blockwise_impl(
 
 
 register_kernel("bitsandbytes::optimizer_update_8bit_blockwise", "cuda")(_optimizer_update_8bit_blockwise_impl)
+register_kernel("bitsandbytes::optimizer_update_32bit", "cuda")(_optimizer_update_32bit_impl)
