@@ -27,35 +27,19 @@ import triton.language as tl
 @triton.jit
 def dequant_8bit_kernel(
     a_ptr,
-    c_ptr,
-    quant_ptr,
+    out_ptr,
+    code_ptr,
     absmax_ptr,
-    num_paired_elements,
+    n,
     QUANT_BLOCK: tl.constexpr,
     SPLIT_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     block_start = pid * SPLIT_SIZE
     offsets = block_start + tl.arange(0, SPLIT_SIZE)
-    mask = offsets < num_paired_elements
-
-    a = tl.load(a_ptr + offsets, mask)
-    a = a.to(tl.uint8)
-
-    # apply conversion
-    scaled_int8 = tl.load(quant_ptr + a, mask)
-
-    abs_blocks_lim = (num_paired_elements // QUANT_BLOCK) * QUANT_BLOCK + num_paired_elements % QUANT_BLOCK
-    abs_offsets = offsets // QUANT_BLOCK
-    mask_blocked = offsets < abs_blocks_lim
-
-    absmax = tl.load(absmax_ptr + abs_offsets, mask_blocked)
-    # apply scales
-    out_dq = scaled_int8 * absmax
-
-    offs = block_start + tl.arange(0, SPLIT_SIZE)
-    mask = offs < num_paired_elements
-    tl.store(c_ptr + offs, out_dq, mask)
+    mask = offsets < n
+    out_dq = dequant_8bit_blockwise_kernel_util(a_ptr, offsets, code_ptr, absmax_ptr, mask, QUANT_BLOCK)
+    tl.store(out_ptr + offsets, out_dq, mask)
 
 
 def dequant_8bit_blockwise(
@@ -66,7 +50,7 @@ def dequant_8bit_blockwise(
     dtype: torch.dtype = None,
     out: torch.Tensor = None,
 ):
-    number_of_paired_elements = a.numel()
+    n = a.numel()
     if out is None:
         if dtype is None:
             raise ValueError("If out is None, dtype must be specified")
@@ -74,13 +58,13 @@ def dequant_8bit_blockwise(
 
     SPLIT_SIZE = 256
     # grid = lambda META: (triton.cdiv(number_of_paired_elements, META["SPLIT_SIZE"]),)
-    grid = (triton.cdiv(number_of_paired_elements, SPLIT_SIZE),)
+    grid = (triton.cdiv(n, SPLIT_SIZE),)
     dequant_8bit_kernel[grid](
         a,
         out,
         quant_state_code,
         absmax,
-        number_of_paired_elements,
+        n,
         quant_blocksize,
         SPLIT_SIZE,
     )
@@ -115,39 +99,9 @@ def quantize_8bit_blockwise_kernel(
 
     A = tl.load(A_ptr + offsets, mask=mask, other=0.0)
 
-    # To be able process several blocks -> (BLOCK_SIZE, SPLIT_NUM_BLOCKS)
-    A_reshaped = tl.reshape(A, (SPLIT_NUM_BLOCKS, BLOCK_SIZE))
-
-    # Calculating absamax for each block
-    absmax = tl.max(tl.abs(A_reshaped), axis=1)
+    quantized, absmax = quantize_8bit_blockwise_kernel_util(A, code_ptr, CODE_SIZE, BLOCK_SIZE, SPLIT_NUM_BLOCKS)
     tl.store(absmax_ptr + block_start_idx + tl.arange(0, SPLIT_NUM_BLOCKS), absmax)
-
-    A_normalized = A_reshaped / absmax[:, None]
-    A_normalized = tl.clamp(A_normalized, -1.0, 1.0)
-
-    lower_pivot = tl.zeros((SPLIT_NUM_BLOCKS, BLOCK_SIZE), dtype=tl.int32)
-    upper_pivot = tl.full((SPLIT_NUM_BLOCKS, BLOCK_SIZE), CODE_SIZE - 1, dtype=tl.int32)
-
-    for _ in range(8):  # ceil(log2(code_size)) = 8, actually, in general case should be input parameter
-        pivot = (lower_pivot + upper_pivot) // 2
-        val = tl.load(code_ptr + pivot)
-        is_higher = A_normalized > val  # code[pivot]
-        lower_pivot = tl.where(is_higher, pivot, lower_pivot)
-        upper_pivot = tl.where(is_higher, upper_pivot, pivot)
-
-    # Choose closest level
-    lower_val = tl.load(code_ptr + lower_pivot)
-    upper_val = tl.load(code_ptr + upper_pivot)
-    lower_dist = tl.abs(A_normalized - lower_val)
-    upper_dist = tl.abs(A_normalized - upper_val)
-    quantized = tl.where(lower_dist <= upper_dist, lower_pivot, upper_pivot).to(tl.uint8)
-
-    # too slow approach
-    # diff = tl.abs(A_normalized[:, :, None] - code[None, None, :])
-    # quantized = tl.argmin(diff, axis=2).to(tl.uint8)
-
-    quantized_flat = tl.reshape(quantized, (BLOCK_SIZE * SPLIT_NUM_BLOCKS,))
-    tl.store(out_ptr + offsets, quantized_flat, mask=mask)
+    tl.store(out_ptr + offsets, quantized, mask=mask)
 
 
 def quantize_blockwise_triton(A, code, blocksize, absmax=None, out=None):
@@ -180,9 +134,9 @@ def quantize_blockwise_triton(A, code, blocksize, absmax=None, out=None):
 
 
 @triton.jit
-def quantize_8bit_blockwise_core(
+def quantize_8bit_blockwise_kernel_util(
     a,
-    qmap_ptr,
+    code_ptr,
     CODE_SIZE: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
     N_PER_TH: tl.constexpr,
@@ -190,7 +144,7 @@ def quantize_8bit_blockwise_core(
     # To be able process several blocks -> (BLOCK_SIZE, SPLIT_NUM_BLOCKS)
     a_reshaped = tl.reshape(a, (N_PER_TH, BLOCK_SIZE))
 
-    # Calculating absamax for each block
+    # Calculating absmax for each block
     absmax = tl.max(tl.abs(a_reshaped), axis=1)
 
     a_normalized = a_reshaped / absmax[:, None]
@@ -202,37 +156,40 @@ def quantize_8bit_blockwise_core(
     # ceil(log2(code_size)) = 8, actually, in general case should be input parameter
     for _ in range(8):
         pivot = (lower_pivot + upper_pivot) // 2
-        val = tl.load(qmap_ptr + pivot)
+        val = tl.load(code_ptr + pivot)
         is_higher = a_normalized > val  # code[pivot]
         lower_pivot = tl.where(is_higher, pivot, lower_pivot)
         upper_pivot = tl.where(is_higher, upper_pivot, pivot)
 
     # Choose closest level
-    lower_val = tl.load(qmap_ptr + lower_pivot)
-    upper_val = tl.load(qmap_ptr + upper_pivot)
+    lower_val = tl.load(code_ptr + lower_pivot)
+    upper_val = tl.load(code_ptr + upper_pivot)
     lower_dist = tl.abs(a_normalized - lower_val)
     upper_dist = tl.abs(a_normalized - upper_val)
     quantized = tl.where(lower_dist <= upper_dist, lower_pivot, upper_pivot).to(tl.uint8)
+
+    # too slow approach
+    # diff = tl.abs(A_normalized[:, :, None] - code[None, None, :])
+    # quantized = tl.argmin(diff, axis=2).to(tl.uint8)
 
     quantized_flat = tl.reshape(quantized, (BLOCK_SIZE * N_PER_TH,))
     return quantized_flat, absmax
 
 
 @triton.jit
-def dequant_8bit_kernel_util(
-    codes_ptr,
+def dequant_8bit_blockwise_kernel_util(
+    a_ptr,
     offsets,
-    qmap_ptr,
+    code_ptr,
     absmax_ptr,
     mask,
     BLOCK_SIZE: tl.constexpr,
 ):
-    codes = tl.load(codes_ptr + offsets, mask, other=0).to(tl.uint8)
-    abs_offsets = offsets // BLOCK_SIZE
-    absmax = tl.load(absmax_ptr + abs_offsets, mask=mask, other=0.0, eviction_policy="evict_last")
-
-    # apply conversion
-    scaled_int8 = tl.load(qmap_ptr + codes, mask)
-    # apply scales
+    a = tl.load(a_ptr + offsets, mask, other=0).to(tl.uint8)
+    scaled_int8 = tl.load(code_ptr + a, mask)
+    # Load scales
+    absmax_offsets = offsets // BLOCK_SIZE
+    absmax = tl.load(absmax_ptr + absmax_offsets, mask=mask, other=0.0, eviction_policy="evict_last")
+    # Apply scales
     out_dq = scaled_int8 * absmax
     return out_dq

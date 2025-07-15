@@ -9,8 +9,8 @@ import triton.language as tl
 # from triton.language.extra import libdevice
 from .kernels_8bit_quant import (
     dequant_8bit_blockwise,
-    dequant_8bit_kernel_util,
-    quantize_8bit_blockwise_core,
+    dequant_8bit_blockwise_kernel_util,
+    quantize_8bit_blockwise_kernel_util,
     quantize_blockwise_triton,
 )
 
@@ -445,7 +445,7 @@ def _optimizer_update_1state_8bit_blockwise_triton_kernel(
     # 2. Load and dequantize tensors
     g = tl.load(g_ptr + offsets, mask=mask, other=0.0).to(tl.float32) * gnorm_scale
     p = tl.load(p_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
-    s1 = dequant_8bit_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
+    s1 = dequant_8bit_blockwise_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
 
     # 3. Optimizer-specific updates
     # LION
@@ -482,7 +482,7 @@ def _optimizer_update_1state_8bit_blockwise_triton_kernel(
 
     # 4. Store updated parameter and requantized state
     tl.store(p_ptr + offsets, p.to(p_ptr.dtype.element_ty), mask=mask)
-    s1_codes, new_absmax1 = quantize_8bit_blockwise_core(s1, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
+    s1_codes, new_absmax1 = quantize_8bit_blockwise_kernel_util(s1, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
     tl.store(state1_ptr + offsets, s1_codes, mask=mask)
     tl.store(absmax1_ptr + block_start_idx + tl.arange(0, N_PER_TH), new_absmax1)
 
@@ -533,8 +533,8 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
 
     # 3. Optimizer-specific updates
     if OPTIMIZER_ID == 3:  # ADAM
-        s1 = dequant_8bit_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
-        s2 = dequant_8bit_kernel_util(state2_ptr, offsets, qmap2_ptr, absmax2_ptr, mask, BLOCK_SIZE_N)
+        s1 = dequant_8bit_blockwise_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
+        s2 = dequant_8bit_blockwise_kernel_util(state2_ptr, offsets, qmap2_ptr, absmax2_ptr, mask, BLOCK_SIZE_N)
 
         s1 = s1 * beta1 + (1.0 - beta1) * g
         s2 = s2 * beta2 + (1.0 - beta2) * g * g
@@ -556,18 +556,18 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
         tl.store(p_ptr + offsets, p.to(p_ptr.dtype.element_ty), mask=mask)
 
         # Requantize and store states
-        s1_codes, new_absmax1 = quantize_8bit_blockwise_core(s1, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
+        s1_codes, new_absmax1 = quantize_8bit_blockwise_kernel_util(s1, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
         tl.store(state1_ptr + offsets, s1_codes, mask=mask)
         tl.store(absmax1_ptr + block_start_idx + tl.arange(0, N_PER_TH), new_absmax1)
 
-        s2_codes, new_absmax2 = quantize_8bit_blockwise_core(s2, qmap2_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
+        s2_codes, new_absmax2 = quantize_8bit_blockwise_kernel_util(s2, qmap2_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
         tl.store(state2_ptr + offsets, s2_codes, mask=mask)
         tl.store(absmax2_ptr + block_start_idx + tl.arange(0, N_PER_TH), new_absmax2)
 
     elif OPTIMIZER_ID == 5:  # ADEMAMIX
         # AdEMAMix has a stacked state1 (m1, m2) and state2 (nu)
-        m1 = dequant_8bit_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
-        m2 = dequant_8bit_kernel_util(
+        m1 = dequant_8bit_blockwise_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
+        m2 = dequant_8bit_blockwise_kernel_util(
             state1_ptr + n_elements,
             offsets,
             qmap1_ptr,
@@ -575,7 +575,7 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
             mask,
             BLOCK_SIZE_N,
         )
-        nu = dequant_8bit_kernel_util(state2_ptr, offsets, qmap2_ptr, absmax2_ptr, mask, BLOCK_SIZE_N)
+        nu = dequant_8bit_blockwise_kernel_util(state2_ptr, offsets, qmap2_ptr, absmax2_ptr, mask, BLOCK_SIZE_N)
 
         m1 = m1 * beta1 + (1.0 - beta1) * g
         m2 = m2 * beta3 + (1.0 - beta3) * g
@@ -599,18 +599,18 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
         tl.store(p_ptr + offsets, p.to(p_ptr.dtype.element_ty), mask=mask)
 
         # Requantize and store all three states
-        m1_codes, new_absmax_m1 = quantize_8bit_blockwise_core(m1, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
+        m1_codes, new_absmax_m1 = quantize_8bit_blockwise_kernel_util(m1, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
         tl.store(state1_ptr + offsets, m1_codes, mask=mask)
         tl.store(absmax1_ptr + block_start_idx + tl.arange(0, N_PER_TH), new_absmax_m1)
 
-        m2_codes, new_absmax_m2 = quantize_8bit_blockwise_core(m2, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
+        m2_codes, new_absmax_m2 = quantize_8bit_blockwise_kernel_util(m2, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
         tl.store(state1_ptr + n_elements + offsets, m2_codes, mask=mask)
         tl.store(
             absmax1_ptr + block_start_idx + tl.arange(0, N_PER_TH) + n_elements // BLOCK_SIZE_N,
             new_absmax_m2,
         )
 
-        nu_codes, new_absmax_nu = quantize_8bit_blockwise_core(nu, qmap2_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
+        nu_codes, new_absmax_nu = quantize_8bit_blockwise_kernel_util(nu, qmap2_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
         tl.store(state2_ptr + offsets, nu_codes, mask=mask)
         tl.store(absmax2_ptr + block_start_idx + tl.arange(0, N_PER_TH), new_absmax_nu)
 
@@ -625,7 +625,7 @@ name2optimizer_fn = {
 }
 
 
-def optimizer_update_8bit_blockwise_triton_impl(
+def optimizer_update_8bit_blockwise_impl(
     optimizer_name: str,
     g: torch.Tensor,
     p: torch.Tensor,
@@ -703,4 +703,4 @@ def optimizer_update_8bit_blockwise_triton_impl(
 # optimizer_update_8bit_blockwise_impl = torch.compile(optimizer_update_8bit_blockwise_pytorch_impl)
 # optimizer_update_8bit_blockwise_impl = optimizer_update_8bit_blockwise_triton_quant
 # optimizer_update_8bit_blockwise_impl = torch.compile(optimizer_update_8bit_blockwise_triton_quant)
-optimizer_update_8bit_blockwise_impl = optimizer_update_8bit_blockwise_triton_impl
+optimizer_update_8bit_blockwise_impl = optimizer_update_8bit_blockwise_impl
