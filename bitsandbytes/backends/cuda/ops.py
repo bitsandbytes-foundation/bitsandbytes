@@ -686,8 +686,8 @@ def _optimizer_update_8bit_blockwise_impl(
     qmap2: Optional[torch.Tensor],
     absmax1: torch.Tensor,
     absmax2: Optional[torch.Tensor],
-    weight_decay: float = 0.0,
-    gnorm_scale: float = 1.0,
+    weight_decay: float,
+    gnorm_scale: float,
     skip_zeros=False,
 ) -> None:
     # torch._check(
