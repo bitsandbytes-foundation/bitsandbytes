@@ -1,8 +1,9 @@
 from collections.abc import Sequence
+from typing import Optional
 
 import torch
 
-from . import triton_kernels
+from . import triton_kernels, kernels_optim
 
 # currently codes unused, kept for reference
 # Should be the same for quant/dequant
@@ -175,3 +176,48 @@ def gemv_4bit(
         B_dq_triton,
         bias=None,
     )
+
+
+# optimizer_update_32bit_impl = kernels_optim.optimizer_update_32bit_impl_torch
+optimizer_update_32bit_impl = kernels_optim.optimizer_update_32bit_impl
+def optimizer_update_32bit(
+    optimizer_name: str,
+    g: torch.Tensor,
+    p: torch.Tensor,
+    state1: torch.Tensor,
+    state2: Optional[torch.Tensor],
+    unorm_vec: Optional[torch.Tensor],
+    max_unorm: float,
+    param_norm: float,
+    beta1: float,
+    beta2: float,
+    beta3: float,
+    alpha: float,
+    eps: float,
+    step: int,
+    lr: float,
+    weight_decay: float = 0.0,
+    gnorm_scale: float = 1.0,
+    skip_zeros=False,
+) -> None:
+    with torch_accelerator_module.device(state1.device):
+        optimizer_update_32bit_impl(
+            optimizer_name=optimizer_name,
+            g=g,
+            p=p,
+            state1=state1,
+            state2=state2,
+            unorm_vec=unorm_vec,
+            max_unorm=max_unorm,
+            param_norm=param_norm,
+            beta1=beta1,
+            beta2=beta2,
+            beta3=beta3,
+            alpha=alpha,
+            eps=eps,
+            step=step,
+            lr=lr,
+            weight_decay=weight_decay,
+            gnorm_scale=gnorm_scale,
+            skip_zeros=skip_zeros,
+        )

@@ -1198,9 +1198,9 @@ def optimizer_update_32bit(
         beta3,
         alpha,
         eps,
-        weight_decay,
         step,
         lr,
+        weight_decay,
         gnorm_scale,
         skip_zeros,
     )
