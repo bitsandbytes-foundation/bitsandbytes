@@ -178,8 +178,6 @@ def gemv_4bit(
     )
 
 
-# optimizer_update_32bit_impl = kernels_optim.optimizer_update_32bit_impl_torch
-optimizer_update_32bit_impl = kernels_optim.optimizer_update_32bit_impl
 def optimizer_update_32bit(
     optimizer_name: str,
     g: torch.Tensor,
@@ -194,14 +192,14 @@ def optimizer_update_32bit(
     beta3: float,
     alpha: float,
     eps: float,
+    weight_decay: float,
     step: int,
     lr: float,
-    weight_decay: float = 0.0,
-    gnorm_scale: float = 1.0,
+    gnorm_scale: float,
     skip_zeros=False,
 ) -> None:
     with torch_accelerator_module.device(state1.device):
-        optimizer_update_32bit_impl(
+        kernels_optim.optimizer_update_32bit_impl(
             optimizer_name=optimizer_name,
             g=g,
             p=p,
@@ -215,9 +213,9 @@ def optimizer_update_32bit(
             beta3=beta3,
             alpha=alpha,
             eps=eps,
+            weight_decay=weight_decay,
             step=step,
             lr=lr,
-            weight_decay=weight_decay,
             gnorm_scale=gnorm_scale,
             skip_zeros=skip_zeros,
         )

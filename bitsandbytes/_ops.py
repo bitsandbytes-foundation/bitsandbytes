@@ -352,7 +352,7 @@ if ipex_cpu or ipex_xpu:
 
 torch.library.define(
     "bitsandbytes::optimizer_update_32bit",
-    "(str optimizer_name, Tensor(a0!) g, Tensor(a1!) p, Tensor(a2!) state1, Tensor(a3!)? state2, Tensor(a4!)? unorm_vec, float max_unorm, float param_norm, float beta1, float beta2, float beta3, float alpha, float eps, int step, float lr, float weight_decay, float gnorm_scale, bool skip_zeros=False) -> ()",
+    "(str optimizer_name, Tensor(a0!) g, Tensor(a1!) p, Tensor(a2!) state1, Tensor(a3!)? state2, Tensor(a4!)? unorm_vec, float max_unorm, float param_norm, float beta1, float beta2, float beta3, float alpha, float eps, float weight_decay, int step, float lr, float gnorm_scale, bool skip_zeros=False) -> ()",
 )
 
 
@@ -371,9 +371,9 @@ def _(
     beta3: float,
     alpha: float,
     eps: float,
+    weight_decay: float,
     step: int,
     lr: float,
-    weight_decay: float,
     gnorm_scale: float,
     skip_zeros=False,
 ) -> None:
