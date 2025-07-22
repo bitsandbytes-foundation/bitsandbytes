@@ -133,6 +133,11 @@ if(BUILD_CUDA)
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
 
+    # Compress embedded fatbins when we build with CUDA ≥ 12.4
+   if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.4")
+      string(APPEND CMAKE_CUDA_FLAGS " --compress-mode=size")
+   endif()
+
     if(PTXAS_VERBOSE)
         # Verbose? Outputs register usage information, and other things...
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
