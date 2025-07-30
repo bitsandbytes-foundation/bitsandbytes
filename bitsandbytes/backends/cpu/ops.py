@@ -67,6 +67,29 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     return out, absmax
 
 
+@register_kernel("bitsandbytes::quantize_blockwise_kbit", "cpu")
+def _(A: torch.Tensor, k: int, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
+    raise NotImplementedError("K-bit quantization is not implemented for CPU backend")
+
+
+@register_kernel("bitsandbytes::dequantize_blockwise_kbit", "cpu")
+def _(A: torch.Tensor, k: int, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
+    raise NotImplementedError("K-bit dequantization is not implemented for CPU backend")
+
+
+@register_kernel("bitsandbytes::dequantize_blockwise_kbit.out", "cpu")
+def _(
+    A: torch.Tensor,
+    k: int,
+    absmax: torch.Tensor,
+    code: torch.Tensor,
+    blocksize: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    raise NotImplementedError("K-bit dequantization is not implemented for CPU backend")
+
+
 @register_kernel("bitsandbytes::dequantize_blockwise", "cpu")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
     torch._check_is_size(blocksize)

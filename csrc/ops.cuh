@@ -133,6 +133,16 @@ void dequantizeBlockwise(
     float* code, unsigned char* A, float* absmax, T* out, int block_size, const int n, cudaStream_t stream
 );
 
+template <typename T, int K, int STOCHASTIC, int DATA_TYPE>
+void quantizeBlockwise_kbit(
+    float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+
+template <typename T, int K, int DATA_TYPE>
+void dequantizeBlockwise_kbit(
+    float* code, unsigned char* A, float* absmax, T* out, int block_size, const int n, cudaStream_t stream
+);
+
 template <typename T, int OPTIMIZER>
 void optimizer32bit(
     T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, float beta1, float beta2,

@@ -467,6 +467,21 @@ __global__ void kQuantizeBlockwise(
     }
 }
 
+template <typename T, int K, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TYPE>
+__global__ void kQuantizeBlockwise_kbit(
+    float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
+    const int rand_offset, const int n
+) {
+    // Placeholder implementation - just store 1 for each element
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        out[idx] = 1;  // Store 1 as quantized value
+        if (threadIdx.x == 0 && (idx % BLOCK_SIZE) == 0) {
+            absmax[idx / BLOCK_SIZE] = 1.0f;  // Store 1.0 as absmax for each block
+        }
+    }
+}
+
 template <typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
 __global__ void
     kDequantizeBlockwise(float* code, unsigned char* A, float* absmax, T* out, const int blocksize, const int n) {
@@ -528,6 +543,15 @@ __global__ void
 
         __syncthreads();
         StoreT(storet).Store(&(out[(DATA_TYPE > 0) ? i * 2 : i]), vals, valid_items_store);
+    }
+}
+
+template <typename T, int K, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
+__global__ void kDequantizeBlockwise_kbit(float* code, unsigned char* A, float* absmax, T* out, const int blocksize, const int n) {
+    // Placeholder implementation - just store 1.0 for each element
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        out[idx] = (T)1.0;  // Store 1.0 as dequantized value
     }
 }
 
@@ -3055,6 +3079,83 @@ template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, General
 template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, NF4>(
     float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, const int blocksize, const int n
 );
+
+// Template instantiations for k-bit quantization kernels
+#define MAKE_kQuantizeBlockwise_kbit(dtype, k, blocksize, num_per_thread, stochastic, data_type_name)                  \
+    template __global__ void kQuantizeBlockwise_kbit<dtype, k, blocksize, num_per_thread, stochastic, data_type_name>( \
+        float* code, dtype* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,   \
+        const int rand_offset, const int n                                                                             \
+    );
+
+#define MAKE_kDequantizeBlockwise_kbit(dtype, k, tile_size, threads, num_per_thread, data_type_name)                   \
+    template __global__ void kDequantizeBlockwise_kbit<dtype, k, tile_size, threads, num_per_thread, data_type_name>(  \
+        float* code, unsigned char* A, float* absmax, dtype* out, const int blocksize, const int n                     \
+    );
+
+// Instantiate for different k values (2-8) and blocksizes
+#define INSTANTIATE_KBIT_KERNELS(dtype)                                                                                \
+    /* Quantize kernels for all block sizes */ \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 2, 4096, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 2, 2048, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 2, 1024, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 2, 512, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 2, 256, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 2, 128, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 2, 64, 2, 0, General8bit)                                                      \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 3, 4096, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 3, 2048, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 3, 1024, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 3, 512, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 3, 256, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 3, 128, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 3, 64, 2, 0, General8bit)                                                      \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 4, 4096, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 4, 2048, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 4, 1024, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 4, 512, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 4, 256, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 4, 128, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 4, 64, 2, 0, General8bit)                                                      \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 5, 4096, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 5, 2048, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 5, 1024, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 5, 512, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 5, 256, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 5, 128, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 5, 64, 2, 0, General8bit)                                                      \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 6, 4096, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 6, 2048, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 6, 1024, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 6, 512, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 6, 256, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 6, 128, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 6, 64, 2, 0, General8bit)                                                      \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 7, 4096, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 7, 2048, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 7, 1024, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 7, 512, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 7, 256, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 7, 128, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 7, 64, 2, 0, General8bit)                                                      \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 8, 4096, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 8, 2048, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 8, 1024, 4, 0, General8bit)                                                    \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 8, 512, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 8, 256, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 8, 128, 2, 0, General8bit)                                                     \
+    MAKE_kQuantizeBlockwise_kbit(dtype, 8, 64, 2, 0, General8bit)                                                      \
+    /* Dequantize kernels */ \
+    MAKE_kDequantizeBlockwise_kbit(dtype, 2, 512, 64, 8, General8bit)                                                 \
+    MAKE_kDequantizeBlockwise_kbit(dtype, 3, 512, 64, 8, General8bit)                                                 \
+    MAKE_kDequantizeBlockwise_kbit(dtype, 4, 512, 64, 8, General8bit)                                                 \
+    MAKE_kDequantizeBlockwise_kbit(dtype, 5, 512, 64, 8, General8bit)                                                 \
+    MAKE_kDequantizeBlockwise_kbit(dtype, 6, 512, 64, 8, General8bit)                                                 \
+    MAKE_kDequantizeBlockwise_kbit(dtype, 7, 512, 64, 8, General8bit)                                                 \
+    MAKE_kDequantizeBlockwise_kbit(dtype, 8, 512, 64, 8, General8bit)
+
+INSTANTIATE_KBIT_KERNELS(half)
+INSTANTIATE_KBIT_KERNELS(float)
+INSTANTIATE_KBIT_KERNELS(__nv_bfloat16)
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread)                              \
     template __global__ void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_per_thread>(            \

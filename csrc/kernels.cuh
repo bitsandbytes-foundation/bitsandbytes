@@ -17,9 +17,17 @@ __global__ void kQuantizeBlockwise(
     float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
     const int rand_offset, const int n
 );
+template <typename T, int K, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TYPE>
+__global__ void kQuantizeBlockwise_kbit(
+    float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
+    const int rand_offset, const int n
+);
 template <typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
 __global__ void
     kDequantizeBlockwise(float* code, unsigned char* A, float* absmax, T* out, const int blocksize, const int n);
+template <typename T, int K, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
+__global__ void
+    kDequantizeBlockwise_kbit(float* code, unsigned char* A, float* absmax, T* out, const int blocksize, const int n);
 
 template <typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPreconditionOptimizer32bit2State(

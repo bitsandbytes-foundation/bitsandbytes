@@ -273,6 +273,52 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     return out, absmax
 
 
+torch.library.define("bitsandbytes::quantize_blockwise_kbit", "(Tensor A, int k, Tensor code, int blocksize) -> (Tensor, Tensor)")
+
+
+@register_fake("bitsandbytes::quantize_blockwise_kbit")
+def _(A: torch.Tensor, k: int, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check_is_size(blocksize)
+    torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
+    n = A.numel()
+    blocks = -(n // -blocksize)
+    absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+    out = torch.empty_like(A, dtype=torch.uint8)
+    return out, absmax
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_blockwise_kbit",
+    "(Tensor A, int k, Tensor absmax, Tensor code, int blocksize, ScalarType dtype) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::dequantize_blockwise_kbit")
+def _(A: torch.Tensor, k: int, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
+    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
+    return torch.empty_like(A, dtype=dtype)
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_blockwise_kbit.out",
+    "(Tensor A, int k, Tensor absmax, Tensor code, int blocksize, ScalarType dtype, Tensor! out) -> ()",
+)
+
+
+@register_fake("bitsandbytes::dequantize_blockwise_kbit.out")
+def _(
+    A: torch.Tensor, k: int, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
+):
+    torch._check_is_size(blocksize)
+    torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
+    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
+    torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
+    torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
+    torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
+
+
 torch.library.define(
     "bitsandbytes::gemv_4bit",
     "(Tensor A, Tensor B, int[] shapeB, Tensor absmax, Tensor code, int blocksize) -> Tensor",

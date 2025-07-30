@@ -245,6 +245,102 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     return out, absmax
 
 
+@register_kernel("bitsandbytes::quantize_blockwise_kbit", "cuda")
+def _(A: torch.Tensor, k: int, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
+    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    torch._check(A.device.type == "cuda", lambda: "Input tensor must be on CUDA device")
+    torch._check(code.device.type == "cuda", lambda: "Code tensor must be on CUDA device")
+    torch._check(code.dtype == torch.float32, lambda: "Code must be float32")
+    torch._check(A.is_contiguous(), lambda: "A must be contiguous")
+    torch._check(code.is_contiguous(), lambda: "Code must be contiguous")
+
+    n = A.numel()
+    blocks = -(n // -blocksize)
+    absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
+    out = torch.zeros_like(A, dtype=torch.uint8)
+
+    with torch.cuda.device_of(A):
+        args = (
+            get_ptr(code),
+            get_ptr(A),
+            get_ptr(absmax),
+            get_ptr(out),
+            ct.c_int32(blocksize),
+            ct.c_int(A.numel()),
+        )
+
+        # Call the appropriate k-bit function based on dtype and k value
+        if A.dtype == torch.float16:
+            getattr(lib, f"cquantize_blockwise_fp16_k{k}")(*args)
+        elif A.dtype == torch.bfloat16:
+            getattr(lib, f"cquantize_blockwise_bf16_k{k}")(*args)
+        elif A.dtype == torch.float32:
+            getattr(lib, f"cquantize_blockwise_fp32_k{k}")(*args)
+        else:
+            raise ValueError(f"K-bit quantization only supports 16/32-bit floats, but got {A.dtype}")
+
+    return out, absmax
+
+
+@register_kernel("bitsandbytes::dequantize_blockwise_kbit", "cuda")
+def _(A: torch.Tensor, k: int, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
+    out = torch.empty_like(A, dtype=dtype)
+    _dequantize_blockwise_kbit_impl(A, k, absmax, code, blocksize, dtype, out=out)
+    return out
+
+
+@register_kernel("bitsandbytes::dequantize_blockwise_kbit.out", "cuda")
+def _(
+    A: torch.Tensor,
+    k: int,
+    absmax: torch.Tensor,
+    code: torch.Tensor,
+    blocksize: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
+    torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
+    torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
+    _dequantize_blockwise_kbit_impl(A, k, absmax, code, blocksize, dtype, out=out)
+
+
+def _dequantize_blockwise_kbit_impl(
+    A: torch.Tensor, k: int, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
+) -> None:
+    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
+    torch._check(
+        dtype in [torch.float16, torch.bfloat16, torch.float32],
+        lambda: f"K-bit dequantization only supports 16/32-bit floats, but got {dtype}",
+    )
+    torch._check(absmax.is_contiguous(), lambda: "Absmax must be contiguous")
+    torch._check(code.is_contiguous(), lambda: "Code must be contiguous")
+
+    with torch.cuda.device_of(A):
+        args = (
+            get_ptr(code),
+            get_ptr(A),
+            get_ptr(absmax),
+            get_ptr(out),
+            ct.c_int32(blocksize),
+            ct.c_int(A.numel()),
+            _get_tensor_stream(A),
+        )
+
+        # Call the appropriate k-bit function based on dtype and k value
+        if dtype == torch.float16:
+            getattr(lib, f"cdequantize_blockwise_fp16_k{k}")(*args)
+        elif dtype == torch.bfloat16:
+            getattr(lib, f"cdequantize_blockwise_bf16_k{k}")(*args)
+        elif dtype == torch.float32:
+            getattr(lib, f"cdequantize_blockwise_fp32_k{k}")(*args)
+        else:
+            raise ValueError(f"K-bit dequantization only supports 16/32-bit floats, but got {dtype}")
+
+
 @register_kernel("bitsandbytes::dequantize_blockwise", "cuda")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
     out = torch.empty_like(A, dtype=dtype)

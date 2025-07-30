@@ -266,6 +266,48 @@ void dequantizeBlockwise_bf16_nf4(
     dequantizeBlockwise<__nv_bfloat16, NF4>(NULL, A, absmax, out, blocksize, n, stream);
 }
 
+// K-bit quantization functions with template demangling
+template<typename T, int K>
+void quantizeBlockwise_kbit_typed(float* code, T* A, float* absmax, unsigned char* out, int blocksize, const int n) {
+    quantizeBlockwise_kbit<T, K, 0, General8bit>(code, A, absmax, out, NULL, 0, blocksize, n);
+}
+
+template<typename T, int K>
+void dequantizeBlockwise_kbit_typed(
+    float* code, unsigned char* A, float* absmax, T* out, int blocksize, const int n, cudaStream_t stream
+) {
+    dequantizeBlockwise_kbit<T, K, General8bit>(code, A, absmax, out, blocksize, n, stream);
+}
+
+// Demangled C interface functions for k-bit quantization
+#define MAKE_KBIT_QUANT_FUNCS(bits)                                                                                    \
+    void quantizeBlockwise_fp16_k##bits(float* code, half* A, float* absmax, unsigned char* out, int blocksize, const int n) { \
+        quantizeBlockwise_kbit_typed<half, bits>(code, A, absmax, out, blocksize, n);                                  \
+    }                                                                                                                  \
+    void quantizeBlockwise_bf16_k##bits(float* code, __nv_bfloat16* A, float* absmax, unsigned char* out, int blocksize, const int n) { \
+        quantizeBlockwise_kbit_typed<__nv_bfloat16, bits>(code, A, absmax, out, blocksize, n);                        \
+    }                                                                                                                  \
+    void quantizeBlockwise_fp32_k##bits(float* code, float* A, float* absmax, unsigned char* out, int blocksize, const int n) { \
+        quantizeBlockwise_kbit_typed<float, bits>(code, A, absmax, out, blocksize, n);                                 \
+    }                                                                                                                  \
+    void dequantizeBlockwise_fp16_k##bits(float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, cudaStream_t stream) { \
+        dequantizeBlockwise_kbit_typed<half, bits>(code, A, absmax, out, blocksize, n, stream);                        \
+    }                                                                                                                  \
+    void dequantizeBlockwise_bf16_k##bits(float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, int blocksize, const int n, cudaStream_t stream) { \
+        dequantizeBlockwise_kbit_typed<__nv_bfloat16, bits>(code, A, absmax, out, blocksize, n, stream);              \
+    }                                                                                                                  \
+    void dequantizeBlockwise_fp32_k##bits(float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, cudaStream_t stream) { \
+        dequantizeBlockwise_kbit_typed<float, bits>(code, A, absmax, out, blocksize, n, stream);                       \
+    }
+
+MAKE_KBIT_QUANT_FUNCS(2)
+MAKE_KBIT_QUANT_FUNCS(3)
+MAKE_KBIT_QUANT_FUNCS(4)
+MAKE_KBIT_QUANT_FUNCS(5)
+MAKE_KBIT_QUANT_FUNCS(6)
+MAKE_KBIT_QUANT_FUNCS(7)
+MAKE_KBIT_QUANT_FUNCS(8)
+
 int igemmlt_32(
     cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
     int lda, int ldb, int ldc, cudaStream_t stream
@@ -415,6 +457,35 @@ void cdequantize_blockwise_bf16_nf4(
 ) {
     dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n, stream);
 }
+
+// C interface for k-bit quantization
+#define MAKE_CKBIT_QUANT_FUNCS(bits)                                                                                   \
+    void cquantize_blockwise_fp16_k##bits(float* code, half* A, float* absmax, unsigned char* out, int blocksize, const int n) { \
+        quantizeBlockwise_fp16_k##bits(code, A, absmax, out, blocksize, n);                                            \
+    }                                                                                                                  \
+    void cquantize_blockwise_bf16_k##bits(float* code, __nv_bfloat16* A, float* absmax, unsigned char* out, int blocksize, const int n) { \
+        quantizeBlockwise_bf16_k##bits(code, A, absmax, out, blocksize, n);                                            \
+    }                                                                                                                  \
+    void cquantize_blockwise_fp32_k##bits(float* code, float* A, float* absmax, unsigned char* out, int blocksize, const int n) { \
+        quantizeBlockwise_fp32_k##bits(code, A, absmax, out, blocksize, n);                                            \
+    }                                                                                                                  \
+    void cdequantize_blockwise_fp16_k##bits(float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, cudaStream_t stream) { \
+        dequantizeBlockwise_fp16_k##bits(code, A, absmax, out, blocksize, n, stream);                                  \
+    }                                                                                                                  \
+    void cdequantize_blockwise_bf16_k##bits(float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, int blocksize, const int n, cudaStream_t stream) { \
+        dequantizeBlockwise_bf16_k##bits(code, A, absmax, out, blocksize, n, stream);                                  \
+    }                                                                                                                  \
+    void cdequantize_blockwise_fp32_k##bits(float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, cudaStream_t stream) { \
+        dequantizeBlockwise_fp32_k##bits(code, A, absmax, out, blocksize, n, stream);                                  \
+    }
+
+MAKE_CKBIT_QUANT_FUNCS(2)
+MAKE_CKBIT_QUANT_FUNCS(3)
+MAKE_CKBIT_QUANT_FUNCS(4)
+MAKE_CKBIT_QUANT_FUNCS(5)
+MAKE_CKBIT_QUANT_FUNCS(6)
+MAKE_CKBIT_QUANT_FUNCS(7)
+MAKE_CKBIT_QUANT_FUNCS(8)
 
 #define MAKE_CFUNC32(name, gtype, gbits)                                                                               \
     void c##name##32bit_grad_##gbits(                                                                                  \
