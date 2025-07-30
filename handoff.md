@@ -1,250 +1,269 @@
-# Bitsandbytes K-bit Quantization Implementation Handoff
+# K-bit Quantization Implementation Handoff
 
-## Git Status
-- Current branch: `kbit`
-- Main branch: `main`
-- All k-bit implementation changes are unstaged (not committed)
-- Untracked test file: `tests/test_kbit_quant.py`
-- Various untracked files in root (test scripts, docs, etc.)
+## Executive Summary
 
-## Overview
-This document summarizes the implementation of k-bit quantization functions (`quantize_blockwise_kbit` and `dequantize_blockwise_kbit`) in the bitsandbytes library. The implementation follows the existing architecture pattern with k as a template parameter for compile-time optimization.
+Successfully replaced the dummy k-bit quantization implementation with a **real bit-packing system** that achieves **70% quantization accuracy** and proper memory compression. The implementation includes:
 
-## Initial Request
-The user requested to:
-1. Create new functions `quantize_blockwise_kbit` and `dequantize_blockwise_kbit` 
-2. These should have the same structure as existing functions but append "_kbit"
-3. Include an additional parameter `k` (number of bits)
-4. K must be a template parameter in CUDA for efficiency
-5. Templates need to be demangled in the C layer
-6. Follow the existing pattern
-7. Implement as placeholder functions that return "1.0" for each element
-8. No CPU fallback needed - just throw NotImplementedError
+- ✅ **Real bit packing**: Packs `floor(32/k)` k-bit values per uint32 word
+- ✅ **Binary search quantization**: Uses existing dQuantize logic with k-bit codebooks
+- ✅ **Shape preservation**: Handles multi-dimensional tensors correctly
+- ✅ **Infrastructure compliance**: Follows bitsandbytes architecture patterns
+- ✅ **Cross-block alignment**: Fixed critical bit packing alignment bug
 
-## Architecture Overview
+**Remaining work**: 30% quantization accuracy gap due to scaling/search logic issues.
 
-The implementation spans multiple layers following the existing bitsandbytes architecture:
+## Implementation Journey
 
-```
-Python API (functional.py)
-    ↓
-PyTorch Ops Registration (_ops.py)
-    ↓
-C Interface with Demangling (pythonInterface.cpp)
-    ↓
-C++ Template Functions (ops.cu)
-    ↓
-CUDA Kernels (kernels.cu)
-```
+### Phase 1: Understanding the Requirements (Completed ✅)
 
-## Detailed Implementation
+**Challenge**: Replace placeholder kernels that returned 1.0 with real k-bit quantization using CUB and bit packing.
 
-### 1. Python API (`bitsandbytes/functional.py`)
+**Key insights discovered**:
+- Existing codebooks use `create_linear_map()` with 256-element tensors
+- k-bit values scattered across indices [0,1,2,252,253,254,255] instead of [0-7]
+- Need to pack multiple k-bit values into uint32 words for memory efficiency
+- Must maintain compatibility with existing quantization infrastructure
 
-Added two main functions:
+### Phase 2: Codebook Compaction (Completed ✅)
 
+**Problem**: Original codebooks scatter k-bit values across 256 indices, but kernels expect consecutive indices 0 to 2^k-1.
+
+**Solution**: Modified `functional.py` to compact codebooks:
 ```python
-def quantize_blockwise_kbit(
-    A: torch.Tensor,
-    k: int,
-    code: Optional[torch.Tensor] = None,
-    absmax: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
-    blocksize=4096,
-    nested=False,
-) -> tuple[torch.Tensor, QuantState]:
+# Extract non-zero values and place at beginning
+non_zero_values = full_code[full_code != 0]
+code = torch.zeros(256, device=device, dtype=torch.float32)
+code[:len(non_zero_values)] = non_zero_values
 ```
 
-```python
-def dequantize_blockwise_kbit(
-    A: torch.Tensor,
-    k: int,
-    quant_state: Optional[QuantState] = None,
-    absmax: Optional[torch.Tensor] = None,
-    code: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
-    blocksize: int = 4096,
-    nested=False,
-) -> torch.Tensor:
+**Result**: Kernel binary search now operates on consecutive indices 0-7 for k=3.
+
+### Phase 3: Bit Packing Implementation (Completed ✅)
+
+**Challenge**: Pack k-bit quantized indices into continuous uint32 words.
+
+**Quantization packing**:
+- k=3: 10 values per word (30 bits used, 2 wasted)
+- k=4: 8 values per word (32 bits used, 0 wasted)
+- k=5: 6 values per word (30 bits used, 2 wasted)
+
+**Dequantization unpacking**:
+```cuda
+uint32_t quantized_val = (packed_word >> (i * K)) & ((1 << K) - 1);
+float dequantized_val = smem_code[quantized_val] * local_absmax;
 ```
 
-**Key changes to QuantState class:**
-- Added `k` parameter to `__init__`
-- Added `k` to valid_qs_keys
-- Added `self.k = k` assignment
+### Phase 4: Critical Bug Fix - Word Boundary Alignment (Completed ✅)
 
-### 2. PyTorch Operation Registration (`bitsandbytes/_ops.py`)
+**Major Bug Discovered**: Original quantization kernel created gaps between blocks:
+- Block 0 (elements 0-31): wrote to words [0,1,2,3]
+- Block 1 (elements 32-63): wrote to words [4,5,6,7] ← **GAP!**
+- Dequantization expected continuous packing: words [0,1,2,3,4,5,6]
 
-Registered operations with PyTorch's custom operator system:
-
-```python
-lib.define("quantize_blockwise_kbit(Tensor input, int k, Tensor code, int blocksize=4096) -> (Tensor, Tensor)")
-lib.define("dequantize_blockwise_kbit(Tensor input, int k, Tensor(a!) absmax, Tensor code, int blocksize, ScalarType dtype) -> Tensor")
-lib.define("dequantize_blockwise_kbit.out(Tensor input, int k, Tensor(a!) absmax, Tensor code, int blocksize, ScalarType dtype, *, Tensor(a!) out) -> ()")
+**Root Cause**: Per-block word offset calculation:
+```cuda
+// WRONG - creates gaps
+const int word_offset = (block_start + elements_per_word - 1) / elements_per_word;
 ```
 
-### 3. C Interface (`csrc/pythonInterface.cpp`)
-
-Created wrapper functions for template demangling. For each dtype (fp32, fp16, bf16) and k value (2-8):
-
-```cpp
-extern "C" void quantizeBlockwise_fp16_k4(
-    float* code, half* A, float* absmax, unsigned char* out, 
-    const int blocksize, const int n
-) {
-    quantizeBlockwise_kbit<half, 4, 0, General8bit>(
-        code, A, absmax, out, NULL, 0, blocksize, n
-    );
+**Fix**: Global word-based processing across block boundaries:
+```cuda
+// CORRECT - continuous packing
+for (int word_idx = global_thread_id; word_idx < total_words; word_idx += stride) {
+    int element_idx = word_idx * elements_per_word + i;
+    int element_block_idx = element_idx / BLOCK_SIZE;  // Cross-block lookup
+    float element_absmax = absmax[element_block_idx];
 }
 ```
 
-### 4. C++ Templates (`csrc/ops.cu` and `csrc/ops.cuh`)
+**Impact**: Improved accuracy from 31% → 70%.
 
-Template functions that dispatch to CUDA kernels:
+## Current Implementation Details
 
-```cpp
-template <typename T, int K, int STOCHASTIC, int DATA_TYPE>
-void quantizeBlockwise_kbit(
-    float* code, T* A, float* absmax, unsigned char* out, 
-    float* rand, int rand_offset, int blocksize, const int n
-) {
-    // Dispatch based on blocksize
+### Architecture Overview
+```
+Python API (functional.py) - Shape handling, codebook compaction
+    ↓
+PyTorch Ops (_ops.py) - Operation registration
+    ↓
+CUDA Backend (backends/cuda/ops.py) - Tensor size calculation
+    ↓
+C++ Templates (ops.cu) - Dispatch logic
+    ↓
+CUDA Kernels (kernels.cu) - Bit packing/unpacking + quantization
+```
+
+### Quantization Kernel (`kQuantizeBlockwise_kbit`)
+**Current approach**:
+1. **Block-wise absmax computation**: CUB BlockReduce for each 32-element block
+2. **Global word processing**: Each thread processes entire words across block boundaries
+3. **Binary search**: Limited to first 2^k codebook entries
+4. **Bit packing**: `|= (quantized_idx & mask) << (bit_position)`
+
+**Performance characteristics**:
+- ⚠️ **Cross-block absmax lookups**: Each element requires `element_idx / BLOCK_SIZE` division
+- ⚠️ **Uncoalesced memory access**: Threads access scattered elements within words
+- ✅ **Efficient shared memory**: Codebook loaded once per block
+
+### Dequantization Kernel (`kDequantizeBlockwise_kbit`) 
+**Current approach** (performance-critical):
+1. **Sequential word processing**: Grid-stride loop over packed words
+2. **Bit unpacking**: Extract k-bit values using shifts and masks
+3. **Direct codebook lookup**: `smem_code[quantized_val]` - no search needed
+4. **Cross-block scaling**: Dynamic absmax lookup per element
+
+**Performance characteristics**:
+- ✅ **Coalesced memory access**: Sequential word reads
+- ✅ **No binary search**: Direct O(1) codebook lookup
+- ⚠️ **Cross-block absmax**: Division required per element
+- ✅ **Good occupancy**: Grid-stride maximizes GPU utilization
+
+## Performance Analysis & Optimization Opportunities
+
+### Dequantization Optimizations (Priority: HIGH)
+
+**1. Eliminate Cross-Block Absmax Divisions**
+```cuda
+// Current: Expensive per-element division
+int element_block_idx = element_idx / BLOCK_SIZE;
+
+// Optimization: Pre-compute block boundaries
+int word_start_block = (word_idx * elements_per_word) / BLOCK_SIZE;
+int word_end_block = ((word_idx + 1) * elements_per_word - 1) / BLOCK_SIZE;
+if (word_start_block == word_end_block) {
+    // Single block - use cached absmax
+    float cached_absmax = absmax[word_start_block];
+} else {
+    // Cross-block word - compute per element
 }
 ```
 
-Added explicit template instantiations for all combinations.
-
-### 5. CUDA Kernels (`csrc/kernels.cu` and `csrc/kernels.cuh`)
-
-Placeholder implementation:
-
-```cpp
-template <typename T, int K, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TYPE>
-__global__ void kQuantizeBlockwise_kbit(...) {
-    // Placeholder - stores 1 for each element
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
-        out[idx] = 1;  // Store 1 as quantized value
-    }
-}
-
-template <typename T, int K, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
-__global__ void kDequantizeBlockwise_kbit(...) {
-    // Placeholder - stores 1.0 for each element
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
-        out[idx] = (T)1.0;  // Store 1.0 as dequantized value
-    }
-}
+**2. CUB BlockLoad Integration**
+```cuda
+// Use CUB for vectorized word loading
+typedef cub::BlockLoad<uint32_t, BLOCK_THREADS, ITEMS_PER_THREAD, 
+                      cub::BLOCK_LOAD_VECTORIZE> LoadWords;
+uint32_t words[ITEMS_PER_THREAD];
+LoadWords(temp_storage).Load(&packed_input[tile_offset], words);
 ```
 
-**Important:** Added template instantiations for ALL block sizes (64, 128, 256, 512, 1024, 2048, 4096) and k values (2-8).
-
-### 6. Backend Implementation
-
-#### CUDA Backend (`bitsandbytes/backends/cuda/ops.py`)
-Full implementation that dispatches to appropriate C functions based on dtype and k:
-
-```python
-@register_kernel("bitsandbytes::quantize_blockwise_kbit", "cuda")
-def _(A: torch.Tensor, k: int, code: torch.Tensor, blocksize: int):
-    # Dispatch based on dtype and k value
+**3. Shared Memory Absmax Caching**
+```cuda
+// Cache multiple absmax values in shared memory
+__shared__ float smem_absmax[MAX_BLOCKS_PER_TILE];
+// Load absmax values needed for current tile
 ```
 
-#### CPU Backend (`bitsandbytes/backends/cpu/ops.py`)
-Simple NotImplementedError as requested:
+### Quantization Optimizations (Priority: MEDIUM)
 
-```python
-@register_kernel("bitsandbytes::quantize_blockwise_kbit", "cpu")
-def _(A: torch.Tensor, k: int, code: torch.Tensor, blocksize: int):
-    raise NotImplementedError("K-bit quantization is not implemented for CPU backend")
+**1. Block-Aligned Processing**
+- Process entire blocks before moving to next block
+- Reduces cross-block absmax lookups
+- Better cache locality for absmax values
+
+**2. Warp-Level Bit Packing**
+- Use warp shuffle for collaborative word assembly
+- Reduce register pressure from packed_word variables
+
+## Remaining Issues (Priority: HIGH)
+
+### Quantization Accuracy Gap (30% error rate)
+
+**Current Status**: Test shows 70% accuracy, with specific pattern of failures:
+```
+Element 33: expected -0.667 (idx 1), got -1.000 (idx 0)  # Wrong quantization choice
+Element 35: expected  0.667 (idx 254), got 0.000 (idx 3) # Wrong quantization choice  
 ```
 
-## Compilation and Runtime Issues Resolved
+**Suspected Root Causes**:
 
-### 1. CMake Configuration
-- Must use `-DCOMPUTE_BACKEND=cuda` (not just `-DBUILD_CUDA=ON`)
-- Configured for RTX 4090: `-DCMAKE_CUDA_ARCHITECTURES=89`
-- Used CUDA 12.4: `-DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.4/bin/nvcc`
+**1. Scaling Direction Issue**:
+```cuda
+// Current implementation
+float normalized_val = ((float)A[element_idx]) / fmaxf(element_absmax, 1e-8f);
 
-### 2. CUDA Version Mismatch
-- PyTorch built with CUDA 12.8, bitsandbytes with 12.4
-- Resolved with: `export BNB_CUDA_VERSION=124`
+// Original used: smem_absmax = 1.0f / block_max; ... * smem_absmax
+// This suggests normalization should be multiplication, not division
+```
 
-### 3. Linker Errors
-- Initial error: undefined symbol for k-bit functions
-- Fixed by adding explicit template instantiations in both `ops.cu` and `kernels.cu`
-- Required instantiations for all block sizes, not just the default
+**2. Binary Search Bounds**:
+```cuda
+// Current search range
+int pivot = (1 << (K-1)) - 1;     // Start at middle
+int upper_pivot = (1 << K) - 1;   // Max index
+int lower_pivot = 0;              // Min index
 
-### 4. Function Import Error
-- `get_stream` was not defined
-- Fixed by using `_get_tensor_stream` which was already imported
+// May need adjustment for compacted codebook layout
+```
 
-### 5. Kernel Launch Configuration
-- Initial kernel launch used incorrect grid size calculation
-- Fixed to properly calculate blocks based on number of elements and threads per block
+**3. Cross-Block Absmax Consistency**:
+- Elements 32+ use different absmax lookup path
+- Potential precision differences between blocks
 
-## Testing
+### Testing Infrastructure
 
-Created comprehensive test suite in `tests/test_kbit_quant.py`:
+**Diagnostic Test Created**: `test_quantization_correctness.py`
+- Manually unpacks k-bit values from packed tensor
+- Compares against reference quantization with same codebook
+- Identifies exact elements where quantization differs
+- **Key insight**: Bit packing alignment now correct, remaining issues are quantization logic
 
-1. `test_kbit_placeholder_functions()` - Verifies placeholder returns all 1.0s
-2. `test_kbit_vs_8bit_quantization()` - Compares with existing 8-bit
-3. `test_real_kbit_quantization()` - Tests different bit widths using linear maps
-4. `test_kbit_vs_specialized_4bit()` - Compares with NF4 format
-5. `test_kbit_quantization_parametrized()` - Parametrized tests for all bit widths
+## Recommended Next Steps
 
-All tests are passing with adjusted error tolerances.
+### Immediate (Fix Accuracy)
+1. **Debug scaling direction**: Test whether normalization should be multiplication vs division
+2. **Validate binary search bounds**: Ensure search operates on correct codebook range
+3. **Test cross-block consistency**: Verify absmax lookup produces identical results
+
+### Short Term (Optimize Dequantization)
+1. **Implement CUB BlockLoad** for vectorized memory access
+2. **Add absmax caching** to reduce cross-block divisions
+3. **Profile memory bandwidth** utilization on target GPU
+
+### Long Term (Production Optimization)
+1. **PTX integration**: Replace shifts/masks with BFE instructions
+2. **Warp-level optimizations**: Collaborative bit packing/unpacking
+3. **Multi-GPU scaling**: Optimize for distributed quantization workloads
 
 ## Build Instructions
 
-For incremental builds (recommended):
 ```bash
 cd build
 cmake .. -DCOMPUTE_BACKEND=cuda -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.4/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=89
 make -j$(nproc)
 ```
 
-## Current Status
+**Environment**: `export BNB_CUDA_VERSION=124`
 
-✅ Complete implementation of k-bit quantization infrastructure
-✅ Placeholder kernels return 1.0 for all elements
-✅ All tests passing
-✅ Follows existing architecture patterns
-✅ Template parameter k for compile-time optimization
-✅ Proper C interface demangling
+## Test Execution
 
-## Next Steps
+```bash
+# Basic functionality
+BNB_CUDA_VERSION=124 python -m pytest tests/test_kbit_quant.py::test_kbit_bit_packing -v
 
-The placeholder implementation is ready to be replaced with actual k-bit quantization logic. The infrastructure supports:
-- k values from 2 to 8
-- All standard block sizes (64 to 4096)
-- float16, float32, and bfloat16 data types
-- Both quantization and dequantization operations
+# Accuracy debugging  
+BNB_CUDA_VERSION=124 python test_quantization_correctness.py
+```
 
 ## Files Modified
 
-1. `bitsandbytes/functional.py` - Added k-bit functions and updated QuantState
-2. `bitsandbytes/_ops.py` - Added PyTorch operation registration
-3. `bitsandbytes/backends/cuda/ops.py` - CUDA backend implementation
-4. `bitsandbytes/backends/cpu/ops.py` - CPU NotImplementedError
-5. `csrc/pythonInterface.cpp` - C interface with demangling
-6. `csrc/ops.cu` - C++ template implementations
-7. `csrc/ops.cuh` - C++ header declarations
-8. `csrc/kernels.cu` - CUDA kernel implementations
-9. `csrc/kernels.cuh` - CUDA kernel declarations
-10. `tests/test_kbit_quant.py` - Comprehensive test suite
+**Core Implementation**:
+- `csrc/kernels.cu` - CUDA kernels with bit packing
+- `csrc/ops.cu` - Template dispatch (simplified to blocksize=32)
+- `bitsandbytes/functional.py` - Codebook compaction, shape handling
+- `bitsandbytes/backends/cuda/ops.py` - Tensor size calculations
 
-Total: 591 lines added across 9 source files (plus tests).
+**Testing**:
+- `tests/test_kbit_quant.py` - End-to-end validation suite
+- `test_quantization_correctness.py` - Bit packing diagnostic tool
 
-## Key Technical Decisions
+**Total**: ~400 lines of new/modified CUDA code, ~200 lines Python changes
 
-1. **Template Parameter K**: Used compile-time template parameter for k to enable optimizations
-2. **C Demangling**: Created individual C functions for each k value (2-8) to handle C++ template name mangling
-3. **Placeholder Implementation**: Returns 1 for quantized values, 1.0 for dequantized values
-4. **Error Handling**: CPU backend throws NotImplementedError rather than falling back
-5. **QuantState Extension**: Added k parameter to existing QuantState class for compatibility
-6. **Test Strategy**: Created comprehensive tests that verify the placeholder behavior and compare with existing quantization methods
+## Technical Debt
 
-## Important Environment Variable
-Always run tests with: `BNB_CUDA_VERSION=124` to match the compiled CUDA version.
+1. **Magic numbers**: Hard-coded blocksize=32, should be configurable
+2. **Error handling**: Limited bounds checking in kernels
+3. **Memory alignment**: No explicit alignment guarantees for packed tensors
+4. **Stochastic quantization**: Currently unimplemented (marked TODO)
+
+The implementation provides a solid foundation for k-bit quantization with proper bit packing and reasonable performance characteristics. The remaining accuracy issues are well-isolated and should be resolvable with focused debugging of the quantization logic.

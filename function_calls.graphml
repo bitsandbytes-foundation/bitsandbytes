@@ -1,0 +1,205 @@
+<?xml version='1.0' encoding='utf-8'?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd"><graph edgedefault="directed"><node id="assert_all_approx_close"/>
+<node id="print"/>
+<node id="__init__"/>
+<node id="super"/>
+<node id="forward"/>
+<node id="tick"/>
+<node id="tock"/>
+<node id="reset"/>
+<node id="setup"/>
+<node id="teardown"/>
+<node id="test_estimate_quantiles"/>
+<node id="test_quantile_quantization"/>
+<node id="range"/>
+<node id="test_dynamic_quantization"/>
+<node id="sum"/>
+<node id="len"/>
+<node id="test_dynamic_blockwise_quantization"/>
+<node id="id_formatter"/>
+<node id="test_percentile_clipping"/>
+<node id="quant"/>
+<node id="dequant"/>
+<node id="mm_dequant"/>
+<node id="quant_multi"/>
+<node id="quant_multi_chunk"/>
+<node id="quant_minmax"/>
+<node id="mean"/>
+<node id="float"/>
+<node id="test_approx_igemm"/>
+<node id="test_stable_embedding"/>
+<node id="test_igemm"/>
+<node id="get_test_dims"/>
+<node id="test_dim3_igemm"/>
+<node id="test_minmax_igemm"/>
+<node id="min_max"/>
+<node id="test_ibmm"/>
+<node id="test_vector_quant"/>
+<node id="int"/>
+<node id="test_nvidia_transform"/>
+<node id="str"/>
+<node id="test_igemmlt_int"/>
+<node id="test_igemmlt_half"/>
+<node id="test_bench_8bit_training"/>
+<node id="test_dequant_mm"/>
+<node id="test_colrow_absmax"/>
+<node id="test_double_quant"/>
+<node id="test_integrated_igemmlt"/>
+<node id="zip"/>
+<node id="test_igemmlt_row_scale"/>
+<node id="test_row_scale_bench"/>
+<node id="test_transform"/>
+<node id="test_overflow"/>
+<node id="test_coo_double_quant"/>
+<node id="test_spmm_coo"/>
+<node id="test_spmm_bench"/>
+<node id="test_integrated_sparse_decomp"/>
+<node id="test_matmuls"/>
+<node id="test_spmm_coo_very_sparse"/>
+<node id="getattr"/>
+<node id="out_func"/>
+<node id="test_coo2csr"/>
+<node id="test_coo2csc"/>
+<node id="test_spmm_coo_dequant"/>
+<node id="test_bench_matmul"/>
+<node id="test_zeropoint"/>
+<node id="quant_zp"/>
+<node id="test_extract_outliers"/>
+<node id="test_blockwise_cpu_large"/>
+<node id="test_fp8_quant"/>
+<node id="test_few_bit_quant"/>
+<node id="test_kbit_quantile_estimation"/>
+<node id="test_bench_dequantization"/>
+<node id="test_4bit_quant"/>
+<node id="list"/>
+<node id="product"/>
+<node id="test_4bit_compressed_stats"/>
+<node id="test_bench_4bit_dequant"/>
+<node id="test_normal_map_tree"/>
+<node id="test_gemv_4bit"/>
+<node id="test_managed"/>
+<node id="test_gemv_eye_4bit"/>
+<edge source="assert_all_approx_close" target="print"/>
+<edge source="__init__" target="super"/>
+<edge source="tock" target="print"/>
+<edge source="reset" target="print"/>
+<edge source="test_quantile_quantization" target="range"/>
+<edge source="test_dynamic_quantization" target="range"/>
+<edge source="test_dynamic_quantization" target="print"/>
+<edge source="test_dynamic_quantization" target="sum"/>
+<edge source="test_dynamic_quantization" target="len"/>
+<edge source="test_dynamic_blockwise_quantization" target="range"/>
+<edge source="test_dynamic_blockwise_quantization" target="sum"/>
+<edge source="test_dynamic_blockwise_quantization" target="len"/>
+<edge source="test_dynamic_blockwise_quantization" target="id_formatter"/>
+<edge source="test_percentile_clipping" target="range"/>
+<edge source="mean" target="sum"/>
+<edge source="mean" target="float"/>
+<edge source="mean" target="len"/>
+<edge source="test_approx_igemm" target="range"/>
+<edge source="test_approx_igemm" target="id_formatter"/>
+<edge source="test_igemm" target="range"/>
+<edge source="test_igemm" target="get_test_dims"/>
+<edge source="test_igemm" target="id_formatter"/>
+<edge source="test_dim3_igemm" target="range"/>
+<edge source="test_dim3_igemm" target="get_test_dims"/>
+<edge source="test_dim3_igemm" target="id_formatter"/>
+<edge source="test_minmax_igemm" target="range"/>
+<edge source="test_minmax_igemm" target="min_max"/>
+<edge source="test_minmax_igemm" target="quant_multi"/>
+<edge source="test_minmax_igemm" target="mm_dequant"/>
+<edge source="test_minmax_igemm" target="mean"/>
+<edge source="test_minmax_igemm" target="get_test_dims"/>
+<edge source="test_minmax_igemm" target="id_formatter"/>
+<edge source="test_ibmm" target="range"/>
+<edge source="test_ibmm" target="get_test_dims"/>
+<edge source="test_ibmm" target="id_formatter"/>
+<edge source="test_vector_quant" target="range"/>
+<edge source="test_vector_quant" target="assert_all_approx_close"/>
+<edge source="test_vector_quant" target="int"/>
+<edge source="test_vector_quant" target="get_test_dims"/>
+<edge source="test_vector_quant" target="id_formatter"/>
+<edge source="test_nvidia_transform" target="str"/>
+<edge source="test_nvidia_transform" target="range"/>
+<edge source="test_nvidia_transform" target="get_test_dims"/>
+<edge source="test_nvidia_transform" target="id_formatter"/>
+<edge source="test_igemmlt_int" target="range"/>
+<edge source="test_igemmlt_int" target="get_test_dims"/>
+<edge source="test_igemmlt_int" target="id_formatter"/>
+<edge source="test_igemmlt_half" target="range"/>
+<edge source="test_igemmlt_half" target="id_formatter"/>
+<edge source="test_bench_8bit_training" target="print"/>
+<edge source="test_bench_8bit_training" target="range"/>
+<edge source="test_dequant_mm" target="range"/>
+<edge source="test_dequant_mm" target="assert_all_approx_close"/>
+<edge source="test_dequant_mm" target="int"/>
+<edge source="test_dequant_mm" target="get_test_dims"/>
+<edge source="test_dequant_mm" target="id_formatter"/>
+<edge source="test_colrow_absmax" target="range"/>
+<edge source="test_colrow_absmax" target="id_formatter"/>
+<edge source="test_double_quant" target="range"/>
+<edge source="test_double_quant" target="print"/>
+<edge source="test_double_quant" target="get_test_dims"/>
+<edge source="test_double_quant" target="id_formatter"/>
+<edge source="test_integrated_igemmlt" target="range"/>
+<edge source="test_integrated_igemmlt" target="zip"/>
+<edge source="test_integrated_igemmlt" target="get_test_dims"/>
+<edge source="test_igemmlt_row_scale" target="range"/>
+<edge source="test_igemmlt_row_scale" target="print"/>
+<edge source="test_igemmlt_row_scale" target="sum"/>
+<edge source="test_igemmlt_row_scale" target="len"/>
+<edge source="test_igemmlt_row_scale" target="zip"/>
+<edge source="test_igemmlt_row_scale" target="get_test_dims"/>
+<edge source="test_row_scale_bench" target="range"/>
+<edge source="test_row_scale_bench" target="print"/>
+<edge source="test_transform" target="range"/>
+<edge source="test_transform" target="get_test_dims"/>
+<edge source="test_transform" target="id_formatter"/>
+<edge source="test_overflow" target="print"/>
+<edge source="test_overflow" target="range"/>
+<edge source="test_coo_double_quant" target="range"/>
+<edge source="test_coo_double_quant" target="get_test_dims"/>
+<edge source="test_coo_double_quant" target="id_formatter"/>
+<edge source="test_spmm_coo" target="range"/>
+<edge source="test_spmm_coo" target="assert_all_approx_close"/>
+<edge source="test_spmm_coo" target="get_test_dims"/>
+<edge source="test_spmm_coo" target="id_formatter"/>
+<edge source="test_spmm_bench" target="range"/>
+<edge source="test_spmm_bench" target="print"/>
+<edge source="test_integrated_sparse_decomp" target="range"/>
+<edge source="test_integrated_sparse_decomp" target="get_test_dims"/>
+<edge source="test_integrated_sparse_decomp" target="id_formatter"/>
+<edge source="test_matmuls" target="print"/>
+<edge source="test_spmm_coo_very_sparse" target="getattr"/>
+<edge source="test_spmm_coo_very_sparse" target="print"/>
+<edge source="test_spmm_coo_very_sparse" target="out_func"/>
+<edge source="test_spmm_coo_very_sparse" target="assert_all_approx_close"/>
+<edge source="test_spmm_coo_very_sparse" target="id_formatter"/>
+<edge source="test_spmm_coo_dequant" target="print"/>
+<edge source="test_spmm_coo_dequant" target="assert_all_approx_close"/>
+<edge source="test_spmm_coo_dequant" target="range"/>
+<edge source="test_bench_matmul" target="range"/>
+<edge source="test_bench_matmul" target="print"/>
+<edge source="test_zeropoint" target="quant_zp"/>
+<edge source="test_zeropoint" target="print"/>
+<edge source="test_extract_outliers" target="range"/>
+<edge source="test_blockwise_cpu_large" target="range"/>
+<edge source="test_blockwise_cpu_large" target="print"/>
+<edge source="test_fp8_quant" target="range"/>
+<edge source="test_few_bit_quant" target="range"/>
+<edge source="test_kbit_quantile_estimation" target="range"/>
+<edge source="test_bench_dequantization" target="print"/>
+<edge source="test_bench_dequantization" target="range"/>
+<edge source="test_4bit_quant" target="list"/>
+<edge source="test_4bit_quant" target="product"/>
+<edge source="test_4bit_compressed_stats" target="range"/>
+<edge source="test_bench_4bit_dequant" target="range"/>
+<edge source="test_normal_map_tree" target="list"/>
+<edge source="test_normal_map_tree" target="range"/>
+<edge source="test_gemv_4bit" target="range"/>
+<edge source="test_gemv_4bit" target="int"/>
+<edge source="test_gemv_4bit" target="assert_all_approx_close"/>
+<edge source="test_gemv_4bit" target="sum"/>
+<edge source="test_gemv_4bit" target="len"/>
+<edge source="test_gemv_eye_4bit" target="get_test_dims"/>
+</graph></graphml>

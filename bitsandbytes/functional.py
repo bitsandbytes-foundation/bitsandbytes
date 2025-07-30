@@ -646,14 +646,14 @@ def quantize_blockwise_kbit(
     code: Optional[torch.Tensor] = None,
     absmax: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize=4096,
+    blocksize=32,
     nested=False,
 ) -> tuple[torch.Tensor, QuantState]:
-    """Quantize a tensor in blocks using k-bit quantization.
+    """Quantize a tensor in blocks using k-bit quantization with bit packing.
 
-    The input tensor is quantized by dividing it into blocks of `blocksize` values.
-    The the absolute maximum value within these blocks is calculated for scaling
-    the k-bit quantization.
+    The input tensor is quantized by dividing it into blocks of 32 values.
+    The absolute maximum value within these blocks is calculated for scaling
+    the k-bit quantization. Multiple k-bit values are packed into uint32 words.
 
     Args:
         A (`torch.Tensor`): The input tensor. Supports `float16`, `bfloat16`, or `float32` datatypes.
@@ -663,27 +663,47 @@ def quantize_blockwise_kbit(
         absmax (`torch.Tensor`, *optional*): A tensor to use to store the absmax values.
         out (`torch.Tensor`, *optional*): A tensor to use to store the result.
         blocksize (`int`, *optional*):
-            The size of the blocks. Defaults to 4096.
-            Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
+            The size of the blocks. Must be 32. Other values will raise NotImplementedError.
         nested (`bool`, *optional*): Whether to additionally quantize the absmax values. Defaults to False.
 
     Raises:
         ValueError: Raised when the input data type or k value is not supported.
+        NotImplementedError: Raised when blocksize is not 32.
 
     Returns:
         `Tuple[torch.Tensor, QuantState]`: A tuple containing the quantization results.
-        - `torch.Tensor`: The quantized tensor.
+        - `torch.Tensor`: The quantized tensor with packed k-bit values.
         - [`QuantState`]: The state object used to undo the quantization.
     """
     if k < 2 or k > 8:
         raise ValueError(f"k must be between 2 and 8, got {k}")
+        
+    if blocksize != 32:
+        raise NotImplementedError(f"Only blocksize=32 is currently supported for k-bit quantization, got {blocksize}")
+
+    # Store original shape for restoration during dequantization
+    original_shape = A.shape
+    A_flat = A.flatten()
 
     if code is None:
         # Create a linear k-bit quantization map
-        code = create_linear_map(signed=True, total_bits=k).to(A.device)
+        full_code = create_linear_map(signed=True, total_bits=k).to(A.device)
+        
+        # Compact the codebook: extract non-zero values and place them at the beginning
+        # This fixes the issue where k-bit values are spread across the 256-element codebook
+        non_zero_mask = full_code != 0
+        non_zero_values = full_code[non_zero_mask]
+        
+        # Create compacted codebook with non-zero values at the beginning
+        code = torch.zeros(256, device=A.device, dtype=torch.float32)
+        code[:len(non_zero_values)] = non_zero_values
+        
+        # Add zero value if not present (important for quantization)
+        if len(non_zero_values) < 2**k:
+            code[len(non_zero_values)] = 0.0
 
     _out, _absmax = torch.ops.bitsandbytes.quantize_blockwise_kbit.default(
-        A,
+        A_flat,
         k,
         code.to(A.device),
         blocksize,
@@ -701,9 +721,17 @@ def quantize_blockwise_kbit(
             offset=offset,
             state2=state2,
             k=k,
+            shape=original_shape,
         )
     else:
-        quant_state = QuantState(absmax=_absmax, code=code.to(A.device, copy=True), blocksize=blocksize, dtype=A.dtype, k=k)
+        quant_state = QuantState(
+            absmax=_absmax, 
+            code=code.to(A.device, copy=True), 
+            blocksize=blocksize, 
+            dtype=A.dtype, 
+            k=k,
+            shape=original_shape,
+        )
 
     # TODO(matthewdouglas): Deprecate out kwarg
     out = out.copy_(_out) if out is not None else _out
@@ -799,17 +827,16 @@ def dequantize_blockwise_kbit(
     absmax: Optional[torch.Tensor] = None,
     code: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
-    blocksize: int = 4096,
+    blocksize: int = 32,
     nested=False,
 ) -> torch.Tensor:
-    """Dequantize a tensor in blocks using k-bit dequantization.
+    """Dequantize a tensor in blocks using k-bit dequantization with bit unpacking.
 
-    The input tensor is dequantized by dividing it into blocks of `blocksize` values.
-    The the absolute maximum value within these blocks is used for scaling
-    the k-bit dequantization.
+    The input tensor contains packed k-bit values that are unpacked and dequantized
+    back to the original tensor shape using stored scaling values.
 
     Args:
-        A (`torch.Tensor`): The quantized input tensor.
+        A (`torch.Tensor`): The quantized input tensor with packed k-bit values.
         k (`int`): The number of bits used for quantization (2-8).
         quant_state ([`QuantState`], *optional*):
             The quantization state as returned by [`quantize_blockwise_kbit`].
@@ -822,24 +849,39 @@ def dequantize_blockwise_kbit(
             Ignored when `quant_state` is provided.
         out (`torch.Tensor`, *optional*): A tensor to use to store the result.
         blocksize (`int`, *optional*):
-            The size of the blocks. Defaults to 4096.
-            Valid values are 64, 128, 256, 512, 1024, 2048, and 4096.
+            The size of the blocks. Must be 32. Other values will raise NotImplementedError.
             Ignored when `quant_state` is provided.
 
     Raises:
         ValueError: Raised when the input data type or k value is not supported.
+        NotImplementedError: Raised when blocksize is not 32.
 
     Returns:
         `torch.Tensor`:
-            The dequantized tensor. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.
+            The dequantized tensor restored to original shape. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.
     """
     if k < 2 or k > 8:
         raise ValueError(f"k must be between 2 and 8, got {k}")
+        
+    if quant_state is None and blocksize != 32:
+        raise NotImplementedError(f"Only blocksize=32 is currently supported for k-bit quantization, got {blocksize}")
 
     assert quant_state is not None or absmax is not None
     if code is None and quant_state is None:
         # Create a linear k-bit quantization map
-        code = create_linear_map(signed=True, total_bits=k).to(A.device)
+        full_code = create_linear_map(signed=True, total_bits=k).to(A.device)
+        
+        # Compact the codebook: extract non-zero values and place them at the beginning
+        non_zero_mask = full_code != 0
+        non_zero_values = full_code[non_zero_mask]
+        
+        # Create compacted codebook with non-zero values at the beginning
+        code = torch.zeros(256, device=A.device, dtype=torch.float32)
+        code[:len(non_zero_values)] = non_zero_values
+        
+        # Add zero value if not present (important for quantization)
+        if len(non_zero_values) < 2**k:
+            code[len(non_zero_values)] = 0.0
 
     if quant_state is None:
         quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=torch.float32, k=k)
@@ -865,9 +907,12 @@ def dequantize_blockwise_kbit(
             quant_state.dtype,
             out=out,
         )
+        # Restore original shape if available
+        if hasattr(quant_state, 'shape') and quant_state.shape is not None:
+            return out.view(quant_state.shape)
         return out
 
-    return torch.ops.bitsandbytes.dequantize_blockwise_kbit.default(
+    result = torch.ops.bitsandbytes.dequantize_blockwise_kbit.default(
         A,
         k,
         absmax,
@@ -875,6 +920,11 @@ def dequantize_blockwise_kbit(
         quant_state.blocksize,
         quant_state.dtype,
     )
+    
+    # Restore original shape if available
+    if hasattr(quant_state, 'shape') and quant_state.shape is not None:
+        return result.view(quant_state.shape)
+    return result
 
 
 def get_4bit_type(typename, device=None, blocksize=64):

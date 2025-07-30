@@ -79,24 +79,17 @@ template <typename T, int K, int STOCHASTIC, int DATA_TYPE>
 void quantizeBlockwise_kbit(
     float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
 ) {
-    int num_blocks = n / blocksize;
-    num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
-
-    if (blocksize == 4096)
-        kQuantizeBlockwise_kbit<T, K, 4096, 4, STOCHASTIC, DATA_TYPE>
-            <<<num_blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
-    else if (blocksize == 2048)
-        kQuantizeBlockwise_kbit<T, K, 2048, 4, 0, DATA_TYPE><<<num_blocks, 512>>>(code, A, absmax, out, rand, rand_offset, n);
-    else if (blocksize == 1024)
-        kQuantizeBlockwise_kbit<T, K, 1024, 4, 0, DATA_TYPE><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
-    else if (blocksize == 512)
-        kQuantizeBlockwise_kbit<T, K, 512, 2, 0, DATA_TYPE><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
-    else if (blocksize == 256)
-        kQuantizeBlockwise_kbit<T, K, 256, 2, 0, DATA_TYPE><<<num_blocks, 128>>>(code, A, absmax, out, rand, rand_offset, n);
-    else if (blocksize == 128)
-        kQuantizeBlockwise_kbit<T, K, 128, 2, 0, DATA_TYPE><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
-    else if (blocksize == 64)
-        kQuantizeBlockwise_kbit<T, K, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
+    // Only support blocksize=32 for k-bit quantization
+    if (blocksize != 32) {
+        // This should be caught at Python level, but add safety check
+        return;
+    }
+    
+    int num_blocks = (n + 31) / 32;  // Round up to handle partial blocks
+    int threads = 256;  // Use 256 threads per block for better occupancy
+    
+    kQuantizeBlockwise_kbit<T, K, 32, 4, STOCHASTIC, DATA_TYPE>
+        <<<num_blocks, threads>>>(code, A, absmax, out, rand, rand_offset, n);
 
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -105,12 +98,19 @@ template <typename T, int K, int DATA_TYPE>
 void dequantizeBlockwise_kbit(
     float* code, unsigned char* A, float* absmax, T* out, int blocksize, const int n, cudaStream_t stream
 ) {
-    int num_blocks = n / blocksize;
-    num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
-    int threads = 64;
-    int blocks = (n + threads - 1) / threads;
+    // Only support blocksize=32 for k-bit quantization
+    if (blocksize != 32) {
+        // This should be caught at Python level, but add safety check
+        return;
+    }
     
-    kDequantizeBlockwise_kbit<T, K, 512, 64, 8, DATA_TYPE>
+    // Calculate grid size based on packed words, not elements
+    const int elements_per_word = 32 / K;
+    const int total_words = (n * K + 31) / 32;
+    int threads = 256;
+    int blocks = (total_words + threads - 1) / threads;
+    
+    kDequantizeBlockwise_kbit<T, K, 512, 256, 8, DATA_TYPE>
         <<<blocks, threads, 0, stream>>>(code, A, absmax, out, blocksize, n);
 
     CUDA_CHECK_RETURN(cudaPeekAtLastError());

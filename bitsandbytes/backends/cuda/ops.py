@@ -248,7 +248,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
 @register_kernel("bitsandbytes::quantize_blockwise_kbit", "cuda")
 def _(A: torch.Tensor, k: int, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    torch._check(blocksize == 32, lambda: f"Only blocksize=32 is supported for k-bit quantization, got {blocksize}")
     torch._check(A.device.type == "cuda", lambda: "Input tensor must be on CUDA device")
     torch._check(code.device.type == "cuda", lambda: "Code tensor must be on CUDA device")
     torch._check(code.dtype == torch.float32, lambda: "Code must be float32")
@@ -256,9 +256,14 @@ def _(A: torch.Tensor, k: int, code: torch.Tensor, blocksize: int) -> tuple[torc
     torch._check(code.is_contiguous(), lambda: "Code must be contiguous")
 
     n = A.numel()
-    blocks = -(n // -blocksize)
+    blocks = (n + 31) // 32  # Round up for 32-element blocks
     absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-    out = torch.zeros_like(A, dtype=torch.uint8)
+    
+    # Calculate packed output size: ceil(n * k / 32) * 4 bytes (as uint32 words)
+    elements_per_word = 32 // k
+    packed_words = (n + elements_per_word - 1) // elements_per_word
+    packed_bytes = packed_words * 4
+    out = torch.zeros((packed_bytes,), device=A.device, dtype=torch.uint8)
 
     with torch.cuda.device_of(A):
         args = (
@@ -286,8 +291,19 @@ def _(A: torch.Tensor, k: int, code: torch.Tensor, blocksize: int) -> tuple[torc
 @register_kernel("bitsandbytes::dequantize_blockwise_kbit", "cuda")
 def _(A: torch.Tensor, k: int, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
     torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
-    out = torch.empty_like(A, dtype=dtype)
-    _dequantize_blockwise_kbit_impl(A, k, absmax, code, blocksize, dtype, out=out)
+    torch._check(blocksize == 32, lambda: f"Only blocksize=32 is supported for k-bit quantization, got {blocksize}")
+    
+    # Calculate original number of elements from packed tensor and absmax
+    elements_per_word = 32 // k
+    packed_words = A.numel() // 4  # A is uint8 tensor, 4 bytes per uint32 word
+    max_elements = packed_words * elements_per_word
+    
+    # Use absmax size to determine actual number of elements
+    blocks = absmax.numel()
+    n_elements = min(max_elements, blocks * 32)  # Each block has up to 32 elements
+    
+    out = torch.empty((n_elements,), device=A.device, dtype=dtype)
+    _dequantize_blockwise_kbit_impl(A, k, absmax, code, blocksize, dtype, n_elements, out=out)
     return out
 
 
@@ -302,15 +318,23 @@ def _(
     out: torch.Tensor,
 ) -> None:
     torch._check(k >= 2 and k <= 8, lambda: f"k must be between 2 and 8, got {k}")
+    torch._check(blocksize == 32, lambda: f"Only blocksize=32 is supported for k-bit quantization, got {blocksize}")
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
-    torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
-    _dequantize_blockwise_kbit_impl(A, k, absmax, code, blocksize, dtype, out=out)
+    
+    # Calculate expected number of elements
+    elements_per_word = 32 // k
+    packed_words = A.numel() // 4
+    blocks = absmax.numel()
+    n_elements = min(packed_words * elements_per_word, blocks * 32)
+    
+    torch._check(out.numel() == n_elements, lambda: f"Expected out.numel() == {n_elements}, got {out.numel()}")
+    _dequantize_blockwise_kbit_impl(A, k, absmax, code, blocksize, dtype, n_elements, out=out)
 
 
 def _dequantize_blockwise_kbit_impl(
-    A: torch.Tensor, k: int, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
+    A: torch.Tensor, k: int, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, n_elements: int, out: torch.Tensor
 ) -> None:
-    torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    torch._check(blocksize == 32, lambda: f"Only blocksize=32 is supported for k-bit quantization, got {blocksize}")
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     torch._check(
         dtype in [torch.float16, torch.bfloat16, torch.float32],
@@ -326,7 +350,7 @@ def _dequantize_blockwise_kbit_impl(
             get_ptr(absmax),
             get_ptr(out),
             ct.c_int32(blocksize),
-            ct.c_int(A.numel()),
+            ct.c_int(n_elements),  # Use calculated n_elements instead of A.numel()
             _get_tensor_stream(A),
         )
 

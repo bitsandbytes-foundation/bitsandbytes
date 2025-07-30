@@ -1,0 +1,11 @@
+Problem: cuBLASLt is using the wrong format (col32, colTuring, colAmpere)
+Solution: Just use integers
+
+
+1. Change format in cuBLASLt library calls (ops.cu)
+  a. Find the correct matrix order and replace colX with that order
+  b. Debug if the matmul runs correctly (this can be done by calling a test with the cublasLt_igemm python function)
+2. Change autograd functions to no longer use obsolete transformations. (_autograd.py)
+  a. locate functions
+  b. remove functions
+  c. run tests and change code until it works

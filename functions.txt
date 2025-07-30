@@ -1,0 +1,1901 @@
+Function name: get_cuda_bnb_library_path
+Args:
+	: cuda_specs
+Function name: get_native_library
+Args:
+Class name: BNBNativeLibrary
+	Function name: __init__
+	Args:
+		: self
+		: lib
+	Function name: __getattr__
+	Args:
+		: self
+		: item
+Class name: CudaBNBNativeLibrary
+	Function name: __init__
+	Args:
+		: self
+		: lib
+Function name: prod
+Args:
+	: iterable
+Function name: get_paged
+Args:
+Function name: prefetch_tensor
+Args:
+	: A
+	: to_cpu
+Function name: elementwise_func
+Args:
+	: func_name
+	: A
+	: B
+	: value
+	: prefetch
+Function name: fill
+Args:
+	: A
+	: value
+	: device
+	: prefetch
+Function name: arange
+Args:
+	: A
+	: device
+Function name: _mul
+Args:
+	: A
+	: B
+	: device
+Function name: create_linear_map
+Args:
+	: signed
+	: total_bits
+	: add_zero
+Function name: create_normal_map
+Args:
+	: offset
+	: use_extra_value
+Function name: create_fp8_map
+Args:
+	: signed
+	: exponent_bits
+	: precision_bits
+	: total_bits
+Function name: create_dynamic_map
+Args:
+	: signed
+	: max_exponent_bits
+	: total_bits
+Function name: create_quantile_map
+Args:
+	: A
+	: total_bits
+Function name: get_special_format_str
+Args:
+Function name: is_on_gpu
+Args:
+	: tensors
+Function name: get_tensor_stream
+Args:
+	: tensor
+Function name: get_ptr
+Args:
+	: A
+Function name: pre_call
+Args:
+	: device
+Function name: post_call
+Args:
+	: prev_device
+Function name: get_transform_func
+Args:
+	: dtype
+	: orderA
+	: orderOut
+	: transpose
+Function name: get_transform_buffer
+Args:
+	: shape
+	: dtype
+	: device
+	: to_order
+	: from_order
+	: transpose
+Function name: nvidia_transform
+Args:
+	: A
+	: to_order
+	: from_order
+	: out
+	: transpose
+	: state
+	: ld
+Function name: estimate_quantiles
+Args:
+	: A
+	: out
+	: offset
+	: num_quantiles
+Function name: quantize_blockwise
+Args:
+	: A
+	: code
+	: absmax
+	: out
+	: blocksize
+	: nested
+Function name: dequantize_blockwise
+Args:
+	: A
+	: quant_state
+	: absmax
+	: code
+	: out
+	: blocksize
+	: nested
+Function name: get_4bit_type
+Args:
+	: typename
+	: device
+	: blocksize
+Function name: quantize_fp4
+Args:
+	: A
+	: absmax
+	: out
+	: blocksize
+	: compress_statistics
+	: quant_storage
+Function name: quantize_nf4
+Args:
+	: A
+	: absmax
+	: out
+	: blocksize
+	: compress_statistics
+	: quant_storage
+Function name: quantize_4bit
+Args:
+	: A
+	: absmax
+	: out
+	: blocksize
+	: compress_statistics
+	: quant_type
+	: quant_storage
+Function name: dequantize_fp4
+Args:
+	: A
+	: quant_state
+	: absmax
+	: out
+	: blocksize
+Function name: dequantize_nf4
+Args:
+	: A
+	: quant_state
+	: absmax
+	: out
+	: blocksize
+Function name: dequantize_4bit
+Args:
+	: A
+	: quant_state
+	: absmax
+	: out
+	: blocksize
+	: quant_type
+Function name: quantize
+Args:
+	: A
+	: code
+	: out
+Function name: dequantize
+Args:
+	: A
+	: state
+	: absmax
+	: code
+	: out
+Function name: quantize_no_absmax
+Args:
+	: A
+	: code
+	: out
+Function name: dequantize_no_absmax
+Args:
+	: A
+	: code
+	: out
+Function name: optimizer_update_32bit
+Args:
+	: optimizer_name
+	: g
+	: p
+	: state1
+	: beta1
+	: eps
+	: step
+	: lr
+	: state2
+	: beta2
+	: weight_decay
+	: gnorm_scale
+	: unorm_vec
+	: max_unorm
+	: skip_zeros
+Function name: optimizer_update_8bit
+Args:
+	: optimizer_name
+	: g
+	: p
+	: state1
+	: state2
+	: beta1
+	: beta2
+	: eps
+	: step
+	: lr
+	: qmap1
+	: qmap2
+	: max1
+	: max2
+	: new_max1
+	: new_max2
+	: weight_decay
+	: gnorm_scale
+	: unorm_vec
+	: max_unorm
+Function name: optimizer_update_8bit_blockwise
+Args:
+	: optimizer_name
+	: g
+	: p
+	: state1
+	: state2
+	: beta1
+	: beta2
+	: eps
+	: step
+	: lr
+	: qmap1
+	: qmap2
+	: absmax1
+	: absmax2
+	: weight_decay
+	: gnorm_scale
+	: skip_zeros
+Function name: percentile_clipping
+Args:
+	: grad
+	: gnorm_vec
+	: step
+	: percentile
+Function name: histogram_scatter_add_2d
+Args:
+	: histogram
+	: index1
+	: index2
+	: source
+Function name: check_matmul
+Args:
+	: A
+	: B
+	: out
+	: transposed_A
+	: transposed_B
+	: expected_type
+Function name: gemv_4bit
+Args:
+	: A
+	: B
+	: out
+	: transposed_A
+	: transposed_B
+	: state
+Function name: igemm
+Args:
+	: A
+	: B
+	: out
+	: transposed_A
+	: transposed_B
+Function name: batched_igemm
+Args:
+	: A
+	: B
+	: out
+	: transposed_A
+	: transposed_B
+Function name: igemmlt
+Args:
+	: A
+	: B
+	: SA
+	: SB
+	: out
+	: Sout
+	: dtype
+Function name: mm_dequant
+Args:
+	: A
+	: quant_state
+	: row_stats
+	: col_stats
+	: out
+	: new_row_stats
+	: new_col_stats
+	: bias
+Function name: get_colrow_absmax
+Args:
+	: A
+	: row_stats
+	: col_stats
+	: nnz_block_ptr
+	: threshold
+Function name: coo2csr
+Args:
+	: cooA
+Function name: coo2csc
+Args:
+	: cooA
+Function name: coo_zeros
+Args:
+	: rows
+	: cols
+	: nnz
+	: device
+	: dtype
+Function name: double_quant
+Args:
+	: A
+	: col_stats
+	: row_stats
+	: out_col
+	: out_row
+	: threshold
+Function name: transform
+Args:
+	: A
+	: to_order
+	: from_order
+	: out
+	: transpose
+	: state
+	: ld
+Function name: spmm_coo
+Args:
+	: cooA
+	: B
+	: out
+Function name: spmm_coo_very_sparse
+Args:
+	: cooA
+	: B
+	: dequant_stats
+	: out
+Function name: vectorwise_quant
+Args:
+	: x
+	: dim
+	: quant_type
+Function name: vectorwise_dequant
+Args:
+	: xq
+	: max1
+	: quant_type
+Function name: vectorwise_mm_dequant
+Args:
+	: xq
+	: S1
+	: S2
+	: dtype
+	: quant_type
+Function name: dequant_min_max
+Args:
+	: xq
+	: A
+	: B
+	: SA
+	: SB
+	: dtype
+Function name: extract_outliers
+Args:
+	: A
+	: SA
+	: idx
+Function name: pipeline_test
+Args:
+	: A
+	: batch_size
+Class name: GlobalPageManager
+	Function name: __init__
+	Args:
+		: self
+	Function name: initialize
+	Args:
+		: self
+	Function name: get_instance
+	Args:
+		: cls
+	Function name: prefetch_all
+	Args:
+		: self
+		: to_cpu
+Class name: CUBLAS_Context
+	Function name: __init__
+	Args:
+		: self
+	Function name: initialize
+	Args:
+		: self
+	Function name: get_instance
+	Args:
+		: cls
+	Function name: get_context
+	Args:
+		: self
+		: device
+Class name: Cusparse_Context
+	Function name: __init__
+	Args:
+		: self
+	Function name: initialize
+	Args:
+		: self
+	Function name: get_instance
+	Args:
+		: cls
+Class name: QuantState
+	Function name: __init__
+	Args:
+		: self
+		: absmax
+		: shape
+		: code
+		: blocksize
+		: quant_type
+		: dtype
+		: offset
+		: state2
+	Function name: __get_item__
+	Args:
+		: self
+		: idx
+	Function name: from_dict
+	Args:
+		: cls
+		: qs_dict
+		: device
+	Function name: as_dict
+	Args:
+		: self
+		: packed
+	Function name: to
+	Args:
+		: self
+		: device
+	Function name: __eq__
+	Args:
+		: self
+		: other
+Class name: COOSparseTensor
+	Function name: __init__
+	Args:
+		: self
+		: rows
+		: cols
+		: nnz
+		: rowidx
+		: colidx
+		: values
+Class name: CSRSparseTensor
+	Function name: __init__
+	Args:
+		: self
+		: rows
+		: cols
+		: nnz
+		: rowptr
+		: colidx
+		: values
+Class name: CSCSparseTensor
+	Function name: __init__
+	Args:
+		: self
+		: rows
+		: cols
+		: nnz
+		: colptr
+		: rowidx
+		: values
+Function name: outlier_hook
+Args:
+	: module
+	: input
+Function name: find_outlier_dims
+Args:
+	: weight
+	: reduction_dim
+	: zscore
+	: topk
+	: rdm
+Function name: execute_and_return
+Args:
+	: command_string
+Function name: replace_linear
+Args:
+	: model
+	: linear_replacement
+	: skip_modules
+	: copy_weights
+	: post_processing_function
+Function name: pack_dict_to_tensor
+Args:
+	: source_dict
+Function name: unpack_tensor_to_dict
+Args:
+	: tensor_data
+Class name: OutlierTracer
+	Function name: __init__
+	Args:
+		: self
+	Function name: initialize
+	Args:
+		: self
+		: model
+	Function name: is_initialized
+	Args:
+		: self
+	Function name: get_hvalue
+	Args:
+		: self
+		: weight
+	Function name: get_outliers
+	Args:
+		: self
+		: weight
+	Function name: get_instance
+	Args:
+		: cls
+Function name: get_compute_capabilities
+Args:
+Function name: get_cuda_version_tuple
+Args:
+Function name: get_cuda_version_string
+Args:
+Function name: get_cuda_specs
+Args:
+Class name: CUDASpecs
+	Function name: has_cublaslt
+	Args:
+		: self
+Function name: prod
+Args:
+	: iterable
+Function name: get_block_sizes
+Args:
+	: input_matrix
+	: weight_matrix
+Function name: matmul_fp8_global
+Args:
+	: A
+	: B
+	: fw_code
+	: bw_code
+	: out
+	: bsz
+	: bsz2
+Function name: matmul_fp8_mixed
+Args:
+	: A
+	: B
+	: fw_code
+	: bw_code
+	: out
+	: bsz
+	: bsz2
+Function name: switchback_bnb
+Args:
+	: A
+	: B
+	: out
+	: state
+	: threshold
+	: bias
+Class name: MatMulFP8Mixed
+	Function name: forward
+	Args:
+		: ctx
+		: A
+		: B
+		: out
+		: fw_code
+		: bw_code
+		: bsz
+		: bsz2
+	Function name: backward
+	Args:
+		: ctx
+		: grad_output
+Class name: MatMulFP8Global
+	Function name: forward
+	Args:
+		: ctx
+		: A
+		: B
+		: out
+		: fw_code
+		: bw_code
+		: bsz
+		: bsz2
+	Function name: backward
+	Args:
+		: ctx
+		: grad_output
+Class name: SwitchBackBnb
+	Function name: forward
+	Args:
+		: ctx
+		: A
+		: B
+		: out
+		: bias
+		: state
+	Function name: backward
+	Args:
+		: ctx
+		: grad_output
+Class name: LinearFP8Mixed
+	Function name: __init__
+	Args:
+		: self
+		: input_features
+		: output_features
+		: bias
+	Function name: forward
+	Args:
+		: self
+		: x
+Class name: LinearFP8Global
+	Function name: __init__
+	Args:
+		: self
+		: input_features
+		: output_features
+		: bias
+	Function name: forward
+	Args:
+		: self
+		: x
+Function name: prod
+Args:
+	: iterable
+Function name: get_inverse_transform_indices
+Args:
+	: transform_tile
+	: tile_size
+Function name: undo_layout
+Args:
+	: permuted_tensor
+	: tile_indices
+Function name: supports_igemmlt
+Args:
+	: device
+Function name: _get_tile_size
+Args:
+	: format
+Function name: get_tile_inds
+Args:
+	: format
+	: device
+Function name: matmul
+Args:
+	: A
+	: B
+	: out
+	: state
+	: threshold
+	: bias
+Function name: matmul_4bit
+Args:
+	: A
+	: B
+	: quant_state
+	: out
+	: bias
+Class name: GlobalOutlierPooler
+	Function name: __init__
+	Args:
+		: self
+	Function name: initialize
+	Args:
+		: self
+	Function name: get_instance
+	Args:
+		: cls
+	Function name: add_outliers
+	Args:
+		: self
+		: outlier_idx
+		: feature_dim
+	Function name: get_current_outlier_idx
+	Args:
+		: self
+Class name: MatMul8bit
+	Function name: forward
+	Args:
+		: ctx
+		: A
+		: B
+		: out
+		: quant_type
+		: precision
+	Function name: backward
+	Args:
+		: ctx
+		: grad_output
+Class name: MatmulLtState
+	Function name: reset_grads
+	Args:
+		: self
+	Function name: tile_indices
+	Args:
+		: self
+Class name: MatMul8bitLt
+	Function name: forward
+	Args:
+		: ctx
+		: A
+		: B
+		: out
+		: bias
+		: state
+	Function name: backward
+	Args:
+		: ctx
+		: grad_output
+Class name: MatMul4Bit
+	Function name: forward
+	Args:
+		: ctx
+		: A
+		: B
+		: out
+		: bias
+		: quant_state
+	Function name: backward
+	Args:
+		: ctx
+		: grad_output
+Class name: SGD
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: momentum
+		: dampening
+		: weight_decay
+		: nesterov
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: SGD8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: momentum
+		: dampening
+		: weight_decay
+		: nesterov
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: SGD32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: momentum
+		: dampening
+		: weight_decay
+		: nesterov
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: Lion
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: weight_decay
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: Lion8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: weight_decay
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: Lion32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: weight_decay
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: PagedLion
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: weight_decay
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: PagedLion8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: weight_decay
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: PagedLion32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: weight_decay
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: RMSprop
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: alpha
+		: eps
+		: weight_decay
+		: momentum
+		: centered
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: RMSprop8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: alpha
+		: eps
+		: weight_decay
+		: momentum
+		: centered
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: RMSprop32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: alpha
+		: eps
+		: weight_decay
+		: momentum
+		: centered
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: Adam
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: Adam8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: Adam32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: PagedAdam
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: PagedAdam8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: PagedAdam32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: AnalysisAdam
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: bnb_analysis
+		: savedir
+	Function name: supports_memory_efficient_fp16
+	Args:
+		: self
+	Function name: supports_flat_params
+	Args:
+		: self
+	Function name: step
+	Args:
+		: self
+		: closure
+Class name: MockArgs
+	Function name: __init__
+	Args:
+		: self
+		: initial_data
+Class name: GlobalOptimManager
+	Function name: __init__
+	Args:
+		: self
+	Function name: initialize
+	Args:
+		: self
+	Function name: get_instance
+	Args:
+		: cls
+	Function name: register_parameters
+	Args:
+		: self
+		: params
+	Function name: override_config
+	Args:
+		: self
+		: parameters
+		: key
+		: value
+		: key_value_dict
+	Function name: register_module_override
+	Args:
+		: self
+		: module
+		: param_name
+		: config
+Class name: Optimizer8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: defaults
+		: optim_bits
+		: is_paged
+	Function name: fill_qmap
+	Args:
+		: self
+	Function name: __setstate__
+	Args:
+		: self
+		: state
+	Function name: load_state_dict
+	Args:
+		: self
+		: state_dict
+	Function name: to_gpu
+	Args:
+		: self
+	Function name: check_overrides
+	Args:
+		: self
+	Function name: step
+	Args:
+		: self
+		: closure
+	Function name: get_config
+	Args:
+		: self
+		: gindex
+		: pindex
+		: group
+	Function name: init_state
+	Args:
+		: self
+		: group
+		: p
+		: gindex
+		: pindex
+	Function name: update_step
+	Args:
+		: self
+		: group
+		: p
+		: gindex
+		: pindex
+	Function name: get_state_buffer
+	Args:
+		: self
+		: p
+		: dtype
+	Function name: prefetch_state
+	Args:
+		: self
+		: p
+Class name: Optimizer2State
+	Function name: __init__
+	Args:
+		: self
+		: optimizer_name
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: max_unorm
+		: skip_zeros
+		: is_paged
+	Function name: init_state
+	Args:
+		: self
+		: group
+		: p
+		: gindex
+		: pindex
+	Function name: update_step
+	Args:
+		: self
+		: group
+		: p
+		: gindex
+		: pindex
+Class name: Optimizer1State
+	Function name: __init__
+	Args:
+		: self
+		: optimizer_name
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: max_unorm
+		: skip_zeros
+		: is_paged
+	Function name: init_state
+	Args:
+		: self
+		: group
+		: p
+		: gindex
+		: pindex
+	Function name: update_step
+	Args:
+		: self
+		: group
+		: p
+		: gindex
+		: pindex
+Class name: LAMB
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: bias_correction
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: adam_w_mode
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: max_unorm
+Class name: LAMB8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: bias_correction
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: adam_w_mode
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: max_unorm
+Class name: LAMB32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: bias_correction
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: adam_w_mode
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: max_unorm
+Class name: LARS
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: momentum
+		: dampening
+		: weight_decay
+		: nesterov
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: max_unorm
+Class name: LARS8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: momentum
+		: dampening
+		: weight_decay
+		: nesterov
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: max_unorm
+Class name: LARS32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: momentum
+		: dampening
+		: weight_decay
+		: nesterov
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: max_unorm
+Class name: PytorchLARS
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: momentum
+		: dampening
+		: weight_decay
+		: nesterov
+		: max_unorm
+	Function name: __setstate__
+	Args:
+		: self
+		: state
+	Function name: step
+	Args:
+		: self
+		: closure
+Class name: Adagrad
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: lr_decay
+		: weight_decay
+		: initial_accumulator_value
+		: eps
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: Adagrad8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: lr_decay
+		: weight_decay
+		: initial_accumulator_value
+		: eps
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: Adagrad32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: lr_decay
+		: weight_decay
+		: initial_accumulator_value
+		: eps
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: AdamW
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: AdamW8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: AdamW32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+		: is_paged
+Class name: PagedAdamW
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: PagedAdamW8bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Class name: PagedAdamW32bit
+	Function name: __init__
+	Args:
+		: self
+		: params
+		: lr
+		: betas
+		: eps
+		: weight_decay
+		: amsgrad
+		: optim_bits
+		: args
+		: min_8bit_size
+		: percentile_clipping
+		: block_wise
+Function name: is_triton_available
+Args:
+Function name: find_cuda_libraries_in_path_list
+Args:
+	: paths_list_candidate
+Function name: is_relevant_candidate_env_var
+Args:
+	: env_var
+	: value
+Function name: get_potentially_lib_path_containing_env_vars
+Args:
+Function name: find_cudart_libraries
+Args:
+Function name: print_cuda_diagnostics
+Args:
+	: cuda_specs
+Function name: print_cuda_runtime_diagnostics
+Args:
+Function name: print_header
+Args:
+	: txt
+	: width
+	: filler
+Function name: print_dedented
+Args:
+	: text
+Function name: sanity_check
+Args:
+Function name: main
+Args:
+Class name: _switchback_global
+	Function name: forward
+	Args:
+		: ctx
+		: X_3D
+		: W
+		: bias
+	Function name: backward
+	Args:
+		: ctx
+		: G_3D
+Class name: _switchback_vectorrize
+	Function name: forward
+	Args:
+		: ctx
+		: X_3D
+		: W
+		: bias
+	Function name: backward
+	Args:
+		: ctx
+		: G_3D
+Class name: _switchback_global_mem_efficient
+	Function name: forward
+	Args:
+		: ctx
+		: X_3D
+		: W
+		: bias
+	Function name: backward
+	Args:
+		: ctx
+		: G_3D
+Class name: SwitchBackLinear
+	Function name: __init__
+	Args:
+		: self
+		: in_features
+		: out_features
+		: bias
+		: device
+		: dtype
+		: vector_wise_quantization
+		: mem_efficient
+	Function name: prepare_for_eval
+	Args:
+		: self
+	Function name: forward
+	Args:
+		: self
+		: x
+Class name: StandardLinearFunction
+	Function name: forward
+	Args:
+		: ctx
+		: input
+		: weight
+		: bias
+	Function name: backward
+	Args:
+		: ctx
+		: grad_output_3D
+Class name: StandardLinear
+	Function name: forward
+	Args:
+		: self
+		: x
+Function name: fix_4bit_weight_quant_state_from_module
+Args:
+	: module
+Function name: maybe_rearrange_weight
+Args:
+	: state_dict
+	: prefix
+	: local_metadata
+	: strict
+	: missing_keys
+	: unexpected_keys
+	: error_msgs
+Class name: StableEmbedding
+	Function name: __init__
+	Args:
+		: self
+		: num_embeddings
+		: embedding_dim
+		: padding_idx
+		: max_norm
+		: norm_type
+		: scale_grad_by_freq
+		: sparse
+		: _weight
+		: device
+		: dtype
+	Function name: reset_parameters
+	Args:
+		: self
+	Function name: _fill_padding_idx_with_zero
+	Args:
+		: self
+	Function name: forward
+	Args:
+		: self
+		: input
+Class name: Embedding
+	Function name: __init__
+	Args:
+		: self
+		: num_embeddings
+		: embedding_dim
+		: padding_idx
+		: max_norm
+		: norm_type
+		: scale_grad_by_freq
+		: sparse
+		: _weight
+		: device
+	Function name: reset_parameters
+	Args:
+		: self
+	Function name: _fill_padding_idx_with_zero
+	Args:
+		: self
+	Function name: forward
+	Args:
+		: self
+		: input
+Class name: Params4bit
+	Function name: __new__
+	Args:
+		: cls
+		: data
+		: requires_grad
+		: quant_state
+		: blocksize
+		: compress_statistics
+		: quant_type
+		: quant_storage
+		: module
+		: bnb_quantized
+	Function name: __getstate__
+	Args:
+		: self
+	Function name: __setstate__
+	Args:
+		: self
+		: state
+	Function name: __deepcopy__
+	Args:
+		: self
+		: memo
+	Function name: __copy__
+	Args:
+		: self
+	Function name: from_prequantized
+	Args:
+		: cls
+		: data
+		: quantized_stats
+		: requires_grad
+		: device
+		: module
+	Function name: _quantize
+	Args:
+		: self
+		: device
+	Function name: cuda
+	Args:
+		: self
+		: device
+		: non_blocking
+	Function name: to
+	Args:
+		: self
+		: device
+		: dtype
+		: non_blocking
+	Function name: to
+	Args:
+		: self
+		: dtype
+		: non_blocking
+	Function name: to
+	Args:
+		: self
+		: tensor
+		: non_blocking
+	Function name: to
+	Args:
+		: self
+Class name: Linear4bit
+	Function name: __init__
+	Args:
+		: self
+		: input_features
+		: output_features
+		: bias
+		: compute_dtype
+		: compress_statistics
+		: quant_type
+		: quant_storage
+		: device
+	Function name: set_compute_type
+	Args:
+		: self
+		: x
+	Function name: _save_to_state_dict
+	Args:
+		: self
+		: destination
+		: prefix
+		: keep_vars
+	Function name: forward
+	Args:
+		: self
+		: x
+Class name: LinearFP4
+	Function name: __init__
+	Args:
+		: self
+		: input_features
+		: output_features
+		: bias
+		: compute_dtype
+		: compress_statistics
+		: quant_storage
+		: device
+Class name: LinearNF4
+	Function name: __init__
+	Args:
+		: self
+		: input_features
+		: output_features
+		: bias
+		: compute_dtype
+		: compress_statistics
+		: quant_storage
+		: device
+Class name: Int8Params
+	Function name: __new__
+	Args:
+		: cls
+		: data
+		: requires_grad
+		: has_fp16_weights
+		: CB
+		: SCB
+	Function name: cuda
+	Args:
+		: self
+		: device
+	Function name: __deepcopy__
+	Args:
+		: self
+		: memo
+	Function name: to
+	Args:
+		: self
+		: device
+		: dtype
+		: non_blocking
+	Function name: to
+	Args:
+		: self
+		: dtype
+		: non_blocking
+	Function name: to
+	Args:
+		: self
+		: tensor
+		: non_blocking
+	Function name: to
+	Args:
+		: self
+Class name: Embedding8bit
+	Function name: __init__
+	Args:
+		: self
+		: num_embeddings
+		: embedding_dim
+		: device
+		: dtype
+	Function name: _save_to_state_dict
+	Args:
+		: self
+		: destination
+		: prefix
+		: keep_vars
+	Function name: forward
+	Args:
+		: self
+		: input
+Class name: Embedding4bit
+	Function name: __init__
+	Args:
+		: self
+		: num_embeddings
+		: embedding_dim
+		: dtype
+		: quant_type
+		: quant_storage
+		: device
+	Function name: _forward_with_partial_dequantize
+	Args:
+		: self
+		: input
+	Function name: _save_to_state_dict
+	Args:
+		: self
+		: destination
+		: prefix
+		: keep_vars
+	Function name: forward
+	Args:
+		: self
+		: input
+Class name: EmbeddingFP4
+	Function name: __init__
+	Args:
+		: self
+		: num_embeddings
+		: embedding_dim
+		: dtype
+		: quant_storage
+		: device
+Class name: EmbeddingNF4
+	Function name: __init__
+	Args:
+		: self
+		: num_embeddings
+		: embedding_dim
+		: dtype
+		: quant_storage
+		: device
+Class name: Linear8bitLt
+	Function name: __init__
+	Args:
+		: self
+		: input_features
+		: output_features
+		: bias
+		: has_fp16_weights
+		: memory_efficient_backward
+		: threshold
+		: index
+		: device
+	Function name: _save_to_state_dict
+	Args:
+		: self
+		: destination
+		: prefix
+		: keep_vars
+	Function name: _load_from_state_dict
+	Args:
+		: self
+		: state_dict
+		: prefix
+		: local_metadata
+		: strict
+		: missing_keys
+		: unexpected_keys
+		: error_msgs
+	Function name: init_8bit_state
+	Args:
+		: self
+	Function name: forward
+	Args:
+		: self
+		: x
+Class name: OutlierAwareLinear
+	Function name: __init__
+	Args:
+		: self
+		: input_features
+		: output_features
+		: bias
+		: device
+	Function name: forward_with_outliers
+	Args:
+		: self
+		: x
+		: outlier_idx
+	Function name: quantize_weight
+	Args:
+		: self
+		: w
+		: outlier_idx
+	Function name: forward
+	Args:
+		: self
+		: x
+Class name: SwitchBackLinearBnb
+	Function name: __init__
+	Args:
+		: self
+		: input_features
+		: output_features
+		: bias
+		: has_fp16_weights
+		: memory_efficient_backward
+		: threshold
+		: index
+		: device
+	Function name: init_8bit_state
+	Args:
+		: self
+	Function name: forward
+	Args:
+		: self
+		: x
