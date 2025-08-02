@@ -431,7 +431,6 @@ __global__ void kQuantizeBlockwise(
             LoadFloat(loadf).Load(&rand[local_rand_idx], rand_vals, BLOCK_SIZE, 0);
         }
 
-        unsigned char packed_4bit = 0;
         switch (DATA_TYPE) {
         case General8bit:
 #pragma unroll NUM_PER_TH
@@ -445,17 +444,15 @@ __global__ void kQuantizeBlockwise(
         case FP4:
 #pragma unroll NUM_PER_TH
             for (int j = 0; j < NUM_PER_TH / 2; j++) {
-                packed_4bit |= dQuantizeFP4(((float)vals[2 * j]) * local_abs_max) << 4;
-                packed_4bit |= dQuantizeFP4(((float)vals[2 * j + 1]) * local_abs_max);
-                qvals[j] = packed_4bit;
+                qvals[j] = dQuantizeFP4(((float)vals[2 * j]) * local_abs_max) << 4;
+                qvals[j] |= dQuantizeFP4(((float)vals[2 * j + 1]) * local_abs_max);
             }
             break;
         case NF4:
 #pragma unroll NUM_PER_TH
             for (int j = 0; j < NUM_PER_TH / 2; j++) {
-                packed_4bit |= dQuantizeNF4(((float)vals[2 * j]) * local_abs_max) << 4;
-                packed_4bit |= dQuantizeNF4(((float)vals[2 * j + 1]) * local_abs_max);
-                qvals[j] = packed_4bit;
+                qvals[j] = dQuantizeNF4(((float)vals[2 * j]) * local_abs_max) << 4;
+                qvals[j] |= dQuantizeNF4(((float)vals[2 * j + 1]) * local_abs_max);
             }
             break;
         }

@@ -1125,21 +1125,52 @@ class TestQuantize4BitFunctional:
 
         # With larger block sizes, we can expect this to blow up.
         # At blocksize>=1024, don't even bother looking at relerr.
-        if blocksize <= 64:
-            assert err.item() < 0.1
-            assert relerr.item() < 0.28
-        elif blocksize <= 256:
-            assert err.item() < 0.11
-            assert relerr.item() < 0.30
-        elif blocksize <= 512:
-            assert err.item() < 0.12
-            assert relerr.item() < 0.31
-        elif quant_type == "fp4":
-            # 1024 => 0.48, 2048 => 0.52, 4096 => 0.56
-            assert err.item() < 0.08 + math.log2(blocksize) * 4e-2
-        else:
-            # 1024 => 0.8, 2048 => 0.88, 4096 => 0.96
-            assert err.item() < math.log2(blocksize) * 8e-2
+        #
+        # Actually, the above is not true anymore after fixing the integer packing bug.
+        # The following values were taken from averaging 1k samples per test configuration after fixing the bug.
+        error_dict = dict()
+        error_dict["fp4"] = dict()
+        error_dict["nf4"] = dict()
+        error_dict["fp4"]["err"] = {
+            64: 0.096545,
+            128: 0.102947,
+            256: 0.108685,
+            512: 0.114087,
+            1024: 0.119312,
+            2048: 0.124460,
+            4096: 0.129573,
+        }
+        error_dict["fp4"]["rel_err"] = {
+            64: 0.260130,
+            128: 0.275734,
+            256: 0.289842,
+            512: 0.302852,
+            1024: 0.314982,
+            2048: 0.326402,
+            4096: 0.337228,
+        }
+
+        error_dict["nf4"]["err"] = {
+            64: 0.072792,
+            128: 0.076835,
+            256: 0.080326,
+            512: 0.083535,
+            1024: 0.086603,
+            2048: 0.089592,
+            4096: 0.092537,
+        }
+        error_dict["nf4"]["rel_err"] = {
+            64: 0.203299,
+            128: 0.215252,
+            256: 0.226044,
+            512: 0.236021,
+            1024: 0.245365,
+            2048: 0.254146,
+            4096: 0.262457,
+        }
+
+        assert err < error_dict[quant_type]["err"][blocksize] + 1e-3
+        assert relerr < error_dict[quant_type]["rel_err"][blocksize] + 1e-3
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
