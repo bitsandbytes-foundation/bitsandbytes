@@ -63,5 +63,6 @@ elif triton_available:
     register_kernel("bitsandbytes::dequantize_4bit.out", "xpu")(triton_ops.dequantize_4bit_inplace)
     register_kernel("bitsandbytes::dequantize_4bit", "xpu")(triton_ops.dequantize_4bit)
     register_kernel("bitsandbytes::gemv_4bit", "xpu")(triton_ops.gemv_4bit)
+    register_kernel("bitsandbytes::optimizer_update_32bit", "xpu")(triton_ops.optimizer_update_32bit)
 else:
     warnings.warn("XPU available but no ipex or triton packages found.")
