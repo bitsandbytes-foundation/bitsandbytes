@@ -144,7 +144,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/${{ (matrix.torch_version == '2.8.0' && 'test/cpu') || 'cpu' }}
+          pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[test]"
           pip install pytest-cov
 
@@ -372,7 +372,7 @@ jobs:
             pypi_index: "https://download.pytorch.org/whl/cu128"
           - cuda_version: "12.9.1"
             torch_version: "2.8.0"
-            pypi_index: "https://download.pytorch.org/whl/test/cu129"
+            pypi_index: "https://download.pytorch.org/whl/cu129"
 
 
           # Linux L40S runners
