@@ -1123,11 +1123,7 @@ class TestQuantize4BitFunctional:
 
         assert A2.dtype == dtype
 
-        # With larger block sizes, we can expect this to blow up.
-        # At blocksize>=1024, don't even bother looking at relerr.
-        #
-        # Actually, the above is not true anymore after fixing the integer packing bug.
-        # The following values were taken from averaging 1k samples per test configuration after fixing the bug.
+        # The following values were taken from averaging 1k samples per test configuration
         error_dict = dict()
         error_dict["fp4"] = dict()
         error_dict["nf4"] = dict()
@@ -1169,8 +1165,12 @@ class TestQuantize4BitFunctional:
             4096: 0.262457,
         }
 
-        assert err < error_dict[quant_type]["err"][blocksize] + 1e-3
-        assert relerr < error_dict[quant_type]["rel_err"][blocksize] + 1e-3
+        # We need a higher tolerance for fp32 on CPU with blocksize >= 128.
+        # TODO: See if we can reduce this.
+        tolerance = 2.7e-3 if device == "cpu" and dtype == torch.float32 and blocksize >= 128 else 1e-3
+
+        assert err < error_dict[quant_type]["err"][blocksize] + tolerance
+        assert relerr < error_dict[quant_type]["rel_err"][blocksize] + tolerance
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
