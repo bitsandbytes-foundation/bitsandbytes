@@ -149,9 +149,11 @@ jobs:
           pip install pytest-cov
 
       # We need to downgrade to numpy<2 for torch<2.3 compatibility.
-      - name: Downgrade NumPy
+      # Additionally, we need to pin safetensors to <0.6.1 for torch<2.3 compatibility.
+      # See: https://github.com/huggingface/safetensors/issues/641
+      - name: Downgrade numpy and safetensors
         if: startsWith(matrix.torch_version, '2.2.')
-        run: pip install "numpy<2"
+        run: pip install "numpy<2" "safetensors<0.6.1"
 
       - name: Show installed packages
         run: pip list
@@ -448,10 +450,12 @@ jobs:
           pip install -e ".[test]"
           pip install pytest-cov
 
-        # We need to downgrade to numpy<2 for torch<2.3 compatibility.
-      - name: Downgrade NumPy
+      # We need to downgrade to numpy<2 for torch<2.3 compatibility.
+      # Additionally, we need to pin safetensors to <0.6.1 for torch<2.3 compatibility.
+      # See: https://github.com/huggingface/safetensors/issues/641
+      - name: Downgrade numpy and safetensors
         if: startsWith(matrix.torch_version, '2.2.')
-        run: pip install "numpy<2"
+        run: pip install "numpy<2" "safetensors<0.6.1"
 
       - name: Show installed packages
         run: pip list
