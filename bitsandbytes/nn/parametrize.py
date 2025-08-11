@@ -21,9 +21,10 @@ class Bnb4bitParametrization(nn.Module):
             The quantization state containing the necessary information for dequantization.
     """
 
-    def __init__(self, quant_state: F.QuantState):
+    def __init__(self, quant_state: F.QuantState, p_name="unknown"):
         super().__init__()
         self.quant_state = quant_state
+        self.p_name = p_name
 
     def forward(self, quantized_param: torch.Tensor) -> torch.Tensor:
         """
@@ -35,7 +36,33 @@ class Bnb4bitParametrization(nn.Module):
         Returns:
             `torch.Tensor`: The dequantized parameter tensor in the original shape and dtype.
         """
+        # print(f"Dequantizing parameter '{self.p_name}'")
         return F.dequantize_4bit(quantized_param, self.quant_state)
+
+
+def replace_parameter_4bit_prequantized(
+    module: nn.Module, param_name: str, qs_dict: dict[str, Any], device: torch.device
+):
+    if not hasattr(module, param_name):
+        raise AttributeError(f"Module does not have parameter '{param_name}'")
+
+    original_param = getattr(module, param_name)
+
+    if not isinstance(original_param, nn.Parameter):
+        raise TypeError(f"Parameter '{param_name}' is not an instance of nn.Parameter")
+
+    quant_state = F.QuantState.from_dict(qs_dict, device=device)
+
+    # Apply a parametrization to the module to handle dequantization.
+    P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state, p_name=param_name), unsafe=True)
+
+    # Next, register state dict hook for saving.
+    module.register_state_dict_post_hook(
+        partial(
+            _parametrized_state_dict_post_hook,
+            param_name=param_name,
+        )
+    )
 
 
 def replace_parameter_4bit(
@@ -99,7 +126,7 @@ def replace_parameter_4bit(
     del original_param
 
     # Apply a parametrization to the module to handle dequantization.
-    P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state), unsafe=True)
+    P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state, p_name=param_name), unsafe=True)
 
     # Next, register state dict hook for saving.
     module.register_state_dict_post_hook(
