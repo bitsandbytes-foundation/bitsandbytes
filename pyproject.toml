@@ -74,7 +74,6 @@ test = [
 package-data = { "*" = ["libbitsandbytes*.*"] }
 
 [tool.setuptools.packages.find]
-exclude = ["*backends.xpu", "*backends.hpu", "*backends.triton"]
 include = ["bitsandbytes*"]
 
 [tool.setuptools.dynamic]
