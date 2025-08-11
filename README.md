@@ -73,9 +73,9 @@ bitsandbytes has the following minimum requirements for all platforms:
         CDNA: gfx90a, gfx942<br>
         RDNA: gfx1100
       </td>
-      <td>🚧</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>〰️</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -85,16 +85,16 @@ bitsandbytes has the following minimum requirements for all platforms:
         Arc A-Series (Alchemist)<br>
         Arc B-Series (Battlemage)
       </td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>🚧</td>
     </tr>
     <tr>
       <td></td>
       <td>🟪 Intel Gaudi <br><code>hpu</code></td>
       <td>Gaudi1, Gaudi2, Gaudi3</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>〰️</td>
       <td>❌</td>
     </tr>
     <tr>
@@ -139,8 +139,8 @@ bitsandbytes has the following minimum requirements for all platforms:
         Arc A-Series (Alchemist) <br>
         Arc B-Series (Battlemage)
       </td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>🚧</td>
     </tr>
     <tr>
