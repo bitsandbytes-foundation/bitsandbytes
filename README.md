@@ -26,7 +26,7 @@ bitsandbytes has the following minimum requirements for all platforms:
 #### Accelerator support:
 
 <small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
-[document in the v0.46.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.46.0/README.md#accelerator-support).
+[document in the 0.47.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.47.0/README.md#accelerator-support).
 </small>
 
 ##### Legend:
@@ -73,9 +73,9 @@ bitsandbytes has the following minimum requirements for all platforms:
         CDNA: gfx90a, gfx942<br>
         RDNA: gfx1100
       </td>
-      <td>✅</td>
-      <td>〰️</td>
-      <td>✅</td>
+      <td>🚧</td>
+      <td>🚧</td>
+      <td>🚧</td>
     </tr>
     <tr>
       <td></td>
@@ -85,16 +85,16 @@ bitsandbytes has the following minimum requirements for all platforms:
         Arc A-Series (Alchemist)<br>
         Arc B-Series (Battlemage)
       </td>
-      <td>✅</td>
-      <td>✅</td>
+      <td>🚧</td>
+      <td>🚧</td>
       <td>🚧</td>
     </tr>
     <tr>
       <td></td>
       <td>🟪 Intel Gaudi <br><code>hpu</code></td>
       <td>Gaudi1, Gaudi2, Gaudi3</td>
-      <td>✅</td>
-      <td>〰️</td>
+      <td>🚧</td>
+      <td>🚧</td>
       <td>❌</td>
     </tr>
     <tr>
@@ -139,8 +139,8 @@ bitsandbytes has the following minimum requirements for all platforms:
         Arc A-Series (Alchemist) <br>
         Arc B-Series (Battlemage)
       </td>
-      <td>✅</td>
-      <td>✅</td>
+      <td>🚧</td>
+      <td>🚧</td>
       <td>🚧</td>
     </tr>
     <tr>

@@ -104,6 +104,7 @@ jobs:
           retention-days: 7
 
   build-shared-libs-rocm:
+    if: false # Temporarily disabled
     strategy:
       matrix:
         os: [ubuntu-22.04]
@@ -151,7 +152,7 @@ jobs:
     needs:
       - build-shared-libs
       - build-shared-libs-cuda
-      - build-shared-libs-rocm
+      #- build-shared-libs-rocm
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]
