@@ -36,7 +36,6 @@ class Bnb4bitParametrization(nn.Module):
         Returns:
             `torch.Tensor`: The dequantized parameter tensor in the original shape and dtype.
         """
-        # print(f"Dequantizing parameter '{self.p_name}'")
         return F.dequantize_4bit(quantized_param, self.quant_state)
 
 
@@ -54,7 +53,7 @@ def replace_parameter_4bit_prequantized(
     quant_state = F.QuantState.from_dict(qs_dict, device=device)
 
     # Apply a parametrization to the module to handle dequantization.
-    P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state, p_name=param_name), unsafe=True)
+    P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state), unsafe=True)
 
     # Next, register state dict hook for saving.
     module.register_state_dict_post_hook(
@@ -126,7 +125,7 @@ def replace_parameter_4bit(
     del original_param
 
     # Apply a parametrization to the module to handle dequantization.
-    P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state, p_name=param_name), unsafe=True)
+    P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state), unsafe=True)
 
     # Next, register state dict hook for saving.
     module.register_state_dict_post_hook(
