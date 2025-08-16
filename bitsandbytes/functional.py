@@ -757,6 +757,29 @@ def get_4bit_type(typename, device=None, blocksize=64):
         # 0b111 = 3
         # can also be created with bnb.functional.create_fp8_map(signed=True, exponent_bits=2, precision_bits=1, total_bits=4)
         data = [0, 0.0625, 8.0, 12.0, 4.0, 6.0, 2.0, 3.0, -0, -0.0625, -8.0, -12.0, -4.0, -6.0, -2.0, -3.0]
+        if "cuda" in str(device).lower():
+            # directly using the normalized (value/absmax) bins here
+            # sorted [ascending order in positive range] + [ascending order in negative range]
+            # to allow for faster quantization/dequantization on CUDA
+            data = [
+                0,
+                0.005208333333,
+                0.16666667,
+                0.25,
+                0.33333333,
+                0.5,
+                0.66666667,
+                1.0,
+                0,
+                -0.005208333333,
+                -0.16666667,
+                -0.25,
+                -0.33333333,
+                -0.5,
+                -0.66666667,
+                -1.0,
+            ]
+
     elif typename == "int4":
         data = [7, 6, 5, 4, 3, 2, 1, 0, -0, -1, -2, -3, -4, -5, -6, -7]
     elif typename == "af4":
