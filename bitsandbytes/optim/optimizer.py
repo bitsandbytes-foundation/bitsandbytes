@@ -272,8 +272,6 @@ class Optimizer8bit(torch.optim.Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        overflows = []
-
         if not self.initialized:
             self.check_overrides()
             self.to_gpu()  # needed for fairseq pure fp16 training

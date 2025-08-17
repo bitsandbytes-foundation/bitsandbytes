@@ -235,7 +235,7 @@ class SwitchBackBnb(torch.autograd.Function):
         # 2. Quantize B
         if state.has_fp16_weights:
             # print('B shape', B.shape)
-            has_grad = True if (getattr(B, "grad", None) is not None) else False
+            has_grad = getattr(B, "grad", None) is not None
             is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
             if is_transposed:
                 B = B.contiguous()
