@@ -464,12 +464,13 @@ class QuantState:
 
         # unpacking tensor with non-tensor components
         qs_key = [k for k, v in qs_dict.items() if "quant_state" in k and isinstance(v, torch.Tensor)]
-        if not len(qs_key) and "quant_type" not in qs_dict:
-            raise ValueError("Expected packed or unpacked quant_state items, found neither")
-        elif len(qs_key) != 1 or qs_key[0].split(".")[-1] not in cls.valid_qs_type_keys:
-            raise ValueError(
-                f"There should be exactly one `quant_state` item with ending from {cls.valid_qs_type_keys}.\nDetected {qs_key}.",
-            )
+        if "quant_type" not in qs_dict:
+            if not qs_key:
+                raise ValueError("Expected packed or unpacked quant_state items, found neither")
+            elif len(qs_key) != 1 or qs_key[0].split(".")[-1] not in cls.valid_qs_type_keys:
+                raise ValueError(
+                    f"There should be exactly one `quant_state` item with ending from {cls.valid_qs_type_keys}.\nDetected {qs_key}.",
+                )
 
         # unpacking minor and non-tensor quant state items if necessary
         if len(qs_key) == 1:
