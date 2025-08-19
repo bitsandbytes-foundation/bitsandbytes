@@ -26,7 +26,7 @@ bitsandbytes has the following minimum requirements for all platforms:
 #### Accelerator support:
 
 <small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
-[document in the v0.46.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.46.0/README.md#accelerator-support).
+[document in the 0.47.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.47.0/README.md#accelerator-support).
 </small>
 
 ##### Legend:
