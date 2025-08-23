@@ -1008,7 +1008,7 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     local_max_s2 = BlockReduce(temp_storage.reduce).Reduce(local_max_s2, cuda::maximum<>{}, valid_items);
     if (unorm != NULL) {
         __syncthreads();
-        local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, cub::Sum(), valid_items);
+        local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, cuda::std::plus<>{}, valid_items);
     }
 
     if (threadIdx.x == 0) {
@@ -1220,7 +1220,7 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     }
     if (unorm != NULL) {
         __syncthreads();
-        local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, cub::Sum(), valid_items);
+        local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, cuda::std::plus<>{}, valid_items);
         if (threadIdx.x == 0) {
             atomicAdd(&unorm[0], local_unorm);
         }
@@ -1525,11 +1525,11 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit2StateBlockwise(
         }
 
         //  reduce: 2.51/1.60 -> 2.67/1.69
-        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, cub::Max());
-        new_local_abs_max2 = BlockReduce2(reduce2).Reduce(new_local_abs_max2, cub::Max());
+        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, cuda::maximum<>{});
+        new_local_abs_max2 = BlockReduce2(reduce2).Reduce(new_local_abs_max2, cuda::maximum<>{});
 
         if (OPTIMIZER == ADEMAMIX) {
-            new_local_abs_max3 = BlockReduce3(reduce3).Reduce(new_local_abs_max3, cub::Max());
+            new_local_abs_max3 = BlockReduce3(reduce3).Reduce(new_local_abs_max3, cuda::maximum<>{});
         }
 
         if (threadIdx.x == 0) {
@@ -1738,7 +1738,7 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit1StateBlockwise(
         }
 
         //  reduce: 2.51/1.60 -> 2.67/1.69
-        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, cub::Max());
+        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, cuda::maximum<>{});
 
         if (threadIdx.x == 0)
             smem_exchange1[0] = new_local_abs_max1;
