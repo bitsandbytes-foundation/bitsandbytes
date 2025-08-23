@@ -109,7 +109,7 @@ if(BUILD_CUDA)
     endif()
 
     # For CMake < 3.23.0: manually determine supported CUDA architectures
-	if (CMAKE_VERSION VERSION_LESS "3.23.0")
+	if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.23.0")
 	    message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
 	
 	    # Base (CUDA 11.4+)
@@ -160,27 +160,6 @@ if(BUILD_CUDA)
         # Verbose? Outputs register usage information, and other things...
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
     endif()
-
-    foreach(capability ${CMAKE_CUDA_ARCHITECTURES_ALL})
-        # Most of the items here are like: `xx-real`, so we just extract the `xx` portion
-        string(REGEX MATCH "[0-9]+" capability_id "${capability}")
-        if(capability_id GREATER 0)
-            list(APPEND POSSIBLE_CAPABILITIES ${capability_id})
-        endif()
-    endforeach()
-	
-	# CUDA 13+: drop <=80 and add new SMs
-	if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-	    list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 103 110 121)
-	    list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75)
-	    list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70)
-	    list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 80 90 100 120)
-	endif()
-	
-	list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES_ALL)
-	list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR)
-	list(SORT CMAKE_CUDA_ARCHITECTURES_ALL COMPARE NATURAL)
-	list(SORT CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR COMPARE NATURAL)
 
     # This can be changed via -D argument to CMake
     # By default all possible capabilities are compiled
