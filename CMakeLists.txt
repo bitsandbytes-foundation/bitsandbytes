@@ -108,35 +108,52 @@ if(BUILD_CUDA)
         message(FATAL_ERROR "CUDA Version < 11.4 is not supported")
     endif()
 
-    # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
-    if(CMAKE_VERSION VERSION_LESS "3.23.0")
-        message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
+    # For CMake < 3.23.0: manually determine supported CUDA architectures
+	if (CMAKE_VERSION VERSION_LESS "3.23.0")
+	    message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
+	
+	    # Base (CUDA 11.4+)
+	    set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
+	    set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+	
+	    # CUDA 11.8 adds Ada/Hopper
+	    if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
+	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
+	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
+	    endif()
+	
+	    # CUDA 12.8 adds Blackwell
+	    if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
+	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 120)
+	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+	    endif()
+	
+	    # CUDA 13: drop all architectures <= 80-series
+	    if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+	        # Add new SMs introduced in CUDA 13
+	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 103 110 121)
+	
+	        # Remove all SMs below 86 (including 80-series)
+	        list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES_ALL
+	            50 52 53 60 61 62 70 72 75 80)
+	
+	        # Remove majors below 90
+	        list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+	
+	        # Optionally, keep majors as round numbers only in CUDA 13+
+	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90 100 120)
+	    endif()
+	 endif()
 
-        # 11.4+ supports these at a minimum.
-		if (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "13.0")
-            set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
-        	set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
-		else()
-		    set(CMAKE_CUDA_ARCHITECTURES_ALL 80 86 87)
-		    set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 80)
-		endif()
+    # Cleanup: remove duplicates and sort naturally
+    list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES_ALL)
+    list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR)
+    list(SORT CMAKE_CUDA_ARCHITECTURES_ALL COMPARE NATURAL)
+    list(SORT CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR COMPARE NATURAL)
 
-        # CUDA 11.8 adds support for Ada and Hopper.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
-        endif()
-
-        # CUDA 12.8 adds support for Blackwell.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 120)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
-        endif()
-		if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 103 110 121)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 103 110 121)
-        endif()
-    endif()
+    # (Optional) Use these SMs directly for compilation
+    # set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES_ALL}" CACHE STRING "" FORCE)
+endif()
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
 
