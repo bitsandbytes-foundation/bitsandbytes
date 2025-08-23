@@ -133,12 +133,12 @@ if(BUILD_CUDA)
 	        # Add new SMs introduced in CUDA 13
 	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 103 110 121)
 	
-	        # Remove all SMs below 86 (including 80-series)
+	        # Remove all SMs below 80
 	        list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES_ALL
-	            50 52 53 60 61 62 70 72 75 80)
+	            50 52 53 60 61 62 70 72 75)
 	
 	        # Remove majors below 90
-	        list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+	        list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70)
 	
 	        # Optionally, keep majors as round numbers only in CUDA 13+
 	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90 100 120)
