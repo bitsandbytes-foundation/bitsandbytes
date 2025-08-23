@@ -614,40 +614,16 @@ void* cget_managed_ptr(size_t bytes) {
     return ptr;
 }
 
-#include <cuda_runtime_api.h>
-#ifndef CUDART_VERSION
-#define CUDART_VERSION 0
-#endif
-
-// Unified helper: CUDA13+ uses cudaMemLocation; older CUDA/HIP keeps int device
-static inline cudaError_t bnb_prefetch_to(void* ptr, size_t bytes, int device, cudaStream_t stream) {
-#if defined(BUILD_CUDA) && !defined(BUILD_HIP) && (CUDART_VERSION >= 13000)
-    cudaMemLocation loc{};
-    if (device == cudaCpuDeviceId) {
-        loc.type = cudaMemLocationTypeHost;
-        loc.id   = 0;
-    } else {
-        loc.type = cudaMemLocationTypeDevice;
-        loc.id   = device;
-    }
-    return cudaMemPrefetchAsync(ptr, bytes, loc, stream);
-#else
-    // Older CUDA or HIP path (your BUILD_HIP macro maps cudaMemPrefetchAsync -> hipMemPrefetchAsync)
-    return cudaMemPrefetchAsync(ptr, bytes, device, stream);
-#endif
-}
-
 void cprefetch(void* ptr, size_t bytes, int device) {
-    // Only check the device attribute when prefetching to a device
-    if (device != cudaCpuDeviceId) {
-        int hasPrefetch = 0;
-        CUDA_CHECK_RETURN(cudaDeviceGetAttribute(
-            &hasPrefetch, cudaDevAttrConcurrentManagedAccess, device)); // ~40ns
-        if (hasPrefetch == 0)
-            return;
-    }
 
-    CUDA_CHECK_RETURN(bnb_prefetch_to(ptr, bytes, device, /*stream=*/0));
+    int hasPrefetch = 0;
+    CUDA_CHECK_RETURN(
+        cudaDeviceGetAttribute(&hasPrefetch, cudaDevAttrConcurrentManagedAccess, device)
+    ); // 40ns overhead
+    if (hasPrefetch == 0)
+        return;
+
+    CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, device, 0));
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
