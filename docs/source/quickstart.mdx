@@ -1,15 +1,163 @@
 # Quickstart
 
-## How does it work?
+## What is BitsAndBytes?
 
-... work in progress ...
+`bitsandbytes` is a lightweight, open-source library that makes it possible to train and run **very large models** on consumer GPUs or limited hardware by using **8-bit and 4-bit quantization** techniques.
 
-(Community contributions would we very welcome!)
+👉 Put simply:
 
-## Minimal examples
+* Most deep learning models normally store weights in 16-bit (`float16`) or 32-bit (`float32`) numbers.
+* `bitsandbytes` compresses those into 8-bit or even 4-bit representations.
+* This reduces the **memory footprint**, makes models **faster to run**, and still preserves nearly the same accuracy.
 
-The following code illustrates the steps above.
+This unlocks the ability to run models like **LLaMA, Mistral, Falcon, or GPT-style LLMs** on GPUs with as little as **8–16 GB VRAM**.
 
-```py
-code examples will soon follow
+---
+
+## How does it work? (Beginner-friendly)
+
+Let’s break it down with an analogy:
+
+* Imagine you have a library of books. Each book is written in **fancy calligraphy (32-bit precision)** — beautiful but heavy.
+* Now, you rewrite the same books in **compact handwriting (8-bit)** — still readable, much lighter to carry.
+* That’s what `bitsandbytes` does for machine learning weights: it stores the same information in a compressed but efficient format.
+
+**Key benefits for beginners:**
+
+* ✅ **Memory savings** → Run bigger models on smaller GPUs.
+* ✅ **Speedups** → Smaller weights mean faster computations.
+* ✅ **Plug-and-play** → Works with PyTorch and Hugging Face Transformers without huge code changes.
+
+So, as a beginner, you don’t need to understand all the math under the hood. Just know: it makes models lighter and faster while still accurate.
+
+---
+
+## How does it work? (Nerd edition)
+
+Now let’s peek under the hood 🔬:
+
+* **Quantization**:
+
+  * Floating point weights (e.g., `float32`) are mapped to lower precision representations (`int8` or `int4`).
+  * This involves scaling factors so that the reduced representation doesn’t lose too much information.
+
+* **Custom CUDA kernels**:
+
+  * `bitsandbytes` provides hand-optimized CUDA kernels that handle low-precision matrix multiplications efficiently.
+  * These kernels apply **dynamic range scaling** to reduce quantization error.
+
+* **8-bit Optimizers**:
+
+  * Optimizers like Adam, AdamW, RMSProp, etc., are reimplemented in 8-bit precision.
+  * Instead of storing massive optimizer states in 32-bit (which usually takes *more memory than the model itself*), these states are stored in 8-bit with clever scaling.
+
+* **Dynamic Quantization**:
+
+  * Instead of using one scale for the entire tensor, `bitsandbytes` uses per-block quantization (e.g., per 64 values). This improves accuracy significantly.
+
+* **Integrations**:
+
+  * Hugging Face Transformers can load models in 4-bit or 8-bit precision with `load_in_4bit=True` or `load_in_8bit=True`.
+  * Compatible with FSDP (Fully Sharded Data Parallel) and QLoRA fine-tuning techniques.
+
+In short: it’s not *just smaller numbers*. It’s **mathematically smart quantization + GPU-optimized code** that makes it production-ready.
+
+---
+
+## Minimal Examples
+
+### 1. Using quantized embedding directly
+
+```python
+import torch
+import bitsandbytes as bnb
+
+# Quantized embedding layer
+embedding = bnb.nn.Embedding(num_embeddings=1000, embedding_dim=128)
+x = torch.randint(0, 1000, (4,))
+y = embedding(x)
+print(y.shape)  # torch.Size([4, 128])
 ```
+
+This shows that you can drop in `bitsandbytes` layers just like PyTorch ones.
+
+---
+
+### 2. Loading a 4-bit model with Hugging Face Transformers
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model_id = "HuggingFaceTB/SmolLM3-3B"  # replace with a model you have access to
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+# Load in 4-bit precision with device map for GPU offloading
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    load_in_4bit=True,
+    device_map="auto"
+)
+
+# Verify quantized layers
+print(model)
+
+# Generate text
+inputs = tokenizer("Hello, world!", return_tensors="pt").to("cuda")
+outputs = model.generate(**inputs, max_new_tokens=50)
+print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+```
+
+When you print the model, you’ll see `Linear4bit` layers, confirming it’s running in **4-bit precision**.
+
+---
+
+### 3. Training with 8-bit optimizers (and verifying)
+
+```python
+import torch
+import bitsandbytes as bnb
+
+# Simple model
+model = torch.nn.Linear(128, 2).cuda()
+criterion = torch.nn.CrossEntropyLoss()
+
+# Use 8-bit Adam optimizer
+optimizer = bnb.optim.Adam8bit(model.parameters(), lr=1e-3)
+
+x = torch.randn(16, 128).cuda()
+y = torch.randint(0, 2, (16,)).cuda()
+
+optimizer.zero_grad()
+loss = criterion(model(x), y)
+loss.backward()
+optimizer.step()
+
+print(f"Loss: {loss.item():.4f}")
+
+# --- Inspect optimizer state to confirm 8-bit usage ---
+print("Optimizer type:", type(optimizer))
+for i, group in enumerate(optimizer.param_groups):
+    for p in group['params']:
+        state = optimizer.state[p]
+        print(f"Param {i} state keys: {list(state.keys())}")
+```
+
+The optimizer type will be `<class 'bitsandbytes.optim.adam.Adam8bit'>`, and state tensors are stored in quantized form, confirming training in **8-bit precision**.
+
+---
+
+## What’s next?
+
+* [Get started](./introduction)
+* [Installation](./installation)
+* [Quickstart](./quickstart)
+* [Usage Guides](./usage)
+* [8-bit optimizers](./optimizers/overview)
+
+---
+
+✨ **In summary:**
+
+* Beginners → `bitsandbytes` makes big models smaller and faster.
+* Nerds → It achieves this through clever quantization, CUDA kernels, and 8-bit optimizer implementations.
+* Everyone → Can benefit by dropping it into their PyTorch or Hugging Face workflows with minimal code changes, and can **verify** the bit precision being used.
