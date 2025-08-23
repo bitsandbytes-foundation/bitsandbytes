@@ -5,6 +5,27 @@
 
 #if BUILD_CUDA
 #include <ops.cuh>
+#include <cuda_runtime_api.h>
+
+#if CUDART_VERSION >= 13000
+static inline cudaError_t bnb_cudaMemPrefetchAsync(const void* ptr,
+                                                   size_t bytes,
+                                                   int device,
+                                                   cudaStream_t stream) {
+  cudaMemLocation loc{};
+  loc.type = cudaMemLocationTypeDevice;
+  loc.id   = device;
+  // flags = 0
+  return cudaMemPrefetchAsync(ptr, bytes, loc, 0u, stream);
+}
+#else
+static inline cudaError_t bnb_cudaMemPrefetchAsync(const void* ptr,
+                                                   size_t bytes,
+                                                   int device,
+                                                   cudaStream_t stream) {
+  return cudaMemPrefetchAsync(ptr, bytes, device, stream);
+}
+#endif
 #endif
 #if BUILD_HIP
 #include <ops_hip.cuh>
@@ -623,7 +644,7 @@ void cprefetch(void* ptr, size_t bytes, int device) {
     if (hasPrefetch == 0)
         return;
 
-    CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, device, 0));
+    CUDA_CHECK_RETURN(bnb_cudaMemPrefetchAsync(ptr, bytes, device, 0));
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
