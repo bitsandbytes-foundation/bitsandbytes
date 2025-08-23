@@ -113,7 +113,7 @@ if(BUILD_CUDA)
         message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
 
         # 11.4+ supports these at a minimum.
-		if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
+		if (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "13.0")
             set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
         	set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
 		else()
