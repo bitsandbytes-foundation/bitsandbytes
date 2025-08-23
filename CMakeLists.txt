@@ -161,6 +161,14 @@ if(BUILD_CUDA)
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
     endif()
 
+ 	foreach(capability ${CMAKE_CUDA_ARCHITECTURES_ALL})
+        # Most of the items here are like: `xx-real`, so we just extract the `xx` portion
+        string(REGEX MATCH "[0-9]+" capability_id "${capability}")
+        if(capability_id GREATER 0)
+            list(APPEND POSSIBLE_CAPABILITIES ${capability_id})
+        endif()
+    endforeach()
+
     # This can be changed via -D argument to CMake
     # By default all possible capabilities are compiled
     set(COMPUTE_CAPABILITY "${POSSIBLE_CAPABILITIES}" CACHE STRING "Compute Capabilities Targeted")
