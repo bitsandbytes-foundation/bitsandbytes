@@ -11,6 +11,7 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/block/block_store.cuh>
 #include <cub/cub.cuh>
+#include <cuda/std/functional>
 #include <cub/warp/warp_reduce.cuh>
 #include <cuda_fp16.h>
 #include <math_constants.h>
@@ -416,7 +417,7 @@ __global__ void kQuantizeBlockwise(
         for (int j = 0; j < NUM_PER_TH; j++)
             local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
 
-        local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cub::Max(), valid_items);
+        local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, cuda::maximum<>{}, valid_items);
 
         if (threadIdx.x == 0) {
             smem_absmax_value[0] = 1.0f / local_abs_max;
@@ -1002,9 +1003,9 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     }
 
     __syncthreads();
-    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, cub::Max(), valid_items);
+    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, cuda::maximum<>{}, valid_items);
     __syncthreads();
-    local_max_s2 = BlockReduce(temp_storage.reduce).Reduce(local_max_s2, cub::Max(), valid_items);
+    local_max_s2 = BlockReduce(temp_storage.reduce).Reduce(local_max_s2, cuda::maximum<>{}, valid_items);
     if (unorm != NULL) {
         __syncthreads();
         local_unorm = BlockReduce(temp_storage.reduce).Reduce(local_unorm, cub::Sum(), valid_items);
@@ -1213,7 +1214,7 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     }
 
     __syncthreads();
-    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, cub::Max(), valid_items);
+    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, cuda::maximum<>{}, valid_items);
     if (threadIdx.x == 0) {
         atomicMax(&new_max1[0], local_max_s1);
     }
@@ -1843,7 +1844,7 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     }
 
     // Reduce thread-local absmax across the block.
-    const TReduction row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, cub::Max(), cols);
+    const TReduction row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, cuda::maximum<>{}, cols);
     if (threadIdx.x == 0) {
         // Save our block's absmax to shared memory for the quantization step.
         rowStats[row_id] = smem_row_absmax = row_absmax;
@@ -1898,7 +1899,7 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
 
     // Reduce thread-local absmax across the block.
     // TODO: Consider algorithm BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY
-    const float row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, cub::Max(), cols);
+    const float row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, cuda::maximum<>{}, cols);
     if (threadIdx.x == 0) {
         // Save our block's absmax to shared memory for the quantization step.
         rowStats[row_id] = row_absmax;
