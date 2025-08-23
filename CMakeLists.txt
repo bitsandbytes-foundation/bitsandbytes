@@ -113,8 +113,13 @@ if(BUILD_CUDA)
         message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
 
         # 11.4+ supports these at a minimum.
-        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
-        set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+		if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
+            set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
+        	set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+		else()
+		    set(CMAKE_CUDA_ARCHITECTURES_ALL 80 86 87)
+		    set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 80)
+		endif()
 
         # CUDA 11.8 adds support for Ada and Hopper.
         if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
