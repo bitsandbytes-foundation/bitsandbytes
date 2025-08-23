@@ -143,17 +143,16 @@ if(BUILD_CUDA)
 	        # Optionally, keep majors as round numbers only in CUDA 13+
 	        list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90 100 120)
 	    endif()
-	 endif()
 
-    # Cleanup: remove duplicates and sort naturally
-    list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES_ALL)
-    list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR)
-    list(SORT CMAKE_CUDA_ARCHITECTURES_ALL COMPARE NATURAL)
-    list(SORT CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR COMPARE NATURAL)
-
-    # (Optional) Use these SMs directly for compilation
-    # set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES_ALL}" CACHE STRING "" FORCE)
-endif()
+	    # Cleanup: remove duplicates and sort naturally
+	    list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES_ALL)
+	    list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR)
+	    list(SORT CMAKE_CUDA_ARCHITECTURES_ALL COMPARE NATURAL)
+	    list(SORT CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR COMPARE NATURAL)
+	
+	    # (Optional) Use these SMs directly for compilation
+	    # set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES_ALL}" CACHE STRING "" FORCE)
+	endif()
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
 
