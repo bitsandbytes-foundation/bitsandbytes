@@ -231,9 +231,6 @@ class PytorchLARS(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            d_p_list = []
-            momentum_buffer_list = []
             weight_decay = group["weight_decay"]
             momentum = group["momentum"]
             dampening = group["dampening"]

@@ -87,7 +87,7 @@ def main():
 
     # Install CUDA version(s)
     if version == "all":
-        for ver in cuda_versions.keys():
+        for ver in cuda_versions:
             install_cuda(ver, base_path, download_path)
     elif version in cuda_versions:
         install_cuda(version, base_path, download_path)
