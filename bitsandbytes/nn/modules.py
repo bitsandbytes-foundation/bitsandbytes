@@ -480,7 +480,7 @@ class Linear4bit(nn.Linear):
         )
         # self.persistent_buffers = []  # TODO consider as way to save quant state
         self.compute_dtype = compute_dtype
-        self.compute_type_is_set = False if compute_dtype is None else True
+        self.compute_type_is_set = compute_dtype is not None
         self.quant_state = None
         self.quant_storage = quant_storage
         self.ipex_linear_is_set = False
@@ -1150,4 +1150,4 @@ class SwitchBackLinearBnb(nn.Linear):
         if self.weight.CB is not None:
             self.init_8bit_state()
 
-        out = bnb.matmul_mixed(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
+        return bnb.matmul_mixed(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
