@@ -18,12 +18,13 @@ BOOLEAN_TUPLES = list(product(TRUE_FALSE, repeat=2))  # all combinations of (boo
 
 
 @functools.cache
-def get_available_devices():
+def get_available_devices(no_cpu=False):
     if "BNB_TEST_DEVICE" in os.environ:
         # If the environment variable is set, use it directly.
-        return [os.environ["BNB_TEST_DEVICE"]]
+        device = os.environ["BNB_TEST_DEVICE"]
+        return [] if no_cpu and device == "cpu" else [device]
 
-    devices = [] if HIP_ENVIRONMENT else ["cpu"]
+    devices = [] if HIP_ENVIRONMENT else ["cpu"] if not no_cpu else []
 
     if hasattr(torch, "accelerator"):
         # PyTorch 2.6+ - determine accelerator using agnostic API.

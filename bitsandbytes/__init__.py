@@ -38,7 +38,6 @@ if torch.cuda.is_available():
 if hasattr(torch, "xpu") and torch.xpu.is_available():
     from .backends.xpu import ops as xpu_ops
 
-
 if importlib.util.find_spec("habana_frameworks") and importlib.util.find_spec("habana_frameworks.torch"):
     # In case not automatically imported
     import habana_frameworks.torch
@@ -76,4 +75,4 @@ __pdoc__ = {
     "optim.optimizer.MockArgs": False,
 }
 
-__version__ = "0.47.0.dev0"
+__version__ = "0.48.0.dev0"
