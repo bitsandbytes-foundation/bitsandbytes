@@ -43,7 +43,8 @@ classifiers = [
 ]
 dependencies = [
     "torch>=2.2,<3",
-    "numpy>=1.17"
+    "numpy>=1.17",
+    "packaging>=20.9"
 ]
 
 [project.urls]
