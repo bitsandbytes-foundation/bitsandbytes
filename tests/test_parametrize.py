@@ -161,6 +161,7 @@ def test_prequantized_replacement(device, dtype, quant_type):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+@pytest.mark.skipif(torch.__version__ < (2, 5), reason="state dict hook requires torch >= 2.5.0")
 def test_state_dict_functionality(device, dtype, quant_type, compress_statistics):
     """Test that state dict saving works with quantized parameters."""
     if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):

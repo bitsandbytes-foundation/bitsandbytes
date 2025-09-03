@@ -137,13 +137,14 @@ def _enable_parametrization_cache(module: nn.Module, inputs: tuple[Any, ...]):
 
 
 def _register_parametrization_hooks(module: nn.Module, param_name: str):
-    # Register a state dict hook for saving.
-    module.register_state_dict_post_hook(
-        partial(
-            _parametrized_state_dict_post_hook,
-            param_name=param_name,
+    # Register a state dict hook for saving. Note that this requires torch >= 2.5.0.
+    if torch.__version__ >= (2, 5):
+        module.register_state_dict_post_hook(
+            partial(
+                _parametrized_state_dict_post_hook,
+                param_name=param_name,
+            )
         )
-    )
 
     # Register hooks to enable caching for the dequantization parametrization.
     # This helps preserve time and memory when the same quantized parameter
