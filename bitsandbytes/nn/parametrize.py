@@ -21,11 +21,11 @@ class Bnb4bitParametrization(nn.Module):
             The quantization state containing the necessary information for dequantization.
     """
 
-    def __init__(self, quant_state: F.QuantState, p_name="unknown"):
+    def __init__(self, quant_state: F.QuantState):
         super().__init__()
         self.quant_state = quant_state
-        self.p_name = p_name
 
+    @torch.no_grad()
     def forward(self, quantized_param: torch.Tensor) -> torch.Tensor:
         """
         Forward pass to dequantize the parameter.
@@ -55,13 +55,8 @@ def replace_parameter_4bit_prequantized(
     # Apply a parametrization to the module to handle dequantization.
     P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state), unsafe=True)
 
-    # Next, register state dict hook for saving.
-    module.register_state_dict_post_hook(
-        partial(
-            _parametrized_state_dict_post_hook,
-            param_name=param_name,
-        )
-    )
+    # Next, register hooks.
+    _register_parametrization_hooks(module, param_name)
 
 
 def replace_parameter_4bit(
@@ -127,13 +122,34 @@ def replace_parameter_4bit(
     # Apply a parametrization to the module to handle dequantization.
     P.register_parametrization(module, param_name, Bnb4bitParametrization(quant_state), unsafe=True)
 
-    # Next, register state dict hook for saving.
+    # Next, register hooks.
+    _register_parametrization_hooks(module, param_name)
+
+
+def _disable_parametrization_cache(module: nn.Module, inputs: tuple[Any, ...], output: Any):
+    P._cache_enabled -= 1
+    if not P._cache_enabled:
+        P._cache = {}
+
+
+def _enable_parametrization_cache(module: nn.Module, inputs: tuple[Any, ...]):
+    P._cache_enabled += 1
+
+
+def _register_parametrization_hooks(module: nn.Module, param_name: str):
+    # Register a state dict hook for saving.
     module.register_state_dict_post_hook(
         partial(
             _parametrized_state_dict_post_hook,
             param_name=param_name,
         )
     )
+
+    # Register hooks to enable caching for the dequantization parametrization.
+    # This helps preserve time and memory when the same quantized parameter
+    # is accessed multiple times in the forward computation.
+    module.register_forward_pre_hook(_enable_parametrization_cache)
+    module.register_forward_hook(_disable_parametrization_cache)
 
 
 def _parametrized_state_dict_post_hook(
