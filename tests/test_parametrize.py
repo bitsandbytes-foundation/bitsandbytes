@@ -259,6 +259,7 @@ def test_error_conditions():
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+@pytest.mark.skipif(torch.__version__ < (2, 5), reason="state dict hook requires torch >= 2.5.0")
 def test_quant_state_preservation(device, dtype):
     """Test that quantization state is properly preserved and accessible."""
     if device == "hpu" and not is_supported_on_hpu("nf4", dtype):
