@@ -8,7 +8,7 @@ import torch
 from typing_extensions import deprecated
 
 import bitsandbytes.functional as F
-from bitsandbytes.functional import ipex_cpu, ipex_xpu
+from bitsandbytes.functional import ipex_cpu
 
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
