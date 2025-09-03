@@ -8,7 +8,7 @@ import torch
 from typing_extensions import deprecated
 
 import bitsandbytes.functional as F
-from bitsandbytes.functional import ipex_cpu, ipex_xpu
+from bitsandbytes.functional import ipex_cpu
 
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
@@ -426,7 +426,7 @@ def matmul(
         state.threshold = threshold
     # MatMul8bitLt is slower because no fast kernel for quant/dequant 8bit in CPU/XPU
     if state.is_training:
-        if (A.device.type == "cpu" and ipex_cpu) or (A.device.type == "xpu" and ipex_xpu):
+        if (A.device.type == "cpu" and ipex_cpu) or (A.device.type == "xpu"):
             return MatMul8bitFp.apply(A, B, out, bias, state)
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
