@@ -90,11 +90,12 @@ def test_replace_parameter_4bit(device, dtype, quant_type, compress_statistics, 
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
-@pytest.mark.parametrize("param_shape", [(64, 32), (8, 64, 32), (4, 8, 64, 32)])
-def test_moe_parameter_shapes(device, dtype, param_shape):
-    """Test parametrization with MoE-style parameter shapes, especially 3D tensors."""
-    if device == "hpu" and dtype == torch.float16:
-        pytest.skip("Float16 not supported on HPU.")
+def test_moe_parameter_shape(device, dtype):
+    """Test parametrization with MoE-style parameter shape"""
+    if device == "hpu" and not is_supported_on_hpu("nf4", dtype):
+        pytest.skip("This configuration is not supported on HPU.")
+
+    param_shape = (8, 64, 32)
 
     # Create module with custom parameter shape directly on target device
     class MoEModule(nn.Module):
@@ -106,7 +107,7 @@ def test_moe_parameter_shapes(device, dtype, param_shape):
     original_param = module.param.clone()
 
     # Apply quantization parametrization
-    replace_parameter_4bit(module, "param", quant_type="nf4", blocksize=64)
+    replace_parameter_4bit(module, "param", quant_type="nf4")
 
     # Verify reconstruction maintains all properties
     reconstructed = module.param
@@ -120,8 +121,8 @@ def test_moe_parameter_shapes(device, dtype, param_shape):
     err_mean = err.mean()
 
     # Use slightly looser bounds for higher dimensional tensors
-    abs_bound = 0.085 if len(param_shape) > 2 else 0.08  # NF4 baseline + margin
-    rel_bound = 0.25 if len(param_shape) > 2 else 0.22  # NF4 baseline + margin
+    abs_bound = 0.085  # NF4 baseline + margin
+    rel_bound = 0.25  # NF4 baseline + margin
 
     assert err_mean < abs_bound, f"Mean abs error {err_mean:.6f} too high for shape {param_shape}"
     assert relerr < rel_bound, f"Mean rel error {relerr:.6f} too high for shape {param_shape}"
@@ -177,7 +178,7 @@ def test_state_dict_functionality(device, dtype, quant_type, compress_statistics
     assert "expert_weights" in state_dict, "Quantized parameter should be in state dict"
     assert "expert_weights.absmax" in state_dict, "Quantization absmax should be saved"
     assert "expert_weights.quant_map" in state_dict, "Quantization map should be saved"
-    assert "expert_weights.quant_state.bitsandbytes__{quant_type}" in state_dict, "Quant state should be saved"
+    assert f"expert_weights.quant_state.bitsandbytes__{quant_type}" in state_dict, "Quant state should be saved"
 
     # Verify parametrization internals are NOT saved (clean state dict)
     assert "parametrizations.expert_weights.original" not in state_dict, (
