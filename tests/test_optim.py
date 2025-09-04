@@ -175,6 +175,9 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
     if optim_name.startswith("paged_") and sys.platform == "win32":
         pytest.skip("Paged optimizers can have issues on Windows.")
 
+    if optim_name.startswith("paged_") and device == "xpu":
+        pytest.skip("Paged optimizers are not supported on XPU currently.")
+
     if gtype == torch.bfloat16 and optim_name in ["momentum", "rmsprop"]:
         pytest.skip()
     if dim1 == 1 and dim2 == 1:
