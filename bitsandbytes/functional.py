@@ -242,7 +242,6 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     assert e + p == total_bits - has_sign
     # the exponent is biased to 2^(e-1) -1 == 0
     evalues = []
-    pvalues = []
     for i, val in enumerate(range(-(2 ** (exponent_bits - has_sign)), 2 ** (exponent_bits - has_sign), 1)):
         evalues.append(2**val)
 
@@ -1357,8 +1356,6 @@ def optimizer_update_8bit_blockwise(
     gnorm_scale: float = 1.0,
     skip_zeros=False,
 ) -> None:
-    optim_func = None
-
     is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
 
     torch.ops.bitsandbytes.optimizer_update_8bit_blockwise(
@@ -2089,7 +2086,7 @@ def spmm_coo(
     assert cooA.values.numel() == nnz
     assert cooA.cols == B.shape[0]
 
-    transposed_B = False if B.is_contiguous() else True
+    transposed_B = not B.is_contiguous()
 
     ldb = B.stride()[(1 if transposed_B else 0)]
     ldc = B.shape[1]
@@ -2138,12 +2135,7 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     assert cooA.values.numel() == nnz
     assert cooA.cols == B.shape[0], f"{cooA.cols} vs {B.shape}"
 
-    transposed_B = False if B.is_contiguous() else True
-
-    ldb = B.stride()[(1 if transposed_B else 0)]
-    ldc = B.shape[1]
-
-    values, counts = torch.unique(cooA.rowidx, return_counts=True)
+    _, counts = torch.unique(cooA.rowidx, return_counts=True)
     offset = counts.cumsum(0).int()
     max_count, max_idx = torch.sort(counts, descending=True)
     max_idx = max_idx.int()
@@ -2163,11 +2155,8 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     cnnz_rows = ct.c_int32(counts.numel())
     cnnz = ct.c_int32(cooA.nnz)
     crowsA = ct.c_int32(cooA.rows)
-    ccolsA = ct.c_int32(cooA.cols)
     crowsB = ct.c_int32(B.shape[1])
     ccolsB = ct.c_int32(B.shape[1])
-    cldb = ct.c_int32(ldb)
-    cldc = ct.c_int32(ldc)
 
     with _cuda_device_of(B):
         is_on_gpu([cooA.rowidx, cooA.colidx, cooA.values, B, out, dequant_stats])

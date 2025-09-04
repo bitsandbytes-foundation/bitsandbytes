@@ -8,7 +8,7 @@ try:
     import triton.language as tl  # noqa: F401
 
     triton_available = True
-except ImportError as e:
+except ImportError:
     triton_available = False
 
 

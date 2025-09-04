@@ -84,11 +84,6 @@ def find_outlier_dims(weight, reduction_dim=0, zscore=4.0, topk=None, rdm=False)
     if rdm:
         return torch.randint(0, weight.shape[1], size=(topk,), device=weight.device).long()
 
-    m = weight.mean(reduction_dim)
-    mm = m.mean()
-    mstd = m.std()
-    zm = (m - mm) / mstd
-
     std = weight.std(reduction_dim)
     stdm = std.mean()
     stdstd = std.std()
