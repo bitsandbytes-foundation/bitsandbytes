@@ -24,12 +24,12 @@
 __device__ static float fp4_dequantization_lut[8] = {
     0.0f,            // 0b000
     0.005208333333f, // 0b001
-    0.16666667f,     // 0b010
-    0.25f,           // 0b011
+    0.66666667f,     // 0b010
+    1.0f,            // 0b011
     0.33333333f,     // 0b100
     0.5f,            // 0b101
-    0.66666667f,     // 0b110
-    1.0f             // 0b111
+    0.16666667f,     // 0b110
+    0.25f            // 0b111
 };
 
 __device__ static float nf4_dequantization_lut[16] = {
@@ -93,18 +93,18 @@ __device__ unsigned char dQuantizeFP4(float x) {
     if (x > 0.29166667f)
         if (x > 0.583333f)
             if (x > 0.8333333f)
-                return 0b0111 + sign;
+                return 0b0011 + sign;
             else
-                return 0b0110 + sign;
+                return 0b0010 + sign;
         else if (x > 0.4166667f)
             return 0b101 + sign;
         else
             return 0b100 + sign;
     else if (x > 0.0859375f)
         if (x > 0.20833333f)
-            return 0b011 + sign;
+            return 0b0111 + sign;
         else
-            return 0b0010 + sign;
+            return 0b0110 + sign;
     else if (x > 0.00260417f)
         return 0b0001 + sign;
     else
