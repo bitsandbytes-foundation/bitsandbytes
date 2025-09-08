@@ -14,7 +14,7 @@ from ..utils import triton_available
 logger = logging.getLogger(__name__)
 
 # _int_mm is available in torch starting from 2.9 version
-if version.parse(torch.__version__).release >= version.parse("2.9"):
+if version.parse(torch.__version__).release >= version.parse("2.9").release:
 
     @register_kernel("bitsandbytes::int8_linear_matmul", "xpu")
     def _(A: torch.Tensor, B: torch.Tensor):
