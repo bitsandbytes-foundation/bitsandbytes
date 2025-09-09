@@ -1418,7 +1418,7 @@ class TestQuantize4BitFunctional:
         if device == "hpu" and not is_supported_on_hpu(storage_type, dtype):
             pytest.skip("This configuration is not supported on HPU.")
 
-        if device == "cpu" and platform.system() == "Windows" and version.parse(torch.__version__.release) == (2, 8, 0):
+        if device == "cpu" and platform.system() == "Windows" and version.parse(torch.__version__).release == (2, 8, 0):
             pytest.skip("Regression: CPU crash on Windows with torch 2.8.0")
 
         dims = 4
