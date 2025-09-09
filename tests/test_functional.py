@@ -1,8 +1,10 @@
 import math
+import platform
 import random
 import time
 
 import einops
+from packaging import version
 import pytest
 import torch
 
@@ -1407,7 +1409,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
     @pytest.mark.skipif(
         HIP_ENVIRONMENT and ROCM_GPU_ARCH == "gfx90a",
-        reason="this test is not supported on ROCm with gfx90a architectßure yet",
+        reason="this test is not supported on ROCm with gfx90a architecture yet",
     )
     def test_gemv_eye_4bit(self, device, storage_type, dtype):
         if device == "cpu" and dtype == torch.bfloat16 and torch.__version__ < (2, 3):
@@ -1415,6 +1417,9 @@ class TestQuantize4BitFunctional:
 
         if device == "hpu" and not is_supported_on_hpu(storage_type, dtype):
             pytest.skip("This configuration is not supported on HPU.")
+
+        if device == "cpu" and platform.system() == "Windows" and version.parse(torch.__version__.release) == (2, 8, 0):
+            pytest.skip("Regression: CPU crash on Windows with torch 2.8.0")
 
         dims = 4
         dims = get_test_dims(0, 8192, n=dims)
