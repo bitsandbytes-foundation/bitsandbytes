@@ -1,4 +1,11 @@
 [files]
+# Skip these files in typo checks
+extend-exclude = [
+    "csrc/xpu_ops.h",
+    "csrc/xpu_ops.cpp",
+    "csrc/xpu_kernels.h",
+    "csrc/xpu_kernels.cpp"
+]
 
 [default]
 extend-ignore-re = [
