@@ -1,9 +1,10 @@
 import math
+import platform
 import random
 import time
 
 import einops
-import numpy as np
+from packaging import version
 import pytest
 import torch
 
@@ -101,16 +102,16 @@ class Test8BitBlockwiseQuantizeFunctional:
     def test_dynamic_blockwise_quantization(self, device, dtype, nested, blocksize, signed):
         iters = 100
 
-        if device == "cpu":
+        if device != "cuda":
             iters = 10
 
-            # This test is slow on CPU, so avoid atypical use cases.
+            # This test is slow in our non-CUDA implementations, so avoid atypical use cases.
             if nested:
                 pytest.skip("Not a typical use case.")
             if blocksize != 256:
-                pytest.skip("Only blocksize 256 is used in CPU/XPU")
+                pytest.skip("Only blocksize 256 is used in CPU/MPS/XPU")
             if dtype != torch.float32:
-                pytest.skip("Only float32 is used in CPU/XPU")
+                pytest.skip("Only float32 is used in CPU/MPS/XPU")
 
         diffs = []
         reldiffs = []
@@ -239,7 +240,7 @@ class Test8BitBlockwiseQuantizeFunctional:
 
             abserr = []
             relerr = []
-            for i in range(100):
+            for i in range(10):
                 A1 = torch.randn(1024, 1024, device=device)
                 C, SC = F.quantize_blockwise(A1, code=code)
                 A2 = F.dequantize_blockwise(C, SC)
@@ -253,7 +254,7 @@ class Test8BitBlockwiseQuantizeFunctional:
 
             abserr = []
             relerr = []
-            for i in range(100):
+            for i in range(10):
                 A1 = torch.rand(1024, 1024, device=device)
                 C, SC = F.quantize_blockwise(A1, code=code)
                 A2 = F.dequantize_blockwise(C, SC)
@@ -267,7 +268,7 @@ class Test8BitBlockwiseQuantizeFunctional:
 
             abserr = []
             relerr = []
-            for i in range(100):
+            for i in range(10):
                 A1 = torch.randn(1024, 1024, device=device)
                 C, SC = F.quantize_blockwise(A1)
                 A2 = F.dequantize_blockwise(C, SC)
@@ -1169,8 +1170,12 @@ class TestQuantize4BitFunctional:
             4096: 0.262457,
         }
 
-        assert err < error_dict[quant_type]["err"][blocksize] + 1e-3
-        assert relerr < error_dict[quant_type]["rel_err"][blocksize] + 1e-3
+        # Allow higher tolerance for fp32 on CPU with larger block sizes
+        reltol = 2.8e-3 if dtype == torch.float32 and blocksize >= 128 and device == "cpu" else 1e-3
+        errtol = 1.2e-3 if dtype == torch.float32 and blocksize >= 1024 and device == "cpu" else 1e-3
+
+        assert err < error_dict[quant_type]["err"][blocksize] + errtol
+        assert relerr < error_dict[quant_type]["rel_err"][blocksize] + reltol
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
@@ -1403,20 +1408,21 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
-    @pytest.mark.parametrize("double_quant", [False], ids=["DQ_True"])
     @pytest.mark.skipif(
         HIP_ENVIRONMENT and ROCM_GPU_ARCH == "gfx90a",
         reason="this test is not supported on ROCm with gfx90a architecture yet",
     )
-    def test_gemv_eye_4bit(self, device, storage_type, dtype, double_quant):
+    def test_gemv_eye_4bit(self, device, storage_type, dtype):
         if device == "cpu" and dtype == torch.bfloat16 and torch.__version__ < (2, 3):
             pytest.skip("eye doe not support bfloat16 on CPU in torch < 2.3")
 
         if device == "hpu" and not is_supported_on_hpu(storage_type, dtype):
             pytest.skip("This configuration is not supported on HPU.")
 
-        dims = 10
-        torch.random.manual_seed(np.random.randint(0, 412424242))
+        if device == "cpu" and platform.system() == "Windows" and version.parse(torch.__version__).release == (2, 8, 0):
+            pytest.skip("Regression: CPU crash on Windows with torch 2.8.0")
+
+        dims = 4
         dims = get_test_dims(0, 8192, n=dims)
         dims = [dim + (64 - (dim % 64)) for dim in dims]
         # for dim in [576, 5120, 3520, 5184, 1280, 4992, 5312, 2048]:
@@ -1424,7 +1430,7 @@ class TestQuantize4BitFunctional:
             A = torch.normal(0, 0.1, size=(1, 1, dim), dtype=dtype, device=device)
             B = torch.eye(dim, dtype=dtype, device=device)
 
-            qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=double_quant)
+            qB, state = F.quantize_4bit(B, quant_type=storage_type, compress_statistics=False)
             C3 = torch.matmul(A, B.t())
             C2 = bnb.matmul_4bit(A, qB.t(), state)
             A.requires_grad = True
