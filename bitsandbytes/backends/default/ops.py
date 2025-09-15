@@ -320,6 +320,7 @@ name2optimizer_id = {
     "ademamix": ADEMAMIX,
 }
 
+
 @torch.compile
 def _optimizer_precondition_32bit(
     g: torch.Tensor,
@@ -525,29 +526,53 @@ def _(
 
     if optimizer_name == "lion":
         _optimizer_update_32bit(
-            g, p, state1, state2, unorm_vec, max_unorm, param_norm,
-            beta1, beta2, beta3, alpha, eps, weight_decay, step,
-            lr, gnorm_scale, optimizer_id
+            g,
+            p,
+            state1,
+            state2,
+            unorm_vec,
+            max_unorm,
+            param_norm,
+            beta1,
+            beta2,
+            beta3,
+            alpha,
+            eps,
+            weight_decay,
+            step,
+            lr,
+            gnorm_scale,
+            optimizer_id,
         )
 
         if max_unorm > 0.0:
             unorm_vec.zero_()
             _optimizer_precondition_32bit(
-                g, p, state1, state2, unorm_vec,
-                beta1, beta2, eps, weight_decay, step,
-                lr, gnorm_scale, optimizer_id
+                g, p, state1, state2, unorm_vec, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, optimizer_id
             )
     else:
         if max_unorm > 0.0:
             unorm_vec.zero_()
             _optimizer_precondition_32bit(
-                g, p, state1, state2, unorm_vec,
-                beta1, beta2, eps, weight_decay, step,
-                lr, gnorm_scale, optimizer_id
+                g, p, state1, state2, unorm_vec, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, optimizer_id
             )
 
         _optimizer_update_32bit(
-            g, p, state1, state2, unorm_vec, max_unorm, param_norm,
-            beta1, beta2, beta3, alpha, eps, weight_decay, step,
-            lr, gnorm_scale, optimizer_id
+            g,
+            p,
+            state1,
+            state2,
+            unorm_vec,
+            max_unorm,
+            param_norm,
+            beta1,
+            beta2,
+            beta3,
+            alpha,
+            eps,
+            weight_decay,
+            step,
+            lr,
+            gnorm_scale,
+            optimizer_id,
         )

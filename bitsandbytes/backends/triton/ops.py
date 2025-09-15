@@ -3,7 +3,7 @@ from typing import Optional
 
 import torch
 
-from . import triton_kernels, kernels_optim
+from . import kernels_optim, triton_kernels
 
 # currently codes unused, kept for reference
 # Should be the same for quant/dequant
