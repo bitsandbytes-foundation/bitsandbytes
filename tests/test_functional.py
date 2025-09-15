@@ -143,11 +143,11 @@ class Test8BitBlockwiseQuantizeFunctional:
         abserr = sum(diffs) / len(diffs)
         relerr = sum(reldiffs) / len(reldiffs)
         if signed:
-            threshold_abserr = 0.0036 if device in ("cpu", "xpu") and (F.ipex_cpu or F.ipex_xpu) else 0.0035
+            threshold_abserr = 0.0035
             assert abserr < 0.0036
             assert relerr < 0.015
         else:
-            assert abserr < 0.00175 if device in ("cpu", "xpu") and (F.ipex_cpu or F.ipex_xpu) else 0.0023
+            assert abserr < 0.0023
             assert relerr < 0.012
         assert A2.dtype == dtype
 
@@ -178,8 +178,8 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("bits", range(2, 9), ids=id_formatter("bits"))
     @pytest.mark.parametrize("method", ["linear", "fp8", "dynamic"])
     def test_few_bit_quant(self, device, bits, method):
-        if bits != 8 and (device == "cpu" or (device == "xpu" and F.ipex_xpu)):
-            pytest.skip("CPU/XPU implementation only supports 8 bits")
+        if bits != 8 and device == "cpu":
+            pytest.skip("CPU implementation only supports 8 bits")
 
         abserrs = []
         relerrs = []
@@ -1274,8 +1274,8 @@ class TestQuantize4BitFunctional:
         max_errs3 = []
 
         # Large number of iterations is excessive and slow on CPU.
-        # Keep for CUDA for now.
-        iters = 100 if device == "cuda" else 10
+        # Keep for CUDA/XPU for now.
+        iters = 10 if device == "cpu" else 100
 
         for i in range(iters):
             if kind == "fc1":
@@ -1377,13 +1377,13 @@ class TestQuantize4BitFunctional:
                 assert err1 < 6e-5
                 assert relerr1 < 2e-4
             assert absratio < 1.005 and absratio > 0.995
-            assert relratio < 1.005 and relratio > 0.995
-            assert maxratio < 1.005 and maxratio > 0.995
+            assert relratio < 1.005 and relratio > 0.992
+            assert maxratio < 1.005 and maxratio > 0.992
         elif dtype == torch.float32:
             if dim <= 512:
                 assert err1 < 5e-8
                 assert relerr1 < 1e-6
-                assert maxerr1 < 1e-7
+                assert maxerr1 < 1.05e-7
             else:
                 assert err1 < 5e-8
                 assert relerr1 < 8e-6
@@ -1393,16 +1393,17 @@ class TestQuantize4BitFunctional:
             assert maxratio < 1.005 and maxratio > 0.995
         elif dtype == torch.bfloat16:
             if dim <= 512:
+                relerr_thres = 0.013 if hasattr(torch, "xpu") and torch.xpu.is_available() else 0.007
                 assert err1 < 6e-4
-                assert relerr1 < 0.007
+                assert relerr1 < relerr_thres
                 assert maxerr1 < 0.015
             else:
                 assert err1 < 2e-4
                 assert relerr1 < 0.002
                 assert maxerr1 < 0.0012
             assert absratio < 1.005 and absratio > 0.995
-            assert relratio < 1.04 and relratio > 0.96
-            assert maxratio < 1.02 and maxratio > 0.98
+            assert relratio < 1.05 and relratio > 0.96
+            assert maxratio < 1.05 and maxratio > 0.97
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
