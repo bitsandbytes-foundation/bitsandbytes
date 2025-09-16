@@ -84,11 +84,7 @@ def get_inverse_transform_indices(
     return permuted_tile_indices
 
 
-# torch.compiler.is_compiling() is available only in torch >= 2.3
-if hasattr(torch.compiler, "is_compiling"):
-    _is_compiling = torch.compiler.is_compiling
-else:
-    _is_compiling = torch._dynamo.is_compiling
+_is_compiling = torch.compiler.is_compiling
 
 
 @deprecated(

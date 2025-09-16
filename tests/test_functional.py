@@ -1413,9 +1413,6 @@ class TestQuantize4BitFunctional:
         reason="this test is not supported on ROCm with gfx90a architecture yet",
     )
     def test_gemv_eye_4bit(self, device, storage_type, dtype):
-        if device == "cpu" and dtype == torch.bfloat16 and torch.__version__ < (2, 3):
-            pytest.skip("eye doe not support bfloat16 on CPU in torch < 2.3")
-
         if device == "hpu" and not is_supported_on_hpu(storage_type, dtype):
             pytest.skip("This configuration is not supported on HPU.")
 
