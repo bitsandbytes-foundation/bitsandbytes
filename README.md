@@ -61,7 +61,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
-      <td>SM50+ minimum<br>SM75+ recommended</td>
+      <td>SM60+ minimum<br>SM75+ recommended</td>
       <td>✅</td>
       <td>✅</td>
       <td>✅</td>
@@ -87,7 +87,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       </td>
       <td>✅</td>
       <td>✅</td>
-      <td>🚧</td>
+      <td>〰️</td>
     </tr>
     <tr>
       <td></td>
@@ -127,7 +127,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
-      <td>SM50+ minimum<br>SM75+ recommended</td>
+      <td>SM60+ minimum<br>SM75+ recommended</td>
       <td>✅</td>
       <td>✅</td>
       <td>✅</td>
