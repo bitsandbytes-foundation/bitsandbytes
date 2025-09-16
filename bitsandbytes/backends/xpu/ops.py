@@ -238,6 +238,5 @@ elif triton_available:
     register_kernel("bitsandbytes::gemv_4bit", "xpu")(triton_ops.gemv_4bit)
     register_kernel("bitsandbytes::optimizer_update_8bit_blockwise", "xpu")(triton_ops.optimizer_update_8bit_blockwise)
     register_kernel("bitsandbytes::optimizer_update_32bit", "xpu")(triton_ops.optimizer_update_32bit)
-
 else:
     logger.warning("Register pytorch bitsandbytes kernels for XPU because no native library or triton packages found.")
