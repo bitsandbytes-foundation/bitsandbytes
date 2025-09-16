@@ -42,7 +42,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "torch>=2.2,<3",
+    "torch>=2.3,<3",
     "numpy>=1.17",
     "packaging>=20.9"
 ]
