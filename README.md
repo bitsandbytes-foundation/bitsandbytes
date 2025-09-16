@@ -20,7 +20,7 @@ The library includes quantization primitives for 8-bit & 4-bit operations, throu
 bitsandbytes has the following minimum requirements for all platforms:
 
 * Python 3.9+
-* [PyTorch](https://pytorch.org/get-started/locally/) 2.2+
+* [PyTorch](https://pytorch.org/get-started/locally/) 2.3+
   * _Note: While we aim to provide wide backwards compatibility, we recommend using the latest version of PyTorch for the best experience._
 
 #### Accelerator support:
@@ -61,7 +61,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
-      <td>SM50+ minimum<br>SM75+ recommended</td>
+      <td>SM60+ minimum<br>SM75+ recommended</td>
       <td>✅</td>
       <td>✅</td>
       <td>✅</td>
@@ -87,7 +87,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       </td>
       <td>✅</td>
       <td>✅</td>
-      <td>🚧</td>
+      <td>〰️</td>
     </tr>
     <tr>
       <td></td>
@@ -127,7 +127,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
-      <td>SM50+ minimum<br>SM75+ recommended</td>
+      <td>SM60+ minimum<br>SM75+ recommended</td>
       <td>✅</td>
       <td>✅</td>
       <td>✅</td>
@@ -141,7 +141,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       </td>
       <td>✅</td>
       <td>✅</td>
-      <td>🚧</td>
+      <td>〰️</td>
     </tr>
     <tr>
       <td colspan="6">🍎 <strong>macOS 14+</strong></td>

@@ -4,8 +4,6 @@ from typing import Optional
 
 import torch
 
-from .cextension import ipex_cpu, ipex_xpu
-
 _IS_TORCH_GTE_24 = False
 
 if hasattr(torch.library, "register_fake"):
@@ -329,25 +327,6 @@ def _(
     )
     torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
     torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
-
-
-if ipex_cpu or ipex_xpu:
-    # Register the dequantize_nf4_ipex implementation
-    torch.library.define(
-        "bitsandbytes::dequantize_nf4_ipex",
-        "(Tensor A, Tensor absmax, int blocksize, int[] shape, ScalarType dtype) -> Tensor",
-    )
-
-    @register_fake("bitsandbytes::dequantize_nf4_ipex")
-    def _(
-        A: torch.Tensor,
-        absmax: torch.Tensor,
-        blocksize: int,
-        shape: Sequence[int],
-        dtype: torch.dtype,
-    ) -> torch.Tensor:
-        torch._check_is_size(blocksize)
-        return torch.empty(shape, dtype=dtype, device=A.device)
 
 
 torch.library.define(
