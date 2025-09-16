@@ -252,3 +252,46 @@ def optimizer_update_8bit_blockwise(
             gnorm_scale=gnorm_scale,
             skip_zeros=skip_zeros,
         )
+
+
+def optimizer_update_32bit(
+    optimizer_name: str,
+    g: torch.Tensor,
+    p: torch.Tensor,
+    state1: torch.Tensor,
+    state2: Optional[torch.Tensor],
+    unorm_vec: Optional[torch.Tensor],
+    max_unorm: float,
+    param_norm: float,
+    beta1: float,
+    beta2: float,
+    beta3: float,
+    alpha: float,
+    eps: float,
+    weight_decay: float,
+    step: int,
+    lr: float,
+    gnorm_scale: float,
+    skip_zeros=False,
+) -> None:
+    with torch_accelerator_module.device(state1.device):
+        kernels_optim.optimizer_update_32bit_impl(
+            optimizer_name=optimizer_name,
+            g=g,
+            p=p,
+            state1=state1,
+            state2=state2,
+            unorm_vec=unorm_vec,
+            max_unorm=max_unorm,
+            param_norm=param_norm,
+            beta1=beta1,
+            beta2=beta2,
+            beta3=beta3,
+            alpha=alpha,
+            eps=eps,
+            weight_decay=weight_decay,
+            step=step,
+            lr=lr,
+            gnorm_scale=gnorm_scale,
+            skip_zeros=skip_zeros,
+        )

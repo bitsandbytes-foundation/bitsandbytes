@@ -43,7 +43,8 @@ classifiers = [
 ]
 dependencies = [
     "torch>=2.2,<3",
-    "numpy>=1.17"
+    "numpy>=1.17",
+    "packaging>=20.9"
 ]
 
 [project.urls]
@@ -71,7 +72,7 @@ test = [
 ]
 
 [tool.setuptools]
-package-data = { "*" = ["libbitsandbytes*.*"] }
+package-data = { "*" = ["libbitsandbytes*.*", "py.typed"] }
 
 [tool.setuptools.packages.find]
 include = ["bitsandbytes*"]
@@ -123,11 +124,10 @@ select = [
 ignore = [
     "B007",  # Loop control variable not used within the loop body (TODO: enable)
     "B028",  # Warning without stacklevel (TODO: enable)
-    "E501",  # Supress line-too-long warnings: trust yapf's judgement on this one.
+    "E501",  # Suppress line-too-long warnings: trust yapf's judgement on this one.
     "E701",  # Multiple statements on one line (TODO: enable)
     "E712",  # Allow using if x == False, as it's not always equivalent to if x.
     "E731",  # Do not use lambda
-    "F841",  # Local assigned but not used (TODO: enable, these are likely bugs)
     "RUF012",  # Mutable class attribute annotations
     "RUF034", # Useless if-else (TODO: enable)
     "ISC001",   # single-line-implicit-string-concatenation incompatible with formatter
