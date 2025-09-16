@@ -141,7 +141,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       </td>
       <td>✅</td>
       <td>✅</td>
-      <td>🚧</td>
+      <td>〰️</td>
     </tr>
     <tr>
       <td colspan="6">🍎 <strong>macOS 14+</strong></td>
