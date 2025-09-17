@@ -943,7 +943,7 @@ def dequantize_4bit(
     """Dequantizes a packed 4-bit quantized tensor.
 
     The input tensor is dequantized by dividing it into blocks of `blocksize` values.
-    The the absolute maximum value within these blocks is used for scaling
+    The absolute maximum value within these blocks is used for scaling
     the non-linear dequantization.
 
     Args:
