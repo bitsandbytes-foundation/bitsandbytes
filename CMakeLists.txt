@@ -115,8 +115,6 @@ if(BUILD_CUDA)
 
     if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.4")
         message(FATAL_ERROR "CUDA Version < 11.4 is not supported")
-    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-        message(FATAL_ERROR "CUDA Version > 12 is not supported")
     endif()
 
     # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
