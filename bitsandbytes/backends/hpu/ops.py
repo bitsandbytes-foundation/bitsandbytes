@@ -3,11 +3,16 @@ import math
 
 import torch
 
-from bitsandbytes.utils import _reverse_4bit_compress_format
-
 from ..._ops import register_kernel
 from ..utils import GAUDI_SW_VER
 
+# convert btw standard 4-bit compression format and ipex compression format
+# needed for backward compatibility with older versions of gaudi sw
+def _reverse_4bit_compress_format(weight: torch.Tensor):
+    out_1 = (weight & 0xF0) >> 4
+    out_2 = (weight & 0xF) << 4
+    out = out_1 | out_2
+    return out
 
 @register_kernel("bitsandbytes::dequantize_4bit", "hpu")
 def _(
