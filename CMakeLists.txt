@@ -115,8 +115,6 @@ if(BUILD_CUDA)
 
     if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.4")
         message(FATAL_ERROR "CUDA Version < 11.4 is not supported")
-    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-        message(FATAL_ERROR "CUDA Version > 12 is not supported")
     endif()
 
     # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
@@ -124,8 +122,13 @@ if(BUILD_CUDA)
         message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
 
         # 11.4+ supports these at a minimum.
-        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
-        set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "13.0")
+            set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
+            set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+        else()
+            set(CMAKE_CUDA_ARCHITECTURES_ALL 75 80 86 87)
+            set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 70 80)
+        endif()
 
         # CUDA 11.8 adds support for Ada and Hopper.
         if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
@@ -135,8 +138,12 @@ if(BUILD_CUDA)
 
         # CUDA 12.8 adds support for Blackwell.
         if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 120)
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+        endif()
+		if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 110)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 110)
         endif()
     endif()
 
