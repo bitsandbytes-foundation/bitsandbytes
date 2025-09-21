@@ -16,17 +16,19 @@ Welcome to the installation guide for the `bitsandbytes` library! This document 
 
 ## CUDA[[cuda]]
 
-`bitsandbytes` is currently supported on NVIDIA GPUs with [Compute Capability](https://developer.nvidia.com/cuda-gpus) 5.0+.
-The library can be built using CUDA Toolkit versions as old as **11.6** on Windows and **11.4** on Linux.
+`bitsandbytes` is currently supported on NVIDIA GPUs with [Compute Capability](https://developer.nvidia.com/cuda-gpus) 6.0+.
+The library can be built using CUDA Toolkit versions as old as **11.8**.
 
 | **Feature**                     | **CC Required** | **Example Hardware Requirement**            |
 |---------------------------------|-----------------|---------------------------------------------|
-| LLM.int8()                      | 7.5+            | Turing (RTX 20 series, T4) or newer GPUs             |
-| 8-bit optimizers/quantization   | 5.0+            | Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs |
-| NF4/FP4 quantization            | 5.0+            | Maxwell (GTX 900 series, TITAN X, M40) or newer GPUs |
+| LLM.int8()                      | 7.5+            | Turing (RTX 20 series, T4) or newer GPUs    |
+| 8-bit optimizers/quantization   | 6.0+            | Pascal (GTX 10X0 series, P100) or newer GPUs|
+| NF4/FP4 quantization            | 6.0+            | Pascal (GTX 10X0 series, P100) or newer GPUs|
 
 > [!WARNING]
-> Support for Maxwell GPUs is deprecated and will be removed in a future release. For the best results, a Turing generation device or newer is recommended.
+> Support for Maxwell GPUs is deprecated and will be removed in a future release.
+> Maxwell support is not included in PyPI distributions from `v0.48.0` on and must be built from source.
+> For the best results, a Turing generation device or newer is recommended.
 
 ### Installation via PyPI[[cuda-pip]]
 
@@ -36,12 +38,12 @@ The currently distributed `bitsandbytes` packages are built with the following c
 
 | **OS**             | **CUDA Toolkit** | **Host Compiler**    | **Targets**
 |--------------------|------------------|----------------------|--------------
-| **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm50, sm60, sm75, sm80, sm86, sm89, sm90
-| **Linux x86-64**   | 12.8             | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm60, sm70, sm75, sm80, sm86, sm89, sm90
+| **Linux x86-64**   | 12.8 - 12.9      | GCC 11.2             | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
 | **Linux aarch64**  | 11.8 - 12.6      | GCC 11.2             | sm75, sm80, sm90
-| **Linux aarch64**  | 12.8             | GCC 11.2             | sm75, sm80, sm90, sm100
+| **Linux aarch64**  | 12.8 - 12.9      | GCC 11.2             | sm75, sm80, sm90, sm100, sm120
 | **Windows x86-64** | 11.8 - 12.6      | MSVC 19.43+ (VS2022) | sm50, sm60, sm75, sm80, sm86, sm89, sm90
-| **Windows x86-64** | 12.8             | MSVC 19.43+ (VS2022) | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Windows x86-64** | 12.8 - 12.9      | MSVC 19.43+ (VS2022) | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
 
 Use `pip` or `uv` to install:
 
@@ -67,7 +69,7 @@ For example, to install a compiler and CMake on Ubuntu:
 apt-get install -y build-essential cmake
 ```
 
-You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide. The current minimum supported CUDA Toolkit version that we test with is **11.8**.
+You should also install CUDA Toolkit by following the [NVIDIA CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) guide. The current minimum supported CUDA Toolkit version that we support is **11.8**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -84,7 +86,7 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 
 Compilation from source on Windows systems require Visual Studio with C++ support as well as an installation of the CUDA Toolkit.
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we test with is **11.8**.
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we support is **11.8**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -138,8 +140,8 @@ We provide an early preview of support for AMD and Intel hardware as part of a d
 | **Backend** | **Supported Versions** | **Python versions** | **Architecture Support** | **Status** |
 |-------------|------------------------|---------------------------|-------------------------|------------|
 | **AMD ROCm** | 6.1+                   | 3.10+                     | minimum CDNA - `gfx90a`, RDNA - `gfx1100` | Alpha      |
-| **Intel CPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel CPU | Alpha |
-| **Intel GPU** | v2.4.0+ (`ipex`)         | 3.10+                     | Intel GPU | Experimental |
+| **Intel CPU** | v2.4.0+                  | 3.10+                     | Intel CPU | Alpha |
+| **Intel GPU** | v2.7.0+                  | 3.10+                     | Intel GPU | Experimental |
 | **Ascend NPU** | 2.1.0+ (`torch_npu`)         | 3.10+                     | Ascend NPU | Experimental |
 
 For each supported backend, follow the respective instructions below:
@@ -179,7 +181,6 @@ pip install torch --index-url https://download.pytorch.org/whl/rocm6.3/
 <hfoption id="Intel XPU">
 
 * A compatible PyTorch version with Intel XPU support is required. It is recommended to use the latest stable release. See [Getting Started on Intel GPU](https://docs.pytorch.org/docs/stable/notes/get_start_xpu.html) for guidance.
-* The [Intel Extension for PyTorch](https://intel.github.io/intel-extension-for-pytorch/xpu/latest/) is recommended for performance improvements.
 
 </hfoption>
 </hfoptions>
@@ -235,26 +236,17 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 </hfoption>
 <hfoption id="Intel CPU + GPU">
 
-#### Intel CPU + XPU
+#### Intel CPU + GPU(XPU)
 
-
-If you are using Intel CPU on Linux or Intel XPU on Linux/Windows, please follow the [instruction](https://pytorch-extension.intel.com/) or the following command to install intel_extension_for_pytorch so you can get better performance.
-
-CPU: `pip install intel_extension_for_pytorch`
-XPU: `pip install intel_extension_for_pytorch --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/`
-
-Install bitsandbytes:
-CPU: Need to build CPU C++ codes
+CPU needs to build CPU C++ codes, while XPU needs to build sycl codes.
+Run `export bnb_device=xpu` if you are using xpu, run `export bnb_device=cpu` if you are using cpu.
 ```
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
-cmake -DCOMPUTE_BACKEND=cpu -S .
+cmake -DCOMPUTE_BACKEND=$bnb_device -S .
 make
-pip install .
+pip install -e .
 ```
-XPU:
-```
-pip install git+https://github.com/bitsandbytes-foundation/bitsandbytes.git
-```
+
 
 </hfoption>
 <hfoption id="Ascend NPU">

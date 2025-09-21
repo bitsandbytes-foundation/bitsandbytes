@@ -34,6 +34,8 @@ def pytest_runtest_teardown(item, nextitem):
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        torch.mps.empty_cache()
 
 
 @pytest.fixture(scope="session")
