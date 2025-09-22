@@ -77,7 +77,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@433d453c1fa37d10a3254452fa8e284441c9192d # v0.2.27
+      #- uses: Jimver/cuda-toolkit@433d453c1fa37d10a3254452fa8e284441c9192d # v0.2.27
+      - uses: N-Storm/cuda-toolkit@d68ba29a800229200a2c3f572f9e816d7f67cdb4 # v0.2.24m
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
