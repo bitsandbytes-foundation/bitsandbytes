@@ -87,6 +87,7 @@ jobs:
           sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
           linux-local-args: '["--toolkit"]'
           use-github-cache: false
+          use-local-cache: false
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
