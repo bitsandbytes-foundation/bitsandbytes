@@ -115,8 +115,8 @@ if(BUILD_CUDA)
 
     if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.4")
         message(FATAL_ERROR "CUDA Version < 11.4 is not supported")
-    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-        message(FATAL_ERROR "CUDA Version > 12 is not supported")
+    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.99")
+        message(FATAL_ERROR "CUDA Version > 13 is not supported")
     endif()
 
     # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
@@ -137,6 +137,13 @@ if(BUILD_CUDA)
         if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120)
             list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+        endif()
+
+        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+            set(CMAKE_CUDA_ARCHITECTURES_ALL 75 80 86 87 88 89 90 100 103 110 120 121)
+            set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 80 90 100 110 120)
+
+            message(STATUS "Using CUDA 13.0 - updated architecture list for sm_75 and newer")
         endif()
     endif()
 

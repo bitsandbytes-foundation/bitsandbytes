@@ -710,7 +710,8 @@ void cprefetch(void* ptr, size_t bytes, int device) {
     if (hasPrefetch == 0)
         return;
 
-    CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, device, 0));
+    cudaMemLocation location = {cudaMemLocationTypeDevice, device};
+    CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, location, 0));
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
