@@ -85,10 +85,9 @@ jobs:
           # Temporary: Use CUDA 13.0.0 for Windows until 13.0.1 is supported with this action.
           cuda: ${{ matrix.cuda_version == '13.0.1' && '13.0.0' || matrix.cuda_version }}
           method: "local"
-          sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
-          linux-local-args: '["--toolkit"]'
           use-github-cache: false
           use-local-cache: false
+          log-file-suffix: ${{matrix.os}}-${{matrix.cuda_version}}.txt
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
