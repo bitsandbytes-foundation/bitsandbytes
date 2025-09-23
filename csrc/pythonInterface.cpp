@@ -4,6 +4,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #if BUILD_CUDA
+#include <cuda_runtime_api.h>
 #include <ops.cuh>
 #endif
 #if BUILD_HIP
@@ -710,7 +711,15 @@ void cprefetch(void* ptr, size_t bytes, int device) {
     if (hasPrefetch == 0)
         return;
 
+#if CUDART_VERSION >= 13000
+    cudaMemLocation loc{};
+    loc.type = cudaMemLocationTypeDevice;
+    loc.id = device;
+    CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, loc, 0u, 0));
+#else
     CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, device, 0));
+#endif
+
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 

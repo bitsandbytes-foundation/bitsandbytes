@@ -72,21 +72,22 @@ jobs:
           - os: windows-latest
             arch: x86_64
         cuda_version:
-          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1"]
+          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.1"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@c35baa1a18fd1fc9dcf47c5bd839bf30559c0bc3 # v0.2.24
+      #- uses: Jimver/cuda-toolkit@433d453c1fa37d10a3254452fa8e284441c9192d # v0.2.27
+      - uses: N-Storm/cuda-toolkit@d68ba29a800229200a2c3f572f9e816d7f67cdb4 # v0.2.24m
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
-          # Temporary: Use CUDA 12.9.0 for Windows until 12.9.1 is supported with this action.
-          cuda: ${{ matrix.cuda_version == '12.9.1' && '12.9.0' || matrix.cuda_version }}
-          method: "network"
-          sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
-          linux-local-args: '["--toolkit"]'
+          # Temporary: Use CUDA 13.0.0 for Windows until 13.0.1 is supported with this action.
+          cuda: ${{ matrix.cuda_version == '13.0.1' && '13.0.0' || matrix.cuda_version }}
+          method: "local"
           use-github-cache: false
+          use-local-cache: false
+          log-file-suffix: ${{matrix.os}}-${{matrix.cuda_version}}.txt
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
