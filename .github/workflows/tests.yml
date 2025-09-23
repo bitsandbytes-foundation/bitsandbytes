@@ -1,4 +1,4 @@
-name: Unit tests
+name: Nightly Tests
 
 on:
   workflow_dispatch:
@@ -102,7 +102,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
         # Test with the oldest supported torch version, the newest two stable/RC.
-        torch_version: ["2.3.1", "2.7.1", "2.8.0"]
+        torch_version: ["2.3.1", "2.8.0", "2.9.0"]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -136,7 +136,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: 3.10
 
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
@@ -144,7 +144,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/cpu
+          pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/${{ (matrix.torch_version == '2.9.0' && 'test/cpu') || 'cpu' }}
           pip install -e ".[test]"
           pip install pytest-cov
 
@@ -429,7 +429,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: 3.10
 
       - name: Install dependencies
         run: |
