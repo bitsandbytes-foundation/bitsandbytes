@@ -114,30 +114,36 @@ if(BUILD_CUDA)
         )
     endif()
 
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.4")
-        message(FATAL_ERROR "CUDA Version < 11.4 is not supported")
-    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-        message(FATAL_ERROR "CUDA Version > 12 is not supported")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.8")
+        message(FATAL_ERROR "CUDA Version < 11.8 is not supported")
+    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "14.0")
+        message(FATAL_ERROR "CUDA Version > 13 is not supported")
     endif()
 
     # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
     if(CMAKE_VERSION VERSION_LESS "3.23.0")
         message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
 
-        # 11.4+ supports these at a minimum.
-        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
-        set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+        if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+            # Starting in CUDA 13.0, Thor Blackwell is renamed to SM110.
+            # Support for architectures older than Turing (SM75) is removed.
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 75 80 86 87 88 89 90 100 103 110 120 121)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 80 90 100 110 120)
+        else()
+            # 11.8-12.9 supports these at a minimum.
+            set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
+            set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80 90)
 
-        # CUDA 11.8 adds support for Ada and Hopper.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
-        endif()
+            # CUDA 12.8 adds support for Blackwell.
+            if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120 121)
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+            endif()
 
-        # CUDA 12.8 adds support for Blackwell.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+            # CUDA 12.9 adds SM103 (Blackwell B300).
+            if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.9")
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 103)
+            endif()
         endif()
     endif()
 
@@ -253,7 +259,7 @@ endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
-target_compile_features(bitsandbytes PUBLIC cxx_std_14)
+target_compile_features(bitsandbytes PUBLIC cxx_std_17)
 target_include_directories(bitsandbytes PUBLIC csrc include)
 
 
