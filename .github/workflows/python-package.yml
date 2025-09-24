@@ -118,7 +118,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shared_library_xpu_${{ matrix.os }}
+          name: shared_library_xpu_${{ matrix.os }}_x86_64
           path: output/*
           retention-days: 7
 
