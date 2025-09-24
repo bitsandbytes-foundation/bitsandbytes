@@ -20,7 +20,6 @@ else
     # CUDA 12.8+: Add sm100 and sm120; remove < sm70 to align with PyTorch 2.8+cu128 minimum
     [[ "${cuda_version}" == 12.8.* || "${cuda_version}" == 12.9.* ]] && build_capability="70;75;80;86;89;90;100;120"
 
-
     # CUDA 13.0+: Remove < sm75 to align with PyTorch 2.9+cu130 minimum
     [[ "${cuda_version}" == 13.*.* ]] && build_capability="75;80;86;89;90;100;120"
 fi
