@@ -9,6 +9,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import HIP_ENVIRONMENT
 from bitsandbytes.nn.modules import Linear8bitLt
 from tests.helpers import (
     TRUE_FALSE,
@@ -233,6 +234,7 @@ def test_linear8bit_serialization(linear8bit):
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
+@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
 def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
@@ -272,14 +274,11 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
 
         # Test with gradients. Currently only works with threshold=0.
         # Has a strange regression on Linux aarch64 CPU in torch==2.6.0.
-        # There is also an issue with torch==2.7.0 on x86-64 with IPEX.
         is_broken_platform = (
             device == "cpu"
             and platform.system() == "Linux"
-            and (
-                (platform.machine() == "aarch64" and (2, 6) <= torch.__version__ < (2, 7))
-                or (platform.machine() == "x86_64" and bnb.functional.ipex_cpu)
-            )
+            and platform.machine() == "aarch64"
+            and (2, 6) <= torch.__version__ < (2, 7)
         )
 
         if threshold == 0 and not is_broken_platform:

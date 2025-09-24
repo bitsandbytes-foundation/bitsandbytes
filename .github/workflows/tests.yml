@@ -49,8 +49,8 @@ jobs:
   build-cuda:
     strategy:
       matrix:
-        cuda_version: ["11.8.0", "12.6.3", "12.8.1"]
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1", "12.9.1"]
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -58,13 +58,14 @@ jobs:
             arch: aarch64
           - os: windows-2025
             arch: x86_64
+            cuda_version: "11.8.0"
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.23
+        uses: Jimver/cuda-toolkit@c35baa1a18fd1fc9dcf47c5bd839bf30559c0bc3 # v0.2.24
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
@@ -100,8 +101,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
-        # Test with the oldest supported torch version and the two newest.
-        torch_version: ["2.2.2", "2.6.0", "2.7.1"]
+        # Test with the oldest supported torch version, the newest two stable/RC.
+        torch_version: ["2.3.1", "2.7.1", "2.8.0"]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -117,7 +118,7 @@ jobs:
             arch: arm64
         exclude:
           - os: ubuntu-22.04-arm
-            torch_version: "2.2.2"
+            torch_version: "2.3.1"
 
     runs-on: ${{ matrix.runner || matrix.os }}
     env:
@@ -147,9 +148,10 @@ jobs:
           pip install -e ".[test]"
           pip install pytest-cov
 
-      # We need to downgrade to numpy<2 for torch<2.3 compatibility.
+      # We need to downgrade to numpy<2 for torch<2.4.1 compatibility on Windows
+      # See: https://github.com/pytorch/pytorch/issues/131668
       - name: Downgrade NumPy
-        if: startsWith(matrix.torch_version, '2.2.')
+        if: startsWith(matrix.os, 'windows') && startsWith(matrix.torch_version, '2.3.')
         run: pip install "numpy<2"
 
       - name: Show installed packages
@@ -161,7 +163,7 @@ jobs:
       - name: Run tests
         run: pytest --durations=100
 
-  test-cpu-ipex:
+  test-cpu-intel:
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
     runs-on: banb-aws-general-8-plus-use1-public-80
@@ -185,7 +187,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install intel_extension_for_pytorch==2.7.0 --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/cpu/us/
           pip install -e ".[test]"
           pip install pytest-cov
 
@@ -194,9 +195,6 @@ jobs:
 
       - name: Show environment information
         run: python -m torch.utils.collect_env
-
-      - name: IPEX smoke test
-        run: python -c "import torch; import intel_extension_for_pytorch as ipex; print(torch.__version__); print(ipex.__version__);"
 
       - name: Run tests
         run: pytest --durations=100
@@ -223,7 +221,7 @@ jobs:
   #       run: pip list
 
   test-hpu:
-    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    if: false # github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
     strategy:
       fail-fast: false
@@ -279,21 +277,12 @@ jobs:
         run: pytest --durations=100
 
   test-xpu:
-    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    if: false # github.repository == 'bitsandbytes-foundation/bitsandbytes'
     needs: build-cpu
     strategy:
       fail-fast: false
       matrix:
         torch_version: ["2.7.1"] #["2.6.0", "2.7.1"]
-        ipex: [false]
-        # ipex: [true, false]
-        # include:
-        #   - torch_version: "2.6.0"
-        #     ipex: true
-        #     ipex_version: "2.6.10+xpu"
-        #   - torch_version: "2.7.1"
-        #     ipex: true
-        #     ipex_version: "2.7.10+xpu"
     runs-on:
       group: bandb-itac-bmsprpvc1550-8-1gpu
     env:
@@ -329,10 +318,6 @@ jobs:
       - name: Install PyTorch
         run: pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/xpu
 
-      - name: Install IPEX
-        if: matrix.ipex == true
-        run: pip install intel_extension_for_pytorch==${{ matrix.ipex_version }} --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
-
       - name: Install dependencies
         run: |
           pip install -e ".[test]"
@@ -358,10 +343,10 @@ jobs:
         os: [ubuntu-22.04, windows-2025]
         arch: [x86_64]
         gpu: [T4, L40S]
-        cuda_version: ["11.8.0", "12.6.3", "12.8.1"]
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1", "12.9.1"]
         include:
           - cuda_version: "11.8.0"
-            torch_version: "2.2.2"
+            torch_version: "2.3.1"
             pypi_index: "https://download.pytorch.org/whl/cu118"
           - cuda_version: "12.6.3"
             torch_version: "2.6.0"
@@ -369,6 +354,9 @@ jobs:
           - cuda_version: "12.8.1"
             torch_version: "2.7.1"
             pypi_index: "https://download.pytorch.org/whl/cu128"
+          - cuda_version: "12.9.1"
+            torch_version: "2.8.0"
+            pypi_index: "https://download.pytorch.org/whl/cu129"
 
 
           # Linux L40S runners
@@ -387,7 +375,7 @@ jobs:
             gpu: T4
             runner: CUDA-Windows-x64
             cuda_version: "11.8.0"
-            torch_version: "2.2.0"
+            torch_version: "2.3.1"
             pypi_index: "https://download.pytorch.org/whl/cu118"
           - os: windows-2025
             arch: x86_64
@@ -401,12 +389,14 @@ jobs:
             gpu: T4
             runner: CUDA-Windows-x64
             cuda_version: "11.8.0"
-            torch_version: "2.7.1"
+            torch_version: "2.7.1"    # Note: this is the last PyTorch release supporting CUDA 11.8.
             pypi_index: "https://download.pytorch.org/whl/cu118"
 
         exclude:
           # Our current T4 Windows runner has a driver too old (471.11)
           # and cannot support CUDA 12+. Skip for now.
+          - os: windows-2025
+            cuda_version: "12.9.1"
           - os: windows-2025
             cuda_version: "12.8.1"
           - os: windows-2025
@@ -438,15 +428,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch==${{ matrix.torch_version }} --index-url ${{ matrix.pypi_index }}
+          pip install --pre torch~=${{ matrix.torch_version }}.dev0 --index-url ${{ matrix.pypi_index }}
           pip install -e ".[test]"
           pip install pytest-cov
-
-        # We need to downgrade to numpy<2 for torch<2.3 compatibility.
-      - name: Downgrade NumPy
-        if: startsWith(matrix.torch_version, '2.2.')
-        run: pip install "numpy<2"
-
       - name: Show installed packages
         run: pip list
 

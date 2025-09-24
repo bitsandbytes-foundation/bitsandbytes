@@ -21,6 +21,9 @@ options:
     --batches BATCHES [BATCHES ...]
     --input-length INPUT_LENGTH
     --out-dir OUT_DIR
+    --iterations ITERATIONS
+    --warmup-runs WARMUP_RUNS
+    --output-length OUTPUT_LENGTH
 """
 
 import argparse
@@ -29,6 +32,9 @@ from pathlib import Path
 from optimum_benchmark import Benchmark, BenchmarkConfig, InferenceConfig, ProcessConfig, PyTorchConfig
 from optimum_benchmark.logging_utils import setup_logging
 import torch
+
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
 
 BFLOAT16_SUPPORT = torch.cuda.get_device_capability()[0] >= 8
 
@@ -73,9 +79,8 @@ WEIGHTS_CONFIGS = {
     },
 }
 
-if __name__ == "__main__":
-    setup_logging(level="INFO")
 
+def parse_args():
     parser = argparse.ArgumentParser(description="bitsandbytes inference benchmark tool")
 
     parser.add_argument("model_id", type=str, help="The model checkpoint to use.")
@@ -98,37 +103,73 @@ if __name__ == "__main__":
 
     parser.add_argument("--out-dir", type=str, default="reports")
 
-    args = parser.parse_args()
+    parser.add_argument("--iterations", type=int, default=10, help="Number of iterations for each benchmark run")
+    parser.add_argument(
+        "--warmup-runs", type=int, default=10, help="Number of warmup runs to discard before measurement"
+    )
+    parser.add_argument(
+        "--output-length",
+        type=int,
+        default=64,
+        help="If set, `max_new_tokens` and `min_new_tokens` will be set to this value.",
+    )
+
+    return parser.parse_args()
+
+
+def run_benchmark(args, config, batch_size):
+    launcher_config = ProcessConfig(device_isolation=True, device_isolation_action="warn", start_method="spawn")
+    scenario_config = InferenceConfig(
+        latency=True,
+        memory=True,
+        input_shapes={"batch_size": batch_size, "sequence_length": args.input_length},
+        iterations=args.iterations,
+        warmup_runs=args.warmup_runs,
+        # set duration to 0 to disable the duration-based stopping criterion
+        # this is IMPORTANT to ensure that all benchmarks run the same number of operations, regardless of hardware speed/bottlenecks
+        duration=0,
+        # for consistent results, set a fixed min and max for output tokens
+        generate_kwargs={"min_new_tokens": args.output_length, "max_new_tokens": args.output_length},
+        forward_kwargs={"min_new_tokens": args.output_length, "max_new_tokens": args.output_length},
+    )
+
+    backend_config = PyTorchConfig(
+        device="cuda",
+        device_ids="0",
+        device_map="auto",
+        no_weights=False,
+        model=args.model_id,
+        **WEIGHTS_CONFIGS[config],
+    )
+
+    test_name = (
+        f"benchmark-{config}"
+        f"-bsz-{batch_size}"
+        f"-isz-{args.input_length}"
+        f"-osz-{args.output_length}"
+        f"-iter-{args.iterations}"
+        f"-wrmup-{args.warmup_runs}"
+    )
+    benchmark_config = BenchmarkConfig(
+        name=test_name,
+        scenario=scenario_config,
+        launcher=launcher_config,
+        backend=backend_config,
+    )
+
+    out_path = out_dir / (test_name + ".json")
+    print(f"[{test_name}] Starting:")
+    benchmark_report = Benchmark.launch(benchmark_config)
+    benchmark_report.save_json(out_path)
+
+
+if __name__ == "__main__":
+    setup_logging(level="INFO")
+    args = parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for batch_size in args.batches:
-        print(f"Benchmarking batch size: {batch_size}")
         for config in args.configs:
-            launcher_config = ProcessConfig(device_isolation=True, start_method="spawn")
-            scenario_config = InferenceConfig(
-                latency=True,
-                memory=True,
-                input_shapes={"batch_size": batch_size, "sequence_length": args.input_length},
-            )
-            backend_config = PyTorchConfig(
-                device="cuda",
-                device_ids="0",
-                device_map="auto",
-                no_weights=False,
-                model=args.model_id,
-                **WEIGHTS_CONFIGS[config],
-            )
-            benchmark_config = BenchmarkConfig(
-                name=f"benchmark-{config}-bsz{batch_size}",
-                scenario=scenario_config,
-                launcher=launcher_config,
-                backend=backend_config,
-            )
-
-            out_path = out_dir / f"benchmark_{config}_bsz{batch_size}.json"
-
-            benchmark_report = Benchmark.launch(benchmark_config)
-            benchmark_report.log()
-            benchmark_report.save_json(out_path)
+            run_benchmark(args, config, batch_size)

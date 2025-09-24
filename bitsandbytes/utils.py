@@ -38,14 +38,6 @@ def outlier_hook(module, input):
             hook.remove()
 
 
-# convert btw standard 4-bit compression format and ipex compression format
-def _reverse_4bit_compress_format(weight: torch.Tensor):
-    out_1 = (weight & 0xF0) >> 4
-    out_2 = (weight & 0xF) << 4
-    out = out_1 | out_2
-    return out
-
-
 class OutlierTracer:
     _instance = None
 
@@ -91,11 +83,6 @@ class OutlierTracer:
 def find_outlier_dims(weight, reduction_dim=0, zscore=4.0, topk=None, rdm=False):
     if rdm:
         return torch.randint(0, weight.shape[1], size=(topk,), device=weight.device).long()
-
-    m = weight.mean(reduction_dim)
-    mm = m.mean()
-    mstd = m.std()
-    zm = (m - mm) / mstd
 
     std = weight.std(reduction_dim)
     stdm = std.mean()
@@ -209,3 +196,10 @@ def unpack_tensor_to_dict(tensor_data):
 
 LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING = {"row": 0, "col32": 1, "col_turing": 2, "col_ampere": 3}
 INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING = {val: name for (name, val) in LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING.items()}
+
+
+def sync_gpu(t: torch.Tensor):
+    if t.device.type == "cuda":
+        torch.cuda.synchronize()
+    elif t.device.type == "xpu":
+        torch.xpu.synchronize()
