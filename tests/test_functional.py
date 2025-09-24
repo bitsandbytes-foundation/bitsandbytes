@@ -1111,7 +1111,6 @@ class TestQuantize4BitFunctional:
         "blocksize",
         [64, 128, 256, 512, 1024, 2048, 4096] if not HIP_ENVIRONMENT else [128, 256, 512, 1024, 2048, 4096],
     )
-    @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
             pytest.skip("This configuration is not supported on HPU.")
