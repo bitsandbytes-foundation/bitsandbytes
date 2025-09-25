@@ -679,6 +679,7 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
+
         if device is not None and device.type != "meta" and self.data.device.type == "cpu":
             if device.type != "cpu" or self.data.dtype != torch.int8:
                 return self._quantize(device)
@@ -690,8 +691,8 @@ class Int8Params(torch.nn.Parameter):
             requires_grad=self.requires_grad,
             has_fp16_weights=self.has_fp16_weights,
         )
-        new_param.CB = self.CB
-        new_param.SCB = self.SCB
+        new_param.CB = self.CB.to(device=device) if self.CB != None else self.CB
+        new_param.SCB = self.SCB.to(device=device) if self.SCB != None else self.SCB
 
         return new_param
 
