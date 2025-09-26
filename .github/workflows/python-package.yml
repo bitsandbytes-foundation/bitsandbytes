@@ -86,7 +86,8 @@ jobs:
           # Temporary: Use CUDA 13.0.0 for Windows until 13.0.1 is supported with this action.
           cuda: ${{ matrix.cuda_version == '13.0.1' && '13.0.0' || matrix.cuda_version }}
           method: "network"
-          sub-packages: '["nvcc","crt","cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]'
+          # The "crt" component is added for CUDA 13.
+          sub-packages: ${{ format('["nvcc"{0},"cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt"' || '') }}          sub-packages: '["nvcc","crt","cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]'
           use-github-cache: false
           use-local-cache: false
           log-file-suffix: ${{matrix.os}}-${{matrix.cuda_version}}.txt
