@@ -679,7 +679,6 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-
         if device is not None and device.type != "meta" and self.data.device.type == "cpu":
             if device.type != "cpu" or self.data.dtype != torch.int8:
                 return self._quantize(device)
