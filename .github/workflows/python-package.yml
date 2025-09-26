@@ -135,8 +135,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Docker multiarch
-        uses: docker/setup-qemu-action@v3
       - name: Clean up disk space
         run: |
           sudo rm -rf \
