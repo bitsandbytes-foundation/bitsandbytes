@@ -294,9 +294,6 @@ def get_native_library() -> BNBNativeLibrary:
     if hasattr(dll, "get_context"):  # only a CUDA-built library exposes this
         return CudaBNBNativeLibrary(dll)
 
-    # TODO: Remove this log for XPU after 8-bit optimizer is supported
-    logger.warning("The 8-bit optimizer is not available on your device, only available on CUDA for now.")
-
     return BNBNativeLibrary(dll)
 
 

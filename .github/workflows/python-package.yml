@@ -104,6 +104,24 @@ jobs:
           path: output/*
           retention-days: 7
 
+  build-shared-libs-xpu:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build C++
+        run: bash .github/scripts/build-xpu.sh
+        env:
+          build_os: ${{ matrix.os }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared_library_xpu_${{ matrix.os }}_x86_64
+          path: output/*
+          retention-days: 7
+
   build-shared-libs-rocm:
     strategy:
       matrix:
@@ -153,6 +171,7 @@ jobs:
       - build-shared-libs
       - build-shared-libs-cuda
       - build-shared-libs-rocm
+      - build-shared-libs-xpu
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]

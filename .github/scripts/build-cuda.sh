@@ -11,7 +11,7 @@ if [[ -v cuda_targets ]]; then
 elif [ "${build_arch}" = "aarch64" ]; then
     build_capability="75;80;90"
 
-    # CUDA 12.8+: Add sm100/sm120
+    # CUDA 12.8-12.9: Add sm100/sm120
     [[ "${cuda_version}" == 12.8.* || "${cuda_version}" == 12.9.* ]] && build_capability="75;80;90;100;120"
 
     # CUDA 13.0+: Add sm100/sm110/sm120
