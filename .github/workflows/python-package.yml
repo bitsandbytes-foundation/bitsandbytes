@@ -36,9 +36,9 @@ jobs:
             arch: x86_64
           - os: ubuntu-22.04-arm
             arch: aarch64
-          - os: windows-latest
+          - os: windows-2025
             arch: x86_64
-          - os: macos-latest
+          - os: macos-15
             arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
@@ -65,13 +65,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
         include:
           - os: ubuntu-22.04
             arch: x86_64
           - os: ubuntu-22.04-arm
             arch: aarch64
-          - os: windows-latest
+          - os: windows-2025
             arch: x86_64
         cuda_version:
           ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.1"]
@@ -177,15 +177,15 @@ jobs:
       - build-xpu
     strategy:
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-latest, macos-latest]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
         include:
           - os: ubuntu-22.04
             arch: x86_64
           - os: ubuntu-22.04-arm
             arch: aarch64
-          - os: windows-latest
+          - os: windows-2025
             arch: x86_64
-          - os: macos-latest
+          - os: macos-15
             arch: arm64
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
         # code. This ensures compatibility across Python versions, as compatibility is
