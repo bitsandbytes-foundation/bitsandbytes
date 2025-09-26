@@ -87,7 +87,7 @@ jobs:
           cuda: ${{ matrix.cuda_version == '13.0.1' && '13.0.0' || matrix.cuda_version }}
           method: "network"
           # The "crt" component is added for CUDA 13.
-          sub-packages: ${{ format('["nvcc"{0},"cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt"' || '') }}          sub-packages: '["nvcc","crt","cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]'
+          sub-packages: ${{ format('["nvcc"{0},"cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt"' || '') }}
           use-github-cache: false
           use-local-cache: false
           log-file-suffix: ${{matrix.os}}-${{matrix.cuda_version}}.txt
