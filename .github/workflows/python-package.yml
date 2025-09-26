@@ -87,8 +87,8 @@ jobs:
           cuda: ${{ matrix.cuda_version == '13.0.1' && '13.0.0' || matrix.cuda_version }}
           # TODO: Build fails when using "network" on CUDA 13.
           method: ${{ startsWith(matrix.cuda_version, '13.') && 'local' || 'network' }}
-          # The "crt" component is added for CUDA 13.
-          sub-packages: ${{ format('["nvcc"{0},"cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt"' || '') }}
+          # The "crt" "nvvm" and "nvptxcompiler" components are added for CUDA 13.
+          sub-packages: ${{ format('["nvcc"{0},"cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt","nvvm","nvptxcompiler"' || '') }}
           use-github-cache: false
           use-local-cache: false
           log-file-suffix: ${{matrix.os}}-${{matrix.cuda_version}}.txt
