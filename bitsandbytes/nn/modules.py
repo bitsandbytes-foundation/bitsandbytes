@@ -690,8 +690,8 @@ class Int8Params(torch.nn.Parameter):
             requires_grad=self.requires_grad,
             has_fp16_weights=self.has_fp16_weights,
         )
-        new_param.CB = self.CB.to(device=device) if self.CB != None else self.CB
-        new_param.SCB = self.SCB.to(device=device) if self.SCB != None else self.SCB
+        new_param.CB = self.CB.to(device=device) if self.CB is not None else self.CB
+        new_param.SCB = self.SCB.to(device=device) if self.SCB is not None else self.SCB
 
         return new_param
 
