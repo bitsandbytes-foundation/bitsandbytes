@@ -46,7 +46,7 @@ The library can be built using CUDA Toolkit versions as old as **11.8**.
 > For the best results, a Turing generation device or newer is recommended.
 
 
-#### Installation via PyPI[[cuda-pip]]
+### Installation via PyPI[[cuda-pip]]
 
 This is the most straightforward and recommended installation option.
 
@@ -120,11 +120,11 @@ Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com
 </hfoption>
 </hfoptions>
 
-### Intel XPU[[xpu]]
+## Intel XPU[[xpu]]
 
 * A compatible PyTorch version with Intel XPU support is required. The current minimum is **PyTorch 2.6.0.**. It is recommended to use the latest stable release. See [Getting Started on Intel GPU](https://docs.pytorch.org/docs/stable/notes/get_start_xpu.html) for guidance.
 
-#### Installation via PyPI[[xpu-pip]]
+### Installation via PyPI[[xpu-pip]]
 
 This is the most straightforward and recommended installation option.
 
@@ -143,12 +143,12 @@ Use `pip` or `uv` to install the latest release:
 pip install bitsandbytes
 ```
 
-### Intel Gaudi[[gaudi]]
+## Intel Gaudi[[gaudi]]
 
 * A compatible PyTorch version with Intel Gaudi support is required. The current minimum is **Gaudi v1.21** with **PyTorch 2.6.0.**. It is recommended to use the latest stable release. See the Gaudi software [installation guide](https://docs.habana.ai/en/latest/Installation_Guide/index.html) for guidance.
 
 
-#### Installation from PyPI[[gaudi-pip]]
+### Installation from PyPI[[gaudi-pip]]
 
 Use `pip` or `uv` to install the latest release:
 
@@ -156,9 +156,9 @@ Use `pip` or `uv` to install the latest release:
 pip install bitsandbytes
 ```
 
-### CPU[[cpu]]
+## CPU[[cpu]]
 
-#### Installation from PyPI[[cpu-pip]]
+### Installation from PyPI[[cpu-pip]]
 
 This is the most straightforward and recommended installation option.
 
@@ -178,7 +178,7 @@ Use `pip` or `uv` to install the latest release:
 pip install bitsandbytes
 ```
 
-#### Compile from Source[[cpu-compile]]
+### Compile from Source[[cpu-compile]]
 
 To compile from source, simply install the package from source using `pip`. The package will be built for CPU only at this time.
 
@@ -187,12 +187,12 @@ git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bits
 pip install -e .
 ```
 
-### AMD ROCm (Preview)[[rocm]]
+## AMD ROCm (Preview)[[rocm]]
 
 * A compatible PyTorch version with AMD ROCm support is required. The current minimum is **Gaudi v1.21** with **PyTorch 2.6.0.**. It is recommended to use the latest stable release. See [PyTorch on ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html) for guidance.
 * ROCm support is currently only available in our preview wheels or when building from source.
 
-#### Preview Wheels from `main`[[rocm-preview]]
+### Preview Wheels from `main`[[rocm-preview]]
 
 The currently distributed preview `bitsandbytes` are built with the following configurations:
 
@@ -208,7 +208,7 @@ The currently distributed preview `bitsandbytes` are built with the following co
 
 Please see [Preview Wheels](#preview-wheels) for installation instructions.
 
-#### Compile from Source[[rocm-compile]]
+### Compile from Source[[rocm-compile]]
 
 bitsandbytes can be compiled from ROCm 6.1 - ROCm 7.0.
 
