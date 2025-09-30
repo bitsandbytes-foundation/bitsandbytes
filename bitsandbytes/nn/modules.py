@@ -679,19 +679,27 @@ class Int8Params(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None and device.type != "meta" and self.data.device.type == "cpu":
-            if device.type != "cpu" or self.data.dtype != torch.int8:
-                return self._quantize(device)
-            elif self.data.dtype == torch.int8 and device.type == "cpu":
-                self.CB = self.data
+        is_quantized = self.data.dtype == torch.int8
 
+        if not is_quantized and device is not None and device.type != "meta" and self.data.device.type == "cpu":
+            # We're moving from a CPU device to a non-meta device.
+            # In this circumstance, we want to quantize if we haven't already.
+            return self._quantize(device)
+
+        # Create a new parameter on the target device.
         new_param = Int8Params(
             super().to(device=device, dtype=dtype, non_blocking=non_blocking),
             requires_grad=self.requires_grad,
             has_fp16_weights=self.has_fp16_weights,
         )
-        new_param.CB = self.CB
-        new_param.SCB = self.SCB
+
+        # If we had already quantized, move the statistics appropriately.
+        if is_quantized and device is not None:
+            if self.CB is not None:
+                new_param.CB = new_param.data
+
+            if self.SCB is not None:
+                new_param.SCB = self.SCB.to(device)
 
         return new_param
 
@@ -1036,6 +1044,21 @@ class Linear8bitLt(nn.Linear):
         self.state.SCB = self.weight.SCB
         self.weight.CB = None
         self.weight.SCB = None
+
+    def to(self, *args, **kwargs):
+        # Call the parent to() method to handle standard parameter/buffer movement
+        result = super().to(*args, **kwargs)
+
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+
+        # Handle state tensors if needed.
+        if device is not None:
+            if result.state.CB is not None:
+                result.state.CB = result.state.CB.to(device)
+            if result.state.SCB is not None:
+                result.state.SCB = result.state.SCB.to(device)
+
+        return result
 
     def forward(self, x: torch.Tensor):
         self.state.is_training = self.training

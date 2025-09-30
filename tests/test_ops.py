@@ -211,6 +211,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not HIP_ENVIRONMENT else [128, 256, 512])
+    @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
             pytest.skip("This configuration is not supported on HPU.")
