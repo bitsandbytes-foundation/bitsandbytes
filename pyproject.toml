@@ -25,7 +25,7 @@ keywords = [
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Environment :: GPU :: NVIDIA CUDA :: 11 :: 11.8",
+    "Environment :: GPU :: NVIDIA CUDA :: 11.8",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
     "Environment :: GPU :: NVIDIA CUDA :: 13",
     "Intended Audience :: Developers",
