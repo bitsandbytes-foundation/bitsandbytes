@@ -73,9 +73,9 @@ bitsandbytes has the following minimum requirements for all platforms:
         CDNA: gfx90a, gfx942<br>
         RDNA: gfx1100
       </td>
-      <td>🚧</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>〰️</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
