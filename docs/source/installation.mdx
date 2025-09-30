@@ -18,17 +18,17 @@ additional platforms such as AMD ROCm.
 - [CPU](#cpu)
   - [Installation via PyPI](#cpu-pip)
   - [Compile from Source](#cpu-compile)
-- [AMD ROCm (Preview)](#rocm)
+- [AMD ROCm (Preview)](#rocm-preview)
 - [Preview Wheels](#preview-wheels)
 
-## System Requirements
+## System Requirements[[requirements]]
 
 These are the minimum requirements for `bitsandbytes` across all platforms. Please be aware that some compute platforms may impose more strict requirements.
 
 * Python >= 3.9
 * PyTorch >= 2.3
 
-## NVIDIA CUDA
+## NVIDIA CUDA[[cuda]]
 
 `bitsandbytes` is currently supported on NVIDIA GPUs with [Compute Capability](https://developer.nvidia.com/cuda-gpus) 6.0+.
 The library can be built using CUDA Toolkit versions as old as **11.8**.
@@ -224,7 +224,7 @@ make
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
-## Preview Wheels [[preview-wheels]]
+## Preview Wheels[[preview-wheels]]
 
 If you would like to use new features even before they are officially released and help us test them, feel free to install the wheel directly from our CI (*the wheel links will remain stable!*):
 
