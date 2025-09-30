@@ -31,7 +31,7 @@ class ExtBuildPy(build_py):
 
 
 setup(
-    version="0.48.0.dev0",
+    version="0.48.0",
     packages=find_packages(),
     distclass=BinaryDistribution,
     cmake_source_dir=".",
