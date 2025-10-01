@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core", "setuptools >= 77.0.3"]
+requires = ["scikit-build-core", "setuptools >= 77.0.3", "trove-classifiers>=2025.8.6.13"]
 build-backend = "scikit_build_core.setuptools.build_meta"
 
 [project]
