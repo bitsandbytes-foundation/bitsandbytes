@@ -126,7 +126,6 @@ jobs:
           retention-days: 7
 
   build-rocm:
-    if: false # Temporary
     strategy:
       matrix:
         os: [ubuntu-22.04]
@@ -172,7 +171,7 @@ jobs:
     needs:
       - build-cpu
       - build-cuda
-      #- build-rocm
+      - build-rocm
       - build-xpu
     strategy:
       matrix:
