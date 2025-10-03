@@ -11,14 +11,20 @@ if [[ -v cuda_targets ]]; then
 elif [ "${build_arch}" = "aarch64" ]; then
     build_capability="75;80;90"
 
-    # CUDA 12.8+: Add sm100/sm120
+    # CUDA 12.8-12.9: Add sm100/sm120
     [[ "${cuda_version}" == 12.8.* || "${cuda_version}" == 12.9.* ]] && build_capability="75;80;90;100;120"
+
+    # CUDA 13.0+: Add sm100/sm110/sm120
+    [[ "${cuda_version}" == 13.*.* ]] && build_capability="75;80;90;100;110;120"
 else
     # By default, target Pascal through Hopper.
     build_capability="60;70;75;80;86;89;90"
 
     # CUDA 12.8+: Add sm100 and sm120; remove < sm70 to align with PyTorch 2.8+cu128 minimum
     [[ "${cuda_version}" == 12.8.* || "${cuda_version}" == 12.9.* ]] && build_capability="70;75;80;86;89;90;100;120"
+
+    # CUDA 13.0+: Remove < sm75 to align with PyTorch 2.9+cu130 minimum
+    [[ "${cuda_version}" == 13.*.* ]] && build_capability="75;80;86;89;90;100;120"
 fi
 
 [[ "${build_os}" = windows-* ]] && python3 -m pip install ninja
@@ -29,8 +35,8 @@ if [ "${build_os:0:6}" == ubuntu ]; then
     echo "Using image $image"
 
     docker run -i -w /src -v "$PWD:/src" "$image" bash -c \
-        "dnf update -y \
-        && dnf install cmake gcc-toolset-11 -y \
+        "dnf -y --refresh update --security \
+        && dnf -y install cmake gcc-toolset-11 --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
         && source scl_source enable gcc-toolset-11 \
         && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" . \
         && cmake --build . --config Release"

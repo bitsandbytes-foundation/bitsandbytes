@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core", "setuptools >= 63.0.0"]
+requires = ["scikit-build-core", "setuptools >= 77.0.3", "trove-classifiers>=2025.8.6.13"]
 build-backend = "scikit_build_core.setuptools.build_meta"
 
 [project]
@@ -13,7 +13,8 @@ maintainers = [
 ]
 requires-python = ">=3.9"
 readme = "README.md"
-license = {file="LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = [
     "gpu",
     "optimizers",
@@ -24,9 +25,9 @@ keywords = [
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "License :: OSI Approved :: MIT License",
-    "Environment :: GPU :: NVIDIA CUDA :: 11",
+    "Environment :: GPU :: NVIDIA CUDA :: 11.8",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
+    "Environment :: GPU :: NVIDIA CUDA :: 13",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX :: Linux",
@@ -67,7 +68,7 @@ test = [
     "einops~=0.8.0",
     "lion-pytorch==0.2.3",
     "pytest~=8.3",
-    "scipy>=1.11.4,<2; python_version >= '3.9'",
+    "scipy>=1.11.4,<2",
     "transformers>=4.30.1,<5"
 ]
 

@@ -26,7 +26,7 @@ bitsandbytes has the following minimum requirements for all platforms:
 #### Accelerator support:
 
 <small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
-[document in the 0.47.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.47.0/README.md#accelerator-support).
+[document in the 0.48.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.48.0/README.md#accelerator-support).
 </small>
 
 ##### Legend:
@@ -92,7 +92,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟪 Intel Gaudi <br><code>hpu</code></td>
-      <td>Gaudi1, Gaudi2, Gaudi3</td>
+      <td>Gaudi2, Gaudi3</td>
       <td>✅</td>
       <td>〰️</td>
       <td>❌</td>
@@ -173,7 +173,9 @@ bitsandbytes has the following minimum requirements for all platforms:
 ## :heart: Sponsors
 The continued maintenance and development of `bitsandbytes` is made possible thanks to the generous support of our sponsors. Their contributions help ensure that we can keep improving the project and delivering valuable updates to the community.
 
-<a href="https://hf.co" target="_blank"><img width="100" src="https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg" alt="Hugging Face"></a>
+<kbd><a href="https://hf.co" target="_blank"><img width="100" src="https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg" alt="Hugging Face"></a></kbd>
+&nbsp;
+<kbd><a href="https://intel.com" target="_blank"><img width="100" src="https://avatars.githubusercontent.com/u/17888862?s=100&v=4" alt="Intel"></a></kbd>
 
 ## License
 `bitsandbytes` is MIT licensed.
