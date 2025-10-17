@@ -693,7 +693,7 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
 	//warpsize - 32
         int num_blocks = (m+3)/4;
 	//warpsize - 64
-        if (warpSize == 64) {
+        if (BNB_WARP_SIZE == 64) {
           num_blocks = (m+1)/2;
         }
 
