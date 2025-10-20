@@ -4,6 +4,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #if BUILD_CUDA
+#include <cuda_runtime_api.h>
 #include <ops.cuh>
 #endif
 #if BUILD_HIP
@@ -11,6 +12,9 @@
 #endif
 #if BUILD_MPS
 // #include <mps_ops.h>
+#endif
+#if BUILD_XPU
+#include <xpu_ops.h>
 #endif
 #include <cpu_ops.h>
 
@@ -306,6 +310,90 @@ void spmm_coo_very_sparse_naive_int8(
         colsB
     );
 }
+#endif
+
+#if BUILD_XPU
+
+void dequantizeBlockwise_fp16(
+    float* code, unsigned char* A, float* absmax, sycl::half* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise<sycl::half, General8bit>(code, A, absmax, out, blocksize, n, stream);
+}
+
+void dequantizeBlockwise_fp16_fp4(
+    float* code, unsigned char* A, float* absmax, sycl::half* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise<sycl::half, FP4>(NULL, A, absmax, out, blocksize, n, stream);
+}
+
+void dequantizeBlockwise_fp16_nf4(
+    float* code, unsigned char* A, float* absmax, sycl::half* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise<sycl::half, NF4>(NULL, A, absmax, out, blocksize, n, stream);
+}
+
+void dequantizeBlockwise_fp32(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise<float, General8bit>(code, A, absmax, out, blocksize, n, stream);
+}
+
+void dequantizeBlockwise_fp32_fp4(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise<float, FP4>(NULL, A, absmax, out, blocksize, n, stream);
+}
+
+void dequantizeBlockwise_fp32_nf4(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise<float, NF4>(NULL, A, absmax, out, blocksize, n, stream);
+}
+
+void dequantizeBlockwise_bf16(
+    float* code, unsigned char* A, float* absmax, sycl::ext::oneapi::bfloat16* out, int blocksize, const int n,
+    sycl::queue* stream
+) {
+    dequantizeBlockwise<sycl::ext::oneapi::bfloat16, General8bit>(code, A, absmax, out, blocksize, n, stream);
+}
+
+void dequantizeBlockwise_bf16_fp4(
+    float* code, unsigned char* A, float* absmax, sycl::ext::oneapi::bfloat16* out, int blocksize, const int n,
+    sycl::queue* stream
+) {
+    dequantizeBlockwise<sycl::ext::oneapi::bfloat16, FP4>(NULL, A, absmax, out, blocksize, n, stream);
+}
+
+void dequantizeBlockwise_bf16_nf4(
+    float* code, unsigned char* A, float* absmax, sycl::ext::oneapi::bfloat16* out, int blocksize, const int n,
+    sycl::queue* stream
+) {
+    dequantizeBlockwise<sycl::ext::oneapi::bfloat16, NF4>(NULL, A, absmax, out, blocksize, n, stream);
+}
+
+void gemv_4bit_inference_fp16(
+    int m, int n, int k, sycl::half* A, unsigned char* B, float* absmax, float* datatype, sycl::half* out, int lda,
+    int ldb, int ldc, int blocksize, sycl::queue* stream
+) {
+    gemv_4bit_inference<sycl::half, 16>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
+}
+
+void gemv_4bit_inference_bf16(
+    int m, int n, int k, sycl::ext::oneapi::bfloat16* A, unsigned char* B, float* absmax, float* datatype,
+    sycl::ext::oneapi::bfloat16* out, int lda, int ldb, int ldc, int blocksize, sycl::queue* stream
+) {
+    gemv_4bit_inference<sycl::ext::oneapi::bfloat16, 16>(
+        m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream
+    );
+}
+
+void gemv_4bit_inference_fp32(
+    int m, int n, int k, float* A, unsigned char* B, float* absmax, float* datatype, float* out, int lda, int ldb,
+    int ldc, int blocksize, sycl::queue* stream
+) {
+    gemv_4bit_inference<float, 32>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
+}
+
 #endif
 
 extern "C" {
@@ -623,7 +711,15 @@ void cprefetch(void* ptr, size_t bytes, int device) {
     if (hasPrefetch == 0)
         return;
 
+#if CUDART_VERSION >= 13000
+    cudaMemLocation loc{};
+    loc.type = cudaMemLocationTypeDevice;
+    loc.id = device;
+    CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, loc, 0u, 0));
+#else
     CUDA_CHECK_RETURN(cudaMemPrefetchAsync(ptr, bytes, device, 0));
+#endif
+
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -654,6 +750,88 @@ void cgemm_4bit_inference_naive_fp32(
     int ldc, int blocksize, cudaStream_t stream
 ) {
     gemm_4bit_inference_naive_fp32(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
+}
+
+#endif
+
+#if BUILD_XPU
+
+void cdequantize_blockwise_fp16_fp4(
+    float* code, unsigned char* A, float* absmax, sycl::half* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise_fp16_fp4(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cdequantize_blockwise_fp16(
+    float* code, unsigned char* A, float* absmax, sycl::half* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise_fp16(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cdequantize_blockwise_fp16_nf4(
+    float* code, unsigned char* A, float* absmax, sycl::half* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise_fp16_nf4(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cdequantize_blockwise_fp32(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise_fp32(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cdequantize_blockwise_fp32_fp4(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise_fp32_fp4(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cdequantize_blockwise_fp32_nf4(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, sycl::queue* stream
+) {
+    dequantizeBlockwise_fp32_nf4(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cdequantize_blockwise_bf16(
+    float* code, unsigned char* A, float* absmax, sycl::ext::oneapi::bfloat16* out, int blocksize, const int n,
+    sycl::queue* stream
+) {
+    dequantizeBlockwise_bf16(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cdequantize_blockwise_bf16_fp4(
+    float* code, unsigned char* A, float* absmax, sycl::ext::oneapi::bfloat16* out, int blocksize, const int n,
+    sycl::queue* stream
+) {
+    dequantizeBlockwise_bf16_fp4(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cdequantize_blockwise_bf16_nf4(
+    float* code, unsigned char* A, float* absmax, sycl::ext::oneapi::bfloat16* out, int blocksize, const int n,
+    sycl::queue* stream
+) {
+    dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n, stream);
+}
+
+void cgemv_4bit_inference_fp16(
+    int m, int n, int k, sycl::half* A, unsigned char* B, float* absmax, float* datatype, sycl::half* out, int lda,
+    int ldb, int ldc, int blocksize, sycl::queue* stream
+) {
+    gemv_4bit_inference_fp16(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
+}
+
+void cgemv_4bit_inference_bf16(
+    int m, int n, int k, sycl::ext::oneapi::bfloat16* A, unsigned char* B, float* absmax, float* datatype,
+    sycl::ext::oneapi::bfloat16* out, int lda, int ldb, int ldc, int blocksize, sycl::queue* stream
+) {
+    gemv_4bit_inference_bf16(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
+}
+
+void cgemv_4bit_inference_fp32(
+    int m, int n, int k, float* A, unsigned char* B, float* absmax, float* datatype, float* out, int lda, int ldb,
+    int ldc, int blocksize, sycl::queue* stream
+) {
+    gemv_4bit_inference_fp32(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
 }
 
 #endif

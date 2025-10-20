@@ -289,6 +289,9 @@ def get_native_library() -> BNBNativeLibrary:
 
         binary_path = cuda_binary_path
 
+    if torch._C._has_xpu:
+        binary_path = PACKAGE_DIR / f"libbitsandbytes_xpu{DYNAMIC_LIBRARY_SUFFIX}"
+
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
 
     # Try to load the library - any errors will propagate up
@@ -297,39 +300,33 @@ def get_native_library() -> BNBNativeLibrary:
     if hasattr(dll, "get_context"):  # only a CUDA-built library exposes this
         return CudaBNBNativeLibrary(dll)
 
-    # TODO: Remove this log for XPU after 8-bit optimizer is supported
-    logger.warning("The 8-bit optimizer is not available on your device, only available on CUDA for now.")
-
     return BNBNativeLibrary(dll)
 
 
 ROCM_GPU_ARCH = get_rocm_gpu_arch()
 ROCM_WARP_SIZE_64 = True if get_rocm_warpsize() == 64 else False
 
+HIP_ENVIRONMENT = False
+BNB_BACKEND = "CPU"
+if torch.version.hip:
+    HIP_ENVIRONMENT = True
+    BNB_BACKEND = "ROCm"
+elif torch.cuda.is_available():
+    BNB_BACKEND = "CUDA"
+elif torch._C._has_xpu:
+    BNB_BACKEND = "XPU"
+
 try:
-    # to support Intel CPU/GPU (XPU) backend
-    import intel_extension_for_pytorch as ipex
-
-    ipex_cpu = ipex if ipex._C._has_cpu() else None
-    ipex_xpu = ipex if ipex._C._has_xpu() else None
-except BaseException:
-    ipex_cpu = None
-    ipex_xpu = None
-
-try:
-    if torch.version.hip:
-        HIP_ENVIRONMENT, BNB_BACKEND = True, "ROCm"
-    else:
-        HIP_ENVIRONMENT, BNB_BACKEND = False, "CUDA"
-
     lib = get_native_library()
 except Exception as e:
-    error_msg = str(e)
-    if not (ipex_cpu or ipex_xpu):
+    if BNB_BACKEND in ("CPU", "XPU"):
+        lib = ErrorHandlerMockBNBNativeLibrary("XPU/CPU can run without native library.")
+    else:
+        error_msg = str(e)
         logger.error(
-            f"bitsandbytes library load error: {error_msg}\n If you are using Intel CPU/XPU, please install intel_extension_for_pytorch to enable required ops",
+            f"bitsandbytes library load error: {error_msg}",
             exc_info=True,
         )
 
-    # create a mock with error messaging as fallback
-    lib = ErrorHandlerMockBNBNativeLibrary(error_msg)
+        # create a mock with error messaging as fallback
+        lib = ErrorHandlerMockBNBNativeLibrary(error_msg)

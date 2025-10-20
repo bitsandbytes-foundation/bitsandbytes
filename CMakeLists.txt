@@ -28,11 +28,12 @@ set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
 set(HIP_FILES csrc/ops.hip csrc/kernels.hip)
 set(MPS_FILES csrc/mps_ops.mm)
 set(METAL_FILES csrc/mps_kernels.metal)
+set(XPU_FILES csrc/xpu_ops.cpp csrc/xpu_kernels.cpp)
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, mps)")
-set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps)
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, mps, xpu)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps xpu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
@@ -64,10 +65,19 @@ elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     set(BUILD_CUDA OFF)
     set(BUILD_HIP OFF)
     set(BUILD_MPS ON)
+elseif(${COMPUTE_BACKEND} STREQUAL "xpu")
+    if(APPLE)
+        message(FATAL_ERROR "XPU is not supported on macOS" )
+    endif()
+    set(BUILD_CUDA OFF)
+    set(BUILD_HIP OFF)
+    set(BUILD_MPS OFF)
+    set(BUILD_XPU ON)
 else()
     set(BUILD_CUDA OFF)
     set(BUILD_HIP OFF)
     set(BUILD_MPS OFF)
+    set(BUILD_XPU OFF)
 endif()
 
 
@@ -104,30 +114,36 @@ if(BUILD_CUDA)
         )
     endif()
 
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.4")
-        message(FATAL_ERROR "CUDA Version < 11.4 is not supported")
-    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-        message(FATAL_ERROR "CUDA Version > 12 is not supported")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.8")
+        message(FATAL_ERROR "CUDA Version < 11.8 is not supported")
+    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "14.0")
+        message(FATAL_ERROR "CUDA Version > 13 is not supported")
     endif()
 
     # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
     if(CMAKE_VERSION VERSION_LESS "3.23.0")
         message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
 
-        # 11.4+ supports these at a minimum.
-        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
-        set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+        if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+            # Starting in CUDA 13.0, Thor Blackwell is renamed to SM110.
+            # Support for architectures older than Turing (SM75) is removed.
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 75 80 86 87 88 89 90 100 103 110 120 121)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 80 90 100 110 120)
+        else()
+            # 11.8-12.9 supports these at a minimum.
+            set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
+            set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80 90)
 
-        # CUDA 11.8 adds support for Ada and Hopper.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
-        endif()
+            # CUDA 12.8 adds support for Blackwell.
+            if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120 121)
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+            endif()
 
-        # CUDA 12.8 adds support for Blackwell.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+            # CUDA 12.9 adds SM103 (Blackwell B300).
+            if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.9")
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 103)
+            endif()
         endif()
     endif()
 
@@ -217,6 +233,15 @@ elseif(BUILD_MPS)
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+elseif(BUILD_XPU)
+    list(APPEND SRC_FILES ${XPU_FILES})
+    string(APPEND BNB_OUTPUT_NAME "_xpu")
+    add_compile_definitions(BUILD_XPU)
+    set(CMAKE_C_COMPILER icx)
+    set(CMAKE_CXX_COMPILER icpx)
+    if(WIN32)
+        set(CMAKE_CXX_COMPILER icx)
+    endif()
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
@@ -234,7 +259,7 @@ endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
-target_compile_features(bitsandbytes PUBLIC cxx_std_14)
+target_compile_features(bitsandbytes PUBLIC cxx_std_17)
 target_include_directories(bitsandbytes PUBLIC csrc include)
 
 
@@ -284,6 +309,15 @@ endif()
 if(BUILD_MPS)
     add_dependencies(bitsandbytes metallib)
     target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
+endif()
+if(BUILD_XPU)
+    set(SYCL_LINK_FLAGS "-fsycl;--offload-compress;-fsycl-targets=spir64_gen,spir64;-Xs;-device pvc,xe-lpg,ats-m150 -options ' -cl-intel-enable-auto-large-GRF-mode -cl-poison-unsupported-fp64-kernels -cl-intel-greater-than-4GB-buffer-required'")
+    set(SYCL_COMPILE_FLAGS "-fsycl;-fhonor-nans;-fhonor-infinities;-fno-associative-math;-fno-approx-func;-fno-sycl-instrument-device-code;--offload-compress;-fsycl-targets=spir64_gen,spir64;")
+
+    set_property(TARGET bitsandbytes PROPERTY CXX_STANDARD 20)
+    target_compile_options(bitsandbytes PRIVATE ${SYCL_COMPILE_FLAGS})
+    target_link_options(bitsandbytes PRIVATE ${SYCL_LINK_FLAGS})
+
 endif()
 
 if(WIN32)
