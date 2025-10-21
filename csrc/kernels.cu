@@ -328,14 +328,16 @@ __global__ void kQuantizeBlockwise(
     float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
     const int rand_offset, const int n
 ) {
-    const int n_full = gridDim.x * BLOCK_SIZE;
+    // This can overflow, so we clamp to INT32_MAX. We won't have more elements than this.
+    const int n_full = min(gridDim.x * BLOCK_SIZE, INT32_MAX);
+
+    const int base_idx = blockIdx.x * BLOCK_SIZE;
     int valid_items = 0;
-    const int base_idx = (blockIdx.x * BLOCK_SIZE);
 
     T vals[NUM_PER_TH];
     float rand_vals[NUM_PER_TH];
     unsigned char qvals[(DATA_TYPE > 0) ? NUM_PER_TH / 2 : NUM_PER_TH];
-    // float local_abs_max = -FLT_MAX;
+
     float local_abs_max = 0.0f;
     int local_rand_idx = 0;
 
@@ -358,8 +360,8 @@ __global__ void kQuantizeBlockwise(
         for (int i = threadIdx.x; i < 256; i += blockDim.x)
             smem_code[i] = code[i];
 
-    for (int i = base_idx; i < n_full; i += gridDim.x * BLOCK_SIZE) {
-        valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
+    for (int64_t i = base_idx; i < n_full; i += gridDim.x * BLOCK_SIZE) {
+        valid_items = min(BLOCK_SIZE, static_cast<int>(n - i));
         local_abs_max = -FLT_MAX;
 
         __syncthreads();
@@ -442,7 +444,8 @@ __global__ void
 
     for (int i = base_idx; i < n_load; i += gridDim.x * TILE_SIZE) {
         if (DATA_TYPE > 0) {
-            valid_items_load = min(TILE_SIZE, (n + 1) / 2 - i);
+            // Cast n to int64_t to avoid overflow for large n
+            valid_items_load = min(TILE_SIZE, static_cast<int>((static_cast<int64_t>(n) + 1) / 2) - i);
             valid_items_store = min(TILE_SIZE * 2, n - i * 2);
         } else {
             valid_items_load = min(TILE_SIZE, n - i);
