@@ -151,6 +151,34 @@ class Test8BitBlockwiseQuantizeFunctional:
             assert relerr < 0.012
         assert A2.dtype == dtype
 
+    @pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+    @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("blocksize", [256], ids=id_formatter("blocksize"))
+    def test_dynamic_blockwise_quantization_large(self, device, dtype, blocksize):
+        """
+        Test that we can successfully quantize a large tensor. Note that the following limitations apply:
+        - On CUDA/XPU/ROCm, the maximum number of elements is limited to 2**31 - 1 due to int32 indexing in C++ kernels.
+        - On CPU, there is a significantly higher memory overhead for the quantization, so we skip this test.
+        - Verification of the accuracy for dequantization has too high memory overhead for this test.
+        """
+        if device not in ["cuda", "xpu"]:
+            pytest.skip("This test is only for CUDA and XPU devices due to memory constraints.")
+
+        data = torch.randn(2**31 - 1, device=device, dtype=dtype)
+        q_data, q_stats = F.quantize_blockwise(data, blocksize=blocksize)
+
+        assert q_data is not None
+        assert q_data.dtype == torch.uint8
+        assert q_data.numel() == data.numel()
+
+        # Dequant
+        del data
+        dq = F.dequantize_blockwise(q_data, q_stats)
+
+        assert dq.dtype == dtype
+        assert dq.numel() == q_data.numel()
+
     @pytest.mark.skipif("cpu" not in get_available_devices(), reason="CPU is required")
     @pytest.mark.parametrize("hidden", [128])
     @pytest.mark.parametrize("blocksize", [4096, 16384])
@@ -1118,18 +1146,17 @@ class TestQuantize4BitFunctional:
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
         A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
-
-        err = (A1 - A2).abs().float()
-        relerr = (err / (A1.abs().float() + 1e-8)).mean()
-        err = err.mean()
+        del qa, SA
 
         assert A2.dtype == dtype
 
-        # With larger block sizes, we can expect this to blow up.
-        # At blocksize>=1024, don't even bother looking at relerr.
-        #
-        # Actually, the above is not true anymore after fixing the integer packing bug.
-        # The following values were taken from averaging 1k samples per test configuration after fixing the bug.
+        err = (A1 - A2).abs().float()
+        del A2
+
+        relerr = (err / (A1.abs().float() + 1e-8)).mean()
+        err = err.mean()
+
+        # The following values were taken from averaging 1k samples per test configuration.
         error_dict = dict()
         error_dict["fp4"] = dict()
         error_dict["nf4"] = dict()
@@ -1212,6 +1239,37 @@ class TestQuantize4BitFunctional:
 
             assert err.item() < 0.11
             assert relerr.item() < 0.28
+
+    @pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+    @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128], ids=id_formatter("blocksize"))
+    def test_4bit_quant_large(self, device, dtype, quant_type, blocksize):
+        """
+        Test that we can successfully quantize a large tensor. Note that the following limitations apply:
+        - On CUDA/XPU/ROCm, the maximum number of elements is limited to 2**31 - 1 due to int32 indexing in C++ kernels.
+        - On CUDA, this test requires ~10GiB of memory for fp32
+        - On CPU, there is a significantly higher memory overhead for the quantization, so we skip this test.
+        - Verification of the accuracy for dequantization has too high memory overhead for this test.
+        """
+
+        if device not in ["cuda", "xpu"]:
+            pytest.skip("This test is only for CUDA and XPU devices due to memory constraints.")
+
+        A1 = torch.randn(2**31 - 1, device=device, dtype=dtype)
+        qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
+
+        assert qa is not None
+        assert qa.dtype == torch.uint8
+        assert qa.numel() == (2**31 - 1 + 1) // 2  # each byte holds 2 quantized values
+
+        # Dequant
+        del A1
+        dq = F.dequantize_4bit(qa, SA)
+
+        assert dq.dtype == dtype
+        assert dq.numel() == 2**31 - 1
 
     # @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
     @pytest.mark.parametrize("quant_type", ["nf4"])
