@@ -100,3 +100,29 @@ ROCm GPU architecture detection failed despite ROCm being available.
                 """,
             )
         return "unknown"
+
+
+def get_rocm_warpsize() -> int:
+    """Get ROCm warp size."""
+    logger = logging.getLogger(__name__)
+    try:
+        if torch.version.hip:
+            result = subprocess.run(["rocminfo"], capture_output=True, text=True)
+            match = re.search(r"Wavefront Size:\s+([0-9]{2})\(0x[0-9]{2}\)", result.stdout)
+            if match:
+                return int(match.group(1))
+            else:
+                # default to 64 to be safe
+                return 64
+        else:
+            # nvidia cards always use 32 warp size
+            return 32
+    except Exception as e:
+        logger.error(f"Could not detect ROCm warp size: {e}. Defaulting to 64. (some 4-bit functions may not work!)")
+        if torch.cuda.is_available():
+            logger.warning(
+                """
+ROCm warp size detection failed despite ROCm being available.
+                """,
+            )
+        return 64
