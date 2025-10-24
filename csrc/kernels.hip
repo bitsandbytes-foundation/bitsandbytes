@@ -2057,11 +2057,6 @@ __global__ void kdequant_mm_int32_fp16(
 #define DENORM 1.0f/127.0f
 #define MAX_SPARSE_COUNT 32
 #define SMEM_SIZE 8*256
-#if defined(__GFX9__)
-  #define WARP_SIZE 64
-#else
-  #define WARP_SIZE 32
-#endif
 template <typename T, int SPMM_ITEMS, int BITS>
 __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB)
 {

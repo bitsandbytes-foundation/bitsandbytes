@@ -21,12 +21,6 @@
 
 #define ERR_NOT_IMPLEMENTED 100
 
-#if defined(__GFX9__)
-  #define WARP_SIZE 64
-#else
-  #define WARP_SIZE 32
-#endif
-
 using namespace BinSearch;
 using std::cout;
 using std::endl;
