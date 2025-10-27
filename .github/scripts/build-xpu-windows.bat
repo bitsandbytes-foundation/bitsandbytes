@@ -1,8 +1,11 @@
 
 set INTEL_DLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/75d4eb97-914a-4a95-852c-7b9733d80f74/intel-deep-learning-essentials-2025.1.3.8_offline.exe
 
+REM for debugging
+set
+
 curl -o intel-dle-installer.exe %INTEL_DLE_URL%
-start /wait "Intel DLE Install" intel-dle-installer.exe -r -a --eula=accept -p=NEED_VS2022_INTEGRATION=0 > intel_dle_log.txt 2>&1
+start /wait "Intel DLE Install" intel-dle-installer.exe -r --log indel_dle_log.txt -a --silent --eula=accept -p=NEED_VS2022_INTEGRATION=0
 type intel_dle_log.txt
 
 if ERRORLEVEL 1 (
