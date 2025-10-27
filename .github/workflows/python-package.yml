@@ -122,6 +122,7 @@ jobs:
       - name: Build C++ (Windows)
         if: runner.os == 'Windows'
         run: .github/scripts/build-xpu-windows.bat
+        shell: cmd
         env:
           build_os: ${{ matrix.os }}
       - name: Upload build artifact
