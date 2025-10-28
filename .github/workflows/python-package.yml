@@ -137,30 +137,10 @@ jobs:
       matrix:
         os: [ubuntu-22.04]
         arch: [x86_64]
-        rocm_version:
-          ["6.1.2", "6.2.4", "6.3.4", "6.4.4", "7.0"]
+        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Clean up disk space
-        run: |
-          sudo rm -rf \
-              /usr/share/dotnet \
-              /opt/ghc \
-              "/usr/local/share/boost" \
-              "$AGENT_TOOLSDIRECTORY" \
-              /opt/hostedtoolcache \
-              /opt/google/chrome \
-              /opt/microsoft/msedge \
-              /opt/microsoft/powershell \
-              /opt/pipx \
-              /usr/lib/mono \
-              /usr/local/julia* \
-              /usr/local/lib/android \
-              /usr/local/lib/node_modules \
-              /usr/local/share/chromium \
-              /usr/local/share/powershell \
-              /usr/share/swift
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
