@@ -110,12 +110,19 @@ jobs:
   build-xpu:
     strategy:
       matrix:
-        os: [ubuntu-22.04]
+        os: [ubuntu-22.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build C++
+      - name: Build C++ (Linux)
+        if: runner.os == 'Linux'
         run: bash .github/scripts/build-xpu.sh
+        env:
+          build_os: ${{ matrix.os }}
+      - name: Build C++ (Windows)
+        if: runner.os == 'Windows'
+        run: .github/scripts/build-xpu-windows.bat
+        shell: cmd
         env:
           build_os: ${{ matrix.os }}
       - name: Upload build artifact
