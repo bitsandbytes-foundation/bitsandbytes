@@ -845,6 +845,18 @@ void cquantize_blockwise_cpu_fp32(
 void cdequantize_blockwise_cpu_fp32(
     float* code, unsigned char* A, float* absmax, float* out, long long blocksize, long long n
 ) {
-    dequantize_cpu(code, A, absmax, out, blocksize, n);
+    dequantizeBlockwiseCpu<float, General8bit>(code, A, absmax, out, blocksize, n);
+}
+
+void cdequantize_blockwise_cpu_bf16(
+    float* code, unsigned char* A, float* absmax, float* out, long long blocksize, long long n
+) {
+    dequantizeBlockwiseCpu<at::BFloat16, General8bit>(code, A, absmax, out, blocksize, n);
+}
+
+void cdequantize_blockwise_cpu_fp16(
+    float* code, unsigned char* A, float* absmax, float* out, long long blocksize, long long n
+) {
+    dequantizeBlockwiseCpu<at::Half, General8bit>(code, A, absmax, out, blocksize, n);
 }
 }
