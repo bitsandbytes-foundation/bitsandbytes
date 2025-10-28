@@ -141,6 +141,22 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Clean up disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+
+          # These are the biggest disk space hogs.
+          sudo rm -rf \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/lib/dotnet \
+            /usr/lib/jvm \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/swift
+
+          echo "Disk space after cleanup:"
+          df -h
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
