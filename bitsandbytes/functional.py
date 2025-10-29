@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import HIP_ENVIRONMENT, lib
+from .cextension import ROCM_WARP_SIZE_64, lib
 
 name2qmap = {}
 
@@ -806,7 +806,7 @@ def quantize_fp4(
     quant_storage=torch.uint8,
 ):
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "fp4", quant_storage)
 
 
@@ -819,7 +819,7 @@ def quantize_nf4(
     quant_storage=torch.uint8,
 ):
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "nf4", quant_storage)
 
 
@@ -857,7 +857,7 @@ def quantize_4bit(
     """
 
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
 
     input_shape = A.shape
 
@@ -912,7 +912,7 @@ def dequantize_fp4(
     blocksize: Optional[int] = None,
 ) -> torch.Tensor:
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -924,7 +924,7 @@ def dequantize_nf4(
     blocksize: Optional[int] = None,
 ) -> torch.Tensor:
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 
@@ -964,7 +964,7 @@ def dequantize_4bit(
     """
 
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
 
     if quant_state is None:
         assert absmax is not None and out is not None
