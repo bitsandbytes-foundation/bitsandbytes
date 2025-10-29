@@ -76,11 +76,27 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         torch._check_is_size(blocksize)
         torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
 
-        # Only FP32 has c++ kernrl
+        out = torch.empty_like(A, dtype=dtype)
         if dtype == torch.float32:
-            out = torch.empty_like(A, dtype=dtype)
-
             lib.cdequantize_blockwise_cpu_fp32(
+                get_ptr(code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_longlong(blocksize),
+                ct.c_longlong(A.numel()),
+            )
+        elif dtype == torch.bfloat16:
+            lib.cdequantize_blockwise_cpu_bf16(
+                get_ptr(code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_longlong(blocksize),
+                ct.c_longlong(A.numel()),
+            )
+        elif dtype == torch.float16:
+            lib.cdequantize_blockwise_cpu_fp16(
                 get_ptr(code),
                 get_ptr(A),
                 get_ptr(absmax),
