@@ -226,13 +226,19 @@ elseif(BUILD_MPS)
     string(APPEND BNB_OUTPUT_NAME "_mps")
     add_compile_definitions(BUILD_MPS)
     file(MAKE_DIRECTORY "build")
-    add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"
-                COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_FILES}
-                COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
+    set(METAL_AIR "${CMAKE_BINARY_DIR}/bitsandbytes.air")
+    set(METAL_LIB "${PROJECT_SOURCE_DIR}/bitsandbytes/bitsandbytes.metallib")
+    set(METAL_SOURCES "")
+    foreach(METAL_FILE ${METAL_FILES})
+        list(APPEND METAL_SOURCES "${PROJECT_SOURCE_DIR}/${METAL_FILE}")
+    endforeach()
+    add_custom_command(OUTPUT "${METAL_LIB}"
+                COMMAND xcrun metal -c ${METAL_SOURCES} -o "${METAL_AIR}"
+                COMMAND xcrun metallib "${METAL_AIR}" -o "${METAL_LIB}"
                 DEPENDS "${METAL_FILES}"
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
-    add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+    add_custom_target(metallib DEPENDS "${METAL_LIB}")
 elseif(BUILD_XPU)
     list(APPEND SRC_FILES ${XPU_FILES})
     string(APPEND BNB_OUTPUT_NAME "_xpu")
@@ -257,10 +263,57 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
 endif()
 
+find_package(Python3 COMPONENTS Interpreter Development)
+message(STATUS "Python3 found: ${Python3_FOUND}")
+
+if(NOT Torch_DIR)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import torch, pathlib; print(pathlib.Path(torch.__file__).resolve().parent / 'share/cmake/Torch')"
+        OUTPUT_VARIABLE Torch_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
+message(STATUS "Torch_DIR=${Torch_DIR}")
+find_package(Torch REQUIRED CONFIG)
+
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
 target_compile_features(bitsandbytes PUBLIC cxx_std_17)
 target_include_directories(bitsandbytes PUBLIC csrc include)
+if(Python3_FOUND)
+    message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
+    target_include_directories(bitsandbytes PRIVATE ${Python3_INCLUDE_DIRS})
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_paths()['include'])"
+        OUTPUT_VARIABLE PYTHON_SYSTEM_INCLUDE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(PYTHON_SYSTEM_INCLUDE)
+        target_include_directories(bitsandbytes PRIVATE ${PYTHON_SYSTEM_INCLUDE})
+    endif()
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import torch\nfrom torch.utils.cpp_extension import include_paths\nprint(';'.join(include_paths()))"
+        OUTPUT_VARIABLE TORCH_INCLUDE_DIRS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(TORCH_INCLUDE_DIRS)
+        string(REPLACE "\\n" ";" TORCH_INCLUDE_DIRS "${TORCH_INCLUDE_DIRS}")
+        target_include_directories(bitsandbytes PRIVATE ${TORCH_INCLUDE_DIRS})
+    endif()
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import torch\nfrom torch.utils.cpp_extension import library_paths\nprint(';'.join(library_paths()))"
+        OUTPUT_VARIABLE TORCH_LIBRARY_DIRS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(TORCH_LIBRARY_DIRS)
+        string(REPLACE "\\n" ";" TORCH_LIBRARY_DIRS "${TORCH_LIBRARY_DIRS}")
+        target_link_directories(bitsandbytes PRIVATE ${TORCH_LIBRARY_DIRS})
+        target_link_libraries(bitsandbytes PRIVATE torch torch_cpu torch_python c10)
+    endif()
+    target_link_libraries(bitsandbytes PRIVATE ${Python3_LIBRARIES})
+endif()
 
 
 if(BUILD_CUDA)
@@ -308,7 +361,8 @@ if(BUILD_HIP)
 endif()
 if(BUILD_MPS)
     add_dependencies(bitsandbytes metallib)
-    target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
+    target_compile_options(bitsandbytes PRIVATE "-fno-objc-arc")
+    target_link_libraries(bitsandbytes PRIVATE objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
 endif()
 if(BUILD_XPU)
     set(SYCL_LINK_FLAGS "-fsycl;--offload-compress;-fsycl-targets=spir64_gen,spir64;-Xs;-device pvc,xe-lpg,ats-m150 -options ' -cl-intel-enable-auto-large-GRF-mode -cl-poison-unsupported-fp64-kernels -cl-intel-greater-than-4GB-buffer-required'")
