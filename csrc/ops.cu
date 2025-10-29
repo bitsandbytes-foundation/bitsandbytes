@@ -61,16 +61,17 @@ template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(
     float* code, unsigned char* A, float* absmax, T* out, int blocksize, const int n, cudaStream_t stream
 ) {
-    // printf("stream==%d\n",stream);
-    int num_blocks = n / blocksize;
-    num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
-    int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
+    constexpr int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
+
+    // Upcast to int64 to avoid overflow for large n
+    int grid_blocks = ((int64_t)n + tile_size - 1) / tile_size;
+
     if (DATA_TYPE > 0)
         kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>
-            <<<(n + tile_size - 1) / tile_size, 64, 0, stream>>>(code, A, absmax, out, blocksize / 2, n);
+            <<<grid_blocks, 64, 0, stream>>>(code, A, absmax, out, blocksize / 2, n);
     else
         kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>
-            <<<(n + tile_size - 1) / tile_size, 64, 0, stream>>>(code, A, absmax, out, blocksize, n);
+            <<<grid_blocks, 64, 0, stream>>>(code, A, absmax, out, blocksize, n);
 
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
