@@ -105,31 +105,31 @@ void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long
 //==============================================================
 
 template void dequantizeBlockwiseCpu<float, General8bit>(
-    float* code, unsigned char* A, float* absmax, float* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long n);
 
 template void dequantizeBlockwiseCpu<float, FP4>(
-    float* code, unsigned char* A, float* absmax, float* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long n);
 
 template void dequantizeBlockwiseCpu<float, NF4>(
-    float* code, unsigned char* A, float* absmax, float* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long n);
 
 template void dequantizeBlockwiseCpu<fp16_t, General8bit>(
-    float* code, unsigned char* A, float* absmax, fp16_t* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long n);
 
 template void dequantizeBlockwiseCpu<fp16_t, FP4>(
-    float* code, unsigned char* A, float* absmax, fp16_t* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long n);
 
 template void dequantizeBlockwiseCpu<fp16_t, NF4>(
-    float* code, unsigned char* A, float* absmax, fp16_t* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long n);
 
 template void dequantizeBlockwiseCpu<bf16_t, General8bit>(
-    float* code, unsigned char* A, float* absmax, bf16_t* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long n);
 
 template void dequantizeBlockwiseCpu<bf16_t, FP4>(
-    float* code, unsigned char* A, float* absmax, bf16_t* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long n);
 
 template void dequantizeBlockwiseCpu<bf16_t, NF4>(
-    float* code, unsigned char* A, float* absmax, bf16_t* out, long long blocksize, long long n);
+    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long n);
 
 // template void gemv_4bit_inference<fp16_t, 16>(
 //     int m, int n, int k, fp16_t* A, unsigned char* B, float* absmax, float* datatype, fp16_t* out,
