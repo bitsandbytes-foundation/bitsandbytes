@@ -135,7 +135,8 @@ def _(
     # Enable non uint8 dtype
     if A.dtype != torch.uint8:
         A = A.view(torch.uint8)
-    
+
+    A = A.reshape(-1)
     out = torch.empty(shape, dtype=dtype, device=A.device).reshape(-1)
     if quant_type == "fp4":
         if dtype == torch.float32:
@@ -194,7 +195,6 @@ def _(
                 ct.c_longlong(out.numel()),
             )
     else:
-        A = A.reshape(-1)
         # Map nf4 to [-1, 1]
         out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
         n = out_dq.numel()
@@ -221,37 +221,4 @@ def _(
 
     out = out.reshape(-1, *shape[1:]).to(dtype)
 
-    return out
-
-def dequant_nf4_x(A: torch.Tensor,
-    absmax: torch.Tensor,
-    blocksize: int,
-    quant_type: str,
-    shape: Sequence[int],
-    dtype: torch.dtype,):
-    out = torch.empty(shape, dtype=dtype, device=A.device).reshape(-1)
-    A = A.reshape(-1)
-    # Map nf4 to [-1, 1]
-    out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
-    n = out_dq.numel()
-    out_dq[1::2] = A & 0xF
-    out_dq[::2] = A >> 4
-    # code is fp32, cast to dtype to avoid the mismatch issue
-    code = CODE[quant_type].to(dtype).to(A.device)
-    out_dq = code[out_dq]
-
-    # Apply scales
-    if out_dq.numel() != n:
-        assert out_dq.numel() == n + 1
-        out_dq = torch.narrow(out_dq, 0, 0, n)
-    blocks = n // blocksize
-    blocks += 1 if n % blocksize > 0 else 0
-    rem = n % blocksize
-    has_rem = rem > 0
-
-    if has_rem:
-        out[: n - rem] = (out_dq[: n - rem].view(-1, blocksize) * absmax[: blocks - has_rem].view(-1, 1)).reshape(-1)
-        out[n - rem :] = out_dq[n - rem :] * absmax[-1]
-    else:
-        out = out_dq.view(-1, blocksize) * absmax.view(-1, 1)
     return out

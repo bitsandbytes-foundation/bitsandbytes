@@ -7,15 +7,15 @@ using namespace BinSearch;
 
 
 template <typename T, int DATA_TYPE>
-void dequantizeBlockwiseCpu(float* code, unsigned char* A, float* absmax, T* out,
+void dequantizeBlockwiseCpu(float* code, unsigned char* A, const float* absmax, T* out,
                             long long blocksize, long long n) {
     if (DATA_TYPE == 0) {
         #pragma omp parallel for
         for (long long block_idx = 0; block_idx < n; block_idx += blocksize) {
-            long long valid_items = n - block_idx >= blocksize ? blocksize : n - block_idx;
+            long long valid_items = (n - block_idx >= blocksize ? blocksize : n - block_idx);
             long long block_end = block_idx + valid_items;
             float scale = absmax[block_idx / blocksize];
-            for (long long i = block_idx; i < block_end; i++) {
+            for (long long i = block_idx; i < block_end; ++i) {
                 float v = code[A[i]] * scale;
                 if constexpr (std::is_same<T, bf16_t>::value) {
                     out[i] = float_to_bf16(v);
@@ -29,23 +29,24 @@ void dequantizeBlockwiseCpu(float* code, unsigned char* A, float* absmax, T* out
         for (long long block_idx = 0; block_idx < n; block_idx += blocksize) {
             long long valid_items = (n - block_idx >= blocksize ? blocksize : n - block_idx);
             float scale = absmax[block_idx / blocksize];
-            for (long long i = 0; i < valid_items; i+=2) {
-                float up, low;
-                long long index = (i + block_idx) / 2;
-                if (DATA_TYPE == 1) {
-                    up = dDequantizeFP4(A[index] >> 4) * scale;
-                    low = dDequantizeFP4(A[index] & 0x0F) * scale;
-                } else {
-                    up = dDequantizeNF4(A[index] >> 4) * scale;
-                    low = dDequantizeNF4(A[index] & 0x0F) * scale;
-                }
-
+            for (long long i = 0; i < valid_items; i += 2) {
+                long long byte_index = (block_idx + i) >> 1;
+                unsigned char byte = A[byte_index];
+                float v0 = (DATA_TYPE == 1 ? dDequantizeFP4(byte & 0x0F)
+                                           : dDequantizeNF4(byte & 0x0F)) * scale;
+                float v1 = (DATA_TYPE == 1 ? dDequantizeFP4(byte >> 4)
+                                           : dDequantizeNF4(byte >> 4)) * scale;
                 if constexpr (std::is_same<T, bf16_t>::value) {
-                    out[i + block_idx] = float_to_bf16(up);
-                    out[i+1 + block_idx] = float_to_bf16(low);
+                    out[block_idx + i] = float_to_bf16(v0);
                 } else {
-                    out[i + block_idx] = static_cast<T>(up);
-                    out[i+1 + block_idx] = static_cast<T>(low);
+                    out[block_idx + i] = static_cast<T>(v0);
+                }
+                if (i + 1 < valid_items) {
+                    if constexpr (std::is_same<T, bf16_t>::value) {
+                        out[block_idx + i + 1] = float_to_bf16(v1);
+                    } else {
+                        out[block_idx + i + 1] = static_cast<T>(v1);
+                    }
                 }
             }
         }
