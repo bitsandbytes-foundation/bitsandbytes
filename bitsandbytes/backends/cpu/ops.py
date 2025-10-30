@@ -189,7 +189,7 @@ def _(
             out_2 = dequantize_nf4_test(A, absmax, blocksize, quant_type, shape, dtype)
             out = out.reshape(shape)
             out_2 = out_2.reshape(shape)
-            if torch.allclose(out, out_2, rtol=1e-2, atol=5e-2):
+            if not torch.allclose(out, out_2, rtol=1e-2, atol=5e-2):
                 import pdb; pdb.set_trace()
         elif dtype == torch.float16:
             lib.cdequantize_blockwise_cpu_nf4_fp16(
