@@ -9,7 +9,7 @@ using namespace BinSearch;
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwiseCpu(float* code, unsigned char* A, float* absmax, T* out,
                             long long blocksize, long long n) {
-    if (DATA_TYPE > 0) {
+    if (DATA_TYPE == 0) {
         #pragma omp parallel for
         for (long long block_idx = 0; block_idx < n; block_idx += blocksize) {
             long long valid_items = n - block_idx >= blocksize ? blocksize : n - block_idx;
