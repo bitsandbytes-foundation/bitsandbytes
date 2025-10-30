@@ -6,7 +6,7 @@ import torch
 
 from bitsandbytes.functional import get_ptr
 
-from ..util import CODE
+from ..utils import CODE
 from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
 
