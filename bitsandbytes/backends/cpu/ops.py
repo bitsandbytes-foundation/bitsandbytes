@@ -137,6 +137,10 @@ def _(
     if A.dtype != torch.uint8:
         A = A.view(torch.uint8)
 
+    # TODO: support half precision absmax
+    if absmax.dtype != torch.float32:
+        absmax = absmax.float()
+
     A = A.reshape(-1)
     out = torch.empty(shape, dtype=dtype, device=A.device).reshape(-1)
     if quant_type == "fp4":
