@@ -27,25 +27,25 @@ void dequantizeBlockwiseCpu(float* code, unsigned char* A, float* absmax, T* out
     } else {
         #pragma omp parallel for
         for (long long block_idx = 0; block_idx < n; block_idx += blocksize) {
-            long long valid_items = n - block_idx >= blocksize ? blocksize : n - block_idx;
-            long long block_end = block_idx + valid_items;
+            long long valid_items = (n - block_idx >= blocksize ? blocksize : n - block_idx);
             float scale = absmax[block_idx / blocksize];
-            for (long long i = block_idx; i * 2 + 1 < block_end; i+=2) {
+            for (long long i = 0; i < valid_items; i+=2) {
                 float up, low;
+                long long index = (i + block_idx) / 2;
                 if (DATA_TYPE == 1) {
-                    float up = dDequantizeFP4(A[i] >> 4) * scale;
-                    float low = dDequantizeFP4(A[i] & 0x0F) * scale;
+                    up = dDequantizeFP4(A[index] >> 4) * scale;
+                    low = dDequantizeFP4(A[index] & 0x0F) * scale;
                 } else {
-                    float up = dDequantizeNF4(A[i] >> 4) * scale;
-                    float low = dDequantizeNF4(A[i] & 0x0F) * scale;
+                    up = dDequantizeNF4(A[index] >> 4) * scale;
+                    low = dDequantizeNF4(A[index] & 0x0F) * scale;
                 }
 
                 if constexpr (std::is_same<T, bf16_t>::value) {
-                    out[i*2] = float_to_bf16(up);
-                    out[i*2+1] = float_to_bf16(low);
+                    out[i + block_idx] = float_to_bf16(up);
+                    out[i+1 + block_idx] = float_to_bf16(low);
                 } else {
-                    out[i*2] = static_cast<T>(up);
-                    out[i*2+1] = static_cast<T>(low);
+                    out[i + block_idx] = static_cast<T>(up);
+                    out[i+1 + block_idx] = static_cast<T>(low);
                 }
             }
         }
