@@ -3,8 +3,6 @@
 
 #include <iostream>
 #include <stdio.h>
-#include <ATen/ATen.h>
-#include <c10/c10.h>
 
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n);
 
