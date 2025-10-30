@@ -31,10 +31,11 @@ void dequantizeBlockwiseCpu(float* code, unsigned char* A, float* absmax, T* out
             long long block_end = block_idx + valid_items;
             float scale = absmax[block_idx / blocksize];
             for (long long i = block_idx; i * 2 + 1 < block_end; i+=2) {
+                float up, low;
                 if (DATA_TYPE == 1) {
                     float up = dDequantizeFP4(A[i] >> 4) * scale;
                     float low = dDequantizeFP4(A[i] & 0x0F) * scale;
-                } else if (DATA_TYPE == 1) {
+                } else {
                     float up = dDequantizeNF4(A[i] >> 4) * scale;
                     float low = dDequantizeNF4(A[i] & 0x0F) * scale;
                 }
