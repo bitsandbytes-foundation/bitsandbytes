@@ -34,7 +34,7 @@ void dequantizeBlockwiseCpu(float* code, unsigned char* A, float* absmax, T* out
                 if (DATA_TYPE == 1) {
                     float up = dDequantizeFP4(A[i] >> 4) * scale;
                     float low = dDequantizeFP4(A[i] & 0x0F) * scale;
-                } elif (DATA_TYPE == 1) {
+                } else if (DATA_TYPE == 1) {
                     float up = dDequantizeNF4(A[i] >> 4) * scale;
                     float low = dDequantizeNF4(A[i] & 0x0F) * scale;
                 }
