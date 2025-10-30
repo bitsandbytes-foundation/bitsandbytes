@@ -32,10 +32,10 @@ void dequantizeBlockwiseCpu(float* code, unsigned char* A, const float* absmax, 
             for (long long i = 0; i < valid_items; i += 2) {
                 long long byte_index = (block_idx + i) >> 1;
                 unsigned char byte = A[byte_index];
-                float v0 = (DATA_TYPE == 1 ? dDequantizeFP4(byte & 0x0F)
-                                           : dDequantizeNF4(byte & 0x0F)) * scale;
-                float v1 = (DATA_TYPE == 1 ? dDequantizeFP4(byte >> 4)
+                float v0 = (DATA_TYPE == 1 ? dDequantizeFP4(byte >> 4)
                                            : dDequantizeNF4(byte >> 4)) * scale;
+                float v1 = (DATA_TYPE == 1 ? dDequantizeFP4(byte & 0x0F)
+                                           : dDequantizeNF4(byte & 0x0F)) * scale;
                 if constexpr (std::is_same<T, bf16_t>::value) {
                     out[block_idx + i] = float_to_bf16(v0);
                 } else {
