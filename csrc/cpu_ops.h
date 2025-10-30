@@ -31,7 +31,4 @@ static inline bf16_t float_to_bf16(float x) {
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwiseCpu(float* code, unsigned char* A, float* absmax, T* out, long long blocksize, long long n);
 
-template <typename T, int DATA_TYPE>
-void dequantizeBlockwise4bitCpu(float* code, unsigned char* A, float* absmax, T* out, long long blocksize, long long n)
-
 #endif

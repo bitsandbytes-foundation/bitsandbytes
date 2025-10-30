@@ -25,14 +25,9 @@ void dequantizeBlockwiseCpu(float* code, unsigned char* A, float* absmax, T* out
             }
         }
     } else {
-        // 4bit path
-        dequantizeBlockwise4bitCpu<T, DATA_TYPE>(code, A, absmax, out, blocksize, n);
+        // TODO: enable nf4 and fp4
+        return;
     }
-}
-
-template <typename T, int DATA_TYPE>
-void dequantizeBlockwise4bitCpu(float* code, unsigned char* A, float* absmax, T* out, long long blocksize, long long n) {
-    return;
 }
 
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
