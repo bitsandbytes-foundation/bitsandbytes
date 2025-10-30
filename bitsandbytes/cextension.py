@@ -283,7 +283,9 @@ def get_native_library() -> BNBNativeLibrary:
 
         binary_path = cuda_binary_path
 
-    if torch._C._has_xpu:
+    if BNB_BACKEND == "MPS":
+        binary_path = PACKAGE_DIR / f"libbitsandbytes_mps{DYNAMIC_LIBRARY_SUFFIX}"
+    elif torch._C._has_xpu:
         binary_path = PACKAGE_DIR / f"libbitsandbytes_xpu{DYNAMIC_LIBRARY_SUFFIX}"
 
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
@@ -306,6 +308,8 @@ if torch.version.hip:
     BNB_BACKEND = "ROCm"
 elif torch.cuda.is_available():
     BNB_BACKEND = "CUDA"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    BNB_BACKEND = "MPS"
 elif torch._C._has_xpu:
     BNB_BACKEND = "XPU"
 

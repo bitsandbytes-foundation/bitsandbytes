@@ -2,7 +2,17 @@ from collections.abc import Sequence
 from math import prod, sqrt
 from typing import Optional
 
+import importlib.util
+
 import torch
+
+_HAS_TRITON = importlib.util.find_spec("triton") is not None
+
+
+def _maybe_compile(fn):
+    if not _HAS_TRITON:
+        return fn
+    return torch.compile(fn)
 
 from ..._ops import register_kernel
 from ..utils import CODE
@@ -321,7 +331,7 @@ name2optimizer_id = {
 }
 
 
-@torch.compile
+@_maybe_compile
 def _optimizer_precondition_32bit(
     g: torch.Tensor,
     p: torch.Tensor,
@@ -382,7 +392,7 @@ def _optimizer_precondition_32bit(
     unorm_vec.add_(total_norm)
 
 
-@torch.compile
+@_maybe_compile
 def _optimizer_update_32bit(
     g: torch.Tensor,
     p: torch.Tensor,
