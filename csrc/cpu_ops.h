@@ -10,9 +10,8 @@
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n);
 
 typedef enum DataType_t {
-    General8bit = 0,
+    NF4 = 0,
     FP4 = 1,
-    NF4 = 2,
 } DataType_t;
 
 using fp16_t = _Float16;
@@ -116,7 +115,10 @@ inline float dDequantizeNF4(unsigned char val) {
         return -1.0f; //*0000
 }
 
+template <typename T>
+void dequantizeBlockwise8bitCpu(float* code, unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n);
+
 template <typename T, int DATA_TYPE>
-void dequantizeBlockwiseCpu(float* code, unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n);
+void dequantizeBlockwise4bitCpu(unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n);
 
 #endif

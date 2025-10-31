@@ -86,8 +86,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(shape[0]),
-                ct.c_longlong(shape[1]),
+                ct.c_longlong(A.numel()),
             )
         elif dtype == torch.bfloat16:
             lib.cdequantize_blockwise_cpu_bf16(
@@ -96,8 +95,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(shape[0]),
-                ct.c_longlong(shape[1]),
+                ct.c_longlong(A.numel()),
             )
         elif dtype == torch.float16:
             lib.cdequantize_blockwise_cpu_fp16(
@@ -106,8 +104,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(shape[0]),
-                ct.c_longlong(shape[1]),
+                ct.c_longlong(A.numel()),
             )
         else:
             out = code[A.reshape(-1).int()]

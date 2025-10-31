@@ -9,13 +9,13 @@ using namespace BinSearch;
 // 4-bit (FP4 / NF4) dequantization helper extracted from the original else branch.
 // DATA_TYPE: 1 = FP4, 2 = NF4
 template <typename T, int DATA_TYPE>
-inline void dequantizeBlockwise4bitCpu(unsigned char* A,
+void dequantizeBlockwise4bitCpu(unsigned char* A,
                                        const float* absmax,
                                        T* out,
                                        long long blocksize,
                                        long long m,
                                        long long n) {
-    static_assert(DATA_TYPE == 1 || DATA_TYPE == 2,
+    static_assert(DATA_TYPE == 0 || DATA_TYPE == 1,
                   "dequantizeBlockwise4bitCpu called with non 4-bit DATA_TYPE");
     if (blocksize <= 0 || n <= 0) return;
 
@@ -60,38 +60,29 @@ inline void dequantizeBlockwise4bitCpu(unsigned char* A,
 }
 
 
-template <typename T, int DATA_TYPE>
-void dequantizeBlockwiseCpu(float* code,
+template <typename T>
+void dequantizeBlockwise8bitCpu(float* code,
                             unsigned char* A,
                             const float* absmax,
                             T* out,
                             long long blocksize,
-                            long long m,
                             long long n) {
-    static_assert(DATA_TYPE == 0 || DATA_TYPE == 1 || DATA_TYPE == 2,
-                  "dequantizeBlockwiseCpu: invalid DATA_TYPE");
-    if (blocksize <= 0 || m <= 0 || n <= 0) return;
-
-    if constexpr (DATA_TYPE == 0) {
-        // 8-bit path
-        long long total = (m * n) >> 1;
-        #pragma omp parallel for
-        for (long long block_idx = 0; block_idx < total; block_idx += blocksize) {
-            long long valid_items = (total - block_idx >= blocksize ? blocksize : total - block_idx);
-            long long block_end   = block_idx + valid_items;
-            float scale = absmax[block_idx / blocksize];
-            for (long long i = block_idx; i < block_end; ++i) {
-                float v = code[A[i]] * scale;
-                if constexpr (std::is_same<T, bf16_t>::value) {
-                    out[i] = float_to_bf16(v);
-                } else {
-                    out[i] = static_cast<T>(v);
-                }
+    if (blocksize <= 0 || n <= 0) return;
+    // 8-bit path
+    long long total = (m * n) >> 1;
+    #pragma omp parallel for
+    for (long long block_idx = 0; block_idx < total; block_idx += blocksize) {
+        long long valid_items = (total - block_idx >= blocksize ? blocksize : total - block_idx);
+        long long block_end   = block_idx + valid_items;
+        float scale = absmax[block_idx / blocksize];
+        for (long long i = block_idx; i < block_end; ++i) {
+            float v = code[A[i]] * scale;
+            if constexpr (std::is_same<T, bf16_t>::value) {
+                out[i] = float_to_bf16(v);
+            } else {
+                out[i] = static_cast<T>(v);
             }
         }
-    } else {
-        // 4-bit helper (FP4 / NF4)
-        dequantizeBlockwise4bitCpu<T, DATA_TYPE>(A, absmax, out, blocksize, m, n);
     }
 }
 
@@ -147,25 +138,11 @@ void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long
 //                   TEMPLATE DEFINITIONS
 //==============================================================
 
-template void dequantizeBlockwiseCpu<float, General8bit>(
+template void dequantizeBlockwise8bitCpu<float>(
     float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long m, long long n);
-template void dequantizeBlockwiseCpu<float, FP4>(
-    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long m, long long n);
-template void dequantizeBlockwiseCpu<float, NF4>(
-    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long m, long long n);
-
-template void dequantizeBlockwiseCpu<fp16_t, General8bit>(
+template void dequantizeBlockwise8bitCpu<fp16_t>(
     float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long m, long long n);
-template void dequantizeBlockwiseCpu<fp16_t, FP4>(
-    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long m, long long n);
-template void dequantizeBlockwiseCpu<fp16_t, NF4>(
-    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long m, long long n);
-
-template void dequantizeBlockwiseCpu<bf16_t, General8bit>(
-    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n);
-template void dequantizeBlockwiseCpu<bf16_t, FP4>(
-    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n);
-template void dequantizeBlockwiseCpu<bf16_t, NF4>(
+template void dequantizeBlockwise8bitCpu<bf16_t>(
     float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n);
 
 template void dequantizeBlockwise4bitCpu<float, FP4>(
