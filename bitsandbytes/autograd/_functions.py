@@ -435,8 +435,6 @@ def matmul_4bit(
     # Change dtype to bfloat16 on CPU
     if A.device.type == "cpu":
         quant_state.dtype = A.dtype
-        if hasattr(quant_state, "state2"):
-            quant_state.state2.dtype = A.dtype
 
     if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "hpu":
         if A.shape[-1] % quant_state.blocksize != 0:

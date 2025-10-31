@@ -86,7 +86,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(A.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
         elif dtype == torch.bfloat16:
             lib.cdequantize_blockwise_cpu_bf16(
@@ -95,7 +96,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(A.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
         elif dtype == torch.float16:
             lib.cdequantize_blockwise_cpu_fp16(
@@ -104,7 +106,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(A.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
         else:
             out = code[A.reshape(-1).int()]
@@ -141,7 +144,7 @@ def _(
     if absmax.dtype != torch.float32:
         absmax = absmax.float()
 
-    A = A.reshape(-1)
+    A = A.reshape(shape[0], shape[1] // 2)
     out = torch.empty(shape, dtype=dtype, device=A.device).reshape(-1)
     if quant_type == "fp4":
         if dtype == torch.float32:
@@ -151,7 +154,8 @@ def _(
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(out.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
         elif dtype == torch.bfloat16:
             lib.cdequantize_blockwise_cpu_fp4_bf16(
@@ -160,7 +164,8 @@ def _(
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(out.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
         elif dtype == torch.float16:
             lib.cdequantize_blockwise_cpu_fp4_fp16(
@@ -169,7 +174,8 @@ def _(
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(out.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
     elif quant_type == "nf4":
         if dtype == torch.float32:
@@ -179,7 +185,8 @@ def _(
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(out.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
         elif dtype == torch.bfloat16:
             lib.cdequantize_blockwise_cpu_nf4_bf16(
@@ -188,7 +195,8 @@ def _(
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(out.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
             out_2 = dequantize_nf4_test(A, absmax, blocksize, quant_type, shape, dtype)
             out = out.reshape(shape)
@@ -202,10 +210,12 @@ def _(
                 get_ptr(absmax),
                 get_ptr(out),
                 ct.c_longlong(blocksize),
-                ct.c_longlong(out.numel()),
+                ct.c_longlong(shape[0]),
+                ct.c_longlong(shape[1]),
             )
     else:
         # Map nf4 to [-1, 1]
+        A = A.reshape(-1)
         out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
         n = out_dq.numel()
         out_dq[1::2] = A & 0xF
@@ -229,7 +239,7 @@ def _(
         else:
             out = out_dq.view(-1, blocksize) * absmax.view(-1, 1)
 
-    out = out.reshape(-1, *shape[1:]).to(dtype)
+        out = out.reshape(-1, *shape[1:]).to(dtype)
 
     return out
 
@@ -265,4 +275,11 @@ def dequantize_nf4_test(
     else:
         out = out_dq.view(-1, blocksize) * absmax.view(-1, 1)
 
+    return out
+
+
+def _reverse_4bit_compress_format(weight: torch.Tensor):
+    out_1 = (weight & 0xF0) >> 4
+    out_2 = (weight & 0xF) << 4
+    out = out_1 | out_2
     return out

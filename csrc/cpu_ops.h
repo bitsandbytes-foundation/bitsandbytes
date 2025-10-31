@@ -117,6 +117,6 @@ inline float dDequantizeNF4(unsigned char val) {
 }
 
 template <typename T, int DATA_TYPE>
-void dequantizeBlockwiseCpu(float* code, unsigned char* A, const float* absmax, T* out, long long blocksize, long long n);
+void dequantizeBlockwiseCpu(float* code, unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n);
 
 #endif
