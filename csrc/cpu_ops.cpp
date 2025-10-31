@@ -69,10 +69,9 @@ void dequantizeBlockwise8bitCpu(float* code,
                             long long n) {
     if (blocksize <= 0 || n <= 0) return;
     // 8-bit path
-    long long total = (m * n) >> 1;
     #pragma omp parallel for
-    for (long long block_idx = 0; block_idx < total; block_idx += blocksize) {
-        long long valid_items = (total - block_idx >= blocksize ? blocksize : total - block_idx);
+    for (long long block_idx = 0; block_idx < n; block_idx += blocksize) {
+        long long valid_items = (n - block_idx >= blocksize ? blocksize : n - block_idx);
         long long block_end   = block_idx + valid_items;
         float scale = absmax[block_idx / blocksize];
         for (long long i = block_idx; i < block_end; ++i) {
