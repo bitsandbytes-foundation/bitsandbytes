@@ -9,8 +9,7 @@ using namespace BinSearch;
 // 4-bit (FP4 / NF4) dequantization helper extracted from the original else branch.
 // DATA_TYPE: 1 = FP4, 2 = NF4
 template <typename T, int DATA_TYPE>
-inline void dequantizeBlockwise4bitCpu(float* code,
-                                       unsigned char* A,
+inline void dequantizeBlockwise4bitCpu(unsigned char* A,
                                        const float* absmax,
                                        T* out,
                                        long long blocksize,
@@ -92,7 +91,7 @@ void dequantizeBlockwiseCpu(float* code,
         }
     } else {
         // 4-bit helper (FP4 / NF4)
-        dequantizeBlockwise4bitCpu<T, DATA_TYPE>(code, A, absmax, out, blocksize, m, n);
+        dequantizeBlockwise4bitCpu<T, DATA_TYPE>(A, absmax, out, blocksize, m, n);
     }
 }
 
