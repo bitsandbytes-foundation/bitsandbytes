@@ -271,6 +271,18 @@ target_include_directories(bitsandbytes PUBLIC csrc include)
 
 if (BUILD_CPU)
     target_link_libraries(bitsandbytes PRIVATE OpenMP::OpenMP_CXX)
+    include(CheckCXXCompilerFlag)
+
+    check_cxx_compiler_flag(-mavx512f HAS_AVX512F)
+    check_cxx_compiler_flag(-mavx512bf16 HAS_AVX512BF16)
+
+    if(HAS_AVX512F)
+    target_compile_options(bitsandbytes PRIVATE -mavx512f)
+    endif()
+
+    if(HAS_AVX512BF16)
+    target_compile_options(bitsandbytes PRIVATE -mavx512bf16)
+    endif()
 endif()
 
 if(BUILD_CUDA)

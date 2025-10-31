@@ -115,6 +115,7 @@ inline float dDequantizeNF4(unsigned char val) {
         return -1.0f; //*0000
 }
 
+
 template <typename T>
 void dequantizeBlockwise8bitCpu(float* code, unsigned char* A, const float* absmax, T* out, long long blocksize, long long n);
 
