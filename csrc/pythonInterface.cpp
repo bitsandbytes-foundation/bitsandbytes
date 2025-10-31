@@ -843,17 +843,17 @@ void cquantize_blockwise_cpu_fp32(
 }
 
 void cdequantize_blockwise_cpu_fp32(
-    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long m, long long n
+    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long n
 ) {
     dequantizeBlockwise8bitCpu<float>(code, A, absmax, out, blocksize, n);
 }
 void cdequantize_blockwise_cpu_bf16(
-    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n
+    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long n
 ) {
     dequantizeBlockwise8bitCpu<bf16_t>(code, A, absmax, out, blocksize, n);
 }
 void cdequantize_blockwise_cpu_fp16(
-    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long m, long long n
+    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long n
 ) {
     dequantizeBlockwise8bitCpu<fp16_t>(code, A, absmax, out, blocksize, n);
 }

@@ -142,7 +142,7 @@ def _(
         absmax = absmax.float()
 
     A = A.reshape(shape[0], shape[1] // 2)
-    out = torch.empty(shape, dtype=dtype, device=A.device).reshape(-1)
+    out = torch.empty(shape, dtype=dtype, device=A.device)
     if quant_type == "fp4":
         if dtype == torch.float32:
             lib.cdequantize_blockwise_cpu_fp4_fp32(
