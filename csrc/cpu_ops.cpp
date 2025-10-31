@@ -88,11 +88,11 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
                   "dequantizeBlockwise4bitCpu called with non 4-bit DATA_TYPE");
     if (blocksize <= 0 || m < 0 || n <= 0) return;
 
-#if defined(__AVX512F__) && defined(TEST_BUG)
+#if defined(__AVX512F__)
     long long dim_0 = m;
     long long dim_1 = n;
     long long input_dim_1 = dim_1 >> 1;
-    long long absmax_dim_1 = dim_1 / blocksize
+    long long absmax_dim_1 = dim_1 / blocksize;
     using Tcomp = float;
     constexpr auto VEC_LEN = sizeof(__m512i) / sizeof(Tcomp); // 16
     if (dim_1 % VEC_LEN == 0 && blocksize >= VEC_LEN) {
