@@ -27,12 +27,6 @@ if torch.__version__ >= (2, 6):
         ).reshape(*A.shape[:-1], B.shape[0])
 
 
-def _reverse_4bit_compress_format(weight: torch.Tensor):
-    out_1 = (weight & 0xF0) >> 4
-    out_2 = (weight & 0xF) << 4
-    out = out_1 | out_2
-    return out
-
 if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
 
     @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
@@ -147,7 +141,6 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-        A = _reverse_4bit_compress_format(A)
         A = A.reshape(shape[0], shape[1] // 2)
         out = torch.empty(shape, dtype=dtype, device=A.device)
         if quant_type == "fp4":

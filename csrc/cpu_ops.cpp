@@ -5,6 +5,8 @@
 
 using namespace BinSearch;
 
+#define __AVX512F__
+
 #if defined(__AVX512F__)
 #include <immintrin.h>
 
@@ -110,9 +112,11 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
                 // unpack nf4 data to 32-bit integers
                 uint64_t high = 0;
                 uint64_t low = 0;
-                for (int i = 0; i < 8; ++i) {
-                    low |= ((packed >> (i * 4)) & 0xf) << (i * 8);
-                    high |= ((packed >> (i * 4 + 32)) & 0xf) << (i * 8);
+                for (int i = 0; i < 4; ++i) {
+                    low |= ((packed >> (2*i * 4)) & 0xf) << ((2*i+1) * 8);
+                    low |= ((packed >> ((2*i+1) * 4)) & 0xf) << (2*i * 8);
+                    high |= ((packed >> (2*i * 4 + 32)) & 0xf) << ((2*i+1) * 8);
+                    high |= ((packed >> ((2*i+1) * 4 + 32)) & 0xf) << (2*i * 8);
                 }
                 __m128i packed_128 = _mm_set_epi64x(high, low);
                 __m512i vint32 = _mm512_cvtepu8_epi32(packed_128);
