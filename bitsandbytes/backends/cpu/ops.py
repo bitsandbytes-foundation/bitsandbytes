@@ -146,7 +146,6 @@ def _(
     if quant_type == "fp4":
         if dtype == torch.float32:
             lib.cdequantize_blockwise_cpu_fp4_fp32(
-                None,
                 get_ptr(A),
                 get_ptr(absmax),
                 get_ptr(out),
@@ -156,7 +155,6 @@ def _(
             )
         elif dtype == torch.bfloat16:
             lib.cdequantize_blockwise_cpu_fp4_bf16(
-                None,
                 get_ptr(A),
                 get_ptr(absmax),
                 get_ptr(out),
@@ -166,7 +164,6 @@ def _(
             )
         elif dtype == torch.float16:
             lib.cdequantize_blockwise_cpu_fp4_fp16(
-                None,
                 get_ptr(A),
                 get_ptr(absmax),
                 get_ptr(out),
@@ -177,7 +174,6 @@ def _(
     elif quant_type == "nf4":
         if dtype == torch.float32:
             lib.cdequantize_blockwise_cpu_nf4_fp32(
-                None,
                 get_ptr(A),
                 get_ptr(absmax),
                 get_ptr(out),
@@ -187,7 +183,6 @@ def _(
             )
         elif dtype == torch.bfloat16:
             lib.cdequantize_blockwise_cpu_nf4_bf16(
-                None,
                 get_ptr(A),
                 get_ptr(absmax),
                 get_ptr(out),
@@ -202,7 +197,6 @@ def _(
                 import pdb; pdb.set_trace()
         elif dtype == torch.float16:
             lib.cdequantize_blockwise_cpu_nf4_fp16(
-                None,
                 get_ptr(A),
                 get_ptr(absmax),
                 get_ptr(out),
