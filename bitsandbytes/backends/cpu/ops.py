@@ -197,9 +197,9 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     ct.c_longlong(shape[0]),
                     ct.c_longlong(shape[1]),
                 )
-                out_2 = dequantize_nf4_test(_reverse_4bit_compress_format(A.reshape(-1)), absmax, blocksize, quant_type, shape, dtype)
-                if not torch.allclose(out, out_2, rtol=1e-2, atol=5e-2):
-                    import pdb; pdb.set_trace()
+                # out_2 = dequantize_nf4_test(_reverse_4bit_compress_format(A.reshape(-1)), absmax, blocksize, quant_type, shape, dtype)
+                # if not torch.allclose(out, out_2, rtol=1e-2, atol=5e-2):
+                #     import pdb; pdb.set_trace()
             elif dtype == torch.float16:
                 lib.cdequantize_blockwise_cpu_nf4_fp16(
                     get_ptr(A),

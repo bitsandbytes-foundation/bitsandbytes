@@ -5,8 +5,7 @@
 
 using namespace BinSearch;
 
-// #if defined(__AVX512F__)
-#if 1
+#if defined(__AVX512F__)
 #include <immintrin.h>
 
 inline __m256i cvt_fp32_to_fp16(const __m512 src) {
@@ -89,31 +88,25 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
                   "dequantizeBlockwise4bitCpu called with non 4-bit DATA_TYPE");
     if (blocksize <= 0 || m < 0 || n <= 0) return;
 
-// #if defined(__AVX512F__) && defined(TEST_BUG)
-# if 1
-    auto dim_0 = m;
-    auto dim_1 = n;
-    auto input_dim_1 = dim_1 >> 1;
+#if defined(__AVX512F__) && defined(TEST_BUG)
+    long long dim_0 = m;
+    long long dim_1 = n;
+    long long input_dim_1 = dim_1 >> 1;
+    long long absmax_dim_1 = dim_1 / blocksize
     using Tcomp = float;
     constexpr auto VEC_LEN = sizeof(__m512i) / sizeof(Tcomp); // 16
     if (dim_1 % VEC_LEN == 0 && blocksize >= VEC_LEN) {
         __m512 lut = DATA_TYPE == 1 ? set_fp4_lut() : set_nf4_lut();
         constexpr auto k_step = VEC_LEN / 2; // 8
-        // auto dequant_loop = ThreadedLoop<2>({{dim_0}}, /* loop_scheme */ "A");
-        // dequant_loop(
-        //     [&](int* idx) {
-        //     int block_idx = idx[0];
         #pragma omp parallel for
         for (int block_idx = 0; block_idx < dim_0; ++block_idx) {
             for (int k = 0; k < input_dim_1; k += k_step) {
                 // Load 64 bits of nf4 data and a single scale data
-                // auto p = A[block_idx * input_dim_1 + k];
                 uint8_t* p = &A[block_idx * input_dim_1 + k];
                 uint64_t packed;
                 std::memcpy(&packed, p, sizeof(uint64_t));
                 auto scale_idx = k * 2 / blocksize;
-                auto vscales = _mm512_set1_ps((float)absmax[block_idx * blocksize + scale_idx]);
-                // uint64_t packed = reinterpret_cast<uint64_t*>(p)[0];
+                auto vscales = _mm512_set1_ps((float)absmax[block_idx * absmax_dim_1 + scale_idx]);
                 // unpack nf4 data to 32-bit integers
                 uint64_t high = 0;
                 uint64_t low = 0;
@@ -128,8 +121,7 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
                 // Apply scale
                 vout = _mm512_mul_ps(vout, vscales);
                 // Store results
-                // auto pout = out[block_idx * dim_1 + k * 2];
-                T* pout = &out[block_idx * dim_1 + k * 2]; // out[block_idx][k/k_step]
+                T* pout = &out[block_idx * dim_1 + k * 2];
                 if constexpr (std::is_same<T, float>()) {
                 _mm512_storeu_ps(pout, vout);
                 } else if constexpr (std::is_same<T, bf16_t>()) {
