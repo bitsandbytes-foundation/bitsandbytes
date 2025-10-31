@@ -139,11 +139,11 @@ void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long
 //==============================================================
 
 template void dequantizeBlockwise8bitCpu<float>(
-    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long m, long long n);
+    float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long n);
 template void dequantizeBlockwise8bitCpu<fp16_t>(
-    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long m, long long n);
+    float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long n);
 template void dequantizeBlockwise8bitCpu<bf16_t>(
-    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n);
+    float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long n);
 
 template void dequantizeBlockwise4bitCpu<float, FP4>(
     unsigned char* A, const float* absmax, float* out, long long blocksize, long long m, long long n);
