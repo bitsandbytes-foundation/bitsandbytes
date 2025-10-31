@@ -190,7 +190,7 @@ def _(
                 ct.c_longlong(shape[0]),
                 ct.c_longlong(shape[1]),
             )
-            out_2 = dequantize_nf4_test(A, absmax, blocksize, quant_type, shape, dtype)
+            out_2 = dequantize_nf4_test(A.reshape(-1), absmax, blocksize, quant_type, shape, dtype)
             out = out.reshape(shape)
             out_2 = out_2.reshape(shape)
             if not torch.allclose(out, out_2, rtol=1e-2, atol=5e-2):
@@ -265,6 +265,8 @@ def dequantize_nf4_test(
         out[n - rem :] = out_dq[n - rem :] * absmax[-1]
     else:
         out = out_dq.view(-1, blocksize) * absmax.view(-1, 1)
+
+    out = out.reshape(-1, *shape[1:]).to(dtype)
 
     return out
 

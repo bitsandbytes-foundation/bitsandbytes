@@ -7,7 +7,7 @@ using namespace BinSearch;
 
 
 // 4-bit (FP4 / NF4) dequantization helper extracted from the original else branch.
-// DATA_TYPE: 1 = FP4, 2 = NF4
+// DATA_TYPE: 1 = FP4, 0 = NF4
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise4bitCpu(unsigned char* A,
                                 const float* absmax,
@@ -17,7 +17,7 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
                                 long long n) {
     static_assert(DATA_TYPE == 0 || DATA_TYPE == 1,
                   "dequantizeBlockwise4bitCpu called with non 4-bit DATA_TYPE");
-    if (blocksize <= 0 || n <= 0) return;
+    if (blocksize <= 0 || m < 0 || n <= 0) return;
 
 #if defined(__AVX512F__) && defined(__AVX512BW__) && defined(TEST_BUG)
     // AVX512 optimized branch (placeholder)
