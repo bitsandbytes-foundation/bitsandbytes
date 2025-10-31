@@ -861,32 +861,32 @@ void cdequantize_blockwise_cpu_fp16(
 void cdequantize_blockwise_cpu_fp4_fp32(
     float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long m, long long n
 ) {
-    dequantizeBlockwise4bitCpu<float, FP4>(code, A, absmax, out, blocksize, m, n);
+    dequantizeBlockwise4bitCpu<float, FP4>(A, absmax, out, blocksize, m, n);
 }
 void cdequantize_blockwise_cpu_fp4_bf16(
     float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n
 ) {
-    dequantizeBlockwise4bitCpu<bf16_t, FP4>(code, A, absmax, out, blocksize, m, n);
+    dequantizeBlockwise4bitCpu<bf16_t, FP4>(A, absmax, out, blocksize, m, n);
 }
 void cdequantize_blockwise_cpu_fp4_fp16(
     float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long m, long long n
 ) {
-    dequantizeBlockwise4bitCpu<fp16_t, FP4>(code, A, absmax, out, blocksize, m, n);
+    dequantizeBlockwise4bitCpu<fp16_t, FP4>(A, absmax, out, blocksize, m, n);
 }
 
 void cdequantize_blockwise_cpu_nf4_fp32(
     float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long m, long long n
 ) {
-    dequantizeBlockwise4bitCpu<float, NF4>(code, A, absmax, out, blocksize, m, n);
+    dequantizeBlockwise4bitCpu<float, NF4>(A, absmax, out, blocksize, m, n);
 }
 void cdequantize_blockwise_cpu_nf4_bf16(
     float* code, unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n
 ) {
-    dequantizeBlockwise4bitCpu<bf16_t, NF4>(code, A, absmax, out, blocksize, m, n);
+    dequantizeBlockwise4bitCpu<bf16_t, NF4>(A, absmax, out, blocksize, m, n);
 }
 void cdequantize_blockwise_cpu_nf4_fp16(
     float* code, unsigned char* A, const float* absmax, fp16_t* out, long long blocksize, long long m, long long n
 ) {
-    dequantizeBlockwise4bitCpu<fp16_t, NF4>(code, A, absmax, out, blocksize, m, n);
+    dequantizeBlockwise4bitCpu<fp16_t, NF4>(A, absmax, out, blocksize, m, n);
 }
 }

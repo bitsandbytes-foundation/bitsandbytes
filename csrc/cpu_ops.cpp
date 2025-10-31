@@ -10,11 +10,11 @@ using namespace BinSearch;
 // DATA_TYPE: 1 = FP4, 2 = NF4
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise4bitCpu(unsigned char* A,
-                                       const float* absmax,
-                                       T* out,
-                                       long long blocksize,
-                                       long long m,
-                                       long long n) {
+                                const float* absmax,
+                                T* out,
+                                long long blocksize,
+                                long long m,
+                                long long n) {
     static_assert(DATA_TYPE == 0 || DATA_TYPE == 1,
                   "dequantizeBlockwise4bitCpu called with non 4-bit DATA_TYPE");
     if (blocksize <= 0 || n <= 0) return;
