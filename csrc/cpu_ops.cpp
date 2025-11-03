@@ -5,7 +5,6 @@
 
 using namespace BinSearch;
 
-#define __AVX512F__
 
 #if defined(__AVX512F__)
 #include <immintrin.h>
@@ -137,8 +136,9 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
                 }
             }
         }
+        return;
     }
-#else
+#endif
     // Scalar fallback branch
     long long total = m * n;
     #pragma omp parallel for
@@ -171,7 +171,6 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
             }
         }
     }
-#endif
 }
 
 
