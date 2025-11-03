@@ -6,7 +6,7 @@ from collections.abc import Iterable
 import ctypes as ct
 import itertools
 from math import prod
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -1413,7 +1413,7 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
             raise ValueError(f"Gradient type {grad.dtype} not supported!")
 
     current_gnorm = torch.sqrt(gnorm_vec[step % 100])
-    vals, idx = torch.sort(gnorm_vec)
+    vals, _ = torch.sort(gnorm_vec)
     clip_value = torch.sqrt(vals[percentile])
     gnorm_scale = 1.0
 
@@ -2059,7 +2059,7 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
 
 
 def spmm_coo(
-    cooA: Union[COOSparseTensor, torch.Tensor],
+    cooA: COOSparseTensor | torch.Tensor,
     B: torch.Tensor,
     out: Optional[torch.Tensor] = None,
 ):

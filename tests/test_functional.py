@@ -312,7 +312,7 @@ class Test8BitBlockwiseQuantizeFunctional:
     def test_bench_dequantization(self):
         a = torch.rand(1024, 1024, device="cuda").half()
         code = F.create_fp8_map(True, 3, 0, 4).cuda()
-        qa, SA = F.quantize_blockwise(a, code=code)
+        qa, _SA = F.quantize_blockwise(a, code=code)
         print(qa.max())
 
         max_theoretical_mu = 1024 * 1024 * 2 / 1024**3 / 672 * 1000 * 1000
@@ -321,7 +321,7 @@ class Test8BitBlockwiseQuantizeFunctional:
         torch.cuda.synchronize()
         t0 = time.time()
         for i in range(100):
-            qa, SA = F.quantize_blockwise(a)
+            qa, _SA = F.quantize_blockwise(a)
         torch.cuda.synchronize()
         # print((time.time()-t0)/1e6)
 
@@ -1004,7 +1004,7 @@ class TestSpMMFunctional:
         torch.nn.init.xavier_uniform_(B)
         Bt = B.t().contiguous()
 
-        CB, CBt, statsB, statsBt, coo_tensor = F.int8_double_quant(B)
+        _CB, CBt, _statsB, statsBt, _coo_tensor = F.int8_double_quant(B)
 
         rowidx = torch.randint(0, A.shape[-1], size=(15,))
 
@@ -1023,7 +1023,7 @@ class TestSpMMFunctional:
 
         values, counts = torch.unique(cooA.rowidx, return_counts=True)
         offset = counts.cumsum(0).int()
-        max_count, max_idx = torch.sort(counts, descending=True)
+        max_count, _ = torch.sort(counts, descending=True)
         print(torch.median(max_count.float()))
 
         torch.testing.assert_close(out2, out3, rtol=0.05, atol=0.001)

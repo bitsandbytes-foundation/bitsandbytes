@@ -35,8 +35,8 @@ def test_bench_matmul(batch, seq, model, hidden):
     B = torch.empty(hidden, model, dtype=torch.float16, device="cuda")
     torch.nn.init.xavier_uniform_(B)
 
-    B_fp4, state = F.quantize_fp4(B)
-    B_fp4_c, state_c = F.quantize_fp4(B, compress_statistics=True)
+    _B_fp4, _state = F.quantize_fp4(B)
+    _B_fp4_c, _state_c = F.quantize_fp4(B, compress_statistics=True)
 
     B_nf4, state_nf4 = F.quantize_nf4(B)
     B_nf4_c, state_nf4_c = F.quantize_nf4(B, compress_statistics=True)
@@ -117,8 +117,8 @@ def test_bench_matmul(batch, seq, model, hidden):
         f"B -> CB + threshold: [{batch},{seq},{model}], [{model},{hidden}]->[{batch},{seq},{hidden}]: {time.time() - t0:.4f}s"
     )
 
-    CA, SCA, _ = F.int8_vectorwise_quant(A, threshold=0.0)
-    CB, SCB, _ = F.int8_vectorwise_quant(B)
+    CA, _SCA, _ = F.int8_vectorwise_quant(A, threshold=0.0)
+    CB, _SCB, _ = F.int8_vectorwise_quant(B)
     torch.cuda.synchronize()
     t0 = time.time()
     for i in range(iters):
