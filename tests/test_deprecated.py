@@ -52,7 +52,7 @@ def test_percentile_clipping(gtype):
         else:
             gnorm_vec1[step % 100] = gnorm2
 
-        vals, idx = torch.sort(gnorm_vec1)
+        vals, _ = torch.sort(gnorm_vec1)
         clip1 = vals[percentile]
 
         torch.testing.assert_close(gnorm_vec1, torch.sqrt(gnorm_vec2))

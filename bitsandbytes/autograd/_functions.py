@@ -1,6 +1,7 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import prod
-from typing import Callable, Optional
+from typing import Optional
 import warnings
 from warnings import warn
 
@@ -257,7 +258,7 @@ class MatMul8bitLt(torch.autograd.Function):
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
-        CAt, subA, A = ctx.tensors
+        CAt, subA, _A = ctx.tensors
         SCAt, idx = ctx.tensor_states
         state: MatmulLtState = ctx.state
         grad_A = grad_B = grad_bias = None
