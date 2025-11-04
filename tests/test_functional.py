@@ -704,45 +704,6 @@ class TestLLMInt8Functional:
             n = C5.numel()
             assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01 * n))
 
-    @pytest.mark.parametrize("dim1", [1 * 1024], ids=id_formatter("dim1"))
-    @pytest.mark.parametrize("dim2", [1 * 1024], ids=id_formatter("dim2"))
-    @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-    @pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("decomp"))
-    @pytest.mark.deprecated
-    def test_colrow_absmax(self, dim1, dim2, dims, threshold):
-        for i in range(k):
-            A = torch.randn(dim1, dim2, device="cuda").half()
-
-            assert dims == 2
-
-            row_stats1, _ = torch.abs(A.float()).max(1)
-            col_stats1, _ = torch.abs(A.float()).max(0)
-
-            if threshold > 0.0:
-                A_truncated = A.clone()
-                A_truncated[torch.abs(A_truncated) >= threshold] = 0.0
-                row_stats1_trunc, _ = torch.abs(A_truncated.float()).max(1)
-                col_stats1_trunc, _ = torch.abs(A_truncated.float()).max(0)
-
-                row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=threshold)
-
-                nnz_rows1_counts = (torch.abs(A) >= threshold).sum(1).flatten()
-                nnz_block_ptr1 = torch.zeros(
-                    nnz_rows1_counts.shape[0] + 1,
-                    dtype=nnz_rows1_counts.dtype,
-                    device=nnz_rows1_counts.device,
-                )
-                nnz_block_ptr1[1:] = nnz_rows1_counts.cumsum(0)
-
-                torch.testing.assert_close(col_stats1_trunc, col_stats2)
-                torch.testing.assert_close(row_stats1_trunc, row_stats2)
-                # torch.testing.assert_close(nnz_block_ptr1, nnz_block_ptr2)
-            else:
-                row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=0.0)
-                assert nnz_block_ptr2 is None
-                torch.testing.assert_close(col_stats1, col_stats2)
-                torch.testing.assert_close(row_stats1, row_stats2)
-
     @pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
     @pytest.mark.deprecated

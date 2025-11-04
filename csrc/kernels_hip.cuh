@@ -112,14 +112,7 @@ __global__ void kdequant_mm_int32_fp16(
 );
 
 template <typename T, int THREADS, int SPARSE_DECOMP>
-__global__ void kgetRowStats(T* __restrict__ A, float* rowStats, float threshold, int rows, int cols);
-template <typename T, int THREADS, int SPARSE_DECOMP>
 __global__ void kInt8VectorQuant(T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols);
-
-template <int THREADS, int ITEMS_PER_THREAD, int TILE_ROWS, int TILE_COLS, int TRANSPOSE, int FORMAT>
-__global__ void kTransformRowToFormat(
-    char* __restrict__ const A, char* out, int rows, int cols, int tiledCols, int outRows, int outCols
-);
 
 template <typename T, int BITS, int THREADS>
 __global__ void gemm_device(int M, int N, int K, T* __restrict__ const A, T* B, T* out, int lda, int ldb, int ldc);

@@ -326,75 +326,6 @@ int roundoff(int v, int d) {
     return (v + d - 1) / d * d;
 }
 
-#ifdef NO_HIPBLASLT
-#else
-template<int ORDER> hipblasLtOrder_t get_order()
-{
-	switch(ORDER)
-	{
-		case ROW:
-      return HIPBLASLT_ORDER_ROW;
-			break;
-    case COL:
-      return HIPBLASLT_ORDER_COL;
-      break;
-    case COL32:
-      //return HIPBLASLT_ORDER_COL32;
-      return HIPBLASLT_ORDER_COL;
-      break;
-    case COL_TURING:
-      //return HIPBLASLT_ORDER_COL4_4R2_8C;
-      return HIPBLASLT_ORDER_COL;
-     break;
-    case COL_AMPERE:
-      //return HIPBLASLT_ORDER_COL32_2R_4R4;
-      return HIPBLASLT_ORDER_COL;
-      break;
-		default:
-			break;
-  }
-
-	return HIPBLASLT_ORDER_ROW;
-}
-
-template hipblasLtOrder_t get_order<ROW>();
-template hipblasLtOrder_t get_order<COL>();
-template hipblasLtOrder_t get_order<COL32>();
-//template hipblasLtOrder_t get_order<COL_TURING>();
-//template hipblasLtOrder_t get_order<COL_AMPERE>();
-#endif
-
-template<int ORDER> int get_leading_dim(int dim1, int dim2)
-{
-	switch(ORDER)
-	{
-		case ROW:
-      return dim2;
-			break;
-    case COL:
-      return dim1;
-      break;
-    default:
-      return dim1;
-      break;
-    /*case COL32:
-      // 32*row tiles
-      return dim1*32;
-      break;
-    case COL_TURING:
-      return 32*roundoff(dim1, 8);
-      break;
-    case COL_AMPERE:
-      // 32*32 tiles
-      return 32*roundoff(dim1, 32);
-      break;
-		default:
-			return 0;
-			break;
-     */
-  }
-}
-
 static std::string hipError_to_string(const hipError_t ret)
 {
 	switch(ret)
@@ -600,14 +531,6 @@ void int8VectorQuant(half * __restrict__ A, int8_t *out, float *rowStats, float 
   } else {
     kInt8VectorQuant<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, out, rowStats, threshold, rows, cols);
   }
-  CUDA_CHECK_RETURN(hipPeekAtLastError());
-}
-
-void getRowStats(half *A, float *rowStats, float threshold, int rows, int cols, hipStream_t stream) {
-  if (threshold == 0.0)
-    kgetRowStats<half, 1024, 0><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
-  else
-    kgetRowStats<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
@@ -835,7 +758,3 @@ MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);
 
 template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
 template void percentileClipping(half * g, float *gnorm_vec, int step, const int n);
-
-template int get_leading_dim<ROW>(int dim1, int dim2);
-template int get_leading_dim<COL>(int dim1, int dim2);
-template int get_leading_dim<COL32>(int dim1, int dim2);
