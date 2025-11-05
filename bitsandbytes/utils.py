@@ -91,7 +91,7 @@ def find_outlier_dims(weight, reduction_dim=0, zscore=4.0, topk=None, rdm=False)
     zstd = (std - stdm) / stdstd
 
     if topk is not None:
-        val, idx = torch.topk(std.abs(), k=topk, dim=0)
+        _, idx = torch.topk(std.abs(), k=topk, dim=0)
     else:
         idx = torch.where(zstd > zscore)[0]
 

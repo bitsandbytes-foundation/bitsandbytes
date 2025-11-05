@@ -57,10 +57,7 @@ def _import_backends():
     """
     from importlib.metadata import entry_points
 
-    if sys.version_info < (3, 10):
-        extensions = entry_points().get("bitsandbytes.backends", [])
-    else:
-        extensions = entry_points(group="bitsandbytes.backends")
+    extensions = entry_points(group="bitsandbytes.backends")
 
     for ext in extensions:
         try:
@@ -78,4 +75,4 @@ __pdoc__ = {
     "optim.optimizer.MockArgs": False,
 }
 
-__version__ = "0.48.3.dev0"
+__version__ = "0.49.0.dev0"
