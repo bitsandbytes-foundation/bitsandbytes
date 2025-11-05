@@ -158,6 +158,8 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
 
             if constexpr (std::is_same<T, bf16_t>::value) {
                 out[block_idx + i] = float_to_bf16(v0);
+            } else if constexpr (std::is_same<T, fp16_t>::value) {
+                out[block_idx + i] = float_to_fp16(v0);
             } else {
                 out[block_idx + i] = static_cast<T>(v0);
             }
@@ -165,6 +167,8 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
             if (i + 1 < valid_items) {
                 if constexpr (std::is_same<T, bf16_t>::value) {
                     out[block_idx + i + 1] = float_to_bf16(v1);
+                } else if constexpr (std::is_same<T, fp16_t>::value) {
+                    out[block_idx + i + 1] = float_to_fp16(v1);
                 } else {
                     out[block_idx + i + 1] = static_cast<T>(v1);
                 }
@@ -192,6 +196,8 @@ void dequantizeBlockwise8bitCpu(float* code,
             float v = code[A[i]] * scale;
             if constexpr (std::is_same<T, bf16_t>::value) {
                 out[i] = float_to_bf16(v);
+            } else if constexpr (std::is_same<T, fp16_t>::value) {
+                out[i] = float_to_fp16(v);
             } else {
                 out[i] = static_cast<T>(v);
             }

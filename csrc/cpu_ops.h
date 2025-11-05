@@ -1,11 +1,8 @@
 #ifndef BITSANDBYTES_CPU_OPS_H
 #define BITSANDBYTES_CPU_OPS_H
 
-#include <iostream>
-#include <stdio.h>
 #include <cstdint>
 #include <cstring>
-#include <type_traits>
 
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n);
 
@@ -14,7 +11,9 @@ typedef enum DataType_t {
     FP4 = 1,
 } DataType_t;
 
-using fp16_t = _Float16;
+struct fp16_t {
+    uint16_t v;
+};
 
 struct bf16_t {
     uint16_t v;
@@ -25,6 +24,48 @@ static inline bf16_t float_to_bf16(float x) {
     std::memcpy(&bits, &x, 4);
     uint32_t r = bits + 0x7FFF + ((bits >> 16) & 1);
     return bf16_t{static_cast<uint16_t>(r >> 16)};
+}
+
+static inline fp16_t float_to_fp16(float x) {
+    uint32_t bits;
+    std::memcpy(&bits, &x, 4);
+    uint32_t sign = (bits >> 31) & 0x1;
+    uint32_t exp  = (bits >> 23) & 0xFF;
+    uint32_t mant = bits & 0x7FFFFF;
+
+    uint16_t h;
+    if (exp == 0xFF) { // Inf / NaN
+        uint16_t mant16 = mant ? 0x200 : 0; // quiet NaN: set MSB of mantissa
+        h = (sign << 15) | (0x1F << 10) | mant16;
+    } else if (exp > 0x70 + 0x1E) { // overflow: exp_f -127 +15 > 30  (exp_f > 142)
+        h = (sign << 15) | (0x1F << 10); // Inf
+    } else if (exp < 0x71) { // subnormal or zero (exp_f < 113)
+        if (exp < 0x67) { // too small -> zero (exp_f < 103)
+            h = (sign << 15);
+        } else {
+            // subnormal: implicit leading 1
+            uint32_t shift = 0x71 - exp;
+            uint32_t mant_with_hidden = mant | 0x800000;
+            // add rounding bias before shifting (23-10 =13 bits to drop + shift)
+            uint32_t rounded = (mant_with_hidden + (1u << (shift + 12))) >> (shift + 13);
+            h = (sign << 15) | (uint16_t)rounded;
+        }
+    } else {
+        // normalized
+        uint32_t exp_h = exp - 127 + 15;
+        // round mantissa: add 2^(23-10-1) = 0x1000
+        uint32_t mant_rounded = mant + 0x00001000;
+        if (mant_rounded & 0x00800000) { // mantissa overflow after rounding
+            mant_rounded = 0;
+            ++exp_h;
+            if (exp_h >= 0x1F) { // overflow to Inf
+                h = (sign << 15) | (0x1F << 10);
+                return fp16_t{h};
+            }
+        }
+        h = (sign << 15) | ((uint16_t)exp_h << 10) | ((uint16_t)(mant_rounded >> 13));
+    }
+    return fp16_t{h};
 }
 
 inline float dDequantizeFP4(unsigned char val) {
