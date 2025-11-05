@@ -10,7 +10,7 @@ import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
-from bitsandbytes.cextension import HIP_ENVIRONMENT, ROCM_GPU_ARCH, ROCM_WARP_SIZE_64
+from bitsandbytes.cextension import HIP_ENVIRONMENT, ROCM_WARP_SIZE_64
 from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,
