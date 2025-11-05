@@ -246,14 +246,14 @@ def test_error_conditions():
         replace_parameter_4bit(module, "nonexistent")
 
     # Test TypeError for non-Parameter attribute
-    with pytest.raises(TypeError, match="Parameter 'not_param' is not an instance of nn.Parameter"):
+    with pytest.raises(TypeError, match="Parameter 'not_param' is not an instance of nn\\.Parameter"):
         replace_parameter_4bit(module, "not_param")
 
     # Test same errors for prequantized version
     with pytest.raises(AttributeError, match="Module does not have parameter 'nonexistent'"):
         replace_parameter_4bit_prequantized(module, "nonexistent", {}, torch.device("cpu"))
 
-    with pytest.raises(TypeError, match="Parameter 'not_param' is not an instance of nn.Parameter"):
+    with pytest.raises(TypeError, match="Parameter 'not_param' is not an instance of nn\\.Parameter"):
         replace_parameter_4bit_prequantized(module, "not_param", {}, torch.device("cpu"))
 
 

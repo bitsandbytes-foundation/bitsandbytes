@@ -348,16 +348,17 @@ template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TY
 //__launch_bounds__(TH, 4)
 __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n)
 {
-  const int n_full = gridDim.x * BLOCK_SIZE;
-  int valid_items = 0;
-  const int base_idx = (blockIdx.x * BLOCK_SIZE);
+    // This can overflow, so we clamp to INT32_MAX. We won't have more elements than this.
+    const int n_full = min(gridDim.x * BLOCK_SIZE, INT32_MAX);
+    int valid_items = 0;
+    const int base_idx = blockIdx.x * BLOCK_SIZE;
 
-  T vals[NUM_PER_TH];
-  float rand_vals[NUM_PER_TH];
-  unsigned char qvals[(DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH];
-  //float local_abs_max = -FLT_MAX;
-  float local_abs_max = 0.0f;
-  int local_rand_idx = 0;
+    T vals[NUM_PER_TH];
+    float rand_vals[NUM_PER_TH];
+    unsigned char qvals[(DATA_TYPE > 0) ? NUM_PER_TH / 2 : NUM_PER_TH];
+
+    float local_abs_max = 0.0f;
+    int local_rand_idx = 0;
 
   typedef hipcub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, hipcub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
   typedef hipcub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, (DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH, hipcub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
@@ -375,9 +376,9 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
     for(int i = threadIdx.x; i < 256; i+=blockDim.x)
       smem_code[i] = code[i];
 
-  for (int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
-  {
-    valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
+
+  for (int64_t i = base_idx; i < n_full; i += gridDim.x * BLOCK_SIZE) {
+    valid_items = min(BLOCK_SIZE, static_cast<int>(n - i));
     local_abs_max = -FLT_MAX;
 
     __syncthreads();
@@ -465,7 +466,8 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * abs
   {
     if (DATA_TYPE > 0)
     {
-      valid_items_load = min(TILE_SIZE, (n + 1) / 2 - i);
+      // Cast n to int64_t to avoid overflow for large n
+      valid_items_load = min(TILE_SIZE, static_cast<int>((static_cast<int64_t>(n) + 1) / 2) - i);
       valid_items_store = min(TILE_SIZE * 2, n - i * 2);
     }
     else
@@ -1943,49 +1945,6 @@ __global__ void kInt8VectorQuant(T * __restrict__ A, int8_t* out, float* rowStat
     }
   }
 }
-
-template<typename T, int THREADS, int SPARSE_DECOMP>
-__launch_bounds__(1024, BNB_MAX_THREADS_PER_CU / 1024)
-__global__ void kgetRowStats(T * __restrict__ A, float *rowStats, float threshold, int rows, int cols) {
-  using BlockReduceT = hipcub::BlockReduce<float, THREADS>;
-
-  // One block per row.
-  // Threads load column values in a striped arrangement.
-  // e.g. t0 reads row[0], row[0+nthreads], ..
-  // and  t1 reads row[1], row[1+nthreads], ..
-  // Each thread will determine its local absmax.
-  // We then do a blockwise reduction to determine the row's absmax.
-
-  __shared__ typename BlockReduceT::TempStorage temp_storage;
-
-  const int row_id = blockIdx.x;
-  const T* __restrict__ row_data = A + (row_id * cols);
-
-  // Threads will read the row values in a striped access pattern and find a local absmax.
-  float row_local_absmax = -FLT_MIN;
-  for (int i = threadIdx.x; i < cols; i += THREADS) {
-    const float absval = fabsf(row_data[i]);
-
-    // For sparse decomposition, values outside of the threshold are not to be
-    // included when calculating the row's absmax.
-    if constexpr (SPARSE_DECOMP) {
-      row_local_absmax = fmaxf(row_local_absmax, absval < threshold ? absval : row_local_absmax);
-    } else {
-      row_local_absmax = fmaxf(row_local_absmax, absval);
-    }
-  }
-
-  // Reduce thread-local absmax across the block.
-  // TODO: Consider algorithm BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY
-  const float row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, hipcub::Max(), cols);
-  if (threadIdx.x == 0) {
-    // Save our block's absmax to shared memory for the quantization step.
-    rowStats[row_id] = row_absmax;
-  }
-}
-
-template __global__ void kgetRowStats<half, 1024, 0>(half * __restrict__ A, float *rowStats, float threshold, int rows, int cols);
-template __global__ void kgetRowStats<half, 1024, 1>(half * __restrict__ A, float *rowStats, float threshold, int rows, int cols);
 
 template __global__ void kInt8VectorQuant<half, 1024, 0>(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols);
 template __global__ void kInt8VectorQuant<half, 1024, 1>(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols);

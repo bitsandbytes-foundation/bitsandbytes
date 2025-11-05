@@ -496,7 +496,7 @@ def test_adam_percentile_clipping(requires_cuda, dim1, dim2, gtype, optim_bits):
         g2 = g1.clone()
         p2.grad = g2
 
-        current_gnorm, clip_val, gnorm_scale = F.percentile_clipping(g1, gnorm_vec, step, 5)
+        _current_gnorm, _clip_val, gnorm_scale = F.percentile_clipping(g1, gnorm_vec, step, 5)
         g1 = (g1.float() * gnorm_scale).to(gtype)
         p1.grad = g1
 

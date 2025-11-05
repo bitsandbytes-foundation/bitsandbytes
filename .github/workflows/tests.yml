@@ -103,7 +103,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
         # Test with the oldest supported torch version, the newest two stable/RC.
-        torch_version: ["2.3.1", "2.7.1", "2.8.0"]
+        torch_version: ["2.3.1", "2.8.0", "2.9.0"]
         include:
           - os: ubuntu-22.04
             arch: x86_64

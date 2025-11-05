@@ -310,28 +310,28 @@ class Params4bit(torch.nn.Parameter):
     def cpu(self):
         return self.to(device="cpu")
 
-    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
 
-    def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def xpu(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     @overload
     def to(
         self: T,
-        device: Optional[Union[int, device]] = ...,
-        dtype: Optional[Union[dtype, str]] = ...,
+        device: Optional[int | device] = ...,
+        dtype: Optional[dtype | str] = ...,
         non_blocking: bool = ...,
     ) -> T: ...
 
     @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T: ...
+    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
 
     @overload
     def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
 
     def to(self, *args, **kwargs):
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
 
         if device is not None and device.type != "meta" and not self.bnb_quantized:
             return self._quantize(device)
@@ -644,10 +644,10 @@ class Int8Params(torch.nn.Parameter):
     def cpu(self):
         return self.to(device="cpu")
 
-    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
 
-    def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def xpu(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     def __deepcopy__(self, memo):
@@ -665,19 +665,19 @@ class Int8Params(torch.nn.Parameter):
     @overload
     def to(
         self: T,
-        device: Optional[Union[int, device]] = ...,
-        dtype: Optional[Union[dtype, str]] = ...,
+        device: Optional[int | device] = ...,
+        dtype: Optional[dtype | str] = ...,
         non_blocking: bool = ...,
     ) -> T: ...
 
     @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T: ...
+    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
 
     @overload
     def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
 
     def to(self, *args, **kwargs):
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
 
         is_quantized = self.data.dtype == torch.int8
 
@@ -1048,7 +1048,7 @@ class Linear8bitLt(nn.Linear):
         # Call the parent to() method to handle standard parameter/buffer movement
         result = super().to(*args, **kwargs)
 
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
 
         # Handle state tensors if needed.
         if device is not None:

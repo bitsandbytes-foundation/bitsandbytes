@@ -1,11 +1,10 @@
 from dataclasses import dataclass
 from math import prod
-from typing import Callable, Optional
+from typing import Optional
 import warnings
 from warnings import warn
 
 import torch
-from typing_extensions import deprecated
 
 import bitsandbytes.functional as F
 
@@ -49,64 +48,7 @@ class GlobalOutlierPooler:
         return torch.Tensor(list(self.outliers)).to(torch.int64)
 
 
-@deprecated(
-    "This function is deprecated and will be removed in a future release.",
-    category=FutureWarning,
-)
-def get_inverse_transform_indices(
-    transform_tile: Callable[[torch.Tensor], torch.Tensor],
-    tile_size: tuple[int, int],
-):
-    """
-    Compute a permutation of indices that invert the specified (tiled) matrix transformation
-
-    :param transform_tile: a function that applies forward transform to a tensor of shape [dim1, dim2]
-    :param tile_size: higher-level tile dimensions, i.e. (8, 32) for Turing and (32, 32) for Ampere
-    :note: we assume that tile_transform applies to a cpu-based int8 tensor of shape tile_size
-    :example: transform_tile function for the turing layout (bitsandbytes.functional as F)
-    :returns: indices
-    """
-    d1, d2 = tile_size
-    assert 0 < d1 * d2 < 2**64
-    tile_indices = torch.arange(d1 * d2, dtype=torch.int64).view(d1, d2)
-    # encode each position in tile as a tuple of <= 8 unique bytes
-    permuted_tile_indices = torch.zeros_like(tile_indices)
-    for i in range(8):
-        # select i-th byte, apply transformation and trace where each index ended up
-        ith_dim_indices = torch.div(tile_indices, 256**i, rounding_mode="trunc") % 256
-        sample_tile_i = (ith_dim_indices - 128).to(torch.int8).contiguous()
-        assert torch.all(sample_tile_i.int() + 128 == ith_dim_indices), "int overflow"
-        permuted_tile_i = transform_tile(sample_tile_i)
-        ith_permuted_indices = permuted_tile_i.to(tile_indices.dtype) + 128
-        permuted_tile_indices += ith_permuted_indices * (256**i)
-        if d1 * d2 < 256**i:
-            break  # if all indices fit in i bytes, stop early
-    return permuted_tile_indices
-
-
 _is_compiling = torch.compiler.is_compiling
-
-
-@deprecated(
-    "This function is deprecated and will be removed in a future release.",
-    category=FutureWarning,
-)
-def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -> torch.Tensor:
-    """
-    Undo a tiled permutation such as turing or ampere layout
-
-    :param permuted_tensor: torch tensor in a permuted layout
-    :param tile_indices: reverse transformation indices, from get_inverse_transform_indices
-    :return: contiguous row-major tensor
-    """
-    (rows, cols), (tile_rows, tile_cols) = permuted_tensor.shape, tile_indices.shape
-    assert rows % tile_rows == cols % tile_cols == 0, "tensor must contain a whole number of tiles"
-    tensor = permuted_tensor.reshape(-1, tile_indices.numel()).t()
-    outputs = torch.empty_like(tensor)  # note: not using .index_copy because it was slower on cuda
-    outputs[tile_indices.flatten()] = tensor
-    outputs = outputs.reshape(tile_rows, tile_cols, cols // tile_cols, rows // tile_rows)
-    outputs = outputs.permute(3, 0, 2, 1)  # (rows // tile_rows, tile_rows), (cols // tile_cols, tile_cols)
-    return outputs.reshape(rows, cols).contiguous()
 
 
 @dataclass
@@ -257,7 +199,7 @@ class MatMul8bitLt(torch.autograd.Function):
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
-        CAt, subA, A = ctx.tensors
+        CAt, subA, _A = ctx.tensors
         SCAt, idx = ctx.tensor_states
         state: MatmulLtState = ctx.state
         grad_A = grad_B = grad_bias = None
