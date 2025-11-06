@@ -3,6 +3,13 @@
 #include <cpu_ops.h>
 #include <thread>
 
+#ifdef HAS_OPENMP
+#include <omp.h>
+#define BNB_OMP_PARALLEL_FOR _Pragma("omp parallel for")
+#else
+#define BNB_OMP_PARALLEL_FOR
+#endif
+
 using namespace BinSearch;
 
 
@@ -99,7 +106,7 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
     if (dim_1 % VEC_LEN == 0 && blocksize >= VEC_LEN) {
         __m512 lut = DATA_TYPE == 1 ? set_fp4_lut() : set_nf4_lut();
         constexpr auto k_step = VEC_LEN / 2; // 8
-        #pragma omp parallel for
+        BNB_OMP_PARALLEL_FOR
         for (int block_idx = 0; block_idx < dim_0; ++block_idx) {
             for (int k = 0; k < input_dim_1; k += k_step) {
                 // Load 64 bits of nf4 data and a single scale data
@@ -141,7 +148,7 @@ void dequantizeBlockwise4bitCpu(unsigned char* A,
 #endif
     // Scalar fallback branch
     long long total = m * n;
-    #pragma omp parallel for
+    BNB_OMP_PARALLEL_FOR
     for (long long block_idx = 0; block_idx < total; block_idx += blocksize) {
         long long valid_items = (total - block_idx >= blocksize ? blocksize : total - block_idx);
         float scale = absmax[block_idx / blocksize];
@@ -187,7 +194,7 @@ void dequantizeBlockwise8bitCpu(float* code,
                             long long n) {
     if (blocksize <= 0 || n <= 0) return;
     // 8-bit path
-    #pragma omp parallel for
+    BNB_OMP_PARALLEL_FOR
     for (long long block_idx = 0; block_idx < n; block_idx += blocksize) {
         long long valid_items = (n - block_idx >= blocksize ? blocksize : n - block_idx);
         long long block_end   = block_idx + valid_items;
