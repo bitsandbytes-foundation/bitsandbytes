@@ -163,4 +163,7 @@ void dequantizeBlockwise8bitCpu(float* code, unsigned char* A, const float* absm
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise4bitCpu(unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n);
 
+template <typename T, int DATA_TYPE>
+void gemv_4bit_inference(long long m, long long n, long long k, T* x, unsigned char* w, const float* absmax, T* out, long long blocksize, long long x_stride, long long out_stride);
+
 #endif

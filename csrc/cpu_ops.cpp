@@ -279,14 +279,17 @@ template void dequantizeBlockwise4bitCpu<bf16_t, FP4>(
 template void dequantizeBlockwise4bitCpu<bf16_t, NF4>(
     unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n);
 
-// template void gemv_4bit_inference<fp16_t, 16>(
-//     int m, int n, int k, fp16_t* A, unsigned char* B, float* absmax, float* datatype, fp16_t* out,
-//     int lda, int ldb, int ldc, int blocksize);
+template void gemv_4bit_inference<float, FP4>(
+    long long m, long long n, long long k, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride);
+template void gemv_4bit_inference<float, NF4>(
+    long long m, long long n, long long k, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride);
 
-// template void gemv_4bit_inference<bf16_t, 16>(
-//     int m, int n, int k, bf16_t* A, unsigned char* B, float* absmax, float* datatype, bf16_t* out,
-//     int lda, int ldb, int ldc, int blocksize);
+template void gemv_4bit_inference<fp16_t, FP4>(
+    long long m, long long n, long long k, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride);
+template void gemv_4bit_inference<fp16_t, NF4>(
+    long long m, long long n, long long k, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride);
 
-// template void gemv_4bit_inference<float, 32>(
-//     int m, int n, int k, float* A, unsigned char* B, float* absmax, float* datatype, float* out,
-//     int lda, int ldb, int ldc, int blocksize);
+template void gemv_4bit_inference<bf16_t, FP4>(
+    long long m, long long n, long long k, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride);
+template void gemv_4bit_inference<bf16_t, NF4>(
+    long long m, long long n, long long k, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride);

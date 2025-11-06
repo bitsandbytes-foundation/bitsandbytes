@@ -81,4 +81,37 @@ def get_gaudi_sw_version():
     return version.parse(output.stdout.split("\n")[0].split()[-1])
 
 
+def convert_weight_packed_for_cpu(qweight: torch.Tensor,
+                                  scales: torch.Tensor,
+                                  block_n: int = 32):
+    """
+    qweight: (K * N / 2)  uint8
+    return: packed_weight
+    """
+    assert qweight.dtype == torch.uint8, "qweight must be uint8"
+    qweight = qweight.reshape(-1)
+    unpacked_w = torch.empty(qweight.shape[0] * 2, dtype=torch.int32, device=A.device)
+    unpacked_w[1::2] = qweight & 0xF
+    unpacked_w[::2] = qweight >> 4
+    qweight_final = unpacked_w.reshape(shape).transpose(-1, -2).to(torch.uint8)  # (*, N, K)
+    # pack weight: [*, N, K] -> [*, N, K/2] combine low and high bit
+    assert len(qweight_final.shape) == 2
+    N, K = qweight_final.shape[0], qweight_final.shape[1]
+    assert N % block_n == 0, "N must be divisible by block_n"
+    assert K % 2 == 0, "K must be even"
+    BLOCK_N = block_n
+    BIT_COUNT = 32  # (=32 low +32 high)
+    prefix = sizes[:-2]
+    new_shape = [N // BLOCK_N, BLOCK_N, K // 2, 2]
+    out_shape = [N, K // 2]
+    qw = qweight_final.reshape(new_shape)                # (..., N/B, B, K/2, 2)
+    qw = qw.transpose(-3, -2).contiguous()               # (..., N/B, K/2, B, 2)
+    qw = qw.reshape(-1, BIT_COUNT * 2)                   # [-1, 64]
+    high = qw[:, BIT_COUNT:]                             # high 32
+    low  = qw[:, :BIT_COUNT]                             # low 32
+    packed = ((high << 4) | low).to(torch.uint8)         # combine
+    final_qweight = packed.reshape(out_shape)
+    return final_qweight
+
+
 GAUDI_SW_VER = get_gaudi_sw_version()
