@@ -6,55 +6,20 @@ from collections.abc import Iterable
 import ctypes as ct
 import itertools
 from math import prod
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import numpy as np
 import torch
 from torch import Tensor
 from typing_extensions import deprecated
 
-from bitsandbytes.utils import _reverse_4bit_compress_format, pack_dict_to_tensor, unpack_tensor_to_dict
+from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import HIP_ENVIRONMENT, ipex_cpu, ipex_xpu, lib
+from .cextension import HIP_ENVIRONMENT, lib
 
 name2qmap = {}
 
 """C FUNCTIONS FOR OPTIMIZERS"""
-str2optimizer32bit = {
-    "adam": (
-        lib.cadam32bit_grad_fp32,
-        lib.cadam32bit_grad_fp16,
-        lib.cadam32bit_grad_bf16,
-    ),
-    "momentum": (
-        lib.cmomentum32bit_grad_32,
-        lib.cmomentum32bit_grad_16,
-    ),
-    "rmsprop": (
-        lib.crmsprop32bit_grad_32,
-        lib.crmsprop32bit_grad_16,
-    ),
-    "lion": (
-        lib.clion32bit_grad_fp32,
-        lib.clion32bit_grad_fp16,
-        lib.clion32bit_grad_bf16,
-    ),
-    "adagrad": (
-        lib.cadagrad32bit_grad_32,
-        lib.cadagrad32bit_grad_16,
-    ),
-    "lamb": (
-        lib.cadam32bit_grad_fp32,
-        lib.cadam32bit_grad_fp16,
-        lib.cadam32bit_grad_bf16,
-    ),
-    "ademamix": (
-        lib.cademamix32bit_grad_fp32,
-        lib.cademamix32bit_grad_fp16,
-        lib.cademamix32bit_grad_bf16,
-    ),
-}
-
 str2optimizer8bit = {
     "adam": (
         lib.cadam_static_8bit_grad_32,
@@ -79,39 +44,6 @@ str2optimizer8bit = {
     "lars": (
         lib.cmomentum_static_8bit_grad_32,
         lib.cmomentum_static_8bit_grad_16,
-    ),
-}
-
-str2optimizer8bit_blockwise = {
-    "adam": (
-        lib.cadam_8bit_blockwise_grad_fp32,
-        lib.cadam_8bit_blockwise_grad_fp16,
-        lib.cadam_8bit_blockwise_grad_bf16,
-    ),
-    "momentum": (
-        lib.cmomentum_8bit_blockwise_grad_fp32,
-        lib.cmomentum_8bit_blockwise_grad_fp16,
-        lib.cmomentum_8bit_blockwise_grad_bf16,
-    ),
-    "rmsprop": (
-        lib.crmsprop_8bit_blockwise_grad_fp32,
-        lib.crmsprop_8bit_blockwise_grad_fp16,
-        lib.crmsprop_8bit_blockwise_grad_bf16,
-    ),
-    "lion": (
-        lib.clion_8bit_blockwise_grad_fp32,
-        lib.clion_8bit_blockwise_grad_fp16,
-        lib.clion_8bit_blockwise_grad_bf16,
-    ),
-    "adagrad": (
-        lib.cadagrad_8bit_blockwise_grad_fp32,
-        lib.cadagrad_8bit_blockwise_grad_fp16,
-        lib.cadagrad_8bit_blockwise_grad_bf16,
-    ),
-    "ademamix": (
-        lib.cademamix_8bit_blockwise_grad_fp32,
-        lib.cademamix_8bit_blockwise_grad_fp16,
-        lib.cademamix_8bit_blockwise_grad_bf16,
     ),
 }
 
@@ -310,7 +242,6 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     assert e + p == total_bits - has_sign
     # the exponent is biased to 2^(e-1) -1 == 0
     evalues = []
-    pvalues = []
     for i, val in enumerate(range(-(2 ** (exponent_bits - has_sign)), 2 ** (exponent_bits - has_sign), 1)):
         evalues.append(2**val)
 
@@ -422,8 +353,8 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
     for t in tensors:
         # NULL pointers and paged tensors are OK.
         if t is not None and not getattr(t, "is_paged", False):
-            on_gpu &= t.is_cuda
-            gpu_ids.add(t.device.index)
+            on_gpu &= t.device.type != "cpu"
+            gpu_ids.add((t.device.type, t.device.index))
 
     if not on_gpu:
         raise RuntimeError(
@@ -439,6 +370,8 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
 
 def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
     # We use the raw stream for performance reasons.
+    if tensor.device.type == "xpu":
+        return ct.c_void_p(torch._C._xpu_getCurrentRawStream(tensor.device.index))
     return ct.c_void_p(torch._C._cuda_getCurrentRawStream(tensor.device.index))
 
 
@@ -1053,16 +986,6 @@ def dequantize_4bit(
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-    # IPEX format is different, we need extra process.
-    if getattr(quant_state, "ipex", False) and quant_state.quant_type == "nf4":
-        return torch.ops.bitsandbytes.dequantize_nf4_ipex(
-            A,
-            absmax,
-            quant_state.blocksize,
-            quant_state.shape,
-            quant_state.dtype,
-        )
-
     if out is not None:
         torch.ops.bitsandbytes.dequantize_4bit.out(
             A, absmax, quant_state.blocksize, quant_state.quant_type, quant_state.shape, quant_state.dtype, out=out
@@ -1252,41 +1175,27 @@ def optimizer_update_32bit(
     if max_unorm > 0.0:
         param_norm = torch.norm(p.data.float())
 
-    optim_func = None
-    if g.dtype == torch.float32:
-        optim_func = str2optimizer32bit[optimizer_name][0]
-    elif g.dtype == torch.float16:
-        optim_func = str2optimizer32bit[optimizer_name][1]
-    elif g.dtype == torch.bfloat16 and len(str2optimizer32bit[optimizer_name]) == 3:
-        optim_func = str2optimizer32bit[optimizer_name][2]
-    else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
-
     is_on_gpu([g, p, state1, state2, unorm_vec])
-
-    with _cuda_device_of(g):
-        optim_func(
-            get_ptr(g),
-            get_ptr(p),
-            get_ptr(state1),
-            get_ptr(state2),
-            get_ptr(unorm_vec),
-            ct.c_float(max_unorm),
-            ct.c_float(param_norm),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(beta3),
-            ct.c_float(alpha),
-            ct.c_float(eps),
-            ct.c_float(weight_decay),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
+    torch.ops.bitsandbytes.optimizer_update_32bit(
+        optimizer_name,
+        g,
+        p,
+        state1,
+        state2,
+        unorm_vec,
+        max_unorm,
+        param_norm,
+        beta1,
+        beta2,
+        beta3,
+        alpha,
+        eps,
+        weight_decay,
+        step,
+        lr,
+        gnorm_scale,
+        skip_zeros,
+    )
 
 
 @deprecated(
@@ -1447,47 +1356,29 @@ def optimizer_update_8bit_blockwise(
     gnorm_scale: float = 1.0,
     skip_zeros=False,
 ) -> None:
-    optim_func = None
-
-    if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][0]
-    elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][1]
-    elif (
-        g.dtype == torch.bfloat16
-        and state1.dtype == torch.uint8
-        and len(str2optimizer8bit_blockwise[optimizer_name]) == 3
-    ):
-        optim_func = str2optimizer8bit_blockwise[optimizer_name][2]
-    else:
-        raise ValueError(
-            f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-        )
-
     is_on_gpu([p, g, state1, state2, qmap1, qmap2, absmax1, absmax2])
 
-    with _cuda_device_of(g):
-        optim_func(
-            get_ptr(p),
-            get_ptr(g),
-            get_ptr(state1),
-            get_ptr(state2),
-            ct.c_float(beta1),
-            ct.c_float(beta2),
-            ct.c_float(beta3),
-            ct.c_float(alpha),
-            ct.c_float(eps),
-            ct.c_int32(step),
-            ct.c_float(lr),
-            get_ptr(qmap1),
-            get_ptr(qmap2),
-            get_ptr(absmax1),
-            get_ptr(absmax2),
-            ct.c_float(weight_decay),
-            ct.c_float(gnorm_scale),
-            ct.c_bool(skip_zeros),
-            ct.c_int32(g.numel()),
-        )
+    torch.ops.bitsandbytes.optimizer_update_8bit_blockwise(
+        optimizer_name,
+        g,
+        p,
+        state1,
+        state2,
+        beta1,
+        beta2,
+        beta3,
+        alpha,
+        eps,
+        step,
+        lr,
+        qmap1,
+        qmap2,
+        absmax1,
+        absmax2,
+        weight_decay,
+        gnorm_scale,
+        skip_zeros,
+    )
 
 
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
@@ -1522,7 +1413,7 @@ def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: 
             raise ValueError(f"Gradient type {grad.dtype} not supported!")
 
     current_gnorm = torch.sqrt(gnorm_vec[step % 100])
-    vals, idx = torch.sort(gnorm_vec)
+    vals, _ = torch.sort(gnorm_vec)
     clip_value = torch.sqrt(vals[percentile])
     gnorm_scale = 1.0
 
@@ -1630,25 +1521,6 @@ def gemv_4bit(
     absmax = state.absmax
     if state.nested:
         absmax = dequantize_blockwise(absmax, state.state2) + state.offset
-
-    if getattr(state, "ipex", False) and state.quant_type == "nf4":
-        # compute_dtype: 1 indicates fp16, 2 indicates bf16
-        compute_dtype = 2 if A.dtype == torch.bfloat16 else 1
-        out = torch.ops.torch_ipex.woq_linear(
-            A,
-            B,
-            "nf4",
-            state.shape,
-            state.new_scales,
-            state.new_zeros,
-            None,
-            None,
-            state.blocksize,
-            compute_dtype,
-            1,
-            state.compensation,
-        )
-        return out
 
     if out is not None:
         torch.ops.bitsandbytes.gemv_4bit.out(
@@ -1923,102 +1795,6 @@ def int8_mm_dequant(
     return result
 
 
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def get_colrow_absmax(
-    A: torch.Tensor,
-    row_stats: Optional[torch.Tensor] = None,
-    col_stats: Optional[torch.Tensor] = None,
-    nnz_block_ptr: Optional[torch.Tensor] = None,
-    threshold=0.0,
-) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-    """ "Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
-
-    The row-wise and column-wise absmax values are determined.
-
-    For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
-
-    <Tip>
-    This function is useful for training, but for inference it is advised to use [`get_row_absmax`] instead.
-    The column-wise quantization scales are not typically needed in inference scenarios.
-    </Tip>
-
-    Args:
-        A (`torch.Tensor` with dtype `torch.float16`): Input tensor.
-        row_stats (`torch.Tensor`, *optional*): If provided, calculation of row statistics is skipped.
-        col_stats (`torch.Tensor`, *optional*): If provided, calculation of column statistics is skipped.
-        nnz_block_ptr (`torch.Tensor`, *optional*): Not used.
-        threshold (`float`, *optional*):
-            An optional threshold for sparse decomposition of outlier features.
-            No outliers are held back when 0.0. Defaults to 0.0.
-
-    Returns:
-        `Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]`: A tuple containing quantization statistics.
-        - `torch.Tensor` with dtype `torch.float32`: The row-wise quantization statistics.
-        - `torch.Tensor` with dtype `torch.float32`: The column-wise quantization statistics.
-        - `torch.Tensor` with dtype `torch.bool`, *optional*: A mask indicating the locations of outliers in the input tensor.
-    """
-    assert A.is_floating_point()
-
-    outlier_mask = None
-
-    if row_stats is None or col_stats is None:
-        absA = A.abs().view(-1, A.shape[-1])
-
-        if threshold > 0.0:
-            # Filter outliers from stats when enabled
-            outlier_mask = absA >= threshold
-            absA.masked_fill_(outlier_mask, 0.0)
-
-        if row_stats is None:
-            # shape [rows]; unsqueeze(-1) gives [rows,1]
-            # We have a CUDA kernel for row max, but not yet for cols.
-            row_stats = get_row_absmax(A, threshold)
-
-        if col_stats is None:
-            # shape [cols]; unsqueeze(0) gives [1,cols]
-            col_stats = absA.amax(dim=0, keepdim=False).float()
-
-    return row_stats, col_stats, outlier_mask
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def get_row_absmax(A: torch.Tensor, threshold=0.0):
-    """Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
-
-    For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
-
-    Args:
-        A (`torch.Tensor` with dtype `torch.float16`): The input matrix.
-        threshold (`float`, *optional*):
-            An optional threshold for sparse decomposition of outlier features.
-            No outliers are held back when 0.0. Defaults to 0.0.
-
-    Returns:
-        `torch.Tensor` with dtype `torch.float32`: The absolute maximum value for each row, with outliers ignored.
-    """
-
-    assert A.dtype == torch.float16
-
-    rows = prod(A.shape[:-1])
-    cols = A.shape[-1]
-
-    row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device)
-
-    is_on_gpu([A])
-
-    with _cuda_device_of(A):
-        lib.cget_row_stats(
-            get_ptr(A),
-            get_ptr(row_stats),
-            ct.c_float(threshold),
-            ct.c_int32(rows),
-            ct.c_int32(cols),
-            _get_tensor_stream(A),
-        )
-
-    return row_stats
-
-
 class COOSparseTensor:
     def __init__(
         self, rows: int, cols: int, nnz: int, rowidx: torch.Tensor, colidx: torch.Tensor, values: torch.Tensor
@@ -2187,7 +1963,7 @@ def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
 
 
 def spmm_coo(
-    cooA: Union[COOSparseTensor, torch.Tensor],
+    cooA: COOSparseTensor | torch.Tensor,
     B: torch.Tensor,
     out: Optional[torch.Tensor] = None,
 ):
@@ -2214,7 +1990,7 @@ def spmm_coo(
     assert cooA.values.numel() == nnz
     assert cooA.cols == B.shape[0]
 
-    transposed_B = False if B.is_contiguous() else True
+    transposed_B = not B.is_contiguous()
 
     ldb = B.stride()[(1 if transposed_B else 0)]
     ldc = B.shape[1]
@@ -2263,12 +2039,7 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     assert cooA.values.numel() == nnz
     assert cooA.cols == B.shape[0], f"{cooA.cols} vs {B.shape}"
 
-    transposed_B = False if B.is_contiguous() else True
-
-    ldb = B.stride()[(1 if transposed_B else 0)]
-    ldc = B.shape[1]
-
-    values, counts = torch.unique(cooA.rowidx, return_counts=True)
+    _, counts = torch.unique(cooA.rowidx, return_counts=True)
     offset = counts.cumsum(0).int()
     max_count, max_idx = torch.sort(counts, descending=True)
     max_idx = max_idx.int()
@@ -2288,11 +2059,8 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     cnnz_rows = ct.c_int32(counts.numel())
     cnnz = ct.c_int32(cooA.nnz)
     crowsA = ct.c_int32(cooA.rows)
-    ccolsA = ct.c_int32(cooA.cols)
     crowsB = ct.c_int32(B.shape[1])
     ccolsB = ct.c_int32(B.shape[1])
-    cldb = ct.c_int32(ldb)
-    cldc = ct.c_int32(ldc)
 
     with _cuda_device_of(B):
         is_on_gpu([cooA.rowidx, cooA.colidx, cooA.values, B, out, dequant_stats])
@@ -2336,49 +2104,3 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
 
 
 C = 127.0
-
-
-def _enable_ipex_fusion(linear: torch.nn.Module, x: torch.Tensor):
-    quant_state = linear.weight.quant_state
-
-    if quant_state.nested:
-        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
-        absmax += quant_state.offset
-        if absmax.dtype != torch.float32:
-            absmax = absmax.float()
-
-        quant_state.absmax = absmax
-        quant_state.nested = False
-        delattr(quant_state, "state2")
-
-    if x.device.type == "cpu" and ipex_cpu:
-        converted_weight = _reverse_4bit_compress_format(linear.weight.data)
-        new_weight, new_scales, new_zeros, _, compensation = torch.ops.ipex_prepack.woq_linear_pack_weight(
-            converted_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2]),
-            "nf4",
-            quant_state.shape,  # weight shape
-            quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize),  # scales
-            None,  # zero_points
-            None,  # bias
-            None,  # batch_size
-            quant_state.blocksize,
-            2,
-        )
-    elif x.device.type == "xpu" and ipex_xpu:
-        new_weight = _reverse_4bit_compress_format(linear.weight.data)
-        new_scales = quant_state.absmax.view(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
-        new_zeros = None
-        compensation = None
-        new_scales = list(new_scales)
-        if not linear.training and not x.requires_grad:
-            new_weight = new_weight.reshape([quant_state.shape[0], quant_state.shape[1] // 2])
-    else:
-        raise ValueError(
-            "Please check the device and ipex version. The device should be cpu or xpu while ipex version should >= 2.7"
-        )
-
-    linear.weight.data = new_weight.data
-    linear.weight.quant_state.ipex = True
-    linear.weight.quant_state.new_scales = new_scales
-    linear.weight.quant_state.new_zeros = new_zeros
-    linear.weight.quant_state.compensation = compensation

@@ -38,7 +38,6 @@ if torch.cuda.is_available():
 if hasattr(torch, "xpu") and torch.xpu.is_available():
     from .backends.xpu import ops as xpu_ops
 
-
 if importlib.util.find_spec("habana_frameworks") and importlib.util.find_spec("habana_frameworks.torch"):
     # In case not automatically imported
     import habana_frameworks.torch
@@ -58,10 +57,7 @@ def _import_backends():
     """
     from importlib.metadata import entry_points
 
-    if sys.version_info < (3, 10):
-        extensions = entry_points().get("bitsandbytes.backends", [])
-    else:
-        extensions = entry_points(group="bitsandbytes.backends")
+    extensions = entry_points(group="bitsandbytes.backends")
 
     for ext in extensions:
         try:
@@ -79,4 +75,4 @@ __pdoc__ = {
     "optim.optimizer.MockArgs": False,
 }
 
-__version__ = "0.47.0.dev0"
+__version__ = "0.49.0.dev0"

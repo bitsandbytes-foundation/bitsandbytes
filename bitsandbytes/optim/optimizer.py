@@ -10,6 +10,7 @@ from typing import Optional
 import torch
 
 import bitsandbytes.functional as F
+from bitsandbytes.utils import sync_gpu
 
 
 class MockArgs:
@@ -271,14 +272,13 @@ class Optimizer8bit(torch.optim.Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        overflows = []
-
         if not self.initialized:
             self.check_overrides()
             self.to_gpu()  # needed for fairseq pure fp16 training
             self.initialized = True
 
         # if self.is_paged: self.page_mng.prefetch_all()
+        p = None
         for gindex, group in enumerate(self.param_groups):
             for pindex, p in enumerate(group["params"]):
                 if p.grad is None:
@@ -289,11 +289,11 @@ class Optimizer8bit(torch.optim.Optimizer):
 
                 self.prefetch_state(p)
                 self.update_step(group, p, gindex, pindex)
-                torch.cuda.synchronize()
-        if self.is_paged:
+                sync_gpu(p)
+        if self.is_paged and p is not None:
             # all paged operations are asynchronous, we need
             # to sync to make sure all tensors are in the right state
-            torch.cuda.synchronize()
+            sync_gpu(p)
 
         return loss
 
@@ -507,7 +507,7 @@ class Optimizer2State(Optimizer8bit):
         step = state["step"]
 
         if config["percentile_clipping"] < 100:
-            current_gnorm, clip_value, gnorm_scale = F.percentile_clipping(
+            _current_gnorm, _clip_value, gnorm_scale = F.percentile_clipping(
                 grad,
                 state["gnorm_vec"],
                 step,
@@ -725,7 +725,7 @@ class Optimizer1State(Optimizer8bit):
         step = state["step"]
 
         if config["percentile_clipping"] < 100:
-            current_gnorm, clip_value, gnorm_scale = F.percentile_clipping(
+            _current_gnorm, _clip_value, gnorm_scale = F.percentile_clipping(
                 grad,
                 state["gnorm_vec"],
                 step,
