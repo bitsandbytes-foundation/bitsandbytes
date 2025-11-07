@@ -474,7 +474,7 @@ void gemv_4bit_inference(int64_t M,
                         int64_t K,
                         T* x,
                         unsigned char* w,
-                        const float* absmax,
+                        const T* absmax,
                         T* out,
                         int64_t blocksize,
                         int64_t x_stride,
@@ -564,6 +564,6 @@ template void dequantizeBlockwise4bitCpu<bf16_t, NF4>(
 //     int64_t M, int64_t N, int64_t K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 
 template void gemv_4bit_inference<bf16_t, FP4>(
-    int64_t M, int64_t N, int64_t K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+    int64_t M, int64_t N, int64_t K, bf16_t* x, unsigned char* w, const bf16_t* absmax, bf16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 template void gemv_4bit_inference<bf16_t, NF4>(
-    int64_t M, int64_t N, int64_t K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+    int64_t M, int64_t N, int64_t K, bf16_t* x, unsigned char* w, const bf16_t* absmax, bf16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);

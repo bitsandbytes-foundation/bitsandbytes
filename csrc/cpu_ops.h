@@ -16,6 +16,8 @@
 #define TILE_M 16
 #define TILE_N 16
 #define TILE_K 32
+// work around compiler internal error
+#define BLOCK_K 128  // 4 * TILE_K
 
 // block size for AMX gemm
 constexpr int block_size_m() { return 2 * TILE_M; }
@@ -281,7 +283,7 @@ void dequantizeBlockwise4bitCpu(unsigned char* A, const float* absmax, T* out, l
 
 #if defined(__AVX512F__) && defined(__AVX512BF16__)
     template <typename T, int DATA_TYPE>
-    void gemv_4bit_inference(int64_t M, int64_t N, int64_t K, T* x, unsigned char* w, const float* absmax, T* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+    void gemv_4bit_inference(int64_t M, int64_t N, int64_t K, T* x, unsigned char* w, const T* absmax, T* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 #endif
 
 #endif
