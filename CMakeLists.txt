@@ -308,11 +308,7 @@ endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
-if(BUILD_NPU)
-    target_compile_features(bitsandbytes PUBLIC cxx_std_17)
-else()
-    target_compile_features(bitsandbytes PUBLIC cxx_std_14)
-endif()
+target_compile_features(bitsandbytes PUBLIC cxx_std_17)
 target_include_directories(bitsandbytes PUBLIC csrc include)
 
 

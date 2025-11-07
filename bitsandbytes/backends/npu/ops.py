@@ -99,21 +99,25 @@ def _dequantize_4bit_impl(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
     )
+    if out.dtype == torch.bfloat16:
+        # bf16: bf16 -> fp32 -> op -> fp32 -> bf16
+        absmax = absmax.to(torch.float32)
+        out_fp32 = torch.empty(out.shape, dtype=torch.float32, device=out.device)
+    else:
+        out_fp32 = out
+
     args = (
         get_ptr(A),
         get_ptr(absmax),
-        get_ptr(out),
+        get_ptr(out_fp32),
         ct.c_int(blocksize),
         ct.c_int(out.numel()),
         torch.npu.current_stream(),
     )
 
     if out.dtype == torch.bfloat16:
-        # bf16: bf16 -> fp32 -> op -> fp32 -> bf16
-        absmax = absmax.to(torch.float32)
-        out = out.to(torch.float32)
         lib.cdequantize_blockwise_fp32_nf4(*args)
-        out = out.to(torch.bfloat16)
+        out.copy_(out_fp32.to(torch.bfloat16))
     elif out.dtype == torch.float16:
         lib.cdequantize_blockwise_fp16_nf4(*args)
     elif out.dtype == torch.float32:
