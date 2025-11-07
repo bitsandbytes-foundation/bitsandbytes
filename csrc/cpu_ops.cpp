@@ -469,16 +469,16 @@ void tinygemm_kernel(
 }
 
 template <typename T, int DATA_TYPE>
-void gemv_4bit_inference(long long M,
-                        long long N,
-                        long long K,
+void gemv_4bit_inference(int64_t M,
+                        int64_t N,
+                        int64_t K,
                         T* x,
                         unsigned char* w,
                         const float* absmax,
                         T* out,
-                        long long blocksize,
-                        long long x_stride,
-                        long long out_stride) {
+                        int64_t blocksize,
+                        int64_t x_stride,
+                        int64_t out_stride) {
     constexpr int64_t BLOCK_M = block_size_m(); // 32
     constexpr int64_t BLOCK_N = block_size_n(); // 32
     const int64_t MB = div_up(M, BLOCK_M); // （x + y -1）/ y, res = 1 when M <= 32
@@ -486,13 +486,13 @@ void gemv_4bit_inference(long long M,
     // TODO: enable brgemm in the future.
     // const bool use_brgemm = M > 4;
     // const bool use_brgemm_dequant_out = M > 512;
-    scalar_t* Btmp_start = nullptr;
+    // T* Btmp_start = nullptr;
     // l2 cache block for n
     int64_t cache_blocks_nb = get_cache_blocks<T>(BLOCK_N * K);
     parallel_2d(MB, NB, [&](int64_t begin_mb, int64_t end_mb, int64_t begin_nb, int64_t end_nb) {
         // for brgemm, use float32 for accumulate
         alignas(64) float Ctmp[BLOCK_M * BLOCK_N];
-        alignas(64) scalar_t Btmp_inner[BLOCK_N * BLOCK_K]; // BLOCK_K = 128
+        alignas(64) T Btmp_inner[BLOCK_N * BLOCK_K]; // BLOCK_K = 128
         for (int64_t nbb = begin_nb; nbb < end_nb; nbb += cache_blocks_nb) {
             for (int64_t mb = begin_mb; mb < end_mb; ++mb) { // 0-1
                 for (int64_t nb = nbb; nb < std::min(nbb + cache_blocks_nb, end_nb); ++nb) {
@@ -500,20 +500,20 @@ void gemv_4bit_inference(long long M,
                     int64_t mb_size = std::min(M - mb_start, BLOCK_M);
                     int64_t nb_start = nb * BLOCK_N;
                     int64_t nb_size = std::min(N - nb_start, BLOCK_N);
-                    tinygemm_kernel<scalar_t, DATA_TYPE>(
-                        /*   A  */ x + mb_start * mat1_strideM,
+                    tinygemm_kernel<T, DATA_TYPE>(
+                        /*   A  */ x + mb_start * x_stride,
                         /*   B  */ w + nb_start * K / 2,  // divide by 2 since w is u4 packed in u8, K is w.size(1) * 2
-                        /*   C  */ out + mb_start * out_strideM + nb_start,
+                        /*   C  */ out + mb_start * out_stride + nb_start,
                         /*  Bs  */ absmax + nb_start,
                         /* Btmp */ Btmp_inner,
                         /* Ctmp */ Ctmp,
                         /*   M  */ mb_size,
                         /*   N  */ nb_size,
                         /*   K  */ K,
-                        /*  gs  */ group_size,
-                        /* lda  */ mat1_strideM,
+                        /*  gs  */ blocksize, // group_size
+                        /* lda  */ x_stride,
                         /* ldb  */ nb_size,
-                        /* ldc  */ out_strideM,
+                        /* ldc  */ out_stride,
                         /* sBz  */ N,
                         /* sBs  */ N);
                 }
@@ -554,16 +554,16 @@ template void dequantizeBlockwise4bitCpu<bf16_t, NF4>(
     unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n);
 
 // template void gemv_4bit_inference<float, FP4>(
-//     long long M, long long N, long long K, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride);
+//     int64_t M, int64_t N, int64_t K, float* x, unsigned char* w, const float* absmax, float* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 // template void gemv_4bit_inference<float, NF4>(
-//     long long M, long long N, long long K, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride);
+//     int64_t M, int64_t N, int64_t K, float* x, unsigned char* w, const float* absmax, float* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 
 // template void gemv_4bit_inference<fp16_t, FP4>(
-//     long long M, long long N, long long K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride);
+//     int64_t M, int64_t N, int64_t K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 // template void gemv_4bit_inference<fp16_t, NF4>(
-//     long long M, long long N, long long K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride);
+//     int64_t M, int64_t N, int64_t K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 
 template void gemv_4bit_inference<bf16_t, FP4>(
-    long long M, long long N, long long K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride);
+    int64_t M, int64_t N, int64_t K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 template void gemv_4bit_inference<bf16_t, NF4>(
-    long long M, long long N, long long K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride);
+    int64_t M, int64_t N, int64_t K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);

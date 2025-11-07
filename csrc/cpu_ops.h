@@ -3,10 +3,14 @@
 
 #include <cstdint>
 #include <cstring>
+#include <thread>
+#include <cmath>
+#include <algorithm>
+#include <type_traits>
 
 #if defined(_OPENMP)
     #include <omp.h>
-#else
+#endif
 
 // amx-bf16
 #define TILE_M 16
@@ -14,12 +18,8 @@
 #define TILE_K 32
 
 // block size for AMX gemm
-constexpr int block_size_m() {
-  return 2 * TILE_M;
-}
-constexpr int block_size_n() {
-  return 2 * TILE_N;
-}
+constexpr int block_size_m() { return 2 * TILE_M; }
+constexpr int block_size_n() { return 2 * TILE_N; }
 
 template <typename T>
 inline int get_cache_blocks(int chunk_size) {
@@ -53,9 +53,7 @@ struct Unroll<1> {
 };
 
 template <typename T, typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
-inline T div_up(T x, T y) {
-  return (x + y - 1) / y;
-}
+inline T div_up(T x, T y) { return (x + y - 1) / y; }
 
 inline int get_max_threads() {
 #if defined(_OPENMP)
@@ -66,11 +64,9 @@ inline int get_max_threads() {
 #endif
 }
 
-int inline adjust_num_threads(int m) {
+inline int adjust_num_threads(int m) {
     int actual_nth = get_max_threads();
-    if (m == 1) {
-        return actual_nth;
-    }
+    if (m == 1) return actual_nth;
     return std::max(1, (actual_nth >> 1) * 2);
 }
 
@@ -285,7 +281,7 @@ void dequantizeBlockwise4bitCpu(unsigned char* A, const float* absmax, T* out, l
 
 #if defined(__AVX512F__) && defined(__AVX512BF16__)
     template <typename T, int DATA_TYPE>
-    void gemv_4bit_inference(long long M, long long N, long long K, T* x, unsigned char* w, const float* absmax, T* out, long long blocksize, long long x_stride, long long out_stride);
+    void gemv_4bit_inference(int64_t M, int64_t N, int64_t K, T* x, unsigned char* w, const float* absmax, T* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 #endif
 
 #endif
