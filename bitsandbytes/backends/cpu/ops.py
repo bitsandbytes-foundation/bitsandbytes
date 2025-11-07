@@ -246,6 +246,9 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     ct.c_int64(out_strideM),
                 )
             elif quant_type == "nf4":
+                #print(A)
+                #print(B)
+                #print(absmax)
                 lib.gemv_4bit_inference_cpu_nf4_bf16(
                     ct.c_int64(M),
                     ct.c_int64(N),
