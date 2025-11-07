@@ -17,7 +17,7 @@
 #include <xpu_ops.h>
 #endif
 #include <cpu_ops.h>
-#include <common.h >
+#include <common.h>
 
 // Compatibility between HIP/CUDA APIs
 #if BUILD_HIP
