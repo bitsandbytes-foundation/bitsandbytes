@@ -235,4 +235,4 @@ def convert_weight_packed_for_cpu(qweight: torch.Tensor,
     low  = qw[:, :BIT_COUNT]                             # low 32
     packed = ((high << 4) | low).to(torch.uint8)         # combine
     final_qweight = packed.reshape(out_shape)
-    return final_qweight, scales.T
+    return final_qweight, scales.T.to(torch.bfloat16)
