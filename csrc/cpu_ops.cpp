@@ -258,6 +258,19 @@ void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long
 
 #define CVT_BF16_TO_FP32(a) _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(a), 16))
 
+template <typename scalar_t, int BLOCK_M, int BLOCK_N, int DATA_TYPE>
+struct tinygemm_kernel_nn {
+  static inline void apply(
+      const scalar_t*,
+      const unsigned char*,
+      scalar_t*,
+      const scalar_t*,
+      int64_t, int, int64_t, int64_t, int64_t, int64_t, int64_t) {
+    static_assert(sizeof(scalar_t) == 0,
+                  "tinygemm_kernel_nn primary template should never be instantiated");
+  }
+};
+
 template <int BLOCK_M, int BLOCK_N, int DATA_TYPE>
 struct tinygemm_kernel_nn<bf16_t, BLOCK_M, BLOCK_N, DATA_TYPE> {
   static inline void apply(

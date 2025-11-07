@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <cstring>
 
+#if defined(_OPENMP)
+    #include <omp.h>
+#else
+
 // amx-bf16
 #define TILE_M 16
 #define TILE_N 16
@@ -22,6 +26,52 @@ inline int get_cache_blocks(int chunk_size) {
   // L2 2MB and ratio of 50%
   const int L2_size = 2048 * 1024 >> 1;
   return std::max(1, int(L2_size / (chunk_size * sizeof(T))));
+}
+
+// forced unroll for perf critical path
+#if __has_attribute(always_inline)
+#define ALWAYS_INLINE __attribute__((__always_inline__)) inline
+#else
+#define ALWAYS_INLINE inline
+#endif
+
+template <int n>
+struct Unroll {
+  template <typename Func, typename... Args>
+  ALWAYS_INLINE void operator()(const Func& f, Args... args) const {
+    Unroll<n - 1>{}(f, args...);
+    f(std::integral_constant<int, n - 1>{}, args...);
+  }
+};
+
+template <>
+struct Unroll<1> {
+  template <typename Func, typename... Args>
+  ALWAYS_INLINE void operator()(const Func& f, Args... args) const {
+    f(std::integral_constant<int, 0>{}, args...);
+  }
+};
+
+template <typename T, typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+inline T div_up(T x, T y) {
+  return (x + y - 1) / y;
+}
+
+inline int get_max_threads() {
+#if defined(_OPENMP)
+    return omp_get_max_threads();
+#else
+    unsigned hc = std::thread::hardware_concurrency();
+    return hc == 0 ? 1 : int(hc);
+#endif
+}
+
+int inline adjust_num_threads(int m) {
+    int actual_nth = get_max_threads();
+    if (m == 1) {
+        return actual_nth;
+    }
+    return std::max(1, (actual_nth >> 1) * 2);
 }
 
 template <typename func_t>
