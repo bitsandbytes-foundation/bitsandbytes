@@ -173,7 +173,6 @@ void cutlass_igemm(
 void dequant_mm_int32_fp16(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, hipStream_t stream
 );
-void getRowStats(half* A, float* rowStats, float threshold, int rows, int cols, hipStream_t stream);
 void int8VectorQuant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, hipStream_t stream
 );

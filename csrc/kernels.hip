@@ -1946,49 +1946,6 @@ __global__ void kInt8VectorQuant(T * __restrict__ A, int8_t* out, float* rowStat
   }
 }
 
-template<typename T, int THREADS, int SPARSE_DECOMP>
-__launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024)
-__global__ void kgetRowStats(T * __restrict__ A, float *rowStats, float threshold, int rows, int cols) {
-  using BlockReduceT = hipcub::BlockReduce<float, THREADS>;
-
-  // One block per row.
-  // Threads load column values in a striped arrangement.
-  // e.g. t0 reads row[0], row[0+nthreads], ..
-  // and  t1 reads row[1], row[1+nthreads], ..
-  // Each thread will determine its local absmax.
-  // We then do a blockwise reduction to determine the row's absmax.
-
-  __shared__ typename BlockReduceT::TempStorage temp_storage;
-
-  const int row_id = blockIdx.x;
-  const T* __restrict__ row_data = A + (row_id * cols);
-
-  // Threads will read the row values in a striped access pattern and find a local absmax.
-  float row_local_absmax = -FLT_MIN;
-  for (int i = threadIdx.x; i < cols; i += THREADS) {
-    const float absval = fabsf(row_data[i]);
-
-    // For sparse decomposition, values outside of the threshold are not to be
-    // included when calculating the row's absmax.
-    if constexpr (SPARSE_DECOMP) {
-      row_local_absmax = fmaxf(row_local_absmax, absval < threshold ? absval : row_local_absmax);
-    } else {
-      row_local_absmax = fmaxf(row_local_absmax, absval);
-    }
-  }
-
-  // Reduce thread-local absmax across the block.
-  // TODO: Consider algorithm BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY
-  const float row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, hipcub::Max(), cols);
-  if (threadIdx.x == 0) {
-    // Save our block's absmax to shared memory for the quantization step.
-    rowStats[row_id] = row_absmax;
-  }
-}
-
-template __global__ void kgetRowStats<half, 1024, 0>(half * __restrict__ A, float *rowStats, float threshold, int rows, int cols);
-template __global__ void kgetRowStats<half, 1024, 1>(half * __restrict__ A, float *rowStats, float threshold, int rows, int cols);
-
 template __global__ void kInt8VectorQuant<half, 1024, 0>(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols);
 template __global__ void kInt8VectorQuant<half, 1024, 1>(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols);
 

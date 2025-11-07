@@ -642,10 +642,6 @@ void cdequant_mm_int32_fp16(
     dequant_mm_int32_fp16(A, rowStats, colStats, out, bias, numRows, numCols, stream);
 }
 
-void cget_row_stats(half* A, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream) {
-    getRowStats(A, rowStats, threshold, rows, cols, stream);
-}
-
 void cint8_vector_quant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream
 ) {
