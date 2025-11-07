@@ -7,8 +7,9 @@
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n);
 
 typedef enum DataType_t {
-    NF4 = 0,
+    General8bit = 0,
     FP4 = 1,
+    NF4 = 2,
 } DataType_t;
 
 struct fp16_t {
@@ -30,17 +31,17 @@ static inline fp16_t float_to_fp16(float x) {
     uint32_t bits;
     std::memcpy(&bits, &x, 4);
     uint32_t sign = (bits >> 31) & 0x1;
-    uint32_t exp  = (bits >> 23) & 0xFF;
+    uint32_t exp = (bits >> 23) & 0xFF;
     uint32_t mant = bits & 0x7FFFFF;
 
     uint16_t h;
-    if (exp == 0xFF) { // Inf / NaN
+    if (exp == 0xFF) {                      // Inf / NaN
         uint16_t mant16 = mant ? 0x200 : 0; // quiet NaN: set MSB of mantissa
         h = (sign << 15) | (0x1F << 10) | mant16;
-    } else if (exp > 0x70 + 0x1E) { // overflow: exp_f -127 +15 > 30  (exp_f > 142)
+    } else if (exp > 0x70 + 0x1E) {      // overflow: exp_f -127 +15 > 30  (exp_f > 142)
         h = (sign << 15) | (0x1F << 10); // Inf
-    } else if (exp < 0x71) { // subnormal or zero (exp_f < 113)
-        if (exp < 0x67) { // too small -> zero (exp_f < 103)
+    } else if (exp < 0x71) {             // subnormal or zero (exp_f < 113)
+        if (exp < 0x67) {                // too small -> zero (exp_f < 103)
             h = (sign << 15);
         } else {
             // subnormal: implicit leading 1
@@ -156,11 +157,14 @@ inline float dDequantizeNF4(unsigned char val) {
         return -1.0f; //*0000
 }
 
-
 template <typename T>
-void dequantizeBlockwise8bitCpu(float* code, unsigned char* A, const float* absmax, T* out, long long blocksize, long long n);
+void dequantizeBlockwise8bitCpu(
+    float* code, unsigned char* A, const float* absmax, T* out, long long blocksize, long long n
+);
 
 template <typename T, int DATA_TYPE>
-void dequantizeBlockwise4bitCpu(unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n);
+void dequantizeBlockwise4bitCpu(
+    unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n
+);
 
 #endif
