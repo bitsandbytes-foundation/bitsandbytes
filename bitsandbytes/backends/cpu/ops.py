@@ -233,7 +233,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             x_strideM = A.stride(0)
             out_strideM = out.stride(0)
             if quant_type == "fp4":
-                lib.cdequantize_blockwise_cpu_fp4_bf16(
+                lib.gemv_4bit_inference_cpu_fp4_bf16(
                     ct.c_int64(M),
                     ct.c_int64(N),
                     ct.c_int64(K),
@@ -246,7 +246,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     ct.c_int64(out_strideM),
                 )
             elif quant_type == "nf4":
-                lib.cdequantize_blockwise_cpu_nf4_bf16(
+                lib.gemv_4bit_inference_cpu_nf4_bf16(
                     ct.c_int64(M),
                     ct.c_int64(N),
                     ct.c_int64(K),
