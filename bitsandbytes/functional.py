@@ -2234,7 +2234,7 @@ def convert_weight_packed_for_cpu(qweight: torch.Tensor,
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-        quant_state.absmax = absmax.T.to(torch.bfloat16)
+        quant_state.absmax = absmax.reshape(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize).T.to(torch.bfloat16)
         quant_state.nested = False
         delattr(quant_state, "state2")
     return final_qweight, quant_state
