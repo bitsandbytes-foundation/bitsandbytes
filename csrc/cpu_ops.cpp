@@ -1,5 +1,4 @@
 #include <BinSearch.h>
-#include <common.h>
 #include <cpu_ops.h>
 #include <thread>
 

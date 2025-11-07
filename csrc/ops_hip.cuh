@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include <common.h>
 #include <functional>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime_api.h>
@@ -70,14 +71,6 @@ typedef enum Optimizer_t {
     LION = 5,
     ADEMAMIX = 6,
 } Optimizer_t;
-
-typedef enum Transform_t {
-    ROW = 0,
-    COL = 1,
-    COL32 = 2,
-    COL_TURING = 3,
-    COL_AMPERE = 4,
-} Transform_t;
 
 typedef enum Funcs_t {
     FILL = 0,

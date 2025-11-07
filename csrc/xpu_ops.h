@@ -2,6 +2,7 @@
 #define xpu_ops_H
 
 #include <assert.h>
+#include <common.h>
 #include <cstdint>
 #include <iostream>
 #include <stdio.h>
