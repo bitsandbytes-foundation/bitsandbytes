@@ -253,6 +253,368 @@ void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long
     }
 }
 
+
+#if true or defined(__AVX512F__) && defined(__AVX512BF16__)
+
+#define CVT_BF16_TO_FP32(a) _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(a), 16))
+
+// template <bool sym_quant>
+// struct load_dequant_zp_only_4bit<32, sym_quant> {
+// #if defined(CPU_CAPABILITY_AVX512)
+//   static inline std::array<__m512, 2> call(
+//       uint8_t* p,
+//       __m512 lut,
+//       std::array<__m512, 2> vzps) {
+//     using T = float;
+//     using VA = VecArray<32, T>;
+//     using VAT = typename VA::type;
+//     constexpr long COLS = VA::num_vec;
+//     auto packed = _mm_loadu_si128((__m128i*)p);
+//     __m512i int32[COLS];
+//     {
+//       auto low_4bit = _mm512_cvtepu8_epi32(packed);
+//       auto high_4bit = _mm512_srli_epi32(low_4bit, 4);
+//       int32[0] = low_4bit;
+//       int32[1] = high_4bit;
+//     }
+//     VAT vbs;
+//     compile_time_for<COLS>::op([&](auto idx) {
+//       vbs[idx] = _mm512_permutexvar_ps(int32[idx], lut);
+//       if constexpr (!sym_quant) {
+//         vbs[idx] = _mm512_sub_ps(vbs[idx], vzps[idx]);
+//       }
+//     });
+//     return vbs;
+//   }
+// #endif
+
+template <int BLOCK_M, int BLOCK_N>
+struct tinygemm_kernel_nn<bf16_t, BLOCK_M, BLOCK_N> {
+  static inline void apply(
+      const bf16_t* __restrict__ A,
+      const unsigned char* __restrict__ B,
+      bf16_t* __restrict__ C,
+      bf16_t* __restrict__ Bs,
+      int64_t K,
+      int group_size,
+      int64_t lda,
+      int64_t ldb,
+      int64_t ldc,
+      int64_t strideBz,
+      int64_t strideBs) {
+    static_assert(BLOCK_N % 32 == 0);
+    constexpr int ROWS = BLOCK_M; // 32
+    constexpr int COLS = BLOCK_N / 16; // 2
+
+    // prefetch distance
+    constexpr int PREFETCH_SIZE_K = 16 * 4;
+
+    __m512bh va;
+    __m512bh vb[COLS];
+    __m512 vc[ROWS * COLS];
+    __m512 vc_master[ROWS * COLS];
+
+    __m256i mask = _mm256_set1_epi8(0xF);  // lower 4 bit
+    // w and z are in [0,15], hence (w-z) is in [-15,15]
+    // we will add 15 to it to shift it to [0,30] for lookup table indexing
+    __m256i fifteen = _mm256_set1_epi8(15);
+    __m512i bf16_lut = _mm512_set_epi16(
+        0x0000,
+        0x4170,
+        0x4160,
+        0x4150,
+        0x4140,
+        0x4130,
+        0x4120,
+        0x4110,
+        0x4100,
+        0x40E0,
+        0x40C0,
+        0x40A0,
+        0x4080,
+        0x4040,
+        0x4000,
+        0x3F80,
+        0x0000,
+        -0x4080,
+        -0x4000,
+        -0x3FC0,
+        -0x3F80,
+        -0x3F60,
+        -0x3F40,
+        -0x3F20,
+        -0x3F00,
+        -0x3EF0,
+        -0x3EE0,
+        -0x3ED0,
+        -0x3EC0,
+        -0x3EB0,
+        -0x3EA0,
+        -0x3E90);
+    __m512 scales[COLS];
+    // repeat interleave
+    __m256i idx1 = _mm256_set_epi8(
+        31,
+        31,
+        30,
+        30,
+        29,
+        29,
+        28,
+        28,
+        27,
+        27,
+        26,
+        26,
+        25,
+        25,
+        24,
+        24,
+        23,
+        23,
+        22,
+        22,
+        21,
+        21,
+        20,
+        20,
+        19,
+        19,
+        18,
+        18,
+        17,
+        17,
+        16,
+        16);
+    __m256i idx0 = _mm256_set_epi8(
+        15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10, 9, 9, 8, 8, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1, 0, 0);
+
+    const int64_t K2 = K >> 1;
+    const int64_t lda2 = lda >> 1;
+    const int64_t ldb2 = ldb;  // ldb * 2 >> 1;
+    const int64_t gs2 = group_size >> 1; // 64 / 2 = 32
+    const float* a_ptr = reinterpret_cast<const float*>(A);
+
+    auto loadc = [&](auto i) {
+      constexpr int col = i % COLS;
+      vc_master[i] = _mm512_set1_ps(0.f);
+    };
+    Unroll<ROWS * COLS>{}(loadc);
+
+    // x * ((w - zeros) * scales)
+    // = (x * (w - zeros)) * scales
+
+    auto pre_compute = [&](auto i, int64_t kgs) {
+      constexpr int row = i / COLS;
+      constexpr int col = i % COLS;
+      vc[i] = _mm512_set1_ps(0.f);  // reset accumulator
+
+      // load zeros and scales
+      if constexpr (row == 0 && col % 2 == 0) {
+        // Bz layout: [K/gs, BLOCK_N] : [strideBs, 1], dtype=uint8
+        __m256i tmp = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(Bz + kgs * strideBz + col * 16));
+        // (w - (z - 15)) = (w - z + 15)
+        tmp = _mm256_sub_epi8(tmp, fifteen);
+        zeros[col] = _mm256_permutexvar_epi8(idx0, tmp);
+        zeros[col + 1] = _mm256_permutexvar_epi8(idx1, tmp);
+
+        // Bs layout: [K/gs, BLOCK_N] : [strideBs, 1], dtype=bf16
+        __m512i tmp2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(Bs + kgs * strideBs + col * 16));
+        scales[col] = CVT_BF16_TO_FP32(_mm512_extracti32x8_epi32(tmp2, 0));
+        scales[col + 1] = CVT_BF16_TO_FP32(_mm512_extracti32x8_epi32(tmp2, 1));
+      }
+    };
+    auto compute = [&](auto i, int64_t k) {
+      constexpr int row = i / COLS;
+      constexpr int col = i % COLS;
+
+      if constexpr (col == 0) {
+        va = (__m512bh)(_mm512_set1_ps(a_ptr[row * lda2 + k]));
+      }
+      if constexpr (row == 0 && col % 2 == 0) {
+        __m256i vb_u4 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(B + k * ldb + col * 16));
+
+        // deinterleave and lookup to BF16
+        __m256i vb_i8_lo = vb_u4 & mask;
+        __m256i vb_i8_hi = _mm256_srli_epi16(vb_u4, 4) & mask;
+        vb_i8_lo = _mm256_sub_epi8(vb_i8_lo, zeros[col]);
+        vb_i8_hi = _mm256_sub_epi8(vb_i8_hi, zeros[col + 1]);
+        vb[col] = (__m512bh)_mm512_permutexvar_epi16(_mm512_cvtepi8_epi16(vb_i8_lo), bf16_lut);
+        vb[col + 1] = (__m512bh)_mm512_permutexvar_epi16(_mm512_cvtepi8_epi16(vb_i8_hi), bf16_lut);
+
+        if constexpr (PREFETCH_SIZE_K > 0) {
+          _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb2 + col * 16, _MM_HINT_T0);
+        }
+      }
+      vc[i] = _mm512_dpbf16_ps(vc[i], va, vb[col]);
+    };
+    auto post_compute = [&](auto i, int64_t kgs) {
+      vc_master[i] = _mm512_fmadd_ps(vc[i], scales[i % COLS], vc_master[i]);
+    };
+    for (int64_t k = 0; k < K2; k += gs2) {
+      Unroll<ROWS * COLS>{}(pre_compute, k / gs2);
+      for (int64_t k_offset = 0; k_offset < gs2; ++k_offset) {
+        Unroll<ROWS * COLS>{}(compute, k + k_offset);
+      }
+      Unroll<ROWS * COLS>{}(post_compute, k / gs2);
+    }
+
+    auto storec = [&](auto i) {
+      constexpr int row = i / COLS;
+      constexpr int col = i % COLS;
+      if constexpr (col % 2 == 0) {
+        _mm512_storeu_si512(
+            reinterpret_cast<__m512i*>(C + row * ldc + col * 16),
+            (__m512i)(_mm512_cvtne2ps_pbh(vc_master[i + 1], vc_master[i])));
+      }
+    };
+    Unroll<ROWS * COLS>{}(storec);
+  }
+};
+#endif
+
+#define LAUNCH_TINYGEMM_KERNEL_NN(MB_SIZE, NB_SIZE)                \
+  tinygemm_kernel_nn<scalar_t, MB_SIZE, NB_SIZE>::apply( \
+      A + mb_start * lda,                                          \
+      B + nb_start,                                                \
+      C + mb_start * ldc + nb_start,                               \
+      Bs + nb_start,                                               \
+      K,                                                           \
+      group_size,                                                  \
+      lda,                                                         \
+      ldb,                                                         \
+      ldc,                                                         \
+      strideBz,                                                    \
+      strideBs);
+
+template <typename scalar_t, bool has_bias>
+void tinygemm_kernel(
+    const scalar_t* __restrict__ A,
+    const unsigned char* __restrict__ B,
+    scalar_t* __restrict__ C,
+    const scalar_t* __restrict__ Bs,
+    scalar_t* __restrict__ Btmp,
+    float* __restrict__ Ctmp,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int group_size,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    int64_t strideBz,
+    int64_t strideBs) {
+    constexpr int64_t BLOCK_M = 4;
+    constexpr int64_t BLOCK_N = 64;
+    const int64_t MB = div_up(M, BLOCK_M);
+    const int64_t NB = div_up(N, BLOCK_N);
+    for (int mb = 0; mb < MB; ++mb) {
+        int64_t mb_start = mb * BLOCK_M;
+        int64_t mb_size = std::min(BLOCK_M, M - mb_start);
+        for (int64_t nb = 0; nb < NB; ++nb) {
+            int64_t nb_start = nb * BLOCK_N;
+            int64_t nb_size = std::min(BLOCK_N, N - nb_start);
+
+            switch (mb_size << 4 | nb_size >> 4) {
+                // mb_size = 1
+                case 0x12:
+                LAUNCH_TINYGEMM_KERNEL_NN(1, 32);
+                break;
+                case 0x14:
+                LAUNCH_TINYGEMM_KERNEL_NN(1, 64);
+                break;
+                // mb_size = 2
+                case 0x22:
+                LAUNCH_TINYGEMM_KERNEL_NN(2, 32);
+                break;
+                case 0x24:
+                LAUNCH_TINYGEMM_KERNEL_NN(2, 64);
+                break;
+                // mb_size = 3
+                case 0x32:
+                LAUNCH_TINYGEMM_KERNEL_NN(3, 32);
+                break;
+                case 0x34:
+                LAUNCH_TINYGEMM_KERNEL_NN(3, 64);
+                break;
+                // mb_size = 4
+                case 0x42:
+                LAUNCH_TINYGEMM_KERNEL_NN(4, 32);
+                break;
+                case 0x44:
+                LAUNCH_TINYGEMM_KERNEL_NN(4, 64);
+                break;
+                default: {
+                    std::fprintf(stderr,
+                                 "[bitsandbytes] Unexpected block size %lldx%lld\n",
+                                 (long long)mb_size,
+                                 (long long)nb_size);
+                    std::abort(); // or return; if you prefer silent exit
+                }
+            }
+        }
+    }
+}
+
+template <typename T, int DATA_TYPE>
+void gemv_4bit_inference(long long M,
+                        long long N,
+                        long long K,
+                        T* x,
+                        unsigned char* w,
+                        const float* absmax,
+                        T* out,
+                        long long blocksize,
+                        long long x_stride,
+                        long long out_stride) {
+    constexpr int64_t BLOCK_M = block_size_m(); // 32
+    constexpr int64_t BLOCK_N = block_size_n(); // 32
+    const int64_t MB = div_up(M, BLOCK_M); // （x + y -1）/ y, res = 1 when M <= 32
+    const int64_t NB = div_up(N, BLOCK_N);
+    // TODO: enable brgemm in the future.
+    // const bool use_brgemm = M > 4;
+    // const bool use_brgemm_dequant_out = M > 512;
+    scalar_t* Btmp_start = nullptr;
+    // l2 cache block for n
+    int64_t cache_blocks_nb = get_cache_blocks<T>(BLOCK_N * K);
+    parallel_2d(MB, NB, [&](int64_t begin_mb, int64_t end_mb, int64_t begin_nb, int64_t end_nb) {
+        // for brgemm, use float32 for accumulate
+        alignas(64) float Ctmp[BLOCK_M * BLOCK_N];
+        alignas(64) scalar_t Btmp_inner[BLOCK_N * BLOCK_K]; // BLOCK_K = 128
+        for (int64_t nbb = begin_nb; nbb < end_nb; nbb += cache_blocks_nb) {
+            for (int64_t mb = begin_mb; mb < end_mb; ++mb) { // 0-1
+                for (int64_t nb = nbb; nb < std::min(nbb + cache_blocks_nb, end_nb); ++nb) {
+                    int64_t mb_start = mb * BLOCK_M; // 0
+                    int64_t mb_size = std::min(M - mb_start, BLOCK_M);
+                    int64_t nb_start = nb * BLOCK_N;
+                    int64_t nb_size = std::min(N - nb_start, BLOCK_N);
+                    tinygemm_kernel<scalar_t>(
+                        /*   A  */ x + mb_start * mat1_strideM,
+                        /*   B  */ w + nb_start * K / 2,  // divide by 2 since w is u4 packed in u8, K is w.size(1) * 2
+                        /*   C  */ out + mb_start * out_strideM + nb_start,
+                        /*  Bs  */ absmax + nb_start,
+                        /* Btmp */ Btmp_inner,
+                        /* Ctmp */ Ctmp,
+                        /*   M  */ mb_size,
+                        /*   N  */ nb_size,
+                        /*   K  */ K,
+                        /*  gs  */ group_size,
+                        /* lda  */ mat1_strideM,
+                        /* ldb  */ nb_size,
+                        /* ldc  */ out_strideM,
+                        /* sBz  */ N,
+                        /* sBs  */ N);
+                }
+            }
+        }
+        // if (use_brgemm) {
+        //     at::native::cpublas::brgemm_release();
+        // }
+    });
+}
+#endif
+
+
 //==============================================================
 //                   TEMPLATE DEFINITIONS
 //==============================================================
@@ -279,17 +641,17 @@ template void dequantizeBlockwise4bitCpu<bf16_t, FP4>(
 template void dequantizeBlockwise4bitCpu<bf16_t, NF4>(
     unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n);
 
-template void gemv_4bit_inference<float, FP4>(
-    long long m, long long n, long long k, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride);
-template void gemv_4bit_inference<float, NF4>(
-    long long m, long long n, long long k, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride);
+// template void gemv_4bit_inference<float, FP4>(
+//     long long M, long long N, long long K, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride);
+// template void gemv_4bit_inference<float, NF4>(
+//     long long M, long long N, long long K, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride);
 
-template void gemv_4bit_inference<fp16_t, FP4>(
-    long long m, long long n, long long k, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride);
-template void gemv_4bit_inference<fp16_t, NF4>(
-    long long m, long long n, long long k, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride);
+// template void gemv_4bit_inference<fp16_t, FP4>(
+//     long long M, long long N, long long K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride);
+// template void gemv_4bit_inference<fp16_t, NF4>(
+//     long long M, long long N, long long K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride);
 
 template void gemv_4bit_inference<bf16_t, FP4>(
-    long long m, long long n, long long k, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride);
+    long long M, long long N, long long K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride);
 template void gemv_4bit_inference<bf16_t, NF4>(
-    long long m, long long n, long long k, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride);
+    long long M, long long N, long long K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride);

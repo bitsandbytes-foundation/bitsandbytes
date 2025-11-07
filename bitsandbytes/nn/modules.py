@@ -14,7 +14,8 @@ import bitsandbytes as bnb
 from bitsandbytes.cextension import HIP_ENVIRONMENT
 from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
-from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
+from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer, convert_weight_packed_for_cpu
+from ..cextension import ErrorHandlerMockBNBNativeLibrary, lib
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -479,6 +480,7 @@ class Linear4bit(nn.Linear):
         self.compute_type_is_set = compute_dtype is not None
         self.quant_state = None
         self.quant_storage = quant_storage
+        self.enable_optimized_cpu = False
 
     def set_compute_type(self, x):
         if x.dtype in [torch.float32, torch.bfloat16]:
@@ -512,7 +514,12 @@ class Linear4bit(nn.Linear):
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
     def forward(self, x: torch.Tensor):
+        quant_state = self.weight.quant_state
         fix_4bit_weight_quant_state_from_module(self)
+
+        if not self.enable_optimized_cpu and not isinstance(lib, ErrorHandlerMockBNBNativeLibrary) and hasattr(lib, "gemv_4bit_inference_cpu_nf4_bf16"):
+            self.weight.data, quant_state.absmax = convert_weight_packed_for_cpu(self.weight.data, quant_state.absmax, quant_state.shape)
+            self.enable_optimized_cpu = True
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:
@@ -529,7 +536,7 @@ class Linear4bit(nn.Linear):
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
         weight = self.weight.t()
 
-        return bnb.matmul_4bit(x, weight, bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
+        return bnb.matmul_4bit(x, weight, bias=bias, quant_state=quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):

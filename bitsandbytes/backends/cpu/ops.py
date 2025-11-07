@@ -207,6 +207,50 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
 
         return out
 
+    if hasattr(lib, "gemv_4bit_inference_cpu_nf4_bf16"):
+        @register_kernel("bitsandbytes::gemv_4bit", "cpu")
+        def _(
+            A: torch.Tensor,
+            B: torch.Tensor,
+            shapeB: Sequence[int],
+            absmax: torch.Tensor,
+            code: torch.Tensor,
+            blocksize: int,
+        ) -> torch.Tensor:
+            # Applied from dequantize_4bit
+            dtype = A.dtype
+            quant_type = "fp4" if code[1] > 0 else "nf4"
+            # cpu fused op only support bf16 for now.
+            if dtype != torch.bfloat16:
+                A = A.to(torch.bfloat16)
+
+            out_shape = (*A.shape[:-1], shapeB[0])
+            out = torch.empty(out_shape, dtype=A.dtype, device=A.device)
+            if quant_type == "fp4":
+                lib.cdequantize_blockwise_cpu_fp4_bf16(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_longlong(blocksize),
+                    ct.c_longlong(shape[0]),
+                    ct.c_longlong(shape[1]),
+                )
+            elif quant_type == "nf4":
+                lib.cdequantize_blockwise_cpu_nf4_bf16(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_longlong(blocksize),
+                    ct.c_longlong(shape[0]),
+                    ct.c_longlong(shape[1]),
+                )
+
+            if dtype != torch.bfloat16:
+                out = out.to(dtype)
+
+            return out
+
+
 def dequantize_nf4_test(
     A: torch.Tensor,
     absmax: torch.Tensor,

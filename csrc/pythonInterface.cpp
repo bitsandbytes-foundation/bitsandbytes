@@ -890,34 +890,34 @@ void cdequantize_blockwise_cpu_nf4_fp16(
     dequantizeBlockwise4bitCpu<fp16_t, NF4>(A, absmax, out, blocksize, m, n);
 }
 
-void gemv_4bit_inference_cpu_fp4_fp32(
-    long long m, long long n, long long k, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride
-) {
-    gemv_4bit_inference<float, FP4>(m, n, k, x, w, absmax, out, blocksize);
-}
-void gemv_4bit_inference_cpu_fp4_fp16(
-    long long m, long long n, long long k, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride
-) {
-    gemv_4bit_inference<fp16_t, FP4>(m, n, k, x, w, absmax, out, blocksize);
-}
+// void gemv_4bit_inference_cpu_fp4_fp32(
+//     long long M, long long N, long long K, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride
+// ) {
+//     gemv_4bit_inference<float, FP4>(m, n, k, x, w, absmax, out, blocksize);
+// }
+// void gemv_4bit_inference_cpu_fp4_fp16(
+//     long long M, long long N, long long K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride
+// ) {
+//     gemv_4bit_inference<fp16_t, FP4>(m, n, k, x, w, absmax, out, blocksize);
+// }
 void gemv_4bit_inference_cpu_fp4_bf16(
-    long long m, long long n, long long k, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride
+    long long M, long long N, long long K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride
 ) {
     gemv_4bit_inference<bf16_t, FP4>(m, n, k, x, w, absmax, out, blocksize);
 }
 
-void gemv_4bit_inference_cpu_nf4_fp32(
-    long long m, long long n, long long k, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride
-) {
-    gemv_4bit_inference<float, NF4>(m, n, k, x, w, absmax, out, blocksize);
-}
-void gemv_4bit_inference_cpu_nf4_fp16(
-    long long m, long long n, long long k, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride
-) {
-    gemv_4bit_inference<fp16_t, NF4>(m, n, k, x, w, absmax, out, blocksize);
-}
+// void gemv_4bit_inference_cpu_nf4_fp32(
+//     long long M, long long N, long long K, float* x, unsigned char* w, const float* absmax, float* out, long long blocksize, long long x_stride, long long out_stride
+// ) {
+//     gemv_4bit_inference<float, NF4>(m, n, k, x, w, absmax, out, blocksize);
+// }
+// void gemv_4bit_inference_cpu_nf4_fp16(
+//     long long M, long long N, long long K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, long long blocksize, long long x_stride, long long out_stride
+// ) {
+//     gemv_4bit_inference<fp16_t, NF4>(m, n, k, x, w, absmax, out, blocksize);
+// }
 void gemv_4bit_inference_cpu_nf4_bf16(
-    long long m, long long n, long long k, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride
+    long long M, long long N, long long K, bf16_t* x, unsigned char* w, const float* absmax, bf16_t* out, long long blocksize, long long x_stride, long long out_stride
 ) {
     gemv_4bit_inference<bf16_t, NF4>(m, n, k, x, w, absmax, out, blocksize);
 }

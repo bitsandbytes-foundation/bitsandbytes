@@ -4,6 +4,76 @@
 #include <cstdint>
 #include <cstring>
 
+// amx-bf16
+#define TILE_M 16
+#define TILE_N 16
+#define TILE_K 32
+
+// block size for AMX gemm
+constexpr int block_size_m() {
+  return 2 * TILE_M;
+}
+constexpr int block_size_n() {
+  return 2 * TILE_N;
+}
+
+template <typename T>
+inline int get_cache_blocks(int chunk_size) {
+  // L2 2MB and ratio of 50%
+  const int L2_size = 2048 * 1024 >> 1;
+  return std::max(1, int(L2_size / (chunk_size * sizeof(T))));
+}
+
+template <typename func_t>
+inline void parallel_2d(int m, int n, const func_t& f) {
+  // make sure we have even num_threads
+  int nth = adjust_num_threads(m);
+
+  // [NOTE] thread blocking:
+  //
+  //   1) prefer square block per thread
+  //   2) use even number of CPU cores
+  //   3) use all `num_threads` cores
+  //
+  //   we have:
+  //     TM * TN = T
+  //     BM / TM = BN / TN
+  //   then:
+  //     TM = ((BM / BN) * T) ^ 0.5
+  //
+  float r = float(m) / n;
+  int nth_m = std::ceil(std::sqrt(r * nth));
+  int nth_n = 1;
+  for (; nth_m > 0; --nth_m) {
+    nth_n = nth / nth_m;
+    if (nth_m * nth_n == nth) {
+      break;
+    }
+  }
+
+#if defined(_OPENMP)
+#pragma omp parallel num_threads(nth)
+  {
+    int ith = omp_get_thread_num();
+    int ith_m = ith / nth_n;
+    int ith_n = ith % nth_n;
+
+    int thread_block_m = div_up(m, nth_m);
+    int thread_block_n = div_up(n, nth_n);
+
+    int begin_m = ith_m * thread_block_m;
+    int end_m = std::min(m, begin_m + thread_block_m);
+    int begin_n = ith_n * thread_block_n;
+    int end_n = std::min(n, begin_n + thread_block_n);
+
+    f(begin_m, end_m, begin_n, end_n);
+  }
+#else
+  f(0, m, 0, n);
+#endif
+}
+
+
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n);
 
 typedef enum DataType_t {
@@ -163,7 +233,9 @@ void dequantizeBlockwise8bitCpu(float* code, unsigned char* A, const float* absm
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise4bitCpu(unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n);
 
-template <typename T, int DATA_TYPE>
-void gemv_4bit_inference(long long m, long long n, long long k, T* x, unsigned char* w, const float* absmax, T* out, long long blocksize, long long x_stride, long long out_stride);
+#if defined(__AVX512F__) && defined(__AVX512BF16__)
+    template <typename T, int DATA_TYPE>
+    void gemv_4bit_inference(long long M, long long N, long long K, T* x, unsigned char* w, const float* absmax, T* out, long long blocksize, long long x_stride, long long out_stride);
+#endif
 
 #endif
