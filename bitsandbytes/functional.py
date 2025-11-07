@@ -2199,4 +2199,45 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     return out
 
 
+def convert_weight_packed_for_cpu(qweight: torch.Tensor,
+                                  quant_state: QuantState,
+                                  block_n: int = 32):
+    """
+    qweight: (K * N / 2)  uint8
+    return: packed_weight
+    """
+    assert qweight.dtype == torch.uint8, "qweight must be uint8"
+    qweight = qweight.reshape(-1)
+    unpacked_w = torch.empty(qweight.shape[0] * 2, dtype=torch.int32, device=qweight.device)
+    unpacked_w[1::2] = qweight & 0xF
+    unpacked_w[::2] = qweight >> 4
+    qweight_final = unpacked_w.reshape(quant_state.shape).to(torch.uint8)  # (*, N, K)
+    # pack weight: [*, N, K] -> [*, N, K/2] combine low and high bit
+    assert len(qweight_final.shape) == 2
+    N, K = qweight_final.shape[0], qweight_final.shape[1]
+    assert N % block_n == 0, "N must be divisible by block_n"
+    assert K % 2 == 0, "K must be even"
+    BLOCK_N = block_n
+    BIT_COUNT = 32  # (=32 low +32 high)
+    new_shape = [N // BLOCK_N, BLOCK_N, K // 2, 2]
+    out_shape = [N, K // 2]
+    qw = qweight_final.reshape(new_shape)                # (..., N/B, B, K/2, 2)
+    qw = qw.transpose(-3, -2).contiguous()               # (..., N/B, K/2, B, 2)
+    qw = qw.reshape(-1, BIT_COUNT * 2)                   # [-1, 64]
+    high = qw[:, BIT_COUNT:]                             # high 32
+    low  = qw[:, :BIT_COUNT]                             # low 32
+    packed = ((high << 4) | low).to(torch.uint8)         # combine
+    final_qweight = packed.reshape(out_shape)
+    if quant_state.nested:
+        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+        absmax += quant_state.offset
+        if absmax.dtype != torch.float32:
+            absmax = absmax.float()
+
+        quant_state.absmax = absmax.T.to(torch.bfloat16)
+        quant_state.nested = False
+        delattr(quant_state, "state2")
+    return final_qweight, quant_state
+
+
 C = 127.0
