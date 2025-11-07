@@ -277,7 +277,7 @@ struct tinygemm_kernel_nn<bf16_t, BLOCK_M, BLOCK_N, DATA_TYPE> {
       const bf16_t* __restrict__ A,
       const unsigned char* __restrict__ B,
       bf16_t* __restrict__ C,
-      bf16_t* __restrict__ Bs,
+      const bf16_t* __restrict__ Bs,
       int64_t K,
       int group_size,
       int64_t lda,
@@ -472,10 +472,10 @@ template <typename T, int DATA_TYPE>
 void gemv_4bit_inference(int64_t M,
                         int64_t N,
                         int64_t K,
-                        T* x,
-                        unsigned char* w,
-                        const T* absmax,
-                        T* out,
+                        const T* __restrict__ x,
+                        const unsigned char* __restrict__ w,
+                        const T* __restrict__ absmax,
+                        T* __restrict__ out,
                         int64_t blocksize,
                         int64_t x_stride,
                         int64_t out_stride) {
@@ -554,16 +554,15 @@ template void dequantizeBlockwise4bitCpu<bf16_t, NF4>(
     unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n);
 
 // template void gemv_4bit_inference<float, FP4>(
-//     int64_t M, int64_t N, int64_t K, float* x, unsigned char* w, const float* absmax, float* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+//     int64_t M, int64_t N, int64_t K, const float* __restrict__ x, const unsigned char* __restrict__ w, const float* __restrict__ absmax, float* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 // template void gemv_4bit_inference<float, NF4>(
-//     int64_t M, int64_t N, int64_t K, float* x, unsigned char* w, const float* absmax, float* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
-
+//     int64_t M, int64_t N, int64_t K, const float* __restrict__ x, const unsigned char* __restrict__ w, const float* __restrict__ absmax, float* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+//
 // template void gemv_4bit_inference<fp16_t, FP4>(
-//     int64_t M, int64_t N, int64_t K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+//     int64_t M, int64_t N, int64_t K, const fp16_t* __restrict__ x, const unsigned char* __restrict__ w, const float* __restrict__ absmax, fp16_t* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 // template void gemv_4bit_inference<fp16_t, NF4>(
-//     int64_t M, int64_t N, int64_t K, fp16_t* x, unsigned char* w, const float* absmax, fp16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
-
+//     int64_t M, int64_t N, int64_t K, const fp16_t* __restrict__ x, const unsigned char* __restrict__ w, const float* __restrict__ absmax, fp16_t* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 template void gemv_4bit_inference<bf16_t, FP4>(
-    int64_t M, int64_t N, int64_t K, bf16_t* x, unsigned char* w, const bf16_t* absmax, bf16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+    int64_t M, int64_t N, int64_t K, const bf16_t* __restrict__ x, const unsigned char* __restrict__ w, const bf16_t* __restrict__ absmax, bf16_t* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 template void gemv_4bit_inference<bf16_t, NF4>(
-    int64_t M, int64_t N, int64_t K, bf16_t* x, unsigned char* w, const bf16_t* absmax, bf16_t* out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+    int64_t M, int64_t N, int64_t K, const bf16_t* __restrict__ x, const unsigned char* __restrict__ w, const bf16_t* __restrict__ absmax, bf16_t* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
