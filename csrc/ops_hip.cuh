@@ -79,12 +79,6 @@ typedef enum Transform_t {
     COL_AMPERE = 4,
 } Transform_t;
 
-typedef enum DataType_t {
-    General8bit = 0,
-    FP4 = 1,
-    NF4 = 2,
-} DataType_t;
-
 typedef enum Funcs_t {
     FILL = 0,
     ARANGE = 1,

@@ -6,12 +6,6 @@
 
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n);
 
-typedef enum DataType_t {
-    General8bit = 0,
-    FP4 = 1,
-    NF4 = 2,
-} DataType_t;
-
 struct fp16_t {
     uint16_t v;
 };
