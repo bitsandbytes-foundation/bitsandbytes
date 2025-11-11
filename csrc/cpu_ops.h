@@ -144,6 +144,13 @@ static inline bf16_t float_to_bf16(float x) {
     return bf16_t{static_cast<uint16_t>(r >> 16)};
 }
 
+static float bf16_to_float(uint16_t bf16) {
+    uint32_t bits = (uint32_t)bf16 << 16;
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+
 static inline fp16_t float_to_fp16(float x) {
     uint32_t bits;
     std::memcpy(&bits, &x, 4);
