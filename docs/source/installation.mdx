@@ -2,7 +2,7 @@
 
 Welcome to the installation guide for the `bitsandbytes` library! This document provides step-by-step instructions to install `bitsandbytes` across various platforms and hardware configurations.
 
-We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, and Intel Gaudi platforms. We also have experimental support for
+We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, Intel Gaudi, and Ascend NPU platforms. We also have experimental support for
 additional platforms such as AMD ROCm.
 
 ## Table of Contents
@@ -15,6 +15,8 @@ additional platforms such as AMD ROCm.
   - [Installation via PyPI](#xpu-pip)
 - [Intel Gaudi](#gaudi)
   - [Installation via PyPI](#gaudi-pip)
+- [Ascend NPU](#npu)
+  - [Compile from Source](#npu-compile)
 - [CPU](#cpu)
   - [Installation via PyPI](#cpu-pip)
   - [Compile from Source](#cpu-compile)
@@ -154,6 +156,35 @@ Use `pip` or `uv` to install the latest release:
 
 ```bash
 pip install bitsandbytes
+```
+
+## Ascend NPU[[npu]]
+
+Please refer to [the official Ascend installations instructions](https://www.hiascend.com/document/detail/zh/Pytorch/60RC3/configandinstg/instg/insg_0001.html) for guidance on how to install the necessary `torch_npu` dependency.
+
+### Compile from Source[[npu-compile]]
+
+> [!WARNING]
+> Before building on Ascend NPU:
+>
+> Make sure to source the CANN environment script (adjust path based on your installation):
+>
+> ```bash
+> source /usr/local/Ascend/ascend-toolkit/set_env.sh
+> ```
+>
+> CANN toolkit can be downloaded from: [https://www.hiascend.com/zh/developer/download/community/result?module=cann](https://www.hiascend.com/zh/developer/download/community/result?module=cann)
+
+```bash
+# Install bitsandbytes from source
+# Clone bitsandbytes repo, Ascend NPU backend is currently enabled on main branch
+git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+
+# Compile & install
+apt-get install -y build-essential cmake  # install build tools dependencies, unless present
+cmake -DCOMPUTE_BACKEND=npu -S .
+make
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
 ## CPU[[cpu]]
