@@ -14,14 +14,26 @@ using namespace BinSearch;
 #if defined(__AVX512F__)
 #include <immintrin.h>
 
+bool has_avx512f() {
+    static const bool supported_avx512f = __builtin_cpu_supports("avx512f");
+    return supported_avx512f;
+}
+
+bool has_avx512bf16() {
+    static const bool supported_avx512bf16 = __builtin_cpu_supports("avx512bf16");
+    return supported_avx512bf16;
+}
+
 inline __m256i cvt_fp32_to_fp16(const __m512 src) {
     return _mm512_cvtps_ph(src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
 }
 
 inline __m256i cvt_fp32_to_bf16(const __m512 src) {
 #if defined(__AVX512BF16__)
-    return reinterpret_cast<__m256i>(_mm512_cvtneps_pbh(src));
-#else
+    if (has_avx512bf16()) {
+        return reinterpret_cast<__m256i>(_mm512_cvtneps_pbh(src));
+    }
+#endif
     __m512i value = _mm512_castps_si512(src);
     __m512i nan = _mm512_set1_epi32(0xffff);
     auto mask_value = _mm512_cmp_ps_mask(src, src, _CMP_ORD_Q);
@@ -38,7 +50,6 @@ inline __m256i cvt_fp32_to_bf16(const __m512 src) {
     // Check NaN before converting back to bf16
     t_value = _mm512_mask_blend_epi32(mask_value, nan, t_value);
     return _mm512_cvtusepi32_epi16(t_value);
-#endif
 }
 
 static inline __m512 set_nf4_lut() {
@@ -68,51 +79,53 @@ void dequantizeBlockwise4bitCpu(
         return;
 
 #if defined(__AVX512F__)
-    long long dim_0 = m;
-    long long dim_1 = n;
-    long long input_dim_1 = dim_1 >> 1;
-    long long absmax_dim_1 = dim_1 / blocksize;
-    using Tcomp = float;
-    constexpr auto VEC_LEN = sizeof(__m512i) / sizeof(Tcomp); // 16
-    if (dim_1 % VEC_LEN == 0 && blocksize >= VEC_LEN) {
-        __m512 lut = DATA_TYPE == 1 ? set_fp4_lut() : set_nf4_lut();
-        constexpr auto k_step = VEC_LEN / 2; // 8
-        BNB_OMP_PARALLEL_FOR
-        for (int block_idx = 0; block_idx < dim_0; ++block_idx) {
-            for (int k = 0; k < input_dim_1; k += k_step) {
-                // Load 64 bits of nf4 data and a single scale data
-                uint8_t* p = &A[block_idx * input_dim_1 + k];
-                uint64_t packed;
-                std::memcpy(&packed, p, sizeof(uint64_t));
-                auto scale_idx = k * 2 / blocksize;
-                auto vscales = _mm512_set1_ps((float)absmax[block_idx * absmax_dim_1 + scale_idx]);
-                // unpack nf4 data to 32-bit integers
-                uint64_t high = 0;
-                uint64_t low = 0;
-                for (int i = 0; i < 4; ++i) {
-                    low |= ((packed >> (2 * i * 4)) & 0xf) << ((2 * i + 1) * 8);
-                    low |= ((packed >> ((2 * i + 1) * 4)) & 0xf) << (2 * i * 8);
-                    high |= ((packed >> (2 * i * 4 + 32)) & 0xf) << ((2 * i + 1) * 8);
-                    high |= ((packed >> ((2 * i + 1) * 4 + 32)) & 0xf) << (2 * i * 8);
-                }
-                __m128i packed_128 = _mm_set_epi64x(high, low);
-                __m512i vint32 = _mm512_cvtepu8_epi32(packed_128);
-                // Table look-up
-                __m512 vout = _mm512_permutexvar_ps(vint32, lut);
-                // Apply scale
-                vout = _mm512_mul_ps(vout, vscales);
-                // Store results
-                T* pout = &out[block_idx * dim_1 + k * 2];
-                if constexpr (std::is_same<T, float>()) {
-                    _mm512_storeu_ps(pout, vout);
-                } else if constexpr (std::is_same<T, bf16_t>()) {
-                    _mm256_storeu_si256((__m256i*)pout, cvt_fp32_to_bf16(vout));
-                } else if constexpr (std::is_same<T, fp16_t>()) {
-                    _mm256_storeu_si256((__m256i*)pout, cvt_fp32_to_fp16(vout));
+    if (has_avx512f()) {
+        long long dim_0 = m;
+        long long dim_1 = n;
+        long long input_dim_1 = dim_1 >> 1;
+        long long absmax_dim_1 = dim_1 / blocksize;
+        using Tcomp = float;
+        constexpr auto VEC_LEN = sizeof(__m512i) / sizeof(Tcomp); // 16
+        if (dim_1 % VEC_LEN == 0 && blocksize >= VEC_LEN) {
+            __m512 lut = DATA_TYPE == 1 ? set_fp4_lut() : set_nf4_lut();
+            constexpr auto k_step = VEC_LEN / 2; // 8
+            BNB_OMP_PARALLEL_FOR
+            for (int block_idx = 0; block_idx < dim_0; ++block_idx) {
+                for (int k = 0; k < input_dim_1; k += k_step) {
+                    // Load 64 bits of nf4 data and a single scale data
+                    uint8_t* p = &A[block_idx * input_dim_1 + k];
+                    uint64_t packed;
+                    std::memcpy(&packed, p, sizeof(uint64_t));
+                    auto scale_idx = k * 2 / blocksize;
+                    auto vscales = _mm512_set1_ps((float)absmax[block_idx * absmax_dim_1 + scale_idx]);
+                    // unpack nf4 data to 32-bit integers
+                    uint64_t high = 0;
+                    uint64_t low = 0;
+                    for (int i = 0; i < 4; ++i) {
+                        low |= ((packed >> (2 * i * 4)) & 0xf) << ((2 * i + 1) * 8);
+                        low |= ((packed >> ((2 * i + 1) * 4)) & 0xf) << (2 * i * 8);
+                        high |= ((packed >> (2 * i * 4 + 32)) & 0xf) << ((2 * i + 1) * 8);
+                        high |= ((packed >> ((2 * i + 1) * 4 + 32)) & 0xf) << (2 * i * 8);
+                    }
+                    __m128i packed_128 = _mm_set_epi64x(high, low);
+                    __m512i vint32 = _mm512_cvtepu8_epi32(packed_128);
+                    // Table look-up
+                    __m512 vout = _mm512_permutexvar_ps(vint32, lut);
+                    // Apply scale
+                    vout = _mm512_mul_ps(vout, vscales);
+                    // Store results
+                    T* pout = &out[block_idx * dim_1 + k * 2];
+                    if constexpr (std::is_same<T, float>()) {
+                        _mm512_storeu_ps(pout, vout);
+                    } else if constexpr (std::is_same<T, bf16_t>()) {
+                        _mm256_storeu_si256((__m256i*)pout, cvt_fp32_to_bf16(vout));
+                    } else if constexpr (std::is_same<T, fp16_t>()) {
+                        _mm256_storeu_si256((__m256i*)pout, cvt_fp32_to_fp16(vout));
+                    }
                 }
             }
+            return;
         }
-        return;
     }
 #endif
     // Scalar fallback branch
