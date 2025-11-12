@@ -286,7 +286,15 @@ if (BUILD_CPU)
         if (HAS_AVX512BF16_FLAG)
             target_compile_options(bitsandbytes PRIVATE -mavx512bf16)
         endif()
-        target_compile_options(bitsandbytes PRIVATE -mprefer-vector-width=256)
+        target_compile_options(
+            bitsandbytes PRIVATE
+            -mprefer-vector-width=256
+            -mfma
+            -mavx2
+            -mlzcnt
+            -mbmi
+            -mbmi2
+        )
     endif()
 endif()
 

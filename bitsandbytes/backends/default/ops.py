@@ -232,8 +232,7 @@ def _(
     return packed, absmax.float()
 
 
-@register_kernel("bitsandbytes::dequantize_4bit", "default")
-def _(
+def _dequantize_4bit_impl(
     A: torch.Tensor,
     absmax: torch.Tensor,
     blocksize: int,
@@ -241,13 +240,6 @@ def _(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check_is_size(blocksize)
-    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
-    torch._check(
-        dtype in [torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
-    )
-
     # Enable non uint8 dtype
     if A.dtype != torch.uint8:
         A = A.view(torch.uint8)
@@ -281,6 +273,25 @@ def _(
     out = out.reshape(-1, *shape[1:]).to(dtype)
 
     return out
+
+
+@register_kernel("bitsandbytes::dequantize_4bit", "default")
+def _(
+    A: torch.Tensor,
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
+    torch._check(
+        dtype in [torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
+    )
+
+    return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "default")
