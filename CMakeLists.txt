@@ -274,47 +274,22 @@ if (BUILD_CPU)
     if (OpenMP_CXX_FOUND)
         target_link_libraries(bitsandbytes PRIVATE OpenMP::OpenMP_CXX)
         add_definitions(-DHAS_OPENMP)
-    else()
-        add_definitions(-DNO_OPENMP)
     endif()
 
-    if (HOST_ARCH MATCHES "x86_64|amd64")
+    if ((HOST_ARCH MATCHES "x86_64|amd64") AND (NOT MSVC))
         include(CheckCXXCompilerFlag)
         check_cxx_compiler_flag(-mavx512f HAS_AVX512F_FLAG)
         check_cxx_compiler_flag(-mavx512bf16 HAS_AVX512BF16_FLAG)
         if (HAS_AVX512F_FLAG)
             target_compile_options(bitsandbytes PRIVATE -mavx512f)
-            add_definitions(-DHAS_AVX512F)
         endif()
         if (HAS_AVX512BF16_FLAG)
             target_compile_options(bitsandbytes PRIVATE -mavx512bf16)
-            add_definitions(-DHAS_AVX512BF16)
-        else()
-            add_definitions(-DNO_AVX512BF16)
         endif()
+        target_compile_options(bitsandbytes PRIVATE -mprefer-vector-width=256)
     endif()
 endif()
 
-# --- Windows MSVC specific AVX512BF16 probe (after add_library) ---
-if (MSVC AND BUILD_CPU)
-    include(CheckCXXSourceCompiles)
-    set(_AVX512BF16_TEST "
-        #include <immintrin.h>
-        int main(){
-            __m512bh a{}, b{};
-            auto c = _mm512_dpbf16_ps(_mm512_setzero_ps(), a, b);
-            (void)c;
-            return 0;
-        }")
-    check_cxx_source_compiles("${_AVX512BF16_TEST}" MSVC_HAS_AVX512BF16)
-    if (MSVC_HAS_AVX512BF16)
-        # /arch:AVX512;
-        target_compile_options(bitsandbytes PRIVATE /arch:AVX512)
-        add_definitions(-DHAS_AVX512BF16)
-    else()
-        add_definitions(-DNO_AVX512BF16)
-    endif()
-endif()
 
 if(BUILD_CUDA)
     target_include_directories(bitsandbytes PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})

@@ -14,15 +14,32 @@ using namespace BinSearch;
 #if defined(__AVX512F__)
 #include <immintrin.h>
 
+#ifdef _MSC_VER
+#include <intrin.h>
+static inline bool has_avx512f() {
+    static bool v = []{
+        int info[4]; __cpuidex(info, 7, 0);
+        return (info[1] & (1 << 16)) != 0; // EBX bit16 AVX512F
+    }();
+    return v;
+}
+static inline bool has_avx512bf16() {
+    static bool v = []{
+        int info[4]; __cpuidex(info, 7, 1);
+        return (info[0] & (1 << 5)) != 0;  // EAX bit5 AVX512_BF16
+    }();
+    return v;
+}
+#else
 bool has_avx512f() {
     static const bool supported_avx512f = __builtin_cpu_supports("avx512f");
     return supported_avx512f;
 }
-
 bool has_avx512bf16() {
     static const bool supported_avx512bf16 = __builtin_cpu_supports("avx512bf16");
     return supported_avx512bf16;
 }
+#endif
 
 inline __m256i cvt_fp32_to_fp16(const __m512 src) {
     return _mm512_cvtps_ph(src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
