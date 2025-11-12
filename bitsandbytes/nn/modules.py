@@ -15,6 +15,7 @@ from bitsandbytes.cextension import HIP_ENVIRONMENT
 from bitsandbytes.functional import QuantState, convert_weight_packed_for_cpu
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
+
 from ..cextension import ErrorHandlerMockBNBNativeLibrary, lib
 
 T = TypeVar("T", bound="torch.nn.Module")
@@ -517,10 +518,17 @@ class Linear4bit(nn.Linear):
         quant_state = self.weight.quant_state
         fix_4bit_weight_quant_state_from_module(self)
 
-        if not self.enable_optimized_cpu and not isinstance(lib, ErrorHandlerMockBNBNativeLibrary) and hasattr(lib, "gemv_4bit_inference_cpu_nf4_bf16") and not self.training and x.requires_grad == False:
+        if (
+            not self.enable_optimized_cpu
+            and x.device.type == "cpu"
+            and not isinstance(lib, ErrorHandlerMockBNBNativeLibrary)
+            and hasattr(lib, "gemv_4bit_inference_cpu_nf4_bf16")
+            and not self.training
+            and x.requires_grad == False
+        ):
             self.weight.data, quant_state = convert_weight_packed_for_cpu(self.weight.data, quant_state)
             self.enable_optimized_cpu = True
-            setattr(quant_state, "enable_optimized_cpu", True)
+            quant_state.enable_optimized_cpu = True
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:

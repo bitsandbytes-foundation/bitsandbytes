@@ -6,7 +6,6 @@ import torch
 
 from bitsandbytes.functional import get_ptr
 
-from ..utils import CODE
 from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
 
@@ -190,9 +189,6 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     ct.c_longlong(shape[0]),
                     ct.c_longlong(shape[1]),
                 )
-                # out_2 = dequantize_nf4_test(_reverse_4bit_compress_format(A.reshape(-1)), absmax, blocksize, quant_type, shape, dtype)
-                # if not torch.allclose(out, out_2, rtol=1e-2, atol=5e-2):
-                #     import pdb; pdb.set_trace()
             elif dtype == torch.float16:
                 lib.cdequantize_blockwise_cpu_nf4_fp16(
                     get_ptr(A),
@@ -208,6 +204,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         return out
 
     if hasattr(lib, "gemv_4bit_inference_cpu_nf4_bf16"):
+
         @register_kernel("bitsandbytes::gemv_4bit", "cpu")
         def _(
             A: torch.Tensor,
@@ -246,9 +243,9 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     ct.c_int64(out_strideM),
                 )
             elif quant_type == "nf4":
-                #print(A)
-                #print(B)
-                #print(absmax)
+                # print(A)
+                # print(B)
+                # print(absmax)
                 lib.gemv_4bit_inference_cpu_nf4_bf16(
                     ct.c_int64(M),
                     ct.c_int64(N),
@@ -267,40 +264,39 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
 
             return out
 
+# def unpack_weight_packed_for_cpu(packed_qweight: torch.Tensor, block_n: int = 32):
+#     """
+#     Inverse of convert_weight_packed_for_cpu.
+#     packed_qweight: (N, K//2) uint8, each byte = (high<<4)|low, both 4-bit values in 0..15
+#     returns: qweight_final (N, K) uint8 with original 4-bit values (0..15)
+#     """
+#     assert packed_qweight.dtype == torch.uint8
+#     assert packed_qweight.dim() == 2
+#     N, K_half = packed_qweight.shape
+#     assert N % block_n == 0
+#     BIT_COUNT = block_n  # 32
+#     # reshape to rows of 32 packed bytes
+#     qw = packed_qweight.reshape(-1, BIT_COUNT)           # [(N//block_n)*K_half, 32]
+#     low  = (qw & 0x0F)
+#     high = (qw >> 4) & 0x0F
+#     # restore 64 nibbles (low first then high, matching original pack order)
+#     restored = torch.cat([low, high], dim=1)             # [..., 64]
+#     # reshape back (inverse of flatten)
+#     restored = restored.reshape(N // block_n, K_half, block_n, 2)  # [N/block_n, K//2, block_n, 2]
+#     # inverse transpose
+#     restored = restored.transpose(-3, -2)                # [N/block_n, block_n, K//2, 2]
+#     # final shape
+#     qweight_final = restored.reshape(N, K_half * 2).to(torch.uint8)
+#     return qweight_final
 
-def dequantize_nf4_test(
-    A: torch.Tensor,
-    absmax: torch.Tensor,
-    blocksize: int,
-    quant_type: str,
-    shape: Sequence[int],
-    dtype: torch.dtype,
-):
-    # Map nf4 to [-1, 1]
-    out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
-    n = out_dq.numel()
-    out_dq[1::2] = A & 0xF
-    out_dq[::2] = A >> 4
-    # code is fp32, cast to dtype to avoid the mismatch issue
-    code = CODE[quant_type].to(dtype).to(A.device)
-    out_dq = code[out_dq]
 
-    # Apply scales
-    if out_dq.numel() != n:
-        assert out_dq.numel() == n + 1
-        out_dq = torch.narrow(out_dq, 0, 0, n)
-    blocks = n // blocksize
-    blocks += 1 if n % blocksize > 0 else 0
-    rem = n % blocksize
-    has_rem = rem > 0
+# _NF4_QUANT_TABLE = torch.tensor([ -1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
+#                                   0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0 ], dtype=torch.float32)
 
-    if has_rem:
-        out[: n - rem] = (out_dq[: n - rem].view(-1, blocksize) * absmax[: blocks - has_rem].view(-1, 1)).reshape(-1)
-        out[n - rem :] = out_dq[n - rem :] * absmax[-1]
-    else:
-        out = out_dq.view(-1, blocksize) * absmax.view(-1, 1)
-
-    out = out.reshape(-1, *shape[1:]).to(dtype)
-
-    return out
-
+# def fused_matmul(x, packed_weight, scales, group_size):
+#     unpacked_weight = unpack_weight_packed_for_cpu(packed_weight)
+#     shape = unpacked_weight.shape
+#     # original_weight = _INT4_0_TO_15_TABLE[unpacked_weight.reshape(-1).int()].reshape(shape) * scales.T.repeat_interleave(group_size, dim=1)
+#     original_weight = _NF4_QUANT_TABLE[unpacked_weight.reshape(-1).int()].reshape(shape) * scales.T.repeat_interleave(group_size, dim=1)
+#     res = torch.matmul(x, original_weight.T.to(x.dtype))
+#     return res
