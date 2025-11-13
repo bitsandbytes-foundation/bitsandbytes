@@ -2,7 +2,7 @@
 
 #ifdef __GFX9__
 #define BNB_WARP_SIZE 64
-#else 
+#else
 #define BNB_WARP_SIZE 32
 #endif
 
