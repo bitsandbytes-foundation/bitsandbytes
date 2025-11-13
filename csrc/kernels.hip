@@ -594,6 +594,8 @@ __global__ void kPreconditionOptimizer32bit2State(T* g, T* p,
                   s1_vals[j] = s1_vals[j]/(sqrtf(s2_vals[j])+eps); // update
                   s1_vals[j] *= s1_vals[j]; // update l2 norm (update*update)
                   break;
+              case ADEMAMIX:
+                  break;
           }
       }
 
