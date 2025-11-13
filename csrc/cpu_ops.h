@@ -327,5 +327,6 @@ bool has_avx512bf16() {
     return supported_avx512bf16;
 }
 #endif
+#endif
 
 #endif
