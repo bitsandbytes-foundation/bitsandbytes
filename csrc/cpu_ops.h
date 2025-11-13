@@ -319,12 +319,12 @@ static inline bool has_avx512bf16() {
     return v;
 }
 #else
-bool has_avx512f() {
+static inline bool has_avx512f() {
     static const bool supported_avx512f = __builtin_cpu_supports("avx512f");
     return supported_avx512f;
 }
 
-bool has_avx512bf16() {
+static inline bool has_avx512bf16() {
     static const bool supported_avx512bf16 = __builtin_cpu_supports("avx512bf16");
     return supported_avx512bf16;
 }
