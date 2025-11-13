@@ -1,5 +1,7 @@
+from collections.abc import Sequence
 import ctypes as ct
 import logging
+from math import prod
 
 import torch
 
@@ -76,11 +78,27 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         torch._check_is_size(blocksize)
         torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
 
-        # Only FP32 has c++ kernrl
+        out = torch.empty_like(A, dtype=dtype)
         if dtype == torch.float32:
-            out = torch.empty_like(A, dtype=dtype)
-
             lib.cdequantize_blockwise_cpu_fp32(
+                get_ptr(code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_longlong(blocksize),
+                ct.c_longlong(A.numel()),
+            )
+        elif dtype == torch.bfloat16:
+            lib.cdequantize_blockwise_cpu_bf16(
+                get_ptr(code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_longlong(blocksize),
+                ct.c_longlong(A.numel()),
+            )
+        elif dtype == torch.float16:
+            lib.cdequantize_blockwise_cpu_fp16(
                 get_ptr(code),
                 get_ptr(A),
                 get_ptr(absmax),
@@ -97,5 +115,105 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             out = (out.view(-1, blocksize) * absmax.view(-1, 1)).to(dtype).reshape(-1)
             out = out[: blocks * blocksize + res]
             out = out.reshape(A.shape)
+
+        return out
+
+    @register_kernel("bitsandbytes::dequantize_4bit", "cpu")
+    def _(
+        A: torch.Tensor,
+        absmax: torch.Tensor,
+        blocksize: int,
+        quant_type: str,
+        shape: Sequence[int],
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        torch._check_is_size(blocksize)
+        torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
+        torch._check(
+            dtype in [torch.bfloat16, torch.float16, torch.float32],
+            lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
+        )
+
+        # Odd shape is not supported by this kernel; fallback to generic implementation
+        if shape[-1] % 2 != 0:
+            from ..default.ops import _dequantize_4bit_impl
+
+            return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
+
+        # Enable non uint8 dtype
+        if A.dtype != torch.uint8:
+            A = A.view(torch.uint8)
+
+        # TODO: support half precision absmax
+        if absmax.dtype != torch.float32:
+            absmax = absmax.float()
+
+        if len(shape) == 1:
+            shape = (1, shape[0])
+
+        m = prod(shape[:-1])
+        n = shape[-1]
+
+        A = A.reshape(m, n // 2)
+        out = torch.empty(shape, dtype=dtype, device=A.device)
+
+        if quant_type == "fp4":
+            if dtype == torch.float32:
+                lib.cdequantize_blockwise_cpu_fp4_fp32(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_longlong(blocksize),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
+                )
+            elif dtype == torch.bfloat16:
+                lib.cdequantize_blockwise_cpu_fp4_bf16(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_longlong(blocksize),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
+                )
+            elif dtype == torch.float16:
+                lib.cdequantize_blockwise_cpu_fp4_fp16(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_longlong(blocksize),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
+                )
+        elif quant_type == "nf4":
+            if dtype == torch.float32:
+                lib.cdequantize_blockwise_cpu_nf4_fp32(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_longlong(blocksize),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
+                )
+            elif dtype == torch.bfloat16:
+                lib.cdequantize_blockwise_cpu_nf4_bf16(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_longlong(blocksize),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
+                )
+            elif dtype == torch.float16:
+                lib.cdequantize_blockwise_cpu_nf4_fp16(
+                    get_ptr(A),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_longlong(blocksize),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
+                )
+        else:
+            raise ValueError
 
         return out

@@ -5,6 +5,12 @@
 
 using namespace BinSearch;
 
+typedef enum DataType_t {
+    General8bit = 0,
+    FP4 = 1,
+    NF4 = 2,
+} DataType_t;
+
 struct quantize_block_args {
     BinAlgo<Scalar, float, Direct2>* bin_searcher;
     float* code;
