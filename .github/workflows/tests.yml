@@ -10,6 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Skip rebuilding the CPU library when installing the wheels.
+  # We build the libraries in separate jobs and upload as artifacts.
+  BNB_SKIP_CMAKE: 1
+
 jobs:
 
   build-cpu:

@@ -163,3 +163,8 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "scipy.stats"
 ignore_missing_imports = true
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.build-args = ["--config", "Release"]
+wheel.cmake = false

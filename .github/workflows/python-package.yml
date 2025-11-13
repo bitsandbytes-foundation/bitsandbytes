@@ -171,6 +171,9 @@ jobs:
           retention-days: 7
 
   build-wheels:
+    env:
+      # Skip rebuilding the CPU library when building the wheels.
+      BNB_SKIP_CMAKE: 1
     needs:
       - build-cpu
       - build-cuda
