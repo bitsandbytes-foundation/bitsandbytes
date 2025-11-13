@@ -4,7 +4,7 @@ import logging
 
 import torch
 
-from bitsandbytes.functional import get_ptr
+from bitsandbytes.functional import get_ptr, has_avx512bf16
 
 from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
@@ -203,8 +203,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
 
         return out
 
-    if hasattr(lib, "gemv_4bit_inference_cpu_nf4_bf16"):
-
+    if has_avx512bf16():
         @register_kernel("bitsandbytes::gemv_4bit", "cpu")
         def _(
             A: torch.Tensor,
@@ -243,9 +242,6 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     ct.c_int64(out_strideM),
                 )
             elif quant_type == "nf4":
-                # print(A)
-                # print(B)
-                # print(absmax)
                 lib.gemv_4bit_inference_cpu_nf4_bf16(
                     ct.c_int64(M),
                     ct.c_int64(N),
