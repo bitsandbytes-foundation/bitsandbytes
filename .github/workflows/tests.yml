@@ -151,7 +151,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install torch==${{ matrix.torch_version }} --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[test]"
+          pip install -e ".[test]" -v
           pip install pytest-cov
 
       # We need to downgrade to numpy<2 for torch<2.4.1 compatibility on Windows
@@ -193,7 +193,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[test]"
+          pip install -e ".[test]" -v
           pip install pytest-cov
 
       - name: Show installed packages
@@ -268,7 +268,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e ".[test]"
+          pip install -e ".[test]" -v
           pip install pytest-cov
 
       - name: Show installed packages
@@ -326,7 +326,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e ".[test]"
+          pip install -e ".[test]" -v
           pip install pytest-cov
 
       - name: Show installed packages
@@ -443,7 +443,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --pre torch~=${{ matrix.torch_version }}.dev0 --index-url ${{ matrix.pypi_index }}
-          pip install -e ".[test]"
+          pip install -e ".[test]" -v
           pip install pytest-cov
       - name: Show installed packages
         run: pip list
