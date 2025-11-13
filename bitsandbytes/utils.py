@@ -3,7 +3,7 @@ import shlex
 import subprocess
 
 import torch
-from collections.abc import Sequence
+
 
 def outlier_hook(module, input):
     assert isinstance(module, torch.nn.Linear)

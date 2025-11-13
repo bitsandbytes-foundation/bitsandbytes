@@ -2243,6 +2243,7 @@ def convert_weight_packed_for_cpu(qweight: torch.Tensor, quant_state: QuantState
     quant_state.dtype = torch.bfloat16
     return final_qweight, quant_state
 
+
 def has_avx512bf16():
     if hasattr(lib, "has_avx512bf16_cpu") and lib.has_avx512bf16_cpu():
         return True

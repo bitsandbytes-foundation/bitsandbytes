@@ -204,6 +204,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         return out
 
     if has_avx512bf16():
+
         @register_kernel("bitsandbytes::gemv_4bit", "cpu")
         def _(
             A: torch.Tensor,

@@ -1,7 +1,6 @@
 import subprocess
 
 from packaging import version
-from collections.abc import Sequence
 import torch
 
 try:
