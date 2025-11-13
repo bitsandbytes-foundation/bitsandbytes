@@ -2613,7 +2613,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
   // per threadblock:
   // load step-by-step in chunks of [BNB_WARP_SIZE,warps]: 1xBNB_WARP_SIZE * [BNB_WARP_SIZE,warps] -> [1,warps]
   // 4 warps -> 4 loads per iter
-  // 1xBNB_WARP_SIZE * BNB_WARP_SIZEx4 -> 1x4 outputs per thread block
+  // 1 x BNB_WARP_SIZE * BNB_WARP_SIZE x 4 -> 1x4 outputs per thread block
   typedef hipcub::WarpReduce<float, BNB_WARP_SIZE> WarpReduce;
   __shared__ typename WarpReduce::TempStorage temp_storage[THREADS/BNB_WARP_SIZE];
 
