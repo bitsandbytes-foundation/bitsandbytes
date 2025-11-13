@@ -12,11 +12,9 @@ import torch.nn.functional as F
 
 import bitsandbytes as bnb
 from bitsandbytes.cextension import HIP_ENVIRONMENT
-from bitsandbytes.functional import QuantState, convert_weight_packed_for_cpu
+from bitsandbytes.functional import QuantState, convert_weight_packed_for_cpu, has_avx512bf16
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
-
-from ..cextension import ErrorHandlerMockBNBNativeLibrary, lib
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -521,8 +519,7 @@ class Linear4bit(nn.Linear):
         if (
             not self.enable_optimized_cpu
             and x.device.type == "cpu"
-            and not isinstance(lib, ErrorHandlerMockBNBNativeLibrary)
-            and hasattr(lib, "gemv_4bit_inference_cpu_nf4_bf16")
+            and has_avx512bf16()
             and not self.training
             and x.requires_grad == False
         ):

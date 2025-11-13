@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import HIP_ENVIRONMENT, lib
+from .cextension import HIP_ENVIRONMENT, lib, ErrorHandlerMockBNBNativeLibrary
 
 name2qmap = {}
 
@@ -2242,6 +2242,14 @@ def convert_weight_packed_for_cpu(qweight: torch.Tensor, quant_state: QuantState
 
     quant_state.dtype = torch.bfloat16
     return final_qweight, quant_state
+
+def has_avx512bf16():
+    if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary)
+        and hasattr(lib, "has_avx512bf16_cpu")
+        and lib.has_avx512bf16_cpu():
+        return True
+
+    return False
 
 
 C = 127.0

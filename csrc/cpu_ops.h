@@ -293,4 +293,39 @@ void dequantizeBlockwise4bitCpu(unsigned char* A, const float* absmax, T* out, l
     void gemv_4bit_inference(int64_t M, int64_t N, int64_t K, const T* __restrict__ x, const unsigned char* __restrict__ w, const T* __restrict__ absmax, T* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
 #endif
 
+#if defined(__AVX512F__)
+#include <immintrin.h>
+
+#ifdef _MSC_VER
+#include <intrin.h>
+
+static inline bool has_avx512f() {
+    static bool v = [] {
+        int info[4];
+        __cpuidex(info, 7, 0);
+        return (info[1] & (1 << 16)) != 0; // EBX bit16 AVX512F
+    }();
+    return v;
+}
+
+static inline bool has_avx512bf16() {
+    static bool v = [] {
+        int info[4];
+        __cpuidex(info, 7, 1);
+        return (info[0] & (1 << 5)) != 0; // EAX bit5 AVX512_BF16
+    }();
+    return v;
+}
+#else
+bool has_avx512f() {
+    static const bool supported_avx512f = __builtin_cpu_supports("avx512f");
+    return supported_avx512f;
+}
+
+bool has_avx512bf16() {
+    static const bool supported_avx512bf16 = __builtin_cpu_supports("avx512bf16");
+    return supported_avx512bf16;
+}
+#endif
+
 #endif

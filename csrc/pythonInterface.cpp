@@ -891,22 +891,6 @@ void cdequantize_blockwise_cpu_nf4_fp16(
 }
 
 #if defined(__AVX512F__) && defined(__AVX512BF16__)
-// void gemv_4bit_inference_cpu_fp4_fp32(
-//     int64_t M, int64_t N, int64_t K,
-//     const float* __restrict__ x, const unsigned char* __restrict__ w,
-//     const float* __restrict__ absmax, float* __restrict__ out,
-//     int64_t blocksize, int64_t x_stride, int64_t out_stride
-// ) {
-//     gemv_4bit_inference<float, FP4>(M, N, K, x, w, absmax, out, blocksize, x_stride, out_stride);
-// }
-// void gemv_4bit_inference_cpu_fp4_fp16(
-//     int64_t M, int64_t N, int64_t K,
-//     const fp16_t* __restrict__ x, const unsigned char* __restrict__ w,
-//     const fp16_t* __restrict__ absmax, fp16_t* __restrict__ out,
-//     int64_t blocksize, int64_t x_stride, int64_t out_stride
-// ) {
-//     gemv_4bit_inference<fp16_t, FP4>(M, N, K, x, w, absmax, out, blocksize, x_stride, out_stride);
-// }
 void gemv_4bit_inference_cpu_fp4_bf16(
     int64_t M, int64_t N, int64_t K,
     const bf16_t* __restrict__ x, const unsigned char* __restrict__ w,
@@ -915,23 +899,6 @@ void gemv_4bit_inference_cpu_fp4_bf16(
 ) {
     gemv_4bit_inference<bf16_t, FP4>(M, N, K, x, w, absmax, out, blocksize, x_stride, out_stride);
 }
-
-// void gemv_4bit_inference_cpu_nf4_fp32(
-//     int64_t M, int64_t N, int64_t K,
-//     const float* __restrict__ x, const unsigned char* __restrict__ w,
-//     const float* __restrict__ absmax, float* __restrict__ out,
-//     int64_t blocksize, int64_t x_stride, int64_t out_stride
-// ) {
-//     gemv_4bit_inference<float, NF4>(M, N, K, x, w, absmax, out, blocksize, x_stride, out_stride);
-// }
-// void gemv_4bit_inference_cpu_nf4_fp16(
-//     int64_t M, int64_t N, int64_t K,
-//     const fp16_t* __restrict__ x, const unsigned char* __restrict__ w,
-//     const fp16_t* __restrict__ absmax, fp16_t* __restrict__ out,
-//     int64_t blocksize, int64_t x_stride, int64_t out_stride
-// ) {
-//     gemv_4bit_inference<fp16_t, NF4>(M, N, K, x, w, absmax, out, blocksize, x_stride, out_stride);
-// }
 void gemv_4bit_inference_cpu_nf4_bf16(
     int64_t M, int64_t N, int64_t K,
     const bf16_t* __restrict__ x, const unsigned char* __restrict__ w,
@@ -940,5 +907,9 @@ void gemv_4bit_inference_cpu_nf4_bf16(
 ) {
     gemv_4bit_inference<bf16_t, NF4>(M, N, K, x, w, absmax, out, blocksize, x_stride, out_stride);
 }
+#endif
+#if defined(__AVX512F__)
+bool has_avx512f_cpu() return has_avx512f()
+bool has_avx512bf16_cpu() return has_avx512bf16()
 #endif
 }
