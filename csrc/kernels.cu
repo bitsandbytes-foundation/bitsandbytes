@@ -558,7 +558,7 @@ __launch_bounds__(BLOCK_SIZE / NUM_VALS, 1) __global__ void kPreconditionOptimiz
                 s1_vals[j] *= s1_vals[j];                            // update l2 norm (update*update)
                 break;
             case ADEMAMIX:
-                break;     
+                break;
             }
         }
 
