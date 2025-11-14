@@ -283,14 +283,6 @@ void dequantizeBlockwise4bitCpu(
     unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n
 );
 
-#if defined(__AVX512F__) && defined(__AVX512BF16__)
-template <typename T, int DATA_TYPE>
-void gemv_4bit_inference(
-    int64_t M, int64_t N, int64_t K, const T* __restrict__ x, const unsigned char* __restrict__ w,
-    const T* __restrict__ absmax, T* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride
-);
-#endif
-
 #if defined(__AVX512F__)
 #include <immintrin.h>
 
@@ -325,6 +317,14 @@ static inline bool has_avx512bf16() {
     return supported_avx512bf16;
 }
 #endif
+#endif
+
+#if defined(__AVX512F__) && defined(__AVX512BF16__)
+template <typename T, int DATA_TYPE>
+void gemv_4bit_inference(
+    int64_t M, int64_t N, int64_t K, const T* __restrict__ x, const unsigned char* __restrict__ w,
+    const T* __restrict__ absmax, T* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride
+);
 #endif
 
 #endif

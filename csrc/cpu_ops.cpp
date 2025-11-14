@@ -1,5 +1,4 @@
 #include <BinSearch.h>
-#include <common.h>
 #include <cpu_ops.h>
 #include <thread>
 
@@ -529,19 +528,7 @@ template void dequantizeBlockwise4bitCpu<bf16_t, NF4>(
     unsigned char* A, const float* absmax, bf16_t* out, long long blocksize, long long m, long long n
 );
 
-// template void gemv_4bit_inference<float, FP4>(
-//     int64_t M, int64_t N, int64_t K, const float* __restrict__ x, const unsigned char* __restrict__ w, const float*
-//     __restrict__ absmax, float* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
-// template void gemv_4bit_inference<float, NF4>(
-//     int64_t M, int64_t N, int64_t K, const float* __restrict__ x, const unsigned char* __restrict__ w, const float*
-//     __restrict__ absmax, float* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
-//
-// template void gemv_4bit_inference<fp16_t, FP4>(
-//     int64_t M, int64_t N, int64_t K, const fp16_t* __restrict__ x, const unsigned char* __restrict__ w, const float*
-//     __restrict__ absmax, fp16_t* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
-// template void gemv_4bit_inference<fp16_t, NF4>(
-//     int64_t M, int64_t N, int64_t K, const fp16_t* __restrict__ x, const unsigned char* __restrict__ w, const float*
-//     __restrict__ absmax, fp16_t* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride);
+#if defined(__AVX512F__) && defined(__AVX512BF16__)
 template void gemv_4bit_inference<bf16_t, FP4>(
     int64_t M, int64_t N, int64_t K, const bf16_t* __restrict__ x, const unsigned char* __restrict__ w,
     const bf16_t* __restrict__ absmax, bf16_t* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride
@@ -550,3 +537,4 @@ template void gemv_4bit_inference<bf16_t, NF4>(
     int64_t M, int64_t N, int64_t K, const bf16_t* __restrict__ x, const unsigned char* __restrict__ w,
     const bf16_t* __restrict__ absmax, bf16_t* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride
 );
+#endif
