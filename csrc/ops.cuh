@@ -11,6 +11,7 @@
 #include <iostream>
 #include <stdio.h>
 
+#include <common.h>
 #include <cublasLt.h>
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
@@ -68,20 +69,6 @@ typedef enum Optimizer_t {
     LION = 5,
     ADEMAMIX = 6
 } Optimizer_t;
-
-typedef enum Transform_t {
-    ROW = 0,
-    COL = 1,
-    COL32 = 2,
-    COL_TURING = 3,
-    COL_AMPERE = 4,
-} Transform_t;
-
-typedef enum DataType_t {
-    General8bit = 0,
-    FP4 = 1,
-    NF4 = 2,
-} DataType_t;
 
 typedef enum Funcs_t {
     FILL = 0,
@@ -177,7 +164,6 @@ void cutlass_igemm(
 void dequant_mm_int32_fp16(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, cudaStream_t stream
 );
-void getRowStats(half* A, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream);
 void int8VectorQuant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream
 );

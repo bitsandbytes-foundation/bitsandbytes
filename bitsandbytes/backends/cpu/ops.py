@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 import ctypes as ct
 import logging
+from math import prod
 
 import torch
 
@@ -132,6 +133,13 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             dtype in [torch.bfloat16, torch.float16, torch.float32],
             lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
         )
+
+        # Odd shape is not supported by this kernel; fallback to generic implementation
+        if shape[-1] % 2 != 0:
+            from ..default.ops import _dequantize_4bit_impl
+
+            return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
+
         # Enable non uint8 dtype
         if A.dtype != torch.uint8:
             A = A.view(torch.uint8)
@@ -140,8 +148,15 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-        A = A.reshape(shape[0], shape[1] // 2)
+        if len(shape) == 1:
+            shape = (1, shape[0])
+
+        m = prod(shape[:-1])
+        n = shape[-1]
+
+        A = A.reshape(m, n // 2)
         out = torch.empty(shape, dtype=dtype, device=A.device)
+
         if quant_type == "fp4":
             if dtype == torch.float32:
                 lib.cdequantize_blockwise_cpu_fp4_fp32(
@@ -149,8 +164,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     get_ptr(absmax),
                     get_ptr(out),
                     ct.c_longlong(blocksize),
-                    ct.c_longlong(shape[0]),
-                    ct.c_longlong(shape[1]),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
                 )
             elif dtype == torch.bfloat16:
                 lib.cdequantize_blockwise_cpu_fp4_bf16(
@@ -158,8 +173,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     get_ptr(absmax),
                     get_ptr(out),
                     ct.c_longlong(blocksize),
-                    ct.c_longlong(shape[0]),
-                    ct.c_longlong(shape[1]),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
                 )
             elif dtype == torch.float16:
                 lib.cdequantize_blockwise_cpu_fp4_fp16(
@@ -167,8 +182,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     get_ptr(absmax),
                     get_ptr(out),
                     ct.c_longlong(blocksize),
-                    ct.c_longlong(shape[0]),
-                    ct.c_longlong(shape[1]),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
                 )
         elif quant_type == "nf4":
             if dtype == torch.float32:
@@ -177,8 +192,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     get_ptr(absmax),
                     get_ptr(out),
                     ct.c_longlong(blocksize),
-                    ct.c_longlong(shape[0]),
-                    ct.c_longlong(shape[1]),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
                 )
             elif dtype == torch.bfloat16:
                 lib.cdequantize_blockwise_cpu_nf4_bf16(
@@ -186,8 +201,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     get_ptr(absmax),
                     get_ptr(out),
                     ct.c_longlong(blocksize),
-                    ct.c_longlong(shape[0]),
-                    ct.c_longlong(shape[1]),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
                 )
             elif dtype == torch.float16:
                 lib.cdequantize_blockwise_cpu_nf4_fp16(
@@ -195,8 +210,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     get_ptr(absmax),
                     get_ptr(out),
                     ct.c_longlong(blocksize),
-                    ct.c_longlong(shape[0]),
-                    ct.c_longlong(shape[1]),
+                    ct.c_longlong(m),
+                    ct.c_longlong(n),
                 )
         else:
             raise ValueError

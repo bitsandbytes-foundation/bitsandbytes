@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import HIP_ENVIRONMENT, lib
+from .cextension import ROCM_WARP_SIZE_64, lib
 
 name2qmap = {}
 
@@ -806,7 +806,7 @@ def quantize_fp4(
     quant_storage=torch.uint8,
 ):
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "fp4", quant_storage)
 
 
@@ -819,7 +819,7 @@ def quantize_nf4(
     quant_storage=torch.uint8,
 ):
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "nf4", quant_storage)
 
 
@@ -857,7 +857,7 @@ def quantize_4bit(
     """
 
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
 
     input_shape = A.shape
 
@@ -912,7 +912,7 @@ def dequantize_fp4(
     blocksize: Optional[int] = None,
 ) -> torch.Tensor:
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -924,7 +924,7 @@ def dequantize_nf4(
     blocksize: Optional[int] = None,
 ) -> torch.Tensor:
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 
@@ -964,7 +964,7 @@ def dequantize_4bit(
     """
 
     if blocksize is None:
-        blocksize = 64 if not HIP_ENVIRONMENT else 128
+        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
 
     if quant_state is None:
         assert absmax is not None and out is not None
@@ -1793,102 +1793,6 @@ def int8_mm_dequant(
         return out.copy_(result)
 
     return result
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def get_colrow_absmax(
-    A: torch.Tensor,
-    row_stats: Optional[torch.Tensor] = None,
-    col_stats: Optional[torch.Tensor] = None,
-    nnz_block_ptr: Optional[torch.Tensor] = None,
-    threshold=0.0,
-) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-    """ "Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
-
-    The row-wise and column-wise absmax values are determined.
-
-    For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
-
-    <Tip>
-    This function is useful for training, but for inference it is advised to use [`get_row_absmax`] instead.
-    The column-wise quantization scales are not typically needed in inference scenarios.
-    </Tip>
-
-    Args:
-        A (`torch.Tensor` with dtype `torch.float16`): Input tensor.
-        row_stats (`torch.Tensor`, *optional*): If provided, calculation of row statistics is skipped.
-        col_stats (`torch.Tensor`, *optional*): If provided, calculation of column statistics is skipped.
-        nnz_block_ptr (`torch.Tensor`, *optional*): Not used.
-        threshold (`float`, *optional*):
-            An optional threshold for sparse decomposition of outlier features.
-            No outliers are held back when 0.0. Defaults to 0.0.
-
-    Returns:
-        `Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]`: A tuple containing quantization statistics.
-        - `torch.Tensor` with dtype `torch.float32`: The row-wise quantization statistics.
-        - `torch.Tensor` with dtype `torch.float32`: The column-wise quantization statistics.
-        - `torch.Tensor` with dtype `torch.bool`, *optional*: A mask indicating the locations of outliers in the input tensor.
-    """
-    assert A.is_floating_point()
-
-    outlier_mask = None
-
-    if row_stats is None or col_stats is None:
-        absA = A.abs().view(-1, A.shape[-1])
-
-        if threshold > 0.0:
-            # Filter outliers from stats when enabled
-            outlier_mask = absA >= threshold
-            absA.masked_fill_(outlier_mask, 0.0)
-
-        if row_stats is None:
-            # shape [rows]; unsqueeze(-1) gives [rows,1]
-            # We have a CUDA kernel for row max, but not yet for cols.
-            row_stats = get_row_absmax(A, threshold)
-
-        if col_stats is None:
-            # shape [cols]; unsqueeze(0) gives [1,cols]
-            col_stats = absA.amax(dim=0, keepdim=False).float()
-
-    return row_stats, col_stats, outlier_mask
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def get_row_absmax(A: torch.Tensor, threshold=0.0):
-    """Determine the quantization statistics for input matrix `A` in accordance to the `LLM.int8()` algorithm.
-
-    For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
-
-    Args:
-        A (`torch.Tensor` with dtype `torch.float16`): The input matrix.
-        threshold (`float`, *optional*):
-            An optional threshold for sparse decomposition of outlier features.
-            No outliers are held back when 0.0. Defaults to 0.0.
-
-    Returns:
-        `torch.Tensor` with dtype `torch.float32`: The absolute maximum value for each row, with outliers ignored.
-    """
-
-    assert A.dtype == torch.float16
-
-    rows = prod(A.shape[:-1])
-    cols = A.shape[-1]
-
-    row_stats = torch.empty((rows,), dtype=torch.float32, device=A.device)
-
-    is_on_gpu([A])
-
-    with _cuda_device_of(A):
-        lib.cget_row_stats(
-            get_ptr(A),
-            get_ptr(row_stats),
-            ct.c_float(threshold),
-            ct.c_int32(rows),
-            ct.c_int32(cols),
-            _get_tensor_stream(A),
-        )
-
-    return row_stats
 
 
 class COOSparseTensor:

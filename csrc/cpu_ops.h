@@ -7,6 +7,7 @@
 #include <cstring>
 #include <thread>
 #include <type_traits>
+#include <common.h>
 
 #if defined(_OPENMP)
 #include <omp.h>
@@ -119,11 +120,6 @@ template <typename func_t> inline void parallel_2d(int m, int n, const func_t& f
 }
 
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n);
-
-typedef enum DataType_t {
-    NF4 = 0,
-    FP4 = 1,
-} DataType_t;
 
 struct fp16_t {
     uint16_t v;
