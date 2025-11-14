@@ -18,7 +18,7 @@ if [ "${build_os:0:6}" == ubuntu ]; then
     docker run --rm --platform "linux/$build_arch" -i \
         -w /src -v "$PWD:/src" "$image" sh -c \
         "apt-get update \
-      && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
+      && pip install cmake==3.31.6 \
       && cmake -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH=\"${bnb_rocm_arch}\" . \
       && cmake --build ."
 fi
