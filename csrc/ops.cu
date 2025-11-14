@@ -5,7 +5,6 @@
 
 #include <BinSearch.h>
 #include <cassert>
-#include <common.h>
 #include <cub/device/device_scan.cuh>
 #include <kernels.cuh>
 #include <limits>

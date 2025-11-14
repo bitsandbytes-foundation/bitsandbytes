@@ -2,6 +2,7 @@
 #define xpu_ops_H
 
 #include <assert.h>
+#include <common.h>
 #include <cstdint>
 #include <iostream>
 #include <stdio.h>
@@ -26,12 +27,6 @@ static inline void sycl_comp_kernel_submit(sycl::nd_range<dim> range, sycl::queu
     };
     q.submit(cgf);
 }
-
-typedef enum DataType_t {
-    General8bit = 0,
-    FP4 = 1,
-    NF4 = 2,
-} DataType_t;
 
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(

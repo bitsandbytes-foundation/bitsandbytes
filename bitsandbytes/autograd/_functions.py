@@ -374,6 +374,9 @@ def matmul_4bit(
     bias: Optional[torch.Tensor] = None,
 ):
     assert quant_state is not None
+    # Change dtype to bfloat16 on CPU
+    if A.device.type == "cpu":
+        quant_state.dtype = A.dtype
 
     if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "hpu" and A.device.type != "npu":
         if A.shape[-1] % quant_state.blocksize != 0:

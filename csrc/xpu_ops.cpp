@@ -1,4 +1,3 @@
-#include <common.h>
 #include <xpu_kernels.h>
 #include <xpu_ops.h>
 

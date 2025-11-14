@@ -95,7 +95,7 @@ def test_moe_parameter_shape(device, dtype):
     if device == "hpu" and not is_supported_on_hpu("nf4", dtype):
         pytest.skip("This configuration is not supported on HPU.")
 
-    param_shape = (8, 64, 32)
+    param_shape = (8, 64, 64)
 
     # Create module with custom parameter shape directly on target device
     class MoEModule(nn.Module):
@@ -364,7 +364,7 @@ def test_parametrization_forward_method():
     device = "cpu"
 
     # Create test tensor and manually quantize it
-    original_tensor = torch.randn(64, 32, dtype=torch.float32, device=device)
+    original_tensor = torch.randn(64, 64, dtype=torch.float32, device=device)
     quantized_data, quant_state = F.quantize_4bit(original_tensor, quant_type="nf4")
 
     # Create parametrization instance

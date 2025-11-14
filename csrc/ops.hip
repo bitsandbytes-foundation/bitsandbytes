@@ -5,6 +5,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <common_hip.cuh>
 #include <ops_hip.cuh>
 #include <kernels_hip.cuh>
 #include <hipcub/hipcub.hpp>
@@ -19,12 +20,6 @@
 #include <common.h>
 
 #define ERR_NOT_IMPLEMENTED 100
-
-#if defined(__GFX9__)
-  #define WARP_SIZE 64
-#else
-  #define WARP_SIZE 32
-#endif
 
 using namespace BinSearch;
 using std::cout;
@@ -63,8 +58,8 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
    hipLaunchKernelGGL(( kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(128), 0, 0, code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 128)
    hipLaunchKernelGGL(( kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(64), 0, 0, code, A, absmax, out, rand, rand_offset, n);
-  //else if(blocksize == 64)
-  // hipLaunchKernelGGL(( kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(32), 0, 0, code, A, absmax, out, rand, rand_offset, n);
+  else if(blocksize == 64 && BNB_WARP_SIZE == 32)
+   hipLaunchKernelGGL(( kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(32), 0, 0, code, A, absmax, out, rand, rand_offset, n);
 
 
   CUDA_CHECK_RETURN(hipPeekAtLastError());
@@ -621,7 +616,7 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
 	//warpsize - 32
         int num_blocks = (m+3)/4;
 	//warpsize - 64
-        if (WARP_SIZE == 64) {
+        if (BNB_WARP_SIZE == 64) {
           num_blocks = (m+1)/2;
         }
 
