@@ -1767,15 +1767,7 @@ template <typename T, int THREADS, int SPARSE_DECOMP>
 __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     void kInt8VectorQuant(T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols) {
 
-    // For sm50/sm52 and CUDA < 12.2 we need to do the reduction in fp32.
-    // Otherwise `T` is `fp16`. This can be removed when Maxwell is dropped.
-#if (__CUDACC_VER_MAJOR__ >= 12 && __CUDACC_VER_MINOR >= 2) || BNB_FP16_AVAILABLE
-    using TReduction = T;
-#else
-    using TReduction = float;
-#endif
-
-    using BlockReduceT = cub::BlockReduce<TReduction, THREADS>;
+    using BlockReduceT = cub::BlockReduce<T, THREADS>;
 
     // One block per row.
     // Threads load column values in a striped arrangement.
@@ -1785,27 +1777,27 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     // We then do a blockwise reduction to determine the row's absmax.
 
     __shared__ typename BlockReduceT::TempStorage temp_storage;
-    __shared__ TReduction smem_row_absmax;
+    __shared__ T smem_row_absmax;
 
     const int row_id = blockIdx.x;
     const T* row_data = A + (row_id * cols);
 
     // Threads will read the row values in a striped access pattern and find a local absmax.
-    TReduction row_local_absmax = -FLT_MIN;
+    T row_local_absmax = -FLT_MIN;
     for (int i = threadIdx.x; i < cols; i += THREADS) {
-        const TReduction absval = fabsf(__ldcs(&(row_data[i])));
+        const T absval = fabsf(__ldcs(&(row_data[i])));
 
         // For sparse decomposition, values outside of the threshold are not to be
         // included when calculating the row's absmax.
         if constexpr (SPARSE_DECOMP) {
-            row_local_absmax = fmaxf(row_local_absmax, absval < TReduction(threshold) ? absval : row_local_absmax);
+            row_local_absmax = fmaxf(row_local_absmax, absval < T(threshold) ? absval : row_local_absmax);
         } else {
             row_local_absmax = fmaxf(row_local_absmax, absval);
         }
     }
 
     // Reduce thread-local absmax across the block.
-    const TReduction row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, CUB_REDUCTIONOP_MAX, cols);
+    const T row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, CUB_REDUCTIONOP_MAX, cols);
     if (threadIdx.x == 0) {
         // Save our block's absmax to shared memory for the quantization step.
         rowStats[row_id] = smem_row_absmax = row_absmax;

@@ -40,12 +40,6 @@ The library can be built using CUDA Toolkit versions as old as **11.8**.
 | NF4/FP4 quantization            | 6.0+            | Pascal (GTX 10X0 series, P100) or newer GPUs|
 
 
-> [!WARNING]
-> Support for Maxwell GPUs is deprecated and will be removed in a future release.
-> Maxwell support is not included in PyPI distributions from `v0.48.0` on and must be built from source.
-> For the best results, a Turing generation device or newer is recommended.
-
-
 ### Installation via PyPI[[cuda-pip]]
 
 This is the most straightforward and recommended installation option.
@@ -81,7 +75,7 @@ For Linux and Windows systems, compiling from source allows you to customize the
 <hfoptions id="source">
 <hfoption id="Linux">
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.). It is recommended to use GCC 9 or newer.
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.10** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.). It is recommended to use GCC 11 or newer.
 
 For example, to install a compiler and CMake on Ubuntu:
 
@@ -133,7 +127,7 @@ The currently distributed `bitsandbytes` packages are built with the following c
 | **OS**             | **oneAPI Toolkit** | **Kernel Implementation** |
 |--------------------|------------------|----------------------|
 | **Linux x86-64**   | 2025.1.3         | SYCL + Triton        |
-| **Windows x86-64** | N/A              | SYCL |
+| **Windows x86-64** | 2025.1.3         | SYCL + Triton        |
 
 The Linux build has a minimum glibc version of 2.34.
 
@@ -197,12 +191,12 @@ pip install -e .
 The currently distributed preview `bitsandbytes` are built with the following configurations:
 
 | **OS**             | **ROCm** | **Targets**
-|--------------------|----------|---------------------------|
-| **Linux x86-64**   | 6.1.2    | gfx90a / gfx942 / gfx1100
-| **Linux x86-64**   | 6.2.4    | gfx90a / gfx942 / gfx1100
-| **Linux x86-64**   | 6.3.4    | gfx90a / gfx942 / gfx1100
-| **Linux x86-64**   | 6.4.4    | gfx90a / gfx942 / gfx1100
-| **Linux x86-64**   | 7.0.0    | gfx90a / gfx942 / gfx1100
+|--------------------|----------|---------------------------------------------------------------------|
+| **Linux x86-64**   | 6.2.4    | CDNA: gfx90a, gfx942 / RDNA: gfx1100, gfx1101
+| **Linux x86-64**   | 6.3.4    | CDNA: gfx90a, gfx942 / RDNA: gfx1100, gfx1101
+| **Linux x86-64**   | 6.4.4    | CDNA: gfx90a, gfx942 / RDNA: gfx1100, gfx1101, gfx1200, gfx1201
+| **Linux x86-64**   | 7.0.2    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100 / gfx1101 / gfx1200 / gfx1201
+| **Linux x86-64**   | 7.1.0    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100 / gfx1101 / gfx1200 / gfx1201
 
 **Windows is not currently supported.**
 
