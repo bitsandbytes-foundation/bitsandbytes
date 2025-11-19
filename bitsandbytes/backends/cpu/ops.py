@@ -236,6 +236,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             if dtype != torch.bfloat16:
                 A = A.to(torch.bfloat16)
 
+            final_out_shape = (*A.shape[:-1], shapeB[0])
             A = A.reshape(-1, A.shape[-1])
             out_shape = (*A.shape[:-1], shapeB[0])
             out = torch.empty(out_shape, dtype=A.dtype, device=A.device)
@@ -274,4 +275,4 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             if dtype != torch.bfloat16:
                 out = out.to(dtype)
 
-            return out
+            return out.reshape(final_out_shape)
