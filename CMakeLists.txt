@@ -78,8 +78,16 @@ else()
     set(BUILD_HIP OFF)
     set(BUILD_MPS OFF)
     set(BUILD_XPU OFF)
+    set(BUILD_CPU ON)
 endif()
 
+
+if (BUILD_CPU)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" HOST_ARCH)
+    find_package(OpenMP)
+endif()
 
 if(BUILD_CUDA)
     # NVCC normally will only work with MSVC up to 1939. VS2022 17.10+ starts using versions 1940+.
@@ -261,6 +269,34 @@ set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
 target_compile_features(bitsandbytes PUBLIC cxx_std_17)
 target_include_directories(bitsandbytes PUBLIC csrc include)
+
+if (BUILD_CPU)
+    if (OpenMP_CXX_FOUND)
+        target_link_libraries(bitsandbytes PRIVATE OpenMP::OpenMP_CXX)
+        add_definitions(-DHAS_OPENMP)
+    endif()
+
+    if ((HOST_ARCH MATCHES "x86_64|amd64") AND (NOT MSVC))
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag(-mavx512f HAS_AVX512F_FLAG)
+        check_cxx_compiler_flag(-mavx512bf16 HAS_AVX512BF16_FLAG)
+        if (HAS_AVX512F_FLAG)
+            target_compile_options(bitsandbytes PRIVATE -mavx512f)
+        endif()
+        if (HAS_AVX512BF16_FLAG)
+            target_compile_options(bitsandbytes PRIVATE -mavx512bf16)
+        endif()
+        target_compile_options(
+            bitsandbytes PRIVATE
+            -mprefer-vector-width=256
+            -mfma
+            -mavx2
+            -mlzcnt
+            -mbmi
+            -mbmi2
+        )
+    endif()
+endif()
 
 
 if(BUILD_CUDA)

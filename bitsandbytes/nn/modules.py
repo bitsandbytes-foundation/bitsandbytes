@@ -11,7 +11,7 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.cextension import HIP_ENVIRONMENT
+from bitsandbytes.cextension import ROCM_WARP_SIZE_64
 from bitsandbytes.functional import QuantState
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
@@ -221,7 +221,7 @@ class Params4bit(torch.nn.Parameter):
             data = torch.empty(0)
 
         if blocksize is None:
-            blocksize = 64 if not HIP_ENVIRONMENT else 128
+            blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
 
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
         self.blocksize = blocksize
@@ -310,28 +310,28 @@ class Params4bit(torch.nn.Parameter):
     def cpu(self):
         return self.to(device="cpu")
 
-    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
 
-    def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def xpu(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     @overload
     def to(
         self: T,
-        device: Optional[Union[int, device]] = ...,
-        dtype: Optional[Union[dtype, str]] = ...,
+        device: Optional[int | device] = ...,
+        dtype: Optional[dtype | str] = ...,
         non_blocking: bool = ...,
     ) -> T: ...
 
     @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T: ...
+    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
 
     @overload
     def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
 
     def to(self, *args, **kwargs):
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
 
         if device is not None and device.type != "meta" and not self.bnb_quantized:
             return self._quantize(device)
@@ -644,10 +644,10 @@ class Int8Params(torch.nn.Parameter):
     def cpu(self):
         return self.to(device="cpu")
 
-    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
 
-    def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def xpu(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     def __deepcopy__(self, memo):
@@ -665,19 +665,19 @@ class Int8Params(torch.nn.Parameter):
     @overload
     def to(
         self: T,
-        device: Optional[Union[int, device]] = ...,
-        dtype: Optional[Union[dtype, str]] = ...,
+        device: Optional[int | device] = ...,
+        dtype: Optional[dtype | str] = ...,
         non_blocking: bool = ...,
     ) -> T: ...
 
     @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T: ...
+    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
 
     @overload
     def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
 
     def to(self, *args, **kwargs):
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
 
         is_quantized = self.data.dtype == torch.int8
 
@@ -697,7 +697,7 @@ class Int8Params(torch.nn.Parameter):
         if is_quantized:
             new_param.CB = new_param.data
 
-            if self.SCB is not None and device is not None:
+            if device is not None and self.SCB is not None and self.SCB.device.type != "meta":
                 new_param.SCB = self.SCB.to(device)
 
         return new_param
@@ -1048,7 +1048,7 @@ class Linear8bitLt(nn.Linear):
         # Call the parent to() method to handle standard parameter/buffer movement
         result = super().to(*args, **kwargs)
 
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
 
         # Handle state tensors if needed.
         if device is not None:

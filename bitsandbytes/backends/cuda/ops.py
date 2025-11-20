@@ -8,7 +8,7 @@ import torch
 from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, _get_tensor_stream, get_ptr
 
 from ..._ops import register_kernel
-from ...cextension import HIP_ENVIRONMENT, lib
+from ...cextension import ROCM_WARP_SIZE_64, lib
 
 
 @register_kernel("bitsandbytes::int8_linear_matmul", "cuda")
@@ -211,7 +211,7 @@ def _get_col_absmax(
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
 
-    if HIP_ENVIRONMENT:
+    if ROCM_WARP_SIZE_64:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
     else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
@@ -269,7 +269,7 @@ def _(
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
-    if HIP_ENVIRONMENT:
+    if ROCM_WARP_SIZE_64:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
     else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
@@ -303,7 +303,7 @@ def _dequantize_blockwise_impl(
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    if HIP_ENVIRONMENT:
+    if ROCM_WARP_SIZE_64:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
     else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
@@ -326,7 +326,7 @@ def _(
             get_ptr(absmax),
             get_ptr(out),
             ct.c_int32(blocksize),
-            ct.c_int(n),
+            ct.c_int32(n),
         )
 
         if A.dtype == torch.bfloat16:
@@ -385,7 +385,7 @@ def _dequantize_4bit_impl(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-    if HIP_ENVIRONMENT:
+    if ROCM_WARP_SIZE_64:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
     else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
@@ -403,7 +403,7 @@ def _dequantize_4bit_impl(
             get_ptr(absmax),
             get_ptr(out),
             ct.c_int(blocksize),
-            ct.c_int(out.numel()),
+            ct.c_int32(out.numel()),
             _get_tensor_stream(A),
         )
 

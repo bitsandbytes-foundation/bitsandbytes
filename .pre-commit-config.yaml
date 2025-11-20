@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.2
+    rev: v0.14.3
     hooks:
       - id: ruff
         args:
@@ -17,6 +17,7 @@ repos:
       - id: mixed-line-ending
         args:
           - --fix=lf
+        exclude: '\.bat$'
   - repo: https://github.com/crate-ci/typos
     rev: v1.26.0
     hooks:

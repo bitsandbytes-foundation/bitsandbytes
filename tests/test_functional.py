@@ -10,7 +10,7 @@ import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
-from bitsandbytes.cextension import HIP_ENVIRONMENT
+from bitsandbytes.cextension import HIP_ENVIRONMENT, ROCM_WARP_SIZE_64
 from tests.helpers import (
     BOOLEAN_TUPLES,
     TRUE_FALSE,
@@ -96,7 +96,7 @@ class Test8BitBlockwiseQuantizeFunctional:
     @pytest.mark.parametrize("nested", TRUE_FALSE, ids=id_formatter("nested"))
     @pytest.mark.parametrize(
         "blocksize",
-        [4096, 2048, 1024, 512, 256, 128, 64] if not HIP_ENVIRONMENT else [4096, 2048, 1024, 512, 256, 128],
+        [4096, 2048, 1024, 512, 256, 128, 64] if not ROCM_WARP_SIZE_64 else [4096, 2048, 1024, 512, 256, 128],
     )
     @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
     def test_dynamic_blockwise_quantization(self, device, dtype, nested, blocksize, signed):
@@ -150,6 +150,34 @@ class Test8BitBlockwiseQuantizeFunctional:
             assert abserr < 0.0023
             assert relerr < 0.012
         assert A2.dtype == dtype
+
+    @pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+    @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("blocksize", [256], ids=id_formatter("blocksize"))
+    def test_dynamic_blockwise_quantization_large(self, device, dtype, blocksize):
+        """
+        Test that we can successfully quantize a large tensor. Note that the following limitations apply:
+        - On CUDA/XPU/ROCm, the maximum number of elements is limited to 2**31 - 1 due to int32 indexing in C++ kernels.
+        - On CPU, there is a significantly higher memory overhead for the quantization, so we skip this test.
+        - Verification of the accuracy for dequantization has too high memory overhead for this test.
+        """
+        if device not in ["cuda", "xpu"]:
+            pytest.skip("This test is only for CUDA and XPU devices due to memory constraints.")
+
+        data = torch.randn(2**31 - 1, device=device, dtype=dtype)
+        q_data, q_stats = F.quantize_blockwise(data, blocksize=blocksize)
+
+        assert q_data is not None
+        assert q_data.dtype == torch.uint8
+        assert q_data.numel() == data.numel()
+
+        # Dequant
+        del data
+        dq = F.dequantize_blockwise(q_data, q_stats)
+
+        assert dq.dtype == dtype
+        assert dq.numel() == q_data.numel()
 
     @pytest.mark.skipif("cpu" not in get_available_devices(), reason="CPU is required")
     @pytest.mark.parametrize("hidden", [128])
@@ -284,7 +312,7 @@ class Test8BitBlockwiseQuantizeFunctional:
     def test_bench_dequantization(self):
         a = torch.rand(1024, 1024, device="cuda").half()
         code = F.create_fp8_map(True, 3, 0, 4).cuda()
-        qa, SA = F.quantize_blockwise(a, code=code)
+        qa, _SA = F.quantize_blockwise(a, code=code)
         print(qa.max())
 
         max_theoretical_mu = 1024 * 1024 * 2 / 1024**3 / 672 * 1000 * 1000
@@ -293,7 +321,7 @@ class Test8BitBlockwiseQuantizeFunctional:
         torch.cuda.synchronize()
         t0 = time.time()
         for i in range(100):
-            qa, SA = F.quantize_blockwise(a)
+            qa, _SA = F.quantize_blockwise(a)
         torch.cuda.synchronize()
         # print((time.time()-t0)/1e6)
 
@@ -463,7 +491,7 @@ class TestIGEMMFunctional:
     @pytest.mark.parametrize("hidden_dim", [32, 1024 * 4], ids=id_formatter("hidden_dim"))
     @pytest.mark.parametrize("batch_dim", [2, 16], ids=id_formatter("batch_dim"))
     @pytest.mark.parametrize("transpose", TRUE_FALSE, ids=id_formatter("transpose"))
-    @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
+    @pytest.mark.skipif(ROCM_WARP_SIZE_64, reason="this test is not supported on ROCm yet")
     def test_minmax_igemm(self, seq_dim, hidden_dim, batch_dim, transpose):
         def min_max(x):
             maxA = torch.amax(x, dim=2, keepdim=True)
@@ -675,45 +703,6 @@ class TestLLMInt8Functional:
             torch.testing.assert_close(C5, C4, atol=0.015, rtol=0.1)
             n = C5.numel()
             assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01 * n))
-
-    @pytest.mark.parametrize("dim1", [1 * 1024], ids=id_formatter("dim1"))
-    @pytest.mark.parametrize("dim2", [1 * 1024], ids=id_formatter("dim2"))
-    @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-    @pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("decomp"))
-    @pytest.mark.deprecated
-    def test_colrow_absmax(self, dim1, dim2, dims, threshold):
-        for i in range(k):
-            A = torch.randn(dim1, dim2, device="cuda").half()
-
-            assert dims == 2
-
-            row_stats1, _ = torch.abs(A.float()).max(1)
-            col_stats1, _ = torch.abs(A.float()).max(0)
-
-            if threshold > 0.0:
-                A_truncated = A.clone()
-                A_truncated[torch.abs(A_truncated) >= threshold] = 0.0
-                row_stats1_trunc, _ = torch.abs(A_truncated.float()).max(1)
-                col_stats1_trunc, _ = torch.abs(A_truncated.float()).max(0)
-
-                row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=threshold)
-
-                nnz_rows1_counts = (torch.abs(A) >= threshold).sum(1).flatten()
-                nnz_block_ptr1 = torch.zeros(
-                    nnz_rows1_counts.shape[0] + 1,
-                    dtype=nnz_rows1_counts.dtype,
-                    device=nnz_rows1_counts.device,
-                )
-                nnz_block_ptr1[1:] = nnz_rows1_counts.cumsum(0)
-
-                torch.testing.assert_close(col_stats1_trunc, col_stats2)
-                torch.testing.assert_close(row_stats1_trunc, row_stats2)
-                # torch.testing.assert_close(nnz_block_ptr1, nnz_block_ptr2)
-            else:
-                row_stats2, col_stats2, nnz_block_ptr2 = F.get_colrow_absmax(A, threshold=0.0)
-                assert nnz_block_ptr2 is None
-                torch.testing.assert_close(col_stats1, col_stats2)
-                torch.testing.assert_close(row_stats1, row_stats2)
 
     @pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
@@ -976,7 +965,7 @@ class TestSpMMFunctional:
         torch.nn.init.xavier_uniform_(B)
         Bt = B.t().contiguous()
 
-        CB, CBt, statsB, statsBt, coo_tensor = F.int8_double_quant(B)
+        _CB, CBt, _statsB, statsBt, _coo_tensor = F.int8_double_quant(B)
 
         rowidx = torch.randint(0, A.shape[-1], size=(15,))
 
@@ -995,7 +984,7 @@ class TestSpMMFunctional:
 
         values, counts = torch.unique(cooA.rowidx, return_counts=True)
         offset = counts.cumsum(0).int()
-        max_count, max_idx = torch.sort(counts, descending=True)
+        max_count, _ = torch.sort(counts, descending=True)
         print(torch.median(max_count.float()))
 
         torch.testing.assert_close(out2, out3, rtol=0.05, atol=0.001)
@@ -1109,7 +1098,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize(
         "blocksize",
-        [64, 128, 256, 512, 1024, 2048, 4096] if not HIP_ENVIRONMENT else [128, 256, 512, 1024, 2048, 4096],
+        [64, 128, 256, 512, 1024, 2048, 4096] if not ROCM_WARP_SIZE_64 else [128, 256, 512, 1024, 2048, 4096],
     )
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
@@ -1118,18 +1107,17 @@ class TestQuantize4BitFunctional:
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
         A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
-
-        err = (A1 - A2).abs().float()
-        relerr = (err / (A1.abs().float() + 1e-8)).mean()
-        err = err.mean()
+        del qa, SA
 
         assert A2.dtype == dtype
 
-        # With larger block sizes, we can expect this to blow up.
-        # At blocksize>=1024, don't even bother looking at relerr.
-        #
-        # Actually, the above is not true anymore after fixing the integer packing bug.
-        # The following values were taken from averaging 1k samples per test configuration after fixing the bug.
+        err = (A1 - A2).abs().float()
+        del A2
+
+        relerr = (err / (A1.abs().float() + 1e-8)).mean()
+        err = err.mean()
+
+        # The following values were taken from averaging 1k samples per test configuration.
         error_dict = dict()
         error_dict["fp4"] = dict()
         error_dict["nf4"] = dict()
@@ -1180,7 +1168,7 @@ class TestQuantize4BitFunctional:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128] if not HIP_ENVIRONMENT else [128], ids=id_formatter("blocksize"))
+    @pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128], ids=id_formatter("blocksize"))
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=describe_dtype)
     def test_4bit_compressed_stats(self, device, quant_type, blocksize, dtype):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
@@ -1212,6 +1200,37 @@ class TestQuantize4BitFunctional:
 
             assert err.item() < 0.11
             assert relerr.item() < 0.28
+
+    @pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+    @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128], ids=id_formatter("blocksize"))
+    def test_4bit_quant_large(self, device, dtype, quant_type, blocksize):
+        """
+        Test that we can successfully quantize a large tensor. Note that the following limitations apply:
+        - On CUDA/XPU/ROCm, the maximum number of elements is limited to 2**31 - 1 due to int32 indexing in C++ kernels.
+        - On CUDA, this test requires ~10GiB of memory for fp32
+        - On CPU, there is a significantly higher memory overhead for the quantization, so we skip this test.
+        - Verification of the accuracy for dequantization has too high memory overhead for this test.
+        """
+
+        if device not in ["cuda", "xpu"]:
+            pytest.skip("This test is only for CUDA and XPU devices due to memory constraints.")
+
+        A1 = torch.randn(2**31 - 1, device=device, dtype=dtype)
+        qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
+
+        assert qa is not None
+        assert qa.dtype == torch.uint8
+        assert qa.numel() == (2**31 - 1 + 1) // 2  # each byte holds 2 quantized values
+
+        # Dequant
+        del A1
+        dq = F.dequantize_4bit(qa, SA)
+
+        assert dq.dtype == dtype
+        assert dq.numel() == 2**31 - 1
 
     # @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
     @pytest.mark.parametrize("quant_type", ["nf4"])
@@ -1247,7 +1266,7 @@ class TestQuantize4BitFunctional:
         # print((time.time()-t0)/iters*1e6)
 
     @pytest.mark.skipif(
-        HIP_ENVIRONMENT, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64"
+        ROCM_WARP_SIZE_64, reason="gemv 4bit tests are partially enabled on MI300, others being fixed for warpsize 64"
     )
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("double_quant", TRUE_FALSE, ids=lambda double_quant: f"DQ_{double_quant}")
@@ -1409,7 +1428,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
-    @pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
+    @pytest.mark.skipif(ROCM_WARP_SIZE_64, reason="this test is not supported on ROCm yet")
     def test_gemv_eye_4bit(self, device, storage_type, dtype):
         if device == "hpu" and not is_supported_on_hpu(storage_type, dtype):
             pytest.skip("This configuration is not supported on HPU.")

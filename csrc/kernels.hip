@@ -348,16 +348,17 @@ template<typename T, int BLOCK_SIZE, int NUM_PER_TH, int STOCHASTIC, int DATA_TY
 //__launch_bounds__(TH, 4)
 __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n)
 {
-  const int n_full = gridDim.x * BLOCK_SIZE;
-  int valid_items = 0;
-  const int base_idx = (blockIdx.x * BLOCK_SIZE);
+    // This can overflow, so we clamp to INT32_MAX. We won't have more elements than this.
+    const int n_full = min(gridDim.x * BLOCK_SIZE, INT32_MAX);
+    int valid_items = 0;
+    const int base_idx = blockIdx.x * BLOCK_SIZE;
 
-  T vals[NUM_PER_TH];
-  float rand_vals[NUM_PER_TH];
-  unsigned char qvals[(DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH];
-  //float local_abs_max = -FLT_MAX;
-  float local_abs_max = 0.0f;
-  int local_rand_idx = 0;
+    T vals[NUM_PER_TH];
+    float rand_vals[NUM_PER_TH];
+    unsigned char qvals[(DATA_TYPE > 0) ? NUM_PER_TH / 2 : NUM_PER_TH];
+
+    float local_abs_max = 0.0f;
+    int local_rand_idx = 0;
 
   typedef hipcub::BlockLoad<T, BLOCK_SIZE/NUM_PER_TH, NUM_PER_TH, hipcub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
   typedef hipcub::BlockStore<unsigned char, BLOCK_SIZE/NUM_PER_TH, (DATA_TYPE > 0) ? NUM_PER_TH/2 : NUM_PER_TH, hipcub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
@@ -375,9 +376,9 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
     for(int i = threadIdx.x; i < 256; i+=blockDim.x)
       smem_code[i] = code[i];
 
-  for (int i = base_idx; i < n_full; i += gridDim.x*BLOCK_SIZE)
-  {
-    valid_items = n - i > BLOCK_SIZE ? BLOCK_SIZE : n - i;
+
+  for (int64_t i = base_idx; i < n_full; i += gridDim.x * BLOCK_SIZE) {
+    valid_items = min(BLOCK_SIZE, static_cast<int>(n - i));
     local_abs_max = -FLT_MAX;
 
     __syncthreads();
@@ -465,7 +466,8 @@ __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * abs
   {
     if (DATA_TYPE > 0)
     {
-      valid_items_load = min(TILE_SIZE, (n + 1) / 2 - i);
+      // Cast n to int64_t to avoid overflow for large n
+      valid_items_load = min(TILE_SIZE, static_cast<int>((static_cast<int64_t>(n) + 1) / 2) - i);
       valid_items_store = min(TILE_SIZE * 2, n - i * 2);
     }
     else
@@ -591,6 +593,8 @@ __global__ void kPreconditionOptimizer32bit2State(T* g, T* p,
                   s2_vals[j] *= correction2;
                   s1_vals[j] = s1_vals[j]/(sqrtf(s2_vals[j])+eps); // update
                   s1_vals[j] *= s1_vals[j]; // update l2 norm (update*update)
+                  break;
+              case ADEMAMIX:
                   break;
           }
       }
@@ -1881,7 +1885,7 @@ kOptimizerStatic8bit1StateBlockwise(T* p, T* __restrict__ const g, unsigned char
 //  rowStats [rows]
 //  out [rows, cols]
 template<typename T, int THREADS, int SPARSE_DECOMP>
-__launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024)
+__launch_bounds__(1024, BNB_MAX_THREADS_PER_CU / 1024)
 __global__ void kInt8VectorQuant(T * __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols) {
 
   // For sm50/sm52 and CUDA < 12.2 we need to do the reduction in fp32.
@@ -1943,49 +1947,6 @@ __global__ void kInt8VectorQuant(T * __restrict__ A, int8_t* out, float* rowStat
     }
   }
 }
-
-template<typename T, int THREADS, int SPARSE_DECOMP>
-__launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024)
-__global__ void kgetRowStats(T * __restrict__ A, float *rowStats, float threshold, int rows, int cols) {
-  using BlockReduceT = hipcub::BlockReduce<float, THREADS>;
-
-  // One block per row.
-  // Threads load column values in a striped arrangement.
-  // e.g. t0 reads row[0], row[0+nthreads], ..
-  // and  t1 reads row[1], row[1+nthreads], ..
-  // Each thread will determine its local absmax.
-  // We then do a blockwise reduction to determine the row's absmax.
-
-  __shared__ typename BlockReduceT::TempStorage temp_storage;
-
-  const int row_id = blockIdx.x;
-  const T* __restrict__ row_data = A + (row_id * cols);
-
-  // Threads will read the row values in a striped access pattern and find a local absmax.
-  float row_local_absmax = -FLT_MIN;
-  for (int i = threadIdx.x; i < cols; i += THREADS) {
-    const float absval = fabsf(row_data[i]);
-
-    // For sparse decomposition, values outside of the threshold are not to be
-    // included when calculating the row's absmax.
-    if constexpr (SPARSE_DECOMP) {
-      row_local_absmax = fmaxf(row_local_absmax, absval < threshold ? absval : row_local_absmax);
-    } else {
-      row_local_absmax = fmaxf(row_local_absmax, absval);
-    }
-  }
-
-  // Reduce thread-local absmax across the block.
-  // TODO: Consider algorithm BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY
-  const float row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, hipcub::Max(), cols);
-  if (threadIdx.x == 0) {
-    // Save our block's absmax to shared memory for the quantization step.
-    rowStats[row_id] = row_absmax;
-  }
-}
-
-template __global__ void kgetRowStats<half, 1024, 0>(half * __restrict__ A, float *rowStats, float threshold, int rows, int cols);
-template __global__ void kgetRowStats<half, 1024, 1>(half * __restrict__ A, float *rowStats, float threshold, int rows, int cols);
 
 template __global__ void kInt8VectorQuant<half, 1024, 0>(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols);
 template __global__ void kInt8VectorQuant<half, 1024, 1>(half * __restrict__ A, int8_t *out, float *rowStats, float threshold, int rows, int cols);
@@ -2057,11 +2018,6 @@ __global__ void kdequant_mm_int32_fp16(
 #define DENORM 1.0f/127.0f
 #define MAX_SPARSE_COUNT 32
 #define SMEM_SIZE 8*256
-#if defined(__GFX9__)
-  #define WARP_SIZE 64
-#else
-  #define WARP_SIZE 32
-#endif
 template <typename T, int SPMM_ITEMS, int BITS>
 __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB)
 {
@@ -2082,9 +2038,9 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   const int offset = local_max_idx == 0 ? 0 : offset_rowidx[local_max_idx-1];
   const int local_row_idx = rowidx[offset];
 
-  const int warp_id = threadIdx.x / WARP_SIZE;
-  const int warp_idx = threadIdx.x % WARP_SIZE;
-  const int warp_offset = (warp_id*WARP_SIZE)*SPMM_ITEMS;
+  const int warp_id = threadIdx.x / BNB_WARP_SIZE;
+  const int warp_idx = threadIdx.x % BNB_WARP_SIZE;
+  const int warp_offset = (warp_id*BNB_WARP_SIZE)*SPMM_ITEMS;
   const int num_items = BITS == 8 ? 8 : 8;
   int idx_col_B = warp_offset;
   int local_idx_col_B_offset = 0;
@@ -2104,7 +2060,7 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   }
 
   // each thread processes SPMM_ITEMS=32 per iteration. We have 256 threads. 32*256=x192
-  // we expect each warp to be SPMM_ITEMS*WARP_SIZE apart
+  // we expect each warp to be SPMM_ITEMS*BNB_WARP_SIZE apart
   // we have a total of 128 bytes for the bank with a bank size of 4 bytes
   // added 3 bytes = 6 values between warps should reduce bank conflicts
   __shared__ half smem_dequant_stats[SMEM_SIZE];
@@ -2660,12 +2616,12 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
   // load step-by-step in chunks of [warp_size,warps]: 1xwarp_size * [warp_size,warps] -> [1,warps]
   // 4 warps -> 4 loads per iter
   // 1xwarp_size * warp_sizex4 -> 1x4 outputs per thread block
-  typedef hipcub::WarpReduce<float, WARP_SIZE> WarpReduce;
-  __shared__ typename WarpReduce::TempStorage temp_storage[THREADS/WARP_SIZE];
+  typedef hipcub::WarpReduce<float, BNB_WARP_SIZE> WarpReduce;
+  __shared__ typename WarpReduce::TempStorage temp_storage[THREADS/BNB_WARP_SIZE];
 
-  const int warp_idx = threadIdx.x / WARP_SIZE;
-  const int warp_lane = threadIdx.x % WARP_SIZE;
-  const int row_B = (THREADS/WARP_SIZE)*blockIdx.x + warp_idx;
+  const int warp_idx = threadIdx.x / BNB_WARP_SIZE;
+  const int warp_lane = threadIdx.x % BNB_WARP_SIZE;
+  const int row_B = (THREADS/BNB_WARP_SIZE)*blockIdx.x + warp_idx;
   const int offset_B = ldb * row_B;
   const int num_values_8bit = num_values_4bit/2;
   float local_C = 0.0f;
@@ -2684,7 +2640,7 @@ template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inferenc
 
   // A: [1, K]
   // B: [M, K]
-  for(int inner_idx = warp_lane*num_values_4bit; inner_idx < K; inner_idx += WARP_SIZE*num_values_4bit)
+  for(int inner_idx = warp_lane*num_values_4bit; inner_idx < K; inner_idx += BNB_WARP_SIZE*num_values_4bit)
   {
     const int inner_idx_halved = inner_idx/2;
 
@@ -2996,7 +2952,9 @@ MAKE_kQuantizeBlockwise(half,  1024, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,   512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,   256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half,   128, 2, 0, General8bit)
-//MAKE_kQuantizeBlockwise(half,    64, 2, 0, General8bit)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(half,    64, 2, 0, General8bit)
+#endif
 
 MAKE_kQuantizeBlockwise(half,  4096, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(half,  2048, 4, 0, FP4)
@@ -3004,7 +2962,9 @@ MAKE_kQuantizeBlockwise(half,  1024, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(half,   512, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(half,   256, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(half,   128, 2, 0, FP4)
-//MAKE_kQuantizeBlockwise(half,    64, 2, 0, FP4)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(half,    64, 2, 0, FP4)
+#endif
 
 MAKE_kQuantizeBlockwise(half,  4096, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(half,  2048, 4, 0, NF4)
@@ -3012,7 +2972,9 @@ MAKE_kQuantizeBlockwise(half,  1024, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(half,   512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half,   256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half,   128, 2, 0, NF4)
-//MAKE_kQuantizeBlockwise(half,    64, 2, 0, NF4)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(half,    64, 2, 0, NF4)
+#endif
 
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
@@ -3021,7 +2983,9 @@ MAKE_kQuantizeBlockwise(float, 1024, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(float,  512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float,  256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, General8bit)
-//MAKE_kQuantizeBlockwise(float,   64, 2, 0, General8bit)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(float,   64, 2, 0, General8bit)
+#endif
 
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, FP4)
@@ -3029,7 +2993,9 @@ MAKE_kQuantizeBlockwise(float, 1024, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float,  512, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float,  256, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, FP4)
-//MAKE_kQuantizeBlockwise(float,   64, 2, 0, FP4)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(float,   64, 2, 0, FP4)
+#endif
 
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, NF4)
@@ -3037,7 +3003,9 @@ MAKE_kQuantizeBlockwise(float, 1024, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(float,  512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float,  256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float,  128, 2, 0, NF4)
-//MAKE_kQuantizeBlockwise(float,   64, 2, 0, NF4)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(float,   64, 2, 0, NF4)
+#endif
 
 MAKE_kQuantizeBlockwise(hip_bfloat16, 4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(hip_bfloat16, 4096, 4, 1, General8bit)
@@ -3046,7 +3014,9 @@ MAKE_kQuantizeBlockwise(hip_bfloat16, 1024, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  128, 2, 0, General8bit)
-//MAKE_kQuantizeBlockwise(hip_bfloat16,   64, 2, 0, General8bit)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(hip_bfloat16,   64, 2, 0, General8bit)
+#endif
 
 MAKE_kQuantizeBlockwise(hip_bfloat16, 4096, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(hip_bfloat16, 2048, 4, 0, FP4)
@@ -3054,7 +3024,9 @@ MAKE_kQuantizeBlockwise(hip_bfloat16, 1024, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  512, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  256, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  128, 2, 0, FP4)
-//MAKE_kQuantizeBlockwise(hip_bfloat16,   64, 2, 0, FP4)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(hip_bfloat16,   64, 2, 0, FP4)
+#endif
 
 MAKE_kQuantizeBlockwise(hip_bfloat16, 4096, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(hip_bfloat16, 2048, 4, 0, NF4)
@@ -3062,7 +3034,9 @@ MAKE_kQuantizeBlockwise(hip_bfloat16, 1024, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(hip_bfloat16,  128, 2, 0, NF4)
-//MAKE_kQuantizeBlockwise(hip_bfloat16,   64, 2, 0, NF4)
+#if BNB_WARP_SIZE == 32
+  MAKE_kQuantizeBlockwise(hip_bfloat16,   64, 2, 0, NF4)
+#endif
 
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);

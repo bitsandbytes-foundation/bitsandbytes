@@ -110,12 +110,19 @@ jobs:
   build-xpu:
     strategy:
       matrix:
-        os: [ubuntu-22.04]
+        os: [ubuntu-22.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build C++
+      - name: Build C++ (Linux)
+        if: runner.os == 'Linux'
         run: bash .github/scripts/build-xpu.sh
+        env:
+          build_os: ${{ matrix.os }}
+      - name: Build C++ (Windows)
+        if: runner.os == 'Windows'
+        run: .github/scripts/build-xpu-windows.bat
+        shell: cmd
         env:
           build_os: ${{ matrix.os }}
       - name: Upload build artifact
@@ -130,30 +137,26 @@ jobs:
       matrix:
         os: [ubuntu-22.04]
         arch: [x86_64]
-        rocm_version:
-          ["6.1.2", "6.2.4", "6.3.4", "6.4.4", "7.0"]
+        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Clean up disk space
         run: |
+          echo "Disk space before cleanup:"
+          df -h
+
+          # These are the biggest disk space hogs.
           sudo rm -rf \
-              /usr/share/dotnet \
-              /opt/ghc \
-              "/usr/local/share/boost" \
-              "$AGENT_TOOLSDIRECTORY" \
-              /opt/hostedtoolcache \
-              /opt/google/chrome \
-              /opt/microsoft/msedge \
-              /opt/microsoft/powershell \
-              /opt/pipx \
-              /usr/lib/mono \
-              /usr/local/julia* \
-              /usr/local/lib/android \
-              /usr/local/lib/node_modules \
-              /usr/local/share/chromium \
-              /usr/local/share/powershell \
-              /usr/share/swift
+            /opt/hostedtoolcache/CodeQL \
+            /usr/lib/dotnet \
+            /usr/lib/jvm \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/swift
+
+          echo "Disk space after cleanup:"
+          df -h
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
@@ -168,6 +171,9 @@ jobs:
           retention-days: 7
 
   build-wheels:
+    env:
+      # Skip rebuilding the CPU library when building the wheels.
+      BNB_SKIP_CMAKE: 1
     needs:
       - build-cpu
       - build-cuda
