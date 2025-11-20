@@ -229,7 +229,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             code: torch.Tensor,
             blocksize: int,
         ) -> torch.Tensor:
-            # Applied from dequantize_4bit
+            assert B.dtype == torch.uint8, "Only support uint8 qweight"
             dtype = A.dtype
             quant_type = "fp4" if code[1] > 0 else "nf4"
             # cpu fused op only support bf16 for now.

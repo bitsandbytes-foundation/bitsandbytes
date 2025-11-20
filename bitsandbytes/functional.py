@@ -2108,7 +2108,9 @@ def _convert_weight_packed_for_cpu(qweight: torch.Tensor, quant_state: QuantStat
     qweight: (K * N / 2)  uint8
     return: packed_weight
     """
-    assert qweight.dtype == torch.uint8, "qweight must be uint8"
+    if qweight.dtype != torch.uint8:
+        quant_state.original_storage_type = qweight.dtype
+        qweight = qweight.view(torch.uint8)
     quant_state.original_dtype = quant_state.dtype
     quant_state.original_nested = quant_state.nested
     quant_state.original_qshape = qweight.shape
@@ -2200,6 +2202,7 @@ def _convert_weight_packed_for_cpu_inverse(
 
     # 2) Best-effort restore of quant_state fields (absmax / dtype / nested flags, etc.)
     recovered_state = quant_state
+    qweight = qweight.to(torch.uint8).reshape(recovered_state.original_qshape)
 
     # quantize absmax
     if recovered_state.original_nested:
@@ -2213,7 +2216,10 @@ def _convert_weight_packed_for_cpu_inverse(
     recovered_state.dtype = recovered_state.original_dtype
     recovered_state.packing_format_for_cpu = False
 
-    return qweight.to(torch.uint8).reshape(recovered_state.original_qshape), recovered_state
+    if getattr(recovered_state, "original_storage_type", None):
+        qweight = qweight.view(recovered_state.original_storage_type)
+
+    return qweight, recovered_state
 
 
 def has_avx512bf16():
