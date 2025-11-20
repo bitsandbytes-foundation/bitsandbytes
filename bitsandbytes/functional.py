@@ -2103,7 +2103,7 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     return out
 
 
-def convert_weight_packed_for_cpu(qweight: torch.Tensor, quant_state: QuantState, block_n: int = 32):
+def _convert_weight_packed_for_cpu(qweight: torch.Tensor, quant_state: QuantState, block_n: int = 32):
     """
     qweight: (K * N / 2)  uint8
     return: packed_weight
