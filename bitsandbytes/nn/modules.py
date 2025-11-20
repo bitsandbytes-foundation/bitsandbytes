@@ -488,6 +488,7 @@ class Linear4bit(nn.Linear):
         self.compute_type_is_set = compute_dtype is not None
         self.quant_state = None
         self.quant_storage = quant_storage
+        self.support_avx512bf16_for_cpu = has_avx512bf16()
 
     def set_compute_type(self, x):
         if x.dtype in [torch.float32, torch.bfloat16]:
@@ -530,7 +531,7 @@ class Linear4bit(nn.Linear):
         if (
             not getattr(quant_state, "packing_format_for_cpu", False)
             and x.device.type == "cpu"
-            and has_avx512bf16()
+            and self.support_avx512bf16_for_cpu
             and not self.training
             and x.requires_grad == False
         ):
