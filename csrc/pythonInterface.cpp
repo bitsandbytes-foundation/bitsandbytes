@@ -909,7 +909,8 @@ void gemv_4bit_inference_cpu_nf4_bf16(
 #endif
 #if defined(__AVX512F__)
 bool has_avx512f_cpu() { return has_avx512f(); }
-
+#if defined(__AVX512BF16__)
 bool has_avx512bf16_cpu() { return has_avx512bf16(); }
+#endif
 #endif
 }

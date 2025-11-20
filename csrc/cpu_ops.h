@@ -298,6 +298,7 @@ static inline bool has_avx512f() {
     return v;
 }
 
+#if defined(__AVX512BF16__)
 static inline bool has_avx512bf16() {
     static bool v = [] {
         int info[4];
@@ -306,16 +307,19 @@ static inline bool has_avx512bf16() {
     }();
     return v;
 }
+#endif
 #else
 static inline bool has_avx512f() {
     static const bool supported_avx512f = __builtin_cpu_supports("avx512f");
     return supported_avx512f;
 }
 
+#if defined(__AVX512BF16__)
 static inline bool has_avx512bf16() {
     static const bool supported_avx512bf16 = __builtin_cpu_supports("avx512bf16");
     return supported_avx512bf16;
 }
+#endif
 #endif
 #endif
 
