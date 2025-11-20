@@ -2142,13 +2142,15 @@ def _convert_weight_packed_for_cpu(qweight: torch.Tensor, quant_state: QuantStat
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-        quant_state.absmax = (
-            absmax.reshape(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
-            .T.to(torch.bfloat16)
-            .contiguous()
-        )
+        quant_state.absmax = absmax
         quant_state.nested = False
         delattr(quant_state, "state2")
+
+    quant_state.absmax = (
+        quant_state.absmax.reshape(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
+        .T.to(torch.bfloat16)
+        .contiguous()
+    )
 
     quant_state.dtype = torch.bfloat16
     quant_state.packing_format_for_cpu = True
