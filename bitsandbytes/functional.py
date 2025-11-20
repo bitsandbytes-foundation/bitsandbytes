@@ -2217,10 +2217,15 @@ def _convert_weight_packed_for_cpu_inverse(
 
 
 def has_avx512bf16():
-    if hasattr(lib, "has_avx512bf16_cpu") and lib.has_avx512bf16_cpu():
-        return True
-    else:
-        return False
+    """
+    Try calling native lib.has_avx512bf16_cpu().
+    Return False explicitly if symbol missing or call fails.
+    """
+    try:
+        support_avx_bf16 = lib.has_avx512bf16_cpu()
+    except (AttributeError, RuntimeError, OSError):
+        support_avx_bf16 = False
+    return support_avx_bf16
 
 
 C = 127.0
