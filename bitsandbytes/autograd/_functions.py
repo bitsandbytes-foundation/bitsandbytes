@@ -378,11 +378,13 @@ def matmul_4bit(
     if A.device.type == "cpu":
         quant_state.dtype = A.dtype
 
-    if getattr(quant_state, "packing_format_for_cpu", False):
-        out = F.gemv_4bit(A, B, out, state=quant_state)
-        if bias is not None:
-            out += bias
-        return out
+        if getattr(quant_state, "packing_format_for_cpu", False):
+            out = F.gemv_4bit(A, B, out, state=quant_state)
+            if bias is not None:
+                out += bias
+            return out
+        else:
+            return MatMul4Bit.apply(A, B, out, bias, quant_state)
 
     if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "hpu":
         if A.shape[-1] % quant_state.blocksize != 0:
