@@ -1,4 +1,4 @@
-name: Nightly Tests
+name: Nightly Tests (New)
 
 on:
   workflow_dispatch:
