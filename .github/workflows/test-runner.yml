@@ -53,6 +53,7 @@ jobs:
     steps:
       - name: Configure test runner and paths
         id: config
+        shell: bash
         run: |
           # Map platform to OS identifiers, architecture, and test runner
           case "${{ inputs.platform }}" in
