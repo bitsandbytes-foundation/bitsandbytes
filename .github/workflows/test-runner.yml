@@ -37,23 +37,27 @@ env:
   BNB_SKIP_CMAKE: 1
 
 jobs:
-  setup:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: >-
+      ${{
+        inputs.platform == 'linux-x64' && 'ubuntu-22.04' ||
+        inputs.platform == 'linux-aarch64' && 'ubuntu-22.04-arm' ||
+        inputs.platform == 'macos' && 'macos-15' ||
+        'windows-2025'
+      }}
     outputs:
-      build_runner: ${{ steps.map.outputs.build_runner }}
-      test_runner: ${{ steps.map.outputs.test_runner }}
-      build_os: ${{ steps.map.outputs.build_os }}
-      arch: ${{ steps.map.outputs.arch }}
-      artifact_name: ${{ steps.map.outputs.artifact_name }}
+      test_runner: ${{ steps.config.outputs.test_runner }}
+      artifact_name: ${{ steps.config.outputs.artifact_name }}
+      build_os: ${{ steps.config.outputs.build_os }}
+      arch: ${{ steps.config.outputs.arch }}
     steps:
-      - name: Map configuration to runners
-        id: map
+      - name: Configure test runner and paths
+        id: config
         run: |
-          # Map platform to concrete runner names, OS identifiers, and architecture
+          # Map platform to OS identifiers, architecture, and test runner
           case "${{ inputs.platform }}" in
             linux-x64)
               BUILD_OS="ubuntu-22.04"
-              BUILD_RUNNER="ubuntu-22.04"
               ARCH="x64"
               if [[ "${{ inputs.backend }}" == "cuda" ]]; then
                 case "${{ inputs.gpu_type }}" in
@@ -69,7 +73,6 @@ jobs:
                     ;;
                 esac
               else
-                # CPU backend
                 case "${{ inputs.cpu_type }}" in
                   icelake)
                     TEST_RUNNER="banb-aws-general-8-plus-use1-public-80"
@@ -78,7 +81,6 @@ jobs:
                     TEST_RUNNER="bandb-aws-g4dn-4xlarge-plus-use1-public-80"
                     ;;
                   "")
-                    # Default: GitHub-provided runner (AMD EPYC 7763)
                     TEST_RUNNER="ubuntu-22.04"
                     ;;
                   *)
@@ -90,19 +92,16 @@ jobs:
               ;;
             linux-aarch64)
               BUILD_OS="ubuntu-22.04-arm"
-              BUILD_RUNNER="ubuntu-22.04-arm"
               ARCH="aarch64"
               TEST_RUNNER="ubuntu-22.04-arm"
               ;;
             macos)
               BUILD_OS="macos-15"
-              BUILD_RUNNER="macos-15"
               ARCH="arm64"
               TEST_RUNNER="macos-15"
               ;;
             windows)
               BUILD_OS="windows-2025"
-              BUILD_RUNNER="windows-2025"
               ARCH="x64"
               if [[ "${{ inputs.backend }}" == "cuda" ]]; then
                 TEST_RUNNER="CUDA-Windows-x64"
@@ -123,23 +122,19 @@ jobs:
           else
             ARTIFACT="${ARTIFACT}_${{ inputs.cpu_type }}"
           fi
-          # Add torch version and run ID to ensure uniqueness
           ARTIFACT="${ARTIFACT}_torch${{ inputs.torch_version }}_${{ github.run_id }}_${{ github.run_attempt }}"
 
-          echo "build_runner=${BUILD_RUNNER}" >> $GITHUB_OUTPUT
           echo "test_runner=${TEST_RUNNER}" >> $GITHUB_OUTPUT
+          echo "artifact_name=${ARTIFACT}" >> $GITHUB_OUTPUT
           echo "build_os=${BUILD_OS}" >> $GITHUB_OUTPUT
           echo "arch=${ARCH}" >> $GITHUB_OUTPUT
-          echo "artifact_name=${ARTIFACT}" >> $GITHUB_OUTPUT
 
-  build:
-    needs: setup
-    runs-on: ${{ needs.setup.outputs.build_runner }}
-    env:
-      build_os: ${{ needs.setup.outputs.build_os }}
-      build_arch: ${{ needs.setup.outputs.arch }}
-    steps:
       - uses: actions/checkout@v4
+
+      - name: Set build environment variables
+        run: |
+          echo "build_os=${{ steps.config.outputs.build_os }}" >> $GITHUB_ENV
+          echo "build_arch=${{ steps.config.outputs.arch }}" >> $GITHUB_ENV
 
       # Windows + CUDA: Install CUDA Toolkit
       - name: Install CUDA Toolkit
@@ -172,13 +167,13 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ needs.setup.outputs.artifact_name }}
-          path: output/${{ needs.setup.outputs.build_os }}/${{ needs.setup.outputs.arch }}/*
+          name: ${{ steps.config.outputs.artifact_name }}
+          path: output/${{ steps.config.outputs.build_os }}/${{ steps.config.outputs.arch }}/*
           retention-days: 7
 
   test:
-    needs: [setup, build]
-    runs-on: ${{ needs.setup.outputs.test_runner }}
+    needs: build
+    runs-on: ${{ needs.build.outputs.test_runner }}
     env:
       BNB_TEST_DEVICE: ${{ inputs.backend }}
     steps:
@@ -192,7 +187,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.setup.outputs.artifact_name }}
+          name: ${{ needs.build.outputs.artifact_name }}
           path: bitsandbytes/
           merge-multiple: true
 
