@@ -1,8 +1,6 @@
 name: Nightly Tests
 
 on:
-  push:
-    branches: [pr-test-workflow]
   workflow_dispatch:
   schedule:
     # Every day at 02:15 AM UTC
