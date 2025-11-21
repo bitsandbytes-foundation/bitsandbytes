@@ -1318,6 +1318,10 @@ class TestQuantize4BitFunctional:
                 quant_storage=quant_storage,
             )
             C3 = torch.matmul(A, B.t())
+            # CPU requires convert weight packed for gemv
+            if device == "cpu" and F.has_avx512bf16():
+                qB, state = F._convert_weight_packed_for_cpu(qB, state)
+                qB = qB.t()
             C2 = F.gemv_4bit(A, qB.t(), state=state)
             A.requires_grad = True
             C1 = bnb.matmul_4bit(A, qB.t(), state)

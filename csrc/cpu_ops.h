@@ -1,9 +1,123 @@
 #ifndef BITSANDBYTES_CPU_OPS_H
 #define BITSANDBYTES_CPU_OPS_H
 
+#include <algorithm>
+#include <cmath>
 #include <common.h>
 #include <cstdint>
 #include <cstring>
+#include <thread>
+#include <type_traits>
+
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+
+// amx-bf16
+#define TILE_M 16
+#define TILE_N 16
+#define TILE_K 32
+// work around compiler internal error
+#define BLOCK_K 128 // 4 * TILE_K
+
+// block size for AMX gemm
+constexpr int block_size_m() { return 2 * TILE_M; }
+
+constexpr int block_size_n() { return 2 * TILE_N; }
+
+template <typename T> inline int get_cache_blocks(int chunk_size) {
+    // L2 2MB and ratio of 50%
+    const int L2_size = 2048 * 1024 >> 1;
+    return std::max(1, int(L2_size / (chunk_size * sizeof(T))));
+}
+
+// forced unroll for perf critical path
+#if __has_attribute(always_inline)
+#define ALWAYS_INLINE __attribute__((__always_inline__)) inline
+#else
+#define ALWAYS_INLINE inline
+#endif
+
+template <int n> struct Unroll {
+    template <typename Func, typename... Args> ALWAYS_INLINE void operator()(const Func& f, Args... args) const {
+        Unroll<n - 1>{}(f, args...);
+        f(std::integral_constant<int, n - 1>{}, args...);
+    }
+};
+
+template <> struct Unroll<1> {
+    template <typename Func, typename... Args> ALWAYS_INLINE void operator()(const Func& f, Args... args) const {
+        f(std::integral_constant<int, 0>{}, args...);
+    }
+};
+
+template <typename T, typename std::enable_if<std::is_integral<T>::value, int>::type = 0> inline T div_up(T x, T y) {
+    return (x + y - 1) / y;
+}
+
+inline int get_max_threads() {
+#if defined(_OPENMP)
+    return omp_get_max_threads();
+#else
+    unsigned hc = std::thread::hardware_concurrency();
+    return hc == 0 ? 1 : int(hc);
+#endif
+}
+
+inline int adjust_num_threads(int m) {
+    int actual_nth = get_max_threads();
+    if (m == 1)
+        return actual_nth;
+    return std::max(1, (actual_nth >> 1) * 2);
+}
+
+template <typename func_t> inline void parallel_2d(int m, int n, const func_t& f) {
+    // make sure we have even num_threads
+    int nth = adjust_num_threads(m);
+
+    // [NOTE] thread blocking:
+    //
+    //   1) prefer square block per thread
+    //   2) use even number of CPU cores
+    //   3) use all `num_threads` cores
+    //
+    //   we have:
+    //     TM * TN = T
+    //     BM / TM = BN / TN
+    //   then:
+    //     TM = ((BM / BN) * T) ^ 0.5
+    //
+    float r = float(m) / n;
+    int nth_m = std::ceil(std::sqrt(r * nth));
+    int nth_n = 1;
+    for (; nth_m > 0; --nth_m) {
+        nth_n = nth / nth_m;
+        if (nth_m * nth_n == nth) {
+            break;
+        }
+    }
+
+#if defined(_OPENMP)
+#pragma omp parallel num_threads(nth)
+    {
+        int ith = omp_get_thread_num();
+        int ith_m = ith / nth_n;
+        int ith_n = ith % nth_n;
+
+        int thread_block_m = div_up(m, nth_m);
+        int thread_block_n = div_up(n, nth_n);
+
+        int begin_m = ith_m * thread_block_m;
+        int end_m = std::min(m, begin_m + thread_block_m);
+        int begin_n = ith_n * thread_block_n;
+        int end_n = std::min(n, begin_n + thread_block_n);
+
+        f(begin_m, end_m, begin_n, end_n);
+    }
+#else
+    f(0, m, 0, n);
+#endif
+}
 
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n);
 
@@ -20,6 +134,13 @@ static inline bf16_t float_to_bf16(float x) {
     std::memcpy(&bits, &x, 4);
     uint32_t r = bits + 0x7FFF + ((bits >> 16) & 1);
     return bf16_t{static_cast<uint16_t>(r >> 16)};
+}
+
+static float bf16_to_float(uint16_t bf16) {
+    uint32_t bits = (uint32_t)bf16 << 16;
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
 }
 
 static inline fp16_t float_to_fp16(float x) {
@@ -161,5 +282,53 @@ template <typename T, int DATA_TYPE>
 void dequantizeBlockwise4bitCpu(
     unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n
 );
+
+#if defined(__AVX512F__)
+#include <immintrin.h>
+
+#ifdef _MSC_VER
+#include <intrin.h>
+
+static inline bool has_avx512f() {
+    static bool v = [] {
+        int info[4];
+        __cpuidex(info, 7, 0);
+        return (info[1] & (1 << 16)) != 0; // EBX bit16 AVX512F
+    }();
+    return v;
+}
+
+#if defined(__AVX512BF16__)
+static inline bool has_avx512bf16() {
+    static bool v = [] {
+        int info[4];
+        __cpuidex(info, 7, 1);
+        return (info[0] & (1 << 5)) != 0; // EAX bit5 AVX512_BF16
+    }();
+    return v;
+}
+#endif
+#else
+static inline bool has_avx512f() {
+    static const bool supported_avx512f = __builtin_cpu_supports("avx512f");
+    return supported_avx512f;
+}
+
+#if defined(__AVX512BF16__)
+static inline bool has_avx512bf16() {
+    static const bool supported_avx512bf16 = __builtin_cpu_supports("avx512bf16");
+    return supported_avx512bf16;
+}
+#endif
+#endif
+#endif
+
+#if defined(__AVX512F__) && defined(__AVX512BF16__)
+template <typename T, int DATA_TYPE>
+void gemv_4bit_inference(
+    int64_t M, int64_t N, int64_t K, const T* __restrict__ x, const unsigned char* __restrict__ w,
+    const T* __restrict__ absmax, T* __restrict__ out, int64_t blocksize, int64_t x_stride, int64_t out_stride
+);
+#endif
 
 #endif
