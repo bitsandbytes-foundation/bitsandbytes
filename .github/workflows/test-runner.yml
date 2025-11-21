@@ -116,13 +116,15 @@ jobs:
               ;;
           esac
 
-          # Create unique artifact name
+          # Create unique artifact name per configuration
           ARTIFACT="lib_${{ inputs.backend }}_${BUILD_OS}_${ARCH}"
           if [[ "${{ inputs.backend }}" == "cuda" ]]; then
-            ARTIFACT="${ARTIFACT}_${{ inputs.cuda_version }}"
+            ARTIFACT="${ARTIFACT}_${{ inputs.cuda_version }}_${{ inputs.gpu_type }}"
+          else
+            ARTIFACT="${ARTIFACT}_${{ inputs.cpu_type }}"
           fi
-          # Add run ID to make artifacts unique across workflow runs
-          ARTIFACT="${ARTIFACT}_${{ github.run_id }}_${{ github.run_attempt }}"
+          # Add torch version and run ID to ensure uniqueness
+          ARTIFACT="${ARTIFACT}_torch${{ inputs.torch_version }}_${{ github.run_id }}_${{ github.run_attempt }}"
 
           echo "build_runner=${BUILD_RUNNER}" >> $GITHUB_OUTPUT
           echo "test_runner=${TEST_RUNNER}" >> $GITHUB_OUTPUT
