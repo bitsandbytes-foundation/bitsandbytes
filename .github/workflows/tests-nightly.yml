@@ -1,0 +1,101 @@
+name: Nightly Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every day at 02:15 AM UTC
+    - cron: "15 2 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-cpu:
+    name: CPU
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux-x64, linux-aarch64, macos, windows]
+        # default runners don't have AVX-512 support, but icelake does
+        cpu_type: ["", icelake]
+        torch_version: ["2.3.1", "2.8.0", "2.9.1"]
+
+        exclude:
+          # aarch64 minimum torch version is 2.5.1
+          - platform: linux-aarch64
+            torch_version: "2.3.1"
+          # icelake only applies to linux-x64
+          - platform: linux-aarch64
+            cpu_type: icelake
+          - platform: macos
+            cpu_type: icelake
+          - platform: windows
+            cpu_type: icelake
+
+        include:
+          # Add aarch64 with torch 2.5.1
+          - platform: linux-aarch64
+            cpu_type: ""
+            torch_version: "2.5.1"
+
+    uses: ./.github/workflows/test-runner.yml
+    with:
+      platform: ${{ matrix.platform }}
+      backend: cpu
+      torch_version: ${{ matrix.torch_version }}
+      pypi_index: "https://download.pytorch.org/whl/cpu"
+      cpu_type: ${{ matrix.cpu_type }}
+
+  test-cuda:
+    name: CUDA
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux x64 cross-product
+        platform: [linux-x64]
+        gpu_type: [T4, L40S]
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1", "13.0.1"]
+
+        include:
+          # Map CUDA version to torch version and PyPI index
+          - cuda_version: "11.8.0"
+            torch_version: "2.3.1"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - cuda_version: "12.6.3"
+            torch_version: "2.7.1"
+            pypi_index: "https://download.pytorch.org/whl/cu126"
+          - cuda_version: "12.8.1"
+            torch_version: "2.8.0"
+            pypi_index: "https://download.pytorch.org/whl/cu128"
+          - cuda_version: "13.0.1"
+            torch_version: "2.9.1"
+            pypi_index: "https://download.pytorch.org/whl/cu130"
+
+          # Windows CUDA Tests - T4 GPU (CUDA 11.8 only, multiple torch versions)
+          - platform: windows
+            gpu_type: T4
+            cuda_version: "11.8.0"
+            torch_version: "2.3.1"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - platform: windows
+            gpu_type: T4
+            cuda_version: "11.8.0"
+            torch_version: "2.6.0"
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+          - platform: windows
+            gpu_type: T4
+            cuda_version: "11.8.0"
+            torch_version: "2.7.1"  # Note: this is the last PyTorch release supporting CUDA 11.8.
+            pypi_index: "https://download.pytorch.org/whl/cu118"
+
+    uses: ./.github/workflows/test-runner.yml
+    with:
+      platform: ${{ matrix.platform }}
+      backend: cuda
+      cuda_version: ${{ matrix.cuda_version }}
+      gpu_type: ${{ matrix.gpu_type }}
+      torch_version: ${{ matrix.torch_version }}
+      pypi_index: ${{ matrix.pypi_index }}
