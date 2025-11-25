@@ -2,6 +2,10 @@
 #include <cpu_ops.h>
 #include <thread>
 
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
 #ifdef HAS_OPENMP
 #include <omp.h>
 #define BNB_OMP_PARALLEL_FOR _Pragma("omp parallel for")
@@ -9,7 +13,29 @@
 #define BNB_OMP_PARALLEL_FOR
 #endif
 
-using namespace BinSearch;
+namespace {
+
+constexpr int kCodebookSize = 256;
+
+inline unsigned char lookup_code_index(const float* codebook, float value) {
+    value = std::clamp(value, -1.0f, 1.0f);
+    const float* begin = codebook;
+    const float* end = codebook + kCodebookSize;
+    const float* right = std::lower_bound(begin, end, value);
+    if (right == begin) {
+        return 0;
+    }
+    if (right == end) {
+        return static_cast<unsigned char>(kCodebookSize - 1);
+    }
+    const float* left = right - 1;
+    const float dist_left = std::fabs(value - *left);
+    const float dist_right = std::fabs(*right - value);
+    const unsigned char idx = static_cast<unsigned char>(right - begin);
+    return dist_right < dist_left ? idx : idx - 1;
+}
+
+}
 
 #if defined(__AVX512F__)
 #include <immintrin.h>
@@ -181,48 +207,57 @@ void dequantizeBlockwise8bitCpu(
 
 void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
 
-    // the default code is has range [-0.993, 1.0] which can cause an error in the binary search algorithm used below
+    if (blocksize <= 0 || n <= 0)
+        return;
+
+    // Ensure we cover the full expected dynamic range of the codebook.
     code[0] = -1.0f;
 
-    long long num_blocks = n / blocksize;
-    num_blocks += n % blocksize == 0 ? 0 : 1;
-
-    const uint32 elements_code = 256;
-    BinAlgo<Scalar, float, Direct2> bin_searcher(code, elements_code);
-
-    int thread_wave_size = 256;
-    // we chunk the threads into waves of 256 since the max limit is
-    // between 16k and 64k on Linux (we reach this when running BLOOM-176B with a large batch size)
-    for (long long offset = 0; offset < num_blocks; offset += thread_wave_size) {
-        long long valid_chunks = num_blocks - offset >= thread_wave_size ? thread_wave_size : num_blocks - offset;
-        std::vector<std::thread> threads(valid_chunks);
-        std::vector<quantize_block_args> args(valid_chunks);
-
-        int chunks_processed = 0;
-        for (long long block_idx = offset * blocksize; block_idx < n; block_idx += blocksize) {
-            long long valid_items = n - block_idx >= blocksize ? blocksize : n - block_idx;
-            long long block_end = block_idx + valid_items;
-
-            struct quantize_block_args& arg = args[chunks_processed];
-            arg.bin_searcher = &bin_searcher;
-            arg.code = code;
-            arg.A = A;
-            arg.absmax = absmax;
-            arg.out = out;
-            arg.block_end = block_end;
-            arg.block_idx = block_idx;
-            arg.threadidx = block_idx / blocksize;
-            arg.blocksize = blocksize;
-
-            threads[chunks_processed] = std::thread([arg] { quantize_block(arg); });
-            chunks_processed += 1;
-            if (chunks_processed == valid_chunks) {
-                break;
-            }
+    const auto process_block = [&](long long block_start, long long block_end) {
+        float absmax_block = 0.0f;
+        for (long long i = block_start; i < block_end; ++i) {
+            absmax_block = std::max(absmax_block, std::fabs(A[i]));
         }
 
-        for (int i = 0; i < valid_chunks; i++)
-            threads[i].join();
+        long long absmax_idx = block_start / blocksize;
+        absmax[absmax_idx] = absmax_block;
+
+        if (absmax_block == 0.0f) {
+            std::fill(out + block_start, out + block_end, 0);
+            return;
+        }
+
+        const float inv_absmax = 1.0f / absmax_block;
+        for (long long i = block_start; i < block_end; ++i) {
+            float normed_value = A[i] * inv_absmax;
+            out[i] = lookup_code_index(code, normed_value);
+        }
+    };
+
+    const long long num_blocks = (n + blocksize - 1) / blocksize;
+    const int thread_wave_size = 256;
+
+    // We chunk the threads into waves of 256 since the max limit is between 16k and 64k on Linux
+    // (we reach this when running BLOOM-176B with a large batch size).
+    for (long long offset = 0; offset < num_blocks; offset += thread_wave_size) {
+        const long long wave_blocks = std::min<long long>(thread_wave_size, num_blocks - offset);
+        std::vector<std::thread> threads;
+        threads.reserve(wave_blocks);
+
+        const long long first_block_start = offset * blocksize;
+        for (long long b = 0; b < wave_blocks; ++b) {
+            const long long block_start = first_block_start + b * blocksize;
+            if (block_start >= n)
+                break;
+            const long long block_end = std::min(block_start + blocksize, n);
+            threads.emplace_back(process_block, block_start, block_end);
+        }
+
+        for (auto& thread : threads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
     }
 }
 
