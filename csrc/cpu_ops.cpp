@@ -35,7 +35,7 @@ inline unsigned char lookup_code_index(const float* codebook, float value) {
     return dist_right < dist_left ? idx : idx - 1;
 }
 
-}
+} // namespace
 
 #if defined(__AVX512F__)
 #include <immintrin.h>
