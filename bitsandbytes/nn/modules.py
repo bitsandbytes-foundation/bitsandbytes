@@ -515,11 +515,11 @@ class Linear4bit(nn.Linear):
         save weight and bias,
         then fill state_dict with components of quant_state
         """
-        super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
         if getattr(self.weight.quant_state, "packing_format_for_cpu", False):
             self.weight.data, self.weight.quant_state = _convert_weight_packed_for_cpu_inverse(
                 self.weight.data, self.weight.quant_state
             )
+        super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
         if getattr(self.weight, "quant_state", None) is not None:
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()

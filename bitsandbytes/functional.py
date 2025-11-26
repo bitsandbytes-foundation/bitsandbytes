@@ -2214,6 +2214,7 @@ def _convert_weight_packed_for_cpu_inverse(
         recovered_state.absmax = qabsmax
         recovered_state.offset = offset
         recovered_state.state2 = state2
+        recovered_state.nested = True
 
     recovered_state.dtype = recovered_state.original_dtype
     recovered_state.packing_format_for_cpu = False
