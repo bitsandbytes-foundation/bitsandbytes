@@ -105,7 +105,7 @@ jobs:
               BUILD_OS="windows-2025"
               ARCH="x64"
               if [[ "${{ inputs.backend }}" == "cuda" ]]; then
-                TEST_RUNNER="CUDA-Windows-x64"
+                TEST_RUNNER="CUDA-Windows-2025-x64"
               else
                 TEST_RUNNER="windows-2025"
               fi
