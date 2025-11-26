@@ -219,11 +219,26 @@ class Test4bitBlockwiseQuantOps:
         out_features = 1024
         in_features = 256
 
+        if device == "cpu" and blocksize > in_features:
+            pytest.skip("CPU implementation only suppoer blocksize <= in_features")
+
         A = torch.randn((1, 1, in_features), dtype=dtype, device=device)
         B = torch.randn((out_features, in_features), dtype=dtype, device=A.device)
         B_q, absmax = torch.ops.bitsandbytes.quantize_4bit(B, blocksize, quant_type, storage_dtype)
         code = bitsandbytes.functional.get_4bit_type(quant_type, device=A.device, blocksize=blocksize)
 
+        if device == "cpu" and bitsandbytes.functional.has_avx512bf16():
+            state = bitsandbytes.functional.QuantState(
+                absmax=absmax,
+                shape=B.shape,
+                dtype=A.dtype,
+                blocksize=blocksize,
+                code=code,
+                quant_type=quant_type,
+            )
+            B_q, state = bitsandbytes.functional._convert_weight_packed_for_cpu(B_q, state)
+            B_q = B_q.t()
+            absmax = state.absmax
         out = torch.ops.bitsandbytes.gemv_4bit.default(A, B_q, B.shape, absmax, code, blocksize)
 
         assert out.device == A.device
