@@ -54,7 +54,7 @@ else:
         x = tl.load(x_ptr + offsets, mask=p2_arange_mask)
         abs_x = tl.abs(x)
         max_val = tl.max(tl.where(p2_arange_mask, abs_x, 0), axis=0)
-        output = tl.libdevice.llrint(127.0 * (x / max_val))
+        output = tl.extra.cuda.libdevice.rint(127.0 * (x / max_val))
 
         new_start = pid * M
         new_offsets = new_start + p2_arange
