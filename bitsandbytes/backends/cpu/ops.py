@@ -230,7 +230,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                     "/workspace/nix/nix/store/vvsb2xvj5zkzfd37r1k1d5j23hpa9n86-quantization_bitsandbytes-torch-ext"
                 ),
                 package_name="quantization_bitsandbytes",
-            ).gemm_4bit_forward_kernel
+            ).gemm_4bit_forward
         except Exception as exc:  # pragma: no cover - best effort fallback
             gemm_4bit_forward_kernel = None
             logger.warning("Failed to load CPU gemm_4bit kernel: %s", exc)
