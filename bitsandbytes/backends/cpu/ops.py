@@ -5,7 +5,7 @@ from math import prod
 
 import torch
 
-from bitsandbytes.functional import get_ptr
+from bitsandbytes.functional import get_ptr, has_avx512bf16
 
 from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
@@ -217,3 +217,62 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             raise ValueError
 
         return out
+
+    if has_avx512bf16():
+
+        @register_kernel("bitsandbytes::gemv_4bit", "cpu")
+        def _(
+            A: torch.Tensor,
+            B: torch.Tensor,
+            shapeB: Sequence[int],
+            absmax: torch.Tensor,
+            code: torch.Tensor,
+            blocksize: int,
+        ) -> torch.Tensor:
+            assert B.dtype == torch.uint8, "Only support uint8 qweight"
+            dtype = A.dtype
+            quant_type = "fp4" if code[1] > 0 else "nf4"
+            # cpu fused op only support bf16 for now.
+            if dtype != torch.bfloat16:
+                A = A.to(torch.bfloat16)
+
+            final_out_shape = (*A.shape[:-1], shapeB[0])
+            A = A.reshape(-1, A.shape[-1])
+            out_shape = (*A.shape[:-1], shapeB[0])
+            out = torch.empty(out_shape, dtype=A.dtype, device=A.device)
+            M = A.shape[0]
+            N = shapeB[0]
+            K = A.shape[1]
+            x_strideM = A.stride(0)
+            out_strideM = out.stride(0)
+            if quant_type == "fp4":
+                lib.gemv_4bit_inference_cpu_fp4_bf16(
+                    ct.c_int64(M),
+                    ct.c_int64(N),
+                    ct.c_int64(K),
+                    get_ptr(A),
+                    get_ptr(B),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_int64(blocksize),
+                    ct.c_int64(x_strideM),
+                    ct.c_int64(out_strideM),
+                )
+            elif quant_type == "nf4":
+                lib.gemv_4bit_inference_cpu_nf4_bf16(
+                    ct.c_int64(M),
+                    ct.c_int64(N),
+                    ct.c_int64(K),
+                    get_ptr(A),
+                    get_ptr(B),
+                    get_ptr(absmax),
+                    get_ptr(out),
+                    ct.c_int64(blocksize),
+                    ct.c_int64(x_strideM),
+                    ct.c_int64(out_strideM),
+                )
+
+            if dtype != torch.bfloat16:
+                out = out.to(dtype)
+
+            return out.reshape(final_out_shape)

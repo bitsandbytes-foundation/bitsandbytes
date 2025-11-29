@@ -2103,4 +2103,138 @@ def spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None):
     return out
 
 
+def _convert_weight_packed_for_cpu(qweight: torch.Tensor, quant_state: QuantState, block_n: int = 32):
+    """
+    qweight: (K * N / 2)  uint8
+    return: packed_weight
+    """
+    if qweight.dtype != torch.uint8:
+        quant_state.original_storage_type = qweight.dtype
+        qweight = qweight.view(torch.uint8)
+    quant_state.original_dtype = quant_state.dtype
+    quant_state.original_nested = quant_state.nested
+    quant_state.original_qshape = qweight.shape
+
+    qweight = qweight.reshape(-1)
+    unpacked_w = torch.empty(qweight.shape[0] * 2, dtype=torch.int32, device=qweight.device)
+    unpacked_w[1::2] = qweight & 0xF
+    unpacked_w[::2] = qweight >> 4
+    qweight_final = unpacked_w.reshape(quant_state.shape).to(torch.uint8)  # (*, N, K)
+    # pack weight: [*, N, K] -> [*, N, K/2] combine low and high bit
+    assert len(qweight_final.shape) == 2
+    N, K = qweight_final.shape[0], qweight_final.shape[1]
+    assert N % block_n == 0, "N must be divisible by block_n"
+    assert K % 2 == 0, "K must be even"
+    BLOCK_N = block_n
+    BIT_COUNT = 32  # (=32 low +32 high)
+    new_shape = [N // BLOCK_N, BLOCK_N, K // 2, 2]
+    out_shape = [N, K // 2]
+    qw = qweight_final.reshape(new_shape)  # (..., N/B, B, K/2, 2)
+    qw = qw.transpose(-3, -2).contiguous()  # (..., N/B, K/2, B, 2)
+    qw = qw.reshape(-1, BIT_COUNT * 2)  # [-1, 64]
+    high = qw[:, BIT_COUNT:]  # high 32
+    low = qw[:, :BIT_COUNT]  # low 32
+    packed = ((high << 4) | low).to(torch.uint8)  # combine
+    final_qweight = packed.reshape(out_shape)
+    if quant_state.nested:
+        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+        absmax += quant_state.offset
+        if absmax.dtype != torch.float32:
+            absmax = absmax.float()
+
+        quant_state.absmax = absmax
+        quant_state.nested = False
+        delattr(quant_state, "state2")
+
+    quant_state.absmax = (
+        quant_state.absmax.reshape(quant_state.shape[0], quant_state.shape[1] // quant_state.blocksize)
+        .T.to(torch.bfloat16)
+        .contiguous()
+    )
+
+    quant_state.dtype = torch.bfloat16
+    quant_state.packing_format_for_cpu = True
+    return final_qweight, quant_state
+
+
+def _convert_weight_packed_for_cpu_inverse(
+    packed_weight: torch.Tensor,
+    quant_state: QuantState,
+    block_n: int = 32,
+) -> tuple[torch.Tensor, QuantState]:
+    """
+    packed_weight: [N, K/2] uint8, output of `_convert_weight_packed_for_cpu` (final_qweight)
+    quant_state:   QuantState that was modified by `_convert_weight_packed_for_cpu`
+    Returns:
+        qweight: [*, N, K] uint8, original qweight shape (quant_state.shape)
+        recovered_state: QuantState with partially restored fields (best-effort inverse)
+    """
+    assert quant_state.packing_format_for_cpu, "only for packing format"
+    assert packed_weight.dtype == torch.uint8
+    assert len(packed_weight.shape) == 2, "packed_weight should be [N, K/2]"
+    N, K_half = packed_weight.shape
+    K = K_half * 2
+
+    # 1) packed [N, K/2] -> [N//BLOCK_N, BLOCK_N, K/2, 2]
+    BLOCK_N = block_n
+    BIT_COUNT = 32  # (=32 low + 32 high)
+
+    assert N % BLOCK_N == 0, "N must be divisible by block_n"
+    assert K % 2 == 0, "K must be even"
+
+    # [N, K/2] -> [-1, 64] (32 low + 32 high)
+    packed = packed_weight.reshape(-1, BIT_COUNT)  # [-1, 64]
+    # split high/low nibbles
+    high = (packed >> 4) & 0xF
+    low = packed & 0xF
+    # concatenate to [..., 64], first 32 are low, last 32 are high
+    qw = torch.cat([low, high], dim=-1).to(torch.uint8)  # [..., 64]
+
+    # -> [N/BLOCK_N, K/2, BLOCK_N, 2] -> [N, K]
+    qw = qw.reshape(N // BLOCK_N, K_half, BLOCK_N, 2)  # [N/B, K/2, B, 2]
+    qw = qw.transpose(-3, -2).contiguous()  # [N/B, B, K/2, 2]
+    qw = qw.reshape(N, K)  # [N, K]
+
+    qweight = qw  # [N, K]
+
+    unpacked_w = qweight.reshape(-1).to(torch.int32)  # [K*N]
+    high4 = (unpacked_w[::2] & 0xF).to(torch.uint8)
+    low4 = (unpacked_w[1::2] & 0xF).to(torch.uint8)
+    qweight = (high4 << 4) | low4  # [K*N/2]
+
+    # 2) Best-effort restore of quant_state fields (absmax / dtype / nested flags, etc.)
+    recovered_state = quant_state
+    qweight = qweight.to(torch.uint8).reshape(recovered_state.original_qshape)
+
+    # quantize absmax
+    if recovered_state.original_nested:
+        absmax = recovered_state.absmax.T.reshape(-1).to(recovered_state.original_dtype)
+        offset = absmax.mean()
+        qabsmax, state2 = quantize_blockwise(absmax - offset, blocksize=256)
+        recovered_state.absmax = qabsmax
+        recovered_state.offset = offset
+        recovered_state.state2 = state2
+        recovered_state.nested = True
+
+    recovered_state.dtype = recovered_state.original_dtype
+    recovered_state.packing_format_for_cpu = False
+
+    if getattr(recovered_state, "original_storage_type", None):
+        qweight = qweight.view(recovered_state.original_storage_type)
+
+    return qweight, recovered_state
+
+
+def has_avx512bf16():
+    """
+    Try calling native lib.has_avx512bf16_cpu().
+    Return False explicitly if symbol missing or call fails.
+    """
+    try:
+        support_avx_bf16 = lib.has_avx512bf16_cpu()
+    except (AttributeError, RuntimeError, OSError):
+        support_avx_bf16 = False
+    return support_avx_bf16
+
+
 C = 127.0

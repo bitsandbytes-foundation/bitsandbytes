@@ -7,10 +7,10 @@ set -xeuo pipefail
 bnb_rocm_arch="gfx90a;gfx942;gfx1100;gfx1101"
 
 # ROCm 6.4+ - Add gfx1200/gfx1201. Note we assume >=6.4.1.
-[[ "${rocm_version}" == 6.4.* || "${rocm_version}" == 7.*.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx1200;gfx1201"
+[[ "${rocm_version}" == 6.4.* || "${rocm_version}" == 7.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx1200;gfx1201"
 
 # ROCm 7.0+ - Add gfx950
-[[ "${rocm_version}" == 7.*.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx950"
+[[ "${rocm_version}" == 7.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx950"
 
 if [ "${build_os:0:6}" == ubuntu ]; then
     image=rocm/dev-ubuntu-22.04:${rocm_version}-complete
@@ -18,7 +18,7 @@ if [ "${build_os:0:6}" == ubuntu ]; then
     docker run --rm --platform "linux/$build_arch" -i \
         -w /src -v "$PWD:/src" "$image" sh -c \
         "apt-get update \
-      && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake \
+      && pip install cmake==3.31.6 \
       && cmake -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH=\"${bnb_rocm_arch}\" . \
       && cmake --build ."
 fi

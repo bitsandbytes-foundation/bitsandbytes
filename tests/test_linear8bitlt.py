@@ -9,7 +9,7 @@ import pytest
 import torch
 
 import bitsandbytes as bnb
-from bitsandbytes.cextension import HIP_ENVIRONMENT
+from bitsandbytes.cextension import ROCM_WARP_SIZE_64
 from bitsandbytes.nn.modules import Linear8bitLt
 from tests.helpers import (
     TRUE_FALSE,
@@ -234,7 +234,7 @@ def test_linear8bit_serialization(linear8bit):
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm yet")
+@pytest.mark.skipif(ROCM_WARP_SIZE_64, reason="this test is not supported on ROCm yet")
 def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")

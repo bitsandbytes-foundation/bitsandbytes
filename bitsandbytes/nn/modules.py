@@ -12,7 +12,12 @@ import torch.nn.functional as F
 
 import bitsandbytes as bnb
 from bitsandbytes.cextension import ROCM_WARP_SIZE_64
-from bitsandbytes.functional import QuantState
+from bitsandbytes.functional import (
+    QuantState,
+    _convert_weight_packed_for_cpu,
+    _convert_weight_packed_for_cpu_inverse,
+    has_avx512bf16,
+)
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
 
@@ -311,9 +316,13 @@ class Params4bit(torch.nn.Parameter):
         return self.to(device="cpu")
 
     def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
+        if getattr(self.quant_state, "packing_format_for_cpu", False):
+            self.data, self.quant_state = _convert_weight_packed_for_cpu_inverse(self.data, self.quant_state)
         return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
 
     def xpu(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
+        if getattr(self.quant_state, "packing_format_for_cpu", False):
+            self.data, self.quant_state = _convert_weight_packed_for_cpu_inverse(self.data, self.quant_state)
         return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     @overload
@@ -479,6 +488,7 @@ class Linear4bit(nn.Linear):
         self.compute_type_is_set = compute_dtype is not None
         self.quant_state = None
         self.quant_storage = quant_storage
+        self.support_avx512bf16_for_cpu = has_avx512bf16()
 
     def set_compute_type(self, x):
         if x.dtype in [torch.float32, torch.bfloat16]:
@@ -505,14 +515,27 @@ class Linear4bit(nn.Linear):
         save weight and bias,
         then fill state_dict with components of quant_state
         """
+        if getattr(self.weight.quant_state, "packing_format_for_cpu", False):
+            self.weight.data, self.weight.quant_state = _convert_weight_packed_for_cpu_inverse(
+                self.weight.data, self.weight.quant_state
+            )
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
-
         if getattr(self.weight, "quant_state", None) is not None:
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
     def forward(self, x: torch.Tensor):
         fix_4bit_weight_quant_state_from_module(self)
+        quant_state = self.weight.quant_state
+
+        if (
+            not getattr(quant_state, "packing_format_for_cpu", False)
+            and x.device.type == "cpu"
+            and self.support_avx512bf16_for_cpu
+            and not self.training
+            and x.requires_grad == False
+        ):
+            self.weight.data, quant_state = _convert_weight_packed_for_cpu(self.weight.data, quant_state)
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:
@@ -527,9 +550,9 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        weight = self.weight.t()
+        weight = self.weight if getattr(quant_state, "packing_format_for_cpu", False) else self.weight.t()
 
-        return bnb.matmul_4bit(x, weight, bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
+        return bnb.matmul_4bit(x, weight, bias=bias, quant_state=quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):
