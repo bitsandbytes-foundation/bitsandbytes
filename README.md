@@ -114,6 +114,14 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>✅</td>
     </tr>
     <tr>
+      <td></td>
+      <td>🟧 Ascend NPU <br><code>npu</code></td>
+      <td>Atlas 800T A2+</td>
+      <td>❌</td>
+      <td>✅</td>
+      <td>❌</td>
+    </tr>
+    <tr>
       <td colspan="6">🪟 <strong>Windows 11 / Windows Server 2019+</strong></td>
     </tr>
     <tr>
