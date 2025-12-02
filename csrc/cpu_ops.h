@@ -3,11 +3,11 @@
 
 #include <algorithm>
 #include <cmath>
-#include <common.h>
 #include <cstdint>
 #include <cstring>
 #include <thread>
 #include <type_traits>
+#include "common.h"
 
 #if defined(_OPENMP)
 #include <omp.h>

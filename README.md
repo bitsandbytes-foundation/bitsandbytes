@@ -180,8 +180,6 @@ The continued maintenance and development of `bitsandbytes` is made possible tha
 ## License
 `bitsandbytes` is MIT licensed.
 
-We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fabiocannizzo/FastBinarySearch) which we use for CPU quantization.
-
 ## How to cite us
 If you found this library useful, please consider citing our work:
 
