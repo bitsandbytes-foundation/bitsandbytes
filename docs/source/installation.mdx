@@ -2,8 +2,7 @@
 
 Welcome to the installation guide for the `bitsandbytes` library! This document provides step-by-step instructions to install `bitsandbytes` across various platforms and hardware configurations.
 
-We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, and Intel Gaudi platforms. We also have experimental support for
-additional platforms such as AMD ROCm.
+We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, and Intel Gaudi. We also have experimental support for additional platforms such as AMD ROCm and Apple Silicon.
 
 ## Table of Contents
 
@@ -100,7 +99,7 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 
 Compilation from source on Windows systems require Visual Studio with C++ support as well as an installation of the CUDA Toolkit.
 
-To compile from source, you need CMake >= **3.22.1** and Python >= **3.9** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we support is **11.8**.
+To compile from source, you need CMake >= **3.22.1** and Python >= **3.10** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we support is **11.8**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -163,6 +162,7 @@ The currently distributed `bitsandbytes` packages are built with the following c
 | **Linux x86-64**   | GCC 11.4             | AVX2                 |
 | **Linux aarch64**  | GCC 11.4             |                      |
 | **Windows x86-64** | MSVC 19.43+ (VS2022) | AVX2                 |
+| **macOS arm64**    | Apple Clang 17       |                      |
 
 The Linux build has a minimum glibc version of 2.24.
 
@@ -241,6 +241,13 @@ pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsand
 ```bash
 # Note: if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-win_amd64.whl
+```
+</hfoption>
+<hfoption id="macOS">
+
+```bash
+# Note: if you don't want to reinstall our dependencies, append the `--no-deps` flag!
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-macosx_14_0_arm64.whl
 ```
 </hfoption>
 </hfoptions>

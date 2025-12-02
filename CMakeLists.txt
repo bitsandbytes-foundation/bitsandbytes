@@ -37,7 +37,7 @@ set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps xpu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
-  set(CMAKE_OSX_DEPLOYMENT_TARGET 13.1)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET 14.0)
 endif()
 
 set(BNB_OUTPUT_NAME "bitsandbytes")
