@@ -1,6 +1,7 @@
 #include <thread>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 #include "cpu_ops.h"
 
