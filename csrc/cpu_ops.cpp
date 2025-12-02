@@ -1,9 +1,9 @@
-#include <thread>
+#include "cpu_ops.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <thread>
 #include <vector>
-#include "cpu_ops.h"
 
 #ifdef HAS_OPENMP
 #include <omp.h>

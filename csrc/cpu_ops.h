@@ -1,13 +1,13 @@
 #ifndef BITSANDBYTES_CPU_OPS_H
 #define BITSANDBYTES_CPU_OPS_H
 
+#include "common.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <thread>
 #include <type_traits>
-#include "common.h"
 
 #if defined(_OPENMP)
 #include <omp.h>
