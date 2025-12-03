@@ -157,6 +157,11 @@ if(BUILD_CUDA)
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
 
+    # It's safe for us to enable more aggressive compression for 13.0+
+    if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+        string(APPEND CMAKE_CUDA_FLAGS " --compress-mode=size")
+    endif()
+
     if(PTXAS_VERBOSE)
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
     endif()
