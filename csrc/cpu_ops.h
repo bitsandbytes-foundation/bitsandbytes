@@ -1,9 +1,9 @@
 #ifndef BITSANDBYTES_CPU_OPS_H
 #define BITSANDBYTES_CPU_OPS_H
 
+#include "common.h"
 #include <algorithm>
 #include <cmath>
-#include <common.h>
 #include <cstdint>
 #include <cstring>
 #include <thread>

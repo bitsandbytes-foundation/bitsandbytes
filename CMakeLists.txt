@@ -23,7 +23,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Define included source files
-set(CPP_FILES csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
+set(CPP_FILES csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
 set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
 set(HIP_FILES csrc/ops.hip csrc/kernels.hip)
 set(MPS_FILES csrc/mps_ops.mm)
@@ -37,7 +37,7 @@ set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps xpu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
-  set(CMAKE_OSX_DEPLOYMENT_TARGET 13.1)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET 14.0)
 endif()
 
 set(BNB_OUTPUT_NAME "bitsandbytes")
@@ -157,8 +157,12 @@ if(BUILD_CUDA)
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
 
+    # It's safe for us to enable more aggressive compression for 13.0+
+    if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+        string(APPEND CMAKE_CUDA_FLAGS " --compress-mode=size")
+    endif()
+
     if(PTXAS_VERBOSE)
-        # Verbose? Outputs register usage information, and other things...
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
     endif()
 
@@ -268,7 +272,7 @@ endif()
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
 target_compile_features(bitsandbytes PUBLIC cxx_std_17)
-target_include_directories(bitsandbytes PUBLIC csrc include)
+target_include_directories(bitsandbytes PUBLIC csrc)
 
 if (BUILD_CPU)
     if (OpenMP_CXX_FOUND)

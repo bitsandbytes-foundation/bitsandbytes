@@ -3,7 +3,6 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <BinSearch.h>
 #include <cassert>
 #include <cub/device/device_scan.cuh>
 #include <kernels.cuh>
@@ -12,7 +11,6 @@
 
 #define ERR_NOT_IMPLEMENTED 100
 
-using namespace BinSearch;
 using std::cout;
 using std::endl;
 

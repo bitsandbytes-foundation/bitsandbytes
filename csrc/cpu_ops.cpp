@@ -1,9 +1,8 @@
-#include <BinSearch.h>
-#include <cpu_ops.h>
-#include <thread>
-
+#include "cpu_ops.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <thread>
 #include <vector>
 
 #ifdef HAS_OPENMP

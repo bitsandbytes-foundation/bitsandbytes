@@ -15,13 +15,11 @@
 #include <hipblaslt/hipblaslt.h>
 #endif
 #include <limits>
-#include <BinSearch.h>
 #include <cassert>
 #include <common.h>
 
 #define ERR_NOT_IMPLEMENTED 100
 
-using namespace BinSearch;
 using std::cout;
 using std::endl;
 
