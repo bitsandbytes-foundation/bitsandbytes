@@ -233,7 +233,10 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             ).gemm_4bit_forward
         except Exception as exc:  # pragma: no cover - best effort fallback
             gemm_4bit_forward_kernel = None
-            logger.warning("Failed to load CPU gemm_4bit kernel: %s", exc)
+            logger.warning(
+                "Failed to load CPU gemm_4bit kernel: %s. Please make sure you already `pip install kernels` and the kernels >= 0.11.1",
+                exc,
+            )
 
         @register_kernel("bitsandbytes::gemv_4bit", "cpu")
         def _(
