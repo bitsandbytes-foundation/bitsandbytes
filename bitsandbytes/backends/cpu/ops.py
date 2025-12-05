@@ -221,16 +221,9 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
     if has_avx512bf16():
         gemm_4bit_forward_kernel = None
         try:
-            from pathlib import Path
+            from kernels import get_kernel
 
-            from kernels import get_local_kernel
-
-            gemm_4bit_forward_kernel = get_local_kernel(
-                repo_path=Path(
-                    "/workspace/nix/nix/store/vvsb2xvj5zkzfd37r1k1d5j23hpa9n86-quantization_bitsandbytes-torch-ext"
-                ),
-                package_name="quantization_bitsandbytes",
-            ).gemm_4bit_forward
+            gemm_4bit_forward_kernel = get_kernel("kernels-community/quantization_bitsandbytes").gemm_4bit_forward
         except Exception as exc:  # pragma: no cover - best effort fallback
             gemm_4bit_forward_kernel = None
             logger.warning(
