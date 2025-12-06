@@ -189,8 +189,7 @@ def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int,
     return out
 
 
-@register_kernel("bitsandbytes::quantize_4bit", "default")
-def _(
+def _quantize_4bit_impl(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check_is_size(blocksize)
@@ -232,6 +231,13 @@ def _(
     return packed, absmax.float()
 
 
+@register_kernel("bitsandbytes::quantize_4bit", "default")
+def _(
+    A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _quantize_4bit_impl(A, blocksize, quant_type, quant_storage)
+
+
 def _dequantize_4bit_impl(
     A: torch.Tensor,
     absmax: torch.Tensor,
@@ -243,7 +249,6 @@ def _dequantize_4bit_impl(
     # Enable non uint8 dtype
     if A.dtype != torch.uint8:
         A = A.view(torch.uint8)
-
     A = A.reshape(-1)
     # Map nf4 to [-1, 1]
     out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
@@ -290,7 +295,6 @@ def _(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
     )
-
     return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
 
 

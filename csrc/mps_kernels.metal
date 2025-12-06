@@ -1,117 +1,238 @@
 #include <metal_stdlib>
+#include <metal_simdgroup>
 using namespace metal;
 
-#define HLF_MAX 65504
-#define TH 1024
-#define NUM 4
-#define NUM_BLOCK 4096
+namespace {
 
-template<bool STOCHASTIC>
-static unsigned char quantize_scalar(
-  float rand,
-  device float* code,
-  float x)
-{
-    int pivot = 127;
-    int upper_pivot = 255;
-    int lower_pivot = 0;
+constant float NF4_CODE[16] = {
+    -1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453,
+    -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
+    0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224,
+    0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0
+};
 
-    float lower = -1.0f;
-    float upper = 1.0f;
+constant float FP4_CODE[16] = {
+    0.0, 0.0052, 0.6667, 1.0, 0.3333, 0.5, 0.1667, 0.25,
+    0.0, -0.0052, -0.6667, -1.0, -0.3333, -0.5, -0.1667, -0.25
+};
 
-    float val = code[pivot];
-    // i>>=1 = {32, 16, 8, 4, 2, 1}
-    for(int i = 64; i > 0; i>>=1)
-    {
-        if(x > val)
-        {
-            lower_pivot = pivot;
-            lower = val;
-            pivot+=i;
+template <typename scalar_t>
+inline uchar encode_value(float value, constant float* code_table) {
+    float best = fabs(value - code_table[0]);
+    uchar index = 0;
+    for (uchar i = 1; i < 16; ++i) {
+        float diff = fabs(value - code_table[i]);
+        if (diff < best) {
+            best = diff;
+            index = i;
         }
-        else
-        {
-            upper_pivot = pivot;
-            upper = val;
-            pivot-=i;
-        }
-        val = code[pivot];
+    }
+    return index;
+}
+
+template <typename scalar_t>
+inline void quantize_block(
+    device const scalar_t* input,
+    device float* absmax,
+    device uchar* packed,
+    uint n,
+    uint blocksize,
+    uint block_index,
+    constant float* code_table
+) {
+    uint start = block_index * blocksize;
+    if (start >= n) {
+        return;
     }
 
-    if(upper_pivot == 255)
-        upper = code[upper_pivot];
-    if(lower_pivot == 0)
-        lower = code[lower_pivot];
-
-    if(!STOCHASTIC)
-    {
-      if(x > val)
-      {
-        float midpoint = (upper+val)*0.5f;
-        if(x > midpoint)
-        {
-          return upper_pivot;
-        }
-        else
-          return pivot;
-      }
-      else
-      {
-        float midpoint = (lower+val)*0.5f;
-        if(x < midpoint)
-          return lower_pivot;
-        else
-          return pivot;
-      }
+    uint end = min(start + blocksize, n);
+    float max_val = 0.0f;
+    for (uint i = start; i < end; ++i) {
+        float current = fabs((float)input[i]);
+        max_val = max(max_val, current);
     }
-    else
-    {
-      if(x > val)
-      {
-        float dist_to_upper = fabs(upper-x);
-        float dist_full = upper-val;
-        if(rand >= dist_to_upper/dist_full) return upper_pivot;
-        else return pivot;
-      }
-      else
-      {
-        float dist_to_lower = fabs(lower-x);
-        float dist_full = val-lower;
-        if(rand >= dist_to_lower/dist_full) return lower_pivot;
-        else return pivot;
-      }
+
+    absmax[block_index] = max_val;
+    float inv = max_val > 0.0f ? 1.0f / max_val : 0.0f;
+
+    uint out_byte = start >> 1;
+    bool has_pending = false;
+    uchar pending = 0;
+
+    for (uint i = start; i < end; ++i) {
+        float normalized = (max_val > 0.0f) ? clamp((float)input[i] * inv, -1.0f, 1.0f) : 0.0f;
+        uchar q = encode_value<scalar_t>(normalized, code_table) & 0xF;
+
+        if (!has_pending) {
+            pending = q << 4;
+            has_pending = true;
+            if (i == end - 1) {
+                packed[out_byte++] = pending;
+                has_pending = false;
+            }
+        } else {
+            packed[out_byte++] = pending | q;
+            has_pending = false;
+        }
     }
 }
 
-kernel void quantize(device float* code [[buffer(0)]],
-                      device float* A [[buffer(1)]],
-                      device uchar* out [[buffer(2)]],
-                      constant uint& n [[buffer(3)]],
-                      uint id [[thread_position_in_grid]]) {
-  const uint n_full = (NUM_BLOCK * (n / NUM_BLOCK)) + (n % NUM_BLOCK == 0 ? 0 : NUM_BLOCK);
-  uint valid_items = (id / NUM_BLOCK + 1 == (n + NUM_BLOCK - 1) / NUM_BLOCK) ? n - (id / NUM_BLOCK * NUM_BLOCK) : NUM_BLOCK;
-  const uint base_idx = (id / NUM_BLOCK * NUM_BLOCK);
-
-  float vals[NUM];
-  uchar qvals[NUM];
-
-  for (uint i = base_idx; i < n_full; i += ((n + NUM_BLOCK - 1) / NUM_BLOCK) * NUM_BLOCK) {
-    valid_items = n - i > NUM_BLOCK ? NUM_BLOCK : n - i;
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    for (uint j = 0; j < valid_items; j++) {
-      vals[j] = A[i + j];
+template <typename scalar_t>
+inline void dequantize_block(
+    device const uchar* packed,
+    device const float* absmax,
+    device scalar_t* output,
+    uint n,
+    uint blocksize,
+    uint block_index,
+    constant float* code_table
+) {
+    uint start = block_index * blocksize;
+    if (start >= n) {
+        return;
     }
 
-    for (uint j = 0; j < valid_items; j++) {
-      qvals[j] = quantize_scalar<false>(0.0f, code, vals[j]);
+    uint end = min(start + blocksize, n);
+    float scale = absmax[block_index];
+    if (scale == 0.0f) {
+        for (uint i = start; i < end; ++i) {
+          output[i] = scalar_t(0.0f);
+        }
+        return;
     }
 
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    for (uint j = 0; j < valid_items; j++) {
-      out[i + j] = qvals[j];
+    uint base_byte = start >> 1;
+    for (uint offset = 0; offset < end - start; ++offset) {
+        uint global_index = start + offset;
+        uint byte_index = base_byte + (offset >> 1);
+        uchar byte_val = packed[byte_index];
+        uchar nibble = (offset & 1) == 0 ? (byte_val >> 4) & 0xF : byte_val & 0xF;
+        float decoded = code_table[nibble] * scale;
+        output[global_index] = scalar_t(decoded);
     }
-  }
+}
+
+}  // namespace
+
+// Quantization kernels
+kernel void quantize_4bit_fp16_fp4(
+    device const half* input [[buffer(0)]],
+    device float* absmax [[buffer(1)]],
+    device uchar* packed [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& blocksize [[buffer(4)]],
+    constant uint& blocks [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= blocks) {
+        return;
+    }
+    quantize_block(input, absmax, packed, n, blocksize, gid, FP4_CODE);
+}
+
+kernel void quantize_4bit_fp16_nf4(
+    device const half* input [[buffer(0)]],
+    device float* absmax [[buffer(1)]],
+    device uchar* packed [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& blocksize [[buffer(4)]],
+    constant uint& blocks [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= blocks) {
+        return;
+    }
+    quantize_block(input, absmax, packed, n, blocksize, gid, NF4_CODE);
+}
+
+kernel void quantize_4bit_fp32_fp4(
+    device const float* input [[buffer(0)]],
+    device float* absmax [[buffer(1)]],
+    device uchar* packed [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& blocksize [[buffer(4)]],
+    constant uint& blocks [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= blocks) {
+        return;
+    }
+    quantize_block(input, absmax, packed, n, blocksize, gid, FP4_CODE);
+}
+
+kernel void quantize_4bit_fp32_nf4(
+    device const float* input [[buffer(0)]],
+    device float* absmax [[buffer(1)]],
+    device uchar* packed [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& blocksize [[buffer(4)]],
+    constant uint& blocks [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= blocks) {
+        return;
+    }
+    quantize_block(input, absmax, packed, n, blocksize, gid, NF4_CODE);
+}
+
+// Dequantization kernels
+kernel void dequantize_4bit_fp16_fp4(
+    device const uchar* packed [[buffer(0)]],
+    device const float* absmax [[buffer(1)]],
+    device half* output [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& blocksize [[buffer(4)]],
+    constant uint& blocks [[buffer(5)]],
+    uint gid [[thread_position_in_grid]],
+    
+) {
+    if (gid >= blocks) {
+        return;
+    }
+    dequantize_block(packed, absmax, output, n, blocksize, gid, FP4_CODE);
+}
+
+kernel void dequantize_4bit_fp16_nf4(
+    device const uchar* packed [[buffer(0)]],
+    device const float* absmax [[buffer(1)]],
+    device half* output [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& blocksize [[buffer(4)]],
+    constant uint& blocks [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= blocks) {
+        return;
+    }
+    dequantize_block(packed, absmax, output, n, blocksize, gid, NF4_CODE);
+}
+
+kernel void dequantize_4bit_fp32_fp4(
+    device const uchar* packed [[buffer(0)]],
+    device const float* absmax [[buffer(1)]],
+    device float* output [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& blocksize [[buffer(4)]],
+    constant uint& blocks [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= blocks) {
+        return;
+    }
+    dequantize_block(packed, absmax, output, n, blocksize, gid, FP4_CODE);
+}
+
+kernel void dequantize_4bit_fp32_nf4(
+    device const uchar* packed [[buffer(0)]],
+    device const float* absmax [[buffer(1)]],
+    device float* output [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& blocksize [[buffer(4)]],
+    constant uint& blocks [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= blocks) {
+        return;
+    }
+    dequantize_block(packed, absmax, output, n, blocksize, gid, NF4_CODE);
 }
