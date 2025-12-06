@@ -527,7 +527,6 @@ class Linear4bit(nn.Linear):
     def forward(self, x: torch.Tensor):
         fix_4bit_weight_quant_state_from_module(self)
         quant_state = self.weight.quant_state
-
         if (
             not getattr(quant_state, "packing_format_for_cpu", False)
             and x.device.type == "cpu"
