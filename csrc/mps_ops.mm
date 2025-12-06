@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <algorithm>
 
 namespace {
 
@@ -167,7 +168,6 @@ static inline void dispatch_dequant_kernel(
     if (n == 0) {
         return;
     }
-
     uint32_t blocks = (n + blocksize - 1) / blocksize;
     TensorView packedView = make_tensor_view(packed, "packed");
     TensorView absmaxView = make_tensor_view(absmax, "absmax");
@@ -184,17 +184,25 @@ static inline void dispatch_dequant_kernel(
     [encoder setBytes:&n length:sizeof(uint32_t) atIndex:3];
     [encoder setBytes:&blocksize length:sizeof(uint32_t) atIndex:4];
     [encoder setBytes:&blocks length:sizeof(uint32_t) atIndex:5];
-    NSUInteger threadsPerThreadgroup = pipeline.threadExecutionWidth;
-    if (threadsPerThreadgroup == 0) {
-        threadsPerThreadgroup = 1;
+
+    NSUInteger maxThreadsPerTG = pipeline.maxTotalThreadsPerThreadgroup;
+    NSUInteger desiredThreads = (blocksize + 1) / 2;
+    if (desiredThreads == 0) {
+        desiredThreads = 1;
     }
+    NSUInteger threadsPerThreadgroup = std::min(maxThreadsPerTG, std::max<NSUInteger>(1, desiredThreads));
+    if (threadsPerThreadgroup < pipeline.threadExecutionWidth) {
+        threadsPerThreadgroup = std::min(pipeline.threadExecutionWidth, maxThreadsPerTG);
+    }
+
+    NSUInteger totalThreads = threadsPerThreadgroup * blocks;
     MTLSize threads = MTLSizeMake(threadsPerThreadgroup, 1, 1);
-    MTLSize grid = MTLSizeMake(blocks, 1, 1);
+    MTLSize grid = MTLSizeMake(totalThreads, 1, 1);
     [encoder dispatchThreads:grid threadsPerThreadgroup:threads];
     [encoder endEncoding];
 
     [commandBuffer commit];
-    [commandBuffer waitUntilCompleted];
+    // [commandBuffer waitUntilCompleted];
 }
 
 }  // namespace

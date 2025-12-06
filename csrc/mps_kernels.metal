@@ -85,30 +85,46 @@ inline void dequantize_block(
     uint n,
     uint blocksize,
     uint block_index,
-    constant float* code_table
+    uint thread_idx,
+    uint threadgroup_size,
+    constant float* code_table,
+    threadgroup float& shared_scale
 ) {
-    uint start = block_index * blocksize;
-    if (start >= n) {
+    uint block_start = block_index * blocksize;
+    if (block_start >= n) {
         return;
     }
+    uint block_end = min(block_start + blocksize, n);
+    uint pairs_in_block = (block_end - block_start + 1) >> 1;
 
-    uint end = min(start + blocksize, n);
-    float scale = absmax[block_index];
-    if (scale == 0.0f) {
-        for (uint i = start; i < end; ++i) {
-          output[i] = scalar_t(0.0f);
+    if (thread_idx == 0) {
+        shared_scale = absmax[block_index];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float scale = shared_scale;
+
+    for (uint pair = thread_idx; pair < pairs_in_block; pair += threadgroup_size) {
+        uint value_index0 = block_start + pair * 2;
+        if (value_index0 >= block_end) {
+            break;
         }
-        return;
-    }
 
-    uint base_byte = start >> 1;
-    for (uint offset = 0; offset < end - start; ++offset) {
-        uint global_index = start + offset;
-        uint byte_index = base_byte + (offset >> 1);
-        uchar byte_val = packed[byte_index];
-        uchar nibble = (offset & 1) == 0 ? (byte_val >> 4) & 0xF : byte_val & 0xF;
-        float decoded = code_table[nibble] * scale;
-        output[global_index] = scalar_t(decoded);
+        uint byte_index0 = value_index0 >> 1;
+        uchar byte_val0 = packed[byte_index0];
+        bool upper0 = ((value_index0 & 1) == 0);
+        uchar nibble0 = upper0 ? ((byte_val0 >> 4) & 0xF) : (byte_val0 & 0xF);
+        float decoded0 = code_table[nibble0] * scale;
+        output[value_index0] = scalar_t(decoded0);
+
+        uint value_index1 = value_index0 + 1;
+        if (value_index1 < block_end) {
+            uint byte_index1 = value_index1 >> 1;
+            uchar byte_val1 = (byte_index1 == byte_index0) ? byte_val0 : packed[byte_index1];
+            bool upper1 = ((value_index1 & 1) == 0);
+            uchar nibble1 = upper1 ? ((byte_val1 >> 4) & 0xF) : (byte_val1 & 0xF);
+            float decoded1 = code_table[nibble1] * scale;
+            output[value_index1] = scalar_t(decoded1);
+        }
     }
 }
 
@@ -183,13 +199,15 @@ kernel void dequantize_4bit_fp16_fp4(
     constant uint& n [[buffer(3)]],
     constant uint& blocksize [[buffer(4)]],
     constant uint& blocks [[buffer(5)]],
-    uint gid [[thread_position_in_grid]],
-    
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint threadgroup_size [[threads_per_threadgroup]]
 ) {
-    if (gid >= blocks) {
+    if (tgid >= blocks) {
         return;
     }
-    dequantize_block(packed, absmax, output, n, blocksize, gid, FP4_CODE);
+    threadgroup float shared_scale;
+    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, FP4_CODE, shared_scale);
 }
 
 kernel void dequantize_4bit_fp16_nf4(
@@ -199,12 +217,15 @@ kernel void dequantize_4bit_fp16_nf4(
     constant uint& n [[buffer(3)]],
     constant uint& blocksize [[buffer(4)]],
     constant uint& blocks [[buffer(5)]],
-    uint gid [[thread_position_in_grid]]
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint threadgroup_size [[threads_per_threadgroup]]
 ) {
-    if (gid >= blocks) {
+    if (tgid >= blocks) {
         return;
     }
-    dequantize_block(packed, absmax, output, n, blocksize, gid, NF4_CODE);
+    threadgroup float shared_scale;
+    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, NF4_CODE, shared_scale);
 }
 
 kernel void dequantize_4bit_fp32_fp4(
@@ -214,12 +235,15 @@ kernel void dequantize_4bit_fp32_fp4(
     constant uint& n [[buffer(3)]],
     constant uint& blocksize [[buffer(4)]],
     constant uint& blocks [[buffer(5)]],
-    uint gid [[thread_position_in_grid]]
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint threadgroup_size [[threads_per_threadgroup]]
 ) {
-    if (gid >= blocks) {
+    if (tgid >= blocks) {
         return;
     }
-    dequantize_block(packed, absmax, output, n, blocksize, gid, FP4_CODE);
+    threadgroup float shared_scale;
+    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, FP4_CODE, shared_scale);
 }
 
 kernel void dequantize_4bit_fp32_nf4(
@@ -229,10 +253,13 @@ kernel void dequantize_4bit_fp32_nf4(
     constant uint& n [[buffer(3)]],
     constant uint& blocksize [[buffer(4)]],
     constant uint& blocks [[buffer(5)]],
-    uint gid [[thread_position_in_grid]]
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint threadgroup_size [[threads_per_threadgroup]]
 ) {
-    if (gid >= blocks) {
+    if (tgid >= blocks) {
         return;
     }
-    dequantize_block(packed, absmax, output, n, blocksize, gid, NF4_CODE);
+    threadgroup float shared_scale;
+    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, NF4_CODE, shared_scale);
 }

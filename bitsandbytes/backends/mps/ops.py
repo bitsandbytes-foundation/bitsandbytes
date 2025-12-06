@@ -131,6 +131,7 @@ def _dequantize_4bit_native(
         ct.c_int32(blocksize),
         ct.c_int32(out.numel()),
     )
+
     return True
 
 
@@ -163,7 +164,7 @@ def _(
     out = torch.empty(shape, dtype=dtype, device=A.device)
     if _dequantize_4bit_native(A, absmax, blocksize, quant_type, dtype, out):
         return out
-    return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
+    # return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
 
 
 @register_kernel("bitsandbytes::dequantize_4bit.out", "mps")
@@ -182,7 +183,6 @@ def _(
     torch._check(out.shape == tuple(shape), lambda: f"Expected out.shape == {tuple(shape)}, got {out.shape}")
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
 
-    if not _dequantize_4bit_native(A, absmax, blocksize, quant_type, dtype, out):
-        result = _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
-        out.copy_(result)
-
+    _dequantize_4bit_native(A, absmax, blocksize, quant_type, dtype, out)
+        # result = _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
+        # out.copy_(result)

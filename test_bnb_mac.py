@@ -9,14 +9,14 @@ inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 outputs = model.generate(**inputs, max_new_tokens=20)
 print(tokenizer.decode(outputs[0], skip_special_tokens=True))  # or whatever entry function you have
 
-import torch
-import bitsandbytes as bnb
-A = torch.randn(2048, device='mps', dtype=torch.float16)
-q, absmax = torch.ops.bitsandbytes.quantize_4bit(A, 64, 'nf4', torch.uint8)
-print('q.shape:', q.shape, q.dtype)
-print('absmax.shape:', absmax.shape, absmax.dtype)
-B = torch.ops.bitsandbytes.dequantize_4bit(q, absmax, 64, 'nf4', A.shape, A.dtype)
-print('ok', float((A-B).abs().max()))
+# import torch
+# import bitsandbytes as bnb
+# A = torch.randn(2048, device='mps', dtype=torch.float16)
+# q, absmax = torch.ops.bitsandbytes.quantize_4bit(A, 64, 'nf4', torch.uint8)
+# print('q.shape:', q.shape, q.dtype)
+# print('absmax.shape:', absmax.shape, absmax.dtype)
+# B = torch.ops.bitsandbytes.dequantize_4bit(q, absmax, 64, 'nf4', A.shape, A.dtype)
+# print('ok', float((A-B).abs().max()))
 
 # import torch, bitsandbytes as bnb
 
@@ -53,3 +53,18 @@ print('ok', float((A-B).abs().max()))
 # print("q_cpu[:8]:", q_cpu.view(-1)[:8])
 # print("absmax_mps[:4]:", absmax[:4].cpu())
 # print("absmax_cpu[:4]:", absmax_cpu[:4])
+
+# import torch, bitsandbytes as bnb, time
+
+# torch.manual_seed(0)
+# A = torch.randn(4096 * 4096, device="mps", dtype=torch.float16)
+# blocksize = 64
+
+# q, absmax = torch.ops.bitsandbytes.quantize_4bit(A, blocksize, "nf4", torch.uint8)
+
+# torch.mps.synchronize()
+# t0 = time.perf_counter()
+# torch.ops.bitsandbytes.dequantize_4bit(q, absmax, blocksize, "nf4", A.shape, A.dtype)
+# torch.mps.synchronize()
+# dt = time.perf_counter() - t0
+# print(f"Dequant time: {dt*1000:.2f} ms for {A.numel()/1e6:.1f}M elements")
