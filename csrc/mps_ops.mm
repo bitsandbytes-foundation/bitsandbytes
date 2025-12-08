@@ -7,6 +7,9 @@
 #include <string.h>
 #include <algorithm>
 
+#include <ATen/mps/MPSStream.h>
+#include <ATen/native/mps/OperationUtils.h>
+
 namespace {
 
 typedef struct {
@@ -15,30 +18,19 @@ typedef struct {
     size_t nbytes;
 } BNBMPSTensor;
 
-static inline id<MTLDevice> get_device() {
-    static id<MTLDevice> device = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        device = MTLCreateSystemDefaultDevice();
-    if (!device) {
-            NSLog(@"bitsandbytes: failed to acquire Metal device");
+static constexpr NSUInteger kMaxThreadsPerThreadgroup = 512;
+
+static inline at::mps::MPSStream* get_default_stream() {
+    at::mps::MPSStream* stream = at::mps::getCurrentMPSStream();
+    if (!stream) {
+        NSLog(@"bitsandbytes: PyTorch MPS stream is unavailable");
         abort();
     }
-    });
-    return device;
+    return stream;
 }
 
-static inline id<MTLCommandQueue> get_command_queue() {
-    static id<MTLCommandQueue> queue = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        queue = [get_device() newCommandQueue];
-        if (!queue) {
-            NSLog(@"bitsandbytes: failed to create Metal command queue");
-            abort();
-        }
-    });
-    return queue;
+static inline id<MTLDevice> get_device() {
+    return get_default_stream()->device();
 }
 
 static inline NSURL* metallib_url() {
@@ -74,9 +66,11 @@ static inline id<MTLComputePipelineState> get_pipeline(NSString* functionName) {
         cache = [[NSMutableDictionary alloc] init];
     });
 
-    id<MTLComputePipelineState> pipeline = cache[functionName];
-    if (pipeline) {
-        return pipeline;
+    @synchronized(cache) {
+        id<MTLComputePipelineState> pipeline = cache[functionName];
+        if (pipeline) {
+            return pipeline;
+        }
     }
 
     NSError* error = nil;
@@ -86,7 +80,7 @@ static inline id<MTLComputePipelineState> get_pipeline(NSString* functionName) {
         abort();
     }
 
-    pipeline = [get_device() newComputePipelineStateWithFunction:function error:&error];
+    id<MTLComputePipelineState> pipeline = [get_device() newComputePipelineStateWithFunction:function error:&error];
     [function release];
 
     if (!pipeline) {
@@ -94,7 +88,9 @@ static inline id<MTLComputePipelineState> get_pipeline(NSString* functionName) {
         abort();
     }
 
-    cache[functionName] = pipeline;
+    @synchronized(cache) {
+        cache[functionName] = pipeline;
+    }
     return pipeline;
 }
 
@@ -125,36 +121,36 @@ static inline void dispatch_quant_kernel(
     if (n == 0) {
         return;
     }
-
     uint32_t blocks = (n + blocksize - 1) / blocksize;
     TensorView inputView = make_tensor_view(input, "input");
     TensorView absmaxView = make_tensor_view(absmax, "absmax");
     TensorView outView = make_tensor_view(out, "out");
 
-    id<MTLCommandBuffer> commandBuffer = [get_command_queue() commandBuffer];
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> pipeline = get_pipeline(name);
+    at::mps::MPSStream* stream = get_default_stream();
+    // stream->endKernelCoalescing();
+    id<MTLCommandBuffer> command_buffer_obj = stream->commandBuffer();
 
-    [encoder setComputePipelineState:pipeline];
-    [encoder setBuffer:inputView.buffer offset:inputView.offset atIndex:0];
-    [encoder setBuffer:absmaxView.buffer offset:absmaxView.offset atIndex:1];
-    [encoder setBuffer:outView.buffer offset:outView.offset atIndex:2];
-    [encoder setBytes:&n length:sizeof(uint32_t) atIndex:3];
-    [encoder setBytes:&blocksize length:sizeof(uint32_t) atIndex:4];
-    [encoder setBytes:&blocks length:sizeof(uint32_t) atIndex:5];
+    id<MTLComputePipelineState> pipeline_state_obj = (id<MTLComputePipelineState>) get_pipeline(name);
 
-    NSUInteger threadsPerThreadgroup = pipeline.threadExecutionWidth;
+    id<MTLComputeCommandEncoder> command_encoder_obj = [command_buffer_obj computeCommandEncoder];
+
+    // Set kernel arguments
+    [command_encoder_obj setComputePipelineState:pipeline_state_obj];
+    [command_encoder_obj setBuffer:inputView.buffer offset:inputView.offset atIndex:0];
+    [command_encoder_obj setBuffer:absmaxView.buffer offset:absmaxView.offset atIndex:1];
+    [command_encoder_obj setBuffer:outView.buffer offset:outView.offset atIndex:2];
+    [command_encoder_obj setBytes:&n length:sizeof(uint32_t) atIndex:3];
+    [command_encoder_obj setBytes:&blocksize length:sizeof(uint32_t) atIndex:4];
+    [command_encoder_obj setBytes:&blocks length:sizeof(uint32_t) atIndex:5];
+    NSUInteger threadsPerThreadgroup = pipeline_state_obj.threadExecutionWidth;
     if (threadsPerThreadgroup == 0) {
         threadsPerThreadgroup = 1;
     }
     MTLSize threads = MTLSizeMake(threadsPerThreadgroup, 1, 1);
     MTLSize grid = MTLSizeMake(blocks, 1, 1);
-    [encoder dispatchThreads:grid threadsPerThreadgroup:threads];
-    [encoder endEncoding];
-
-    [commandBuffer commit];
-    [commandBuffer waitUntilCompleted];
-
+    [command_encoder_obj dispatchThreads:grid threadsPerThreadgroup:threads];
+    [command_encoder_obj endEncoding];
+    stream->synchronize(at::mps::SyncType::COMMIT);
 }
 
 static inline void dispatch_dequant_kernel(
@@ -173,36 +169,37 @@ static inline void dispatch_dequant_kernel(
     TensorView absmaxView = make_tensor_view(absmax, "absmax");
     TensorView outputView = make_tensor_view(output, "output");
 
-    id<MTLCommandBuffer> commandBuffer = [get_command_queue() commandBuffer];
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> pipeline = get_pipeline(name);
+    at::mps::MPSStream* stream = get_default_stream();
+    at::native::mps::dispatch_sync_with_rethrow(stream->queue(), ^{
+        @autoreleasepool {
+            id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+            id<MTLComputePipelineState> pipeline = get_pipeline(name);
 
-    [encoder setComputePipelineState:pipeline];
-    [encoder setBuffer:packedView.buffer offset:packedView.offset atIndex:0];
-    [encoder setBuffer:absmaxView.buffer offset:absmaxView.offset atIndex:1];
-    [encoder setBuffer:outputView.buffer offset:outputView.offset atIndex:2];
-    [encoder setBytes:&n length:sizeof(uint32_t) atIndex:3];
-    [encoder setBytes:&blocksize length:sizeof(uint32_t) atIndex:4];
-    [encoder setBytes:&blocks length:sizeof(uint32_t) atIndex:5];
+            [encoder setComputePipelineState:pipeline];
+            [encoder setBuffer:packedView.buffer offset:packedView.offset atIndex:0];
+            [encoder setBuffer:absmaxView.buffer offset:absmaxView.offset atIndex:1];
+            [encoder setBuffer:outputView.buffer offset:outputView.offset atIndex:2];
+            [encoder setBytes:&n length:sizeof(uint32_t) atIndex:3];
+            [encoder setBytes:&blocksize length:sizeof(uint32_t) atIndex:4];
+            [encoder setBytes:&blocks length:sizeof(uint32_t) atIndex:5];
 
-    NSUInteger maxThreadsPerTG = pipeline.maxTotalThreadsPerThreadgroup;
-    NSUInteger desiredThreads = (blocksize + 1) / 2;
-    if (desiredThreads == 0) {
-        desiredThreads = 1;
-    }
-    NSUInteger threadsPerThreadgroup = std::min(maxThreadsPerTG, std::max<NSUInteger>(1, desiredThreads));
-    if (threadsPerThreadgroup < pipeline.threadExecutionWidth) {
-        threadsPerThreadgroup = std::min(pipeline.threadExecutionWidth, maxThreadsPerTG);
-    }
+            NSUInteger maxThreadsPerTG = pipeline.maxTotalThreadsPerThreadgroup;
+            NSUInteger desiredThreads = (blocksize + 1) / 2;
+            if (desiredThreads == 0) {
+                desiredThreads = 1;
+            }
+            NSUInteger threadsPerThreadgroup =
+                std::min(maxThreadsPerTG, std::max<NSUInteger>(1, desiredThreads));
+            if (threadsPerThreadgroup < pipeline.threadExecutionWidth) {
+                threadsPerThreadgroup = std::min(pipeline.threadExecutionWidth, maxThreadsPerTG);
+            }
 
-    NSUInteger totalThreads = threadsPerThreadgroup * blocks;
-    MTLSize threads = MTLSizeMake(threadsPerThreadgroup, 1, 1);
-    MTLSize grid = MTLSizeMake(totalThreads, 1, 1);
-    [encoder dispatchThreads:grid threadsPerThreadgroup:threads];
-    [encoder endEncoding];
-
-    [commandBuffer commit];
-    // [commandBuffer waitUntilCompleted];
+            NSUInteger totalThreads = threadsPerThreadgroup * blocks;
+            MTLSize threads = MTLSizeMake(threadsPerThreadgroup, 1, 1);
+            MTLSize grid = MTLSizeMake(totalThreads, 1, 1);
+            [encoder dispatchThreads:grid threadsPerThreadgroup:threads];
+        }
+    });
 }
 
 }  // namespace

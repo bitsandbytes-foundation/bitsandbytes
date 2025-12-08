@@ -1,22 +1,42 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1b-Instruct")
-quantization_config = BitsAndBytesConfig(load_in_4bit=True)
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1b-Instruct", device_map="mps", quantization_config=quantization_config)
-print("model.device:", model.device)
-prompt = "Hello, how are you?"
-inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-outputs = model.generate(**inputs, max_new_tokens=20)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))  # or whatever entry function you have
-
+# from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 # import torch
-# import bitsandbytes as bnb
-# A = torch.randn(2048, device='mps', dtype=torch.float16)
-# q, absmax = torch.ops.bitsandbytes.quantize_4bit(A, 64, 'nf4', torch.uint8)
-# print('q.shape:', q.shape, q.dtype)
-# print('absmax.shape:', absmax.shape, absmax.dtype)
-# B = torch.ops.bitsandbytes.dequantize_4bit(q, absmax, 64, 'nf4', A.shape, A.dtype)
-# print('ok', float((A-B).abs().max()))
+# tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1b-Instruct")
+# quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+# model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1b-Instruct", device_map="mps", quantization_config=quantization_config, dtype=torch.float16)
+# print("model.device:", model.device)
+# prompt = "Hello, how are you?"
+# inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+# outputs = model.generate(**inputs, max_new_tokens=20)
+# print(tokenizer.decode(outputs[0], skip_special_tokens=True))  # or whatever entry function you have
+
+import torch
+import bitsandbytes as bnb
+from torch.profiler import profile, ProfilerActivity
+from torch.mps.profiler import metal_capture
+
+
+def run_once():
+    A = torch.randn(2048, device="mps", dtype=torch.float16)
+    q, absmax = torch.ops.bitsandbytes.quantize_4bit(A, 64, "nf4", torch.uint8)
+    print("q.shape:", q.shape, q.dtype)
+    print("absmax.shape:", absmax.shape, absmax.dtype)
+    B = torch.ops.bitsandbytes.dequantize_4bit(q, absmax, 64, "nf4", A.shape, A.dtype)
+    torch.mps.synchronize()
+    print("ok", float((A - B).abs().max()))
+
+run_once()
+# trace_path = "bnb_mps_capture_1.gputrace"
+
+# with metal_capture(trace_path):
+#     with profile(
+#         activities=[],
+#         record_shapes=True,
+#         with_stack=True,
+#     ) as prof:
+#         run_once()
+
+# print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+# print(f"Metal capture saved to: {trace_path}")
 
 # import torch, bitsandbytes as bnb
 

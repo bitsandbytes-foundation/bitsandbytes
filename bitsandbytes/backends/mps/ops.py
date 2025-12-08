@@ -12,11 +12,6 @@ from ..utils import CODE
 from .shim import MPSTensorShim#, configure_mps_blockwise_kernel
 
 
-def _sync_mps_if_needed() -> None:
-    if torch.backends.mps.is_available():
-        torch.mps.synchronize()
-
-
 def _check_mps_device(tensor: torch.Tensor, name: str) -> None:
     torch._check(
         tensor.device.type == "mps",
@@ -25,7 +20,13 @@ def _check_mps_device(tensor: torch.Tensor, name: str) -> None:
 
 
 def _supports_dtype(dtype: torch.dtype) -> bool:
-    return dtype in (torch.float16, torch.float32)
+    return dtype in (torch.float16, torch.float32, torch.bfloat16)
+
+
+def _kernel_dtype(dtype: torch.dtype) -> torch.dtype:
+    if dtype == torch.bfloat16:
+        return torch.float32
+    return dtype
 
 
 def _resolve_quant_fn(dtype: torch.dtype, quant_type: str) -> Optional[_CFuncPtr]:
@@ -79,20 +80,25 @@ def _quantize_4bit_native(
     if quant_storage != torch.uint8 or not _supports_dtype(A.dtype):
         return None
 
-    fn = _resolve_quant_fn(A.dtype, quant_type)
+    kernel_dtype = _kernel_dtype(A.dtype)
+    fn = _resolve_quant_fn(kernel_dtype, quant_type)
     if fn is None:
         return None
+
+    if kernel_dtype != A.dtype:
+        A_kernel = A.to(kernel_dtype)
+    else:
+        A_kernel = A
 
     n = A.numel()
     blocks = -(n // -blocksize)
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
     out = torch.empty(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)
 
-    input_shim = MPSTensorShim.from_tensor(A)
+    input_shim = MPSTensorShim.from_tensor(A_kernel)
     absmax_shim = MPSTensorShim.from_tensor(absmax)
     out_shim = MPSTensorShim.from_tensor(out)
 
-    _sync_mps_if_needed()
     fn(
         input_shim.struct,
         absmax_shim.struct,
@@ -115,15 +121,19 @@ def _dequantize_4bit_native(
         return False
 
     _check_mps_device(absmax, "absmax")
-    fn = _resolve_dequant_fn(dtype, quant_type)
+    kernel_dtype = _kernel_dtype(dtype)
+    fn = _resolve_dequant_fn(kernel_dtype, quant_type)
     if fn is None:
         return False
 
     packed_shim = MPSTensorShim.from_tensor(A)
     absmax_shim = MPSTensorShim.from_tensor(absmax)
-    out_shim = MPSTensorShim.from_tensor(out)
+    if kernel_dtype != dtype:
+        work_out = torch.empty_like(out, dtype=kernel_dtype)
+    else:
+        work_out = out
+    out_shim = MPSTensorShim.from_tensor(work_out)
 
-    _sync_mps_if_needed()
     fn(
         packed_shim.struct,
         absmax_shim.struct,
@@ -131,6 +141,9 @@ def _dequantize_4bit_native(
         ct.c_int32(blocksize),
         ct.c_int32(out.numel()),
     )
+
+    if work_out is not out:
+        out.copy_(work_out.to(dtype))
 
     return True
 
@@ -164,7 +177,7 @@ def _(
     out = torch.empty(shape, dtype=dtype, device=A.device)
     if _dequantize_4bit_native(A, absmax, blocksize, quant_type, dtype, out):
         return out
-    # return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
+    return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
 
 
 @register_kernel("bitsandbytes::dequantize_4bit.out", "mps")
@@ -183,6 +196,6 @@ def _(
     torch._check(out.shape == tuple(shape), lambda: f"Expected out.shape == {tuple(shape)}, got {out.shape}")
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
 
-    _dequantize_4bit_native(A, absmax, blocksize, quant_type, dtype, out)
-        # result = _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
-        # out.copy_(result)
+    if not _dequantize_4bit_native(A, absmax, blocksize, quant_type, dtype, out):
+        result = _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
+        out.copy_(result)

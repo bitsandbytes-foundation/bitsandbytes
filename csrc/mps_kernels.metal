@@ -4,6 +4,8 @@ using namespace metal;
 
 namespace {
 
+constant uint kQuantThreadsCapacity = 512;
+
 constant float NF4_CODE[16] = {
     -1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453,
     -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
@@ -38,7 +40,13 @@ inline void quantize_block(
     uint n,
     uint blocksize,
     uint block_index,
-    constant float* code_table
+    uint thread_idx,
+    uint threadgroup_size,
+    constant float* code_table,
+    threadgroup float* shared_thread_max,
+    threadgroup float& shared_scale,
+    uint simd_lane_id,
+    uint simd_group_id
 ) {
     uint start = block_index * blocksize;
     if (start >= n) {
@@ -46,35 +54,52 @@ inline void quantize_block(
     }
 
     uint end = min(start + blocksize, n);
-    float max_val = 0.0f;
-    for (uint i = start; i < end; ++i) {
+    float local_max = 0.0f;
+    for (uint i = start + thread_idx; i < end; i += threadgroup_size) {
         float current = fabs((float)input[i]);
-        max_val = max(max_val, current);
+        local_max = max(local_max, current);
     }
+    
+    // SIMD reduction
+    local_max = simd_max(local_max);
 
+    // Store SIMD group max to shared memory
+    if (simd_lane_id == 0) {
+        shared_thread_max[simd_group_id] = local_max;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (thread_idx == 0) {
+        float max_val = 0.0f;
+        uint num_simd_groups = (threadgroup_size + 31) / 32;
+        for (uint i = 0; i < num_simd_groups; ++i) {
+            max_val = max(max_val, shared_thread_max[i]);
+        }
+        shared_scale = max_val;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float max_val = shared_scale;
     absmax[block_index] = max_val;
     float inv = max_val > 0.0f ? 1.0f / max_val : 0.0f;
 
-    uint out_byte = start >> 1;
-    bool has_pending = false;
-    uchar pending = 0;
+    uint pairs_in_block = (end - start + 1) >> 1;
+    uint out_byte = block_index * ((blocksize + 1) >> 1);
 
-    for (uint i = start; i < end; ++i) {
-        float normalized = (max_val > 0.0f) ? clamp((float)input[i] * inv, -1.0f, 1.0f) : 0.0f;
-        uchar q = encode_value<scalar_t>(normalized, code_table) & 0xF;
+    for (uint pair = thread_idx; pair < pairs_in_block; pair += threadgroup_size) {
+        uint value_index0 = start + pair * 2;
+        float normalized0 = (max_val > 0.0f) ? clamp((float)input[value_index0] * inv, -1.0f, 1.0f) : 0.0f;
+        uchar nibble0 = encode_value<scalar_t>(normalized0, code_table) & 0xF;
 
-        if (!has_pending) {
-            pending = q << 4;
-            has_pending = true;
-            if (i == end - 1) {
-                packed[out_byte++] = pending;
-                has_pending = false;
-            }
-        } else {
-            packed[out_byte++] = pending | q;
-            has_pending = false;
+        uint value_index1 = value_index0 + 1;
+        uchar nibble1 = 0;
+        if (value_index1 < end) {
+            float normalized1 = (max_val > 0.0f) ? clamp((float)input[value_index1] * inv, -1.0f, 1.0f) : 0.0f;
+            nibble1 = encode_value<scalar_t>(normalized1, code_table) & 0xF;
         }
+        packed[out_byte + pair] = (nibble0 << 4) | nibble1;
     }
+
 }
 
 template <typename scalar_t>
@@ -138,12 +163,18 @@ kernel void quantize_4bit_fp16_fp4(
     constant uint& n [[buffer(3)]],
     constant uint& blocksize [[buffer(4)]],
     constant uint& blocks [[buffer(5)]],
-    uint gid [[thread_position_in_grid]]
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint threadgroup_size [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]
 ) {
-    if (gid >= blocks) {
+    if (tgid >= blocks || threadgroup_size > kQuantThreadsCapacity) {
         return;
     }
-    quantize_block(input, absmax, packed, n, blocksize, gid, FP4_CODE);
+    threadgroup float shared_thread_max[kQuantThreadsCapacity];
+    threadgroup float shared_scale;
+    quantize_block(input, absmax, packed, n, blocksize, tgid, tid, threadgroup_size, FP4_CODE, shared_thread_max, shared_scale, simd_lane_id, simd_group_id);
 }
 
 kernel void quantize_4bit_fp16_nf4(
@@ -153,12 +184,18 @@ kernel void quantize_4bit_fp16_nf4(
     constant uint& n [[buffer(3)]],
     constant uint& blocksize [[buffer(4)]],
     constant uint& blocks [[buffer(5)]],
-    uint gid [[thread_position_in_grid]]
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint threadgroup_size [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]
 ) {
-    if (gid >= blocks) {
+    if (tgid >= blocks || threadgroup_size > kQuantThreadsCapacity) {
         return;
     }
-    quantize_block(input, absmax, packed, n, blocksize, gid, NF4_CODE);
+    threadgroup float shared_thread_max[kQuantThreadsCapacity];
+    threadgroup float shared_scale;
+    quantize_block(input, absmax, packed, n, blocksize, tgid, tid, threadgroup_size, NF4_CODE, shared_thread_max, shared_scale, simd_lane_id, simd_group_id);
 }
 
 kernel void quantize_4bit_fp32_fp4(
@@ -168,12 +205,18 @@ kernel void quantize_4bit_fp32_fp4(
     constant uint& n [[buffer(3)]],
     constant uint& blocksize [[buffer(4)]],
     constant uint& blocks [[buffer(5)]],
-    uint gid [[thread_position_in_grid]]
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint threadgroup_size [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]
 ) {
-    if (gid >= blocks) {
+    if (tgid >= blocks || threadgroup_size > kQuantThreadsCapacity) {
         return;
     }
-    quantize_block(input, absmax, packed, n, blocksize, gid, FP4_CODE);
+    threadgroup float shared_thread_max[kQuantThreadsCapacity];
+    threadgroup float shared_scale;
+    quantize_block(input, absmax, packed, n, blocksize, tgid, tid, threadgroup_size, FP4_CODE, shared_thread_max, shared_scale, simd_lane_id, simd_group_id);
 }
 
 kernel void quantize_4bit_fp32_nf4(
@@ -183,12 +226,18 @@ kernel void quantize_4bit_fp32_nf4(
     constant uint& n [[buffer(3)]],
     constant uint& blocksize [[buffer(4)]],
     constant uint& blocks [[buffer(5)]],
-    uint gid [[thread_position_in_grid]]
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint threadgroup_size [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]
 ) {
-    if (gid >= blocks) {
+    if (tgid >= blocks || threadgroup_size > kQuantThreadsCapacity) {
         return;
     }
-    quantize_block(input, absmax, packed, n, blocksize, gid, NF4_CODE);
+    threadgroup float shared_thread_max[kQuantThreadsCapacity];
+    threadgroup float shared_scale;
+    quantize_block(input, absmax, packed, n, blocksize, tgid, tid, threadgroup_size, NF4_CODE, shared_thread_max, shared_scale, simd_lane_id, simd_group_id);
 }
 
 // Dequantization kernels
