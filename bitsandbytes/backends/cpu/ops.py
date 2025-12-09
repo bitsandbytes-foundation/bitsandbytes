@@ -227,7 +227,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         except Exception as exc:  # pragma: no cover - best effort fallback
             gemm_4bit_forward_kernel = None
             logger.warning(
-                "Failed to load CPU gemm_4bit kernel: %s. Please make sure you already `pip install kernels` and the kernels >= 0.11.1",
+                "Failed to load CPU gemm_4bit_forward from kernels-community: %s. Please make sure you already `pip install kernels` and the kernels >= 0.11.1",
                 exc,
             )
 
@@ -250,8 +250,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             final_out_shape = (*A.shape[:-1], shapeB[0])
             A = A.reshape(-1, A.shape[-1])
             out_shape = (*A.shape[:-1], shapeB[0])
-            quant_type_num = 1 if quant_type == "fp4" else 0
             if gemm_4bit_forward_kernel is not None:
+                quant_type_num = 1 if quant_type == "fp4" else 0
                 out = gemm_4bit_forward_kernel(A, B, absmax, blocksize, quant_type_num)
             else:
                 out = torch.empty(out_shape, dtype=A.dtype, device=A.device)
