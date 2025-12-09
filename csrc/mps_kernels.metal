@@ -112,21 +112,28 @@ inline void dequantize_block(
     uint block_index,
     uint thread_idx,
     uint threadgroup_size,
-    constant float* code_table,
-    threadgroup float& shared_scale
+    constant float* code_table
 ) {
     uint block_start = block_index * blocksize;
     if (block_start >= n) {
         return;
     }
-    uint block_end = min(block_start + blocksize, n);
+    uint block_end;
+    if (block_start + blocksize < n) {
+        block_end = block_start + blocksize;
+    } else {
+        block_end = n;
+    }
     uint pairs_in_block = (block_end - block_start + 1) >> 1;
 
-    if (thread_idx == 0) {
-        shared_scale = absmax[block_index];
+    float scale = absmax[block_index];
+
+    // Precompute scaled table in registers - avoids threadgroup bank conflicts
+    // and constant memory is broadcast-optimized so initial loads are fast
+    float scaled_table[16];
+    for (uint i = 0; i < 16; i++) {
+        scaled_table[i] = code_table[i] * scale;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    float scale = shared_scale;
 
     for (uint pair = thread_idx; pair < pairs_in_block; pair += threadgroup_size) {
         uint value_index0 = block_start + pair * 2;
@@ -136,22 +143,203 @@ inline void dequantize_block(
 
         uint byte_index0 = value_index0 >> 1;
         uchar byte_val0 = packed[byte_index0];
-        bool upper0 = ((value_index0 & 1) == 0);
-        uchar nibble0 = upper0 ? ((byte_val0 >> 4) & 0xF) : (byte_val0 & 0xF);
-        float decoded0 = code_table[nibble0] * scale;
+        // High nibble -> even index, low nibble -> odd index (matches Python ref)
+        uchar nibble0 = (byte_val0 >> 4) & 0xF;
+        uchar nibble1 = byte_val0 & 0xF;
+        float decoded0 = scaled_table[nibble0];
+        float decoded1 = scaled_table[nibble1];
+        // value_index0 is already the output index (block_start + pair*2)
         output[value_index0] = scalar_t(decoded0);
-
-        uint value_index1 = value_index0 + 1;
-        if (value_index1 < block_end) {
-            uint byte_index1 = value_index1 >> 1;
-            uchar byte_val1 = (byte_index1 == byte_index0) ? byte_val0 : packed[byte_index1];
-            bool upper1 = ((value_index1 & 1) == 0);
-            uchar nibble1 = upper1 ? ((byte_val1 >> 4) & 0xF) : (byte_val1 & 0xF);
-            float decoded1 = code_table[nibble1] * scale;
-            output[value_index1] = scalar_t(decoded1);
+        
+        // Bounds check for odd-length blocks
+        if (value_index0 + 1 < block_end) {
+            output[value_index0 + 1] = scalar_t(decoded1);
         }
     }
 }
+
+// template <typename scalar_t>
+// inline void dequantize_block(
+//     device const uchar* packed,
+//     device const float* absmax,
+//     device scalar_t* output,
+//     uint n,
+//     uint blocksize,
+//     uint block_index,
+//     uint thread_idx,
+//     uint threadgroup_size,
+//     constant float* code_table
+// ) {
+//     const uint block_start = block_index * blocksize;
+//     if (block_start >= n) return;
+
+//     const uint block_end = min(block_start + blocksize, n);
+//     const uint num_values = block_end - block_start;
+
+//     const float scale = absmax[block_index];
+
+//     // Precompute scaled code table
+//     float scaled_table[16];
+//     for (uint i = 0; i < 16; ++i)
+//         scaled_table[i] = code_table[i] * scale;
+
+//     device const uchar* packed_ptr = packed + (block_start >> 1);
+//     device scalar_t* output_ptr = output + block_start;
+
+//     // Each thread processes multiple *bytes* at a stride
+//     const uint bytes_in_block = (num_values + 1) >> 1;
+
+//     for (uint byte_idx = thread_idx; byte_idx < bytes_in_block; byte_idx += threadgroup_size) {
+//         uchar byte_val = packed_ptr[byte_idx];
+
+//         // Decode upper and lower nibbles
+//         uchar upper_nib = (byte_val >> 4) & 0xF;
+//         uchar lower_nib = byte_val & 0xF;
+
+//         // Compute global value index
+//         uint val_idx = byte_idx << 1;  // byte_idx * 2
+
+//         // Write both values if in bounds
+//         if (val_idx < num_values) output_ptr[val_idx] = scalar_t(scaled_table[upper_nib]);
+//         if (val_idx + 1 < num_values) output_ptr[val_idx + 1] = scalar_t(scaled_table[lower_nib]);
+//     }
+// }
+
+// template <typename scalar_t>
+// inline void dequantize_block(
+//     device const uchar* packed,
+//     device const float* absmax,
+//     device scalar_t* output,
+//     uint n,
+//     uint blocksize,
+//     uint block_index,
+//     uint thread_idx,
+//     uint threadgroup_size,
+//     constant float* code_table
+// ) {
+//     const uint block_start = block_index * blocksize;
+//     if (block_start >= n) return;
+
+//     const uint block_end = min(block_start + blocksize, n);
+//     const uint num_values = block_end - block_start;
+
+//     const float scale = absmax[block_index];
+
+//     // Precompute scaled code table
+//     float scaled_table[16];
+//     for (uint i = 0; i < 16; ++i)
+//         scaled_table[i] = code_table[i] * scale;
+
+//     device const uchar* packed_ptr = packed + (block_start >> 1);
+//     device scalar_t* output_ptr = output + block_start;
+
+//     // Each thread processes multiple uchar4 (4 bytes = 8 values)
+//     const uint num_bytes = (num_values + 1) >> 1; // total bytes in block
+//     const uint num_blocks = (num_bytes + 3) >> 2; // number of uchar4 blocks
+
+//     for (uint block_idx = thread_idx; block_idx < num_blocks; block_idx += threadgroup_size) {
+//         uint byte_offset = block_idx * 4; // starting byte in packed array
+//         uchar4 b = uchar4(0); // default zero
+
+//         // Load safely (handle tail)
+//         if (byte_offset + 3 < num_bytes) {
+//             b = *((device uchar4*)(packed_ptr + byte_offset));
+//         } else {
+//             // Tail case: read remaining bytes safely
+//             uchar temp[4] = {0, 0, 0, 0};
+//             for (uint i = 0; i < num_bytes - byte_offset; ++i) {
+//                 temp[i] = packed_ptr[byte_offset + i];
+//             }
+//             b = uchar4(temp[0], temp[1], temp[2], temp[3]);
+//         }
+
+//         // Decode 8 nibbles into 8 values
+//         uchar nibbles[8] = {
+//             uchar((b.x >> 4) & 0xF), uchar(b.x & 0xF),
+//             uchar((b.y >> 4) & 0xF), uchar(b.y & 0xF),
+//             uchar((b.z >> 4) & 0xF), uchar(b.z & 0xF),
+//             uchar((b.w >> 4) & 0xF), uchar(b.w & 0xF)
+//         };
+
+//         // Compute global value indices and write outputs
+//         uint val_idx = byte_offset << 1; // byte_offset * 2
+//         for (uint i = 0; i < 8; ++i) {
+//             if (val_idx + i < num_values)
+//                 output_ptr[val_idx + i] = scalar_t(scaled_table[nibbles[i]]);
+//         }
+//     }
+// }
+
+// template <typename scalar_t>
+// inline void dequantize_block(
+//     device const uchar* packed,
+//     device const float* absmax,
+//     device scalar_t* output,
+//     uint n,
+//     uint blocksize,
+//     uint block_index,
+//     uint thread_idx,
+//     uint threadgroup_size,
+//     constant float* code_table
+// ) {
+//     const uint block_start = block_index * blocksize;
+//     if (block_start >= n) return;
+
+//     const uint block_end = min(block_start + blocksize, n);
+//     const uint num_values = block_end - block_start;
+
+//     const float scale = absmax[block_index];
+
+//     // Precompute scaled code table
+//     float scaled_table[16];
+//     for (uint i = 0; i < 16; ++i)
+//         scaled_table[i] = code_table[i] * scale;
+
+//     device const uchar* packed_ptr = packed + (block_start >> 1);
+//     device scalar_t* output_ptr = output + block_start;
+
+//     const uint num_bytes = (num_values + 1) >> 1;        // total bytes in block
+//     const uint num_uchar4 = (num_bytes + 3) >> 2;        // total uchar4 blocks
+
+//     // Each thread handles one or two uchar4 blocks
+//     uint block_pos = thread_idx;
+//     if (block_pos >= num_uchar4) return;
+
+//     // Compute byte offset
+//     uint byte_offset = block_pos * 4;
+//     uchar4 b = uchar4(0, 0, 0, 0);
+
+//     // Safe load
+//     if (byte_offset + 3 < num_bytes) {
+//         b = *((device uchar4*)(packed_ptr + byte_offset));
+//     } else {
+//         uchar temp[4] = {0, 0, 0, 0};
+//         for (uint i = 0; i < num_bytes - byte_offset; ++i)
+//             temp[i] = packed_ptr[byte_offset + i];
+//         b = uchar4(temp[0], temp[1], temp[2], temp[3]);
+//     }
+
+//     // Decode 8 nibbles
+//     uchar nibbles[8] = {
+//         uchar((b.x >> 4) & 0xF), uchar(b.x & 0xF),
+//         uchar((b.y >> 4) & 0xF), uchar(b.y & 0xF),
+//         uchar((b.z >> 4) & 0xF), uchar(b.z & 0xF),
+//         uchar((b.w >> 4) & 0xF), uchar(b.w & 0xF)
+//     };
+
+//     // Compute global value index
+//     uint val_idx = byte_offset << 1; // byte_offset * 2
+
+//     // Fully unrolled writes (branch-free for main values)
+//     if (val_idx + 0 < num_values) output_ptr[val_idx + 0] = scalar_t(scaled_table[nibbles[0]]);
+//     if (val_idx + 1 < num_values) output_ptr[val_idx + 1] = scalar_t(scaled_table[nibbles[1]]);
+//     if (val_idx + 2 < num_values) output_ptr[val_idx + 2] = scalar_t(scaled_table[nibbles[2]]);
+//     if (val_idx + 3 < num_values) output_ptr[val_idx + 3] = scalar_t(scaled_table[nibbles[3]]);
+//     if (val_idx + 4 < num_values) output_ptr[val_idx + 4] = scalar_t(scaled_table[nibbles[4]]);
+//     if (val_idx + 5 < num_values) output_ptr[val_idx + 5] = scalar_t(scaled_table[nibbles[5]]);
+//     if (val_idx + 6 < num_values) output_ptr[val_idx + 6] = scalar_t(scaled_table[nibbles[6]]);
+//     if (val_idx + 7 < num_values) output_ptr[val_idx + 7] = scalar_t(scaled_table[nibbles[7]]);
+// }
 
 }  // namespace
 
@@ -255,8 +443,7 @@ kernel void dequantize_4bit_fp16_fp4(
     if (tgid >= blocks) {
         return;
     }
-    threadgroup float shared_scale;
-    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, FP4_CODE, shared_scale);
+    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, FP4_CODE);
 }
 
 kernel void dequantize_4bit_fp16_nf4(
@@ -273,8 +460,7 @@ kernel void dequantize_4bit_fp16_nf4(
     if (tgid >= blocks) {
         return;
     }
-    threadgroup float shared_scale;
-    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, NF4_CODE, shared_scale);
+    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, NF4_CODE);
 }
 
 kernel void dequantize_4bit_fp32_fp4(
@@ -291,8 +477,7 @@ kernel void dequantize_4bit_fp32_fp4(
     if (tgid >= blocks) {
         return;
     }
-    threadgroup float shared_scale;
-    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, FP4_CODE, shared_scale);
+    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, FP4_CODE);
 }
 
 kernel void dequantize_4bit_fp32_nf4(
@@ -306,9 +491,8 @@ kernel void dequantize_4bit_fp32_nf4(
     uint tid [[thread_index_in_threadgroup]],
     uint threadgroup_size [[threads_per_threadgroup]]
 ) {
-    if (tgid >= blocks) {
-        return;
-    }
-    threadgroup float shared_scale;
-    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, NF4_CODE, shared_scale);
+    // if (tgid >= blocks) {
+    //     return;
+    // }
+    dequantize_block(packed, absmax, output, n, blocksize, tgid, tid, threadgroup_size, NF4_CODE);
 }

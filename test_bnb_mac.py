@@ -14,29 +14,127 @@ import bitsandbytes as bnb
 from torch.profiler import profile, ProfilerActivity
 from torch.mps.profiler import metal_capture
 
+_NF4_QUANT_TABLE = torch.tensor(
+    [
+        -1.0,
+        -0.6961928009986877,
+        -0.5250730514526367,
+        -0.39491748809814453,
+        -0.28444138169288635,
+        -0.18477343022823334,
+        -0.09105003625154495,
+        0.0,
+        0.07958029955625534,
+        0.16093020141124725,
+        0.24611230194568634,
+        0.33791524171829224,
+        0.44070982933044434,
+        0.5626170039176941,
+        0.7229568362236023,
+        1.0,
+    ],
+    dtype=torch.float32,
+    device="xpu"
+    if hasattr(torch, "xpu") and torch.xpu.is_available()
+    else "cpu",  # Only cpu/xpu use this table for now.
+)
+_FP4_QUANT_TABLE = torch.tensor(
+    [
+        0.0000,
+        0.0052,
+        0.6667,
+        1.0000,
+        0.3333,
+        0.5000,
+        0.1667,
+        0.2500,
+        0.0000,
+        -0.0052,
+        -0.6667,
+        -1.0000,
+        -0.3333,
+        -0.5000,
+        -0.1667,
+        -0.2500,
+    ],
+    dtype=torch.float32,
+    device="xpu"
+    if hasattr(torch, "xpu") and torch.xpu.is_available()
+    else "cpu",  # Only cpu/xpu use this table for now.
+)
+CODE = {"nf4": _NF4_QUANT_TABLE, "fp4": _FP4_QUANT_TABLE}
 
+def _dequantize_4bit_impl(
+    A: torch.Tensor,
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    shape: "Sequence[int]",
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    # Enable non uint8 dtype
+    if A.dtype != torch.uint8:
+        A = A.view(torch.uint8)
+    A = A.reshape(-1)
+    # Map nf4 to [-1, 1]
+    out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
+    n = out_dq.numel()
+    out_dq[1::2] = A & 0xF
+    out_dq[::2] = A >> 4
+    # code is fp32, cast to dtype to avoid the mismatch issue
+    code = CODE[quant_type].to(dtype).to(A.device)
+    out_dq = code[out_dq]
+
+    # Apply scales
+    if out_dq.numel() != n:
+        assert out_dq.numel() == n + 1
+        out_dq = torch.narrow(out_dq, 0, 0, n)
+    blocks = n // blocksize
+    blocks += 1 if n % blocksize > 0 else 0
+    rem = n % blocksize
+    has_rem = rem > 0
+
+    out = torch.empty(shape, dtype=dtype, device=A.device).reshape(-1)
+    if has_rem:
+        out[: n - rem] = (out_dq[: n - rem].view(-1, blocksize) * absmax[: blocks - has_rem].view(-1, 1)).reshape(-1)
+        out[n - rem :] = out_dq[n - rem :] * absmax[-1]
+    else:
+        out = out_dq.view(-1, blocksize) * absmax.view(-1, 1)
+
+    out = out.reshape(-1, *shape[1:]).to(dtype)
+
+    return out
 def run_once():
-    A = torch.randn(2048, device="mps", dtype=torch.float16)
-    q, absmax = torch.ops.bitsandbytes.quantize_4bit(A, 64, "nf4", torch.uint8)
+    # A = torch.randn(2048, device="mps", dtype=torch.float16)
+    # q, absmax = torch.ops.bitsandbytes.quantize_4bit(A, 64, "nf4", torch.uint8)
+    out = torch.empty(2048*2, device="mps", dtype=torch.float32)
+    q = torch.randint(0, 255, (2048,), device="mps", dtype=torch.uint8)
+    absmax = torch.randn(64, device="mps", dtype=torch.float32)
     print("q.shape:", q.shape, q.dtype)
     print("absmax.shape:", absmax.shape, absmax.dtype)
-    B = torch.ops.bitsandbytes.dequantize_4bit(q, absmax, 64, "nf4", A.shape, A.dtype)
-    torch.mps.synchronize()
-    print("ok", float((A - B).abs().max()))
+    B = torch.ops.bitsandbytes.dequantize_4bit(q, absmax, 64, "nf4", out.shape, out.dtype)
+    # B_ref = _dequantize_4bit_impl(q, absmax, 64, "nf4", out.shape, out.dtype)
+    # print("ok", float((B - B_ref).abs().max()))
+    # torch.mps.synchronize()
+    # print("B.shape:", B.shape, B.dtype)
+    # print("ok", float((A - B).abs().max()))
 
 run_once()
-# trace_path = "bnb_mps_capture_1.gputrace"
+trace_path = "bnb_mps_capture_11.gputrace"
 
-# with metal_capture(trace_path):
-#     with profile(
-#         activities=[],
-#         record_shapes=True,
-#         with_stack=True,
-#     ) as prof:
-#         run_once()
+with metal_capture(trace_path):
+    with profile(
+        activities=[],
+        record_shapes=True,
+        with_stack=True,
+    ) as prof:
+        for i in range(10):
+            run_once()
+            torch.mps.synchronize()
+            print(f"iteration {i} done")
 
-# print(prof.key_averages().table(sort_by="self_cpu_time_total"))
-# print(f"Metal capture saved to: {trace_path}")
+print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+print(f"Metal capture saved to: {trace_path}")
 
 # import torch, bitsandbytes as bnb
 

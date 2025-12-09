@@ -239,7 +239,7 @@ elseif(BUILD_MPS)
     add_compile_definitions(BUILD_MPS)
     file(MAKE_DIRECTORY "build")
     add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"
-                COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_FILES}
+                COMMAND xcrun metal -c -g -frecord-sources -gline-tables-only -o "build/bitsandbytes.air" ${METAL_FILES}
                 COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
                 DEPENDS "${METAL_FILES}"
                 COMMENT "Compiling Metal kernels"

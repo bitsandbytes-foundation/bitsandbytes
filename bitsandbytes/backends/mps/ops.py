@@ -173,10 +173,11 @@ def _(
 ) -> torch.Tensor:
     _check_mps_device(A, "A")
     _check_mps_device(absmax, "absmax")
-
     out = torch.empty(shape, dtype=dtype, device=A.device)
     if _dequantize_4bit_native(A, absmax, blocksize, quant_type, dtype, out):
         return out
+    else:
+        raise RuntimeError("Failed to dequantize 4bit on MPS")
     return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
 
 
