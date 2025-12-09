@@ -179,13 +179,6 @@ void spmm_coo_very_sparse_naive(
     float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
 );
 
-void matmul4bite(half* A, unsigned char* B, half* out, int lda, int ldb, int rowsA, int colsA, int colsB);
-
-template <typename T> void gemm_host(int m, int n, int k, T* A, T* B, T* out, int lda, int ldb, int ldc, int bits);
-template <typename T>
-void gemm_4bit_inference(
-    int m, int n, int k, T* A, unsigned char* B, float* absmax, T* out, int lda, int ldb, int ldc, int blocksize
-);
 template <typename T, int BITS>
 void gemm_4bit_inference_naive(
     int m, int n, int k, T* A, unsigned char* B, float* absmax, float* datatype, T* out, int lda, int ldb, int ldc,

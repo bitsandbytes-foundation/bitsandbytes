@@ -451,26 +451,6 @@ void spmm_coo_very_sparse_naive(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template <typename T> void gemm_host(int m, int n, int k, T* A, T* B, T* out, int lda, int ldb, int ldc, int bits) {
-
-    int num_blocks = (m + 31) / 32;
-
-    if (bits == 32)
-        gemm_device<T, 32, 32><<<num_blocks, 32, 0, 0>>>(m, n, k, A, B, out, lda, ldb, ldc);
-    if (bits == 16)
-        gemm_device<T, 16, 160><<<num_blocks, 160, 0, 0>>>(m, n, k, A, B, out, lda, ldb, ldc);
-}
-
-template <typename T>
-void gemm_4bit_inference(
-    int m, int n, int k, T* A, unsigned char* B, float* absmax, T* out, int lda, int ldb, int ldc, int blocksize
-) {
-
-    int num_blocks = (m + 31) / 32;
-
-    kgemm_4bit_inference<T, 96><<<num_blocks, 96, 0, 0>>>(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize);
-}
-
 template <typename T, int BITS>
 void gemm_4bit_inference_naive(
     int m, int n, int k, T* A, unsigned char* B, float* absmax, float* datatype, T* out, int lda, int ldb, int ldc,
@@ -501,9 +481,6 @@ template void func<unsigned char, FILL>(unsigned char* A, unsigned char* B, unsi
 template void func<float, ARANGE>(float* A, float* B, float value, long n);
 template void func<float, _MUL>(float* A, float* B, float value, long n);
 
-template void gemm_4bit_inference<half>(
-    int m, int n, int k, half* A, unsigned char* B, float* absmax, half* out, int lda, int ldb, int ldc, int blocksize
-);
 template void gemm_4bit_inference_naive<half, 16>(
     int m, int n, int k, half* A, unsigned char* B, float* absmax, float* datatype, half* out, int lda, int ldb,
     int ldc, int blocksize, cudaStream_t stream
@@ -516,10 +493,6 @@ template void gemm_4bit_inference_naive<float, 32>(
     int m, int n, int k, float* A, unsigned char* B, float* absmax, float* datatype, float* out, int lda, int ldb,
     int ldc, int blocksize, cudaStream_t stream
 );
-
-// template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc,
-// int bits);
-template void gemm_host<half>(int m, int n, int k, half* A, half* B, half* out, int lda, int ldb, int ldc, int bits);
 
 template void spmm_coo_very_sparse_naive<half, 16>(
     int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, half* B, half* out,
