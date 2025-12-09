@@ -112,13 +112,6 @@ __global__ void kdequant_mm_int32_fp16(
 template <typename T, int THREADS, int SPARSE_DECOMP>
 __global__ void kInt8VectorQuant(T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols);
 
-template <typename T, int BITS, int THREADS>
-__global__ void gemm_device(int M, int N, int K, T* __restrict__ const A, T* B, T* out, int lda, int ldb, int ldc);
-template <typename T, int THREADS>
-__global__ void kgemm_4bit_inference(
-    int M, int N, int K, T* __restrict__ const A, unsigned char* B, float* absmax, T* out, int lda, int ldb, int ldc,
-    int blocksize
-);
 template <typename T, int THREADS, int BITS>
 __global__ void kgemm_4bit_inference_naive(
     int M, int N, int K, T* __restrict__ const A, unsigned char* B, float* absmax, const float* datatype, T* out,
