@@ -74,17 +74,16 @@ jobs:
           - os: windows-2025
             arch: x86_64
         cuda_version:
-          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.1"]
+          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         # Windows: We install Cuda on the agent (slow)
-      - uses: N-Storm/cuda-toolkit@d68ba29a800229200a2c3f572f9e816d7f67cdb4 # v0.2.24m
+      - uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2 # v0.2.29
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
-          # Temporary: Use CUDA 13.0.0 for Windows until 13.0.1 is supported with this action.
-          cuda: ${{ matrix.cuda_version == '13.0.1' && '13.0.0' || matrix.cuda_version }}
+          cuda: ${{ matrix.cuda_version }}
           method: "network"
           # The "crt" "nvvm" and "nvptxcompiler" components are added for CUDA 13.
           sub-packages: ${{ format('["nvcc"{0},"cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt","nvvm","nvptxcompiler"' || '') }}
