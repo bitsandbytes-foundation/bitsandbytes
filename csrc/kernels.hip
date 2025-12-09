@@ -2162,13 +2162,6 @@ __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *o
   }
 }
 
-template <typename T> __device__ void printnonzero(T *A, int num_values, const char * strval)
-{
-  for(int i = 0; i < num_values; i++)
-    if((float)A[i] != 0.0)
-      printf("%s %i %f\n", strval, i, (float)A[i]);
-}
-
 // No of 4bit values processed by each thread
 #define num_values_4bit 32
 template <typename T, int THREADS, int BITS> __global__ void kgemm_4bit_inference_naive(int M, int N, int K, T * __restrict__ const A, unsigned char *B,  float *absmax, const float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize)
@@ -2621,6 +2614,3 @@ MAKE_OptimizerStatic8bit1StateBlockwise(LION, hip_bfloat16, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, half, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, hip_bfloat16, 256, 1)
-
-template __device__ void printnonzero<float>(float *A, int num_values, const char*strval);
-template __device__ void printnonzero<half>(half *A, int num_values, const char*strval);
