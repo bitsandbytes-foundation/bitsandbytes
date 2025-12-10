@@ -3,6 +3,7 @@
 #include <cub/cub.cuh>
 #include <cublasLt.h>
 #include <cuda_fp16.h>
+#include <float.h> // For FLT_MIN/FLT_MAX
 
 #define MM_DEQUANT_CONST 6.200012e-05f // 1.0f/(127.0f*127.0f)
 

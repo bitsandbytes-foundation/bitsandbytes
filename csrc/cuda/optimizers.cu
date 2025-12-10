@@ -1,5 +1,6 @@
 #include "ops.cuh" // For Optimizer_t, CUDA_CHECK_RETURN
 #include <cub/cub.cuh>
+#include <float.h> // For FLT_MIN/FLT_MAX
 
 // constants for 32bit optimizers
 #define TH 1024

@@ -2,6 +2,7 @@
 #include "ops.cuh" // For CUDA_CHECK_RETURN, some typedefs
 #include <cub/cub.cuh>
 #include <cuda_fp16.h>
+#include <float.h> // For FLT_MIN/FLT_MAX
 
 // from kernels.cu
 // TODO move somewhere like common.cuh or cub_utils.cuh etc
