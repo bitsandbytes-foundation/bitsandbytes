@@ -4,6 +4,9 @@
 // LICENSE file in the root directory of this source tree.
 
 #if BUILD_CUDA
+#include <cuda/blockwise_quantization.cuh>
+#include <cuda/int8.cuh>
+#include <cuda/optimizers.cuh>
 #include <cuda_runtime_api.h>
 #include <ops.cuh>
 #endif

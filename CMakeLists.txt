@@ -24,7 +24,7 @@ endif()
 
 # Define included source files
 set(CPP_FILES csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
-set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
+set(CUDA_FILES csrc/ops.cu csrc/kernels.cu csrc/cuda/blockwise_quantization.cu csrc/cuda/int8.cu csrc/cuda/optimizers.cu)
 set(HIP_FILES csrc/ops.hip csrc/kernels.hip)
 set(MPS_FILES csrc/mps_ops.mm)
 set(METAL_FILES csrc/mps_kernels.metal)
@@ -312,7 +312,9 @@ if(BUILD_CUDA)
     set_target_properties(bitsandbytes
         PROPERTIES
             CUDA_SEPARABLE_COMPILATION ON
+            CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE
     )
+
 endif()
 if(BUILD_HIP)
     if(NOT DEFINED ENV{ROCM_PATH})
