@@ -2,6 +2,7 @@ import copy
 import os
 import pickle
 import platform
+import sys
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -320,6 +321,9 @@ def test_params4bit_real_serialization(device, quant_type, blocksize, compress_s
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
+@pytest.mark.skipif(
+    torch.__version__ < (2, 10) and sys.version_info >= (3, 14), reason="Not supported in Python 3.14 until torch 2.10"
+)
 def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_statistics, bias, fullgraph, mode):
     if device == "hpu" and not is_supported_on_hpu(quant_type):
         pytest.skip("This configuration is not supported on HPU.")
