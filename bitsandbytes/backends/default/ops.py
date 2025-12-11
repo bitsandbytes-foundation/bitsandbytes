@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from functools import wraps
 from math import prod, sqrt
 from typing import Optional
 
@@ -6,6 +7,32 @@ import torch
 
 from ..._ops import register_kernel
 from ..utils import CODE
+
+
+def _try_torch_compile(func=None, **compile_kwargs):
+    """
+    Wrapper around torch.compile that falls back to the original function if compilation fails.
+    """
+
+    def decorator(fn):
+        try:
+            compiled_fn = torch.compile(fn, **compile_kwargs)
+
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                try:
+                    return compiled_fn(*args, **kwargs)
+                except Exception:
+                    return fn(*args, **kwargs)
+
+            return wrapper
+        except Exception:
+            return fn
+
+    if func is None:
+        return decorator
+    else:
+        return decorator(func)
 
 
 @register_kernel("bitsandbytes::int8_mm_dequant", "default")
@@ -332,7 +359,7 @@ name2optimizer_id = {
 }
 
 
-@torch.compile
+@_try_torch_compile
 def _optimizer_precondition_32bit(
     g: torch.Tensor,
     p: torch.Tensor,
@@ -393,7 +420,7 @@ def _optimizer_precondition_32bit(
     unorm_vec.add_(total_norm)
 
 
-@torch.compile
+@_try_torch_compile
 def _optimizer_update_32bit(
     g: torch.Tensor,
     p: torch.Tensor,
