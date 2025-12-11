@@ -18,6 +18,8 @@ We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, and Intel Gaudi. 
   - [Installation via PyPI](#cpu-pip)
   - [Compile from Source](#cpu-compile)
 - [AMD ROCm (Preview)](#rocm-preview)
+  - [Installation via PyPI](#rocm-pip)
+  - [Compile from Source](#rocm-compile)
 - [Preview Wheels](#preview-wheels)
 
 ## System Requirements[[requirements]]
@@ -49,9 +51,9 @@ The currently distributed `bitsandbytes` packages are built with the following c
 |--------------------|------------------|----------------------|--------------
 | **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm60, sm70, sm75, sm80, sm86, sm89, sm90
 | **Linux x86-64**   | 12.8 - 12.9      | GCC 11.2             | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
-| **Linux x86-64**   | 13.0             | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm110, sm120
+| **Linux x86-64**   | 13.0             | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
 | **Linux aarch64**  | 11.8 - 12.6      | GCC 11.2             | sm75, sm80, sm90
-| **Linux aarch64**  | 12.8 - 13.0      | GCC 11.2             | sm75, sm80, sm90, sm100, sm120
+| **Linux aarch64**  | 12.8 - 13.0      | GCC 11.2             | sm75, sm80, sm90, sm100, sm110, sm120, sm121
 | **Windows x86-64** | 11.8 - 12.6      | MSVC 19.43+ (VS2022) | sm50, sm60, sm75, sm80, sm86, sm89, sm90
 | **Windows x86-64** | 12.8 - 12.9      | MSVC 19.43+ (VS2022) | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
 | **Windows x86-64** | 13.0             | MSVC 19.43+ (VS2022) | sm75, sm80, sm86, sm89, sm90, sm100, sm120
@@ -183,12 +185,16 @@ pip install -e .
 
 ## AMD ROCm (Preview)[[rocm]]
 
+* Support for AMD GPUs is currently in a preview state.
+* All features are supported for consumer RDNA devices.
+* The Data Center products currently lack support for the default 4bit blocksize of 64, and as such default to 128.
 * A compatible PyTorch version with AMD ROCm support is required. It is recommended to use the latest stable release. See [PyTorch on ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html) for guidance.
-* ROCm support is currently only available in our preview wheels or when building from source.
 
-### Preview Wheels from `main`[[rocm-preview]]
+### Installation from PyPI[[rocm-pip]]
 
-The currently distributed preview `bitsandbytes` are built with the following configurations:
+This is the most straightforward and recommended installation option.
+
+The currently distributed `bitsandbytes` are built with the following configurations:
 
 | **OS**             | **ROCm** | **Targets**
 |--------------------|----------|---------------------------------------------------------------------|
@@ -200,11 +206,17 @@ The currently distributed preview `bitsandbytes` are built with the following co
 
 **Windows is not currently supported.**
 
-Please see [Preview Wheels](#preview-wheels) for installation instructions.
+Use `pip` or `uv` to install the latest release:
+
+```bash
+pip install bitsandbytes
+```
 
 ### Compile from Source[[rocm-compile]]
 
-bitsandbytes can be compiled from ROCm 6.1 - ROCm 7.0.
+bitsandbytes can be compiled from ROCm 6.2 - ROCm 7.1.
+
+To compile from source, you need CMake >= **3.31.6**.
 
 ```bash
 # Install bitsandbytes from source
