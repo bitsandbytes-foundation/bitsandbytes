@@ -15,7 +15,7 @@ elif [ "${build_arch}" = "aarch64" ]; then
     [[ "${cuda_version}" == 12.8.* || "${cuda_version}" == 12.9.* ]] && build_capability="75;80;90;100;120"
 
     # CUDA 13.0+: Add sm100/sm110/sm120
-    [[ "${cuda_version}" == 13.*.* ]] && build_capability="75;80;90;100;110;120"
+    [[ "${cuda_version}" == 13.*.* ]] && build_capability="75;80;90;100;110;120,121"
 else
     # By default, target Pascal through Hopper.
     build_capability="60;70;75;80;86;89;90"
