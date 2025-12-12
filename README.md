@@ -72,7 +72,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>🟥 AMD GPU <br><code>cuda</code></td>
       <td>
         CDNA: gfx90a, gfx942, gfx950<br>
-        RDNA: gfx1100, gfx1150, gfx1151, gfx1200, gfx1201
+        RDNA: gfx1100, gfx1101, gfx1150, gfx1151, gfx1200, gfx1201
       </td>
       <td>✅</td>
       <td>〰️</td>
