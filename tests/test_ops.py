@@ -237,7 +237,6 @@ class Test4bitBlockwiseQuantOps:
                 quant_type=quant_type,
             )
             B_q, state = bitsandbytes.functional._convert_weight_packed_for_cpu(B_q, state)
-            B_q = B_q.t()
             absmax = state.absmax
         out = torch.ops.bitsandbytes.gemv_4bit.default(A, B_q, B.shape, absmax, code, blocksize)
 

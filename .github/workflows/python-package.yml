@@ -74,17 +74,16 @@ jobs:
           - os: windows-2025
             arch: x86_64
         cuda_version:
-          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.1"]
+          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         # Windows: We install Cuda on the agent (slow)
-      - uses: N-Storm/cuda-toolkit@d68ba29a800229200a2c3f572f9e816d7f67cdb4 # v0.2.24m
+      - uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2 # v0.2.29
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
-          # Temporary: Use CUDA 13.0.0 for Windows until 13.0.1 is supported with this action.
-          cuda: ${{ matrix.cuda_version == '13.0.1' && '13.0.0' || matrix.cuda_version }}
+          cuda: ${{ matrix.cuda_version }}
           method: "network"
           # The "crt" "nvvm" and "nvptxcompiler" components are added for CUDA 13.
           sub-packages: ${{ format('["nvcc"{0},"cudart","cusparse","cublas","thrust","cublas_dev","cusparse_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt","nvvm","nvptxcompiler"' || '') }}
@@ -266,8 +265,7 @@ jobs:
           # `pip install https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl`
           STABLE_PLACEHOLDER_VERSION="1.33.7.preview"
 
-          # exclude macos wheels for now
-          find tmp/ -type f -name '*.whl' ! -name '*macos*' -print0 | while IFS= read -r -d '' wheel; do
+          find tmp/ -type f -name '*.whl' -print0 | while IFS= read -r -d '' wheel; do
             wheel_filename=$(basename "$wheel")
 
             # Strip off the original version
@@ -318,9 +316,11 @@ jobs:
             if [[ "$fname" == *"manylinux_2_24_x86_64"* ]]; then
               echo "### Linux (x86_64)" >> body.md
             elif [[ "$fname" == *"manylinux_2_24_aarch64"* ]]; then
-              echo "### Linux (ARM/aarch64)" >> body.md
+              echo "### Linux (aarch64)" >> body.md
             elif [[ "$fname" == *"win_amd64"* ]]; then
               echo "### Windows (x86_64)" >> body.md
+            elif [[ "$fname" == *"macosx"* ]]; then
+              echo "### macOS 14+ (arm64)" >> body.md
             else
               echo "### Other platform" >> body.md
             fi
@@ -340,7 +340,7 @@ jobs:
           > pip install https://.../bitsandbytes-1.33.7-preview-py3-none-manylinux_2_24_x86_64.whl
           Collecting bitsandbytes==1.33.7rc0
           ...
-          Successfully installed bitsandbytes-0.46.0.dev0
+          Successfully installed bitsandbytes-0.49.0.dev0
           ```
           ENDOFMARKDOWN
 
@@ -404,9 +404,6 @@ jobs:
           path: dist/
           pattern: "bdist_wheel_*"
           merge-multiple: true
-
-      - name: Remove macOS wheels
-        run: rm dist/*macos*
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

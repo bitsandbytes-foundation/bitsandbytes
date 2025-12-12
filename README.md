@@ -3,7 +3,7 @@
 <p align="center">
     <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/bitsandbytes-foundation/bitsandbytes.svg?color=blue"></a>
     <a href="https://pepy.tech/project/bitsandbytes"><img alt="Downloads" src="https://static.pepy.tech/badge/bitsandbytes/month"></a>
-    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/actions/workflows/tests.yml"><img alt="Nightly Unit Tests" src="https://img.shields.io/github/actions/workflow/status/bitsandbytes-foundation/bitsandbytes/tests.yml?logo=github&label=Nightly%20Tests"></a>
+    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/actions/workflows/tests-nightly.yml"><img alt="Nightly Unit Tests" src="https://img.shields.io/github/actions/workflow/status/bitsandbytes-foundation/bitsandbytes/tests-nightly.yml?logo=github&label=Nightly%20Tests"></a>
     <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/bitsandbytes-foundation/bitsandbytes"></a>
     <a href="https://pypi.org/project/bitsandbytes/"><img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/bitsandbytes"></a>
 </p>
@@ -26,13 +26,14 @@ bitsandbytes has the following minimum requirements for all platforms:
 #### Accelerator support:
 
 <small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
-[document in the 0.48.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.48.0/README.md#accelerator-support).
+[document in the 0.49.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.49.0/README.md#accelerator-support).
 </small>
 
 ##### Legend:
 🚧 = In Development,
 〰️ = Partially Supported,
 ✅ = Supported,
+🐢 = Slow Implementation Supported,
 ❌ = Not Supported
 
 <table>
@@ -53,7 +54,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td align="right">x86-64</td>
       <td>◻️ CPU</td>
-      <td>AVX2</td>
+      <td>Minimum: AVX2<br>Optimized: AVX512F, AVX512BF16</td>
       <td>✅</td>
       <td>✅</td>
       <td>❌</td>
@@ -70,8 +71,8 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>🟥 AMD GPU <br><code>cuda</code></td>
       <td>
-        CDNA: gfx90a, gfx942<br>
-        RDNA: gfx1100
+        CDNA: gfx90a, gfx942, gfx950<br>
+        RDNA: gfx1100, gfx1150, gfx1151, gfx1200, gfx1201
       </td>
       <td>✅</td>
       <td>〰️</td>
@@ -122,7 +123,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>❌</td>
     </tr>
     <tr>
-      <td colspan="6">🪟 <strong>Windows 11 / Windows Server 2019+</strong></td>
+      <td colspan="6">🪟 <strong>Windows 11 / Windows Server 2022+</strong></td>
     </tr>
     <tr>
       <td align="right">x86-64</td>
@@ -158,16 +159,16 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">arm64</td>
       <td>◻️ CPU</td>
       <td>Apple M1+</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>❌</td>
     </tr>
     <tr>
       <td></td>
       <td>⬜ Metal <br><code>mps</code></td>
       <td>Apple M1+</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>🐢</td>
+      <td>🐢</td>
       <td>❌</td>
   </tbody>
 </table>
@@ -187,8 +188,6 @@ The continued maintenance and development of `bitsandbytes` is made possible tha
 
 ## License
 `bitsandbytes` is MIT licensed.
-
-We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fabiocannizzo/FastBinarySearch) which we use for CPU quantization.
 
 ## How to cite us
 If you found this library useful, please consider citing our work:

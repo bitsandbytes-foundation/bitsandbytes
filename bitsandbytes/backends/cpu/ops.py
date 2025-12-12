@@ -12,6 +12,8 @@ from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
 
 logger = logging.getLogger(__name__)
 
+_has_avx512 = torch.backends.cpu.get_cpu_capability() == "AVX512"
+
 # torch._int_mm for s8@s8->s32 is supported on CPU from torch 2.4+.
 # However, we can overflow if we use this without AVX512_VNNI support.
 # This is fixed in torch 2.6+, so we set this as the minimum to be safe.
@@ -134,8 +136,14 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
         )
 
+        # Fallback as AVX512 implementation has accuracy issues with fp16/fp32 and blocksize >= 2048
+        # Note: this is not a common use case.
+        avx512_fallback = _has_avx512 and blocksize >= 2048 and dtype != torch.bfloat16
+
         # Odd shape is not supported by this kernel; fallback to generic implementation
-        if shape[-1] % 2 != 0:
+        shape_fallback = shape[-1] % 2 != 0
+
+        if avx512_fallback or shape_fallback:
             from ..default.ops import _dequantize_4bit_impl
 
             return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
@@ -219,6 +227,17 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         return out
 
     if has_avx512bf16():
+        gemm_4bit_forward_kernel = None
+        try:
+            from kernels import get_kernel
+
+            gemm_4bit_forward_kernel = get_kernel("kernels-community/quantization_bitsandbytes").gemm_4bit_forward
+        except Exception as exc:  # pragma: no cover - best effort fallback
+            gemm_4bit_forward_kernel = None
+            logger.warning(
+                "Failed to load CPU gemm_4bit_forward from kernels-community: %s. Please make sure you already `pip install kernels` and the kernels >= 0.11.1",
+                exc,
+            )
 
         @register_kernel("bitsandbytes::gemv_4bit", "cpu")
         def _(
@@ -239,38 +258,42 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             final_out_shape = (*A.shape[:-1], shapeB[0])
             A = A.reshape(-1, A.shape[-1])
             out_shape = (*A.shape[:-1], shapeB[0])
-            out = torch.empty(out_shape, dtype=A.dtype, device=A.device)
-            M = A.shape[0]
-            N = shapeB[0]
-            K = A.shape[1]
-            x_strideM = A.stride(0)
-            out_strideM = out.stride(0)
-            if quant_type == "fp4":
-                lib.gemv_4bit_inference_cpu_fp4_bf16(
-                    ct.c_int64(M),
-                    ct.c_int64(N),
-                    ct.c_int64(K),
-                    get_ptr(A),
-                    get_ptr(B),
-                    get_ptr(absmax),
-                    get_ptr(out),
-                    ct.c_int64(blocksize),
-                    ct.c_int64(x_strideM),
-                    ct.c_int64(out_strideM),
-                )
-            elif quant_type == "nf4":
-                lib.gemv_4bit_inference_cpu_nf4_bf16(
-                    ct.c_int64(M),
-                    ct.c_int64(N),
-                    ct.c_int64(K),
-                    get_ptr(A),
-                    get_ptr(B),
-                    get_ptr(absmax),
-                    get_ptr(out),
-                    ct.c_int64(blocksize),
-                    ct.c_int64(x_strideM),
-                    ct.c_int64(out_strideM),
-                )
+            if gemm_4bit_forward_kernel is not None:
+                quant_type_num = 1 if quant_type == "fp4" else 0
+                out = gemm_4bit_forward_kernel(A, B, absmax, blocksize, quant_type_num)
+            else:
+                out = torch.empty(out_shape, dtype=A.dtype, device=A.device)
+                M = A.shape[0]
+                N = shapeB[0]
+                K = A.shape[1]
+                x_strideM = A.stride(0)
+                out_strideM = out.stride(0)
+                if quant_type == "fp4":
+                    lib.gemv_4bit_inference_cpu_fp4_bf16(
+                        ct.c_int64(M),
+                        ct.c_int64(N),
+                        ct.c_int64(K),
+                        get_ptr(A),
+                        get_ptr(B),
+                        get_ptr(absmax),
+                        get_ptr(out),
+                        ct.c_int64(blocksize),
+                        ct.c_int64(x_strideM),
+                        ct.c_int64(out_strideM),
+                    )
+                elif quant_type == "nf4":
+                    lib.gemv_4bit_inference_cpu_nf4_bf16(
+                        ct.c_int64(M),
+                        ct.c_int64(N),
+                        ct.c_int64(K),
+                        get_ptr(A),
+                        get_ptr(B),
+                        get_ptr(absmax),
+                        get_ptr(out),
+                        ct.c_int64(blocksize),
+                        ct.c_int64(x_strideM),
+                        ct.c_int64(out_strideM),
+                    )
 
             if dtype != torch.bfloat16:
                 out = out.to(dtype)

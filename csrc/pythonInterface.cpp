@@ -45,18 +45,6 @@
 
 #if BUILD_CUDA || BUILD_HIP
 
-// void gemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
-//{ gemm_host<float>(M, N, K, A, B, out, lda, ldb, ldc, 32); }
-void gemm_host_fp16(int M, int N, int K, half* A, half* B, half* out, int lda, int ldb, int ldc) {
-    gemm_host<half>(M, N, K, A, B, out, lda, ldb, ldc, 16);
-}
-
-void gemm_4bit_inference(
-    int m, int n, int k, half* A, unsigned char* B, float* absmax, half* out, int lda, int ldb, int ldc, int blocksize
-) {
-    gemm_4bit_inference<half>(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize);
-}
-
 void gemm_4bit_inference_naive_fp16(
     int m, int n, int k, half* A, unsigned char* B, float* absmax, float* datatype, half* out, int lda, int ldb,
     int ldc, int blocksize, cudaStream_t stream
@@ -678,19 +666,6 @@ void cspmm_coo_very_sparse_naive_int8(
         max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz_rows, nnz, rowsA, rowsB,
         colsB
     );
-}
-
-// void cgemm_host_fp32(int M, int N, int K, float * A,  float* B,  float * out,  int lda, int ldb, int ldc)
-//{ gemm_host_fp32(M, N, K, A, B, out, lda, ldb, ldc); }
-
-void cgemm_host_fp16(int M, int N, int K, half* A, half* B, half* out, int lda, int ldb, int ldc) {
-    gemm_host_fp16(M, N, K, A, B, out, lda, ldb, ldc);
-}
-
-void cgemm_4bit_inference(
-    int m, int n, int k, half* A, unsigned char* B, float* absmax, half* out, int lda, int ldb, int ldc, int blocksize
-) {
-    gemm_4bit_inference(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize);
 }
 
 void* cget_managed_ptr(size_t bytes) {
