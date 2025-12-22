@@ -117,7 +117,7 @@ def get_rocm_warpsize() -> int:
     try:
         if torch.version.hip:
             result = subprocess.run([rocminfo], capture_output=True, text=True)
-            match = re.search(r"(wavefront\s|warp)size:\s+([1-9]{2})(\([x0-9]{4}\))?", result.stdout, re.IGNORECASE)            
+            match = re.search(r"(wavefront\s|warp)size:\s+([0-9]{2})(\([x0-9]{4}\))?", result.stdout, re.IGNORECASE)            
             if match:
                 return int(match.group(2))
             else:
