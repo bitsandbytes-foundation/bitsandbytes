@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import copy
+import logging
 from typing import Any, Optional, TypeVar, Union, overload
 import warnings
 
@@ -22,6 +23,8 @@ from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
 
 T = TypeVar("T", bound="torch.nn.Module")
+
+logger = logging.getLogger(__name__)
 
 
 class StableEmbedding(torch.nn.Embedding):
@@ -1115,9 +1118,10 @@ class OutlierAwareLinear(nn.Linear):
         if self.outlier_dim is None:
             tracer = OutlierTracer.get_instance()
             if not tracer.is_initialized():
-                print("Please use OutlierTracer.initialize(model) before using the OutlierAwareLinear layer")
+                logger.warning(
+                    "Please use OutlierTracer.initialize(model) before using the OutlierAwareLinear layer",
+                )
             outlier_idx = tracer.get_outliers(self.weight)
-            # print(outlier_idx, tracer.get_hvalue(self.weight))
             self.outlier_dim = outlier_idx
 
         if not self.is_quantized:
