@@ -515,9 +515,8 @@ class Linear4bit(nn.Linear):
         save weight and bias,
         then fill state_dict with components of quant_state
         """
-        if (
-            getattr(self.weight, "quant_state", None) is not None
-            and getattr(self.weight.quant_state, "packing_format_for_cpu", False)
+        if getattr(self.weight, "quant_state", None) is not None and getattr(
+            self.weight.quant_state, "packing_format_for_cpu", False
         ):
             self.weight.data, self.weight.quant_state = _convert_weight_packed_for_cpu_inverse(
                 self.weight.data, self.weight.quant_state
