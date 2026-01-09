@@ -66,7 +66,8 @@ def quantize_fp4_blockwise_kernel(
 
     packed_flat = tl.reshape(packed, (BLOCK_SIZE * SPLIT_NUM_BLOCKS,))
     out_offsets = block_start_idx * BLOCK_SIZE // 2 + tl.arange(0, SPLIT_NUM_BLOCKS * BLOCK_SIZE)
-    out_mask = out_offsets < n_elements // 2
+    # Use n - n//2 instead of (n+1)//2 to avoid integer overflow for large n
+    out_mask = out_offsets < (n_elements - n_elements // 2)
     tl.store(out_ptr + out_offsets, packed_flat, mask=out_mask)
 
 
@@ -148,7 +149,8 @@ def quantize_nf4_blockwise_kernel(
 
     packed_flat = tl.reshape(packed, (BLOCK_SIZE * SPLIT_NUM_BLOCKS,))
     out_offsets = block_start_idx * BLOCK_SIZE // 2 + tl.arange(0, SPLIT_NUM_BLOCKS * BLOCK_SIZE)
-    out_mask = out_offsets < n_elements // 2
+    # Use n - n//2 instead of (n+1)//2 to avoid integer overflow for large n
+    out_mask = out_offsets < (n_elements - n_elements // 2)
     tl.store(out_ptr + out_offsets, packed_flat, mask=out_mask)
 
 
@@ -330,7 +332,14 @@ def dequant_nf4_body_util(a, offsets, absmax_ptr, n_elems, QUANT_BLOCK: tl.const
 # )
 @triton.jit
 def dequant_4bit_kernel(
-    a_ptr, c_ptr, quant_ptr, absmax_ptr, num_paired_elements, QUANT_BLOCK: tl.constexpr, SPLIT_SIZE: tl.constexpr
+    a_ptr,
+    c_ptr,
+    quant_ptr,
+    absmax_ptr,
+    num_paired_elements,
+    num_output_elements,
+    QUANT_BLOCK: tl.constexpr,
+    SPLIT_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
     block_start = pid * SPLIT_SIZE
@@ -350,7 +359,7 @@ def dequant_4bit_kernel(
 
     out_block_start = pid * SPLIT_SIZE * 2
     offs = out_block_start + tl.arange(0, SPLIT_SIZE * 2)
-    mask = offs < num_paired_elements * 2
+    mask = offs < num_output_elements
     tl.store(c_ptr + offs, out_dq, mask)
 
 
@@ -367,7 +376,13 @@ def dequant_4bit_kernel(
 # )
 @triton.jit
 def dequant_fp4_kernel(
-    a_ptr, c_ptr, absmax_ptr, num_paired_elements, QUANT_BLOCK: tl.constexpr, SPLIT_SIZE: tl.constexpr
+    a_ptr,
+    c_ptr,
+    absmax_ptr,
+    num_paired_elements,
+    num_output_elements,
+    QUANT_BLOCK: tl.constexpr,
+    SPLIT_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
     block_start = pid * SPLIT_SIZE
@@ -386,7 +401,7 @@ def dequant_fp4_kernel(
 
     out_block_start = pid * SPLIT_SIZE * 2
     offs = out_block_start + tl.arange(0, SPLIT_SIZE * 2)
-    mask = offs < num_paired_elements * 2
+    mask = offs < num_output_elements
     tl.store(c_ptr + offs, out_dq, mask)
 
 
@@ -403,7 +418,13 @@ def dequant_fp4_kernel(
 # )
 @triton.jit
 def dequant_nf4_kernel(
-    a_ptr, c_ptr, absmax_ptr, num_paired_elements, QUANT_BLOCK: tl.constexpr, SPLIT_SIZE: tl.constexpr
+    a_ptr,
+    c_ptr,
+    absmax_ptr,
+    num_paired_elements,
+    num_output_elements,
+    QUANT_BLOCK: tl.constexpr,
+    SPLIT_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
     block_start = pid * SPLIT_SIZE
@@ -422,7 +443,7 @@ def dequant_nf4_kernel(
 
     out_block_start = pid * SPLIT_SIZE * 2
     offs = out_block_start + tl.arange(0, SPLIT_SIZE * 2)
-    mask = offs < num_paired_elements * 2
+    mask = offs < num_output_elements
     tl.store(c_ptr + offs, out_dq, mask)
 
 
@@ -439,15 +460,16 @@ def dequantize_4bit_impl(
     # Elements are in uint8 format, so interleaved
     # so total amount of data is 2 * elem_count
     number_of_paired_elements = A.numel()
+    num_output_elements = out.numel()
     # we assume that split_size > quant_blocksize
 
     SPLIT_SIZE = 256
     # grid = lambda META: (triton.cdiv(number_of_paired_elements, META['SPLIT_SIZE']), )
     grid = (triton.cdiv(number_of_paired_elements, SPLIT_SIZE),)
     if quant_type == "fp4":
-        dequant_fp4_kernel[grid](A, out, absmax, number_of_paired_elements, blocksize, SPLIT_SIZE)
+        dequant_fp4_kernel[grid](A, out, absmax, number_of_paired_elements, num_output_elements, blocksize, SPLIT_SIZE)
     else:
-        dequant_nf4_kernel[grid](A, out, absmax, number_of_paired_elements, blocksize, SPLIT_SIZE)
+        dequant_nf4_kernel[grid](A, out, absmax, number_of_paired_elements, num_output_elements, blocksize, SPLIT_SIZE)
 
 
 def dequantize_4bit_impl_passing_code(
@@ -459,12 +481,15 @@ def dequantize_4bit_impl_passing_code(
     out: torch.Tensor,
 ) -> None:
     number_of_paired_elements = A.numel()
+    num_output_elements = out.numel()
     # we assume that split_size > quant_blocksize
 
     SPLIT_SIZE = 256
     # grid = lambda META: (triton.cdiv(number_of_paired_elements, META['SPLIT_SIZE']), )
     grid = (triton.cdiv(number_of_paired_elements, SPLIT_SIZE),)
-    dequant_4bit_kernel[grid](A, out, code, absmax, number_of_paired_elements, blocksize, SPLIT_SIZE)
+    dequant_4bit_kernel[grid](
+        A, out, code, absmax, number_of_paired_elements, num_output_elements, blocksize, SPLIT_SIZE
+    )
 
 
 ######################### Fallback dequantization functions #########################
