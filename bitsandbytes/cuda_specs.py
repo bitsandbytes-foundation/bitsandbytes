@@ -90,7 +90,7 @@ def get_rocm_gpu_arch() -> str:
     try:
         if torch.version.hip:
             result = subprocess.run([rocminfo], capture_output=True, text=True)
-            match = re.search(r"Name:\s+gfx([a-zA-Z\d]+)", result.stdout)
+            match = re.search(r"Name:\s+gfx([a-z\d]+)", result.stdout, re.IGNORECASE)
             if match:
                 return "gfx" + match.group(1)
             else:
@@ -117,7 +117,7 @@ def get_rocm_warpsize() -> int:
     try:
         if torch.version.hip:
             result = subprocess.run([rocminfo], capture_output=True, text=True)
-            match = re.search(r"(wavefront\s|warp)size:\s+([0-9]{2})(\([x0-9]{4}\))?", result.stdout, re.IGNORECASE)            
+            match = re.search(r"(wavefront\s|warp)size:\s+([0-9]{2})(\([x0-9]{4}\))?", result.stdout, re.IGNORECASE)
             if match:
                 return int(match.group(2))
             else:
