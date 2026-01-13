@@ -105,10 +105,11 @@ SYCL_EXTERNAL void kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::op
     T vals[NUM_PER_TH * ((DATA_TYPE > 0) ? 2 : 1)];
 
     if (DATA_TYPE > 0) {
-        local_load_idx = sycl::min(static_cast<int64_t>(TILE_SIZE), (n + 1) / 2 - base_idx);
-        local_store_idx = sycl::min(static_cast<int64_t>(TILE_SIZE * 2), n - base_idx * 2);
+        // Cast n to int64_t to avoid overflow for large n (same as CUDA)
+        local_load_idx = sycl::min(static_cast<int64_t>(TILE_SIZE), (static_cast<int64_t>(n) + 1) / 2 - base_idx);
+        local_store_idx = sycl::min(static_cast<int64_t>(TILE_SIZE * 2), static_cast<int64_t>(n) - base_idx * 2);
     } else {
-        local_load_idx = sycl::min(static_cast<int64_t>(TILE_SIZE), n - base_idx);
+        local_load_idx = sycl::min(static_cast<int64_t>(TILE_SIZE), static_cast<int64_t>(n) - base_idx);
         local_store_idx = local_load_idx;
     }
 

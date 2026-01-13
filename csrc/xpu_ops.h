@@ -30,7 +30,7 @@ static inline void sycl_comp_kernel_submit(sycl::nd_range<dim> range, sycl::queu
 
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(
-    float* code, unsigned char* A, float* absmax, T* out, int workgroup_size, const int64_t n, sycl::queue* stream
+    float* code, unsigned char* A, float* absmax, T* out, int workgroup_size, const int n, sycl::queue* stream
 );
 template <typename T, int BITS>
 void gemv_4bit_inference(
