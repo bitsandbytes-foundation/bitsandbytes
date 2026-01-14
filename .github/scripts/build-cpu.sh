@@ -4,7 +4,7 @@ declare build_os
 
 set -xeuo pipefail
 
-pip install cmake==3.28.3
+uv tool install cmake==3.28.3
 
 if [ "${build_os:0:5}" == macos ] && [ "${build_arch}" == aarch64 ]; then
 	cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCOMPUTE_BACKEND=cpu .
