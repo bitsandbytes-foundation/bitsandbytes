@@ -33,7 +33,7 @@ class Adagrad(Optimizer1State):
             weight_decay (`float`, defaults to 0.0):
                 The weight decay value for the optimizer.
             initial_accumulator_value (`int`, defaults to 0):
-                The initial momemtum values.
+                The initial momentum values.
             eps (`float`, defaults to 1e-10):
                 The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 32):
@@ -100,7 +100,7 @@ class Adagrad8bit(Optimizer1State):
             weight_decay (`float`, defaults to 0.0):
                 The weight decay value for the optimizer.
             initial_accumulator_value (`int`, defaults to 0):
-                The initial momemtum values.
+                The initial momentum values.
             eps (`float`, defaults to 1e-10):
                 The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 8):
@@ -168,7 +168,7 @@ class Adagrad32bit(Optimizer1State):
             weight_decay (`float`, defaults to 0.0):
                 The weight decay value for the optimizer.
             initial_accumulator_value (`int`, defaults to 0):
-                The initial momemtum values.
+                The initial momentum values.
             eps (`float`, defaults to 1e-10):
                 The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 32):
