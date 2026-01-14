@@ -95,20 +95,21 @@ inline float dDequantizeNF4(unsigned char val) {
 
 template <typename T, int TILE_SIZE, int NUM_PER_TH, int DATA_TYPE>
 SYCL_EXTERNAL void kDequantizeBlockwise<T, TILE_SIZE, NUM_PER_TH, DATA_TYPE>::operator()(sycl::nd_item<1> item) const {
-    const int base_idx = item.get_group(0) * TILE_SIZE;
-    size_t local_idx = item.get_local_id(0) * NUM_PER_TH;
+    const int64_t base_idx = static_cast<int64_t>(item.get_group(0)) * TILE_SIZE;
+    int64_t local_idx = static_cast<int64_t>(item.get_local_id(0)) * NUM_PER_TH;
     float local_abs_max = -FLT_MAX;
-    int local_load_idx = 0;
-    int local_store_idx = 0;
+    int64_t local_load_idx = 0;
+    int64_t local_store_idx = 0;
 
     uint8_t qvals[NUM_PER_TH];
     T vals[NUM_PER_TH * ((DATA_TYPE > 0) ? 2 : 1)];
 
     if (DATA_TYPE > 0) {
-        local_load_idx = sycl::min(TILE_SIZE, (n + 1) / 2 - base_idx);
-        local_store_idx = sycl::min(TILE_SIZE * 2, n - base_idx * 2);
+        // Cast n to int64_t to avoid overflow for large n (same as CUDA)
+        local_load_idx = sycl::min(static_cast<int64_t>(TILE_SIZE), (static_cast<int64_t>(n) + 1) / 2 - base_idx);
+        local_store_idx = sycl::min(static_cast<int64_t>(TILE_SIZE * 2), static_cast<int64_t>(n) - base_idx * 2);
     } else {
-        local_load_idx = sycl::min(TILE_SIZE, n - base_idx);
+        local_load_idx = sycl::min(static_cast<int64_t>(TILE_SIZE), static_cast<int64_t>(n) - base_idx);
         local_store_idx = local_load_idx;
     }
 
