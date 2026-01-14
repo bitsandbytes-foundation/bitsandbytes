@@ -11,9 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.12"
-      - uses: pre-commit/action@v3.0.0
+          enable-cache: true
+          cache-dependency-glob: '.pre-commit-config.yaml'
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-3|${{ hashFiles('.pre-commit-config.yaml') }}
+      - run: uv run --python=3.14 --no-sync --with pre-commit-uv pre-commit run --show-diff-on-failure --color=always --all-files
         env:
           RUFF_OUTPUT_FORMAT: github
