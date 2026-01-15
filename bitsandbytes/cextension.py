@@ -278,19 +278,35 @@ def get_native_library() -> BNBNativeLibrary:
     """
     Load CUDA library XOR CPU, as the latter contains a subset of symbols of the former.
     """
-    cuda_specs = get_cuda_specs()
-    binary_path = PACKAGE_DIR / f"libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}"
+    cpu_binary_path = PACKAGE_DIR / f"libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}"
+    binary_path = cpu_binary_path
 
-    if cuda_specs:
-        cuda_binary_path = get_cuda_bnb_library_path(cuda_specs)
-
-        if not cuda_binary_path.exists():
-            raise RuntimeError(f"Configured {BNB_BACKEND} binary not found at {cuda_binary_path}")
-
-        binary_path = cuda_binary_path
-
-    if torch._C._has_xpu:
+    if BNB_BACKEND in {"CUDA", "ROCm"}:
+        cuda_specs = get_cuda_specs()
+        if cuda_specs:
+            candidate = get_cuda_bnb_library_path(cuda_specs)
+            if not candidate.exists():
+                raise RuntimeError(f"Configured {BNB_BACKEND} binary not found at {candidate}")
+            binary_path = candidate
+        else:
+            logger.warning(
+                "bitsandbytes: CUDA/ROCm backend requested but PyTorch did not expose runtime specs; "
+                "falling back to CPU implementation."
+            )
+    elif BNB_BACKEND == "XPU":
         binary_path = PACKAGE_DIR / f"libbitsandbytes_xpu{DYNAMIC_LIBRARY_SUFFIX}"
+    elif BNB_BACKEND == "MPS":
+        binary_path = PACKAGE_DIR / f"libbitsandbytes_mps{DYNAMIC_LIBRARY_SUFFIX}"
+
+    if not binary_path.exists():
+        if BNB_BACKEND == "MPS":
+            logger.warning(
+                "bitsandbytes: libbitsandbytes_mps was not found. Falling back to CPU kernels; "
+                "MPS-specific optimizations will be unavailable."
+            )
+            binary_path = cpu_binary_path
+        else:
+            raise RuntimeError(f"bitsandbytes: native library not found at {binary_path}")
 
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
 
@@ -313,6 +329,8 @@ if torch.version.hip:
     BNB_BACKEND = "ROCm"
 elif torch.cuda.is_available():
     BNB_BACKEND = "CUDA"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    BNB_BACKEND = "MPS"
 elif torch._C._has_xpu:
     BNB_BACKEND = "XPU"
 
