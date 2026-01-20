@@ -3,6 +3,7 @@ from functools import lru_cache
 import logging
 import re
 import subprocess
+import platform
 from typing import Optional
 
 import torch
@@ -83,7 +84,10 @@ def get_rocm_gpu_arch() -> str:
     logger = logging.getLogger(__name__)
     try:
         if torch.version.hip:
-            result = subprocess.run(["rocminfo"], capture_output=True, text=True)
+            rocminfo_process_name = "rocminfo"
+            if platform.system() == "Windows":  
+                rocminfo_process_name = "hipinfo"
+            result = subprocess.run([rocminfo_process_name], capture_output=True, text=True)
             match = re.search(r"Name:\s+gfx([a-zA-Z\d]+)", result.stdout)
             if match:
                 return "gfx" + match.group(1)
@@ -107,7 +111,10 @@ def get_rocm_warpsize() -> int:
     logger = logging.getLogger(__name__)
     try:
         if torch.version.hip:
-            result = subprocess.run(["rocminfo"], capture_output=True, text=True)
+            rocminfo_process_name = "rocminfo"
+            if platform.system() == "Windows":  
+                rocminfo_process_name = "hipinfo"
+            result = subprocess.run([rocminfo_process_name], capture_output=True, text=True)
             match = re.search(r"Wavefront Size:\s+([0-9]{2})\(0x[0-9]{2}\)", result.stdout)
             if match:
                 return int(match.group(1))
