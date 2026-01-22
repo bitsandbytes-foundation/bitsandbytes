@@ -1,6 +1,7 @@
 import dataclasses
 from functools import lru_cache
 import logging
+import os
 import re
 import subprocess
 from typing import Optional
@@ -83,10 +84,21 @@ def get_rocm_gpu_arch() -> str:
     logger = logging.getLogger(__name__)
     try:
         if torch.version.hip:
-            result = subprocess.run(["rocminfo"], capture_output=True, text=True)
-            match = re.search(r"Name:\s+gfx([a-zA-Z\d]+)", result.stdout)
+            # On Windows, use hipinfo.exe; on Linux, use rocminfo
+            if os.name == "nt":
+                cmd = ["hipinfo.exe"]
+                arch_pattern = r"gcnArchName:\s+(gfx[a-zA-Z\d]+)"
+            else:
+                cmd = ["rocminfo"]
+                arch_pattern = r"Name:\s+gfx([a-zA-Z\d]+)"
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            match = re.search(arch_pattern, result.stdout)
             if match:
-                return "gfx" + match.group(1)
+                if os.name == "nt":
+                    return match.group(1)
+                else:
+                    return "gfx" + match.group(1)
             else:
                 return "unknown"
         else:
@@ -107,8 +119,17 @@ def get_rocm_warpsize() -> int:
     logger = logging.getLogger(__name__)
     try:
         if torch.version.hip:
-            result = subprocess.run(["rocminfo"], capture_output=True, text=True)
-            match = re.search(r"Wavefront Size:\s+([0-9]{2})\(0x[0-9]{2}\)", result.stdout)
+            # On Windows, use hipinfo.exe; on Linux, use rocminfo
+            if os.name == "nt":
+                cmd = ["hipinfo.exe"]
+                # hipinfo.exe output format: "warpSize: 32" or "warpSize: 64"
+                warp_pattern = r"warpSize:\s+(\d+)"
+            else:
+                cmd = ["rocminfo"]
+                warp_pattern = r"Wavefront Size:\s+([0-9]{2})\(0x[0-9]{2}\)"
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            match = re.search(warp_pattern, result.stdout)
             if match:
                 return int(match.group(1))
             else:

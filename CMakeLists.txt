@@ -263,6 +263,8 @@ endif()
 if(WIN32)
     # Export all symbols
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # Prevent Windows SDK min/max macros from conflicting with std::min/std::max
+    add_compile_definitions(NOMINMAX)
 endif()
 
 if(MSVC)
@@ -330,13 +332,21 @@ if(BUILD_HIP)
     find_package_and_print_version(hipsparse REQUIRED)
 
     ## hacky way of excluding hip::amdhip64 (with it linked many tests unexpectedly fail e.g. adam8bit because of inaccuracies)
-    set_target_properties(hip::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
-    set_target_properties(hip-lang::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
-    set(CMAKE_HIP_IMPLICIT_LINK_LIBRARIES "")
+    ## On Windows, we need to link amdhip64 explicitly
+    if(NOT WIN32)
+        set_target_properties(hip::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
+        set_target_properties(hip-lang::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
+        set(CMAKE_HIP_IMPLICIT_LINK_LIBRARIES "")
+    endif()
 
     target_include_directories(bitsandbytes PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include ${ROCM_PATH}/include /include)
     target_link_directories(bitsandbytes PRIVATE ${ROCM_PATH}/lib /lib)
     target_link_libraries(bitsandbytes PUBLIC roc::hipblas hip::hiprand roc::hipsparse)
+
+    # On Windows, link the HIP runtime and rocblas directly
+    if(WIN32)
+        target_link_libraries(bitsandbytes PUBLIC amdhip64 rocblas)
+    endif()
 
     target_compile_definitions(bitsandbytes PUBLIC BNB_USE_HIP)
     set_source_files_properties(${HIP_FILES} PROPERTIES LANGUAGE HIP)
