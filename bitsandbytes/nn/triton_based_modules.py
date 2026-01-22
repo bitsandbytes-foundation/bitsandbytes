@@ -1,4 +1,5 @@
 from functools import partial
+import logging
 
 import torch
 import torch.nn as nn
@@ -19,6 +20,8 @@ from bitsandbytes.triton.quantize_global import (
 )
 from bitsandbytes.triton.quantize_rowwise import quantize_rowwise
 from bitsandbytes.triton.triton_utils import is_triton_available
+
+logger = logging.getLogger(__name__)
 
 
 class _switchback_global(torch.autograd.Function):
@@ -173,8 +176,8 @@ class SwitchBackLinear(nn.Linear):
         if self.vector_wise_quantization:
             self._fn = _switchback_vectorrize
             if mem_efficient:
-                print("mem efficient is not supported for vector-wise quantization.")
-                exit(1)
+                logger.error("mem efficient is not supported for vector-wise quantization.")
+                raise ValueError("mem_efficient is not supported for vector-wise quantization.")
         else:
             if mem_efficient:
                 self._fn = _switchback_global_mem_efficient
@@ -189,7 +192,7 @@ class SwitchBackLinear(nn.Linear):
         #     if hasattr(m, "prepare_for_eval"):
         #         m.prepare_for_eval()
         # model.apply(cond_prepare)
-        print("=> preparing for eval.")
+        logger.info("Preparing SwitchBackLinear for eval.")
         if self.vector_wise_quantization:
             W_int8, state_W = quantize_rowwise(self.weight)
         else:

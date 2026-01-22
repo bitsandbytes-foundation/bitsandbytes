@@ -1,4 +1,6 @@
 import importlib
+import logging
+import os
 import platform
 import sys
 import traceback
@@ -25,6 +27,8 @@ _RELATED_PACKAGES = [
     "triton",
     "trl",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def sanity_check():
@@ -53,24 +57,30 @@ def get_package_version(name: str) -> str:
 def show_environment():
     """Simple utility to print out environment information."""
 
-    print(f"Platform: {platform.platform()}")
+    logger.info("Platform: %s", platform.platform())
     if platform.system() == "Linux":
-        print(f"  libc: {'-'.join(platform.libc_ver())}")
+        logger.info("  libc: %s", "-".join(platform.libc_ver()))
 
-    print(f"Python: {platform.python_version()}")
+    logger.info("Python: %s", platform.python_version())
 
-    print(f"PyTorch: {torch.__version__}")
-    print(f"  CUDA: {torch.version.cuda or 'N/A'}")
-    print(f"  HIP: {torch.version.hip or 'N/A'}")
-    print(f"  XPU: {getattr(torch.version, 'xpu', 'N/A') or 'N/A'}")
+    logger.info("PyTorch: %s", torch.__version__)
+    logger.info("  CUDA: %s", torch.version.cuda or "N/A")
+    logger.info("  HIP: %s", torch.version.hip or "N/A")
+    logger.info("  XPU: %s", getattr(torch.version, "xpu", "N/A") or "N/A")
 
-    print("Related packages:")
+    logger.info("Related packages:")
     for pkg in _RELATED_PACKAGES:
         version = get_package_version(pkg)
-        print(f"  {pkg}: {version}")
+        logger.info("  %s: %s", pkg, version)
 
 
 def main():
+    # bitsandbytes' CLI entrypoint: configure logging for human-readable output.
+    # Library imports do not configure logging; downstream apps should decide.
+    level_name = os.environ.get("BNB_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(level=level, format="%(message)s")
+
     print_header(f"bitsandbytes v{bnb_version}")
     show_environment()
     print_header("")
@@ -84,29 +94,30 @@ def main():
     # print_cuda_runtime_diagnostics()
 
     if not torch.cuda.is_available():
-        print(f"PyTorch says {BNB_BACKEND} is not available. Possible reasons:")
-        print(f"1. {BNB_BACKEND} driver not installed")
-        print("2. Using a CPU-only PyTorch build")
-        print("3. No GPU detected")
+        logger.warning("PyTorch says %s is not available. Possible reasons:", BNB_BACKEND)
+        logger.warning("1. %s driver not installed", BNB_BACKEND)
+        logger.warning("2. Using a CPU-only PyTorch build")
+        logger.warning("3. No GPU detected")
 
     else:
-        print(f"Checking that the library is importable and {BNB_BACKEND} is callable...")
+        logger.info("Checking that the library is importable and %s is callable...", BNB_BACKEND)
 
         try:
             sanity_check()
-            print("SUCCESS!")
+            logger.info("SUCCESS!")
             return
         except RuntimeError as e:
             if "not available in CPU-only" in str(e):
-                print(
-                    f"WARNING: {__package__} is currently running as CPU-only!\n"
+                logger.warning(
+                    "WARNING: %s is currently running as CPU-only!\n"
                     "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
-                    f"If you think that this is so erroneously,\nplease report an issue!",
+                    "If you think that this is so erroneously,\nplease report an issue!",
+                    __package__,
                 )
             else:
                 raise e
         except Exception:
-            traceback.print_exc()
+            logger.exception("Diagnostics sanity check failed:")
 
         print_dedented(
             f"""

@@ -3,6 +3,7 @@
 
 import functools
 import heapq
+import logging
 
 import torch
 
@@ -14,6 +15,8 @@ from triton.testing import (
     get_max_tensorcore_tflops,
     nvsmi,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @functools.lru_cache
@@ -125,10 +128,13 @@ def estimate_matmul_time(
 
     total_time_ms = max(compute_ms, load_ms) + store_ms
     if debug:
-        print(
-            f"Total time: {total_time_ms}ms, compute time: {compute_ms}ms, "
-            f"loading time: {load_ms}ms, store time: {store_ms}ms, "
-            f"Activate CTAs: {active_cta_ratio * 100}%"
+        logger.debug(
+            "Total time: %sms, compute time: %sms, loading time: %sms, store time: %sms, Activate CTAs: %s%%",
+            total_time_ms,
+            compute_ms,
+            load_ms,
+            store_ms,
+            active_cta_ratio * 100,
         )
     return total_time_ms
 
