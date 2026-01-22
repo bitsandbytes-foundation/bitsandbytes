@@ -136,7 +136,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04]
         arch: [x86_64]
-        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1"]
+        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1", "7.2"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
