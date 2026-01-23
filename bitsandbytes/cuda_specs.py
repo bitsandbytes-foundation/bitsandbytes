@@ -1,7 +1,7 @@
 import dataclasses
 from functools import lru_cache
 import logging
-import os
+import platform
 import re
 import subprocess
 from typing import Optional
@@ -85,7 +85,7 @@ def get_rocm_gpu_arch() -> str:
     try:
         if torch.version.hip:
             # On Windows, use hipinfo.exe; on Linux, use rocminfo
-            if os.name == "nt":
+            if platform.system() == "Windows":
                 cmd = ["hipinfo.exe"]
                 arch_pattern = r"gcnArchName:\s+(gfx[a-zA-Z\d]+)"
             else:
@@ -95,7 +95,7 @@ def get_rocm_gpu_arch() -> str:
             result = subprocess.run(cmd, capture_output=True, text=True)
             match = re.search(arch_pattern, result.stdout)
             if match:
-                if os.name == "nt":
+                if platform.system() == "Windows":
                     return match.group(1)
                 else:
                     return "gfx" + match.group(1)
@@ -120,7 +120,7 @@ def get_rocm_warpsize() -> int:
     try:
         if torch.version.hip:
             # On Windows, use hipinfo.exe; on Linux, use rocminfo
-            if os.name == "nt":
+            if platform.system() == "Windows":
                 cmd = ["hipinfo.exe"]
                 # hipinfo.exe output format: "warpSize: 32" or "warpSize: 64"
                 warp_pattern = r"warpSize:\s+(\d+)"
