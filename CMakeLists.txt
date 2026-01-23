@@ -12,6 +12,19 @@
 #  - PTXAS_VERBOSE: Pass the `-v` option to the PTX Assembler
 cmake_minimum_required(VERSION 3.22.1)
 
+# On Windows with HIP backend, auto-detect compilers from ROCM_PATH before project()
+if(WIN32 AND COMPUTE_BACKEND STREQUAL "hip")
+    if(DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH $ENV{ROCM_PATH})
+    endif()
+    if(ROCM_PATH AND NOT DEFINED CMAKE_CXX_COMPILER)
+        set(CMAKE_CXX_COMPILER "${ROCM_PATH}/lib/llvm/bin/clang++.exe")
+    endif()
+    if(ROCM_PATH AND NOT DEFINED CMAKE_HIP_COMPILER)
+        set(CMAKE_HIP_COMPILER "${ROCM_PATH}/lib/llvm/bin/clang++.exe")
+    endif()
+endif()
+
 project(bitsandbytes LANGUAGES CXX)
 
 # If run without specifying a build type, default to using the Release configuration:
@@ -200,6 +213,20 @@ if(BUILD_CUDA)
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
     add_compile_definitions(BUILD_CUDA)
 elseif(BUILD_HIP)
+    # Auto-detect GPU architecture on Windows using hipinfo.exe
+    if(WIN32 AND NOT DEFINED BNB_ROCM_ARCH AND NOT DEFINED AMDGPU_TARGETS AND NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+      execute_process(
+        COMMAND hipinfo
+        OUTPUT_VARIABLE HIPINFO_OUTPUT
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+      if(HIPINFO_OUTPUT MATCHES "gcnArchName:[ \t]*([a-z0-9]+)")
+        set(CMAKE_HIP_ARCHITECTURES "${CMAKE_MATCH_1}")
+        message(STATUS "Auto-detected HIP architecture: ${CMAKE_HIP_ARCHITECTURES}")
+      endif()
+    endif()
+
     enable_language(HIP)
     message(STATUS "HIP Compiler: ${CMAKE_HIP_COMPILER}")
     if(DEFINED BNB_ROCM_ARCH)
@@ -317,10 +344,11 @@ if(BUILD_CUDA)
     )
 endif()
 if(BUILD_HIP)
-    if(NOT DEFINED ENV{ROCM_PATH})
-      set(ROCM_PATH /opt/rocm)
-    else()
+    # Determine ROCM_PATH from environment variable, fallback to /opt/rocm on Linux
+    if(DEFINED ENV{ROCM_PATH})
       set(ROCM_PATH $ENV{ROCM_PATH})
+    else()
+      set(ROCM_PATH /opt/rocm)
     endif()
     list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
     macro(find_package_and_print_version PACKAGE_NAME)
@@ -343,9 +371,11 @@ if(BUILD_HIP)
     target_link_directories(bitsandbytes PRIVATE ${ROCM_PATH}/lib /lib)
     target_link_libraries(bitsandbytes PUBLIC roc::hipblas hip::hiprand roc::hipsparse)
 
-    # On Windows, link the HIP runtime and rocblas directly
+    # On Windows, link the HIP runtime and rocblas directly using full paths
     if(WIN32)
-        target_link_libraries(bitsandbytes PUBLIC amdhip64 rocblas)
+        target_link_libraries(bitsandbytes PUBLIC
+            "${ROCM_PATH}/lib/amdhip64.lib"
+            "${ROCM_PATH}/lib/rocblas.lib")
     endif()
 
     target_compile_definitions(bitsandbytes PUBLIC BNB_USE_HIP)
