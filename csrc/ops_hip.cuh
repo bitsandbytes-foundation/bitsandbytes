@@ -11,7 +11,9 @@
 #include <cstdint>
 #include <iostream>
 #include <stdio.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 #include <common.h>
 #include <functional>
