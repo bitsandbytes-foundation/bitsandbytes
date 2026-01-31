@@ -213,17 +213,32 @@ else:
 
     @register_kernel("bitsandbytes::int8_vectorwise_quant", "mps")
     def _(A: torch.Tensor, threshold=0.0):
-        out_row, row_stats = mps_bnb.quantize_rowwise(A)
+        from math import prod
+        rows = prod(A.shape[:-1])
+        outlier_cols = None
+        outlier_restore = None
 
         if threshold > 0.0:
-            # Handle outliers
+            # Handle outliers - zero them BEFORE computing absmax (matches default backend)
             outliers = A.abs() >= threshold
             if outliers.any():
                 outlier_cols = torch.argwhere(outliers.any(dim=0)).view(-1)
-                out_row[:, outlier_cols] = 0
-                return out_row, row_stats, outlier_cols
+                outlier_restore = A[outliers].clone()
+                A[outliers] = 0
+            else:
+                outlier_cols = torch.empty(0, device=A.device, dtype=torch.int64)
 
-        return out_row, row_stats, None
+        out_row, row_stats = mps_bnb.quantize_rowwise(A)
+
+        # Zero out values from outlier columns across all rows
+        if rows > 1 and outlier_cols is not None:
+            out_row[:, outlier_cols] = 0
+
+        # Restore outliers in A
+        if outlier_restore is not None:
+            A[outliers] = outlier_restore
+
+        return out_row, row_stats, outlier_cols
 
     @register_kernel("bitsandbytes::int8_vectorwise_dequant", "mps")
     def _(A: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
