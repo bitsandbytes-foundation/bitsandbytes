@@ -158,10 +158,10 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>⬜ Metal <br><code>mps</code></td>
-      <td>Apple M1+</td>
-      <td>🐢</td>
-      <td>🐢</td>
-      <td>❌</td>
+      <td>Apple M1+<br><small>Install <a href="https://github.com/mpsops/mps-bitsandbytes">mps-bitsandbytes</a> for optimized Metal kernels</small></td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
   </tbody>
 </table>
 

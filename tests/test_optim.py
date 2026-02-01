@@ -319,8 +319,8 @@ optimizer_names_8bit = [
 @pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
 @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No device")
 def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
-    if device not in ["cuda", "xpu"]:
-        pytest.skip("8-bit optimizers are only supported on CUDA and XPU")
+    if device not in ["cuda", "xpu", "mps"]:
+        pytest.skip("8-bit optimizers are only supported on CUDA, XPU, and MPS")
 
     torch.set_printoptions(precision=6)
 

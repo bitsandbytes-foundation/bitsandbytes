@@ -45,6 +45,13 @@ if importlib.util.find_spec("habana_frameworks") and importlib.util.find_spec("h
     if hasattr(torch, "hpu") and torch.hpu.is_available():
         from .backends.hpu import ops as hpu_ops
 
+# MPS backend (Apple Silicon) - requires mps-bitsandbytes for optimized Metal kernels
+if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    try:
+        from .backends.mps import ops as mps_ops
+    except ImportError:
+        pass  # mps-bitsandbytes not installed, will use default backend
+
 
 def _import_backends():
     """
