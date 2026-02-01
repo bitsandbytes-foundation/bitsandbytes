@@ -137,7 +137,7 @@ else:
         absmax_clamped = absmax.clamp(min=1e-8)
 
         # Scale values to [-1, 1]
-        scaled_A = torch.clamp(A_com_reshaped * (1 / absmax_clamped[: blocks - has_rem].view(-1, 1)), -1, 1)
+        scaled_A = torch.clamp(A_com_reshaped * (1 / absmax_clamped[: blocks - has_rem].reshape(-1, 1)), -1, 1)
         scaled_A = scaled_A.reshape(-1)
 
         if has_rem:
@@ -174,7 +174,7 @@ else:
         if res != 0:
             out = torch.nn.functional.pad(out, (0, blocksize - res), mode="constant", value=0)
 
-        out = (out.view(-1, blocksize) * absmax.view(-1, 1)).to(dtype).reshape(-1)
+        out = (out.reshape(-1, blocksize) * absmax.reshape(-1, 1)).to(dtype).reshape(-1)
         out = out[: blocks * blocksize + res]
         out = out.reshape(A.shape)
 
@@ -199,7 +199,7 @@ else:
     ) -> torch.Tensor:
         torch._check(A.dtype == torch.int32, lambda: f"A must be int32, got {A.dtype}")
 
-        A_calc = A.view(-1, A.shape[-1])
+        A_calc = A.reshape(-1, A.shape[-1])
         row_stats = row_stats.reshape(-1).unsqueeze(-1)
         col_stats = col_stats.reshape(-1).unsqueeze(0)
 
@@ -222,7 +222,7 @@ else:
             # Handle outliers - zero them BEFORE computing absmax (matches default backend)
             outliers = A.abs() >= threshold
             if outliers.any():
-                outlier_cols = torch.argwhere(outliers.any(dim=0)).view(-1)
+                outlier_cols = torch.argwhere(outliers.any(dim=0)).reshape(-1)
                 outlier_restore = A[outliers].clone()
                 A[outliers] = 0
             else:
