@@ -92,8 +92,10 @@ def get_rocm_gpu_arch() -> str:
             result = subprocess.run([rocminfo_process_name], capture_output=True, text=True)
             match = re.search(search_pattern, result.stdout)
             if match:
+                print("BNB: gfx"+ match.group(1))
                 return "gfx" + match.group(1)
             else:
+                print("BNB: gfx unknown")
                 return "unknown"
         else:
             return "unknown"
@@ -121,9 +123,11 @@ def get_rocm_warpsize() -> int:
             result = subprocess.run([rocminfo_process_name], capture_output=True, text=True)
             match = re.search(search_pattern, result.stdout)
             if match:
+                print(f"warpSize: {int(match.group(1))}")
                 return int(match.group(1))
             else:
                 # default to 64 to be safe
+                print(f"warpSize: 64")
                 return 64
         else:
             # nvidia cards always use 32 warp size
