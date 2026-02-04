@@ -459,10 +459,9 @@ __global__ void kQuantizeBlockwise32(
 
     const int i = base_idx + block_id * BLOCK_SIZE;
 
+    // Early exit if this quantization block is out of bounds
     if (i >= n)
         return;
-
-    const int valid_items = min(BLOCK_SIZE, n - i);
 
     // Load 64 values total (32 threads × 2 values each)
     __syncthreads();
