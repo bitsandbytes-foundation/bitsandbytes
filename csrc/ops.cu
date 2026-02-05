@@ -51,13 +51,12 @@ void quantizeBlockwise(
     else if (blocksize == 64)
         kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 32) {
-        // For 4-bit: use specialized kernel that processes 2 blocks per warp
+        // For 4-bit: use specialized kernel (kQuantizeBlockwise32) that processes 2 blocks per warp
         // Each CUDA block handles 2 quantization blocks, so divide num_blocks by 2
         if (DATA_TYPE > 0) {
-            int num_blocks_adjusted = (num_blocks + 1) / 2; // Round up for odd numbers
+            int num_blocks_adjusted = (num_blocks + 1) / 2;
             kQuantizeBlockwise32<T, DATA_TYPE><<<num_blocks_adjusted, 32>>>(code, A, absmax, out, rand, rand_offset, n);
         }
-        // Note: 8-bit quantization with blocksize=32 not supported in this implementation
     }
 
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
