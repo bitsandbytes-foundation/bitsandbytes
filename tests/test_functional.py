@@ -1122,7 +1122,7 @@ class TestQuantize4BitFunctional:
         error_dict["fp4"] = dict()
         error_dict["nf4"] = dict()
         error_dict["fp4"]["err"] = {
-            32: 0.092737,
+            32: 0.088918,
             64: 0.096545,
             128: 0.102947,
             256: 0.108685,
@@ -1132,7 +1132,7 @@ class TestQuantize4BitFunctional:
             4096: 0.129573,
         }
         error_dict["fp4"]["rel_err"] = {
-            32: 0.251279,
+            32: 0.242380,
             64: 0.260130,
             128: 0.275734,
             256: 0.289842,
@@ -1143,7 +1143,7 @@ class TestQuantize4BitFunctional:
         }
 
         error_dict["nf4"]["err"] = {
-            32: 0.070270,
+            32: 0.067745,
             64: 0.072792,
             128: 0.076835,
             256: 0.080326,
@@ -1153,7 +1153,7 @@ class TestQuantize4BitFunctional:
             4096: 0.092537,
         }
         error_dict["nf4"]["rel_err"] = {
-            32: 0.196508,
+            32: 0.189700,
             64: 0.203299,
             128: 0.215252,
             256: 0.226044,
