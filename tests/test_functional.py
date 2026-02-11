@@ -1098,7 +1098,7 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize(
         "blocksize",
-        [64, 128, 256, 512, 1024, 2048, 4096] if not ROCM_WARP_SIZE_64 else [128, 256, 512, 1024, 2048, 4096],
+        [64, 128, 256, 512, 1024, 2048, 4096] if not ROCM_WARP_SIZE_64 else [64, 128, 256, 512, 1024, 2048, 4096],
     )
     def test_4bit_quant(self, device, dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
@@ -1168,7 +1168,9 @@ class TestQuantize4BitFunctional:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128], ids=id_formatter("blocksize"))
+    @pytest.mark.parametrize(
+        "blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [64, 128], ids=id_formatter("blocksize")
+    )
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=describe_dtype)
     def test_4bit_compressed_stats(self, device, quant_type, blocksize, dtype):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
@@ -1205,7 +1207,9 @@ class TestQuantize4BitFunctional:
     @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128], ids=id_formatter("blocksize"))
+    @pytest.mark.parametrize(
+        "blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [64, 128], ids=id_formatter("blocksize")
+    )
     def test_4bit_quant_large(self, device, dtype, quant_type, blocksize):
         """
         Test that we can successfully quantize a large tensor. Note that the following limitations apply:

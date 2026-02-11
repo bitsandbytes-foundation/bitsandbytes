@@ -212,7 +212,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     torch._check_is_size(blocksize)
 
     if ROCM_WARP_SIZE_64:
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
 
@@ -270,7 +270,7 @@ def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
     if ROCM_WARP_SIZE_64:
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
 
@@ -304,7 +304,7 @@ def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if ROCM_WARP_SIZE_64:
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
 
@@ -386,7 +386,7 @@ def _dequantize_4bit_impl(
     out: torch.Tensor,
 ) -> None:
     if ROCM_WARP_SIZE_64:
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
 

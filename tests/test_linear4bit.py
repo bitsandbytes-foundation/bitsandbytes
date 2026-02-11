@@ -193,7 +193,7 @@ def test_linear_serialization(
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
     if device == "hpu" and not is_supported_on_hpu(quant_type):
@@ -250,7 +250,7 @@ def test_params4bit_torch_chunk_split(device, quant_type):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
     if device == "hpu" and not is_supported_on_hpu(quant_type):
@@ -279,7 +279,7 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128])
+@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
     if device == "hpu" and not is_supported_on_hpu(quant_type):
