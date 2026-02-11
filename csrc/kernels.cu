@@ -431,62 +431,60 @@ __global__ void kQuantizeBlockwise32(
     float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
     const int rand_offset, const int n
 ) {
-    // Fixed parameters for blocksize=32 with 4-bit
     constexpr int BLOCK_SIZE = 32;        // Size of each quantization block
     constexpr int NUM_PER_TH = 2;         // Values per thread (for 4-bit packing)
     constexpr int THREADS = 32;           // Total threads (full warp)
     constexpr int THREADS_PER_BLOCK = 16; // Threads handling each quantization block
 
-    // Each CUDA thread block processes 2 quantization blocks of 32 values each
     const int base_idx = blockIdx.x * BLOCK_SIZE * 2; // 2 blocks per CUDA block
 
     T vals[NUM_PER_TH];
     unsigned char qvals[NUM_PER_TH / 2]; // For 4-bit: 2 values per byte
     float local_abs_max = 0.0f;
 
-    // Determine which quantization block this thread belongs to (0 or 1)
     const int block_id = threadIdx.x / THREADS_PER_BLOCK;        // 0 for threads 0-15, 1 for threads 16-31
     const int local_thread_id = threadIdx.x % THREADS_PER_BLOCK; // Thread ID within the block (0-15)
 
     typedef cub::BlockLoad<T, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
     typedef cub::BlockStore<unsigned char, THREADS, NUM_PER_TH / 2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-    typedef cub::WarpReduce<float> WarpReduce;
+    typedef cub::WarpReduce<float, 16>
+        WarpReduce; // Logical warp size of 16: threads 0-15 and 16-31 reduce independently
 
     __shared__ typename LoadT::TempStorage loadt;
     __shared__ typename StoreChar::TempStorage storec;
-    __shared__ typename WarpReduce::TempStorage warp_reduce[2]; // One for each warp half
-    __shared__ float smem_absmax_value[2];                      // Store 2 absmax values
+    __shared__ typename WarpReduce::TempStorage warp_reduce[2]; // One per logical warp
+    __shared__ float smem_absmax_value[2];
 
     const int i = base_idx + block_id * BLOCK_SIZE;
+    // Use a flag instead of early return: BlockLoad/BlockStore/__syncthreads are cooperative
+    // operations that require ALL 32 threads to participate
+    const bool block_valid = (i < n);
 
-    // Early exit if this quantization block is out of bounds
-    if (i >= n)
-        return;
-
-    // Load 64 values total (32 threads × 2 values each)
+    // All 32 threads participate in the load (out-of-bounds threads get 0.0f)
     __syncthreads();
     LoadT(loadt).Load(&(A[base_idx]), vals, min(BLOCK_SIZE * 2, n - base_idx), (T)0.0f);
 
-    // Each thread computes max of its NUM_PER_TH values
+    // Each thread computes max of its values
     local_abs_max = -FLT_MAX;
 #pragma unroll NUM_PER_TH
     for (int j = 0; j < NUM_PER_TH; j++)
         local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
 
-    // Warp-level reduction within each half (threads 0-15 and 16-31 separately)
+    // Reduce within each logical warp of 16 threads independently
     local_abs_max = WarpReduce(warp_reduce[block_id]).Reduce(local_abs_max, CUB_REDUCTIONOP_MAX);
 
-    // First thread of each warp half stores the absmax
     if (local_thread_id == 0) {
-        smem_absmax_value[block_id] = 1.0f / local_abs_max;
-        absmax[blockIdx.x * 2 + block_id] = local_abs_max;
+        if (block_valid) {
+            smem_absmax_value[block_id] = 1.0f / local_abs_max;
+            absmax[blockIdx.x * 2 + block_id] = local_abs_max;
+        } else {
+            smem_absmax_value[block_id] = 0.0f;
+        }
     }
     __syncthreads();
 
-    // Broadcast absmax to all threads in each half
     local_abs_max = smem_absmax_value[block_id];
 
-    // Quantize values based on data type
     switch (DATA_TYPE) {
     case FP4:
 #pragma unroll NUM_PER_TH
@@ -504,7 +502,7 @@ __global__ void kQuantizeBlockwise32(
         break;
     }
 
-    // Store quantized values (all 32 threads write their outputs)
+    // All 32 threads participate in the store (valid_items limits the actual writes)
     __syncthreads();
     StoreChar(storec).Store(&(out[base_idx / 2]), qvals, min((BLOCK_SIZE * 2 + 1) / 2, (n - base_idx + 1) / 2));
 }
