@@ -17,6 +17,11 @@ __global__ void kQuantizeBlockwise(
     float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
     const int rand_offset, const int n
 );
+template <typename T, int DATA_TYPE>
+__global__ void kQuantizeBlockwise32(
+    float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
+    const int rand_offset, const int n
+);
 template <typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
 __global__ void
     kDequantizeBlockwise(float* code, unsigned char* A, float* absmax, T* out, const int blocksize, const int n);
