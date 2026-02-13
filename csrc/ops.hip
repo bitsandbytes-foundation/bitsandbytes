@@ -56,9 +56,14 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
    hipLaunchKernelGGL(( kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(128), 0, 0, code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 128)
    hipLaunchKernelGGL(( kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(64), 0, 0, code, A, absmax, out, rand, rand_offset, n);
-  else if(blocksize == 64 && BNB_WARP_SIZE == 32)
-   hipLaunchKernelGGL(( kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(32), 0, 0, code, A, absmax, out, rand, rand_offset, n);
-
+  else if(blocksize == 64) {
+    // For 4-bit (FP4/NF4): use specialized kernel that processes 2 blocks of 64 per thread block
+    // Works on all warp sizes (32 and 64) by using logical warps of 32
+    if constexpr(DATA_TYPE > 0)
+      hipLaunchKernelGGL(( kQuantizeBlockwise64<T, DATA_TYPE>), dim3((num_blocks + 1) / 2), dim3(64), 0, 0, code, A, absmax, out, rand, rand_offset, n);
+    else
+      hipLaunchKernelGGL(( kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(32), 0, 0, code, A, absmax, out, rand, rand_offset, n);
+  }
 
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }

@@ -443,6 +443,94 @@ __global__ void kQuantizeBlockwise(float * code, T * __restrict__ const A, float
   }
 }
 
+// Specialized kernel for blocksize=64 with 4-bit quantization
+// Works on both warp32 and warp64 hardware
+// Processes 2 blocks of 64 values per thread block using 64 threads
+// Uses logical warps of 32: threads 0-31 handle block 0, threads 32-63 handle block 1
+//   - warp32: 2 hardware warps, each reduces naturally
+//   - warp64: 1 hardware warp split into 2 logical warps of 32
+template <typename T, int DATA_TYPE>
+__global__ void kQuantizeBlockwise64(
+    float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
+    const int rand_offset, const int n
+) {
+    constexpr int BLOCK_SIZE = 64;        // Size of each quantization block
+    constexpr int NUM_PER_TH = 2;         // Values per thread (for 4-bit packing)
+    constexpr int THREADS = 64;           // Total threads per HIP block
+    constexpr int THREADS_PER_BLOCK = 32; // Threads handling each quantization block
+
+    const int base_idx = blockIdx.x * BLOCK_SIZE * 2; // 2 quantization blocks per HIP block
+
+    T vals[NUM_PER_TH];
+    unsigned char qvals[NUM_PER_TH / 2]; // For 4-bit: 2 values per byte
+    float local_abs_max = 0.0f;
+
+    const int block_id = threadIdx.x / THREADS_PER_BLOCK;        // 0 for threads 0-31, 1 for threads 32-63
+    const int local_thread_id = threadIdx.x % THREADS_PER_BLOCK; // Thread ID within the quantization block (0-31)
+
+    typedef hipcub::BlockLoad<T, THREADS, NUM_PER_TH, hipcub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef hipcub::BlockStore<unsigned char, THREADS, NUM_PER_TH / 2, hipcub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+    // Logical warp size of 32: on warp32 this matches hardware warps,
+    // on warp64 this splits the single hardware warp into two independent reductions
+    typedef hipcub::WarpReduce<float, 32> WarpReduce;
+
+    __shared__ typename LoadT::TempStorage loadt;
+    __shared__ typename StoreChar::TempStorage storec;
+    __shared__ typename WarpReduce::TempStorage warp_reduce[2]; // One per logical warp
+    __shared__ float smem_absmax_value[2];
+
+    const int i = base_idx + block_id * BLOCK_SIZE;
+    // Use a flag instead of early return: BlockLoad/BlockStore/__syncthreads are cooperative
+    // operations that require ALL 64 threads to participate
+    const bool block_valid = (i < n);
+
+    // All 64 threads participate in the load (out-of-bounds threads get 0.0f)
+    __syncthreads();
+    LoadT(loadt).Load(&(A[base_idx]), vals, min(BLOCK_SIZE * 2, n - base_idx), (T)0.0f);
+
+    // Each thread computes max of its values
+    local_abs_max = -FLT_MAX;
+#pragma unroll NUM_PER_TH
+    for (int j = 0; j < NUM_PER_TH; j++)
+        local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
+
+    // Reduce within each logical warp of 32 threads independently
+    local_abs_max = WarpReduce(warp_reduce[block_id]).Reduce(local_abs_max, hipcub::Max());
+
+    if (local_thread_id == 0) {
+        if (block_valid) {
+            smem_absmax_value[block_id] = 1.0f / local_abs_max;
+            absmax[blockIdx.x * 2 + block_id] = local_abs_max;
+        } else {
+            smem_absmax_value[block_id] = 0.0f;
+        }
+    }
+    __syncthreads();
+
+    local_abs_max = smem_absmax_value[block_id];
+
+    switch (DATA_TYPE) {
+    case FP4:
+#pragma unroll NUM_PER_TH
+        for (int j = 0; j < NUM_PER_TH / 2; j++) {
+            qvals[j] = dQuantizeFP4(((float)vals[2 * j]) * local_abs_max) << 4;
+            qvals[j] |= dQuantizeFP4(((float)vals[2 * j + 1]) * local_abs_max);
+        }
+        break;
+    case NF4:
+#pragma unroll NUM_PER_TH
+        for (int j = 0; j < NUM_PER_TH / 2; j++) {
+            qvals[j] = dQuantizeNF4(((float)vals[2 * j]) * local_abs_max) << 4;
+            qvals[j] |= dQuantizeNF4(((float)vals[2 * j + 1]) * local_abs_max);
+        }
+        break;
+    }
+
+    // All 64 threads participate in the store (valid_items limits the actual writes)
+    __syncthreads();
+    StoreChar(storec).Store(&(out[base_idx / 2]), qvals, min((BLOCK_SIZE * 2 + 1) / 2, (n - base_idx + 1) / 2));
+}
+
 template<typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
 __global__ void kDequantizeBlockwise(float *code, unsigned char * A, float * absmax, T *out, const int blocksize, const int n)
 {
@@ -2565,6 +2653,20 @@ MAKE_kQuantizeBlockwise(hip_bfloat16,  128, 2, 0, NF4)
 #if BNB_WARP_SIZE == 32
   MAKE_kQuantizeBlockwise(hip_bfloat16,   64, 2, 0, NF4)
 #endif
+
+// Specialized blocksize=64 4-bit quantization kernel instantiations for ROCm
+#define MAKE_kQuantizeBlockwise64(dtype, data_type_name) \
+template __global__ void kQuantizeBlockwise64<dtype, data_type_name>(float * code, dtype * __restrict__ const A, float *absmax, unsigned char *out, float * __restrict__ const rand, const int rand_offset, const int n);
+
+// FP4 instantiations
+MAKE_kQuantizeBlockwise64(half, FP4)
+MAKE_kQuantizeBlockwise64(float, FP4)
+MAKE_kQuantizeBlockwise64(hip_bfloat16, FP4)
+
+// NF4 instantiations
+MAKE_kQuantizeBlockwise64(half, NF4)
+MAKE_kQuantizeBlockwise64(float, NF4)
+MAKE_kQuantizeBlockwise64(hip_bfloat16, NF4)
 
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, General8bit>(float *code, unsigned char * A, float * absmax, half *out, const int blocksize, const int n);
