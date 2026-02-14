@@ -573,3 +573,29 @@ def _(
     torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
     M = A.shape[0]
     return torch.empty(M, N, device=A.device, dtype=A.dtype)
+
+
+# K-bit fused dequant + GEMM (production, Stage 6: fp16 + bf16)
+
+torch.library.define(
+    "bitsandbytes::kbit_gemm_prod",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int k, int k_chunks) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::kbit_gemm_prod")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    k_chunks: int,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    M = A.shape[0]
+    return torch.empty(M, N, device=A.device, dtype=A.dtype)

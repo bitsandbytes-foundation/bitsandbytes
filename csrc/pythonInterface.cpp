@@ -473,6 +473,7 @@ MAKE_KBIT_REPACK(5)
 template <int K> void kbitGemmMinimal(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int);
 template <int K> void kbitGemmPipelined(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int);
 template <int K> void kbitGemmSplitK(const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int);
+template <int K, typename scalar_t> void kbitGemmProd(const scalar_t*, const unsigned int*, const unsigned char*, const float*, scalar_t*, float*, int*, int, int, int, int);
 
 // Unmangled GEMM wrappers (Stage 3: minimal, Stage 4: pipelined)
 #define MAKE_KBIT_GEMM(K)                                                                                              \
@@ -499,6 +500,28 @@ MAKE_KBIT_GEMM(2)
 MAKE_KBIT_GEMM(3)
 MAKE_KBIT_GEMM(4)
 MAKE_KBIT_GEMM(5)
+
+// Production GEMM wrappers (fp16 and bf16)
+#define MAKE_KBIT_GEMM_PROD(K)                                                                                         \
+    void kbit_gemm_prod_fp16_k##K(                                                                                     \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+    ) {                                                                                                                \
+        kbitGemmProd<K, half>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks); \
+    }                                                                                                                  \
+    void kbit_gemm_prod_bf16_k##K(                                                                                     \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax,                           \
+        const float* codebook, __nv_bfloat16* C,                                                                       \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+    ) {                                                                                                                \
+        kbitGemmProd<K, __nv_bfloat16>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters,                 \
+                                       M, K_dim, N, k_chunks);                                                        \
+    }
+
+MAKE_KBIT_GEMM_PROD(2)
+MAKE_KBIT_GEMM_PROD(3)
+MAKE_KBIT_GEMM_PROD(4)
+MAKE_KBIT_GEMM_PROD(5)
 
 // Debug MMA test
 void testMMA(const half*, const half*, float*);
@@ -1113,6 +1136,29 @@ MAKE_CKBIT_GEMM(2)
 MAKE_CKBIT_GEMM(3)
 MAKE_CKBIT_GEMM(4)
 MAKE_CKBIT_GEMM(5)
+
+// Production GEMM extern C wrappers (fp16 and bf16)
+#define MAKE_CKBIT_GEMM_PROD(K)                                                                                        \
+    void ckbit_gemm_prod_fp16_k##K(                                                                                    \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+    ) {                                                                                                                \
+        kbit_gemm_prod_fp16_k##K(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N,         \
+                                 k_chunks);                                                                            \
+    }                                                                                                                  \
+    void ckbit_gemm_prod_bf16_k##K(                                                                                    \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax,                           \
+        const float* codebook, __nv_bfloat16* C,                                                                       \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+    ) {                                                                                                                \
+        kbit_gemm_prod_bf16_k##K(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N,         \
+                                 k_chunks);                                                                            \
+    }
+
+MAKE_CKBIT_GEMM_PROD(2)
+MAKE_CKBIT_GEMM_PROD(3)
+MAKE_CKBIT_GEMM_PROD(4)
+MAKE_CKBIT_GEMM_PROD(5)
 
 void ctest_mma(const half* A, const half* B, float* C) { testMMA(A, B, C); }
 

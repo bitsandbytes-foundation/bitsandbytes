@@ -1063,3 +1063,136 @@ class TestGemmSplitKCUDA:
         sqnr = 10 * torch.log10(signal_power / noise_power).item()
 
         assert sqnr > 10, f"K=4 split-K SQNR too low: {sqnr:.1f} dB (expected > 10 dB)"
+
+
+def _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=torch.float16):
+    """Quantize W, repack, and run production GEMM. Returns CUDA tensor in requested dtype."""
+    indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
+    packed_flat = pack_kbit_ref(indices, k)
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
+        packed_flat.cuda(), absmax.cuda(), K_dim, N, k
+    )
+    A_gpu = A.to(dtype).cuda()
+    return torch.ops.bitsandbytes.kbit_gemm_prod(
+        A_gpu, packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k, k_chunks
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+class TestGemmProdCUDA:
+    """Test production (Stage 6) GEMM kernel with fp16 and bf16."""
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_prod_fp16_matches_splitk(self, k):
+        """Production fp16 (k_chunks=1) must match split-K fp16 bit-for-bit."""
+        M, K_dim, N = 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=1)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=torch.float16)
+
+        assert torch.equal(C_splitk, C_prod), \
+            f"K={k}: prod fp16 does not match split-K fp16 bit-for-bit.\n" \
+            f"Max diff: {(C_splitk.float() - C_prod.float()).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_prod_bf16_matches_reference(self, k):
+        """Production bf16 matches Python reference within tolerance."""
+        M, K_dim, N = 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=torch.bfloat16)
+        C_prod_cpu = C_prod.float().cpu()
+
+        atol = 0.15 * C_direct.abs().mean().item()
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
+            f"K={k}: prod bf16 does not match reference.\n" \
+            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("k", [4])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("M", [1, 4, 8, 16])
+    def test_prod_various_M(self, k, dtype, M):
+        """Production GEMM works for various batch sizes and dtypes."""
+        K_dim, N = 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=dtype)
+        C_prod_cpu = C_prod.float().cpu()
+
+        atol = 0.15 * C_direct.abs().mean().item()
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
+            f"M={M} {dtype}: prod does not match reference.\n" \
+            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("k", [4])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("k_chunks", [1, 2])
+    def test_prod_splitk(self, k, dtype, k_chunks):
+        """Production GEMM with split-K for both dtypes."""
+        M, K_dim, N = 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=k_chunks, dtype=dtype)
+        C_prod_cpu = C_prod.float().cpu()
+
+        atol = 0.15 * C_direct.abs().mean().item()
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
+            f"{dtype} k_chunks={k_chunks}: prod does not match reference.\n" \
+            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("M,K_dim,N", [
+        (4, 128, 128), (4, 128, 256), (4, 256, 128), (4, 256, 256),
+    ])
+    def test_prod_various_sizes(self, dtype, M, K_dim, N):
+        """Production GEMM works for various matrix sizes."""
+        k = 4
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=dtype)
+        C_prod_cpu = C_prod.float().cpu()
+
+        atol = 0.15 * C_direct.abs().mean().item()
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
+            f"({M},{K_dim},{N}) {dtype}: prod does not match reference.\n" \
+            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+
+    def test_prod_output_dtype(self):
+        """Production GEMM output dtype matches input dtype."""
+        k, M, K_dim, N = 4, 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_fp16 = _gemm_prod_helper(A, W, codebook, k, K_dim, N, dtype=torch.float16)
+        C_bf16 = _gemm_prod_helper(A, W, codebook, k, K_dim, N, dtype=torch.bfloat16)
+
+        assert C_fp16.dtype == torch.float16, f"Expected fp16 output, got {C_fp16.dtype}"
+        assert C_bf16.dtype == torch.bfloat16, f"Expected bf16 output, got {C_bf16.dtype}"
