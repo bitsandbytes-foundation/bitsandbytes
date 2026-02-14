@@ -20,6 +20,17 @@ gh pr list --search "issue-number OR keyword" --state open
 
 If a PR exists, review and build on it instead of starting from scratch. Do not create duplicate work.
 
+# MANDATORY: Run linting before every pull request
+
+Before pushing a PR branch, you MUST run linting and formatting checks. CI will reject PRs that fail these checks:
+
+```bash
+ruff check --fix .
+ruff format .
+```
+
+Review and commit any changes these tools make. Full details on all CI lint checks (ruff, typos, clang-format, trailing whitespace, etc.): `agents/linting_guide.md`
+
 # Testing: only run relevant tests
 
 Do NOT run the full test suite — it takes 10+ minutes. Instead, run only the tests that cover the code you changed:
