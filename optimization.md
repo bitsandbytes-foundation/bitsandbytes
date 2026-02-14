@@ -90,17 +90,62 @@ With k_splits=2 and 16 k_tiles per split, the pipeline is even shorter.
 A 3-stage pipeline (instead of 2) provides 2x more latency slack at
 the cost of 1 more prefill iteration.
 
-### 3.3 Dequant compute cost
+### 3.3 Dequant compute cost (SASS analysis, K=4 M_BLOCKS=2 fp16)
 
-Per weight element: ~13 ALU ops (bit extract + shuffle codebook + scale).
-cuBLAS does 0 ops per weight element (just feeds fp16 to MMA). This is
-inherent and cannot be eliminated — it is the price of compression.
+The compiled kernel has **1264 SASS instructions**. The instruction mix:
 
-But the dequant runs on INT32/FP16 ALU while MMA runs on tensor cores.
-They are different functional units. With proper scheduling (B fragment
-double-buffering, deeper pipeline), the dequant can overlap with MMA
-and memory loads. Currently the dequant is on the critical path because
-the inner loop is sequential: load B → dequant → MMA → next N-block.
+| Category | Count | % | What |
+|----------|------:|---:|------|
+| Bit manipulation (SHF+LOP3+IMAD) | 628 | 57% | Dequant + address math |
+| Tensor core (HMMA) | 16 | 1.5% | The actual matmul |
+| Codebook + scale (SHFL+HMUL2) | 64 | 5.8% | Shuffle lookup + absmax multiply |
+| Type conversion (F2FP+F2I+I2F) | 40 | 3.6% | Absmax decode, half↔float |
+| Control flow (BRA+BSSY+BSYNC+ISETP) | 187 | 17% | Branches, divergence, compares |
+| Memory (LDS+LDSM+LDGSTS+PRMT) | 147 | 13% | Shmem, cp.async, permutes |
+
+**The kernel is 39:1 ALU:tensor-core.** The tensor cores are idle 98.5%
+of the time. Three specific problems:
+
+**Problem 1: Bit extraction dependency chain.** The inner loop:
+```cpp
+for (int b = 0; b < K_BITS; b++)
+    idx |= ((planes[b] >> bit_pos) & 1) << b;
+```
+Each `idx |=` depends on the previous value of `idx`, creating a serial
+chain of ~12 dependent operations for K=4. With only 2 warps per
+scheduler (occupancy = 12.5%), pipeline stalls of 2 cycles per
+dependent pair cannot be hidden. For 32 elements per TILE_K × 32
+k_tiles: estimated **~10us of dependency stalls**.
+
+Fix: restructure to a tree reduction with independent extractions:
+```cpp
+int b0 = (planes[0] >> bit_pos) & 1;  // 4 independent extractions
+int b1 = (planes[1] >> bit_pos) & 1;
+int b2 = (planes[2] >> bit_pos) & 1;
+int b3 = (planes[3] >> bit_pos) & 1;
+int idx = b0 | (b1 << 1) | (b2 << 2) | (b3 << 3);  // tree combine
+```
+This reduces the dependency chain from depth 12 to depth 4. With LOP3
+(3-input boolean), the combine is 2 instructions.
+
+**Problem 2: Branchy absmax decode.** `decode_e4m4_absmax` has two
+conditional branches (`if raw == 0`, `if e == 0`) that generate 16
+BSSY/BSYNC divergence-handling pairs per TILE_K iteration. These
+execute 512 times per block (16 × 32 k_tiles). Even when never taken,
+each pair costs ~4-6 cycles of convergence overhead = **~2-3us total**.
+
+Fix: make it branchless — compute the normal-path result unconditionally,
+then use predicated select for the edge cases (or just accept that
+raw=0 and subnormal absmax are negligibly rare and let the normal
+formula handle them, producing a harmless wrong value for impossible
+inputs).
+
+**Problem 3: Low occupancy.** 72 registers per thread × 256 threads =
+18,432 registers per block. The SM has 65,536 registers, so only 3
+blocks fit... but shared memory limits it to 1 block (8 warps). With
+4 warp schedulers, each has only 2 warps to choose from. Every memory
+or ALU latency that both warps hit simultaneously leaves the scheduler
+idle. cuBLAS typically runs at 25-50% occupancy for comparable shapes.
 
 ---
 
@@ -230,29 +275,79 @@ compute stalls, barrier stalls, or something else entirely.
 This informs whether further optimization should focus on memory access
 patterns, compute scheduling, or pipeline structure.
 
-### Step 4: B fragment register double-buffering (HIGH)
+### Step 4: Fix bit extraction dependency chain (HIGH)
 
-**What:** Overlap shmem B loads with MMA execution in the inner loop.
+**What:** Restructure the inner loop bit extraction to eliminate the
+serial `idx |=` dependency chain.
 
-Current inner loop (per k_sub_tile, per N_block):
-```
-load B planes from shmem  →  dequant  →  MMA  →  next N_block
-     [stall]                  [ALU]      [TC]
-```
-
-With double-buffering:
-```
-preload B[nb+1] from shmem  →  dequant B[nb]  →  MMA  →  next
-     [shmem load]                [ALU, overlap]    [TC]
+**Current code** (12-deep dependency chain for K=4):
+```cpp
+int idx = 0;
+for (int b = 0; b < K_BITS; b++)
+    idx |= ((planes[b] >> bit_pos) & 1) << b;
 ```
 
-The shmem loads for the next N_block's B planes (4 uint32 reads,
-~20-30 cycle latency each) overlap with the current N_block's dequant
-ALU work. This removes the shmem load stall from the critical path.
+**Fixed code** (4-deep, independent extractions + tree combine):
+```cpp
+int b0 = (planes[0] >> bit_pos) & 1;
+int b1 = (planes[1] >> bit_pos) & 1;
+int b2 = (planes[2] >> bit_pos) & 1;
+int b3 = (planes[3] >> bit_pos) & 1;
+int idx = b0 | (b1 << 1) | (b2 << 2) | (b3 << 3);
+```
 
-**Expected impact:** 10-20% improvement on all shapes. The dequant ALU
-work (~50 cycles per N_block iteration) provides enough instructions to
-hide the shmem load latency.
+The 4 extractions are independent (no data dependency). The compiler
+can schedule them across pipeline stages. The combine uses LOP3 (2
+instructions for 4-input OR with shifts). Dependency depth: 4 vs 12.
+
+For K=2,3,5: same pattern with 2,3,5 independent extractions.
+
+**Also fix: process 4 elements with interleaved extractions.** Currently
+the inner loop processes elements r=0..3 sequentially. Interleaving
+the bit extraction across elements increases ILP further — while
+element 0's extraction stalls on ALU latency, element 1's extraction
+can issue.
+
+**Expected impact:** 15-25% improvement on all shapes by reducing
+dependency stalls from ~10us to ~3-4us per 32 k_tiles.
+
+### Step 4b: Branchless absmax decode (HIGH)
+
+**What:** Remove the two conditional branches in `decode_e4m4_absmax`.
+
+**Current code** (generates 16 BSSY/BSYNC pairs per TILE_K):
+```cpp
+if (raw == 0) return 0.0f;        // branch + convergence
+int e = raw >> 4;
+int m = raw & 0xF;
+if (e == 0) return ldexpf(...);   // branch + convergence
+```
+
+**Fixed code** (branchless, uses bit manipulation):
+```cpp
+int e = raw >> 4;
+int m = raw & 0xF;
+// Normal path: construct IEEE 754 directly
+unsigned int ieee = (unsigned int)(e - E4M4_BIAS + 127) << 23
+                  | (unsigned int)m << 19;
+float result = __uint_as_float(ieee);
+// Predicated zero-out for raw == 0 (no branch)
+result = (raw == 0) ? 0.0f : result;
+```
+
+Drop subnormal handling entirely (e==0 produces absmax < 2^-10 which
+is effectively zero for quantized weights — no real weight block has
+absmax this small).
+
+**Expected impact:** 5-10% improvement from eliminating 512 BSSY/BSYNC
+convergence points per block.
+
+### Step 4c: B fragment register double-buffering (HIGH)
+
+**What:** Preload next N_block's B planes from shmem while current
+dequant ALU runs. Hides 20-30 cycle shmem load latency.
+
+**Expected impact:** 10-15% improvement on all shapes.
 
 ### Step 5: TILE_N=256 + TILE_K=128 for large shapes (HIGH)
 
