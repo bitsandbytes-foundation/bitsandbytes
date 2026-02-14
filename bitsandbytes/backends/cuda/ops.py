@@ -764,3 +764,75 @@ def _optimizer_update_8bit_blockwise_impl(
 
 register_kernel("bitsandbytes::optimizer_update_8bit_blockwise", "cuda")(_optimizer_update_8bit_blockwise_impl)
 register_kernel("bitsandbytes::optimizer_update_32bit", "cuda")(_optimizer_update_32bit_impl)
+
+
+# K-bit blockwise quantization (K=2..5, blocksize=32)
+
+_KBIT_DTYPE_SUFFIX = {
+    torch.float16: "fp16",
+    torch.bfloat16: "bf16",
+    torch.float32: "fp32",
+}
+
+
+@register_kernel("bitsandbytes::quantize_kbit", "cuda")
+def _(A: torch.Tensor, codebook: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        A.dtype in _KBIT_DTYPE_SUFFIX,
+        lambda: f"quantize_kbit only supports float16/bfloat16/float32, got {A.dtype}",
+    )
+    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
+    torch._check(codebook.numel() == (1 << k), lambda: f"codebook must have {1 << k} entries for k={k}")
+
+    n = A.numel()
+    num_blocks = -(n // -32)
+    packed = torch.zeros(num_blocks * k + k, device=A.device, dtype=torch.int32)
+    absmax = torch.zeros(num_blocks + 1, device=A.device, dtype=torch.float32)
+
+    with _cuda_device_of(A):
+        tname = _KBIT_DTYPE_SUFFIX[A.dtype]
+        fn = getattr(lib, f"cquantize_kbit_{tname}_k{k}")
+        fn(
+            get_ptr(codebook),
+            get_ptr(A),
+            get_ptr(absmax),
+            get_ptr(packed),
+            ct.c_int(n),
+        )
+
+    return packed, absmax
+
+
+@register_kernel("bitsandbytes::dequantize_kbit", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        dtype in _KBIT_DTYPE_SUFFIX,
+        lambda: f"dequantize_kbit only supports float16/bfloat16/float32, got {dtype}",
+    )
+    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
+
+    num_blocks = -(n // -32)
+    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+
+    with _cuda_device_of(packed):
+        tname = _KBIT_DTYPE_SUFFIX[dtype]
+        fn = getattr(lib, f"cdequantize_kbit_{tname}_k{k}")
+        fn(
+            get_ptr(packed),
+            get_ptr(codebook),
+            get_ptr(absmax),
+            get_ptr(out),
+            ct.c_int(n),
+            _get_tensor_stream(packed),
+        )
+
+    return out

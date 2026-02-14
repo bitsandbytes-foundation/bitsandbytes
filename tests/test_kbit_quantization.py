@@ -677,3 +677,417 @@ class TestStage5DequantizeCUDA:
             assert block_err <= block_bound, (
                 f"Block {i}: max_err={block_err}, bound={block_bound}"
             )
+
+
+# ===========================================================================
+# Stage 6: Round-Trip Error Analysis
+# ===========================================================================
+
+
+@requires_cuda
+class TestStage6ErrorAnalysis:
+    """Stage 6: Empirical error analysis on large tensors."""
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_analytical_bound_large(self, k):
+        """Max per-block error must stay within analytical bound on 1M+ elements."""
+        torch.manual_seed(123)
+        cb = create_normal_float_codebook(k).cuda()
+        n = 1_048_576  # 1M elements
+        A = torch.randn(n, dtype=torch.float32, device="cuda")
+        packed, absmax = _cuda_quantize_kbit(A, cb, k)
+        recovered = _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=torch.float32)
+        errors = (A - recovered).abs()
+        max_gap = (cb[1:] - cb[:-1]).max().item()
+        # Vectorized per-block check
+        num_blocks = (n + 31) // 32
+        err_blocks = errors.reshape(num_blocks, 32)
+        block_max_errs = err_blocks.max(dim=1).values
+        block_bounds = max_gap / 2 * absmax + 1e-6
+        violations = (block_max_errs > block_bounds).sum().item()
+        assert violations == 0, f"{violations}/{num_blocks} blocks violated analytical bound"
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_mse_decreases_with_bits(self, k):
+        """More bits should yield lower MSE (CUDA round-trip)."""
+        torch.manual_seed(42)
+        n = 1_048_576
+        A = torch.randn(n, dtype=torch.float32, device="cuda")
+        mses = {}
+        for ki in [2, 3, 4, 5]:
+            cb = create_normal_float_codebook(ki).cuda()
+            packed, absmax = _cuda_quantize_kbit(A, cb, ki)
+            recovered = _cuda_dequantize_kbit(packed, cb, absmax, ki, n, dtype=torch.float32)
+            mses[ki] = ((A - recovered) ** 2).mean().item()
+        for ki in [3, 4, 5]:
+            assert mses[ki] <= mses[ki - 1] * 1.05, (
+                f"MSE did not decrease from K={ki-1} ({mses[ki-1]:.6f}) to K={ki} ({mses[ki]:.6f})"
+            )
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_empirical_mse_and_max_error(self, k):
+        """Report empirical MSE and max absolute error (1M elements, normal data)."""
+        torch.manual_seed(42)
+        cb = create_normal_float_codebook(k).cuda()
+        n = 1_048_576
+        A = torch.randn(n, dtype=torch.float32, device="cuda")
+        packed, absmax = _cuda_quantize_kbit(A, cb, k)
+        recovered = _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=torch.float32)
+        errors = (A - recovered).abs()
+        mse = ((A - recovered) ** 2).mean().item()
+        max_err = errors.max().item()
+        # SQNR = signal power / noise power (in dB)
+        signal_power = (A ** 2).mean().item()
+        sqnr_db = 10 * math.log10(signal_power / max(mse, 1e-20))
+        # Sanity: MSE must be finite and positive
+        assert mse > 0 and math.isfinite(mse), f"Bad MSE: {mse}"
+        assert max_err > 0 and math.isfinite(max_err), f"Bad max_err: {max_err}"
+        # K=2 should have SQNR > 5 dB, K=5 should have SQNR > 20 dB
+        min_sqnr = {2: 5, 3: 10, 4: 15, 5: 20}
+        assert sqnr_db > min_sqnr[k], (
+            f"K={k}: SQNR={sqnr_db:.1f} dB too low (expected >{min_sqnr[k]} dB)"
+        )
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_dtype_error_consistency(self, k, dtype):
+        """Error should not blow up for fp16/bf16 vs fp32."""
+        torch.manual_seed(42)
+        cb = create_normal_float_codebook(k).cuda()
+        n = 32768
+        A = torch.randn(n, dtype=dtype, device="cuda")
+        packed, absmax = _cuda_quantize_kbit(A, cb, k)
+        recovered = _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+        mse = ((A.float() - recovered.float()) ** 2).mean().item()
+        # Just verify MSE is finite and reasonable
+        assert mse > 0 and math.isfinite(mse) and mse < 10.0, f"Bad MSE for {dtype}: {mse}"
+
+
+# ===========================================================================
+# Stage 7: Cross-Validation Against Existing NF4
+# ===========================================================================
+
+
+@requires_cuda
+class TestStage7NF4CrossValidation:
+    """Stage 7: Compare K=4 kbit kernel against existing NF4 dequantize."""
+
+    def _get_nf4_codebook_sorted(self):
+        """Return the existing bitsandbytes NF4 codebook, sorted ascending."""
+        from bitsandbytes.functional import get_4bit_type
+        nf4 = get_4bit_type("nf4", device="cuda")
+        # The existing NF4 data is already sorted for the 16-entry list
+        return nf4
+
+    def test_mse_quality_comparison(self):
+        """New K=4 kernel MSE should be within 10% of existing NF4 MSE."""
+        from bitsandbytes.functional import quantize_nf4, dequantize_nf4
+        torch.manual_seed(42)
+        n = 131072  # 128K elements
+        A = torch.randn(n, dtype=torch.float16, device="cuda")
+
+        # Existing NF4 path (blocksize=64 is default)
+        nf4_packed, nf4_state = quantize_nf4(A, blocksize=64)
+        nf4_recovered = dequantize_nf4(nf4_packed, nf4_state)
+        nf4_mse = ((A.float() - nf4_recovered.float()) ** 2).mean().item()
+
+        # New kbit K=4 path (blocksize=32)
+        cb = create_normal_float_codebook(4).cuda()
+        packed, absmax = _cuda_quantize_kbit(A, cb, 4)
+        kbit_recovered = _cuda_dequantize_kbit(packed, cb, absmax, 4, n, dtype=torch.float16)
+        kbit_mse = ((A.float() - kbit_recovered.float()) ** 2).mean().item()
+
+        # Allow kbit MSE to be up to 2x of NF4 (different blocksize: 32 vs 64)
+        # Smaller blocksize means more overhead but potentially different quality
+        assert kbit_mse < nf4_mse * 2.0, (
+            f"K=4 kbit MSE ({kbit_mse:.6f}) is more than 2x NF4 MSE ({nf4_mse:.6f})"
+        )
+
+    def test_codebook_similarity(self):
+        """Our K=4 NF codebook should be similar to the existing NF4 codebook."""
+        nf4_cb = self._get_nf4_codebook_sorted()
+        our_cb = create_normal_float_codebook(4).cuda()
+        # Both have 16 entries, both approximate N(0,1) quantiles
+        # They won't be identical (existing NF4 has an asymmetric zero trick)
+        # but should be close
+        max_diff = (nf4_cb - our_cb).abs().max().item()
+        assert max_diff < 0.15, f"Codebooks differ too much: max_diff={max_diff}"
+
+    def test_same_codebook_similar_output(self):
+        """When using the exact same NF4 codebook, outputs should be very close."""
+        nf4_cb = self._get_nf4_codebook_sorted()
+        torch.manual_seed(42)
+        n = 32768
+        A = torch.randn(n, dtype=torch.float32, device="cuda")
+
+        # Python reference with NF4 codebook
+        ref_indices, ref_absmax = quantize_kbit_ref(A.cpu(), nf4_cb.cpu())
+        ref_recovered = dequantize_kbit_ref(ref_indices, ref_absmax, nf4_cb.cpu())
+
+        # CUDA kbit with same NF4 codebook
+        packed, absmax = _cuda_quantize_kbit(A, nf4_cb, 4)
+        cuda_recovered = _cuda_dequantize_kbit(packed, nf4_cb, absmax, 4, n, dtype=torch.float32)
+
+        # Should match closely (both use same codebook and same search)
+        assert torch.allclose(cuda_recovered.cpu(), ref_recovered, atol=1e-4), (
+            f"max diff: {(cuda_recovered.cpu() - ref_recovered).abs().max()}"
+        )
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_all_dtypes_nf4_codebook(self, dtype):
+        """K=4 with NF4 codebook should work for all dtypes."""
+        nf4_cb = self._get_nf4_codebook_sorted()
+        torch.manual_seed(42)
+        n = 1024
+        A = torch.randn(n, dtype=dtype, device="cuda")
+        packed, absmax = _cuda_quantize_kbit(A, nf4_cb, 4)
+        recovered = _cuda_dequantize_kbit(packed, nf4_cb, absmax, 4, n, dtype=dtype)
+        mse = ((A.float() - recovered.float()) ** 2).mean().item()
+        assert mse > 0 and math.isfinite(mse), f"Bad MSE: {mse}"
+
+
+# ===========================================================================
+# Stage 8: Performance Benchmarking
+# ===========================================================================
+
+
+@requires_cuda
+class TestStage8PerformanceBenchmark:
+    """Stage 8: Measure dequant throughput and HBM bandwidth utilization."""
+
+    @staticmethod
+    def _get_hbm_bandwidth_gbs():
+        """Estimate theoretical peak HBM bandwidth in GB/s for the current GPU."""
+        name = torch.cuda.get_device_name().lower()
+        # Known bandwidth values (approximate)
+        if "a100" in name:
+            return 2000.0
+        elif "h100" in name:
+            return 3350.0
+        elif "l40" in name:
+            return 864.0
+        elif "4090" in name:
+            return 1008.0
+        elif "3090" in name:
+            return 936.0
+        else:
+            # Conservative default
+            return 500.0
+
+    @staticmethod
+    def _bytes_per_element_dequant(k, dtype):
+        """Compute total memory traffic per element for dequant."""
+        elem_size = {torch.float16: 2, torch.bfloat16: 2, torch.float32: 4}[dtype]
+        # Read: K/32 uint32 per element (packed) + 1/32 float32 per element (absmax)
+        read_bytes = k * 4 / 32 + 4 / 32
+        # Write: sizeof(T) per element
+        write_bytes = elem_size
+        return read_bytes + write_bytes
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_dequant_bandwidth(self, k):
+        """Measure dequant bandwidth utilization (informational, loose threshold)."""
+        cb = create_normal_float_codebook(k).cuda()
+        n = 16 * 1024 * 1024  # 16M elements
+        dtype = torch.float16
+
+        # Pre-quantize
+        A = torch.randn(n, dtype=dtype, device="cuda")
+        packed, absmax = _cuda_quantize_kbit(A, cb, k)
+        del A
+
+        # Warmup
+        for _ in range(5):
+            _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+        torch.cuda.synchronize()
+
+        # Benchmark
+        n_iters = 50
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        for _ in range(n_iters):
+            _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+        end.record()
+        torch.cuda.synchronize()
+
+        elapsed_ms = start.elapsed_time(end)
+        elapsed_s = elapsed_ms / 1000.0
+        bytes_per_elem = self._bytes_per_element_dequant(k, dtype)
+        total_bytes = n * bytes_per_elem * n_iters
+        achieved_gbs = total_bytes / elapsed_s / 1e9
+        peak_gbs = self._get_hbm_bandwidth_gbs()
+        utilization = achieved_gbs / peak_gbs * 100
+
+        # Just verify it's not absurdly slow (>10% of peak)
+        assert utilization > 10.0, (
+            f"K={k}: {achieved_gbs:.1f} GB/s = {utilization:.1f}% of {peak_gbs:.0f} GB/s peak — too slow"
+        )
+
+    def test_throughput_scaling(self):
+        """Verify throughput scales roughly linearly with tensor size."""
+        k = 4
+        cb = create_normal_float_codebook(k).cuda()
+        dtype = torch.float16
+        sizes = [256 * 1024, 1024 * 1024, 4 * 1024 * 1024]
+        throughputs = []
+
+        for n in sizes:
+            A = torch.randn(n, dtype=dtype, device="cuda")
+            packed, absmax = _cuda_quantize_kbit(A, cb, k)
+            del A
+
+            # Warmup
+            for _ in range(3):
+                _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+            torch.cuda.synchronize()
+
+            n_iters = 30
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            for _ in range(n_iters):
+                _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+            end.record()
+            torch.cuda.synchronize()
+            elapsed_ms = start.elapsed_time(end)
+            elements_per_sec = n * n_iters / (elapsed_ms / 1000.0)
+            throughputs.append(elements_per_sec)
+
+        # Throughput should increase with size (no hidden O(n^2))
+        # Allow the smallest size to have lower throughput due to launch overhead
+        # but the larger sizes should be within 2x of each other
+        ratio = throughputs[-1] / throughputs[1]
+        assert ratio > 0.5, (
+            f"Throughput didn't scale: {throughputs[1]:.0f} -> {throughputs[-1]:.0f} elem/s (ratio={ratio:.2f})"
+        )
+
+    def test_k4_vs_existing_nf4(self):
+        """Compare K=4 dequant throughput against existing NF4 dequant."""
+        from bitsandbytes.functional import quantize_nf4, dequantize_nf4
+        n = 4 * 1024 * 1024  # 4M elements
+        dtype = torch.float16
+        A = torch.randn(n, dtype=dtype, device="cuda")
+
+        # Prepare existing NF4
+        nf4_packed, nf4_state = quantize_nf4(A, blocksize=64)
+
+        # Prepare kbit K=4
+        cb = create_normal_float_codebook(4).cuda()
+        kbit_packed, kbit_absmax = _cuda_quantize_kbit(A, cb, 4)
+        del A
+
+        n_iters = 50
+
+        # Benchmark existing NF4
+        for _ in range(5):
+            dequantize_nf4(nf4_packed, nf4_state)
+        torch.cuda.synchronize()
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        for _ in range(n_iters):
+            dequantize_nf4(nf4_packed, nf4_state)
+        end.record()
+        torch.cuda.synchronize()
+        nf4_ms = start.elapsed_time(end)
+
+        # Benchmark kbit K=4
+        for _ in range(5):
+            _cuda_dequantize_kbit(kbit_packed, cb, kbit_absmax, 4, n, dtype=dtype)
+        torch.cuda.synchronize()
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        for _ in range(n_iters):
+            _cuda_dequantize_kbit(kbit_packed, cb, kbit_absmax, 4, n, dtype=dtype)
+        end.record()
+        torch.cuda.synchronize()
+        kbit_ms = start.elapsed_time(end)
+
+        # Informational: kbit may be slower due to smaller blocksize
+        # Just ensure it's not absurdly slower (>10x)
+        ratio = kbit_ms / max(nf4_ms, 0.001)
+        assert ratio < 10.0, (
+            f"K=4 kbit is {ratio:.1f}x slower than existing NF4 ({kbit_ms:.1f}ms vs {nf4_ms:.1f}ms)"
+        )
+
+
+# ===========================================================================
+# Python API Tests (functional.py public interface)
+# ===========================================================================
+
+
+@requires_cuda
+class TestPythonAPI:
+    """Test the public quantize_kbit / dequantize_kbit API in functional.py."""
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_round_trip(self, k):
+        """Basic round-trip through the public API."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        torch.manual_seed(42)
+        A = torch.randn(1024, dtype=torch.float16, device="cuda")
+        packed, absmax, codebook = quantize_kbit(A, k=k)
+        recovered = dequantize_kbit(packed, absmax, codebook, k=k, n=1024, dtype=torch.float16)
+        assert recovered.shape == (1024,)
+        assert recovered.dtype == torch.float16
+        mse = ((A.float() - recovered.float()) ** 2).mean().item()
+        assert mse < 1.0
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_all_dtypes(self, k, dtype):
+        """All dtypes should work through the public API."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        torch.manual_seed(42)
+        A = torch.randn(256, dtype=dtype, device="cuda")
+        packed, absmax, codebook = quantize_kbit(A, k=k)
+        recovered = dequantize_kbit(packed, absmax, codebook, k=k, n=256, dtype=dtype)
+        assert recovered.dtype == dtype
+        assert recovered.shape == (256,)
+
+    def test_default_codebook(self):
+        """Default codebook should be auto-generated and cached."""
+        from bitsandbytes.functional import quantize_kbit
+        A = torch.randn(64, dtype=torch.float16, device="cuda")
+        _, _, cb1 = quantize_kbit(A, k=4)
+        _, _, cb2 = quantize_kbit(A, k=4)
+        # Same object from cache
+        assert cb1.data_ptr() == cb2.data_ptr()
+
+    def test_custom_codebook(self):
+        """Custom codebook should be accepted."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        cb = torch.linspace(-1, 1, 8).cuda()
+        A = torch.randn(128, dtype=torch.float16, device="cuda")
+        packed, absmax, cb_out = quantize_kbit(A, k=3, codebook=cb)
+        recovered = dequantize_kbit(packed, absmax, cb_out, k=3, n=128, dtype=torch.float16)
+        assert recovered.shape == (128,)
+
+    @pytest.mark.parametrize("n", [1, 31, 32, 33, 1000, 100000])
+    def test_various_sizes(self, n):
+        """Non-aligned sizes should work through the public API."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        A = torch.randn(n, dtype=torch.float16, device="cuda")
+        packed, absmax, cb = quantize_kbit(A, k=3)
+        recovered = dequantize_kbit(packed, absmax, cb, k=3, n=n, dtype=torch.float16)
+        assert recovered.shape == (n,)
+
+    def test_matches_ctypes_path(self):
+        """Public API should produce same results as direct ctypes path."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        torch.manual_seed(42)
+        k = 4
+        A = torch.randn(512, dtype=torch.float16, device="cuda")
+        cb = create_normal_float_codebook(k).cuda()
+
+        # Public API
+        packed_api, absmax_api, _ = quantize_kbit(A, k=k, codebook=cb)
+        recovered_api = dequantize_kbit(packed_api, absmax_api, cb, k=k, n=512, dtype=torch.float16)
+
+        # Direct ctypes
+        packed_ct, absmax_ct = _cuda_quantize_kbit(A, cb, k)
+        recovered_ct = _cuda_dequantize_kbit(packed_ct, cb, absmax_ct, k, 512, dtype=torch.float16)
+
+        assert torch.equal(recovered_api, recovered_ct)

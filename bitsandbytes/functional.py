@@ -1005,6 +1005,110 @@ def dequantize_4bit(
     return out
 
 
+# ---------------------------------------------------------------------------
+# K-bit blockwise quantization (K=2..5, blocksize=32)
+# ---------------------------------------------------------------------------
+
+# Cache for precomputed normal-float codebooks (K -> Tensor on each device)
+_kbit_codebook_cache: dict[tuple[int, torch.device], torch.Tensor] = {}
+
+
+def create_normal_float_codebook(k: int, device=None) -> torch.Tensor:
+    """Create a 2^k-entry normal-float codebook (quantiles of N(0,1), normalized to [-1, 1]).
+
+    For k bits we have 2^k reconstruction levels placed at the expected values
+    of N(0,1) within 2^k equiprobable bins.  The result is sorted ascending
+    and normalized so the largest magnitude is 1.0.
+
+    Args:
+        k: Bit width (2-5).
+        device: Target device. Defaults to "cuda".
+
+    Returns:
+        Float32 tensor of shape (2^k,) with values in [-1, 1].
+    """
+    try:
+        from scipy.stats import norm
+    except ImportError as ie:
+        raise ImportError(
+            "Scipy is required for `create_normal_float_codebook`. "
+            "Install `bitsandbytes` with the `[test]` extra.",
+        ) from ie
+
+    if device is None:
+        device = torch.device("cuda")
+    device = torch.device(device)
+
+    cache_key = (k, device)
+    if cache_key in _kbit_codebook_cache:
+        return _kbit_codebook_cache[cache_key]
+
+    n_levels = 1 << k
+    quantiles = torch.linspace(0.5 / n_levels, 1.0 - 0.5 / n_levels, n_levels)
+    values = torch.tensor(norm.ppf(quantiles.numpy()), dtype=torch.float32)
+    values = values / values.abs().max()
+    values = values.to(device)
+
+    _kbit_codebook_cache[cache_key] = values
+    return values
+
+
+def quantize_kbit(
+    A: Tensor,
+    k: int = 4,
+    codebook: Optional[Tensor] = None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Quantize a tensor using k-bit blockwise quantization (blocksize=32).
+
+    Uses warp-level CUDA primitives for efficient bit-plane packing.
+
+    Args:
+        A: Input tensor. Supports float16, bfloat16, or float32.
+        k: Bit width (2, 3, 4, or 5). Defaults to 4.
+        codebook: Optional float32 codebook tensor with 2^k entries in [-1, 1], sorted ascending.
+            If None, uses a precomputed normal-float codebook.
+
+    Returns:
+        Tuple of (packed, absmax, codebook):
+        - packed: int32 tensor of bit-plane packed quantized values.
+        - absmax: float32 tensor of per-block absolute maximum values.
+        - codebook: The codebook tensor used (useful when auto-generated).
+    """
+    if codebook is None:
+        codebook = create_normal_float_codebook(k, device=A.device)
+    else:
+        codebook = codebook.to(device=A.device, dtype=torch.float32)
+
+    A_flat = A.contiguous().view(-1)
+    packed, absmax = torch.ops.bitsandbytes.quantize_kbit(A_flat, codebook, k)
+    return packed, absmax, codebook
+
+
+def dequantize_kbit(
+    packed: Tensor,
+    absmax: Tensor,
+    codebook: Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype = torch.float16,
+) -> Tensor:
+    """Dequantize a k-bit blockwise quantized tensor.
+
+    Args:
+        packed: int32 tensor of bit-plane packed values (from quantize_kbit).
+        absmax: float32 tensor of per-block absmax values (from quantize_kbit).
+        codebook: float32 codebook tensor with 2^k entries.
+        k: Bit width (2, 3, 4, or 5).
+        n: Number of original elements.
+        dtype: Output dtype. Defaults to float16.
+
+    Returns:
+        Dequantized tensor of shape (n,) with the given dtype.
+    """
+    out = torch.ops.bitsandbytes.dequantize_kbit(packed, codebook, absmax, k, n, dtype)
+    return out[:n]
+
+
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def quantize(
     A: Tensor,
