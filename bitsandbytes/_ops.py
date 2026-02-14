@@ -524,3 +524,27 @@ def _(
     torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
     M = A.shape[0]
     return torch.empty(M, N, device=A.device, dtype=A.dtype)
+
+
+# K-bit fused dequant + GEMM (pipelined, Stage 4)
+
+torch.library.define(
+    "bitsandbytes::kbit_gemm_pipelined",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int k) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::kbit_gemm_pipelined")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    M = A.shape[0]
+    return torch.empty(M, N, device=A.device, dtype=A.dtype)

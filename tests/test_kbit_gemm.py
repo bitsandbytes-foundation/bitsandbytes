@@ -856,3 +856,96 @@ class TestGemmCUDA:
 
         # K=4 GEMM should have SQNR > 10 dB (same threshold as Python ref)
         assert sqnr_db > 10, f"SQNR {sqnr_db:.1f} dB is too low (expected > 10 dB)"
+
+
+# ===========================================================================
+# Stage 4 Tests: Pipelined CUDA GEMM (cp.async double-buffered)
+# ===========================================================================
+
+
+def _gemm_helper(A, W, codebook, k, K_dim, N, op_name="kbit_gemm"):
+    """Quantize W, repack, and run the specified GEMM op. Returns fp16 CUDA tensor."""
+    indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
+    packed_flat = pack_kbit_ref(indices, k)
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
+        packed_flat.cuda(), absmax.cuda(), K_dim, N, k
+    )
+    op = getattr(torch.ops.bitsandbytes, op_name)
+    return op(A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+class TestGemmPipelinedCUDA:
+    """Test pipelined (Stage 4) GEMM matches minimal (Stage 3) GEMM bit-for-bit."""
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_pipelined_matches_minimal(self, k):
+        """Pipelined GEMM must produce identical output to minimal GEMM."""
+        M, K_dim, N = 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_minimal = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm")
+        C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
+
+        assert torch.equal(C_minimal, C_pipelined), \
+            f"K={k}: Pipelined GEMM does not match minimal GEMM bit-for-bit.\n" \
+            f"Max diff: {(C_minimal.float() - C_pipelined.float()).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("k", [4])
+    @pytest.mark.parametrize("M", [1, 4, 8, 16])
+    def test_pipelined_various_M(self, k, M):
+        """Pipelined GEMM works for various batch sizes."""
+        K_dim, N = 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_minimal = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm")
+        C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
+
+        assert torch.equal(C_minimal, C_pipelined), \
+            f"M={M}: Pipelined does not match minimal.\n" \
+            f"Max diff: {(C_minimal.float() - C_pipelined.float()).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("k", [4])
+    @pytest.mark.parametrize("M,K_dim,N", [
+        (4, 128, 128), (4, 128, 256), (4, 256, 128), (4, 256, 256),
+    ])
+    def test_pipelined_various_sizes(self, k, M, K_dim, N):
+        """Pipelined GEMM works for various matrix sizes."""
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_minimal = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm")
+        C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
+
+        assert torch.equal(C_minimal, C_pipelined), \
+            f"({M},{K_dim},{N}): Pipelined does not match minimal.\n" \
+            f"Max diff: {(C_minimal.float() - C_pipelined.float()).abs().max().item():.6f}"
+
+    def test_pipelined_matches_reference(self):
+        """Pipelined GEMM matches Python reference (same tolerance as Stage 3)."""
+        k, M, K_dim, N = 4, 8, 256, 256
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
+        C_pipelined_cpu = C_pipelined.float().cpu()
+
+        atol = 0.1 * C_direct.abs().mean().item()
+        assert torch.allclose(C_pipelined_cpu, C_direct, rtol=0.15, atol=atol), \
+            f"Pipelined GEMM does not match Python reference.\n" \
+            f"Max diff: {(C_pipelined_cpu - C_direct).abs().max().item():.6f}"

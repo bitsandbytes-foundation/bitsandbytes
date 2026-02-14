@@ -931,3 +931,39 @@ def _(
         )
 
     return C
+
+
+@register_kernel("bitsandbytes::kbit_gemm_pipelined", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(A.dtype == torch.float16, lambda: f"kbit_gemm_pipelined supports float16 only, got {A.dtype}")
+    torch._check(B_packed.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed.dtype}")
+    torch._check(B_absmax.dtype == torch.uint8, lambda: f"B_absmax must be uint8 (E4M4), got {B_absmax.dtype}")
+    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
+    torch._check(N % 128 == 0, lambda: f"N ({N}) must be divisible by 128")
+
+    M = A.shape[0]
+    C = torch.empty(M, N, device=A.device, dtype=torch.float16)
+
+    with _cuda_device_of(A):
+        fn = getattr(lib, f"ckbit_gemm_pipelined_fp16_k{k}")
+        fn(
+            get_ptr(A),
+            get_ptr(B_packed),
+            get_ptr(B_absmax),
+            get_ptr(codebook),
+            get_ptr(C),
+            ct.c_int(M),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+        )
+
+    return C
