@@ -1048,6 +1048,9 @@ def _(
     M = A.shape[0]
     C = torch.empty(M, N, device=A.device, dtype=A.dtype)
 
+    # Workspace sizing uses TILE_M=16 (M_BLOCKS=1) as worst case for m_tiles.
+    # The C++ launcher may use larger TILE_M (fewer m_tiles), but the workspace
+    # is sized by M*N anyway and tile_counters just need enough for all m_tiles.
     TILE_M = 16
     TILE_N = 128
     m_tiles = (M + TILE_M - 1) // TILE_M

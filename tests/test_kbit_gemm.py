@@ -1196,3 +1196,82 @@ class TestGemmProdCUDA:
 
         assert C_fp16.dtype == torch.float16, f"Expected fp16 output, got {C_fp16.dtype}"
         assert C_bf16.dtype == torch.bfloat16, f"Expected bf16 output, got {C_bf16.dtype}"
+
+    # --- Multi-M-block tests (M > 16 exercises M_BLOCKS > 1) ---
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("M", [17, 32, 33, 48, 49, 64])
+    def test_prod_multi_mblock(self, k, dtype, M):
+        """Production GEMM with M_BLOCKS > 1 matches Python reference."""
+        K_dim, N = 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=dtype)
+        C_prod_cpu = C_prod.float().cpu()
+
+        atol = 0.15 * C_direct.abs().mean().item()
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
+            f"M={M} K={k} {dtype}: multi-M-block does not match reference.\n" \
+            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("M", [20, 40, 64])
+    def test_prod_multi_mblock_splitk(self, M):
+        """Multi-M-block with split-K matches reference."""
+        k, K_dim, N = 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=2, dtype=torch.float16)
+        C_prod_cpu = C_prod.float().cpu()
+
+        atol = 0.15 * C_direct.abs().mean().item()
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
+            f"M={M} split-K: multi-M-block does not match reference.\n" \
+            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("M,K_dim,N", [
+        (32, 128, 256), (64, 256, 128), (64, 256, 256), (48, 128, 128),
+    ])
+    def test_prod_multi_mblock_sizes(self, M, K_dim, N):
+        """Multi-M-block works across various matrix sizes."""
+        k = 4
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=torch.float16)
+        C_prod_cpu = C_prod.float().cpu()
+
+        atol = 0.15 * C_direct.abs().mean().item()
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
+            f"({M},{K_dim},{N}): multi-M-block does not match reference.\n" \
+            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+
+    def test_prod_mblock1_matches_previous(self):
+        """M_BLOCKS=1 (M<=16) must produce bit-exact same output as before."""
+        k, M, K_dim, N = 4, 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=1)
+        C_prod = _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=torch.float16)
+
+        assert torch.equal(C_splitk, C_prod), \
+            f"M_BLOCKS=1 regression: output changed.\n" \
+            f"Max diff: {(C_splitk.float() - C_prod.float()).abs().max().item():.6f}"

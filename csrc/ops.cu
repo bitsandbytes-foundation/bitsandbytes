@@ -1761,7 +1761,7 @@ __device__ __forceinline__ uint32_t pack_two(scalar_t a, scalar_t b) {
     }
 }
 
-template <int K_BITS, typename scalar_t>
+template <int K_BITS, int M_BLOCKS, typename scalar_t>
 __global__ void kbit_gemm_prod(
     const scalar_t* __restrict__ A, const unsigned int* __restrict__ B_packed,
     const unsigned char* __restrict__ B_absmax, const float* __restrict__ codebook,
@@ -1769,7 +1769,7 @@ __global__ void kbit_gemm_prod(
     int* __restrict__ tile_counters, const int M, const int K_dim, const int N, const int k_chunks
 ) {
     using Ops = ScalarOps<scalar_t>;
-    constexpr int TILE_M = 16;
+    constexpr int TILE_M = M_BLOCKS * 16;
     constexpr int TILE_K = 64;
     constexpr int TILE_N = 128;
     constexpr int BS = 32;
@@ -1817,10 +1817,12 @@ __global__ void kbit_gemm_prod(
     // Codebook in registers (converted to scalar_t)
     scalar_t cb_val = (lane_id < (1 << K_BITS)) ? Ops::from_float(codebook[lane_id]) : Ops::from_float(0.0f);
 
-    float frag_c[N_BLOCKS][4];
+    float frag_c[M_BLOCKS][N_BLOCKS][4];
 #pragma unroll
-    for (int nb = 0; nb < N_BLOCKS; nb++)
-        frag_c[nb][0] = frag_c[nb][1] = frag_c[nb][2] = frag_c[nb][3] = 0.0f;
+    for (int mb = 0; mb < M_BLOCKS; mb++)
+#pragma unroll
+        for (int nb = 0; nb < N_BLOCKS; nb++)
+            frag_c[mb][nb][0] = frag_c[mb][nb][1] = frag_c[mb][nb][2] = frag_c[mb][nb][3] = 0.0f;
 
     if (kt_start >= k_tiles)
         return;
@@ -1872,14 +1874,14 @@ __global__ void kbit_gemm_prod(
             const int k_block = ks / 2;
             const int half_idx = ks % 2;
 
-            // Load A fragment via ldmatrix with XOR swizzle
-            uint32_t frag_a[4];
-            {
-                // Thread t is in matrix (lane_id / 8), row (lane_id % 8) within that matrix.
-                // Matrix layout: 0=top/k_lo, 1=bottom/k_lo, 2=top/k_hi, 3=bottom/k_hi
+            // Load A fragments via ldmatrix with XOR swizzle — one per M-block
+            uint32_t frag_a[M_BLOCKS][4];
+#pragma unroll
+            for (int mb = 0; mb < M_BLOCKS; mb++) {
+                const int mb_row_offset = mb * 16;
                 const int matrix_id = lane_id / 8;
                 const int row_in_matrix = lane_id % 8;
-                const int a_row = row_in_matrix + (matrix_id % 2) * 8;
+                const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
                 const int col_start = ks * 16 + (matrix_id / 2) * 8;
 
                 // Apply same XOR swizzle as write path
@@ -1891,7 +1893,7 @@ __global__ void kbit_gemm_prod(
                 uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
 
                 asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                             : "=r"(frag_a[0]), "=r"(frag_a[1]), "=r"(frag_a[2]), "=r"(frag_a[3])
+                             : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
                              : "r"(smem_addr));
             }
 
@@ -1923,7 +1925,11 @@ __global__ void kbit_gemm_prod(
                 frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
                 frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
 
-                mma_m16n8k16<scalar_t>(frag_a, frag_b, frag_c[nb]);
+                // Issue MMA for each M-block, reusing the same B fragment
+#pragma unroll
+                for (int mb = 0; mb < M_BLOCKS; mb++) {
+                    mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                }
             }
         }
     };
@@ -1949,32 +1955,38 @@ __global__ void kbit_gemm_prod(
     // Write output
     if (k_chunks == 1) {
 #pragma unroll
-        for (int nb = 0; nb < N_BLOCKS; nb++) {
-            int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
-            int m_row0 = m_base + gid;
-            int m_row1 = m_base + gid + 8;
-            if (m_row0 < M) {
-                C[m_row0 * N + c_col] = Ops::from_float(frag_c[nb][0]);
-                C[m_row0 * N + c_col + 1] = Ops::from_float(frag_c[nb][1]);
-            }
-            if (m_row1 < M) {
-                C[m_row1 * N + c_col] = Ops::from_float(frag_c[nb][2]);
-                C[m_row1 * N + c_col + 1] = Ops::from_float(frag_c[nb][3]);
+        for (int mb = 0; mb < M_BLOCKS; mb++) {
+#pragma unroll
+            for (int nb = 0; nb < N_BLOCKS; nb++) {
+                int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+                int m_row0 = m_base + mb * 16 + gid;
+                int m_row1 = m_base + mb * 16 + gid + 8;
+                if (m_row0 < M) {
+                    C[m_row0 * N + c_col] = Ops::from_float(frag_c[mb][nb][0]);
+                    C[m_row0 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][1]);
+                }
+                if (m_row1 < M) {
+                    C[m_row1 * N + c_col] = Ops::from_float(frag_c[mb][nb][2]);
+                    C[m_row1 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][3]);
+                }
             }
         }
     } else {
 #pragma unroll
-        for (int nb = 0; nb < N_BLOCKS; nb++) {
-            int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
-            int m_row0 = m_base + gid;
-            int m_row1 = m_base + gid + 8;
-            if (m_row0 < M) {
-                atomicAdd(&C_workspace[m_row0 * N + c_col], frag_c[nb][0]);
-                atomicAdd(&C_workspace[m_row0 * N + c_col + 1], frag_c[nb][1]);
-            }
-            if (m_row1 < M) {
-                atomicAdd(&C_workspace[m_row1 * N + c_col], frag_c[nb][2]);
-                atomicAdd(&C_workspace[m_row1 * N + c_col + 1], frag_c[nb][3]);
+        for (int mb = 0; mb < M_BLOCKS; mb++) {
+#pragma unroll
+            for (int nb = 0; nb < N_BLOCKS; nb++) {
+                int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+                int m_row0 = m_base + mb * 16 + gid;
+                int m_row1 = m_base + mb * 16 + gid + 8;
+                if (m_row0 < M) {
+                    atomicAdd(&C_workspace[m_row0 * N + c_col], frag_c[mb][nb][0]);
+                    atomicAdd(&C_workspace[m_row0 * N + c_col + 1], frag_c[mb][nb][1]);
+                }
+                if (m_row1 < M) {
+                    atomicAdd(&C_workspace[m_row1 * N + c_col], frag_c[mb][nb][2]);
+                    atomicAdd(&C_workspace[m_row1 * N + c_col + 1], frag_c[mb][nb][3]);
+                }
             }
         }
 
@@ -1999,14 +2011,14 @@ __global__ void kbit_gemm_prod(
     }
 }
 
-// Stage 6 production GEMM launcher
-template <int K, typename scalar_t>
-void kbitGemmProd(
+// Production GEMM launcher — selects M_BLOCKS based on M
+template <int K, int MB, typename scalar_t>
+static void kbitGemmProdLaunch(
     const scalar_t* A, const unsigned int* B_packed, const unsigned char* B_absmax,
     const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
     int M, int K_dim, int N, int k_chunks
 ) {
-    constexpr int TILE_M = 16;
+    constexpr int TILE_M = MB * 16;
     constexpr int TILE_K = 64;
     constexpr int TILE_N = 128;
     constexpr int BS = 32;
@@ -2027,14 +2039,67 @@ void kbitGemmProd(
 
     if (k_chunks <= 1) {
         dim3 grid(n_tiles, m_tiles);
-        kbit_gemm_prod<K, scalar_t><<<grid, block, smem_size>>>(
+        kbit_gemm_prod<K, MB, scalar_t><<<grid, block, smem_size>>>(
             A, B_packed, B_absmax, codebook, C, nullptr, nullptr, M, K_dim, N, 1);
     } else {
         dim3 grid(n_tiles, m_tiles, k_chunks);
-        kbit_gemm_prod<K, scalar_t><<<grid, block, smem_size>>>(
+        kbit_gemm_prod<K, MB, scalar_t><<<grid, block, smem_size>>>(
             A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
     }
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <int K, typename scalar_t>
+void kbitGemmProd(
+    const scalar_t* A, const unsigned int* B_packed, const unsigned char* B_absmax,
+    const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
+    int M, int K_dim, int N, int k_chunks
+) {
+    // Query SM count for dispatch decision
+    int dev;
+    cudaGetDevice(&dev);
+    int num_sms;
+    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, dev);
+
+    constexpr int TILE_N = 128;
+    int n_tiles = N / TILE_N;
+
+    // Choose M_BLOCKS. Larger M_BLOCKS amortizes B tile loading across
+    // more M-rows, but the A tile grows proportionally and is loaded
+    // synchronously (not via cp.async). This makes M_BLOCKS>1 slower
+    // unless the grid is large enough that the reduced block count doesn't
+    // hurt SM utilization AND the extra compute amortizes the A load cost.
+    //
+    // Heuristic: only use M_BLOCKS>1 when the resulting grid has at least
+    // 2x num_sms blocks, ensuring good multi-wave overlap.
+    int m_blocks = 1;
+    auto grid_blocks = [&](int mb) {
+        int tile_m = mb * 16;
+        return ((M + tile_m - 1) / tile_m) * n_tiles;
+    };
+    int threshold = 2 * num_sms;
+
+    if (M > 48 && grid_blocks(4) >= threshold)
+        m_blocks = 4;
+    else if (M > 32 && grid_blocks(3) >= threshold)
+        m_blocks = 3;
+    else if (M > 16 && grid_blocks(2) >= threshold)
+        m_blocks = 2;
+
+    switch (m_blocks) {
+    case 4:
+        kbitGemmProdLaunch<K, 4, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+        break;
+    case 3:
+        kbitGemmProdLaunch<K, 3, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+        break;
+    case 2:
+        kbitGemmProdLaunch<K, 2, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+        break;
+    default:
+        kbitGemmProdLaunch<K, 1, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+        break;
+    }
 }
 
 // ---- Debug: Simple MMA test kernel ----
