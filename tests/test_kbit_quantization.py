@@ -15,14 +15,13 @@ import ctypes as ct
 import math
 
 import pytest
-import torch
-
 from scipy.stats import norm
-
+import torch
 
 # ---------------------------------------------------------------------------
 # Codebook generation
 # ---------------------------------------------------------------------------
+
 
 def create_normal_float_codebook(k: int) -> torch.Tensor:
     """Create a 2^k-entry normal-float codebook (quantiles of N(0,1), normalized to [-1, 1]).
@@ -86,10 +85,10 @@ def quantize_kbit_ref(
 
     # Find nearest codebook entry for each element (brute force)
     # codebook: (2^k,), normalized: (num_blocks, blocksize)
-    cb = codebook.float().unsqueeze(0).unsqueeze(0)       # (1, 1, 2^k)
-    norm_exp = normalized.unsqueeze(2)                     # (num_blocks, blocksize, 1)
-    distances = (norm_exp - cb).abs()                      # (num_blocks, blocksize, 2^k)
-    indices = distances.argmin(dim=2).to(torch.uint8)      # (num_blocks, blocksize)
+    cb = codebook.float().unsqueeze(0).unsqueeze(0)  # (1, 1, 2^k)
+    norm_exp = normalized.unsqueeze(2)  # (num_blocks, blocksize, 1)
+    distances = (norm_exp - cb).abs()  # (num_blocks, blocksize, 2^k)
+    indices = distances.argmin(dim=2).to(torch.uint8)  # (num_blocks, blocksize)
 
     # Flatten and trim padding
     indices = indices.reshape(-1)[:n]
@@ -140,6 +139,7 @@ def dequantize_kbit_ref(
 # Bit-plane packing/unpacking (Python reference for testing CUDA)
 # ---------------------------------------------------------------------------
 
+
 def pack_kbit_ref(indices: torch.Tensor, k: int, blocksize: int = BLOCKSIZE) -> torch.Tensor:
     """Pack k-bit indices into bit-plane uint32 words (Python reference).
 
@@ -166,10 +166,10 @@ def pack_kbit_ref(indices: torch.Tensor, k: int, blocksize: int = BLOCKSIZE) -> 
         for bit in range(k):
             word = 0
             for i in range(blocksize):
-                word |= (((int(blocks[b, i]) >> bit) & 1) << i)
+                word |= ((int(blocks[b, i]) >> bit) & 1) << i
             # Convert to signed int32 (reinterpret high bit as sign)
             if word >= (1 << 31):
-                word -= (1 << 32)
+                word -= 1 << 32
             packed_words.append(word)
     return torch.tensor(packed_words, dtype=torch.int32)
 
@@ -194,7 +194,7 @@ def unpack_kbit_ref(packed: torch.Tensor, k: int, n: int, blocksize: int = BLOCK
         for i in range(blocksize):
             val = 0
             for bit in range(k):
-                val |= (((words[bit] >> i) & 1) << bit)
+                val |= ((words[bit] >> i) & 1) << bit
             indices.append(val)
     return torch.tensor(indices[:n], dtype=torch.uint8)
 
@@ -322,9 +322,7 @@ class TestQuantizeRef:
         for i in range(A_blocks.shape[0]):
             block_bound = max_gap / 2 * absmax[i].item()
             block_max_err = err_blocks[i].max().item()
-            assert block_max_err <= block_bound + 1e-6, (
-                f"Block {i}: max_err={block_max_err}, bound={block_bound}"
-            )
+            assert block_max_err <= block_bound + 1e-6, f"Block {i}: max_err={block_max_err}, bound={block_bound}"
 
 
 class TestPackUnpackRef:
@@ -378,9 +376,11 @@ class TestPackUnpackRef:
 # CUDA helpers -- ctypes wrappers for the C interface
 # ===========================================================================
 
+
 def _get_lib():
     """Load the bitsandbytes native library."""
     from bitsandbytes.cextension import lib
+
     return lib
 
 
@@ -405,7 +405,7 @@ def _cuda_quantize_kbit(A, codebook, k):
     fn = getattr(lib, f"cquantize_kbit_{tname}_k{k}")
     fn(_get_ptr(codebook), _get_ptr(A), _get_ptr(absmax), _get_ptr(packed), ct.c_int(n))
     torch.cuda.synchronize()
-    return packed[:num_blocks * k], absmax[:num_blocks]
+    return packed[: num_blocks * k], absmax[:num_blocks]
 
 
 def _cuda_dequantize_kbit(packed, codebook, absmax, k, n, dtype=torch.float16):
@@ -414,11 +414,12 @@ def _cuda_dequantize_kbit(packed, codebook, absmax, k, n, dtype=torch.float16):
     If absmax is float32, encode to E4M4 first.
     """
     from bitsandbytes.functional import encode_absmax_e4m4
+
     lib = _get_lib()
     num_blocks = (n + 31) // 32
     # Pad packed buffer
     packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device=packed.device)
-    packed_padded[:packed.numel()] = packed
+    packed_padded[: packed.numel()] = packed
     # Handle absmax encoding
     if absmax.dtype == torch.float32:
         absmax_enc = encode_absmax_e4m4(absmax)
@@ -426,13 +427,19 @@ def _cuda_dequantize_kbit(packed, codebook, absmax, k, n, dtype=torch.float16):
         absmax_enc = absmax
     aname = {torch.uint8: "u8abs", torch.float16: "fp16abs"}[absmax_enc.dtype]
     absmax_padded = torch.zeros(num_blocks + 1, dtype=absmax_enc.dtype, device=packed.device)
-    absmax_padded[:absmax_enc.numel()] = absmax_enc
+    absmax_padded[: absmax_enc.numel()] = absmax_enc
     # Native output type
     tname = _dtype_to_tname(dtype)
     out = torch.zeros(num_blocks * 32, dtype=dtype, device=packed.device)
     fn = getattr(lib, f"cdequantize_kbit_{tname}_{aname}_k{k}")
-    fn(_get_ptr(packed_padded), _get_ptr(codebook), _get_ptr(absmax_padded),
-       _get_ptr(out), ct.c_int(n), ct.c_void_p(0))
+    fn(
+        _get_ptr(packed_padded),
+        _get_ptr(codebook),
+        _get_ptr(absmax_padded),
+        _get_ptr(out),
+        ct.c_int(n),
+        ct.c_void_p(0),
+    )
     torch.cuda.synchronize()
     return out[:n]
 
@@ -445,8 +452,14 @@ def _cuda_dequantize_kbit_prepped(packed_padded, codebook, absmax_u8_padded, k, 
     lib = _get_lib()
     tname = _dtype_to_tname(out.dtype)
     fn = getattr(lib, f"cdequantize_kbit_{tname}_u8abs_k{k}")
-    fn(_get_ptr(packed_padded), _get_ptr(codebook), _get_ptr(absmax_u8_padded),
-       _get_ptr(out), ct.c_int(n), ct.c_void_p(0))
+    fn(
+        _get_ptr(packed_padded),
+        _get_ptr(codebook),
+        _get_ptr(absmax_u8_padded),
+        _get_ptr(out),
+        ct.c_int(n),
+        ct.c_void_p(0),
+    )
 
 
 # ===========================================================================
@@ -466,11 +479,9 @@ class TestStage4QuantizeCUDA:
         torch.manual_seed(42)
         cb = create_normal_float_codebook(k).cuda()
         A = torch.randn(1024, dtype=torch.float16, device="cuda")
-        packed, absmax = _cuda_quantize_kbit(A, cb, k)
+        _, absmax = _cuda_quantize_kbit(A, cb, k)
         expected = A.float().reshape(-1, 32).abs().max(dim=1).values
-        assert torch.allclose(absmax, expected, atol=1e-4), (
-            f"max diff: {(absmax - expected).abs().max()}"
-        )
+        assert torch.allclose(absmax, expected, atol=1e-4), f"max diff: {(absmax - expected).abs().max()}"
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
@@ -550,9 +561,7 @@ class TestStage5DequantizeCUDA:
         for i in range(absmax.numel()):
             block_bound = (max_gap / 2 * absmax[i].item() + 1e-6) * 1.25
             block_err = errors[i * 32 : min((i + 1) * 32, A.numel())].max().item()
-            assert block_err <= block_bound, (
-                f"Block {i}: max_err={block_err}, bound={block_bound}"
-            )
+            assert block_err <= block_bound, f"Block {i}: max_err={block_err}, bound={block_bound}"
 
 
 # ===========================================================================
@@ -597,7 +606,7 @@ class TestStage6ErrorAnalysis:
             mses[ki] = ((A - recovered) ** 2).mean().item()
         for ki in [3, 4, 5]:
             assert mses[ki] <= mses[ki - 1] * 1.05, (
-                f"MSE did not decrease from K={ki-1} ({mses[ki-1]:.6f}) to K={ki} ({mses[ki]:.6f})"
+                f"MSE did not decrease from K={ki - 1} ({mses[ki - 1]:.6f}) to K={ki} ({mses[ki]:.6f})"
             )
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
@@ -613,16 +622,14 @@ class TestStage6ErrorAnalysis:
         mse = ((A - recovered) ** 2).mean().item()
         max_err = errors.max().item()
         # SQNR = signal power / noise power (in dB)
-        signal_power = (A ** 2).mean().item()
+        signal_power = (A**2).mean().item()
         sqnr_db = 10 * math.log10(signal_power / max(mse, 1e-20))
         # Sanity: MSE must be finite and positive
         assert mse > 0 and math.isfinite(mse), f"Bad MSE: {mse}"
         assert max_err > 0 and math.isfinite(max_err), f"Bad max_err: {max_err}"
         # K=2 should have SQNR > 5 dB, K=5 should have SQNR > 20 dB
         min_sqnr = {2: 5, 3: 10, 4: 15, 5: 20}
-        assert sqnr_db > min_sqnr[k], (
-            f"K={k}: SQNR={sqnr_db:.1f} dB too low (expected >{min_sqnr[k]} dB)"
-        )
+        assert sqnr_db > min_sqnr[k], f"K={k}: SQNR={sqnr_db:.1f} dB too low (expected >{min_sqnr[k]} dB)"
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
@@ -651,13 +658,15 @@ class TestStage7NF4CrossValidation:
     def _get_nf4_codebook_sorted(self):
         """Return the existing bitsandbytes NF4 codebook, sorted ascending."""
         from bitsandbytes.functional import get_4bit_type
+
         nf4 = get_4bit_type("nf4", device="cuda")
         # The existing NF4 data is already sorted for the 16-entry list
         return nf4
 
     def test_mse_quality_comparison(self):
         """New K=4 kernel MSE should be within 10% of existing NF4 MSE."""
-        from bitsandbytes.functional import quantize_nf4, dequantize_nf4
+        from bitsandbytes.functional import dequantize_nf4, quantize_nf4
+
         torch.manual_seed(42)
         n = 131072  # 128K elements
         A = torch.randn(n, dtype=torch.float16, device="cuda")
@@ -675,9 +684,7 @@ class TestStage7NF4CrossValidation:
 
         # Allow kbit MSE to be up to 2x of NF4 (different blocksize: 32 vs 64)
         # Smaller blocksize means more overhead but potentially different quality
-        assert kbit_mse < nf4_mse * 2.0, (
-            f"K=4 kbit MSE ({kbit_mse:.6f}) is more than 2x NF4 MSE ({nf4_mse:.6f})"
-        )
+        assert kbit_mse < nf4_mse * 2.0, f"K=4 kbit MSE ({kbit_mse:.6f}) is more than 2x NF4 MSE ({nf4_mse:.6f})"
 
     def test_codebook_similarity(self):
         """Our K=4 NF codebook should be similar to the existing NF4 codebook."""
@@ -764,6 +771,7 @@ class TestStage8PerformanceBenchmark:
     def test_dequant_bandwidth(self, k):
         """Measure dequant bandwidth utilization (informational, loose threshold)."""
         from bitsandbytes.functional import encode_absmax_e4m4
+
         cb = create_normal_float_codebook(k).cuda()
         n = 16 * 1024 * 1024  # 16M elements
         dtype = torch.float16
@@ -775,9 +783,9 @@ class TestStage8PerformanceBenchmark:
         del A
         absmax_u8 = encode_absmax_e4m4(absmax)
         packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device="cuda")
-        packed_padded[:packed.numel()] = packed
+        packed_padded[: packed.numel()] = packed
         absmax_padded = torch.zeros(num_blocks + 1, dtype=torch.uint8, device="cuda")
-        absmax_padded[:absmax_u8.numel()] = absmax_u8
+        absmax_padded[: absmax_u8.numel()] = absmax_u8
         out = torch.zeros(num_blocks * 32, dtype=torch.float16, device="cuda")
 
         # Warmup
@@ -811,6 +819,7 @@ class TestStage8PerformanceBenchmark:
     def test_throughput_scaling(self):
         """Verify throughput scales roughly linearly with tensor size."""
         from bitsandbytes.functional import encode_absmax_e4m4
+
         k = 4
         cb = create_normal_float_codebook(k).cuda()
         dtype = torch.float16
@@ -824,9 +833,9 @@ class TestStage8PerformanceBenchmark:
             del A
             absmax_u8 = encode_absmax_e4m4(absmax)
             packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device="cuda")
-            packed_padded[:packed.numel()] = packed
+            packed_padded[: packed.numel()] = packed
             absmax_padded = torch.zeros(num_blocks + 1, dtype=torch.uint8, device="cuda")
-            absmax_padded[:absmax_u8.numel()] = absmax_u8
+            absmax_padded[: absmax_u8.numel()] = absmax_u8
             out = torch.zeros(num_blocks * 32, dtype=torch.float16, device="cuda")
 
             # Warmup
@@ -856,7 +865,8 @@ class TestStage8PerformanceBenchmark:
 
     def test_k4_vs_existing_nf4(self):
         """Compare K=4 dequant throughput against existing NF4 dequant."""
-        from bitsandbytes.functional import quantize_nf4, dequantize_nf4, encode_absmax_e4m4
+        from bitsandbytes.functional import dequantize_nf4, encode_absmax_e4m4, quantize_nf4
+
         n = 4 * 1024 * 1024  # 4M elements
         k = 4
         dtype = torch.float16
@@ -872,9 +882,9 @@ class TestStage8PerformanceBenchmark:
         del A
         absmax_u8 = encode_absmax_e4m4(kbit_absmax)
         packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device="cuda")
-        packed_padded[:kbit_packed.numel()] = kbit_packed
+        packed_padded[: kbit_packed.numel()] = kbit_packed
         absmax_padded = torch.zeros(num_blocks + 1, dtype=torch.uint8, device="cuda")
-        absmax_padded[:absmax_u8.numel()] = absmax_u8
+        absmax_padded[: absmax_u8.numel()] = absmax_u8
         out = torch.zeros(num_blocks * 32, dtype=torch.float16, device="cuda")
 
         n_iters = 50
@@ -908,9 +918,7 @@ class TestStage8PerformanceBenchmark:
         # Informational: kbit may be slower due to smaller blocksize
         # Just ensure it's not absurdly slower (>10x)
         ratio = kbit_ms / max(nf4_ms, 0.001)
-        assert ratio < 10.0, (
-            f"K=4 kbit is {ratio:.1f}x slower than existing NF4 ({kbit_ms:.1f}ms vs {nf4_ms:.1f}ms)"
-        )
+        assert ratio < 10.0, f"K=4 kbit is {ratio:.1f}x slower than existing NF4 ({kbit_ms:.1f}ms vs {nf4_ms:.1f}ms)"
 
 
 # ===========================================================================
@@ -925,7 +933,8 @@ class TestPythonAPI:
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_round_trip(self, k):
         """Basic round-trip through the public API."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         torch.manual_seed(42)
         A = torch.randn(1024, dtype=torch.float16, device="cuda")
         packed, absmax, codebook = quantize_kbit(A, k=k)
@@ -939,7 +948,8 @@ class TestPythonAPI:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_all_dtypes(self, k, dtype):
         """All dtypes should work through the public API."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         torch.manual_seed(42)
         A = torch.randn(256, dtype=dtype, device="cuda")
         packed, absmax, codebook = quantize_kbit(A, k=k)
@@ -950,6 +960,7 @@ class TestPythonAPI:
     def test_default_codebook(self):
         """Default codebook should be auto-generated and cached."""
         from bitsandbytes.functional import quantize_kbit
+
         A = torch.randn(64, dtype=torch.float16, device="cuda")
         _, _, cb1 = quantize_kbit(A, k=4)
         _, _, cb2 = quantize_kbit(A, k=4)
@@ -958,7 +969,8 @@ class TestPythonAPI:
 
     def test_custom_codebook(self):
         """Custom codebook should be accepted."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         cb = torch.linspace(-1, 1, 8).cuda()
         A = torch.randn(128, dtype=torch.float16, device="cuda")
         packed, absmax, cb_out = quantize_kbit(A, k=3, codebook=cb)
@@ -968,7 +980,8 @@ class TestPythonAPI:
     @pytest.mark.parametrize("n", [1, 31, 32, 33, 1000, 100000])
     def test_various_sizes(self, n):
         """Non-aligned sizes should work through the public API."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         A = torch.randn(n, dtype=torch.float16, device="cuda")
         packed, absmax, cb = quantize_kbit(A, k=3)
         recovered = dequantize_kbit(packed, absmax, cb, k=3, n=n, dtype=torch.float16)
@@ -979,7 +992,8 @@ class TestPythonAPI:
 
         Both default to E4M4 absmax encoding now, so they should match exactly.
         """
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         torch.manual_seed(42)
         k = 4
         A = torch.randn(512, dtype=torch.float16, device="cuda")
@@ -999,6 +1013,7 @@ class TestPythonAPI:
 # ---------------------------------------------------------------------------
 # Output dtype correctness tests
 # ---------------------------------------------------------------------------
+
 
 @requires_cuda
 class TestOutputDtypeCorrectness:
@@ -1064,14 +1079,13 @@ class TestOutputDtypeCorrectness:
         for i in range(absmax.numel()):
             block_bound = (max_gap / 2 * absmax[i].item() + 1e-6) * 1.25
             block_err = errors[i * 32 : min((i + 1) * 32, A.numel())].max().item()
-            assert block_err <= block_bound, (
-                f"Block {i}: max_err={block_err}, bound={block_bound}"
-            )
+            assert block_err <= block_bound, f"Block {i}: max_err={block_err}, bound={block_bound}"
 
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_public_api_all_dtypes(self, dtype):
         """Public API dequantize_kbit should produce correct output for all dtypes."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         torch.manual_seed(42)
         A = torch.randn(1024, dtype=torch.float16, device="cuda")
         packed, absmax, cb = quantize_kbit(A, k=4)
@@ -1088,17 +1102,18 @@ class TestOutputDtypeCorrectness:
 # Asymmetric codebook tests
 # ---------------------------------------------------------------------------
 
+
 @requires_cuda
 class TestAsymmetricCodebooks:
     """Verify correctness with non-symmetric and non-uniform codebooks."""
 
     def test_all_positive_codebook(self):
         """Codebook with only positive values (e.g., ReLU weight distribution)."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         k = 3
         # 8 levels, all positive, non-uniform spacing
-        cb = torch.tensor([0.01, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0],
-                          dtype=torch.float32, device="cuda")
+        cb = torch.tensor([0.01, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0], dtype=torch.float32, device="cuda")
         A = torch.rand(1024, dtype=torch.float16, device="cuda")  # uniform [0, 1)
         packed, absmax, cb_out = quantize_kbit(A, k=k, codebook=cb)
         rec = dequantize_kbit(packed, absmax, cb_out, k=k, n=1024, dtype=torch.float16)
@@ -1109,7 +1124,8 @@ class TestAsymmetricCodebooks:
 
     def test_all_negative_codebook(self):
         """Codebook with only negative values."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         k = 2
         cb = torch.tensor([-1.0, -0.5, -0.2, -0.05], dtype=torch.float32, device="cuda")
         A = -torch.rand(512, dtype=torch.float16, device="cuda")  # all negative
@@ -1121,13 +1137,15 @@ class TestAsymmetricCodebooks:
 
     def test_skewed_codebook(self):
         """Asymmetric codebook with more levels on the positive side."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         k = 4
         # 16 levels: 4 negative, 12 positive
-        cb = torch.tensor([-1.0, -0.5, -0.2, -0.05,
-                           0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5,
-                           0.6, 0.7, 0.85, 1.0],
-                          dtype=torch.float32, device="cuda")
+        cb = torch.tensor(
+            [-1.0, -0.5, -0.2, -0.05, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.85, 1.0],
+            dtype=torch.float32,
+            device="cuda",
+        )
         A = torch.randn(2048, dtype=torch.float16, device="cuda")
         packed, absmax, cb_out = quantize_kbit(A, k=k, codebook=cb)
         rec = dequantize_kbit(packed, absmax, cb_out, k=k, n=2048, dtype=torch.float16)
@@ -1137,7 +1155,8 @@ class TestAsymmetricCodebooks:
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_asymmetric_round_trip_quality(self, k):
         """Asymmetric codebook should still produce reasonable MSE."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         torch.manual_seed(42)
         n_levels = 1 << k
         # Create a deliberately asymmetric codebook: shifted normal-float
@@ -1160,7 +1179,8 @@ class TestAsymmetricCodebooks:
 
     def test_non_uniform_spacing(self):
         """Codebook with highly non-uniform spacing (log-like distribution)."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         k = 3
         # Log-spaced positive + mirror negative
         pos = torch.tensor([0.01, 0.03, 0.1, 0.3], dtype=torch.float32)
@@ -1174,7 +1194,8 @@ class TestAsymmetricCodebooks:
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_asymmetric_ctypes_matches_api(self, k):
         """ctypes path with asymmetric codebook should match public API."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         torch.manual_seed(42)
         n_levels = 1 << k
         # Asymmetric: more negative than positive
@@ -1194,7 +1215,8 @@ class TestAsymmetricCodebooks:
 
     def test_single_value_codebook_k2(self):
         """Edge case: codebook where some entries are identical."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
         # K=2: 4 entries, but two pairs are identical
         cb = torch.tensor([-0.5, -0.5, 0.5, 0.5], dtype=torch.float32, device="cuda")
         A = torch.randn(256, dtype=torch.float16, device="cuda")
@@ -1203,7 +1225,9 @@ class TestAsymmetricCodebooks:
         assert rec.shape == (256,)
         assert torch.isfinite(rec).all()
         # With only 2 effective levels, all values should be close to ±0.5 * absmax
-        rec_normalized = rec.float() / (A.float().reshape(-1, 32).abs().max(dim=1, keepdim=True).values.repeat(1, 32).reshape(-1)[:256] + 1e-8)
+        rec_normalized = rec.float() / (
+            A.float().reshape(-1, 32).abs().max(dim=1, keepdim=True).values.repeat(1, 32).reshape(-1)[:256] + 1e-8
+        )
         assert ((rec_normalized.abs() - 0.5).abs() < 0.01).all() or True  # just check no crash
 
 
@@ -1211,12 +1235,13 @@ class TestAsymmetricCodebooks:
 # E4M4 uint8 absmax tests
 # ---------------------------------------------------------------------------
 
+
 class TestE4M4Absmax:
     """Tests for E4M4 uint8 absmax encode/decode and integration."""
 
     def test_encode_decode_roundtrip(self):
         """Encode then decode should approximate the original values."""
-        from bitsandbytes.functional import encode_absmax_e4m4, decode_absmax_e4m4
+        from bitsandbytes.functional import decode_absmax_e4m4, encode_absmax_e4m4
 
         # Test a range of values spanning the full E4M4 range
         values = torch.tensor([0.0, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 25.0])
@@ -1234,7 +1259,7 @@ class TestE4M4Absmax:
 
     def test_encode_decode_subnormals(self):
         """Subnormal range should encode/decode correctly."""
-        from bitsandbytes.functional import encode_absmax_e4m4, decode_absmax_e4m4
+        from bitsandbytes.functional import decode_absmax_e4m4, encode_absmax_e4m4
 
         # Values in subnormal range for bias=11: [6.1e-5, 1.83e-3]
         values = torch.tensor([0.0001, 0.0005, 0.001, 0.0015])
@@ -1264,7 +1289,7 @@ class TestE4M4Absmax:
 
     def test_encode_monotonic(self):
         """Larger input values should produce larger or equal encoded values."""
-        from bitsandbytes.functional import encode_absmax_e4m4, decode_absmax_e4m4
+        from bitsandbytes.functional import decode_absmax_e4m4, encode_absmax_e4m4
 
         values = torch.linspace(0.001, 30.0, 1000)
         encoded = encode_absmax_e4m4(values, bias=11)
@@ -1272,12 +1297,12 @@ class TestE4M4Absmax:
 
         # Decoded values should be non-decreasing
         for i in range(1, len(decoded)):
-            assert decoded[i] >= decoded[i - 1], f"non-monotonic at {i}: {decoded[i-1]} > {decoded[i]}"
+            assert decoded[i] >= decoded[i - 1], f"non-monotonic at {i}: {decoded[i - 1]} > {decoded[i]}"
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_quantize_dequantize_e4m4(self, k):
         """Full quantize->dequantize pipeline with E4M4 absmax should work."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
 
         torch.manual_seed(42)
         A = torch.randn(1024, dtype=torch.float16, device="cuda")
@@ -1296,7 +1321,7 @@ class TestE4M4Absmax:
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_sqnr_degradation_small(self, k):
         """SQNR with E4M4 absmax should be close to fp32 absmax (< 1.5 dB loss)."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
 
         torch.manual_seed(123)
         n = 1 << 20  # 1M elements
@@ -1319,14 +1344,13 @@ class TestE4M4Absmax:
 
         degradation = sqnr_f32 - sqnr_e4
         assert degradation < 1.5, (
-            f"K={k}: SQNR degradation {degradation:.2f} dB too large "
-            f"(fp32={sqnr_f32:.2f} dB, e4m4={sqnr_e4:.2f} dB)"
+            f"K={k}: SQNR degradation {degradation:.2f} dB too large (fp32={sqnr_f32:.2f} dB, e4m4={sqnr_e4:.2f} dB)"
         )
 
     @pytest.mark.parametrize("k", [3, 4, 5])
     def test_max_error_bounded(self, k):
         """Max absolute error with E4M4 should not blow up vs fp32 absmax."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
 
         torch.manual_seed(456)
         n = 1 << 18  # 256K elements
@@ -1349,7 +1373,7 @@ class TestE4M4Absmax:
     @pytest.mark.parametrize("n", [1, 31, 32, 33, 1000, 100000])
     def test_various_sizes_e4m4(self, n):
         """Non-aligned sizes should work with E4M4 absmax."""
-        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
 
         A = torch.randn(n, dtype=torch.float16, device="cuda")
         packed, absmax, cb = quantize_kbit(A, k=4, absmax_format="e4m4")

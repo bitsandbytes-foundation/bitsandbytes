@@ -1031,8 +1031,7 @@ def create_normal_float_codebook(k: int, device=None) -> torch.Tensor:
         from scipy.stats import norm
     except ImportError as ie:
         raise ImportError(
-            "Scipy is required for `create_normal_float_codebook`. "
-            "Install `bitsandbytes` with the `[test]` extra.",
+            "Scipy is required for `create_normal_float_codebook`. Install `bitsandbytes` with the `[test]` extra.",
         ) from ie
 
     if device is None:

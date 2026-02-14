@@ -276,9 +276,7 @@ def test_quant_storage_shard_roundtrip(device, quant_type, quant_storage):
     reassembled = torch.cat(shards).reshape(qB.shape)
 
     assert reassembled.dtype == qB.dtype
-    assert torch.equal(
-        reassembled.view(torch.uint8), qB.view(torch.uint8)
-    ), "Bytes changed after shard roundtrip"
+    assert torch.equal(reassembled.view(torch.uint8), qB.view(torch.uint8)), "Bytes changed after shard roundtrip"
 
     out = bnb.functional.gemv_4bit(A, reassembled.t(), state=state)
     torch.testing.assert_close(out, ref)
