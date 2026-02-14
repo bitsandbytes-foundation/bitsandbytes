@@ -49,6 +49,10 @@ For each candidate issue, gather full context. This step is critical — the qua
 # Full issue with all comments
 python3 ~/git/lab_tools/github/query_issues.py show <NUMBER>
 
+# Check for existing open PRs that already address this issue
+gh pr list --search "<NUMBER>" --state open
+gh pr list --search "keyword from issue" --state open
+
 # Find related/duplicate issues (with body previews and last comments)
 python3 ~/git/lab_tools/github/query_issues.py related <NUMBER> -v
 
@@ -61,11 +65,13 @@ python3 ~/git/lab_tools/github/query_issues.py search "specific error text"
 
 For each promising related issue that shows up, run `show` on it to get the full context. Don't stop at the `related` output — read the full body and comments of related issues, especially closed ones where the resolution may be documented.
 
+**IMPORTANT: Check for existing PRs.** If `gh pr list` or the cross-references in the `show` output reveal an open PR that already addresses the issue, do NOT generate a prompt that duplicates that work. Either skip the issue or generate a prompt that tells the worker to review/test/complete the existing PR instead.
+
 For each issue, determine:
 
 1. **What is the root cause?** Read the full body, comments, and tracebacks.
 2. **Has this been fixed before?** Check related closed issues for prior fixes.
-3. **Is there an existing PR?** Check cross-references in the `show` output.
+3. **Is there an existing PR?** Check cross-references in the `show` output AND run `gh pr list --search` to find PRs that may not be cross-referenced. If a PR exists, the worker should review it rather than start from scratch.
 4. **What files need to change?** Look for code pointers in the issue body and comments. If possible, read the actual source files in the bitsandbytes repo to verify.
 5. **How do we verify the fix?** Is there a reproduction script? What tests apply?
 6. **What patterns or context from other issues are relevant?** Maybe three other issues report the same error with different trigger conditions. Maybe a closed issue's fix didn't fully address the problem. This broader context is valuable for the worker agent.
@@ -94,12 +100,12 @@ Write each prompt file using the Write tool. The file name should be `issue-<NUM
 
 Every prompt file should have these sections:
 
-**1. Setup instructions.** The exact commands to create a worktree, plus a pointer to build/test docs:
+**1. Setup instructions.** The exact commands to create a worktree, plus a pointer to build/test docs. **The worktree step is mandatory — the worker agent must NOT work directly in `~/git/bitsandbytes`.**
 
 ```markdown
 ## Setup
 
-Create your working environment by running these commands:
+IMPORTANT: You MUST create a worktree. Do NOT work in ~/git/bitsandbytes directly.
 
     cd ~/git/bitsandbytes
     git worktree add ~/git/bnb-fix-<NUMBER> -b fix/issue-<NUMBER>
@@ -113,17 +119,18 @@ project before making changes so you can verify your setup works.
 
 **3. Related issues — full context.** For each related issue that you identified during your deep-dive, include the full `show` output or a thorough excerpt. For closed issues, the comments often contain the resolution — make sure those are included. Explain how each related issue connects to the target issue.
 
-**4. Additional context from your analysis.** This is where you include everything else you discovered:
+**4. Existing PRs.** If any open PRs already address (or partially address) this issue, list them with their PR number, branch, and a summary of what they change. Tell the worker agent to review the existing PR first and build on it rather than starting from scratch. If no existing PRs were found, state that explicitly so the worker knows it checked.
+
+**5. Additional context from your analysis.** This is where you include everything else you discovered:
 
 - Patterns across multiple issues (e.g. "Issues #933, #966, #1190, #1394, and #1434 all report the same CUDA Setup failure with different CUDA versions — the root cause appears to be X")
 - Relevant technical details from maintainer comments on other issues
 - Source code observations if you read the bitsandbytes source
-- Information about existing PRs — what they change, whether they look correct
 - Anything else the worker agent should know
 
-**5. Your recommended approach.** What you think the fix should look like. Be specific — name files, functions, line numbers. Frame it as guidance, not commands — the worker agent may find things you didn't and should use its own judgment. Include which specific test file(s) or test function(s) the agent should run to verify its fix — not the full suite.
+**6. Your recommended approach.** What you think the fix should look like. Be specific — name files, functions, line numbers. Frame it as guidance, not commands — the worker agent may find things you didn't and should use its own judgment. Include which specific test file(s) or test function(s) the agent should run to verify its fix — not the full suite.
 
-**6. Completion workflow.** Every prompt file must include this section verbatim, with the issue number filled in:
+**7. Completion workflow.** Every prompt file must include this section verbatim, with the issue number filled in:
 
 ```markdown
 ## When You Are Done
@@ -178,7 +185,7 @@ push, and create the PR — but note the failures in the PR description
 and explain what you tried. Do not silently abandon work.
 ```
 
-**7. What NOT to do.** If there are traps, scope boundaries, or things that look tempting but are wrong, list them explicitly. For example: "Don't change the 8bit_blockwise dispatch — only the 32bit dispatch is affected."
+**8. What NOT to do.** If there are traps, scope boundaries, or things that look tempting but are wrong, list them explicitly. For example: "Don't change the 8bit_blockwise dispatch — only the 32bit dispatch is affected."
 
 ### Example Prompt File
 
