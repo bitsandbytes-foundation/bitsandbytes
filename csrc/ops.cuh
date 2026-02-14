@@ -10,6 +10,13 @@
 #include <cstdint>
 #include <iostream>
 #include <stdio.h>
+#ifdef _WIN32
+#include <io.h>
+#include <process.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <common.h>
 #include <cublasLt.h>
