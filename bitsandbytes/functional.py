@@ -1053,10 +1053,94 @@ def create_normal_float_codebook(k: int, device=None) -> torch.Tensor:
     return values
 
 
+def encode_absmax_e4m4(absmax: Tensor, bias: int = 11) -> Tensor:
+    """Encode fp32 absmax values to uint8 using E4M4 micro-float format.
+
+    Format: 4-bit exponent + 4-bit mantissa with IEEE-style subnormals.
+    Normal   (e > 0): 2^(e - bias) * (1 + m/16)
+    Subnormal (e = 0): 2^(1 - bias) * (m/16)
+    Zero     (e = 0, m = 0): 0.0
+
+    Args:
+        absmax: float32 tensor of per-block absolute maximum values.
+        bias: Exponent bias. Default 11 gives range [6.1e-5, 31.0].
+
+    Returns:
+        uint8 tensor of same shape as absmax.
+    """
+    result = torch.zeros_like(absmax, dtype=torch.uint8)
+    nonzero = absmax > 0
+
+    # Compute exponent: floor(log2(absmax))
+    log2_val = torch.log2(absmax[nonzero])
+    e_unbiased = torch.floor(log2_val).to(torch.int32)
+
+    # Clamp to representable range
+    e_biased = (e_unbiased + bias).clamp(0, 15)
+
+    # Handle subnormals (e_biased <= 0 before clamping)
+    is_subnormal = (e_unbiased + bias) <= 0
+    e_biased[is_subnormal] = 0
+
+    # Compute mantissa
+    abs_nz = absmax[nonzero]
+    # Normal: m = round((absmax / 2^e_unbiased - 1) * 16)
+    # Subnormal: m = round(absmax / 2^(1-bias) * 16)
+    mantissa = torch.zeros_like(abs_nz, dtype=torch.int32)
+
+    normal_mask = ~is_subnormal
+    if normal_mask.any():
+        e_ub_normal = e_unbiased[normal_mask]
+        scale = torch.exp2(e_ub_normal.float())
+        m_float = (abs_nz[normal_mask] / scale - 1.0) * 16.0
+        mantissa[normal_mask] = m_float.round().to(torch.int32).clamp(0, 15)
+
+    if is_subnormal.any():
+        subnormal_scale = 2.0 ** (1 - bias)
+        m_float = abs_nz[is_subnormal] / subnormal_scale * 16.0
+        mantissa[is_subnormal] = m_float.round().to(torch.int32).clamp(0, 15)
+
+    encoded = (e_biased << 4 | mantissa).to(torch.uint8)
+    result[nonzero] = encoded
+    return result
+
+
+def decode_absmax_e4m4(encoded: Tensor, bias: int = 11) -> Tensor:
+    """Decode uint8 E4M4 absmax values to fp32.
+
+    Args:
+        encoded: uint8 tensor of E4M4-encoded absmax values.
+        bias: Exponent bias (must match encoding).
+
+    Returns:
+        float32 tensor of decoded absmax values.
+    """
+    raw = encoded.to(torch.int32)
+    e = raw >> 4
+    m = raw & 0xF
+
+    # Normal: 2^(e - bias) * (1 + m/16)
+    # Subnormal: 2^(1 - bias) * (m/16)
+    is_subnormal = e == 0
+    result = torch.zeros_like(encoded, dtype=torch.float32)
+
+    if (~is_subnormal).any():
+        e_normal = e[~is_subnormal].float()
+        m_normal = m[~is_subnormal].float()
+        result[~is_subnormal] = torch.exp2(e_normal - bias) * (1.0 + m_normal / 16.0)
+
+    if is_subnormal.any():
+        m_sub = m[is_subnormal].float()
+        result[is_subnormal] = (2.0 ** (1 - bias)) * (m_sub / 16.0)
+
+    return result
+
+
 def quantize_kbit(
     A: Tensor,
     k: int = 4,
     codebook: Optional[Tensor] = None,
+    absmax_format: str = "fp32",
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Quantize a tensor using k-bit blockwise quantization (blocksize=32).
 
@@ -1067,11 +1151,12 @@ def quantize_kbit(
         k: Bit width (2, 3, 4, or 5). Defaults to 4.
         codebook: Optional float32 codebook tensor with 2^k entries in [-1, 1], sorted ascending.
             If None, uses a precomputed normal-float codebook.
+        absmax_format: Format for absmax storage. "fp32" (default) or "e4m4" (uint8).
 
     Returns:
         Tuple of (packed, absmax, codebook):
         - packed: int32 tensor of bit-plane packed quantized values.
-        - absmax: float32 tensor of per-block absolute maximum values.
+        - absmax: Tensor of per-block absolute maximum values (float32 or uint8).
         - codebook: The codebook tensor used (useful when auto-generated).
     """
     if codebook is None:
@@ -1081,6 +1166,10 @@ def quantize_kbit(
 
     A_flat = A.contiguous().view(-1)
     packed, absmax = torch.ops.bitsandbytes.quantize_kbit(A_flat, codebook, k)
+
+    if absmax_format == "e4m4":
+        absmax = encode_absmax_e4m4(absmax)
+
     return packed, absmax, codebook
 
 
@@ -1096,7 +1185,8 @@ def dequantize_kbit(
 
     Args:
         packed: int32 tensor of bit-plane packed values (from quantize_kbit).
-        absmax: float32 tensor of per-block absmax values (from quantize_kbit).
+        absmax: Tensor of per-block absmax values (from quantize_kbit).
+            Supports float32 or uint8 (E4M4 format).
         codebook: float32 codebook tensor with 2^k entries.
         k: Bit width (2, 3, 4, or 5).
         n: Number of original elements.

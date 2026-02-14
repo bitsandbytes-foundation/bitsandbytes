@@ -469,5 +469,9 @@ def _(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        absmax.dtype in (torch.float32, torch.uint8),
+        lambda: f"absmax must be float32 or uint8 (E4M4), got {absmax.dtype}",
+    )
     num_blocks = -(n // -32)
     return torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)

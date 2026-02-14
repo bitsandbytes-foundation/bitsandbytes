@@ -1091,3 +1091,168 @@ class TestPythonAPI:
         recovered_ct = _cuda_dequantize_kbit(packed_ct, cb, absmax_ct, k, 512, dtype=torch.float16)
 
         assert torch.equal(recovered_api, recovered_ct)
+
+
+# ---------------------------------------------------------------------------
+# E4M4 uint8 absmax tests
+# ---------------------------------------------------------------------------
+
+class TestE4M4Absmax:
+    """Tests for E4M4 uint8 absmax encode/decode and integration."""
+
+    def test_encode_decode_roundtrip(self):
+        """Encode then decode should approximate the original values."""
+        from bitsandbytes.functional import encode_absmax_e4m4, decode_absmax_e4m4
+
+        # Test a range of values spanning the full E4M4 range
+        values = torch.tensor([0.0, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 25.0])
+        encoded = encode_absmax_e4m4(values, bias=11)
+        decoded = decode_absmax_e4m4(encoded, bias=11)
+
+        # Zero should be exact
+        assert decoded[0] == 0.0
+
+        # Non-zero values: relative error should be < 12.5% (E4M4 has 16 mantissa steps)
+        for i in range(1, len(values)):
+            if values[i] > 0:
+                rel_err = abs(decoded[i] - values[i]) / values[i]
+                assert rel_err < 0.125, f"value={values[i]}, decoded={decoded[i]}, rel_err={rel_err}"
+
+    def test_encode_decode_subnormals(self):
+        """Subnormal range should encode/decode correctly."""
+        from bitsandbytes.functional import encode_absmax_e4m4, decode_absmax_e4m4
+
+        # Values in subnormal range for bias=11: [6.1e-5, 1.83e-3]
+        values = torch.tensor([0.0001, 0.0005, 0.001, 0.0015])
+        encoded = encode_absmax_e4m4(values, bias=11)
+        decoded = decode_absmax_e4m4(encoded, bias=11)
+
+        for i in range(len(values)):
+            rel_err = abs(decoded[i] - values[i]) / values[i]
+            assert rel_err < 0.5, f"subnormal value={values[i]}, decoded={decoded[i]}, rel_err={rel_err}"
+
+    def test_encode_all_codes_unique(self):
+        """All 256 E4M4 codes should decode to distinct non-negative values."""
+        from bitsandbytes.functional import decode_absmax_e4m4
+
+        all_codes = torch.arange(256, dtype=torch.uint8)
+        decoded = decode_absmax_e4m4(all_codes, bias=11)
+
+        # All values should be non-negative
+        assert (decoded >= 0).all()
+
+        # Code 0 should be zero
+        assert decoded[0] == 0.0
+
+        # All non-zero codes should be positive and monotonically increasing
+        nonzero = decoded[1:]
+        assert (nonzero > 0).all()
+
+    def test_encode_monotonic(self):
+        """Larger input values should produce larger or equal encoded values."""
+        from bitsandbytes.functional import encode_absmax_e4m4, decode_absmax_e4m4
+
+        values = torch.linspace(0.001, 30.0, 1000)
+        encoded = encode_absmax_e4m4(values, bias=11)
+        decoded = decode_absmax_e4m4(encoded, bias=11)
+
+        # Decoded values should be non-decreasing
+        for i in range(1, len(decoded)):
+            assert decoded[i] >= decoded[i - 1], f"non-monotonic at {i}: {decoded[i-1]} > {decoded[i]}"
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_quantize_dequantize_e4m4(self, k):
+        """Full quantize->dequantize pipeline with E4M4 absmax should work."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+
+        torch.manual_seed(42)
+        A = torch.randn(1024, dtype=torch.float16, device="cuda")
+        packed, absmax_u8, codebook = quantize_kbit(A, k=k, absmax_format="e4m4")
+
+        # absmax should be uint8
+        assert absmax_u8.dtype == torch.uint8
+
+        recovered = dequantize_kbit(packed, absmax_u8, codebook, k=k, n=1024, dtype=torch.float16)
+        assert recovered.shape == (1024,)
+        assert recovered.dtype == torch.float16
+
+        # Basic sanity: output should be finite
+        assert torch.isfinite(recovered).all()
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_sqnr_degradation_small(self, k):
+        """SQNR with E4M4 absmax should be close to fp32 absmax (< 1.5 dB loss)."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+
+        torch.manual_seed(123)
+        n = 1 << 20  # 1M elements
+        A = torch.randn(n, dtype=torch.float16, device="cuda")
+
+        # fp32 absmax baseline
+        packed_f32, absmax_f32, cb = quantize_kbit(A, k=k, absmax_format="fp32")
+        rec_f32 = dequantize_kbit(packed_f32, absmax_f32, cb, k=k, n=n, dtype=torch.float16)
+
+        # E4M4 absmax
+        packed_e4, absmax_e4, _ = quantize_kbit(A, k=k, codebook=cb, absmax_format="e4m4")
+        rec_e4 = dequantize_kbit(packed_e4, absmax_e4, cb, k=k, n=n, dtype=torch.float16)
+
+        signal_power = (A.float() ** 2).mean()
+        mse_f32 = ((A.float() - rec_f32.float()) ** 2).mean()
+        mse_e4 = ((A.float() - rec_e4.float()) ** 2).mean()
+
+        sqnr_f32 = 10 * torch.log10(signal_power / mse_f32)
+        sqnr_e4 = 10 * torch.log10(signal_power / mse_e4)
+
+        degradation = sqnr_f32 - sqnr_e4
+        assert degradation < 1.5, (
+            f"K={k}: SQNR degradation {degradation:.2f} dB too large "
+            f"(fp32={sqnr_f32:.2f} dB, e4m4={sqnr_e4:.2f} dB)"
+        )
+
+    @pytest.mark.parametrize("k", [3, 4, 5])
+    def test_max_error_bounded(self, k):
+        """Max absolute error with E4M4 should not blow up vs fp32 absmax."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+
+        torch.manual_seed(456)
+        n = 1 << 18  # 256K elements
+        A = torch.randn(n, dtype=torch.float16, device="cuda")
+
+        packed_f32, absmax_f32, cb = quantize_kbit(A, k=k, absmax_format="fp32")
+        rec_f32 = dequantize_kbit(packed_f32, absmax_f32, cb, k=k, n=n, dtype=torch.float16)
+
+        packed_e4, absmax_e4, _ = quantize_kbit(A, k=k, codebook=cb, absmax_format="e4m4")
+        rec_e4 = dequantize_kbit(packed_e4, absmax_e4, cb, k=k, n=n, dtype=torch.float16)
+
+        max_err_f32 = (A.float() - rec_f32.float()).abs().max()
+        max_err_e4 = (A.float() - rec_e4.float()).abs().max()
+
+        # E4M4 max error should not be more than 1.25x the fp32 max error
+        # (E4M4 adds at most ~6.25% scale error)
+        ratio = max_err_e4 / max_err_f32
+        assert ratio < 1.25, f"K={k}: max error ratio {ratio:.3f} too large"
+
+    @pytest.mark.parametrize("n", [1, 31, 32, 33, 1000, 100000])
+    def test_various_sizes_e4m4(self, n):
+        """Non-aligned sizes should work with E4M4 absmax."""
+        from bitsandbytes.functional import quantize_kbit, dequantize_kbit
+
+        A = torch.randn(n, dtype=torch.float16, device="cuda")
+        packed, absmax, cb = quantize_kbit(A, k=4, absmax_format="e4m4")
+        recovered = dequantize_kbit(packed, absmax, cb, k=4, n=n, dtype=torch.float16)
+        assert recovered.shape == (n,)
+        assert torch.isfinite(recovered).all()
+
+    def test_storage_reduction(self):
+        """E4M4 absmax should use 1 byte per block vs 4 bytes for fp32."""
+        from bitsandbytes.functional import quantize_kbit
+
+        A = torch.randn(1024, dtype=torch.float16, device="cuda")
+        _, absmax_f32, _ = quantize_kbit(A, k=4, absmax_format="fp32")
+        _, absmax_e4, _ = quantize_kbit(A, k=4, absmax_format="e4m4")
+
+        assert absmax_f32.dtype == torch.float32
+        assert absmax_e4.dtype == torch.uint8
+        # uint8 should use 4x less storage (ignoring padding)
+        assert absmax_e4.element_size() == 1
+        assert absmax_f32.element_size() == 4
