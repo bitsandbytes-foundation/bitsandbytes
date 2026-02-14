@@ -125,21 +125,7 @@ __global__ void kgemm_4bit_inference_naive(
 
 template <typename T, int FUNC> __global__ void kfunc(T* A, T* B, T value, long n);
 
-// K-bit blockwise quantization/dequantization kernels (blocksize=32, K=2..5)
-template <int K>
-__global__ void kTestPackUnpack_kbit(const unsigned char* indices, unsigned char* recovered, const int n);
-template <int K>
-__global__ void kTestPackWrite_kbit(const unsigned char* indices, unsigned int* packed_out, const int n);
-template <int K>
-__global__ void kTestReadUnpack_kbit(const unsigned int* packed_in, unsigned char* indices_out, const int n);
-template <int K>
-__global__ void kTestCodebookLookup_kbit(
-    const unsigned char* indices, const float* codebook, float* out, const int n);
-template <typename T, int K>
-__global__ void kQuantizeBlockwise_kbit(
-    const float* codebook, const T* A, float* absmax, unsigned int* packed_out, const int n);
-template <typename T, int K>
-__global__ void kDequantizeBlockwise_kbit(
-    const unsigned int* packed_in, const float* codebook, const float* absmax, T* out, const int n);
+// K-bit kernel definitions live in ops.cu (not kernels.cu) to keep kernel
+// and launch wrapper in the same compilation unit. No declarations needed here.
 
 #endif

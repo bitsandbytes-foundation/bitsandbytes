@@ -1,94 +1,88 @@
 # K-Bit Quantization Implementation Progress
 
 **Branch**: `feature/kbit-quantization` (worktree at `~/git/bitsandbytes-kbit`)
-**Spec files**: `cuda-spec.md`, `cuda-spec-additions.md` (in main repo, gitignored)
+**Spec files**: `cuda-spec.md`, `cuda-spec-additions.md` (in main repo root, gitignored)
 
-## Completed
+## Status: Stages 0-5 COMPLETE, 157/157 tests passing
 
-### Stage 0: Pure Python Reference -- DONE
-- File: `tests/test_kbit_quantization.py`
-- Functions: `create_normal_float_codebook()`, `quantize_kbit_ref()`, `dequantize_kbit_ref()`, `pack_kbit_ref()`, `unpack_kbit_ref()`
-- 57 tests pass (codebook generation, round-trip, MSE ordering, error bounds, pack/unpack)
-- Serves as permanent ground truth for all CUDA validation
+All CUDA kernels are working. The full quantize/dequantize pipeline runs on GPU, validated against the Python reference.
 
-### Stages 1-5: CUDA Kernels -- CODE WRITTEN, BUILD ISSUE
+## What's Done
 
-All CUDA kernel code is written and compiles, but there's a **device linker issue** preventing the kernels from appearing in the final `.so`.
+### Stage 0: Pure Python Reference
+- File: `tests/test_kbit_quantization.py` (top half)
+- `create_normal_float_codebook(k)` -- generates 2^k NF codebook from N(0,1) quantiles
+- `quantize_kbit_ref(A, codebook)` -- pure PyTorch blockwise quantize (blocksize=32)
+- `dequantize_kbit_ref(indices, absmax, codebook)` -- pure PyTorch dequantize
+- `pack_kbit_ref(indices, k)` / `unpack_kbit_ref(packed, k, n)` -- bit-plane packing reference
+- Tests: `TestCodebook`, `TestQuantizeRef`, `TestPackUnpackRef`
 
-#### Files modified:
+### Stages 1-3: CUDA Test Kernels (temporary scaffolding)
+- `kTestPackUnpack_kbit<K>` -- in-warp __ballot_sync pack / bit-extract unpack round-trip
+- `kTestPackWrite_kbit<K>` / `kTestReadUnpack_kbit<K>` -- persistent memory format
+- `kTestCodebookLookup_kbit<K>` -- __shfl_sync codebook lookup
+- Tests: `TestStage1PackUnpackCUDA`, `TestStage2PackMemoryCUDA`, `TestStage3CodebookLookupCUDA`
 
-1. **`csrc/kernels.cu`** (appended at end, ~200 lines):
-   - `warp_reduce_absmax()` -- device helper for warp-level max reduction
-   - `pack_kbit_warp<K>()` -- device helper, __ballot_sync bit-plane packing
-   - `unpack_kbit_warp<K>()` -- device helper, bit extraction unpacking
-   - `kTestPackUnpack_kbit<K>` -- Stage 1 test kernel (in-warp round-trip)
-   - `kTestPackWrite_kbit<K>` -- Stage 2 test kernel (pack to global memory)
-   - `kTestReadUnpack_kbit<K>` -- Stage 2 test kernel (read from global memory)
-   - `kTestCodebookLookup_kbit<K>` -- Stage 3 test kernel (shfl_sync codebook)
-   - `kQuantizeBlockwise_kbit<T, K>` -- Stage 4 production quantize kernel
-   - `kDequantizeBlockwise_kbit<T, K>` -- Stage 5 production dequantize kernel
-   - Template instantiation macros for K=2,3,4,5 x T=half,bf16,float
+### Stage 4: Full Quantize Kernel
+- `kQuantizeBlockwise_kbit<T, K>` -- warp-level absmax reduction, branchless codebook search, ballot_sync bit-plane packing
+- CUDA indices match Python reference exactly
+- Tests: `TestStage4QuantizeCUDA` (absmax correctness, indices match ref, all dtypes, various sizes)
 
-2. **`csrc/kernels.cuh`** (appended before `#endif`):
-   - Forward declarations of all kernel templates
+### Stage 5: Full Dequantize Kernel
+- `kDequantizeBlockwise_kbit<T, K>` -- bit-plane unpacking, shfl_sync codebook lookup, absmax scaling
+- Round-trip error within analytical bounds for all K
+- Tests: `TestStage5DequantizeCUDA` (matches ref, all dtypes, various sizes, error bounds)
 
-3. **`csrc/ops.cu`** (appended at end, ~100 lines):
-   - Launch wrappers: `test_pack_unpack_kbit<K>()`, `test_pack_write_kbit<K>()`, etc.
-   - Launch wrappers: `quantizeBlockwise_kbit<T,K>()`, `dequantizeBlockwise_kbit<T,K>()`
-   - Grid calculation: `ceil(n/32)/8` CUDA blocks, 256 threads per block
-   - Template instantiation macros
+## Files Modified (relative to main branch)
 
-4. **`csrc/pythonInterface.cpp`** (two sections added):
-   - Unmangled wrappers (inside `#if BUILD_CUDA || BUILD_HIP`): `test_pack_unpack_k{K}()`, `quantize_kbit_{fp16,bf16,fp32}_k{K}()`, etc.
-   - extern "C" wrappers: `ctest_pack_unpack_k{K}()`, `cquantize_kbit_{tname}_k{K}()`, `cdequantize_kbit_{tname}_k{K}()`, etc.
+| File | What changed |
+|------|-------------|
+| `csrc/ops.cu` | Kernel definitions + device helpers + launch wrappers (~280 lines appended) |
+| `csrc/kernels.cu` | Removed: just a comment pointing to ops.cu |
+| `csrc/kernels.cuh` | Removed stale forward declarations (was causing "invalid device function") |
+| `csrc/pythonInterface.cpp` | Unmangled wrappers + extern "C" exports for all kbit functions |
+| `CMakeLists.txt` | Added `CUDA_RESOLVE_DEVICE_SYMBOLS ON` |
+| `tests/test_kbit_quantization.py` | Full test file: Python ref + CUDA tests + ctypes wrappers |
 
-5. **`tests/test_kbit_quantization.py`** (comprehensive test file):
-   - Python reference tests (Stage 0): `TestCodebook`, `TestQuantizeRef`, `TestPackUnpackRef`
-   - CUDA ctypes wrappers: `_cuda_test_pack_unpack()`, `_cuda_quantize_kbit()`, `_cuda_dequantize_kbit()`, etc.
-   - CUDA tests (Stages 1-5): `TestStage1PackUnpackCUDA`, `TestStage2PackMemoryCUDA`, `TestStage3CodebookLookupCUDA`, `TestStage4QuantizeCUDA`, `TestStage5DequantizeCUDA`
+### Key Architecture Decision During Implementation
 
-## Current Blocker: RDC Device Linking
+Kernel definitions MUST live in `ops.cu` (same file as launch wrappers), not in `kernels.cu`. The project uses CUDA separable compilation (`-rdc=true`), and having forward declarations in `kernels.cuh` (without `__restrict__`) alongside definitions in a different TU (with `__restrict__`) caused mismatched CUDA function registration. Keeping everything in one compilation unit avoids this entirely.
 
-### Problem
-The compiled kernels exist in the `.o` object files (verified via `nm`), and the C-level symbols are exported in the final `.so` (verified via `nm -D`), but the **CUDA device code** (fatbinary) does not contain the new kernel functions. Running any kernel gives "invalid device function".
+## C Interface (exported symbols)
 
-### Root Cause
-The project uses `-rdc=true` (relocatable device code) for separate compilation. The device link step (`cmake_device_link.o`) needs to resolve all device-side references. The template instantiations in `kernels.cu` produce weak symbols in the object file, but the device linker may not be pulling them in because they're not referenced from the device link compilation unit.
+Test kernels (prefix `ctest_`):
+- `ctest_pack_unpack_k{2,3,4,5}(indices, recovered, n)`
+- `ctest_pack_write_k{2,3,4,5}(indices, packed_out, n)`
+- `ctest_read_unpack_k{2,3,4,5}(packed_in, indices_out, n)`
+- `ctest_codebook_lookup_k{2,3,4,5}(indices, codebook, out, n)`
 
-### How to Fix (options)
+Production kernels:
+- `cquantize_kbit_{fp16,bf16,fp32}_k{2,3,4,5}(codebook, A, absmax, packed_out, n)`
+- `cdequantize_kbit_{fp16,bf16,fp32}_k{2,3,4,5}(packed_in, codebook, absmax, out, n, stream)`
 
-1. **Add `__global__` function declarations to the device link file**: Check how CMake generates the device link step and ensure it sees all `.cu` object files.
-
-2. **Use `--relocatable-device-code=false` for the kbit kernels**: If the kbit kernels don't need cross-file device calls, they could be compiled without RDC. But this requires CMake changes.
-
-3. **Move kernel definitions to the same file as the launch wrappers**: Instead of splitting between `kernels.cu` (kernel definitions) and `ops.cu` (launch wrappers), put everything in a single `.cu` file. This is the simplest fix -- add the kernel bodies directly to `ops.cu` or create a new `kbit_kernels.cu` that contains both kernels and launch wrappers.
-
-4. **Check CMakeLists.txt for device link configuration**: The CMake `CUDA_SEPARABLE_COMPILATION` property or `CUDA_RESOLVE_DEVICE_SYMBOLS` might need adjustment.
-
-**Recommended fix**: Option 3 -- move all kbit kernel code from `kernels.cu` into `ops.cu` (or a new self-contained file). This sidesteps the RDC linking issue entirely since the kernel and its launch site would be in the same compilation unit.
-
-## Build Instructions
+## Build & Test
 
 ```bash
 cd ~/git/bitsandbytes-kbit
 cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY="89;90" -S . -B build
 make -C build -j$(nproc)
 ln -sf libbitsandbytes_cuda124.so bitsandbytes/libbitsandbytes_cuda128.so
-```
-
-## Test Instructions
-
-```bash
-# Python-only tests (all pass)
-python -m pytest tests/test_kbit_quantization.py -k "not CUDA" -v
-
-# CUDA tests (currently fail due to device link issue)
-python -m pytest tests/test_kbit_quantization.py -k "CUDA" -v
+python -m pytest tests/test_kbit_quantization.py -p no:randomly -v   # 157 pass
 ```
 
 ## Not Yet Implemented
 
-- Stages 6-8: Error analysis, NF4 cross-validation, performance benchmarking (test code not written)
-- Python API in `bitsandbytes/functional.py` (quantize_kbit, dequantize_kbit)
-- `torch.library` registration in `bitsandbytes/_ops.py`
-- Codebook caching/registration system
+### Stages 6-8 (test scripts only, no new kernels needed)
+- **Stage 6**: Round-trip error analysis (analytical bounds, empirical MSE on large tensors)
+- **Stage 7**: Cross-validate K=4 against existing NF4 dequant
+- **Stage 8**: Performance benchmarking (measure HBM bandwidth utilization, target 60-80%)
+
+### Python API
+- `bitsandbytes/functional.py`: `quantize_kbit()` and `dequantize_kbit()` public functions
+- `bitsandbytes/_ops.py`: `torch.library` registration
+- Codebook caching/registration system (precomputed NF codebooks for K=2..5)
+
+### Cleanup
+- Remove temporary test kernels (Stages 1-3) after confirming Stages 4+5 are solid
+- Remove `ctest_*` exports from pythonInterface.cpp
+- Update KBIT_PROGRESS.md or remove it

@@ -647,8 +647,182 @@ template void percentileClipping(float* g, float* gnorm_vec, int step, const int
 template void percentileClipping(half* g, float* gnorm_vec, int step, const int n);
 
 // ===========================================================================
-// K-bit blockwise quantization launch wrappers
+// K-bit blockwise quantization/dequantization (blocksize=32, K=2..5)
+//
+// Kernel definitions and launch wrappers in the same compilation unit
+// to avoid RDC device linking issues with template instantiations.
 // ===========================================================================
+
+// ---- Device helpers ----
+
+__device__ __forceinline__ float warp_reduce_absmax_kbit(float val) {
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1)
+        val = fmaxf(val, __shfl_down_sync(0xFFFFFFFF, val, offset));
+    return __shfl_sync(0xFFFFFFFF, val, 0);
+}
+
+template <int K>
+__device__ __forceinline__ void pack_kbit_warp(unsigned char qval, unsigned int* packed_words) {
+    #pragma unroll
+    for (int bit = 0; bit < K; bit++)
+        packed_words[bit] = __ballot_sync(0xFFFFFFFF, (qval >> bit) & 1);
+}
+
+template <int K>
+__device__ __forceinline__ unsigned char unpack_kbit_warp(const unsigned int* packed_words, int lane_id) {
+    unsigned char val = 0;
+    #pragma unroll
+    for (int bit = 0; bit < K; bit++)
+        val |= ((packed_words[bit] >> lane_id) & 1) << bit;
+    return val;
+}
+
+// ---- Stage 1: Pack/unpack round-trip test kernel ----
+
+template <int K>
+__global__ void kTestPackUnpack_kbit(
+    const unsigned char* __restrict__ indices,
+    unsigned char* __restrict__ recovered,
+    const int n
+) {
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_id * 32;
+    if (block_start >= n) return;
+    unsigned char qval = (block_start + lane_id < n) ? indices[block_start + lane_id] : 0;
+    unsigned int packed[K];
+    pack_kbit_warp<K>(qval, packed);
+    unsigned char recovered_val = unpack_kbit_warp<K>(packed, lane_id);
+    if (block_start + lane_id < n)
+        recovered[block_start + lane_id] = recovered_val;
+}
+
+// ---- Stage 2: Pack-write and read-unpack test kernels ----
+
+template <int K>
+__global__ void kTestPackWrite_kbit(
+    const unsigned char* __restrict__ indices,
+    unsigned int* __restrict__ packed_out,
+    const int n
+) {
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_id * 32;
+    if (block_start >= n) return;
+    unsigned char qval = (block_start + lane_id < n) ? indices[block_start + lane_id] : 0;
+    unsigned int packed[K];
+    pack_kbit_warp<K>(qval, packed);
+    if (lane_id < K)
+        packed_out[warp_id * K + lane_id] = packed[lane_id];
+}
+
+template <int K>
+__global__ void kTestReadUnpack_kbit(
+    const unsigned int* __restrict__ packed_in,
+    unsigned char* __restrict__ indices_out,
+    const int n
+) {
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_id * 32;
+    if (block_start >= n) return;
+    unsigned int packed[K];
+    #pragma unroll
+    for (int bit = 0; bit < K; bit++) {
+        unsigned int word = (lane_id == bit) ? packed_in[warp_id * K + bit] : 0;
+        packed[bit] = __shfl_sync(0xFFFFFFFF, word, bit);
+    }
+    unsigned char val = unpack_kbit_warp<K>(packed, lane_id);
+    if (block_start + lane_id < n)
+        indices_out[block_start + lane_id] = val;
+}
+
+// ---- Stage 3: Codebook shuffle lookup test kernel ----
+
+template <int K>
+__global__ void kTestCodebookLookup_kbit(
+    const unsigned char* __restrict__ indices,
+    const float* __restrict__ codebook,
+    float* __restrict__ out,
+    const int n
+) {
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_id * 32;
+    if (block_start >= n) return;
+    float cb = (lane_id < (1 << K)) ? codebook[lane_id] : 0.0f;
+    unsigned char idx = (block_start + lane_id < n) ? indices[block_start + lane_id] : 0;
+    float val = __shfl_sync(0xFFFFFFFF, cb, idx);
+    if (block_start + lane_id < n)
+        out[block_start + lane_id] = val;
+}
+
+// ---- Stage 4: Full quantize kernel ----
+
+template <typename T, int K>
+__global__ void kQuantizeBlockwise_kbit(
+    const float* __restrict__ codebook,
+    const T* __restrict__ A,
+    float* __restrict__ absmax,
+    unsigned int* __restrict__ packed_out,
+    const int n
+) {
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_id * 32;
+    if (block_start >= n) return;
+    float val = (block_start + lane_id < n) ? (float)A[block_start + lane_id] : 0.0f;
+    float amax = warp_reduce_absmax_kbit(fabsf(val));
+    float amax_safe = fmaxf(amax, 1e-8f);
+    if (lane_id == 0) absmax[warp_id] = amax;
+    float normalized = val / amax_safe;
+    float cb = (lane_id < (1 << K)) ? codebook[lane_id] : 0.0f;
+    unsigned char best_idx = 0;
+    float best_dist = 1e10f;
+    #pragma unroll
+    for (int i = 0; i < (1 << K); i++) {
+        float cb_val = __shfl_sync(0xFFFFFFFF, cb, i);
+        float dist = fabsf(normalized - cb_val);
+        bool closer = (dist < best_dist);
+        best_dist = closer ? dist : best_dist;
+        best_idx = closer ? (unsigned char)i : best_idx;
+    }
+    unsigned int packed[K];
+    pack_kbit_warp<K>(best_idx, packed);
+    if (lane_id < K)
+        packed_out[warp_id * K + lane_id] = packed[lane_id];
+}
+
+// ---- Stage 5: Full dequantize kernel ----
+
+template <typename T, int K>
+__global__ void kDequantizeBlockwise_kbit(
+    const unsigned int* __restrict__ packed_in,
+    const float* __restrict__ codebook,
+    const float* __restrict__ absmax,
+    T* __restrict__ out,
+    const int n
+) {
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_id * 32;
+    if (block_start >= n) return;
+    float cb = (lane_id < (1 << K)) ? codebook[lane_id] : 0.0f;
+    float amax = absmax[warp_id];
+    unsigned int packed[K];
+    #pragma unroll
+    for (int bit = 0; bit < K; bit++) {
+        unsigned int word = (lane_id == bit) ? packed_in[warp_id * K + bit] : 0;
+        packed[bit] = __shfl_sync(0xFFFFFFFF, word, bit);
+    }
+    unsigned char idx = unpack_kbit_warp<K>(packed, lane_id);
+    float val = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+    if (block_start + lane_id < n)
+        out[block_start + lane_id] = (T)val;
+}
+
+// ---- Launch wrappers ----
 
 #define KBIT_WARPS_PER_BLOCK 8
 #define KBIT_THREADS_PER_BLOCK (KBIT_WARPS_PER_BLOCK * 32)  // 256
