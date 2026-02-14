@@ -574,6 +574,10 @@ str2optimizer32bit = {
         lib.cademamix32bit_grad_fp16,
         lib.cademamix32bit_grad_bf16,
     ),
+    "lars": (
+        lib.cmomentum32bit_grad_32,
+        lib.cmomentum32bit_grad_16,
+    ),
 }
 
 str2optimizer8bit_blockwise = {
