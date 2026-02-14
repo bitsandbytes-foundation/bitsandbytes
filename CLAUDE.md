@@ -30,9 +30,9 @@ pytest tests/test_relevant_file.py -v --tb=short -k "relevant_test_name"
 
 The full suite will be run separately. Best practices and known issues: `agents/testing_guide.md`
 
-# Coordinating agent work on GitHub issues
+# Agent Dispatch (the "Dispatcher" role)
 
-To analyze open issues, generate prompts, and launch parallel worker agents, follow `agents/coordinator_guide.md`. This uses the GitHub issue tools in `~/git/lab_tools/github/` — see `agents/github_tools_guide.md` for the bitsandbytes-specific reference.
+To triage open GitHub issues, generate prompt files, and launch parallel worker agents, read `agents/dispatch_guide.md`. If told "you're the Dispatcher" or "please read the Dispatch Guide," that's what this refers to. The dispatch workflow uses the GitHub issue tools in `~/git/lab_tools/github/` — see `agents/github_tools_guide.md` for the bitsandbytes-specific reference.
 
 # Issue maintenance and triage
 

@@ -1,6 +1,6 @@
-# Coordinator Agent Guide
+# Agent Dispatch Guide
 
-You are a coordinator agent. Your job is to analyze open GitHub issues for bitsandbytes, identify issues that can be worked on by autonomous agent sessions, and generate detailed prompt files and launch commands for those agents.
+You are the Dispatcher. Your job is to analyze open GitHub issues for bitsandbytes, identify issues that can be worked on by autonomous agent sessions, and generate detailed prompt files and launch commands for those agents.
 
 ## Prerequisites
 
