@@ -645,3 +645,99 @@ MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);
 
 template void percentileClipping(float* g, float* gnorm_vec, int step, const int n);
 template void percentileClipping(half* g, float* gnorm_vec, int step, const int n);
+
+// ===========================================================================
+// K-bit blockwise quantization launch wrappers
+// ===========================================================================
+
+#define KBIT_WARPS_PER_BLOCK 8
+#define KBIT_THREADS_PER_BLOCK (KBIT_WARPS_PER_BLOCK * 32)  // 256
+
+// ---- Test kernel launchers (Stage 1-3) ----
+
+template <int K>
+void test_pack_unpack_kbit(const unsigned char* indices, unsigned char* recovered, int n) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kTestPackUnpack_kbit<K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(indices, recovered, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <int K>
+void test_pack_write_kbit(const unsigned char* indices, unsigned int* packed_out, int n) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kTestPackWrite_kbit<K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(indices, packed_out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <int K>
+void test_read_unpack_kbit(const unsigned int* packed_in, unsigned char* indices_out, int n) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kTestReadUnpack_kbit<K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(packed_in, indices_out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <int K>
+void test_codebook_lookup_kbit(const unsigned char* indices, const float* codebook, float* out, int n) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kTestCodebookLookup_kbit<K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(indices, codebook, out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// ---- Production kernel launchers (Stage 4-5) ----
+
+template <typename T, int K>
+void quantizeBlockwise_kbit(
+    const float* codebook, const T* A, float* absmax, unsigned int* packed_out, int n
+) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kQuantizeBlockwise_kbit<T, K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(codebook, A, absmax, packed_out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <typename T, int K>
+void dequantizeBlockwise_kbit(
+    const unsigned int* packed_in, const float* codebook, const float* absmax, T* out, int n, cudaStream_t stream
+) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kDequantizeBlockwise_kbit<T, K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(
+        packed_in, codebook, absmax, out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// ---- Template instantiations ----
+
+#define INSTANTIATE_TEST_KBIT_OPS(K) \
+    template void test_pack_unpack_kbit<K>(const unsigned char*, unsigned char*, int); \
+    template void test_pack_write_kbit<K>(const unsigned char*, unsigned int*, int); \
+    template void test_read_unpack_kbit<K>(const unsigned int*, unsigned char*, int); \
+    template void test_codebook_lookup_kbit<K>(const unsigned char*, const float*, float*, int);
+
+INSTANTIATE_TEST_KBIT_OPS(2)
+INSTANTIATE_TEST_KBIT_OPS(3)
+INSTANTIATE_TEST_KBIT_OPS(4)
+INSTANTIATE_TEST_KBIT_OPS(5)
+
+#define INSTANTIATE_KBIT_OPS(T, K) \
+    template void quantizeBlockwise_kbit<T, K>( \
+        const float*, const T*, float*, unsigned int*, int); \
+    template void dequantizeBlockwise_kbit<T, K>( \
+        const unsigned int*, const float*, const float*, T*, int, cudaStream_t);
+
+INSTANTIATE_KBIT_OPS(half, 2)
+INSTANTIATE_KBIT_OPS(half, 3)
+INSTANTIATE_KBIT_OPS(half, 4)
+INSTANTIATE_KBIT_OPS(half, 5)
+INSTANTIATE_KBIT_OPS(__nv_bfloat16, 2)
+INSTANTIATE_KBIT_OPS(__nv_bfloat16, 3)
+INSTANTIATE_KBIT_OPS(__nv_bfloat16, 4)
+INSTANTIATE_KBIT_OPS(__nv_bfloat16, 5)
+INSTANTIATE_KBIT_OPS(float, 2)
+INSTANTIATE_KBIT_OPS(float, 3)
+INSTANTIATE_KBIT_OPS(float, 4)
+INSTANTIATE_KBIT_OPS(float, 5)
