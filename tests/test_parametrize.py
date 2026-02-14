@@ -70,22 +70,26 @@ def test_replace_parameter_4bit(device, dtype, quant_type, compress_statistics, 
     relerr = (err / (original_param.abs().float() + 1e-8)).mean()
     err_mean = err.mean()
 
-    # Expected error bounds from test_functional.py
+    # Expected (mean, std) from 200 samples on RTX 4090. Worst-case std across dtypes.
+    # Threshold = mean + N_SIGMA * std avoids flaky failures across GPU architectures.
+    N_SIGMA = 7
     expected_errors = {
         "nf4": {
-            64: {"abs": 0.072792, "rel": 0.203299},
-            128: {"abs": 0.076835, "rel": 0.215252},
-            256: {"abs": 0.080326, "rel": 0.226044},
+            64: {"abs": (0.072796, 0.000072), "rel": (0.203353, 0.000326)},
+            128: {"abs": (0.076839, 0.000093), "rel": (0.215258, 0.000367)},
+            256: {"abs": (0.080322, 0.000100), "rel": (0.226056, 0.000392)},
         },
         "fp4": {
-            64: {"abs": 0.096545, "rel": 0.260130},
-            128: {"abs": 0.102947, "rel": 0.275734},
-            256: {"abs": 0.108685, "rel": 0.289842},
+            64: {"abs": (0.096547, 0.000112), "rel": (0.260144, 0.000379)},
+            128: {"abs": (0.102949, 0.000138), "rel": (0.275763, 0.000391)},
+            256: {"abs": (0.108681, 0.000177), "rel": (0.289835, 0.000507)},
         },
     }
 
-    assert err_mean < expected_errors[quant_type][blocksize]["abs"] + 1e-3, f"Mean abs error {err_mean:.6f} too high"
-    assert relerr < expected_errors[quant_type][blocksize]["rel"] + 1e-3, f"Mean rel error {relerr:.6f} too high"
+    abs_mean, abs_std = expected_errors[quant_type][blocksize]["abs"]
+    rel_mean, rel_std = expected_errors[quant_type][blocksize]["rel"]
+    assert err_mean < abs_mean + N_SIGMA * abs_std, f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
+    assert relerr < rel_mean + N_SIGMA * rel_std, f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
 
 
 @pytest.mark.parametrize("device", get_available_devices())
@@ -120,12 +124,13 @@ def test_moe_parameter_shape(device, dtype):
     relerr = (err / (original_param.abs().float() + 1e-8)).mean()
     err_mean = err.mean()
 
-    # Use slightly looser bounds for higher dimensional tensors
-    abs_bound = 0.085  # NF4 baseline + margin
-    rel_bound = 0.25  # NF4 baseline + margin
+    # Expected (mean, std) for NF4 on MoE-shaped tensors (8x512x256), from 200 samples on RTX 4090.
+    N_SIGMA = 7
+    abs_mean, abs_std = 0.072802, 0.000072
+    rel_mean, rel_std = 0.203327, 0.000312
 
-    assert err_mean < abs_bound, f"Mean abs error {err_mean:.6f} too high for shape {param_shape}"
-    assert relerr < rel_bound, f"Mean rel error {relerr:.6f} too high for shape {param_shape}"
+    assert err_mean < abs_mean + N_SIGMA * abs_std, f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
+    assert relerr < rel_mean + N_SIGMA * rel_std, f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
 
 
 @pytest.mark.parametrize("device", get_available_devices())
@@ -349,14 +354,19 @@ def test_different_blocksizes(device, dtype, blocksize):
     relerr = (err / (original_param.abs().float() + 1e-8)).mean()
     err_mean = err.mean()
 
-    # Expected error bounds from functional tests (using NF4 bounds since that's what we're testing)
-    expected_abs = {64: 0.072792, 128: 0.076835, 256: 0.080326}
-    expected_rel = {64: 0.203299, 128: 0.215252, 256: 0.226044}
+    # Expected (mean, std) for NF4, from 200 samples on RTX 4090. Worst-case std across dtypes.
+    N_SIGMA = 7
+    expected_abs = {64: (0.072796, 0.000072), 128: (0.076839, 0.000093), 256: (0.080322, 0.000100)}
+    expected_rel = {64: (0.203353, 0.000326), 128: (0.215258, 0.000367), 256: (0.226056, 0.000392)}
 
-    assert err_mean < expected_abs[blocksize] + 0.01, (
-        f"Mean abs error {err_mean:.6f} too high for blocksize {blocksize}"
+    abs_mean, abs_std = expected_abs[blocksize]
+    rel_mean, rel_std = expected_rel[blocksize]
+    assert err_mean < abs_mean + N_SIGMA * abs_std, (
+        f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f} for blocksize {blocksize}"
     )
-    assert relerr < expected_rel[blocksize] + 0.02, f"Mean rel error {relerr:.6f} too high for blocksize {blocksize}"
+    assert relerr < rel_mean + N_SIGMA * rel_std, (
+        f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f} for blocksize {blocksize}"
+    )
 
 
 def test_parametrization_forward_method():
@@ -383,9 +393,13 @@ def test_parametrization_forward_method():
     relerr = (err / (original_tensor.abs().float() + 1e-8)).mean()
     err_mean = err.mean()
 
-    # Use NF4 bounds from functional tests with small margin
-    assert err_mean < 0.08, f"Mean abs error {err_mean:.6f} too high"
-    assert relerr < 0.25, f"Mean rel error {relerr:.6f} too high"
+    # Expected (mean, std) for NF4 on small 64x64 tensor, from 200 samples on RTX 4090.
+    # Small tensors have higher variance due to fewer blocks in the quantization.
+    N_SIGMA = 7
+    abs_mean, abs_std = 0.072842, 0.001180
+    rel_mean, rel_std = 0.202648, 0.004729
+    assert err_mean < abs_mean + N_SIGMA * abs_std, f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
+    assert relerr < rel_mean + N_SIGMA * rel_std, f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
 
 
 @pytest.mark.parametrize("device", get_available_devices())
