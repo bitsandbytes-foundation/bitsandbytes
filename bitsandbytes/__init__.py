@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import logging
 import importlib
 import sys
 
@@ -19,6 +20,10 @@ from .backends.cpu import ops as cpu_ops
 from .backends.default import ops as default_ops
 from .nn import modules
 from .optim import adam
+
+# Library logging should be opt-in for downstream users.
+# (No handlers are configured by default; CLI entrypoints may configure logging.)
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 # This is a signal for integrations with transformers/diffusers.
 # Eventually we may remove this but it is currently required for compatibility.
