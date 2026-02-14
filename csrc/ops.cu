@@ -2060,14 +2060,19 @@ static void kbitGemmProdLaunch(
     int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
     int mn_tiles = m_tiles * n_tiles;
 
-    // Auto-select k_splits to fill SMs when there aren't enough (m,n) tiles
+    // Auto-select k_splits only for severe SM underutilization (< 25%).
+    // The atomicAdd + workspace overhead of k_splits > 1 is significant,
+    // so only use it when the utilization gain clearly outweighs the cost.
     int k_splits = 1;
-    if (mn_tiles < num_sms && k_tiles > 1) {
+    if (mn_tiles < num_sms / 4 && k_tiles > 1) {
         k_splits = min(k_tiles, (num_sms + mn_tiles - 1) / mn_tiles);
     }
 
     int total_work = mn_tiles * k_splits;
-    int grid_size = min(num_sms, total_work);
+    // When k_splits == 1, launch one block per tile (non-persistent).
+    // The work loop runs exactly once per block, avoiding loop overhead.
+    // When k_splits > 1, cap at num_sms for persistent coordination.
+    int grid_size = (k_splits == 1) ? total_work : min(num_sms, total_work);
 
     dim3 block(256);
     int smem_size = 2 * STAGE_BYTES;
