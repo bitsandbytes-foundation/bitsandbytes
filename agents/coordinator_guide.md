@@ -121,7 +121,7 @@ project before making changes so you can verify your setup works.
 - Information about existing PRs — what they change, whether they look correct
 - Anything else the worker agent should know
 
-**5. Your recommended approach.** What you think the fix should look like. Be specific — name files, functions, line numbers. Frame it as guidance, not commands — the worker agent may find things you didn't and should use its own judgment.
+**5. Your recommended approach.** What you think the fix should look like. Be specific — name files, functions, line numbers. Frame it as guidance, not commands — the worker agent may find things you didn't and should use its own judgment. Include which specific test file(s) or test function(s) the agent should run to verify its fix — not the full suite.
 
 **6. Completion workflow.** Every prompt file must include this section verbatim, with the issue number filled in:
 
@@ -130,20 +130,29 @@ project before making changes so you can verify your setup works.
 
 After implementing and verifying the fix:
 
-1. **Commit** your changes with a message referencing the issue:
+1. **Run only the tests relevant to your change.** Do NOT run the full
+   test suite — it takes 10+ minutes and will be run separately later.
+   Instead, run the specific test file(s) that cover the code you changed:
+
+       pytest tests/test_autograd.py -v --tb=short -k "relevant_test_name"
+
+   If you wrote a new test, run that plus the existing tests in the same
+   file to check for regressions in that area.
+
+2. **Commit** your changes with a message referencing the issue:
 
        git add <files>
        git commit -m "Fix <brief description> (#<NUMBER>)"
 
-2. **Push** the branch:
+3. **Push** the branch:
 
        git push -u origin fix/issue-<NUMBER>
 
-3. **Create a pull request** with `gh pr create`. The PR body must
+4. **Create a pull request** with `gh pr create`. The PR body must
    include "Fixes #<NUMBER>" so GitHub auto-links and auto-closes the
    issue on merge. Describe what the fix does and how you verified it.
 
-4. **Post to the bitsandbytes Slack channel** to notify the team.
+5. **Post to the bitsandbytes Slack channel** to notify the team.
    Write a temporary Python script to `/tmp/slack_notify.py` and run it:
 
        import json, urllib.request, sys
@@ -245,7 +254,8 @@ whether it is correct and complete before implementing from scratch.
 
 ## When You Are Done
 
-[the standard completion workflow section with issue number 1810 filled in]
+[the standard completion workflow section with issue number 1810 filled in.
+Remember: tell the agent to run only the relevant tests, not the full suite.]
 
 ## What NOT to Do
 
