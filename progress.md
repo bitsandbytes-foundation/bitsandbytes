@@ -44,6 +44,14 @@ and what the implications are for implementation.
 31. [File Locations and Worktree Setup](#31-file-locations-and-worktree-setup)
 32. [How to Read the Spec (cuda-spec.md)](#32-how-to-read-the-spec)
 33. [Next Steps](#33-next-steps)
+34. [Implementation Progress: Stages 2-3 Complete](#34-implementation-progress-stages-2-3-complete)
+35. [Next Steps: Stage 4 (cp.async Pipeline)](#35-next-steps-stage-4-cpasync-pipeline)
+36. [Implementation Progress: Stages 4-6 Complete](#36-implementation-progress-stage-4-6-complete)
+37. [Current Status and Remaining Work](#37-current-status-and-remaining-work)
+
+**Optimization Guide:** [`optimization.md`](optimization.md) — detailed
+catalog of remaining performance optimizations with expected impact,
+implementation approach, and recommended order.
 
 ---
 
@@ -2048,17 +2056,6 @@ RTX 4090, K=4 (4-bit), fp16, k_chunks=1:
 N) where reading 4x less weight data matters. It loses in compute-bound cases
 because the current tile is small (TILE_M=16, only 2 N-blocks per warp).
 
-### Optimization Opportunities for Further Work
-
-1. **Multi-M-block tiling:** Template on M_BLOCKS (1-4) so TILE_M scales to
-   32/48/64. This is the biggest performance lever for M>1.
-2. **Larger N_BLOCKS:** Use more of the warp's N-dimension capacity.
-3. **C output staging through shared memory:** Coalesce the scattered fragment
-   writes to global memory (currently each thread writes to non-contiguous rows).
-4. **Persistent kernel:** Replace the 3D grid with a persistent kernel that
-   loops over work items, reducing launch overhead and enabling better SM
-   utilization for small tile counts.
-
 ### Commit History (Stages 4-6)
 
 ```
@@ -2068,3 +2065,43 @@ b64bb91 Add ldmatrix + XOR swizzle for A-fragment loading in production kernel
 fdcec9c Add Stage 5 split-K GEMM kernel (110 tests pass)
 9b155d3 Add Stage 4 pipelined GEMM kernel with cp.async double-buffering (89 tests pass)
 ```
+
+---
+
+## 37. Current Status and Remaining Work
+
+### What's Done
+
+All 6 implementation stages are complete. The kernel is **functionally
+complete** with:
+- fp16 and bf16 support (production kernel `kbit_gemm_prod`)
+- Split-K for low-tile-count shapes
+- ldmatrix with XOR swizzle (zero bank conflicts)
+- cp.async double-buffered pipeline
+- 139 tests passing across Stages 1-6
+- Benchmark infrastructure
+
+### What Remains
+
+**Performance optimizations** to close the gap with cuBLAS for square/compute-
+bound shapes. The kernel currently wins in memory-bandwidth-bound regimes
+(M=1 large-N) but loses 2-5x for typical square LLM shapes due to small
+tile size (TILE_M=16, N_BLOCKS=2).
+
+See **[`optimization.md`](optimization.md)** for the detailed catalog of
+5 optimizations, ordered by priority:
+
+1. Multi-M-block tiling (HIGHEST — 2-3x expected impact)
+2. Larger N_BLOCKS per warp (HIGH — 2x expected, compounds with #1)
+3. C output staging through shared memory (MEDIUM — 5-15%)
+4. Persistent kernel (MEDIUM — helps low-tile-count shapes)
+5. cp.async for A tile (LOW — 2-5%)
+
+After optimizations 1+2, the kernel should match or beat cuBLAS for the
+M=1-32 LLM inference target.
+
+**Integration work** (not performance, but required to ship):
+- Wire into LinearNbit module
+- Auto-select k_chunks
+- Remove staging kernels (Stages 3-5)
+- Lint + PR to main
