@@ -1970,3 +1970,101 @@ Test criterion: output matches Stage 3 bit-for-bit.
 - `cp_async_wait<1>()` inside the loop waits for the computing stage
 - The first tile is prefetched before the loop starts
 - `cp_async_wait<0>()` after the loop drains the pipeline
+
+---
+
+## 36. Implementation Progress: Stage 4-6 Complete
+
+### Stage 4: cp.async Double-Buffered Pipeline (commit 9b155d3)
+
+Replaces synchronous global→shared memory loads with `cp.async` double buffering.
+B tile and absmax loaded via `cp.async.cg.shared.global` (16-byte copies, L2 only).
+A tile loaded synchronously (needs M/K_dim bounds checking).
+Output is bit-exact identical to Stage 3 for all K values.
+
+**Tests:** 13 new tests → 89 total (all pass).
+
+### Stage 5: Split-K GEMM (commit fdcec9c)
+
+Adds split-K support: multiple blocks share an output tile, each handling a
+subset of k-tiles. Partial sums accumulated via atomicAdd in fp32 workspace.
+Grid is 2D for k_chunks=1, 3D for k_chunks>1. Last contributor (detected via
+atomic tile counter) converts fp32→fp16 output.
+
+**Tests:** 21 new tests → 110 total (all pass).
+
+### Stage 6: Production Kernel with bf16, ldmatrix, Swizzle, Benchmarks
+
+#### bf16 Support (commit 24406d2)
+
+New production kernel `kbit_gemm_prod` templates on `scalar_t` (half or
+__nv_bfloat16). Uses `if constexpr` to select the right MMA PTX instruction:
+- fp16: `mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32`
+- bf16: `mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32`
+
+Helper structs `ScalarOps<T>`, `pack_two<T>`, and `mma_m16n8k16<T>` abstract
+type-specific operations. 8 kernel variants instantiated (4 K × 2 dtypes).
+
+fp16 path matches Stage 5 split-K output bit-for-bit.
+bf16 path matches Python reference within tolerance for all K values.
+
+**Tests:** 29 new tests → 139 total (all pass).
+
+#### ldmatrix + XOR Swizzle (commit b64bb91)
+
+Replaced 8 element-by-element shared memory reads per A fragment with a single
+`ldmatrix.sync.aligned.m8n8.x4.shared.b16` instruction.
+
+**The bank conflict problem:** Without swizzle, the A tile stored in shared
+memory with stride TILE_K=64 halves (128 bytes) causes every row to start at
+the same bank (stride is a multiple of 128 bytes = the bank repeat distance).
+This gives 8-way bank conflicts during ldmatrix.
+
+**The fix:** XOR-based swizzle at 8-half (16-byte) granularity:
+```
+col_group = col / 8
+swizzled_group = col_group ^ (row % 8)
+swizzled_col = swizzled_group * 8 + (col % 8)
+```
+
+Applied during A tile write to shared memory AND in the ldmatrix address
+calculation. The XOR distributes 8 threads in an ldmatrix group across 8
+different banks (zero conflicts).
+
+Output is mathematically identical (verified by tests).
+
+#### Benchmark Results (commit 27cf6a2)
+
+RTX 4090, K=4 (4-bit), fp16, k_chunks=1:
+
+| M | K_dim | N | kbit (µs) | kbit TFLOPS | cuBLAS (µs) | Speedup |
+|---:|------:|------:|----------:|------------:|------------:|--------:|
+| 1 | 4096 | 4096 | 109 | 0.31 | 43 | 0.39x |
+| 1 | 4096 | 11008 | 82 | 1.10 | 128 | **1.56x** |
+| 4 | 4096 | 11008 | 100 | 3.61 | 121 | **1.21x** |
+| 4 | 4096 | 4096 | 92 | 1.46 | 22 | 0.24x |
+
+**Analysis:** The kernel wins in the memory-bandwidth-bound regime (M=1, large
+N) where reading 4x less weight data matters. It loses in compute-bound cases
+because the current tile is small (TILE_M=16, only 2 N-blocks per warp).
+
+### Optimization Opportunities for Further Work
+
+1. **Multi-M-block tiling:** Template on M_BLOCKS (1-4) so TILE_M scales to
+   32/48/64. This is the biggest performance lever for M>1.
+2. **Larger N_BLOCKS:** Use more of the warp's N-dimension capacity.
+3. **C output staging through shared memory:** Coalesce the scattered fragment
+   writes to global memory (currently each thread writes to non-contiguous rows).
+4. **Persistent kernel:** Replace the 3D grid with a persistent kernel that
+   loops over work items, reducing launch overhead and enabling better SM
+   utilization for small tile counts.
+
+### Commit History (Stages 4-6)
+
+```
+27cf6a2 Add kbit GEMM benchmark script
+b64bb91 Add ldmatrix + XOR swizzle for A-fragment loading in production kernel
+24406d2 Add Stage 6 production kernel with bf16 support (139 tests pass)
+fdcec9c Add Stage 5 split-K GEMM kernel (110 tests pass)
+9b155d3 Add Stage 4 pipelined GEMM kernel with cp.async double-buffering (89 tests pass)
+```
