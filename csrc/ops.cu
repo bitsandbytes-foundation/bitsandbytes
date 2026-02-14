@@ -1846,14 +1846,18 @@ __global__ void kbit_gemm_prod(
         if (threadIdx.x < ABS_INT4S)
             cp_async_cg_16(&abs_dst[threadIdx.x], &abs_src[threadIdx.x]);
 
-        // A tile (synchronous, with bounds check)
+        // A tile (synchronous, with bounds check + XOR swizzle for bank-conflict-free ldmatrix)
+        // Swizzle: col_group (8-half granularity) XOR'd with (row % 8)
         scalar_t* a_dst = sh_a(stage);
         for (int i = threadIdx.x; i < A_STAGE_ELEMS; i += blockDim.x) {
             int row = i / TILE_K;
             int col = i % TILE_K;
+            int col_group = col / 8;
+            int swizzled_group = col_group ^ (row % 8);
+            int swizzled_col = swizzled_group * 8 + (col % 8);
             int gr = m_base + row;
             int gc = k_base + col;
-            a_dst[row * TILE_K + col] = (gr < M && gc < K_dim) ? A[gr * K_dim + gc] : Ops::from_float(0.0f);
+            a_dst[row * TILE_K + swizzled_col] = (gr < M && gc < K_dim) ? A[gr * K_dim + gc] : Ops::from_float(0.0f);
         }
     };
 
@@ -1868,26 +1872,27 @@ __global__ void kbit_gemm_prod(
             const int k_block = ks / 2;
             const int half_idx = ks % 2;
 
-            // Load A fragment
+            // Load A fragment via ldmatrix with XOR swizzle
             uint32_t frag_a[4];
             {
-                const int kc0 = ks * 16 + tid * 2;
-                const int kc1 = ks * 16 + tid * 2 + 8;
-                const int r0 = gid;
-                const int r1 = gid + 8;
-                scalar_t zero = Ops::from_float(0.0f);
-                frag_a[0] = pack_two<scalar_t>(
-                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0] : zero,
-                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0 + 1] : zero);
-                frag_a[1] = pack_two<scalar_t>(
-                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0] : zero,
-                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0 + 1] : zero);
-                frag_a[2] = pack_two<scalar_t>(
-                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1] : zero,
-                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1 + 1] : zero);
-                frag_a[3] = pack_two<scalar_t>(
-                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1] : zero,
-                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1 + 1] : zero);
+                // Thread t is in matrix (lane_id / 8), row (lane_id % 8) within that matrix.
+                // Matrix layout: 0=top/k_lo, 1=bottom/k_lo, 2=top/k_hi, 3=bottom/k_hi
+                const int matrix_id = lane_id / 8;
+                const int row_in_matrix = lane_id % 8;
+                const int a_row = row_in_matrix + (matrix_id % 2) * 8;
+                const int col_start = ks * 16 + (matrix_id / 2) * 8;
+
+                // Apply same XOR swizzle as write path
+                const int col_group = col_start / 8;
+                const int swizzled_group = col_group ^ (a_row % 8);
+                const int swizzled_col_start = swizzled_group * 8;
+
+                const scalar_t* addr = &a_ptr[a_row * TILE_K + swizzled_col_start];
+                uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
+
+                asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
+                             : "=r"(frag_a[0]), "=r"(frag_a[1]), "=r"(frag_a[2]), "=r"(frag_a[3])
+                             : "r"(smem_addr));
             }
 
 #pragma unroll
