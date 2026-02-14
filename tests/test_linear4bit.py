@@ -1,7 +1,9 @@
 import copy
 import os
+import pathlib
 import pickle
 import platform
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 
@@ -497,3 +499,30 @@ def test_params4bit_quant_state_attr_access(device, quant_type, compress_statist
     assert isinstance(w.quant_state, bnb.functional.QuantState)
     assert isinstance(w.bnb_quantized, bool)
     assert w.bnb_quantized is True
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="FSDP requires CUDA")
+@pytest.mark.skipif(
+    not torch.distributed.is_nccl_available(),
+    reason="FSDP test requires NCCL backend",
+)
+def test_fsdp_state_dict_save_4bit():
+    """Integration test: FSDP get_model_state_dict with cpu_offload on a 4-bit model (#1405).
+
+    Launches a single-GPU FSDP process via torchrun to exercise the real
+    _get_fqns() code path that previously crashed with:
+        AttributeError: 'Params4bit' object has no attribute 'absmax'
+    """
+    script = pathlib.Path(__file__).with_name("fsdp_state_dict_save.py")
+    result = subprocess.run(
+        ["torchrun", "--nproc_per_node=1", str(script)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        pytest.fail(
+            f"FSDP state_dict test failed (exit {result.returncode}):\n"
+            f"stdout: {result.stdout}\n"
+            f"stderr: {result.stderr}"
+        )
