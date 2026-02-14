@@ -5,7 +5,7 @@ remains for the production kernel `kbit_gemm_prod`.
 
 ---
 
-## Current Kernel Configuration (after Optimizations 1 + 5)
+## Current Kernel Configuration (after Optimizations 1 + 3 + 5)
 
 **Template parameters:** `<K_BITS, M_BLOCKS, scalar_t>`
 
@@ -14,9 +14,12 @@ remains for the production kernel `kbit_gemm_prod`.
 - **TILE_K** = 64 (4 MMA k-sub-tiles of 16)
 - 256 threads = 8 warps, all warps share the same M rows, each handles a
   different N slice
+- **Persistent kernel**: launches `min(num_SMs, total_work)` blocks that
+  loop over work items instead of one block per tile
+- **Auto k_splits**: when mn_tiles < num_SMs, automatically splits K
+  dimension to create enough work items to fill SMs
 - Double-buffered cp.async pipeline for A, B, and absmax tiles
 - ldmatrix.x4 with XOR bank-conflict swizzle for A fragments
-- Split-K support via atomicAdd + tile counters
 - fp16 and bf16 via `scalar_t` template
 
 **Instantiations:** 4 K-values x 4 M_BLOCKS x 2 dtypes = 32 kernel variants.
@@ -30,7 +33,7 @@ remains for the production kernel `kbit_gemm_prod`.
 | 3        |  92 |  92 |  96 |  96 |
 | 4        | 111 | 111 | 113 | 115 |
 
-**Tests:** 195 total (139 original + 56 multi-M-block), all passing.
+**Tests:** 85 production tests, all passing.
 
 ---
 
@@ -43,235 +46,242 @@ as `M_BLOCKS * 16`. Each warp loads M_BLOCKS A fragments per k-sub-tile
 via ldmatrix.x4 and reuses the same dequantized B fragment across all of
 them, amortizing the codebook shuffle + absmax multiply.
 
-**Dispatch:** SM-aware. Queries `cudaDevAttrMultiProcessorCount` and
-selects the largest M_BLOCKS where the resulting grid still has at least
-`num_SMs` blocks. For the target shapes (M=1-16), M_BLOCKS=1 is always
-selected.
-
 **Key finding:** Multi-M-block alone showed NO benefit — it was actually
-slower for M>16 because synchronous A tile loading (element-by-element,
-with per-element bounds check + XOR swizzle) became the bottleneck. The
-A tile grows from 2 KB (MB=1) to 8 KB (MB=4), and this synchronous load
-was on the critical path, not overlapped by the pipeline.
-
-This finding reordered the optimization priorities: cp.async for A
-(originally listed as "Priority LOW, 2-5%") turned out to be a
-**prerequisite** for multi-M-block to work at all.
+slower for M>16 because synchronous A tile loading became the bottleneck.
+cp.async for A (Optimization 5) was required first.
 
 ### Optimization 5: cp.async for A Tile (commit 7cd575b)
 
 **What:** Replaced synchronous A tile loading with cp.async 16-byte
-copies. The A tile is loaded in groups of 8 halves (one int4), with XOR
-swizzle applied to the destination shared memory address.
+copies. XOR swizzle applied to destination shmem address.
 
-- **Interior tiles** (m_base + TILE_M <= M and k_base + TILE_K <= K_dim):
-  pure cp.async, no branches in the loop.
-- **Boundary tiles** (last M-tile or last K-tile): per-group bounds check;
-  in-bounds groups use cp.async, out-of-bounds groups get synchronous
-  zero-fill. K_dim is always a multiple of 32 (BLOCKSIZE), so group
-  boundaries align cleanly — no partial groups.
+- **Interior tiles**: pure cp.async, no branches.
+- **Boundary tiles**: per-group bounds check.
 
-**Impact:** This was the most impactful single change. It improved
-performance for ALL shapes, not just M_BLOCKS>1, because even M_BLOCKS=1
-benefits from pipelining A loads.
+**Impact:** Single most impactful change. Improved ALL shapes because
+even M_BLOCKS=1 benefits from pipelining A loads.
+
+### Optimization 3: Persistent Kernel (commit 78fb6bb)
+
+**What:** Converted the kernel from one-block-per-tile to a persistent
+work loop. Each block processes multiple (m_tile, n_tile, k_split) work
+items in round-robin. The launcher auto-selects k_splits when
+mn_tiles < num_SMs to create enough work to fill all SMs.
+
+**M_BLOCKS dispatch:** With the persistent kernel, the SM utilization
+concern for M_BLOCKS selection is removed. The dispatcher now simply
+picks the largest M_BLOCKS that fits M (>48→4, >32→3, >16→2, else 1).
+
+**Impact — mixed results, needs tuning:**
+
+The persistent kernel improved some shapes (especially M=32-64 at
+N=16384) but regressed others. The auto k_splits introduces atomicAdd
+overhead that hurts shapes where k_splits=1 was previously sufficient.
+
+### Optimization 2: Larger N_BLOCKS (TILE_N=256) — ATTEMPTED, REVERTED
+
+**What was tried:** Increased TILE_N from 128 to 256 and N_BLOCKS from
+2 to 4, keeping 8 warps all along N. Each warp covers 32 columns (4
+N-blocks) instead of 16 (2 N-blocks). The repack format stayed at
+KBIT_TILE_N=128; the kernel loaded two adjacent repack tiles per GEMM
+tile (contiguous in memory, so the addressing worked naturally).
+
+**Result: massive regression.** The grid size halved (n_tiles = N/256
+instead of N/128), cutting SM utilization in half. For bandwidth-bound
+shapes, fewer active SMs means less aggregate memory bandwidth:
+
+| Shape | Before (TILE_N=128) | After (TILE_N=256) |
+|-------|:---:|:---:|
+| M=4, N=11008 | **2.02x** | 0.92x |
+| M=1, N=16384 | **1.84x** | 1.00x |
+| M=16, N=16384 | **1.98x** | 1.30x |
+
+**Root cause:** For bandwidth-bound shapes, SM utilization matters more
+than per-tile compute efficiency. Doubling TILE_N gives 2x more compute
+per tile but halves the number of tiles, reducing total memory bandwidth
+the GPU can deliver.
+
+**This approach will work after the persistent kernel is properly tuned**
+(since persistent always launches num_SMs blocks regardless of tile count).
+But the persistent kernel itself needs the k_splits overhead fixed first.
 
 ---
 
-## Current Benchmark (RTX 4090, K=4, fp16, k_chunks=1)
+## Current Benchmark (RTX 4090, K=4, fp16, persistent kernel)
 
-### Standard shapes (N=4096, compute-bound)
+### Standard shapes (N=4096)
 
 | M | K_dim | N | kbit (us) | cuBLAS (us) | Speedup |
 |---:|------:|------:|----------:|------------:|--------:|
-| 1 | 4096 | 4096 | 77 | 60 | 0.79x |
-| 4 | 4096 | 4096 | 78 | 28 | 0.36x |
-| 8 | 4096 | 4096 | 73 | 25 | 0.34x |
-| 16 | 4096 | 4096 | 96 | 28 | 0.29x |
-| 32 | 4096 | 4096 | 95 | 41 | 0.43x |
-| 64 | 4096 | 4096 | 79 | 29 | 0.36x |
+| 1 | 4096 | 4096 | 72 | 43 | 0.59x |
+| 4 | 4096 | 4096 | 70 | 26 | 0.37x |
+| 8 | 4096 | 4096 | 73 | 22 | 0.30x |
+| 16 | 4096 | 4096 | 82 | 23 | 0.28x |
+| 32 | 4096 | 4096 | 70 | 27 | 0.38x |
+| 64 | 4096 | 4096 | 70 | 25 | 0.36x |
+| 128 | 4096 | 4096 | 71 | 32 | 0.46x |
 
 ### Large-N shapes (bandwidth-bound — target regime)
 
-| M | K_dim | N | MB | kbit (us) | cuBLAS (us) | Speedup |
-|---:|------:|------:|---:|----------:|------------:|--------:|
-| 1 | 4096 | 11008 | 1 | 89 | 123 | **1.38x** |
-| 1 | 4096 | 16384 | 1 | 77 | 142 | **1.84x** |
-| 4 | 4096 | 11008 | 1 | 62 | 126 | **2.02x** |
-| 4 | 4096 | 16384 | 1 | 82 | 142 | **1.75x** |
-| 16 | 4096 | 11008 | 1 | 62 | 98 | **1.58x** |
-| 16 | 4096 | 16384 | 1 | 83 | 164 | **1.98x** |
-| 32 | 4096 | 11008 | 1 | 121 | 100 | 0.83x |
-| 32 | 4096 | 16384 | 2 | 96 | 149 | **1.55x** |
-| 64 | 4096 | 16384 | 3 | 199 | 219 | **1.10x** |
-| 128 | 4096 | 16384 | 4 | 154 | 173 | **1.12x** |
+| M | K_dim | N | kbit (us) | cuBLAS (us) | Speedup |
+|---:|------:|------:|----------:|------------:|--------:|
+| 1 | 4096 | 11008 | 83 | 100 | **1.22x** |
+| 1 | 4096 | 16384 | 90 | 175 | **1.95x** |
+| 4 | 4096 | 11008 | 83 | 125 | **1.50x** |
+| 4 | 4096 | 16384 | 81 | 165 | **2.04x** |
+| 16 | 4096 | 11008 | 103 | 120 | **1.17x** |
+| 16 | 4096 | 16384 | 82 | 145 | **1.76x** |
+| 32 | 4096 | 16384 | 97 | 172 | **1.77x** |
+| 64 | 4096 | 16384 | 92 | 157 | **1.71x** |
+| 128 | 4096 | 16384 | 219 | 200 | 0.91x |
 
-### Progress vs pre-optimization baseline
+### Comparison: persistent kernel vs pre-persistent baseline
 
-| Shape | Before | After | Improvement |
-|-------|--------|-------|-------------|
-| M=1, N=11008 | 1.56x | 1.38x | noise (same regime) |
-| M=4, N=11008 | 1.21x | **2.02x** | +67% |
-| M=16, N=11008 | ~1.0x | **1.58x** | +58% |
-| M=16, N=4096 | 0.19x | 0.29x | +53% |
-| M=64, N=16384 | lost badly | **1.10x** | now beats cuBLAS |
-| M=128, N=16384 | lost badly | **1.12x** | now beats cuBLAS |
-
----
-
-## Analysis: Why N=4096 is Still Slow
-
-For N=4096, `n_tiles = 32`. On a 128-SM GPU:
-
-- M=1: 32 blocks → 25% SM utilization
-- M=16: 32 blocks → 25% utilization
-- M=64: 128 blocks → 100% utilization, but each block still only does
-  2 MMAs per B fragment (N_BLOCKS=2)
-
-The kernel loses to cuBLAS on N=4096 for two reasons:
-
-1. **Low SM utilization** (M<=16): not enough blocks to fill the GPU.
-   The persistent kernel (Optimization 3 below) addresses this.
-
-2. **Low compute-per-B-fragment** (all M): N_BLOCKS=2 means each warp
-   dequantizes a B fragment and uses it for only 2 (or 2×M_BLOCKS) MMAs.
-   cuBLAS uses much larger tiles. Optimization 2 (larger N_BLOCKS)
-   directly addresses this.
-
-For large N (11008+), the kernel wins because the GEMM is bandwidth-bound
-and reading 4-bit weights (4x less data than fp16 cuBLAS) dominates.
+| Shape | Pre-persistent | Persistent | Change |
+|-------|:---:|:---:|:---:|
+| M=1, N=4096 | 0.79x | 0.59x | -25% (k_splits overhead) |
+| M=1, N=11008 | 1.38x | 1.22x | -12% (k_splits overhead) |
+| M=1, N=16384 | 1.84x | **1.95x** | +6% |
+| M=4, N=11008 | 2.02x | 1.50x | -26% (k_splits overhead) |
+| M=4, N=16384 | 1.75x | **2.04x** | +17% |
+| M=32, N=16384 | 1.55x | **1.77x** | +14% |
+| M=64, N=16384 | 1.10x | **1.71x** | +55% |
+| M=128, N=16384 | 1.12x | 0.91x | -19% (M_BLOCKS dispatch) |
 
 ---
 
-## Remaining Optimizations
+## Critical Analysis: What Needs Fixing
 
-### Optimization 2: Larger N_BLOCKS per Warp
+### Problem 1: Auto k_splits is too aggressive
 
-**Priority: HIGHEST. This is the next optimization to implement.**
+The persistent kernel auto-splits K whenever `mn_tiles < num_SMs`. For
+shapes like M=4, N=11008 (mn_tiles=86, num_SMs=128), it uses k_splits=2.
+This introduces atomicAdd + tile_counters + fp32 workspace + final
+conversion overhead, which outweighs the benefit of filling 128 SMs
+instead of 86.
 
-**The problem:** N_BLOCKS=2. Each warp covers 16 of the 128 tile columns
-and dequantizes one B fragment that is used for only 2 MMAs per M-block.
-With 8 warps all along N, there's no M-axis parallelism within the block.
+**Fix options (in order of preference):**
 
-**The fix:** Increase N_BLOCKS to 4 (each warp covers 32 columns). Change
-the warp layout from 8-along-N to 2-along-M x 4-along-N:
+1. **Higher threshold:** Only auto-split when mn_tiles < num_SMs / 4
+   (severe underutilization). For most shapes, k_splits stays at 1.
 
-```
-Current:  8 warps x 1 M-slice x 2 N-blocks = 2 MMAs per warp per k-sub
-Target:   (2 warps-M x 4 warps-N) x M_BLOCKS_PER_WARP x 4 N-blocks
-```
+2. **Conditional workspace:** Pass a flag from Python indicating whether
+   the workspace is zeroed. Only use k_splits > 1 when the workspace is
+   available and zeroed.
 
-For TILE_M=64 (M_BLOCKS=4), each warp handles 2 M-blocks x 4 N-blocks =
-8 MMAs per k-sub-tile. Over 4 k-sub-tiles per K-tile: 32 MMAs per warp
-per K-tile. This is 4x more compute per B fragment dequant than current.
+3. **Remove auto k_splits entirely:** Let the Python side control it
+   (restore the k_chunks parameter behavior). The persistent loop still
+   benefits from load balancing across waves even with k_splits=1.
 
-**Key interactions with Optimization 1:**
+**Recommendation:** Option 1. Change the threshold from `mn_tiles < num_sms`
+to `mn_tiles < num_sms / 4` in `kbitGemmProdLaunch`. This means k_splits > 1
+only activates for truly small grids (< 32 tiles on 128 SMs).
 
-- M_BLOCKS_PER_WARP = M_BLOCKS / 2 (with 2 warp-rows along M).
-  For M_BLOCKS=1 or 2: 1 M-block per warp. For M_BLOCKS=4: 2 per warp.
-- For M_BLOCKS=1 (M<=16): only 1 warp-row needed, but we still want 4
-  warps along N. This means 4 warps are active, 4 warps idle. Alternatively,
-  keep all 8 warps along N with N_BLOCKS=2 for the M_BLOCKS=1 case and
-  only switch to the 2x4 layout for M_BLOCKS>=2. Template on warp layout.
-- **Simpler alternative:** just increase N_BLOCKS from 2 to 4 for ALL
-  M_BLOCKS values, without changing the warp layout. 8 warps x 4 N-blocks
-  = 32 N-blocks x 8 cols = 256 columns. TILE_N would grow to 256. This
-  doubles the B tile in shared memory (8 KB → 16 KB for K=4) but is still
-  well within limits. Each warp does 4 MMAs per M-block per k-sub (2x
-  improvement) with no warp layout change.
+### Problem 2: M=128, N=16384 regression
 
-**Recommendation:** Start with the simpler approach (N_BLOCKS=4,
-TILE_N=256, same 8-warps-all-along-N layout). This requires N%256==0
-instead of N%128==0. For LLM shapes: 4096/256=16, 11008/256=43,
-16384/256=64. All work. If profiling shows the 2x4 warp layout is better,
-refactor later.
+With M=128, the dispatcher selects M_BLOCKS=4 (TILE_M=64). This gives
+m_tiles=2, n_tiles=128, mn_tiles=256, k_tiles=64. With k_splits=1 and
+256 work items on 128 SMs, each SM handles 2 tiles. The persistent loop
+overhead (zeroing accumulators, re-initializing pipeline per tile) may
+explain the 0.91x vs previous 1.12x.
 
-**Expected impact:** ~2x improvement in compute throughput. The kernel
-should become competitive with cuBLAS even on N=4096 shapes.
+**Fix:** For shapes where mn_tiles >= num_SMs (full utilization without
+k_splits), the persistent loop overhead hurts. Consider a fast path that
+skips the loop when total_work == gridDim.x (each block handles exactly
+one work item, equivalent to non-persistent behavior).
 
-### Optimization 3: Persistent Kernel
+### Problem 3: N=4096 is still 0.28-0.59x vs cuBLAS
 
-**Priority: HIGH. Critical for N=4096 shapes with small M.**
+Even with the persistent kernel filling SMs via k_splits, N=4096 shapes
+are far behind cuBLAS. The issue is fundamental: each warp only does
+2 MMAs per B-fragment dequant (N_BLOCKS=2). cuBLAS uses much larger
+tiles and achieves higher compute-per-load ratios.
 
-**The problem:** For M=1, N=4096: only 32 blocks launch on a 128-SM GPU
-(25% utilization). Increasing TILE_M/TILE_N doesn't help because there's
-only 1 M-row and N/TILE_N blocks along N.
+**Fix:** This is where larger N_BLOCKS will help, but it requires
+TILE_N=256 (grid halving), which only works with a properly-tuned
+persistent kernel that doesn't suffer from the k_splits overhead.
 
-**The fix:** Launch exactly `num_SMs` blocks. Each block loops over
-assigned work items (linearized `(m_tile, n_tile, k_chunk)` triples).
+---
 
-Key benefits:
-1. All SMs active even when `m_tiles * n_tiles < num_SMs`
-2. Accumulator persistence: consecutive k-chunks for the same output tile
-   stay in registers (no atomicAdd needed)
-3. Subsumes split-K: k_chunks becomes a tuning parameter, not a separate
-   code path
+## Remaining Optimizations (Revised Priority Order)
 
-**Interaction with current dispatch:** The persistent kernel replaces the
-current grid launch logic entirely. The M_BLOCKS dispatch still selects
-tile size, but the grid is always `(num_SMs, 1, 1)`.
+### 1. Tune Persistent Kernel k_splits Threshold (HIGHEST, quick fix)
 
-**Expected impact:** 2-4x for N=4096 M<=16 shapes. Moderate for shapes
-that already have enough blocks. Will likely make split-K unnecessary
-as a separate mode.
+Raise the auto k_splits threshold to avoid the atomicAdd overhead for
+shapes that already have reasonable SM utilization. Add a fast path for
+work_items == gridDim.x to eliminate loop overhead when all SMs are busy.
 
-### Optimization 4: C Output Staging Through Shared Memory
+**Expected impact:** Restore the pre-persistent performance for large-N
+shapes (M=4 N=11008 back to ~2.0x) while keeping the persistent benefit
+for shapes that need it (M=32-64 N=16384).
 
-**Priority: LOW. Polish optimization.**
+### 2. Larger N_BLOCKS (TILE_N=256) — RE-ATTEMPT after k_splits fix
 
-**The problem:** MMA fragment layout causes scattered global memory writes
-(threads write to rows `gid` and `gid+8`, each row N*2 bytes apart).
+With the persistent kernel properly tuned, TILE_N=256 should work
+because the grid size reduction is irrelevant (persistent always uses
+num_SMs blocks). The implementation from the reverted attempt is known
+to be correct (85 tests passed). Key details:
 
-**The fix:** After the K-tile loop, write FragC to shared memory (reusing
-pipeline buffers), `__syncthreads()`, then cooperatively write to global
-memory in row-major coalesced order.
+- No repack changes needed: the kernel loads two adjacent 128-wide
+  repack tiles per 256-wide GEMM tile (contiguous in memory)
+- Shmem budget OK: worst case K=5 MB=4 is ~38 KB per block (2 stages)
+- Register headroom: ~32 extra float accumulators, estimated ~147 regs
+- Requires N % 256 == 0 (all LLM shapes satisfy this)
 
-**Expected impact:** 5-15% for small K_dim. Negligible for large K_dim
-where the K-tile loop dominates. Implement after the higher-priority
-optimizations are done.
+### 3. C Output Staging (LOW, polish)
+
+Coalesced global writes instead of scattered fragment writes.
+5-15% for small K_dim. Implement after 1+2 are done and benchmarked.
 
 ---
 
 ## Lessons Learned
 
-1. **cp.async for A was not "low priority."** The original doc rated it
-   2-5% impact. In practice it was the **single most impactful change**
-   because it unlocked multi-M-block AND improved the baseline. The lesson:
-   anything that removes synchronous work from the pipeline critical path
-   has outsized impact, especially as tile sizes grow.
+1. **cp.async for A was not "low priority."** Originally rated 2-5%
+   impact, it was the single most impactful change because it removed
+   synchronous work from the pipeline critical path.
 
-2. **SM utilization dominates small-grid shapes.** Multi-M-block initially
-   made things worse because larger tiles meant fewer blocks. The SM-aware
-   dispatch was essential. For N=4096 shapes, no amount of per-block
-   optimization can compensate for having only 32 active SMs out of 128.
-   The persistent kernel is the real fix.
+2. **Tile size increases halve the grid.** Both multi-M-block and
+   TILE_N=256 initially caused regressions because the grid shrank,
+   reducing SM utilization. Any tile size increase needs either an
+   SM-aware dispatch that avoids it when the grid is small, or a
+   persistent kernel that decouples grid size from SM utilization.
 
-3. **Register pressure is not an issue.** Even M_BLOCKS=4 with K=5 uses
-   only 115 registers (well under the 255 limit) with zero spills. There's
-   headroom for N_BLOCKS=4 (which adds ~8 more float accumulators per
-   M-block = 32 more floats for MB=4).
+3. **Auto k_splits has high overhead.** The atomicAdd + fp32 workspace +
+   tile_counters + final conversion path is significantly more expensive
+   than direct writes. Only use it when the SM utilization gain clearly
+   outweighs the overhead (mn_tiles << num_SMs).
 
-4. **Benchmark variance is significant.** Small-M kernel times (50-100µs)
-   fluctuate 10-20% between runs due to GPU thermal state, power
-   management, and CUDA runtime overhead. Always use high iteration counts
-   (500+) and focus on relative trends, not absolute numbers.
+4. **The persistent loop itself has overhead.** Zeroing accumulators and
+   re-initializing the cp.async pipeline per work item adds cycles. When
+   each SM only handles one tile (total_work <= gridDim.x), the loop
+   overhead is pure waste. Add a fast path.
+
+5. **Register pressure is not an issue.** Even M_BLOCKS=4 with K=5 uses
+   only 115 registers with zero spills. There's headroom for N_BLOCKS=4.
+
+6. **Benchmark variance is significant.** Small-M kernel times fluctuate
+   10-20% between runs. Use high iteration counts (500+) and focus on
+   relative trends.
 
 ---
 
 ## Implementation Order
 
-1. **Optimization 2 (larger N_BLOCKS)** — next step, highest remaining
-   priority. Doubles compute per B fragment. Should close the gap on
-   N=4096 and further extend the lead on large-N shapes.
+1. **Tune k_splits threshold + fast path** — highest priority, should be
+   a small change to the launcher. Re-benchmark to confirm regressions
+   are fixed.
 
-2. **Optimization 3 (persistent kernel)** — addresses the SM utilization
-   problem for small grids. Essential for N=4096 M<=16.
+2. **Re-attempt TILE_N=256** — once the persistent kernel is tuned, the
+   grid size halving is no longer a concern. The implementation is
+   already validated (tests passed in the reverted attempt).
 
-3. **Optimization 4 (C staging)** — polish. Only after 2+3 are done and
-   benchmarked.
+3. **C staging** — polish optimization, low priority.
 
-After Optimization 2, re-benchmark. If the kernel matches cuBLAS for
-M=1-32 across all N values, deprioritize remaining optimizations in
-favor of integration work.
+After steps 1+2, re-benchmark. The target is ≥1.5x vs cuBLAS for all
+LLM shapes (M=1-64, N=4096-16384). If N=4096 shapes are still slow,
+consider whether they matter for the target use case (they may not — LLM
+inference typically has N ≥ 11008 for the large linear layers).
 
 ---
 
@@ -281,7 +291,6 @@ Required to ship, independent of performance optimizations:
 
 - **Wire into LinearNbit module:** Call `kbit_gemm_prod` instead of
   dequant+cuBLAS when CUDA, fp16/bf16, N % TILE_N == 0, K_dim % 64 == 0
-- **Auto-select k_chunks:** Based on M, N, K_dim, SM count
 - **Remove staging kernels:** Delete Stages 3-5 (minimal, pipelined,
   split-K), keep only production kernel + MMA test
 - **Lint + PR:** ruff/clang-format, merge to main
