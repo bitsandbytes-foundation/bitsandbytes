@@ -555,11 +555,12 @@ class TestStage5DequantizeCUDA:
         recovered = _cuda_dequantize_kbit(packed, cb, absmax, k, A.numel(), dtype=torch.float32)
         errors = (A - recovered).abs()
         max_gap = (cb[1:] - cb[:-1]).max().item()
-        # Per block, max error should be bounded.
-        # E4M4 absmax adds up to ~6.25% scale error, fp16 output adds rounding.
-        # Use 1.25 multiplier to account for both.
+        # Per block, max error has two sources:
+        #   1. Quantization error: max_gap/2 * absmax (codebook nearest-neighbor)
+        #   2. E4M4 scale error: absmax is quantized with up to 1/16 relative error
+        # Total bound: (max_gap/2 + 1/16) * absmax + epsilon
         for i in range(absmax.numel()):
-            block_bound = (max_gap / 2 * absmax[i].item() + 1e-6) * 1.25
+            block_bound = (max_gap / 2 + 1 / 16) * absmax[i].item() + 1e-6
             block_err = errors[i * 32 : min((i + 1) * 32, A.numel())].max().item()
             assert block_err <= block_bound, f"Block {i}: max_err={block_err}, bound={block_bound}"
 
@@ -584,11 +585,14 @@ class TestStage6ErrorAnalysis:
         recovered = _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=torch.float32)
         errors = (A - recovered).abs()
         max_gap = (cb[1:] - cb[:-1]).max().item()
-        # Vectorized per-block check (loosened by 1.25 for E4M4 scale error + fp16 output)
+        # Per block, error has two sources:
+        #   1. Quantization error: max_gap/2 * absmax (codebook nearest-neighbor)
+        #   2. E4M4 scale error: absmax quantized with up to 1/16 relative error
+        # Total bound: (max_gap/2 + 1/16) * absmax + epsilon
         num_blocks = (n + 31) // 32
         err_blocks = errors.reshape(num_blocks, 32)
         block_max_errs = err_blocks.max(dim=1).values
-        block_bounds = (max_gap / 2 * absmax + 1e-6) * 1.25
+        block_bounds = (max_gap / 2 + 1 / 16) * absmax + 1e-6
         violations = (block_max_errs > block_bounds).sum().item()
         assert violations == 0, f"{violations}/{num_blocks} blocks violated analytical bound"
 
@@ -1077,7 +1081,7 @@ class TestOutputDtypeCorrectness:
         errors = (A.float() - recovered.float()).abs()
         max_gap = (cb[1:] - cb[:-1]).max().item()
         for i in range(absmax.numel()):
-            block_bound = (max_gap / 2 * absmax[i].item() + 1e-6) * 1.25
+            block_bound = (max_gap / 2 + 1 / 16) * absmax[i].item() + 1e-6
             block_err = errors[i * 32 : min((i + 1) * 32, A.numel())].max().item()
             assert block_err <= block_bound, f"Block {i}: max_err={block_err}, bound={block_bound}"
 
