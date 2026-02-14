@@ -804,6 +804,12 @@ def _(A: torch.Tensor, codebook: torch.Tensor, k: int) -> tuple[torch.Tensor, to
     return packed, absmax
 
 
+_KBIT_ABSMAX_SUFFIX = {
+    torch.uint8: "u8abs",
+    torch.float16: "fp16abs",
+}
+
+
 @register_kernel("bitsandbytes::dequantize_kbit", "cuda")
 def _(
     packed: torch.Tensor,
@@ -824,48 +830,27 @@ def _(
         lambda: f"absmax must be float32, float16, or uint8 (E4M4), got {absmax.dtype}",
     )
 
+    # If fp32 absmax, encode to E4M4 first
+    if absmax.dtype == torch.float32:
+        from bitsandbytes.functional import encode_absmax_e4m4
+
+        absmax = encode_absmax_e4m4(absmax)
+
     num_blocks = -(n // -32)
-    # Always produce fp16 output from the kernel, then cast if needed
-    out = torch.empty(num_blocks * 32, device=packed.device, dtype=torch.float16)
+    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+
+    tname = _KBIT_DTYPE_SUFFIX[dtype]
+    aname = _KBIT_ABSMAX_SUFFIX[absmax.dtype]
 
     with _cuda_device_of(packed):
-        if absmax.dtype == torch.float32:
-            # Encode fp32 absmax to E4M4 first, then use u8abs kernel
-            from bitsandbytes.functional import encode_absmax_e4m4
-
-            absmax_u8 = encode_absmax_e4m4(absmax)
-            fn = getattr(lib, f"cdequantize_kbit_u8abs_k{k}")
-            fn(
-                get_ptr(packed),
-                get_ptr(codebook),
-                get_ptr(absmax_u8),
-                get_ptr(out),
-                ct.c_int(n),
-                _get_tensor_stream(packed),
-            )
-        elif absmax.dtype == torch.uint8:
-            fn = getattr(lib, f"cdequantize_kbit_u8abs_k{k}")
-            fn(
-                get_ptr(packed),
-                get_ptr(codebook),
-                get_ptr(absmax),
-                get_ptr(out),
-                ct.c_int(n),
-                _get_tensor_stream(packed),
-            )
-        else:
-            # fp16 absmax
-            fn = getattr(lib, f"cdequantize_kbit_fp16abs_k{k}")
-            fn(
-                get_ptr(packed),
-                get_ptr(codebook),
-                get_ptr(absmax),
-                get_ptr(out),
-                ct.c_int(n),
-                _get_tensor_stream(packed),
-            )
-
-    if dtype != torch.float16:
-        out = out.to(dtype)
+        fn = getattr(lib, f"cdequantize_kbit_{tname}_{aname}_k{k}")
+        fn(
+            get_ptr(packed),
+            get_ptr(codebook),
+            get_ptr(absmax),
+            get_ptr(out),
+            ct.c_int(n),
+            _get_tensor_stream(packed),
+        )
 
     return out

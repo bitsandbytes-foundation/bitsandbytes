@@ -750,16 +750,15 @@ __device__ __forceinline__ float load_absmax<unsigned char>(const unsigned char*
 
 // ---- Stage 5: Full dequantize kernel ----
 
-// Vectorized version: each warp processes BLOCKS_PER_WARP quant blocks.
-// Within each block, adjacent lane pairs store as half2 (4 bytes instead of 2).
-// This gives wider stores + amortizes codebook load across multiple blocks.
-// ABSMAX_T: float for fp32 absmax, half for fp16 absmax.
-template <int K, int BLOCKS_PER_WARP, typename ABSMAX_T>
+// Vectorized version: each warp processes BLOCKS_PER_WARP quant blocks,
+// amortizing codebook load across multiple blocks.
+// Templated on T (output type) and ABSMAX_T (absmax format).
+template <typename T, int K, int BLOCKS_PER_WARP, typename ABSMAX_T>
 __global__ void kDequantizeBlockwise_kbit_vec(
     const unsigned int* __restrict__ packed_in,
     const float* __restrict__ codebook,
     const ABSMAX_T* __restrict__ absmax,
-    half* __restrict__ out,
+    T* __restrict__ out,
     const int n
 ) {
     const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
@@ -787,24 +786,8 @@ __global__ void kDequantizeBlockwise_kbit_vec(
         unsigned char idx = unpack_kbit_warp<K>(packed, lane_id);
         float val = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
 
-        // Vectorized half2 store: even lanes pair with odd lanes
-        // Exchange values between adjacent lanes
-        half my_half = __float2half(val);
-        // Use raw bits for shuffle (half doesn't have direct shfl support everywhere)
-        unsigned int my_bits = __half_as_ushort(my_half);
-        unsigned int neighbor_bits = __shfl_xor_sync(0xFFFFFFFF, my_bits, 1);
-
-        if ((lane_id & 1) == 0) {
-            // Even lane: pack [my_val, neighbor_val] into half2
-            half2 pair = __halves2half2(my_half, __ushort_as_half((unsigned short)neighbor_bits));
-            int out_idx = block_start + lane_id;
-            if (out_idx + 1 < n) {
-                ((half2*)out)[out_idx / 2] = pair;
-            } else if (out_idx < n) {
-                // Last element edge case: scalar store
-                out[out_idx] = my_half;
-            }
-        }
+        if (block_start + lane_id < n)
+            out[block_start + lane_id] = (T)val;
     }
 }
 
@@ -825,30 +808,17 @@ void quantizeBlockwise_kbit(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-// half specialization with fp16 absmax
-template <int K>
-void dequantizeBlockwise_kbit_half_fp16abs(
-    const unsigned int* packed_in, const float* codebook, const half* absmax, half* out, int n, cudaStream_t stream
+// Generic dequant launcher: supports all output types and absmax formats.
+template <typename T, int K, typename ABSMAX_T>
+void dequantizeBlockwise_kbit(
+    const unsigned int* packed_in, const float* codebook, const ABSMAX_T* absmax,
+    T* out, int n, cudaStream_t stream
 ) {
-    constexpr int BPW = 4;
+    constexpr int BPW = 4;  // blocks per warp
     int num_blocks_quant = (n + 31) / 32;
     int num_warps = (num_blocks_quant + BPW - 1) / BPW;
     int num_cuda_blocks = (num_warps + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kDequantizeBlockwise_kbit_vec<K, BPW, half><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(
-        packed_in, codebook, absmax, out, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-// half specialization with uint8 E4M4 absmax
-template <int K>
-void dequantizeBlockwise_kbit_half_u8abs(
-    const unsigned int* packed_in, const float* codebook, const unsigned char* absmax, half* out, int n, cudaStream_t stream
-) {
-    constexpr int BPW = 4;
-    int num_blocks_quant = (n + 31) / 32;
-    int num_warps = (num_blocks_quant + BPW - 1) / BPW;
-    int num_cuda_blocks = (num_warps + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kDequantizeBlockwise_kbit_vec<K, BPW, unsigned char><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(
+    kDequantizeBlockwise_kbit_vec<T, K, BPW, ABSMAX_T><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(
         packed_in, codebook, absmax, out, n);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -872,22 +842,35 @@ INSTANTIATE_KBIT_QUANT(float, 3)
 INSTANTIATE_KBIT_QUANT(float, 4)
 INSTANTIATE_KBIT_QUANT(float, 5)
 
-// fp16 absmax dequant instantiations
-#define INSTANTIATE_KBIT_DEQUANT_FP16ABS(K) \
-    template void dequantizeBlockwise_kbit_half_fp16abs<K>( \
-        const unsigned int*, const float*, const half*, half*, int, cudaStream_t);
+// Dequant instantiations: all output types × absmax types × K values
+#define INSTANTIATE_KBIT_DEQUANT(T, K, ABSMAX_T) \
+    template void dequantizeBlockwise_kbit<T, K, ABSMAX_T>( \
+        const unsigned int*, const float*, const ABSMAX_T*, T*, int, cudaStream_t);
 
-INSTANTIATE_KBIT_DEQUANT_FP16ABS(2)
-INSTANTIATE_KBIT_DEQUANT_FP16ABS(3)
-INSTANTIATE_KBIT_DEQUANT_FP16ABS(4)
-INSTANTIATE_KBIT_DEQUANT_FP16ABS(5)
+// uint8 E4M4 absmax (default)
+INSTANTIATE_KBIT_DEQUANT(half, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(half, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(half, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(half, 5, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 5, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(float, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(float, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(float, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(float, 5, unsigned char)
 
-// uint8 E4M4 absmax dequant instantiations
-#define INSTANTIATE_KBIT_DEQUANT_U8ABS(K) \
-    template void dequantizeBlockwise_kbit_half_u8abs<K>( \
-        const unsigned int*, const float*, const unsigned char*, half*, int, cudaStream_t);
-
-INSTANTIATE_KBIT_DEQUANT_U8ABS(2)
-INSTANTIATE_KBIT_DEQUANT_U8ABS(3)
-INSTANTIATE_KBIT_DEQUANT_U8ABS(4)
-INSTANTIATE_KBIT_DEQUANT_U8ABS(5)
+// fp16 absmax (option)
+INSTANTIATE_KBIT_DEQUANT(half, 2, half)
+INSTANTIATE_KBIT_DEQUANT(half, 3, half)
+INSTANTIATE_KBIT_DEQUANT(half, 4, half)
+INSTANTIATE_KBIT_DEQUANT(half, 5, half)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 2, half)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 3, half)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 4, half)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 5, half)
+INSTANTIATE_KBIT_DEQUANT(float, 2, half)
+INSTANTIATE_KBIT_DEQUANT(float, 3, half)
+INSTANTIATE_KBIT_DEQUANT(float, 4, half)
+INSTANTIATE_KBIT_DEQUANT(float, 5, half)

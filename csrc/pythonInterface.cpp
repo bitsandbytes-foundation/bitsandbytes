@@ -391,48 +391,59 @@ void gemv_4bit_inference_fp32(
 
 // Forward declarations of ops.cu template functions
 template <typename T, int K> void quantizeBlockwise_kbit(const float*, const T*, float*, unsigned int*, int);
-template <int K> void dequantizeBlockwise_kbit_half_fp16abs(const unsigned int*, const float*, const half*, half*, int, cudaStream_t);
-template <int K> void dequantizeBlockwise_kbit_half_u8abs(const unsigned int*, const float*, const unsigned char*, half*, int, cudaStream_t);
+template <typename T, int K, typename ABSMAX_T> void dequantizeBlockwise_kbit(const unsigned int*, const float*, const ABSMAX_T*, T*, int, cudaStream_t);
 
-// Unmangled production wrappers (quantize only)
-#define MAKE_KBIT_QUANT_ONLY(tname, T, K) \
+// Unmangled quantize wrappers
+#define MAKE_KBIT_QUANT(tname, T, K) \
     void quantize_kbit_##tname##_k##K(const float* codebook, const T* A, float* absmax, unsigned int* packed_out, int n) { \
         quantizeBlockwise_kbit<T, K>(codebook, A, absmax, packed_out, n); }
 
-MAKE_KBIT_QUANT_ONLY(fp16, half, 2)
-MAKE_KBIT_QUANT_ONLY(fp16, half, 3)
-MAKE_KBIT_QUANT_ONLY(fp16, half, 4)
-MAKE_KBIT_QUANT_ONLY(fp16, half, 5)
-MAKE_KBIT_QUANT_ONLY(bf16, __nv_bfloat16, 2)
-MAKE_KBIT_QUANT_ONLY(bf16, __nv_bfloat16, 3)
-MAKE_KBIT_QUANT_ONLY(bf16, __nv_bfloat16, 4)
-MAKE_KBIT_QUANT_ONLY(bf16, __nv_bfloat16, 5)
-MAKE_KBIT_QUANT_ONLY(fp32, float, 2)
-MAKE_KBIT_QUANT_ONLY(fp32, float, 3)
-MAKE_KBIT_QUANT_ONLY(fp32, float, 4)
-MAKE_KBIT_QUANT_ONLY(fp32, float, 5)
+MAKE_KBIT_QUANT(fp16, half, 2)
+MAKE_KBIT_QUANT(fp16, half, 3)
+MAKE_KBIT_QUANT(fp16, half, 4)
+MAKE_KBIT_QUANT(fp16, half, 5)
+MAKE_KBIT_QUANT(bf16, __nv_bfloat16, 2)
+MAKE_KBIT_QUANT(bf16, __nv_bfloat16, 3)
+MAKE_KBIT_QUANT(bf16, __nv_bfloat16, 4)
+MAKE_KBIT_QUANT(bf16, __nv_bfloat16, 5)
+MAKE_KBIT_QUANT(fp32, float, 2)
+MAKE_KBIT_QUANT(fp32, float, 3)
+MAKE_KBIT_QUANT(fp32, float, 4)
+MAKE_KBIT_QUANT(fp32, float, 5)
 
-// fp16 absmax dequant wrappers (half output only)
-#define MAKE_KBIT_DEQUANT_FP16ABS(K) \
-    void dequantize_kbit_fp16abs_k##K(const unsigned int* packed_in, const float* codebook, \
-                                       const half* absmax, half* out, int n, cudaStream_t stream) { \
-        dequantizeBlockwise_kbit_half_fp16abs<K>(packed_in, codebook, absmax, out, n, stream); }
+// Unmangled dequant wrappers: output type × absmax type × K
+#define MAKE_KBIT_DEQUANT(tname, T, aname, ABSMAX_T, K) \
+    void dequantize_kbit_##tname##_##aname##_k##K(const unsigned int* packed_in, const float* codebook, \
+                                                    const ABSMAX_T* absmax, T* out, int n, cudaStream_t stream) { \
+        dequantizeBlockwise_kbit<T, K, ABSMAX_T>(packed_in, codebook, absmax, out, n, stream); }
 
-MAKE_KBIT_DEQUANT_FP16ABS(2)
-MAKE_KBIT_DEQUANT_FP16ABS(3)
-MAKE_KBIT_DEQUANT_FP16ABS(4)
-MAKE_KBIT_DEQUANT_FP16ABS(5)
+// uint8 E4M4 absmax (default) - all output types
+MAKE_KBIT_DEQUANT(fp16, half, u8abs, unsigned char, 2)
+MAKE_KBIT_DEQUANT(fp16, half, u8abs, unsigned char, 3)
+MAKE_KBIT_DEQUANT(fp16, half, u8abs, unsigned char, 4)
+MAKE_KBIT_DEQUANT(fp16, half, u8abs, unsigned char, 5)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 3)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 5)
+MAKE_KBIT_DEQUANT(fp32, float, u8abs, unsigned char, 2)
+MAKE_KBIT_DEQUANT(fp32, float, u8abs, unsigned char, 3)
+MAKE_KBIT_DEQUANT(fp32, float, u8abs, unsigned char, 4)
+MAKE_KBIT_DEQUANT(fp32, float, u8abs, unsigned char, 5)
 
-// uint8 E4M4 absmax dequant wrappers (half output only)
-#define MAKE_KBIT_DEQUANT_U8ABS(K) \
-    void dequantize_kbit_u8abs_k##K(const unsigned int* packed_in, const float* codebook, \
-                                     const unsigned char* absmax, half* out, int n, cudaStream_t stream) { \
-        dequantizeBlockwise_kbit_half_u8abs<K>(packed_in, codebook, absmax, out, n, stream); }
-
-MAKE_KBIT_DEQUANT_U8ABS(2)
-MAKE_KBIT_DEQUANT_U8ABS(3)
-MAKE_KBIT_DEQUANT_U8ABS(4)
-MAKE_KBIT_DEQUANT_U8ABS(5)
+// fp16 absmax (option) - all output types
+MAKE_KBIT_DEQUANT(fp16, half, fp16abs, half, 2)
+MAKE_KBIT_DEQUANT(fp16, half, fp16abs, half, 3)
+MAKE_KBIT_DEQUANT(fp16, half, fp16abs, half, 4)
+MAKE_KBIT_DEQUANT(fp16, half, fp16abs, half, 5)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, fp16abs, half, 2)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, fp16abs, half, 3)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, fp16abs, half, 4)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, fp16abs, half, 5)
+MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 2)
+MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 3)
+MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 4)
+MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 5)
 
 #endif // BUILD_CUDA || BUILD_HIP (kbit unmangled)
 
@@ -965,27 +976,39 @@ MAKE_CKBIT(fp32, float, 3)
 MAKE_CKBIT(fp32, float, 4)
 MAKE_CKBIT(fp32, float, 5)
 
-// fp16 absmax dequant extern C wrappers
-#define MAKE_CKBIT_FP16ABS(K) \
-    void cdequantize_kbit_fp16abs_k##K(const unsigned int* packed_in, const float* codebook, \
-                                        const half* absmax, half* out, int n, cudaStream_t stream) { \
-        dequantize_kbit_fp16abs_k##K(packed_in, codebook, absmax, out, n, stream); }
+// Dequant extern C wrappers: output type × absmax type × K
+#define MAKE_CKBIT_DEQUANT(tname, T, aname, ABSMAX_T, K) \
+    void cdequantize_kbit_##tname##_##aname##_k##K(const unsigned int* packed_in, const float* codebook, \
+                                                     const ABSMAX_T* absmax, T* out, int n, cudaStream_t stream) { \
+        dequantize_kbit_##tname##_##aname##_k##K(packed_in, codebook, absmax, out, n, stream); }
 
-MAKE_CKBIT_FP16ABS(2)
-MAKE_CKBIT_FP16ABS(3)
-MAKE_CKBIT_FP16ABS(4)
-MAKE_CKBIT_FP16ABS(5)
+// uint8 E4M4 absmax - all output types
+MAKE_CKBIT_DEQUANT(fp16, half, u8abs, unsigned char, 2)
+MAKE_CKBIT_DEQUANT(fp16, half, u8abs, unsigned char, 3)
+MAKE_CKBIT_DEQUANT(fp16, half, u8abs, unsigned char, 4)
+MAKE_CKBIT_DEQUANT(fp16, half, u8abs, unsigned char, 5)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 3)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 5)
+MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 2)
+MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 3)
+MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 4)
+MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 5)
 
-// uint8 E4M4 absmax dequant extern C wrappers
-#define MAKE_CKBIT_U8ABS(K) \
-    void cdequantize_kbit_u8abs_k##K(const unsigned int* packed_in, const float* codebook, \
-                                      const unsigned char* absmax, half* out, int n, cudaStream_t stream) { \
-        dequantize_kbit_u8abs_k##K(packed_in, codebook, absmax, out, n, stream); }
-
-MAKE_CKBIT_U8ABS(2)
-MAKE_CKBIT_U8ABS(3)
-MAKE_CKBIT_U8ABS(4)
-MAKE_CKBIT_U8ABS(5)
+// fp16 absmax - all output types
+MAKE_CKBIT_DEQUANT(fp16, half, fp16abs, half, 2)
+MAKE_CKBIT_DEQUANT(fp16, half, fp16abs, half, 3)
+MAKE_CKBIT_DEQUANT(fp16, half, fp16abs, half, 4)
+MAKE_CKBIT_DEQUANT(fp16, half, fp16abs, half, 5)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, fp16abs, half, 2)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, fp16abs, half, 3)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, fp16abs, half, 4)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, fp16abs, half, 5)
+MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 2)
+MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 3)
+MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 4)
+MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 5)
 
 #endif
 }
