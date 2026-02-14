@@ -1848,18 +1848,39 @@ __global__ void kbit_gemm_prod(
         if (threadIdx.x < ABS_INT4S)
             cp_async_cg_16(&abs_dst[threadIdx.x], &abs_src[threadIdx.x]);
 
-        // A tile (synchronous, with bounds check + XOR swizzle for bank-conflict-free ldmatrix)
-        // Swizzle: col_group (8-half granularity) XOR'd with (row % 8)
+        // A tile via cp.async with XOR swizzle for bank-conflict-free ldmatrix.
+        // Copies 16 bytes (8 halves) at a time. K_dim is a multiple of 32
+        // (BLOCKSIZE), so boundary groups are always fully in/out of bounds.
         scalar_t* a_dst = sh_a(stage);
-        for (int i = threadIdx.x; i < A_STAGE_ELEMS; i += blockDim.x) {
-            int row = i / TILE_K;
-            int col = i % TILE_K;
-            int col_group = col / 8;
-            int swizzled_group = col_group ^ (row % 8);
-            int swizzled_col = swizzled_group * 8 + (col % 8);
-            int gr = m_base + row;
-            int gc = k_base + col;
-            a_dst[row * TILE_K + swizzled_col] = (gr < M && gc < K_dim) ? A[gr * K_dim + gc] : Ops::from_float(0.0f);
+        constexpr int A_GROUPS = A_STAGE_ELEMS / 8;  // number of 8-half groups
+        const bool a_interior = (m_base + TILE_M <= M) && (k_base + TILE_K <= K_dim);
+
+        if (a_interior) {
+            // Fast path: all in-bounds, pure cp.async
+            for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
+                int row = i / (TILE_K / 8);
+                int col_group = i % (TILE_K / 8);
+                int swizzled_group = col_group ^ (row % 8);
+                int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                const int4* src = reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
+                cp_async_cg_16(dst, src);
+            }
+        } else {
+            // Boundary path: per-group bounds check
+            for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
+                int row = i / (TILE_K / 8);
+                int col_group = i % (TILE_K / 8);
+                int swizzled_group = col_group ^ (row % 8);
+                int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                int gr = m_base + row;
+                int gc = k_base + col_group * 8;
+                if (gr < M && gc < K_dim) {
+                    const int4* src = reinterpret_cast<const int4*>(&A[gr * K_dim + gc]);
+                    cp_async_cg_16(dst, src);
+                } else {
+                    *dst = make_int4(0, 0, 0, 0);
+                }
+            }
         }
     };
 
@@ -2071,13 +2092,13 @@ void kbitGemmProd(
     // hurt SM utilization AND the extra compute amortizes the A load cost.
     //
     // Heuristic: only use M_BLOCKS>1 when the resulting grid has at least
-    // 2x num_sms blocks, ensuring good multi-wave overlap.
+    // num_sms blocks, ensuring full SM utilization.
     int m_blocks = 1;
     auto grid_blocks = [&](int mb) {
         int tile_m = mb * 16;
         return ((M + tile_m - 1) / tile_m) * n_tiles;
     };
-    int threshold = 2 * num_sms;
+    int threshold = num_sms;
 
     if (M > 48 && grid_blocks(4) >= threshold)
         m_blocks = 4;
