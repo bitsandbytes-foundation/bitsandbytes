@@ -29,9 +29,15 @@ def pytest_runtest_call(item):
         raise
 
 
+_teardown_counter = 0
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_runtest_teardown(item, nextitem):
-    gc.collect()
+    global _teardown_counter
+    _teardown_counter += 1
+    if _teardown_counter % 50 == 0 or nextitem is None:
+        gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
