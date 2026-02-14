@@ -452,6 +452,43 @@ MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 3)
 MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 4)
 MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 5)
 
+// Forward declaration of repack launcher
+template <int K> void repackKbit(const unsigned int*, const float*, unsigned int*, unsigned char*, int, int);
+
+// Unmangled repack wrappers
+#define MAKE_KBIT_REPACK(K)                                                                                            \
+    void repack_kbit_k##K(                                                                                             \
+        const unsigned int* packed_flat, const float* absmax_flat, unsigned int* packed_tiled,                          \
+        unsigned char* absmax_tiled, int K_dim, int N                                                                  \
+    ) {                                                                                                                \
+        repackKbit<K>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);                                 \
+    }
+
+MAKE_KBIT_REPACK(2)
+MAKE_KBIT_REPACK(3)
+MAKE_KBIT_REPACK(4)
+MAKE_KBIT_REPACK(5)
+
+// Forward declaration of GEMM launcher
+template <int K> void kbitGemmMinimal(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int);
+
+// Unmangled GEMM wrappers
+#define MAKE_KBIT_GEMM(K)                                                                                              \
+    void kbit_gemm_fp16_k##K(                                                                                          \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
+        int M, int K_dim, int N                                                                                        \
+    ) {                                                                                                                \
+        kbitGemmMinimal<K>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                           \
+    }
+
+MAKE_KBIT_GEMM(2)
+MAKE_KBIT_GEMM(3)
+MAKE_KBIT_GEMM(4)
+MAKE_KBIT_GEMM(5)
+
+// Debug MMA test
+void testMMA(const half*, const half*, float*);
+
 #endif // BUILD_CUDA || BUILD_HIP (kbit unmangled)
 
 extern "C" {
@@ -1008,6 +1045,20 @@ MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 3)
 MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 4)
 MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 5)
 
+// Repack extern C wrappers
+#define MAKE_CKBIT_REPACK(K)                                                                                           \
+    void crepack_kbit_k##K(                                                                                            \
+        const unsigned int* packed_flat, const float* absmax_flat, unsigned int* packed_tiled,                          \
+        unsigned char* absmax_tiled, int K_dim, int N                                                                  \
+    ) {                                                                                                                \
+        repack_kbit_k##K(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);                              \
+    }
+
+MAKE_CKBIT_REPACK(2)
+MAKE_CKBIT_REPACK(3)
+MAKE_CKBIT_REPACK(4)
+MAKE_CKBIT_REPACK(5)
+
 // fp16 absmax - all output types
 MAKE_CKBIT_DEQUANT(fp16, half, fp16abs, half, 2)
 MAKE_CKBIT_DEQUANT(fp16, half, fp16abs, half, 3)
@@ -1021,6 +1072,22 @@ MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 2)
 MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 3)
 MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 4)
 MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 5)
+
+// GEMM extern C wrappers (fp16 only for Stage 3)
+#define MAKE_CKBIT_GEMM(K)                                                                                             \
+    void ckbit_gemm_fp16_k##K(                                                                                         \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
+        int M, int K_dim, int N                                                                                        \
+    ) {                                                                                                                \
+        kbit_gemm_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                         \
+    }
+
+MAKE_CKBIT_GEMM(2)
+MAKE_CKBIT_GEMM(3)
+MAKE_CKBIT_GEMM(4)
+MAKE_CKBIT_GEMM(5)
+
+void ctest_mma(const half* A, const half* B, float* C) { testMMA(A, B, C); }
 
 #endif
 }

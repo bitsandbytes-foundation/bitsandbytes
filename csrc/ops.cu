@@ -735,6 +735,36 @@ __device__ __forceinline__ float decode_e4m4_absmax(unsigned char raw) {
     return __uint_as_float(ieee);
 }
 
+// ---- E4M4 absmax encode ----
+// float -> uint8: inverse of decode_e4m4_absmax.
+// Normal   (e_biased > 0): e_biased = floor(log2(val)) + BIAS, m = round((val/2^e_unbiased - 1) * 16)
+// Subnormal (e_biased == 0): m = round(val / 2^(1-BIAS) * 16)
+__device__ __forceinline__ unsigned char encode_e4m4_absmax(float val) {
+    if (val <= 0.0f)
+        return 0;
+    int e_unbiased = (int)floorf(log2f(val));
+    int e_biased = e_unbiased + E4M4_BIAS;
+    if (e_biased < 0)
+        e_biased = 0;
+    if (e_biased > 15)
+        e_biased = 15;
+    int m;
+    if (e_biased == 0) {
+        // Subnormal: val = 2^(1-BIAS) * (m/16)  =>  m = val / 2^(1-BIAS) * 16
+        float subnormal_scale = ldexpf(1.0f, 1 - E4M4_BIAS);
+        m = __float2int_rn(val / subnormal_scale * 16.0f);
+    } else {
+        // Normal: val = 2^e_unbiased * (1 + m/16)  =>  m = (val/2^e_unbiased - 1) * 16
+        float scale = ldexpf(1.0f, e_unbiased);
+        m = __float2int_rn((val / scale - 1.0f) * 16.0f);
+    }
+    if (m < 0)
+        m = 0;
+    if (m > 15)
+        m = 15;
+    return (unsigned char)((e_biased << 4) | m);
+}
+
 // Template helper: convert ABSMAX_T to float.
 // Specialization for unsigned char uses E4M4 decode.
 template <typename ABSMAX_T> __device__ __forceinline__ float load_absmax(const ABSMAX_T* absmax, int idx) {
@@ -816,6 +846,349 @@ void dequantizeBlockwise_kbit(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+// ---- Stage 2: Repack kernel (flat bit-plane -> GEMM-tiled layout) ----
+
+// Tile sizes matching the GEMM kernel design (compile-time constants).
+constexpr int KBIT_TILE_K = 64;
+constexpr int KBIT_TILE_N = 128;
+constexpr int KBIT_BLOCKSIZE = 32;
+
+template <int K>
+__global__ void kRepackKbit(
+    const unsigned int* __restrict__ packed_flat, const float* __restrict__ absmax_flat,
+    unsigned int* __restrict__ packed_tiled, unsigned char* __restrict__ absmax_tiled, const int K_dim, const int N
+) {
+    // Each thread handles one (n_idx, k_block_idx) pair.
+    const int total_k_blocks = K_dim / KBIT_BLOCKSIZE;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= N * total_k_blocks)
+        return;
+
+    const int n_idx = idx / total_k_blocks;
+    const int k_block_idx = idx % total_k_blocks;
+    const int k_start = k_block_idx * KBIT_BLOCKSIZE;
+
+    // Source: flat block ID from W[N, K_dim] row-major layout.
+    // Element (n, k) at flat_index = n * K_dim + k; block_id = flat_index / 32.
+    const int flat_block_id = n_idx * (K_dim / KBIT_BLOCKSIZE) + k_block_idx;
+
+    // Destination: tiled position.
+    const int k_tile = k_start / KBIT_TILE_K;
+    const int n_tile = n_idx / KBIT_TILE_N;
+    const int col = n_idx % KBIT_TILE_N;
+    const int kb = (k_start % KBIT_TILE_K) / KBIT_BLOCKSIZE;
+
+    const int n_tiles = N / KBIT_TILE_N;
+    constexpr int k_blocks_per_tile = KBIT_TILE_K / KBIT_BLOCKSIZE; // 2
+    constexpr int words_per_tile = KBIT_TILE_N * k_blocks_per_tile * K;
+    constexpr int absmax_per_tile = KBIT_TILE_N * k_blocks_per_tile;
+
+    const int tile_base = k_tile * n_tiles + n_tile;
+    const int dst_word_base = tile_base * words_per_tile + (col * k_blocks_per_tile + kb) * K;
+    const int src_word_base = flat_block_id * K;
+
+// Copy K bit-plane words
+#pragma unroll
+    for (int bit = 0; bit < K; bit++)
+        packed_tiled[dst_word_base + bit] = packed_flat[src_word_base + bit];
+
+    // Encode absmax to E4M4 and copy
+    const int dst_abs_idx = tile_base * absmax_per_tile + col * k_blocks_per_tile + kb;
+    absmax_tiled[dst_abs_idx] = encode_e4m4_absmax(absmax_flat[flat_block_id]);
+}
+
+// Repack launcher
+template <int K>
+void repackKbit(
+    const unsigned int* packed_flat, const float* absmax_flat, unsigned int* packed_tiled,
+    unsigned char* absmax_tiled, int K_dim, int N
+) {
+    int total_work = N * (K_dim / KBIT_BLOCKSIZE);
+    int block_size = 256;
+    int grid_size = (total_work + block_size - 1) / block_size;
+    kRepackKbit<K><<<grid_size, block_size>>>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// ---- Stage 3: Minimal fused kbit dequant + GEMM kernel ----
+// No cp.async pipeline, no persistent kernel, no split-K.
+// Validates: tiled addressing, bit-plane extraction, codebook lookup, MMA, output write.
+// C[M, N] = A[M, K_dim] * W^T where W[N, K_dim] is kbit-quantized in tiled format.
+//
+// Grid: (n_tiles, m_tiles), 256 threads (8 warps) per block.
+// For M_BLOCKS=1 (TILE_M=16): all 8 warps span N, each warp handles 16 columns.
+
+template <int K_BITS>
+__global__ void kbit_gemm_minimal(
+    const half* __restrict__ A, const unsigned int* __restrict__ B_packed, const unsigned char* __restrict__ B_absmax,
+    const float* __restrict__ codebook, half* __restrict__ C, const int M, const int K_dim, const int N
+) {
+    constexpr int TILE_M = 16;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int BS = 32;
+    constexpr int KB_PER_TILE = TILE_K / BS;                 // 2
+    constexpr int B_COL_STRIDE = KB_PER_TILE * K_BITS + 1;  // +1 padding for bank conflicts
+    constexpr int N_BLOCKS = 2;                              // 16 cols per warp / 8 cols per MMA
+
+    const int n_tile = blockIdx.x;
+    const int m_tile = blockIdx.y;
+    const int n_tiles = N / TILE_N;
+    const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
+    const int warp_id = threadIdx.x / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int gid = lane_id / 4;  // group_id (0-7): maps to MMA row (A/C) or column (B)
+    const int tid = lane_id % 4;  // tid_in_group (0-3): maps to MMA column pairs
+
+    const int warp_n_base = warp_id * (TILE_N / 8);  // 16 cols per warp
+
+    // Shared memory: A tile | B tile (padded) | absmax tile
+    extern __shared__ char smem[];
+    half* sh_a = reinterpret_cast<half*>(smem);
+    unsigned int* sh_b = reinterpret_cast<unsigned int*>(sh_a + TILE_M * TILE_K);
+    unsigned char* sh_abs = reinterpret_cast<unsigned char*>(sh_b + TILE_N * B_COL_STRIDE);
+
+    // Codebook in register (one half per lane, lanes 0..2^K-1 hold valid entries)
+    half cb_h = (lane_id < (1 << K_BITS)) ? __float2half(codebook[lane_id]) : __float2half(0.0f);
+
+    // Accumulators: N_BLOCKS MMA positions, 4 floats each
+    float frag_c[N_BLOCKS][4];
+#pragma unroll
+    for (int nb = 0; nb < N_BLOCKS; nb++)
+        frag_c[nb][0] = frag_c[nb][1] = frag_c[nb][2] = frag_c[nb][3] = 0.0f;
+
+    const int m_base = m_tile * TILE_M;
+
+    for (int kt = 0; kt < k_tiles; kt++) {
+        const int k_base = kt * TILE_K;
+
+        // ---- Load A tile to shared memory (synchronous) ----
+        for (int i = threadIdx.x; i < TILE_M * TILE_K; i += blockDim.x) {
+            int row = i / TILE_K;
+            int col = i % TILE_K;
+            int gr = m_base + row;
+            int gc = k_base + col;
+            sh_a[row * TILE_K + col] = (gr < M && gc < K_dim) ? A[gr * K_dim + gc] : __float2half(0.0f);
+        }
+
+        // ---- Load B tile to shared memory (with +1 column padding) ----
+        const int tile_idx = kt * n_tiles + n_tile;
+        const int b_global_base = tile_idx * (TILE_N * KB_PER_TILE * K_BITS);
+        const int abs_global_base = tile_idx * (TILE_N * KB_PER_TILE);
+
+        for (int i = threadIdx.x; i < TILE_N * KB_PER_TILE * K_BITS; i += blockDim.x) {
+            int col = i / (KB_PER_TILE * K_BITS);
+            int rem = i % (KB_PER_TILE * K_BITS);
+            int kb = rem / K_BITS;
+            int bit = rem % K_BITS;
+            sh_b[col * B_COL_STRIDE + kb * K_BITS + bit] = B_packed[b_global_base + i];
+        }
+
+        // ---- Load absmax ----
+        for (int i = threadIdx.x; i < TILE_N * KB_PER_TILE; i += blockDim.x)
+            sh_abs[i] = B_absmax[abs_global_base + i];
+
+        __syncthreads();
+
+        // ---- Process 4 k-sub-tiles (each 16 elements) ----
+#pragma unroll
+        for (int ks = 0; ks < 4; ks++) {
+            const int k_block = ks / 2;   // which 32-element block (0 or 1)
+            const int half_idx = ks % 2;  // which half within block (0: bits 0-15, 1: bits 16-31)
+
+            // Load A fragment from shared memory
+            // m16n8k16 register order (from Turing m16n8k8 decomposition):
+            //   a[0]: row_lo (gid), k_lo (tid*2..tid*2+1)
+            //   a[1]: row_hi (gid+8), k_lo (tid*2..tid*2+1)
+            //   a[2]: row_lo (gid), k_hi (tid*2+8..tid*2+9)
+            //   a[3]: row_hi (gid+8), k_hi (tid*2+8..tid*2+9)
+            uint32_t frag_a[4];
+            {
+                const int kc0 = ks * 16 + tid * 2;
+                const int kc1 = ks * 16 + tid * 2 + 8;
+                const int r0 = gid;
+                const int r1 = gid + 8;
+                half2 h_rlo_klo = __halves2half2(
+                    (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc0] : __float2half(0.0f),
+                    (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                half2 h_rhi_klo = __halves2half2(
+                    (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc0] : __float2half(0.0f),
+                    (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                half2 h_rlo_khi = __halves2half2(
+                    (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc1] : __float2half(0.0f),
+                    (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                half2 h_rhi_khi = __halves2half2(
+                    (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc1] : __float2half(0.0f),
+                    (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                frag_a[0] = *reinterpret_cast<uint32_t*>(&h_rlo_klo);
+                frag_a[1] = *reinterpret_cast<uint32_t*>(&h_rhi_klo);
+                frag_a[2] = *reinterpret_cast<uint32_t*>(&h_rlo_khi);
+                frag_a[3] = *reinterpret_cast<uint32_t*>(&h_rhi_khi);
+            }
+
+            // For each N-block (2 per warp)
+#pragma unroll
+            for (int nb = 0; nb < N_BLOCKS; nb++) {
+                // Column in the tile for this thread's B fragment
+                // B fragment layout for m16n8k16: column = gid (0-7)
+                int col = warp_n_base + nb * 8 + gid;
+
+                // Load K bit-plane words from shared memory
+                unsigned int planes[K_BITS];
+                int b_addr = col * B_COL_STRIDE + k_block * K_BITS;
+#pragma unroll
+                for (int b = 0; b < K_BITS; b++)
+                    planes[b] = sh_b[b_addr + b];
+
+                // Decode absmax for this column and block
+                half scale = __float2half(decode_e4m4_absmax(sh_abs[col * KB_PER_TILE + k_block]));
+
+                // Extract indices and dequantize 4 fragment values
+                // B fragment rows: {2*tid, 2*tid+1, 2*tid+8, 2*tid+9} within the 16-element sub-tile
+                // Bit position in the 32-bit plane word: half_idx*16 + row
+                const int bit_offset = half_idx * 16;
+                const int rows[4] = {2 * tid, 2 * tid + 1, 2 * tid + 8, 2 * tid + 9};
+                half vals[4];
+#pragma unroll
+                for (int r = 0; r < 4; r++) {
+                    int bit_pos = bit_offset + rows[r];
+                    int idx = 0;
+#pragma unroll
+                    for (int b = 0; b < K_BITS; b++)
+                        idx |= ((planes[b] >> bit_pos) & 1) << b;
+                    vals[r] = __hmul(__shfl_sync(0xFFFFFFFF, cb_h, idx), scale);
+                }
+
+                // Construct B fragment as uint32_t registers
+                uint32_t frag_b[2];
+                {
+                    half2 b0 = __halves2half2(vals[0], vals[1]);
+                    half2 b1 = __halves2half2(vals[2], vals[3]);
+                    frag_b[0] = *reinterpret_cast<uint32_t*>(&b0);
+                    frag_b[1] = *reinterpret_cast<uint32_t*>(&b1);
+                }
+
+                // MMA: C += A * B (m16n8k16, fp16 inputs, fp32 accumulator)
+                asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
+                             "{%0, %1, %2, %3}, "
+                             "{%4, %5, %6, %7}, "
+                             "{%8, %9}, "
+                             "{%10, %11, %12, %13};\n"
+                             : "=f"(frag_c[nb][0]), "=f"(frag_c[nb][1]), "=f"(frag_c[nb][2]),
+                               "=f"(frag_c[nb][3])
+                             : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
+                               "r"(frag_b[0]), "r"(frag_b[1]),
+                               "f"(frag_c[nb][0]), "f"(frag_c[nb][1]), "f"(frag_c[nb][2]),
+                               "f"(frag_c[nb][3]));
+            }
+        }
+        __syncthreads();
+    }
+
+    // ---- Write output ----
+    // C fragment layout for m16n8k16:
+    //   c[0] = C[gid,   tid*2],   c[1] = C[gid,   tid*2+1]
+    //   c[2] = C[gid+8, tid*2],   c[3] = C[gid+8, tid*2+1]
+#pragma unroll
+    for (int nb = 0; nb < N_BLOCKS; nb++) {
+        int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+        int m_row0 = m_base + gid;
+        int m_row1 = m_base + gid + 8;
+        if (m_row0 < M) {
+            C[m_row0 * N + c_col] = __float2half(frag_c[nb][0]);
+            C[m_row0 * N + c_col + 1] = __float2half(frag_c[nb][1]);
+        }
+        if (m_row1 < M) {
+            C[m_row1 * N + c_col] = __float2half(frag_c[nb][2]);
+            C[m_row1 * N + c_col + 1] = __float2half(frag_c[nb][3]);
+        }
+    }
+}
+
+// Stage 3 GEMM launcher
+template <int K>
+void kbitGemmMinimal(
+    const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C, int M,
+    int K_dim, int N
+) {
+    constexpr int TILE_M = 16;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int BS = 32;
+    constexpr int KB_PER_TILE = TILE_K / BS;
+    constexpr int B_COL_STRIDE = KB_PER_TILE * K + 1;
+
+    int m_tiles = (M + TILE_M - 1) / TILE_M;
+    int n_tiles = N / TILE_N;
+
+    dim3 grid(n_tiles, m_tiles);
+    dim3 block(256);
+
+    int smem_size = TILE_M * TILE_K * sizeof(half) + TILE_N * B_COL_STRIDE * sizeof(unsigned int)
+                    + TILE_N * KB_PER_TILE * sizeof(unsigned char);
+
+    kbit_gemm_minimal<K><<<grid, block, smem_size>>>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// ---- Debug: Simple MMA test kernel ----
+// Takes fp16 A[16,16] and fp16 B[16,8] (B stored row-major), outputs fp32 C[16,8].
+__global__ void test_mma_kernel(const half* __restrict__ A, const half* __restrict__ B, float* __restrict__ C) {
+    int lane_id = threadIdx.x % 32;
+    int gid = lane_id / 4;
+    int tid = lane_id % 4;
+
+    // Load A fragment: A is [16,16] row-major
+    // m16n8k16 register order (from Turing m16n8k8 decomposition):
+    //   a[0]: row_lo (gid), k_lo (tid*2..tid*2+1)
+    //   a[1]: row_hi (gid+8), k_lo (tid*2..tid*2+1)
+    //   a[2]: row_lo (gid), k_hi (tid*2+8..tid*2+9)
+    //   a[3]: row_hi (gid+8), k_hi (tid*2+8..tid*2+9)
+    uint32_t frag_a[4];
+    {
+        half2 h_rlo_klo = __halves2half2(A[gid * 16 + tid * 2], A[gid * 16 + tid * 2 + 1]);
+        half2 h_rhi_klo = __halves2half2(A[(gid + 8) * 16 + tid * 2], A[(gid + 8) * 16 + tid * 2 + 1]);
+        half2 h_rlo_khi = __halves2half2(A[gid * 16 + tid * 2 + 8], A[gid * 16 + tid * 2 + 9]);
+        half2 h_rhi_khi = __halves2half2(A[(gid + 8) * 16 + tid * 2 + 8], A[(gid + 8) * 16 + tid * 2 + 9]);
+        frag_a[0] = *reinterpret_cast<uint32_t*>(&h_rlo_klo);
+        frag_a[1] = *reinterpret_cast<uint32_t*>(&h_rhi_klo);
+        frag_a[2] = *reinterpret_cast<uint32_t*>(&h_rlo_khi);
+        frag_a[3] = *reinterpret_cast<uint32_t*>(&h_rhi_khi);
+    }
+
+    // Load B fragment: B is [16,8] row-major. MMA B is col-major, so B_col[k,n] = B_row[k,n].
+    uint32_t frag_b[2];
+    {
+        half2 b0 = __halves2half2(B[(tid * 2) * 8 + gid], B[(tid * 2 + 1) * 8 + gid]);
+        half2 b1 = __halves2half2(B[(tid * 2 + 8) * 8 + gid], B[(tid * 2 + 9) * 8 + gid]);
+        frag_b[0] = *reinterpret_cast<uint32_t*>(&b0);
+        frag_b[1] = *reinterpret_cast<uint32_t*>(&b1);
+    }
+
+    float c[4] = {0, 0, 0, 0};
+    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
+                 "{%0, %1, %2, %3}, "
+                 "{%4, %5, %6, %7}, "
+                 "{%8, %9}, "
+                 "{%10, %11, %12, %13};\n"
+                 : "=f"(c[0]), "=f"(c[1]), "=f"(c[2]), "=f"(c[3])
+                 : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
+                   "r"(frag_b[0]), "r"(frag_b[1]),
+                   "f"(c[0]), "f"(c[1]), "f"(c[2]), "f"(c[3]));
+
+    // Write C[16,8] row-major
+    C[gid * 8 + tid * 2] = c[0];
+    C[gid * 8 + tid * 2 + 1] = c[1];
+    C[(gid + 8) * 8 + tid * 2] = c[2];
+    C[(gid + 8) * 8 + tid * 2 + 1] = c[3];
+}
+
+void testMMA(const half* A, const half* B, float* C) {
+    test_mma_kernel<<<1, 32>>>(A, B, C);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+
 // ---- Template instantiations ----
 
 #define INSTANTIATE_KBIT_QUANT(T, K)                                                                                   \
@@ -867,3 +1240,19 @@ INSTANTIATE_KBIT_DEQUANT(float, 2, half)
 INSTANTIATE_KBIT_DEQUANT(float, 3, half)
 INSTANTIATE_KBIT_DEQUANT(float, 4, half)
 INSTANTIATE_KBIT_DEQUANT(float, 5, half)
+
+// Repack instantiations: one per K value
+#define INSTANTIATE_KBIT_REPACK(K) template void repackKbit<K>(const unsigned int*, const float*, unsigned int*, unsigned char*, int, int);
+
+INSTANTIATE_KBIT_REPACK(2)
+INSTANTIATE_KBIT_REPACK(3)
+INSTANTIATE_KBIT_REPACK(4)
+INSTANTIATE_KBIT_REPACK(5)
+
+// GEMM instantiations: one per K value (fp16 only for Stage 3)
+#define INSTANTIATE_KBIT_GEMM(K) template void kbitGemmMinimal<K>(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int);
+
+INSTANTIATE_KBIT_GEMM(2)
+INSTANTIATE_KBIT_GEMM(3)
+INSTANTIATE_KBIT_GEMM(4)
+INSTANTIATE_KBIT_GEMM(5)

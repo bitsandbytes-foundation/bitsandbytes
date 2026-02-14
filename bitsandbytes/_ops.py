@@ -475,3 +475,52 @@ def _(
     )
     num_blocks = -(n // -32)
     return torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+
+
+# K-bit repack: flat bit-plane layout -> GEMM-tiled layout
+
+torch.library.define(
+    "bitsandbytes::repack_kbit",
+    "(Tensor packed_flat, Tensor absmax_flat, int K_dim, int N, int k) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::repack_kbit")
+def _(packed_flat: torch.Tensor, absmax_flat: torch.Tensor, K_dim: int, N: int, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
+    torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
+    torch._check(K_dim % BLOCKSIZE == 0, lambda: f"K_dim ({K_dim}) must be divisible by {BLOCKSIZE}")
+    K_dim_padded = ((K_dim + TILE_K - 1) // TILE_K) * TILE_K
+    k_tiles = K_dim_padded // TILE_K
+    n_tiles = N // TILE_N
+    k_blocks_per_tile = TILE_K // BLOCKSIZE
+    total_words = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * k
+    total_absmax = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+    packed_tiled = torch.empty(total_words, device=packed_flat.device, dtype=torch.int32)
+    absmax_tiled = torch.empty(total_absmax, device=packed_flat.device, dtype=torch.uint8)
+    return packed_tiled, absmax_tiled
+
+
+# K-bit fused dequant + GEMM: C[M,N] = A[M,K_dim] * W_kbit^T
+
+torch.library.define(
+    "bitsandbytes::kbit_gemm",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int k) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::kbit_gemm")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    M = A.shape[0]
+    return torch.empty(M, N, device=A.device, dtype=A.dtype)
