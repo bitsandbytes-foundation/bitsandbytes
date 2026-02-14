@@ -1,11 +1,15 @@
-# kbit GEMM Kernel: Optimization Status and Remaining Work
+# kbit GEMM Kernel: Optimization Guide
 
-This document records what has been done, what was learned, and what
-remains for the production kernel `kbit_gemm_prod`.
+This document records the current state of the production kernel
+`kbit_gemm_prod`, comprehensive performance data on real model shapes,
+analysis of bottlenecks, and a detailed roadmap for further optimization.
+
+All benchmarks: RTX 4090 (128 SMs, sm_89), GPU clocks locked at 2520 MHz,
+500 iterations, K=4, fp16 unless stated otherwise.
 
 ---
 
-## Current Kernel Configuration (after Optimizations 1 + 3 + 5)
+## 1. Current Kernel Configuration
 
 **Template parameters:** `<K_BITS, M_BLOCKS, scalar_t>`
 
@@ -14,10 +18,8 @@ remains for the production kernel `kbit_gemm_prod`.
 - **TILE_K** = 64 (4 MMA k-sub-tiles of 16)
 - 256 threads = 8 warps, all warps share the same M rows, each handles a
   different N slice
-- **Persistent kernel**: launches `min(num_SMs, total_work)` blocks that
-  loop over work items instead of one block per tile
-- **Auto k_splits**: when mn_tiles < num_SMs, automatically splits K
-  dimension to create enough work items to fill SMs
+- Persistent work loop with tuned k_splits (only for mn_tiles < num_SMs/4)
+- Non-persistent grid (grid_size = total_work) when k_splits = 1
 - Double-buffered cp.async pipeline for A, B, and absmax tiles
 - ldmatrix.x4 with XOR bank-conflict swizzle for A fragments
 - fp16 and bf16 via `scalar_t` template
@@ -37,260 +39,447 @@ remains for the production kernel `kbit_gemm_prod`.
 
 ---
 
-## Completed Optimizations
+## 2. Performance on Real Model Shapes
 
-### Optimization 1: Multi-M-Block Tiling (commit f8a06a3)
+### Target batch size: M >= 32
 
-**What:** Templated `kbit_gemm_prod` on `M_BLOCKS` (1-4). TILE_M scales
-as `M_BLOCKS * 16`. Each warp loads M_BLOCKS A fragments per k-sub-tile
-via ldmatrix.x4 and reuses the same dequantized B fragment across all of
-them, amortizing the codebook shuffle + absmax multiply.
+The kernel targets LLM inference with batch sizes M=32-64. These are the
+GEMM shapes from the FFN and attention layers of real models.
 
-**Key finding:** Multi-M-block alone showed NO benefit — it was actually
-slower for M>16 because synchronous A tile loading became the bottleneck.
-cp.async for A (Optimization 5) was required first.
+### 2.1 K=4, fp16 — All M values
 
-### Optimization 5: cp.async for A Tile (commit 7cd575b)
+| Layer | K_dim | N | M=1 | M=4 | M=16 | M=32 | M=64 | M=128 |
+|-------|------:|-----:|:---:|:---:|:----:|:----:|:----:|:-----:|
+| Llama3-70B gate/up | 8192 | 28672 | 2.81x | 2.52x | 2.37x | **2.84x** | **1.93x** | 0.91x |
+| Llama3-8B gate/up | 4096 | 14336 | 1.47x | 1.94x | 1.77x | **1.65x** | **1.41x** | 0.91x |
+| Llama2-7B gate/up | 4096 | 11008 | 1.00x | 1.65x | 1.43x | **1.38x** | **1.05x** | 0.76x |
+| Llama3-70B down | 28672 | 8192 | 1.00x | 1.16x | 1.08x | 0.66x | 0.93x | 0.74x |
+| Llama3-8B down | 14336 | 4096 | 0.51x | 0.52x | 0.56x | 0.45x | 0.43x | 0.48x |
+| Llama2-7B down | 11008 | 4096 | 0.59x | 0.41x | 0.56x | 0.80x | 0.44x | 0.48x |
+| Llama3-8B QKV | 4096 | 4096 | 0.48x | 0.25x | 0.27x | 0.31x | 0.21x | 0.41x |
+| GLM4.7 shared gate/up | 2048 | 10240 | 0.70x | 0.30x | 0.33x | 0.36x | 0.40x | 0.51x |
+| GLM4.7 routed expert | 2048 | 1536 | 0.30x | 0.30x | 0.30x | - | - | - |
 
-**What:** Replaced synchronous A tile loading with cp.async 16-byte
-copies. XOR swizzle applied to destination shmem address.
+### 2.2 Absolute timings (M=32, M=64, K=4, fp16)
 
-- **Interior tiles**: pure cp.async, no branches.
-- **Boundary tiles**: per-group bounds check.
+| Layer | K_dim | N | M=32 kbit | M=32 cuBLAS | M=64 kbit | M=64 cuBLAS |
+|-------|------:|-----:|----------:|------------:|----------:|------------:|
+| Llama3-70B gate/up | 8192 | 28672 | 232 us | 674 us | 312 us | 652 us |
+| Llama3-8B gate/up | 4096 | 14336 | 101 us | 173 us | 101 us | 142 us |
+| Llama2-7B gate/up | 4096 | 11008 | 121 us | 138 us | 118 us | 104 us |
+| Llama3-8B down | 14336 | 4096 | 288 us | 141 us | 319 us | 159 us |
+| Llama3-70B down | 28672 | 8192 | 537 us | 503 us | 677 us | 534 us |
 
-**Impact:** Single most impactful change. Improved ALL shapes because
-even M_BLOCKS=1 benefits from pipelining A loads.
+### 2.3 K-value comparison (M=32)
 
-### Optimization 3: Persistent Kernel (commit 78fb6bb)
+| Layer | K=2 | K=3 | K=4 | K=5 |
+|-------|:---:|:---:|:---:|:---:|
+| Llama3-8B gate/up | 1.92x | 1.86x | 1.65x | 1.55x |
+| Llama2-7B gate/up | 1.24x | 1.36x | 1.18x | 0.93x |
+| Llama3-70B gate/up | 2.62x | 2.62x | 2.10x | 1.93x |
+| Llama3-8B down | 0.70x | 0.59x | 0.55x | 0.52x |
+| Llama3-70B down | 1.12x | 0.90x | 0.95x | 0.97x |
 
-**What:** Converted the kernel from one-block-per-tile to a persistent
-work loop. Each block processes multiple (m_tile, n_tile, k_split) work
-items in round-robin. The launcher auto-selects k_splits when
-mn_tiles < num_SMs to create enough work to fill all SMs.
+All K values follow the same pattern. K=2-3 are slightly faster (fewer
+bit-planes to load and extract). The kernel generalizes well across K.
 
-**M_BLOCKS dispatch:** With the persistent kernel, the SM utilization
-concern for M_BLOCKS selection is removed. The dispatcher now simply
-picks the largest M_BLOCKS that fits M (>48→4, >32→3, >16→2, else 1).
+### 2.4 Summary
 
-**Impact — mixed results, needs tuning:**
+**Where the kernel wins (gate/up projections, N >= 11008):**
+- Llama3-70B: 1.9-2.8x at M=32-64
+- Llama3-8B: 1.4-1.7x at M=32-64
+- Llama2-7B: 1.1-1.4x at M=32-64
 
-The persistent kernel improved some shapes (especially M=32-64 at
-N=16384) but regressed others. The auto k_splits introduces atomicAdd
-overhead that hurts shapes where k_splits=1 was previously sufficient.
-
-### Optimization 2: Larger N_BLOCKS (TILE_N=256) — ATTEMPTED, REVERTED
-
-**What was tried:** Increased TILE_N from 128 to 256 and N_BLOCKS from
-2 to 4, keeping 8 warps all along N. Each warp covers 32 columns (4
-N-blocks) instead of 16 (2 N-blocks). The repack format stayed at
-KBIT_TILE_N=128; the kernel loaded two adjacent repack tiles per GEMM
-tile (contiguous in memory, so the addressing worked naturally).
-
-**Result: massive regression.** The grid size halved (n_tiles = N/256
-instead of N/128), cutting SM utilization in half. For bandwidth-bound
-shapes, fewer active SMs means less aggregate memory bandwidth:
-
-| Shape | Before (TILE_N=128) | After (TILE_N=256) |
-|-------|:---:|:---:|
-| M=4, N=11008 | **2.02x** | 0.92x |
-| M=1, N=16384 | **1.84x** | 1.00x |
-| M=16, N=16384 | **1.98x** | 1.30x |
-
-**Root cause:** For bandwidth-bound shapes, SM utilization matters more
-than per-tile compute efficiency. Doubling TILE_N gives 2x more compute
-per tile but halves the number of tiles, reducing total memory bandwidth
-the GPU can deliver.
-
-**This approach will work after the persistent kernel is properly tuned**
-(since persistent always launches num_SMs blocks regardless of tile count).
-But the persistent kernel itself needs the k_splits overhead fixed first.
+**Where the kernel loses:**
+- Down projections (N=4096-8192): 0.4-0.9x — small N means low SM utilization
+- Attention QKV (N=4096): 0.2-0.5x — same problem
+- GLM-4.7-Flash (K_dim=2048): 0.3-0.7x — K_dim too small for pipeline
+- M=128: performance degrades across all shapes
 
 ---
 
-## Current Benchmark (RTX 4090, K=4, fp16, persistent kernel)
+## 3. Performance Analysis
 
-### Standard shapes (N=4096)
+### 3.1 Bandwidth utilization (M=32, K=4)
 
-| M | K_dim | N | kbit (us) | cuBLAS (us) | Speedup |
-|---:|------:|------:|----------:|------------:|--------:|
-| 1 | 4096 | 4096 | 72 | 43 | 0.59x |
-| 4 | 4096 | 4096 | 70 | 26 | 0.37x |
-| 8 | 4096 | 4096 | 73 | 22 | 0.30x |
-| 16 | 4096 | 4096 | 82 | 23 | 0.28x |
-| 32 | 4096 | 4096 | 70 | 27 | 0.38x |
-| 64 | 4096 | 4096 | 70 | 25 | 0.36x |
-| 128 | 4096 | 4096 | 71 | 32 | 0.46x |
+| Layer | Data read | Kernel time | Achieved BW | % of 900 GB/s |
+|-------|----------:|------------:|------------:|---------------:|
+| Llama3-8B gate/up | 32 MB | 97 us | 333 GB/s | 37% |
+| Llama2-7B gate/up | 25 MB | 83 us | 300 GB/s | 33% |
+| Llama3-70B gate/up | 127 MB | 248 us | 513 GB/s | 57% |
+| Llama3-8B down | 32 MB | 257 us | 126 GB/s | 14% |
+| Llama3-70B down | 127 MB | 511 us | 249 GB/s | 28% |
 
-### Large-N shapes (bandwidth-bound — target regime)
+The kernel achieves 33-57% of peak bandwidth for gate/up shapes and only
+14-28% for down shapes. For K=4 quantized weights, the theoretical maximum
+speedup over cuBLAS fp16 GEMM is approximately 4x (reading 4x less data).
+We are at 1.2-2.8x, meaning significant headroom remains.
 
-| M | K_dim | N | kbit (us) | cuBLAS (us) | Speedup |
-|---:|------:|------:|----------:|------------:|--------:|
-| 1 | 4096 | 11008 | 83 | 100 | **1.22x** |
-| 1 | 4096 | 16384 | 90 | 175 | **1.95x** |
-| 4 | 4096 | 11008 | 83 | 125 | **1.50x** |
-| 4 | 4096 | 16384 | 81 | 165 | **2.04x** |
-| 16 | 4096 | 11008 | 103 | 120 | **1.17x** |
-| 16 | 4096 | 16384 | 82 | 145 | **1.76x** |
-| 32 | 4096 | 16384 | 97 | 172 | **1.77x** |
-| 64 | 4096 | 16384 | 92 | 157 | **1.71x** |
-| 128 | 4096 | 16384 | 219 | 200 | 0.91x |
+### 3.2 Why gate/up wins but down loses
 
-### Comparison: persistent kernel vs pre-persistent baseline
+The key variable is N (output columns), not K_dim (reduction dimension).
 
-| Shape | Pre-persistent | Persistent | Change |
-|-------|:---:|:---:|:---:|
-| M=1, N=4096 | 0.79x | 0.59x | -25% (k_splits overhead) |
-| M=1, N=11008 | 1.38x | 1.22x | -12% (k_splits overhead) |
-| M=1, N=16384 | 1.84x | **1.95x** | +6% |
-| M=4, N=11008 | 2.02x | 1.50x | -26% (k_splits overhead) |
-| M=4, N=16384 | 1.75x | **2.04x** | +17% |
-| M=32, N=16384 | 1.55x | **1.77x** | +14% |
-| M=64, N=16384 | 1.10x | **1.71x** | +55% |
-| M=128, N=16384 | 1.12x | 0.91x | -19% (M_BLOCKS dispatch) |
+**Gate/up (large N):** N=11008-28672 gives n_tiles=86-224 with TILE_N=128.
+Most or all SMs are occupied, achieving good aggregate bandwidth.
 
----
+**Down (small N):** N=4096-8192 gives n_tiles=32-64 with TILE_N=128. At
+M=32 with M_BLOCKS=2, m_tiles=1, so mn_tiles=32-64. On 128 SMs, that is
+25-50% utilization. Fewer active SMs means less aggregate memory bandwidth
+and less concurrent compute.
 
-## Critical Analysis: What Needs Fixing
+### 3.3 Compute bottleneck: the dequant inner loop
 
-### Problem 1: Auto k_splits is too aggressive
+Per TILE_K iteration, each warp executes:
 
-The persistent kernel auto-splits K whenever `mn_tiles < num_SMs`. For
-shapes like M=4, N=11008 (mn_tiles=86, num_SMs=128), it uses k_splits=2.
-This introduces atomicAdd + tile_counters + fp32 workspace + final
-conversion overhead, which outweighs the benefit of filling 128 SMs
-instead of 86.
+1. **Load A fragments** via ldmatrix: M_BLOCKS ldmatrix.x4 per k-sub-tile
+2. **For each N-block (2 iterations):**
+   - 4 shmem loads (B bit-planes, K=4)
+   - 1 absmax decode (shmem load + 5 ALU ops)
+   - 4 elements x (4 shifts + 4 ANDs + 3 ORs) = 44 ALU ops for bit extraction
+   - 4 `__shfl_sync` for codebook lookup
+   - 4 multiplies for absmax scaling
+   - 2 `pack_two` for fragment assembly
+   - M_BLOCKS MMA instructions
 
-**Fix options (in order of preference):**
+Per TILE_K iteration (4 k-sub-tiles x 2 N-blocks = 8 inner iterations):
+~472 ALU + 32 shuffles + 32 shmem loads + 8*M_BLOCKS MMAs.
 
-1. **Higher threshold:** Only auto-split when mn_tiles < num_SMs / 4
-   (severe underutilization). For most shapes, k_splits stays at 1.
+The ALU work (bit extraction + codebook lookup + scaling) is dense and
+partially serialized with the MMA operations because they share the same
+warp's instruction stream. The MMA runs on the tensor core (independent
+functional unit) but the dequant ALU work must complete before the MMA
+can issue, creating a dependency chain.
 
-2. **Conditional workspace:** Pass a flag from Python indicating whether
-   the workspace is zeroed. Only use k_splits > 1 when the workspace is
-   available and zeroed.
+With N_BLOCKS=2, each B-fragment dequant feeds only 2 MMAs (per M_BLOCKS).
+Doubling to N_BLOCKS=4 would amortize the dequant cost over 4 MMAs,
+halving the effective compute overhead per useful FLOP.
 
-3. **Remove auto k_splits entirely:** Let the Python side control it
-   (restore the k_chunks parameter behavior). The persistent loop still
-   benefits from load balancing across waves even with k_splits=1.
+### 3.4 SM utilization analysis (TILE_N=128 vs 256)
 
-**Recommendation:** Option 1. Change the threshold from `mn_tiles < num_sms`
-to `mn_tiles < num_sms / 4` in `kbitGemmProdLaunch`. This means k_splits > 1
-only activates for truly small grids (< 32 tiles on 128 SMs).
+For M=32, M_BLOCKS=2, TILE_M=32, m_tiles=1:
 
-### Problem 2: M=128, N=16384 regression
+| Shape | TILE_N=128 n_tiles | SM util | TILE_N=256 n_tiles | SM util |
+|-------|-------------------:|--------:|-------------------:|--------:|
+| Llama3-70B gate/up (N=28672) | 224 | 100% | 112 | 87% |
+| Llama3-8B gate/up (N=14336) | 112 | 87% | 56 | 44% |
+| Llama2-7B gate/up (N=11008) | 86 | 67% | 43 | 34% |
+| Llama3-70B down (N=8192) | 64 | 50% | 32 | 25% |
+| Llama3-8B down (N=4096) | 32 | 25% | 16 | 12% |
 
-With M=128, the dispatcher selects M_BLOCKS=4 (TILE_M=64). This gives
-m_tiles=2, n_tiles=128, mn_tiles=256, k_tiles=64. With k_splits=1 and
-256 work items on 128 SMs, each SM handles 2 tiles. The persistent loop
-overhead (zeroing accumulators, re-initializing pipeline per tile) may
-explain the 0.91x vs previous 1.12x.
+TILE_N=256 halves the SM utilization. For 70B gate/up (87% → 87%), this
+is fine. For 8B gate/up (87% → 44%), it is a concern. For down
+projections, it would be catastrophic.
 
-**Fix:** For shapes where mn_tiles >= num_SMs (full utilization without
-k_splits), the persistent loop overhead hurts. Consider a fast path that
-skips the loop when total_work == gridDim.x (each block handles exactly
-one work item, equivalent to non-persistent behavior).
-
-### Problem 3: N=4096 is still 0.28-0.59x vs cuBLAS
-
-Even with the persistent kernel filling SMs via k_splits, N=4096 shapes
-are far behind cuBLAS. The issue is fundamental: each warp only does
-2 MMAs per B-fragment dequant (N_BLOCKS=2). cuBLAS uses much larger
-tiles and achieves higher compute-per-load ratios.
-
-**Fix:** This is where larger N_BLOCKS will help, but it requires
-TILE_N=256 (grid halving), which only works with a properly-tuned
-persistent kernel that doesn't suffer from the k_splits overhead.
+**Implication:** TILE_N=256 should only be used when N is large enough
+that the SM utilization loss is acceptable, or when the persistent
+kernel with k_splits compensates. Shape-adaptive dispatch is needed.
 
 ---
 
-## Remaining Optimizations (Revised Priority Order)
+## 4. Completed Optimizations
 
-### 1. Tune Persistent Kernel k_splits Threshold (HIGHEST, quick fix)
+### 4.1 Multi-M-Block Tiling (commit f8a06a3)
 
-Raise the auto k_splits threshold to avoid the atomicAdd overhead for
-shapes that already have reasonable SM utilization. Add a fast path for
-work_items == gridDim.x to eliminate loop overhead when all SMs are busy.
+Templated `kbit_gemm_prod` on `M_BLOCKS` (1-4). Each warp loads
+M_BLOCKS A fragments per k-sub-tile and reuses the same dequantized B
+fragment across all of them, amortizing dequant cost per M row.
 
-**Expected impact:** Restore the pre-persistent performance for large-N
-shapes (M=4 N=11008 back to ~2.0x) while keeping the persistent benefit
-for shapes that need it (M=32-64 N=16384).
+### 4.2 cp.async for A Tile (commit 7cd575b)
 
-### 2. Larger N_BLOCKS (TILE_N=256) — RE-ATTEMPT after k_splits fix
+Replaced synchronous A tile loading with cp.async 16-byte copies with XOR
+swizzle. Single most impactful change: improved ALL shapes by pipelining
+A loads alongside compute.
 
-With the persistent kernel properly tuned, TILE_N=256 should work
-because the grid size reduction is irrelevant (persistent always uses
-num_SMs blocks). The implementation from the reverted attempt is known
-to be correct (85 tests passed). Key details:
+### 4.3 Persistent Kernel (commit 78fb6bb)
 
-- No repack changes needed: the kernel loads two adjacent 128-wide
-  repack tiles per 256-wide GEMM tile (contiguous in memory)
-- Shmem budget OK: worst case K=5 MB=4 is ~38 KB per block (2 stages)
-- Register headroom: ~32 extra float accumulators, estimated ~147 regs
-- Requires N % 256 == 0 (all LLM shapes satisfy this)
+Converted from one-block-per-tile to a persistent work loop. Each block
+processes multiple (m_tile, n_tile, k_split) work items in round-robin.
+Auto-selects k_splits when mn_tiles < num_SMs/4.
 
-### 3. C Output Staging (LOW, polish)
+### 4.4 k_splits Threshold Tuning (commit 6e18c03)
 
-Coalesced global writes instead of scattered fragment writes.
-5-15% for small K_dim. Implement after 1+2 are done and benchmarked.
+Raised auto k_splits threshold from `mn_tiles < num_sms` to
+`mn_tiles < num_sms / 4`. Uses non-persistent grid (grid_size = total_work)
+when k_splits = 1 to avoid loop overhead. Key result: M=128 N=16384
+improved from 0.86x to 0.98x (+13%).
 
----
+### 4.5 TILE_N=256 — Previously Attempted and Reverted
 
-## Lessons Learned
-
-1. **cp.async for A was not "low priority."** Originally rated 2-5%
-   impact, it was the single most impactful change because it removed
-   synchronous work from the pipeline critical path.
-
-2. **Tile size increases halve the grid.** Both multi-M-block and
-   TILE_N=256 initially caused regressions because the grid shrank,
-   reducing SM utilization. Any tile size increase needs either an
-   SM-aware dispatch that avoids it when the grid is small, or a
-   persistent kernel that decouples grid size from SM utilization.
-
-3. **Auto k_splits has high overhead.** The atomicAdd + fp32 workspace +
-   tile_counters + final conversion path is significantly more expensive
-   than direct writes. Only use it when the SM utilization gain clearly
-   outweighs the overhead (mn_tiles << num_SMs).
-
-4. **The persistent loop itself has overhead.** Zeroing accumulators and
-   re-initializing the cp.async pipeline per work item adds cycles. When
-   each SM only handles one tile (total_work <= gridDim.x), the loop
-   overhead is pure waste. Add a fast path.
-
-5. **Register pressure is not an issue.** Even M_BLOCKS=4 with K=5 uses
-   only 115 registers with zero spills. There's headroom for N_BLOCKS=4.
-
-6. **Benchmark variance is significant.** Small-M kernel times fluctuate
-   10-20% between runs. Use high iteration counts (500+) and focus on
-   relative trends.
+Increased TILE_N to 256 and N_BLOCKS to 4. Implementation was correct (85
+tests passed), but halving the grid caused massive regression because SM
+utilization dropped. This approach requires shape-adaptive dispatch.
 
 ---
 
-## Implementation Order
+## 5. Optimization Roadmap
 
-1. **Tune k_splits threshold + fast path** — highest priority, should be
-   a small change to the launcher. Re-benchmark to confirm regressions
-   are fixed.
+### Step 1: TILE_N=256 + TILE_K=128 (HIGHEST PRIORITY)
 
-2. **Re-attempt TILE_N=256** — once the persistent kernel is tuned, the
-   grid size halving is no longer a concern. The implementation is
-   already validated (tests passed in the reverted attempt).
+**What:** Increase both tile dimensions simultaneously:
+- TILE_N: 128 → 256, N_BLOCKS: 2 → 4
+- TILE_K: 64 → 128, k-sub-tiles per iteration: 4 → 8
 
-3. **C staging** — polish optimization, low priority.
+**Why both at once:** They address different bottlenecks and interact:
+- TILE_N=256 halves dequant-per-MMA (4 MMAs per B dequant instead of 2),
+  directly reducing the compute bottleneck identified in section 3.3
+- TILE_K=128 doubles compute per pipeline iteration, halving the number
+  of `__syncthreads()` barriers and improving pipeline amortization
 
-After steps 1+2, re-benchmark. The target is ≥1.5x vs cuBLAS for all
-LLM shapes (M=1-64, N=4096-16384). If N=4096 shapes are still slow,
-consider whether they matter for the target use case (they may not — LLM
-inference typically has N ≥ 11008 for the large linear layers).
+**Shared memory budget (2 stages):**
+
+| M_BLOCKS | K | A stage | B stage | Absmax | Total/stage | 2 stages |
+|---------:|--:|--------:|--------:|-------:|------------:|---------:|
+| 1 | 4 | 4 KB | 16 KB | 512 B | 20.5 KB | 41 KB |
+| 2 | 4 | 8 KB | 16 KB | 512 B | 24.5 KB | 49 KB |
+| 4 | 4 | 16 KB | 16 KB | 512 B | 32.5 KB | 65 KB |
+| 4 | 5 | 16 KB | 20 KB | 512 B | 36.5 KB | 73 KB |
+
+Computation for TILE_N=256, TILE_K=128:
+- A stage: M_BLOCKS * 16 * 128 * 2 bytes
+- B stage: 256 * (128/32) * K * 4 bytes = 256 * 4 * K * 4
+- Absmax: 256 * (128/32) = 1024 bytes, aligned to 16 → 1024 bytes
+
+RTX 4090 supports up to 100 KB dynamic shmem per block. M_BLOCKS=4 K=5
+at 73 KB fits. M_BLOCKS=2 (the M=32 case) at 49 KB fits easily.
+
+**Register estimate:** N_BLOCKS=4 adds 2 extra float accumulators per
+M_BLOCK (frag_c grows from [MB][2][4] to [MB][4][4]). For M_BLOCKS=2
+K=4, estimated ~104 regs (from 72 + 32). Still zero spills.
+
+**Repack compatibility:** The repack kernel uses KBIT_TILE_N=128. The
+GEMM kernel would load two adjacent repack tiles per 256-wide GEMM
+tile. They are contiguous in memory (tile layout is kt * n_tiles + nt),
+so this works naturally with the existing repack format.
+
+**Shape-adaptive dispatch:** TILE_N=256 only when N >= 10240. For
+smaller N, keep TILE_N=128 to preserve SM utilization. This requires
+adding TILE_N as a template parameter (doubles instantiation count to
+64 variants, acceptable for compilation time).
+
+**TILE_K=128 constraint:** Requires K_dim >= 128 (satisfied by all real
+model shapes) and K_dim % 128 == 0 or a boundary check in the pipeline.
+Most LLM shapes have K_dim divisible by 128. For shapes where K_dim is
+only divisible by 64, fall back to TILE_K=64.
+
+**Expected impact:**
+- Gate/up projections: the dequant-per-MMA ratio halves. If dequant is
+  ~50% of kernel time (section 3.3), expect ~25% speedup. Combined with
+  TILE_K=128 pipeline improvements: **30-50% speedup**.
+- Llama3-8B gate/up M=32: 1.65x → ~2.0-2.5x
+- Llama3-70B gate/up M=32: 2.10x → ~2.5-3.0x
+- Down projections with TILE_N=128 fallback: unchanged
+
+### Step 2: B Fragment Register Double-Buffering (HIGH)
+
+**What:** Preload the next N-block's B bit-planes from shmem while the
+current N-block's MMA executes on the tensor core.
+
+Current inner loop (per k-sub-tile):
+```
+load A fragment
+for nb = 0..N_BLOCKS-1:
+    load B planes from shmem     ← stalls until data arrives
+    dequant (bit extract + shuffle + scale)
+    MMA                          ← tensor core, independent unit
+```
+
+Optimized (software-pipelined):
+```
+load A fragment
+preload B planes for nb=0
+for nb = 0..N_BLOCKS-1:
+    dequant current B planes     ← uses already-loaded data
+    preload B planes for nb+1    ← overlaps with dequant ALU
+    MMA                          ← overlaps with next preload
+```
+
+**Why it helps:** The shmem loads for B planes have ~20-30 cycle latency.
+By issuing the loads for the next iteration before the current dequant,
+the warp scheduler can interleave these instructions, hiding the latency.
+Marlin uses this pattern (frag_b_quant[k%2]).
+
+**Expected impact:** 10-20% improvement from hiding shmem load latency.
+
+### Step 3: C Output Staging via Shared Memory (MEDIUM)
+
+**What:** Instead of scattered fragment writes directly to global memory,
+stage the output tile in shared memory first, then write coalesced.
+
+Current write pattern: each thread writes 2 elements at
+`C[m_row, c_col]` and `C[m_row, c_col+1]`. Within a warp, 8 different
+rows are written (gid=0..7), each ~22 KB apart for N=11008. This is
+non-coalesced: 8 separate cache lines per warp write.
+
+Staged: after compute, store fragments to shmem (bank-conflict-free layout),
+then __syncthreads, then coalesced 16-byte writes to global memory.
+
+**Expected impact:** 5-15% for shapes with small K_dim (faster output
+relative to total kernel time). Less impact for large K_dim.
+
+### Step 4: Deeper cp.async Pipeline (MEDIUM)
+
+**What:** Increase pipeline depth from 2 stages to 3 or 4 stages.
+
+With 2 stages, `cp_async_wait<1>()` blocks until the previous group
+completes. With 3 stages, `cp_async_wait<2>()` allows 2 groups to be
+outstanding, providing more slack for variable memory latency.
+
+**Trade-off:** Each extra stage costs one STAGE_BYTES of shmem. For
+TILE_N=256 TILE_K=128 M_BLOCKS=2 K=4: 24.5 KB per stage. 3 stages =
+73.5 KB (fits), 4 stages = 98 KB (tight, might not fit with M_BLOCKS=4).
+
+**Expected impact:** 5-10% improvement from better load-compute overlap,
+especially for shapes with variable memory access latency.
+
+### Step 5: Revisit k_splits for Down Projections (LOW)
+
+**What:** For down projections (N=4096, mn_tiles=32), the kernel has
+only 25% SM utilization. k_splits could fill more SMs at the cost of
+atomicAdd overhead.
+
+**Analysis needed:** Profile whether the bandwidth gain from filling
+SMs outweighs the atomicAdd + workspace + conversion overhead for these
+specific shapes. The current threshold (mn_tiles < num_sms/4 = 32) means
+N=4096 is right at the boundary.
+
+**Alternative:** Accept that down projections (N <= 4096) are not the
+kernel's target regime. In real inference, the gate/up projection
+dominates runtime (larger matrix), so optimizing gate/up is more
+impactful for end-to-end latency.
+
+### Step 6: Warp Specialization (FUTURE, if needed)
+
+**What:** Dedicated producer warps (issue cp.async loads) and consumer
+warps (dequant + MMA), communicating via shmem barriers.
+
+**When:** Only if Steps 1-4 do not reach the target speedup. This is
+complex (barrier management, warp role assignment, reduced consumer
+parallelism) and should only be attempted after simpler optimizations
+are exhausted.
+
+**Expected impact:** Could push bandwidth utilization from 33-57% toward
+70-80%, yielding an additional 30-50% speedup on top of Steps 1-4.
 
 ---
 
-## Integration Work (Not Performance)
+## 6. Implementation Order
 
-Required to ship, independent of performance optimizations:
+### Phase 1: TILE_N=256 + TILE_K=128 with shape-adaptive dispatch
 
-- **Wire into LinearNbit module:** Call `kbit_gemm_prod` instead of
-  dequant+cuBLAS when CUDA, fp16/bf16, N % TILE_N == 0, K_dim % 64 == 0
-- **Remove staging kernels:** Delete Stages 3-5 (minimal, pipelined,
-  split-K), keep only production kernel + MMA test
-- **Lint + PR:** ruff/clang-format, merge to main
+1. Add TILE_N as a template parameter alongside M_BLOCKS
+2. Implement TILE_K=128 inner loop (8 k-sub-tiles per iteration)
+3. Shape-adaptive dispatch: TILE_N=256 for N >= 10240, TILE_N=128 otherwise
+4. TILE_K=128 when K_dim % 128 == 0, TILE_K=64 fallback otherwise
+5. Update Python side: N % 256 check for large-N path, workspace sizing
+6. Update tests: add N=256 minimum for TILE_N=256 test shapes
+7. Benchmark all real model shapes at M=32, M=64 across K=2-5
+8. Compare gate/up speedups to current baseline
+
+### Phase 2: Inner loop optimization
+
+9. B fragment register double-buffering
+10. C output staging via shmem
+11. Benchmark and compare
+
+### Phase 3: Pipeline tuning
+
+12. 3-stage pipeline (if shmem permits)
+13. Re-evaluate k_splits for down projections
+14. Final benchmark sweep
+
+### Phase 4: Integration
+
+15. Wire into LinearNbit module
+16. Remove staging kernels (keep only production + MMA test)
+17. Lint (ruff, clang-format) and PR to main
+
+---
+
+## 7. Target Performance
+
+For M=32, K=4:
+
+| Layer | Current | After Phase 1 (est.) | After Phase 2 (est.) | Theoretical max |
+|-------|:-------:|:--------------------:|:--------------------:|:---------------:|
+| Llama3-70B gate/up | 2.10x | 2.5-3.0x | 2.8-3.5x | ~4x |
+| Llama3-8B gate/up | 1.65x | 2.0-2.5x | 2.3-2.8x | ~4x |
+| Llama2-7B gate/up | 1.18x | 1.5-2.0x | 1.7-2.2x | ~4x |
+| Llama3-70B down | 0.95x | ~1.0x | ~1.0-1.2x | ~4x |
+| Llama3-8B down | 0.55x | ~0.55x | ~0.6-0.7x | ~4x |
+
+Down projections (small N) are unlikely to be competitive. The target is
+to make gate/up projections fast enough that the overall FFN inference
+time (gate/up + down combined) is faster than cuBLAS fp16 for both
+projections combined. At M=32:
+
+- Llama3-8B FFN: gate/up (101 us kbit) + down (288 us kbit) = 389 us
+  vs gate/up (173 us cuBLAS) + down (141 us cuBLAS) = 314 us.
+  Currently 0.81x overall. Need gate/up to drop to ~50 us to break even.
+
+- Llama3-70B FFN: gate/up (232 us kbit) + down (537 us kbit) = 769 us
+  vs gate/up (674 us cuBLAS) + down (503 us cuBLAS) = 1177 us.
+  Currently **1.53x overall**. Phase 1 target: ~2x overall.
+
+The 70B model is where the kernel has real end-to-end impact today.
+For 7-8B models, the gate/up wins are offset by down projection losses.
+
+---
+
+## 8. Model Shape Reference
+
+### GLM-4.7-Flash (MoE, hidden=2048)
+
+Not a good target for this kernel. K_dim=2048 is too small for the
+pipeline (only 32 TILE_K iterations with TILE_K=64, 16 with TILE_K=128).
+All layers lose to cuBLAS.
+
+- Shared expert: K_dim=2048, N=10240
+- Routed expert: K_dim=2048, N=1536 (64 experts, top-4)
+- Attention: MLA with q_lora_rank=768, kv_lora_rank=512
+
+### Llama-style models (good targets)
+
+| Model | hidden | intermediate | QKV | gate/up (N) | down (N) |
+|-------|-------:|-------------:|----:|------------:|---------:|
+| Llama 2 7B | 4096 | 11008 | 4096 | 11008 | 4096 |
+| Llama 3 8B | 4096 | 14336 | 4096 | 14336 | 4096 |
+| Llama 2 13B | 5120 | 13824 | 5120 | 13824 | 5120 |
+| Llama 3 70B | 8192 | 28672 | 8192 | 28672 | 8192 |
+| Mistral 7B | 4096 | 14336 | 4096 | 14336 | 4096 |
+| Qwen2.5 7B | 3584 | 18944 | 3584 | 18944 | 3584 |
+
+All gate/up N values are divisible by 256. All K_dim values are
+divisible by 128 (required for TILE_K=128).
+
+---
+
+## 9. Lessons Learned
+
+1. **Benchmark on real model shapes, not synthetic grids.** Synthetic
+   shapes (M=4, K=4096, N=16384) showed 2.0x+ but the actual model
+   shapes tell a different story. Down projections are a problem.
+
+2. **SM utilization dominates for bandwidth-bound shapes.** Any tile
+   size increase that reduces the grid size reduces aggregate bandwidth.
+   Shape-adaptive dispatch is essential.
+
+3. **The kernel is compute-bound at 33-57% bandwidth utilization.**
+   The dequant inner loop (bit extraction + codebook shuffle + absmax
+   scaling) is the primary bottleneck, not memory bandwidth.
+
+4. **N_BLOCKS is the most impactful knob.** Going from N_BLOCKS=2 to 4
+   doubles the compute amortization per dequant. This directly attacks
+   the compute bottleneck.
+
+5. **K_dim must be large (>= 4096) for the pipeline to be effective.**
+   With K_dim=2048 (GLM-4.7-Flash), the pipeline has too few iterations
+   to amortize startup/drain overhead.
+
+6. **Larger K benefits from this kernel more.** 70B models (K_dim=8192,
+   N=28672) show 2-3x speedup. The larger both dimensions are, the
+   better the kernel performs relative to cuBLAS.
+
+7. **End-to-end FFN analysis matters.** The kernel must be fast enough
+   on gate/up to compensate for the down projection loss, or the down
+   projection must also be competitive. For 70B models, the gate/up win
+   is large enough to dominate. For 7-8B models, it is marginal.
