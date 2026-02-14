@@ -1048,20 +1048,16 @@ def _(
     M = A.shape[0]
     C = torch.empty(M, N, device=A.device, dtype=A.dtype)
 
-    # Workspace sizing uses TILE_M=16 (M_BLOCKS=1) as worst case for m_tiles.
-    # The C++ launcher may use larger TILE_M (fewer m_tiles), but the workspace
-    # is sized by M*N anyway and tile_counters just need enough for all m_tiles.
+    # The persistent kernel auto-selects k_splits internally. When
+    # k_splits > 1, it needs a zeroed fp32 workspace and tile counters.
+    # Always allocate these since the C++ decides at runtime.
     TILE_M = 16
     TILE_N = 128
     m_tiles = (M + TILE_M - 1) // TILE_M
     n_tiles = N // TILE_N
 
-    if k_chunks > 1:
-        C_workspace = torch.zeros(M, N, device=A.device, dtype=torch.float32)
-        tile_counters = torch.zeros(m_tiles * n_tiles, device=A.device, dtype=torch.int32)
-    else:
-        C_workspace = torch.empty(0, device=A.device, dtype=torch.float32)
-        tile_counters = torch.empty(0, device=A.device, dtype=torch.int32)
+    C_workspace = torch.zeros(M, N, device=A.device, dtype=torch.float32)
+    tile_counters = torch.zeros(m_tiles * n_tiles, device=A.device, dtype=torch.int32)
 
     dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
 

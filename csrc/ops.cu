@@ -1766,7 +1766,8 @@ __global__ void kbit_gemm_prod(
     const scalar_t* __restrict__ A, const unsigned int* __restrict__ B_packed,
     const unsigned char* __restrict__ B_absmax, const float* __restrict__ codebook,
     scalar_t* __restrict__ C, float* __restrict__ C_workspace,
-    int* __restrict__ tile_counters, const int M, const int K_dim, const int N, const int k_chunks
+    int* __restrict__ tile_counters, const int M, const int K_dim, const int N,
+    const int k_splits, const int total_work
 ) {
     using Ops = ScalarOps<scalar_t>;
     constexpr int TILE_M = M_BLOCKS * 16;
@@ -1786,21 +1787,15 @@ __global__ void kbit_gemm_prod(
     constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
     constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES_VAL + ABS_STAGE_ALIGNED;
 
-    const int n_tile = blockIdx.x;
-    const int m_tile = blockIdx.y;
-    const int k_chunk_id = (k_chunks > 1) ? blockIdx.z : 0;
     const int n_tiles = N / TILE_N;
     const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
-    const int tiles_per_chunk = (k_tiles + k_chunks - 1) / k_chunks;
-    const int kt_start = k_chunk_id * tiles_per_chunk;
-    const int kt_end = min(kt_start + tiles_per_chunk, k_tiles);
+    const int tiles_per_split = (k_tiles + k_splits - 1) / k_splits;
 
     const int warp_id = threadIdx.x / 32;
     const int lane_id = threadIdx.x % 32;
     const int gid = lane_id / 4;
     const int tid = lane_id % 4;
     const int warp_n_base = warp_id * (TILE_N / 8);
-    const int m_base = m_tile * TILE_M;
 
     // Double-buffered shared memory
     extern __shared__ char smem[];
@@ -1818,226 +1813,234 @@ __global__ void kbit_gemm_prod(
     scalar_t cb_val = (lane_id < (1 << K_BITS)) ? Ops::from_float(codebook[lane_id]) : Ops::from_float(0.0f);
 
     float frag_c[M_BLOCKS][N_BLOCKS][4];
+
+    // Persistent work loop: each block processes multiple (m,n,k_split) items
+    // Work items are ordered k-split-last: work_id = mn_id * k_splits + ks_id
+    // This groups k-splits for the same (m,n) tile together.
+    for (int work_id = blockIdx.x; work_id < total_work; work_id += gridDim.x) {
+        const int mn_id = work_id / k_splits;
+        const int ks_id = work_id % k_splits;
+        const int n_tile = mn_id % n_tiles;
+        const int m_tile = mn_id / n_tiles;
+        const int m_base = m_tile * TILE_M;
+
+        const int kt_start = ks_id * tiles_per_split;
+        const int kt_end = min(kt_start + tiles_per_split, k_tiles);
+        if (kt_start >= k_tiles)
+            continue;
+
+        // Zero accumulators for this work item
 #pragma unroll
-    for (int mb = 0; mb < M_BLOCKS; mb++)
+        for (int mb = 0; mb < M_BLOCKS; mb++)
 #pragma unroll
-        for (int nb = 0; nb < N_BLOCKS; nb++)
-            frag_c[mb][nb][0] = frag_c[mb][nb][1] = frag_c[mb][nb][2] = frag_c[mb][nb][3] = 0.0f;
+            for (int nb = 0; nb < N_BLOCKS; nb++)
+                frag_c[mb][nb][0] = frag_c[mb][nb][1] = frag_c[mb][nb][2] = frag_c[mb][nb][3] = 0.0f;
 
-    if (kt_start >= k_tiles)
-        return;
+        // Fetch tile lambda (captures n_tile, m_base from loop)
+        auto fetch_tile = [&](int stage, int kt) {
+            const int k_base = kt * TILE_K;
+            const int tile_idx = kt * n_tiles + n_tile;
 
-    // Fetch tile
-    auto fetch_tile = [&](int stage, int kt) {
-        const int k_base = kt * TILE_K;
-        const int tile_idx = kt * n_tiles + n_tile;
+            // B tile via cp.async
+            const int b_global_base = tile_idx * B_STAGE_WORDS;
+            constexpr int B_INT4S = B_STAGE_BYTES_VAL / 16;
+            const int4* b_src = reinterpret_cast<const int4*>(B_packed + b_global_base);
+            int4* b_dst = reinterpret_cast<int4*>(sh_b(stage));
+            for (int i = threadIdx.x; i < B_INT4S; i += blockDim.x)
+                cp_async_cg_16(&b_dst[i], &b_src[i]);
 
-        // B tile via cp.async
-        const int b_global_base = tile_idx * B_STAGE_WORDS;
-        constexpr int B_INT4S = B_STAGE_BYTES_VAL / 16;
-        const int4* b_src = reinterpret_cast<const int4*>(B_packed + b_global_base);
-        int4* b_dst = reinterpret_cast<int4*>(sh_b(stage));
-        for (int i = threadIdx.x; i < B_INT4S; i += blockDim.x)
-            cp_async_cg_16(&b_dst[i], &b_src[i]);
+            // Absmax via cp.async
+            const int abs_global_base = tile_idx * ABS_STAGE_BYTES;
+            constexpr int ABS_INT4S = (ABS_STAGE_BYTES + 15) / 16;
+            const int4* abs_src = reinterpret_cast<const int4*>(B_absmax + abs_global_base);
+            int4* abs_dst = reinterpret_cast<int4*>(sh_abs(stage));
+            for (int i = threadIdx.x; i < ABS_INT4S; i += blockDim.x)
+                cp_async_cg_16(&abs_dst[i], &abs_src[i]);
 
-        // Absmax via cp.async
-        const int abs_global_base = tile_idx * ABS_STAGE_BYTES;
-        constexpr int ABS_INT4S = (ABS_STAGE_BYTES + 15) / 16;
-        const int4* abs_src = reinterpret_cast<const int4*>(B_absmax + abs_global_base);
-        int4* abs_dst = reinterpret_cast<int4*>(sh_abs(stage));
-        if (threadIdx.x < ABS_INT4S)
-            cp_async_cg_16(&abs_dst[threadIdx.x], &abs_src[threadIdx.x]);
+            // A tile via cp.async with XOR swizzle
+            scalar_t* a_dst = sh_a(stage);
+            constexpr int A_GROUPS = A_STAGE_ELEMS / 8;
+            const bool a_interior = (m_base + TILE_M <= M) && (k_base + TILE_K <= K_dim);
 
-        // A tile via cp.async with XOR swizzle for bank-conflict-free ldmatrix.
-        // Copies 16 bytes (8 halves) at a time. K_dim is a multiple of 32
-        // (BLOCKSIZE), so boundary groups are always fully in/out of bounds.
-        scalar_t* a_dst = sh_a(stage);
-        constexpr int A_GROUPS = A_STAGE_ELEMS / 8;  // number of 8-half groups
-        const bool a_interior = (m_base + TILE_M <= M) && (k_base + TILE_K <= K_dim);
-
-        if (a_interior) {
-            // Fast path: all in-bounds, pure cp.async
-            for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
-                int row = i / (TILE_K / 8);
-                int col_group = i % (TILE_K / 8);
-                int swizzled_group = col_group ^ (row % 8);
-                int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
-                const int4* src = reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
-                cp_async_cg_16(dst, src);
-            }
-        } else {
-            // Boundary path: per-group bounds check
-            for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
-                int row = i / (TILE_K / 8);
-                int col_group = i % (TILE_K / 8);
-                int swizzled_group = col_group ^ (row % 8);
-                int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
-                int gr = m_base + row;
-                int gc = k_base + col_group * 8;
-                if (gr < M && gc < K_dim) {
-                    const int4* src = reinterpret_cast<const int4*>(&A[gr * K_dim + gc]);
+            if (a_interior) {
+                for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
+                    int row = i / (TILE_K / 8);
+                    int col_group = i % (TILE_K / 8);
+                    int swizzled_group = col_group ^ (row % 8);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    const int4* src = reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
                     cp_async_cg_16(dst, src);
-                } else {
-                    *dst = make_int4(0, 0, 0, 0);
+                }
+            } else {
+                for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
+                    int row = i / (TILE_K / 8);
+                    int col_group = i % (TILE_K / 8);
+                    int swizzled_group = col_group ^ (row % 8);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    int gr = m_base + row;
+                    int gc = k_base + col_group * 8;
+                    if (gr < M && gc < K_dim) {
+                        const int4* src = reinterpret_cast<const int4*>(&A[gr * K_dim + gc]);
+                        cp_async_cg_16(dst, src);
+                    } else {
+                        *dst = make_int4(0, 0, 0, 0);
+                    }
                 }
             }
-        }
-    };
+        };
 
-    // Compute tile
-    auto compute_tile = [&](int stage) {
-        scalar_t* a_ptr = sh_a(stage);
-        unsigned int* b_ptr = sh_b(stage);
-        unsigned char* abs_ptr = sh_abs(stage);
-
-#pragma unroll
-        for (int ks = 0; ks < 4; ks++) {
-            const int k_block = ks / 2;
-            const int half_idx = ks % 2;
-
-            // Load A fragments via ldmatrix with XOR swizzle — one per M-block
-            uint32_t frag_a[M_BLOCKS][4];
-#pragma unroll
-            for (int mb = 0; mb < M_BLOCKS; mb++) {
-                const int mb_row_offset = mb * 16;
-                const int matrix_id = lane_id / 8;
-                const int row_in_matrix = lane_id % 8;
-                const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
-                const int col_start = ks * 16 + (matrix_id / 2) * 8;
-
-                // Apply same XOR swizzle as write path
-                const int col_group = col_start / 8;
-                const int swizzled_group = col_group ^ (a_row % 8);
-                const int swizzled_col_start = swizzled_group * 8;
-
-                const scalar_t* addr = &a_ptr[a_row * TILE_K + swizzled_col_start];
-                uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
-
-                asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                             : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
-                             : "r"(smem_addr));
-            }
+        // Compute tile lambda
+        auto compute_tile = [&](int stage) {
+            scalar_t* a_ptr = sh_a(stage);
+            unsigned int* b_ptr = sh_b(stage);
+            unsigned char* abs_ptr = sh_abs(stage);
 
 #pragma unroll
-            for (int nb = 0; nb < N_BLOCKS; nb++) {
-                int col = warp_n_base + nb * 8 + gid;
-                unsigned int planes[K_BITS];
-                int b_addr = col * B_COL_WORDS + k_block * K_BITS;
-#pragma unroll
-                for (int b = 0; b < K_BITS; b++)
-                    planes[b] = b_ptr[b_addr + b];
+            for (int ks = 0; ks < 4; ks++) {
+                const int k_block = ks / 2;
+                const int half_idx = ks % 2;
 
-                scalar_t scale = Ops::from_float(decode_e4m4_absmax(abs_ptr[col * KB_PER_TILE + k_block]));
-
-                const int bit_offset = half_idx * 16;
-                const int rows[4] = {2 * tid, 2 * tid + 1, 2 * tid + 8, 2 * tid + 9};
-                scalar_t vals[4];
-#pragma unroll
-                for (int r = 0; r < 4; r++) {
-                    int bit_pos = bit_offset + rows[r];
-                    int idx = 0;
-#pragma unroll
-                    for (int b = 0; b < K_BITS; b++)
-                        idx |= ((planes[b] >> bit_pos) & 1) << b;
-                    vals[r] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx), scale);
-                }
-
-                uint32_t frag_b[2];
-                frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
-                frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
-
-                // Issue MMA for each M-block, reusing the same B fragment
+                uint32_t frag_a[M_BLOCKS][4];
 #pragma unroll
                 for (int mb = 0; mb < M_BLOCKS; mb++) {
-                    mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                    const int mb_row_offset = mb * 16;
+                    const int matrix_id = lane_id / 8;
+                    const int row_in_matrix = lane_id % 8;
+                    const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
+                    const int col_start = ks * 16 + (matrix_id / 2) * 8;
+                    const int col_group = col_start / 8;
+                    const int swizzled_group = col_group ^ (a_row % 8);
+                    const int swizzled_col_start = swizzled_group * 8;
+
+                    const scalar_t* addr = &a_ptr[a_row * TILE_K + swizzled_col_start];
+                    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
+
+                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
+                                 : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
+                                 : "r"(smem_addr));
+                }
+
+#pragma unroll
+                for (int nb = 0; nb < N_BLOCKS; nb++) {
+                    int col = warp_n_base + nb * 8 + gid;
+                    unsigned int planes[K_BITS];
+                    int b_addr = col * B_COL_WORDS + k_block * K_BITS;
+#pragma unroll
+                    for (int b = 0; b < K_BITS; b++)
+                        planes[b] = b_ptr[b_addr + b];
+
+                    scalar_t scale = Ops::from_float(decode_e4m4_absmax(abs_ptr[col * KB_PER_TILE + k_block]));
+
+                    const int bit_offset = half_idx * 16;
+                    const int rows[4] = {2 * tid, 2 * tid + 1, 2 * tid + 8, 2 * tid + 9};
+                    scalar_t vals[4];
+#pragma unroll
+                    for (int r = 0; r < 4; r++) {
+                        int bit_pos = bit_offset + rows[r];
+                        int idx = 0;
+#pragma unroll
+                        for (int b = 0; b < K_BITS; b++)
+                            idx |= ((planes[b] >> bit_pos) & 1) << b;
+                        vals[r] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx), scale);
+                    }
+
+                    uint32_t frag_b[2];
+                    frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
+                    frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
+
+#pragma unroll
+                    for (int mb = 0; mb < M_BLOCKS; mb++) {
+                        mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                    }
                 }
             }
+        };
+
+        // Pipeline: double-buffered cp.async
+        fetch_tile(0, kt_start);
+        cp_async_fence();
+
+        for (int kt = kt_start; kt < kt_end; kt++) {
+            int cur = (kt - kt_start) % 2;
+            if (kt + 1 < kt_end) {
+                fetch_tile((kt + 1 - kt_start) % 2, kt + 1);
+                cp_async_fence();
+                cp_async_wait<1>();
+            } else {
+                cp_async_wait<0>();
+            }
+            __syncthreads();
+            compute_tile(cur);
+            __syncthreads();
         }
-    };
 
-    // Pipeline
-    fetch_tile(0, kt_start);
-    cp_async_fence();
-
-    for (int kt = kt_start; kt < kt_end; kt++) {
-        int cur = (kt - kt_start) % 2;
-        if (kt + 1 < kt_end) {
-            fetch_tile((kt + 1 - kt_start) % 2, kt + 1);
-            cp_async_fence();
-            cp_async_wait<1>();
+        // Write output for this work item
+        if (k_splits == 1) {
+            // Direct write — this block owns the full K reduction
+#pragma unroll
+            for (int mb = 0; mb < M_BLOCKS; mb++) {
+#pragma unroll
+                for (int nb = 0; nb < N_BLOCKS; nb++) {
+                    int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+                    int m_row0 = m_base + mb * 16 + gid;
+                    int m_row1 = m_base + mb * 16 + gid + 8;
+                    if (m_row0 < M) {
+                        C[m_row0 * N + c_col] = Ops::from_float(frag_c[mb][nb][0]);
+                        C[m_row0 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][1]);
+                    }
+                    if (m_row1 < M) {
+                        C[m_row1 * N + c_col] = Ops::from_float(frag_c[mb][nb][2]);
+                        C[m_row1 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][3]);
+                    }
+                }
+            }
         } else {
-            cp_async_wait<0>();
-        }
-        __syncthreads();
-        compute_tile(cur);
-        __syncthreads();
-    }
-
-    // Write output
-    if (k_chunks == 1) {
+            // Partial K — atomicAdd to workspace, last block converts to output
 #pragma unroll
-        for (int mb = 0; mb < M_BLOCKS; mb++) {
+            for (int mb = 0; mb < M_BLOCKS; mb++) {
 #pragma unroll
-            for (int nb = 0; nb < N_BLOCKS; nb++) {
-                int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
-                int m_row0 = m_base + mb * 16 + gid;
-                int m_row1 = m_base + mb * 16 + gid + 8;
-                if (m_row0 < M) {
-                    C[m_row0 * N + c_col] = Ops::from_float(frag_c[mb][nb][0]);
-                    C[m_row0 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][1]);
+                for (int nb = 0; nb < N_BLOCKS; nb++) {
+                    int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+                    int m_row0 = m_base + mb * 16 + gid;
+                    int m_row1 = m_base + mb * 16 + gid + 8;
+                    if (m_row0 < M) {
+                        atomicAdd(&C_workspace[m_row0 * N + c_col], frag_c[mb][nb][0]);
+                        atomicAdd(&C_workspace[m_row0 * N + c_col + 1], frag_c[mb][nb][1]);
+                    }
+                    if (m_row1 < M) {
+                        atomicAdd(&C_workspace[m_row1 * N + c_col], frag_c[mb][nb][2]);
+                        atomicAdd(&C_workspace[m_row1 * N + c_col + 1], frag_c[mb][nb][3]);
+                    }
                 }
-                if (m_row1 < M) {
-                    C[m_row1 * N + c_col] = Ops::from_float(frag_c[mb][nb][2]);
-                    C[m_row1 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][3]);
+            }
+
+            __threadfence();
+
+            __shared__ int is_last;
+            if (threadIdx.x == 0) {
+                int done = atomicAdd(&tile_counters[mn_id], 1);
+                is_last = (done == k_splits - 1) ? 1 : 0;
+            }
+            __syncthreads();
+
+            if (is_last) {
+                for (int i = threadIdx.x; i < TILE_M * TILE_N; i += blockDim.x) {
+                    int row = m_base + i / TILE_N;
+                    int col = n_tile * TILE_N + i % TILE_N;
+                    if (row < M)
+                        C[row * N + col] = Ops::from_float(C_workspace[row * N + col]);
                 }
             }
         }
-    } else {
-#pragma unroll
-        for (int mb = 0; mb < M_BLOCKS; mb++) {
-#pragma unroll
-            for (int nb = 0; nb < N_BLOCKS; nb++) {
-                int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
-                int m_row0 = m_base + mb * 16 + gid;
-                int m_row1 = m_base + mb * 16 + gid + 8;
-                if (m_row0 < M) {
-                    atomicAdd(&C_workspace[m_row0 * N + c_col], frag_c[mb][nb][0]);
-                    atomicAdd(&C_workspace[m_row0 * N + c_col + 1], frag_c[mb][nb][1]);
-                }
-                if (m_row1 < M) {
-                    atomicAdd(&C_workspace[m_row1 * N + c_col], frag_c[mb][nb][2]);
-                    atomicAdd(&C_workspace[m_row1 * N + c_col + 1], frag_c[mb][nb][3]);
-                }
-            }
-        }
-
-        __threadfence();
-
-        __shared__ int is_last;
-        if (threadIdx.x == 0) {
-            int mn_id = m_tile * n_tiles + n_tile;
-            int done = atomicAdd(&tile_counters[mn_id], 1);
-            is_last = (done == k_chunks - 1) ? 1 : 0;
-        }
-        __syncthreads();
-
-        if (is_last) {
-            for (int i = threadIdx.x; i < TILE_M * TILE_N; i += blockDim.x) {
-                int row = m_base + i / TILE_N;
-                int col = n_tile * TILE_N + i % TILE_N;
-                if (row < M)
-                    C[row * N + col] = Ops::from_float(C_workspace[row * N + col]);
-            }
-        }
-    }
+    } // end persistent work loop
 }
 
-// Production GEMM launcher — selects M_BLOCKS based on M
+// Production GEMM launcher — persistent kernel with auto k_splits
 template <int K, int MB, typename scalar_t>
 static void kbitGemmProdLaunch(
     const scalar_t* A, const unsigned int* B_packed, const unsigned char* B_absmax,
     const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
-    int M, int K_dim, int N, int k_chunks
+    int M, int K_dim, int N, int num_sms
 ) {
     constexpr int TILE_M = MB * 16;
     constexpr int TILE_K = 64;
@@ -2054,19 +2057,24 @@ static void kbitGemmProdLaunch(
 
     int m_tiles = (M + TILE_M - 1) / TILE_M;
     int n_tiles = N / TILE_N;
+    int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
+    int mn_tiles = m_tiles * n_tiles;
+
+    // Auto-select k_splits to fill SMs when there aren't enough (m,n) tiles
+    int k_splits = 1;
+    if (mn_tiles < num_sms && k_tiles > 1) {
+        k_splits = min(k_tiles, (num_sms + mn_tiles - 1) / mn_tiles);
+    }
+
+    int total_work = mn_tiles * k_splits;
+    int grid_size = min(num_sms, total_work);
 
     dim3 block(256);
     int smem_size = 2 * STAGE_BYTES;
 
-    if (k_chunks <= 1) {
-        dim3 grid(n_tiles, m_tiles);
-        kbit_gemm_prod<K, MB, scalar_t><<<grid, block, smem_size>>>(
-            A, B_packed, B_absmax, codebook, C, nullptr, nullptr, M, K_dim, N, 1);
-    } else {
-        dim3 grid(n_tiles, m_tiles, k_chunks);
-        kbit_gemm_prod<K, MB, scalar_t><<<grid, block, smem_size>>>(
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
-    }
+    kbit_gemm_prod<K, MB, scalar_t><<<grid_size, block, smem_size>>>(
+        A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters,
+        M, K_dim, N, k_splits, total_work);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -2076,49 +2084,35 @@ void kbitGemmProd(
     const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
     int M, int K_dim, int N, int k_chunks
 ) {
-    // Query SM count for dispatch decision
+    // Query SM count for persistent kernel grid sizing and M_BLOCKS dispatch
     int dev;
     cudaGetDevice(&dev);
     int num_sms;
     cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, dev);
 
-    constexpr int TILE_N = 128;
-    int n_tiles = N / TILE_N;
-
-    // Choose M_BLOCKS. Larger M_BLOCKS amortizes B tile loading across
-    // more M-rows, but the A tile grows proportionally and is loaded
-    // synchronously (not via cp.async). This makes M_BLOCKS>1 slower
-    // unless the grid is large enough that the reduced block count doesn't
-    // hurt SM utilization AND the extra compute amortizes the A load cost.
-    //
-    // Heuristic: only use M_BLOCKS>1 when the resulting grid has at least
-    // num_sms blocks, ensuring full SM utilization.
+    // Choose M_BLOCKS. With the persistent kernel, the grid always has
+    // num_SMs blocks, so the SM utilization concern is gone. Choose the
+    // largest M_BLOCKS that fits the M dimension.
     int m_blocks = 1;
-    auto grid_blocks = [&](int mb) {
-        int tile_m = mb * 16;
-        return ((M + tile_m - 1) / tile_m) * n_tiles;
-    };
-    int threshold = num_sms;
-
-    if (M > 48 && grid_blocks(4) >= threshold)
+    if (M > 48)
         m_blocks = 4;
-    else if (M > 32 && grid_blocks(3) >= threshold)
+    else if (M > 32)
         m_blocks = 3;
-    else if (M > 16 && grid_blocks(2) >= threshold)
+    else if (M > 16)
         m_blocks = 2;
 
     switch (m_blocks) {
     case 4:
-        kbitGemmProdLaunch<K, 4, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+        kbitGemmProdLaunch<K, 4, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms);
         break;
     case 3:
-        kbitGemmProdLaunch<K, 3, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+        kbitGemmProdLaunch<K, 3, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms);
         break;
     case 2:
-        kbitGemmProdLaunch<K, 2, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+        kbitGemmProdLaunch<K, 2, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms);
         break;
     default:
-        kbitGemmProdLaunch<K, 1, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+        kbitGemmProdLaunch<K, 1, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms);
         break;
     }
 }
