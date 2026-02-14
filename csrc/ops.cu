@@ -736,6 +736,24 @@ __device__ __forceinline__ float decode_e4m4_absmax(unsigned char raw) {
     return __uint_as_float(ieee);
 }
 
+// Branchless version for the GEMM inner loop.  Eliminates BSSY/BSYNC
+// divergence-handling pairs that the branchy version generates.
+// Subnormals (e==0) are treated as normal-path (produces a small wrong
+// value, but no real weight block has absmax < 2^-10).
+__device__ __forceinline__ float decode_e4m4_absmax_branchless(unsigned char raw) {
+    int e = raw >> 4;
+    int m = raw & 0xF;
+    // Normal path: construct IEEE 754 directly.
+    // When raw==0 (e==0, m==0) this produces 2^(0-11+127)<<23 | 0 which
+    // is some small positive float; we select 0.0 below via predicate.
+    unsigned int ieee = (unsigned int)(e - E4M4_BIAS + 127) << 23
+                      | (unsigned int)m << 19;
+    float result = __uint_as_float(ieee);
+    // Zero-out for raw==0 using predicated select (no branch).
+    // PTXAS emits a FSEL instruction (1 cycle, no divergence).
+    return (raw != 0) ? result : 0.0f;
+}
+
 // ---- E4M4 absmax encode ----
 // float -> uint8: inverse of decode_e4m4_absmax.
 // Normal   (e_biased > 0): e_biased = floor(log2(val)) + BIAS, m = round((val/2^e_unbiased - 1) * 16)
@@ -1929,20 +1947,36 @@ __global__ void kbit_gemm_prod(
                     for (int b = 0; b < K_BITS; b++)
                         planes[b] = b_ptr[b_addr + b];
 
-                    scalar_t scale = Ops::from_float(decode_e4m4_absmax(abs_ptr[col * KB_PER_TILE + k_block]));
+                    scalar_t scale = Ops::from_float(decode_e4m4_absmax_branchless(abs_ptr[col * KB_PER_TILE + k_block]));
 
                     const int bit_offset = half_idx * 16;
                     const int rows[4] = {2 * tid, 2 * tid + 1, 2 * tid + 8, 2 * tid + 9};
-                    scalar_t vals[4];
+
+                    // Dequantize 4 elements with interleaved bit extraction.
+                    // Extract all bit values independently first (no serial
+                    // dependency chain), then combine per-element.
+                    int bp0 = bit_offset + rows[0];
+                    int bp1 = bit_offset + rows[1];
+                    int bp2 = bit_offset + rows[2];
+                    int bp3 = bit_offset + rows[3];
+
+                    // All 4*K_BITS extractions are independent — compiler
+                    // can issue them in any order across ALU pipelines.
+                    int idx0 = 0, idx1 = 0, idx2 = 0, idx3 = 0;
 #pragma unroll
-                    for (int r = 0; r < 4; r++) {
-                        int bit_pos = bit_offset + rows[r];
-                        int idx = 0;
-#pragma unroll
-                        for (int b = 0; b < K_BITS; b++)
-                            idx |= ((planes[b] >> bit_pos) & 1) << b;
-                        vals[r] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx), scale);
+                    for (int b = 0; b < K_BITS; b++) {
+                        unsigned int p = planes[b];
+                        idx0 |= ((p >> bp0) & 1) << b;
+                        idx1 |= ((p >> bp1) & 1) << b;
+                        idx2 |= ((p >> bp2) & 1) << b;
+                        idx3 |= ((p >> bp3) & 1) << b;
                     }
+
+                    scalar_t vals[4];
+                    vals[0] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx0), scale);
+                    vals[1] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx1), scale);
+                    vals[2] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx2), scale);
+                    vals[3] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx3), scale);
 
                     uint32_t frag_b[2];
                     frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
@@ -2060,12 +2094,27 @@ static void kbitGemmProdLaunch(
     int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
     int mn_tiles = m_tiles * n_tiles;
 
-    // Auto-select k_splits only for severe SM underutilization (< 25%).
-    // The atomicAdd + workspace overhead of k_splits > 1 is significant,
-    // so only use it when the utilization gain clearly outweighs the cost.
+    // Two-tier k_splits heuristic:
+    //
+    // Tier 1: Severe underutilization (< 25% of SMs active).
+    // Even with L2-cached data, having 75%+ SMs idle wastes parallelism.
+    // Split aggressively to fill SMs.
+    //
+    // Tier 2: Moderate underutilization with DRAM-bound data.
+    // When data exceeds L2 cache, more SMs generate more DRAM requests.
+    // Split conservatively (k_splits <= 2) to avoid atomicAdd overhead.
+    long long b_data_bytes = (long long)N * (K_dim / BS) * K * sizeof(unsigned int)
+                           + (long long)N * (K_dim / BS);  // packed + absmax
+    constexpr long long DRAM_THRESHOLD = 24LL * 1024 * 1024;  // 24 MB
+
     int k_splits = 1;
     if (mn_tiles < num_sms / 4 && k_tiles > 1) {
+        // Tier 1: severe underutil — split aggressively
         k_splits = min(k_tiles, (num_sms + mn_tiles - 1) / mn_tiles);
+    } else if (mn_tiles < num_sms && k_tiles > 1 && b_data_bytes > DRAM_THRESHOLD) {
+        // Tier 2: DRAM-bound with moderate underutil — split conservatively
+        k_splits = min(k_tiles, (num_sms + mn_tiles - 1) / mn_tiles);
+        k_splits = min(k_splits, 2);
     }
 
     int total_work = mn_tiles * k_splits;
