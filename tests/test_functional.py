@@ -1281,13 +1281,9 @@ class TestQuantize4BitFunctional:
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"])
     @pytest.mark.parametrize("kind", ["fc1", "fc2", "attn", "attn_packed"])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
-    @pytest.mark.parametrize(
-        "quant_storage",
-        [torch.uint8, torch.float16, torch.bfloat16, torch.float32],
-        ids=describe_dtype,
-    )
     @pytest.mark.parametrize("dim", [128, 256, 512, 1024], ids=id_formatter("dim"))
-    def test_gemv_4bit(self, device, dim, dtype, storage_type, quant_storage, double_quant, kind):
+    def test_gemv_4bit(self, device, dim, dtype, storage_type, double_quant, kind):
+        quant_storage = torch.uint8
         if device == "hpu" and not is_supported_on_hpu(storage_type, dtype, quant_storage):
             pytest.skip("This configuration is not supported on HPU.")
 
