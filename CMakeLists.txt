@@ -312,6 +312,7 @@ if(BUILD_CUDA)
     set_target_properties(bitsandbytes
         PROPERTIES
             CUDA_SEPARABLE_COMPILATION ON
+            CUDA_RESOLVE_DEVICE_SYMBOLS ON
     )
 endif()
 if(BUILD_HIP)
