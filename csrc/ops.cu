@@ -678,86 +678,6 @@ __device__ __forceinline__ unsigned char unpack_kbit_warp(const unsigned int* pa
     return val;
 }
 
-// ---- Stage 1: Pack/unpack round-trip test kernel ----
-
-template <int K>
-__global__ void kTestPackUnpack_kbit(
-    const unsigned char* __restrict__ indices,
-    unsigned char* __restrict__ recovered,
-    const int n
-) {
-    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
-    const int lane_id = threadIdx.x % 32;
-    const int block_start = warp_id * 32;
-    if (block_start >= n) return;
-    unsigned char qval = (block_start + lane_id < n) ? indices[block_start + lane_id] : 0;
-    unsigned int packed[K];
-    pack_kbit_warp<K>(qval, packed);
-    unsigned char recovered_val = unpack_kbit_warp<K>(packed, lane_id);
-    if (block_start + lane_id < n)
-        recovered[block_start + lane_id] = recovered_val;
-}
-
-// ---- Stage 2: Pack-write and read-unpack test kernels ----
-
-template <int K>
-__global__ void kTestPackWrite_kbit(
-    const unsigned char* __restrict__ indices,
-    unsigned int* __restrict__ packed_out,
-    const int n
-) {
-    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
-    const int lane_id = threadIdx.x % 32;
-    const int block_start = warp_id * 32;
-    if (block_start >= n) return;
-    unsigned char qval = (block_start + lane_id < n) ? indices[block_start + lane_id] : 0;
-    unsigned int packed[K];
-    pack_kbit_warp<K>(qval, packed);
-    if (lane_id < K)
-        packed_out[warp_id * K + lane_id] = packed[lane_id];
-}
-
-template <int K>
-__global__ void kTestReadUnpack_kbit(
-    const unsigned int* __restrict__ packed_in,
-    unsigned char* __restrict__ indices_out,
-    const int n
-) {
-    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
-    const int lane_id = threadIdx.x % 32;
-    const int block_start = warp_id * 32;
-    if (block_start >= n) return;
-    unsigned int packed[K];
-    #pragma unroll
-    for (int bit = 0; bit < K; bit++) {
-        unsigned int word = (lane_id == bit) ? packed_in[warp_id * K + bit] : 0;
-        packed[bit] = __shfl_sync(0xFFFFFFFF, word, bit);
-    }
-    unsigned char val = unpack_kbit_warp<K>(packed, lane_id);
-    if (block_start + lane_id < n)
-        indices_out[block_start + lane_id] = val;
-}
-
-// ---- Stage 3: Codebook shuffle lookup test kernel ----
-
-template <int K>
-__global__ void kTestCodebookLookup_kbit(
-    const unsigned char* __restrict__ indices,
-    const float* __restrict__ codebook,
-    float* __restrict__ out,
-    const int n
-) {
-    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
-    const int lane_id = threadIdx.x % 32;
-    const int block_start = warp_id * 32;
-    if (block_start >= n) return;
-    float cb = (lane_id < (1 << K)) ? codebook[lane_id] : 0.0f;
-    unsigned char idx = (block_start + lane_id < n) ? indices[block_start + lane_id] : 0;
-    float val = __shfl_sync(0xFFFFFFFF, cb, idx);
-    if (block_start + lane_id < n)
-        out[block_start + lane_id] = val;
-}
-
 // ---- Stage 4: Full quantize kernel ----
 
 template <typename T, int K>
@@ -830,33 +750,6 @@ __device__ __forceinline__ float load_absmax<unsigned char>(const unsigned char*
 
 // ---- Stage 5: Full dequantize kernel ----
 
-// Original scalar version (kept for correctness reference and non-fp16 paths)
-template <typename T, int K>
-__global__ void kDequantizeBlockwise_kbit(
-    const unsigned int* __restrict__ packed_in,
-    const float* __restrict__ codebook,
-    const float* __restrict__ absmax,
-    T* __restrict__ out,
-    const int n
-) {
-    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
-    const int lane_id = threadIdx.x % 32;
-    const int block_start = warp_id * 32;
-    if (block_start >= n) return;
-    float cb = (lane_id < (1 << K)) ? codebook[lane_id] : 0.0f;
-    float amax = absmax[warp_id];
-    unsigned int packed[K];
-    #pragma unroll
-    for (int bit = 0; bit < K; bit++) {
-        unsigned int word = (lane_id == bit) ? packed_in[warp_id * K + bit] : 0;
-        packed[bit] = __shfl_sync(0xFFFFFFFF, word, bit);
-    }
-    unsigned char idx = unpack_kbit_warp<K>(packed, lane_id);
-    float val = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
-    if (block_start + lane_id < n)
-        out[block_start + lane_id] = (T)val;
-}
-
 // Vectorized version: each warp processes BLOCKS_PER_WARP quant blocks.
 // Within each block, adjacent lane pairs store as half2 (4 bytes instead of 2).
 // This gives wider stores + amortizes codebook load across multiple blocks.
@@ -920,40 +813,6 @@ __global__ void kDequantizeBlockwise_kbit_vec(
 #define KBIT_WARPS_PER_BLOCK 8
 #define KBIT_THREADS_PER_BLOCK (KBIT_WARPS_PER_BLOCK * 32)  // 256
 
-// ---- Test kernel launchers (Stage 1-3) ----
-
-template <int K>
-void test_pack_unpack_kbit(const unsigned char* indices, unsigned char* recovered, int n) {
-    int num_blocks_quant = (n + 31) / 32;
-    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kTestPackUnpack_kbit<K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(indices, recovered, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-template <int K>
-void test_pack_write_kbit(const unsigned char* indices, unsigned int* packed_out, int n) {
-    int num_blocks_quant = (n + 31) / 32;
-    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kTestPackWrite_kbit<K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(indices, packed_out, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-template <int K>
-void test_read_unpack_kbit(const unsigned int* packed_in, unsigned char* indices_out, int n) {
-    int num_blocks_quant = (n + 31) / 32;
-    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kTestReadUnpack_kbit<K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(packed_in, indices_out, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-template <int K>
-void test_codebook_lookup_kbit(const unsigned char* indices, const float* codebook, float* out, int n) {
-    int num_blocks_quant = (n + 31) / 32;
-    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kTestCodebookLookup_kbit<K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(indices, codebook, out, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
 // ---- Production kernel launchers (Stage 4-5) ----
 
 template <typename T, int K>
@@ -963,20 +822,6 @@ void quantizeBlockwise_kbit(
     int num_blocks_quant = (n + 31) / 32;
     int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
     kQuantizeBlockwise_kbit<T, K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(codebook, A, absmax, packed_out, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-// half specialization: use vectorized kernel with BLOCKS_PER_WARP=4
-template <int K>
-void dequantizeBlockwise_kbit_half(
-    const unsigned int* packed_in, const float* codebook, const float* absmax, half* out, int n, cudaStream_t stream
-) {
-    constexpr int BPW = 4;  // blocks per warp
-    int num_blocks_quant = (n + 31) / 32;
-    int num_warps = (num_blocks_quant + BPW - 1) / BPW;
-    int num_cuda_blocks = (num_warps + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kDequantizeBlockwise_kbit_vec<K, BPW, float><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(
-        packed_in, codebook, absmax, out, n);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -1008,63 +853,24 @@ void dequantizeBlockwise_kbit_half_u8abs(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-// Generic version for non-half types (bf16, float): scalar kernel
-template <typename T, int K>
-void dequantizeBlockwise_kbit(
-    const unsigned int* packed_in, const float* codebook, const float* absmax, T* out, int n, cudaStream_t stream
-) {
-    int num_blocks_quant = (n + 31) / 32;
-    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kDequantizeBlockwise_kbit<T, K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(
-        packed_in, codebook, absmax, out, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-// Explicit specialization: route half through the vectorized path
-template <>
-void dequantizeBlockwise_kbit<half, 2>(
-    const unsigned int* p, const float* c, const float* a, half* o, int n, cudaStream_t s) { dequantizeBlockwise_kbit_half<2>(p, c, a, o, n, s); }
-template <>
-void dequantizeBlockwise_kbit<half, 3>(
-    const unsigned int* p, const float* c, const float* a, half* o, int n, cudaStream_t s) { dequantizeBlockwise_kbit_half<3>(p, c, a, o, n, s); }
-template <>
-void dequantizeBlockwise_kbit<half, 4>(
-    const unsigned int* p, const float* c, const float* a, half* o, int n, cudaStream_t s) { dequantizeBlockwise_kbit_half<4>(p, c, a, o, n, s); }
-template <>
-void dequantizeBlockwise_kbit<half, 5>(
-    const unsigned int* p, const float* c, const float* a, half* o, int n, cudaStream_t s) { dequantizeBlockwise_kbit_half<5>(p, c, a, o, n, s); }
-
 // ---- Template instantiations ----
 
-#define INSTANTIATE_TEST_KBIT_OPS(K) \
-    template void test_pack_unpack_kbit<K>(const unsigned char*, unsigned char*, int); \
-    template void test_pack_write_kbit<K>(const unsigned char*, unsigned int*, int); \
-    template void test_read_unpack_kbit<K>(const unsigned int*, unsigned char*, int); \
-    template void test_codebook_lookup_kbit<K>(const unsigned char*, const float*, float*, int);
-
-INSTANTIATE_TEST_KBIT_OPS(2)
-INSTANTIATE_TEST_KBIT_OPS(3)
-INSTANTIATE_TEST_KBIT_OPS(4)
-INSTANTIATE_TEST_KBIT_OPS(5)
-
-#define INSTANTIATE_KBIT_OPS(T, K) \
+#define INSTANTIATE_KBIT_QUANT(T, K) \
     template void quantizeBlockwise_kbit<T, K>( \
-        const float*, const T*, float*, unsigned int*, int); \
-    template void dequantizeBlockwise_kbit<T, K>( \
-        const unsigned int*, const float*, const float*, T*, int, cudaStream_t);
+        const float*, const T*, float*, unsigned int*, int);
 
-INSTANTIATE_KBIT_OPS(half, 2)
-INSTANTIATE_KBIT_OPS(half, 3)
-INSTANTIATE_KBIT_OPS(half, 4)
-INSTANTIATE_KBIT_OPS(half, 5)
-INSTANTIATE_KBIT_OPS(__nv_bfloat16, 2)
-INSTANTIATE_KBIT_OPS(__nv_bfloat16, 3)
-INSTANTIATE_KBIT_OPS(__nv_bfloat16, 4)
-INSTANTIATE_KBIT_OPS(__nv_bfloat16, 5)
-INSTANTIATE_KBIT_OPS(float, 2)
-INSTANTIATE_KBIT_OPS(float, 3)
-INSTANTIATE_KBIT_OPS(float, 4)
-INSTANTIATE_KBIT_OPS(float, 5)
+INSTANTIATE_KBIT_QUANT(half, 2)
+INSTANTIATE_KBIT_QUANT(half, 3)
+INSTANTIATE_KBIT_QUANT(half, 4)
+INSTANTIATE_KBIT_QUANT(half, 5)
+INSTANTIATE_KBIT_QUANT(__nv_bfloat16, 2)
+INSTANTIATE_KBIT_QUANT(__nv_bfloat16, 3)
+INSTANTIATE_KBIT_QUANT(__nv_bfloat16, 4)
+INSTANTIATE_KBIT_QUANT(__nv_bfloat16, 5)
+INSTANTIATE_KBIT_QUANT(float, 2)
+INSTANTIATE_KBIT_QUANT(float, 3)
+INSTANTIATE_KBIT_QUANT(float, 4)
+INSTANTIATE_KBIT_QUANT(float, 5)
 
 // fp16 absmax dequant instantiations
 #define INSTANTIATE_KBIT_DEQUANT_FP16ABS(K) \

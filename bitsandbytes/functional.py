@@ -1140,7 +1140,7 @@ def quantize_kbit(
     A: Tensor,
     k: int = 4,
     codebook: Optional[Tensor] = None,
-    absmax_format: str = "fp32",
+    absmax_format: str = "e4m4",
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Quantize a tensor using k-bit blockwise quantization (blocksize=32).
 
@@ -1151,7 +1151,7 @@ def quantize_kbit(
         k: Bit width (2, 3, 4, or 5). Defaults to 4.
         codebook: Optional float32 codebook tensor with 2^k entries in [-1, 1], sorted ascending.
             If None, uses a precomputed normal-float codebook.
-        absmax_format: Format for absmax storage. "fp32" (default) or "e4m4" (uint8).
+        absmax_format: Format for absmax storage. "e4m4" (default, uint8) or "fp32".
 
     Returns:
         Tuple of (packed, absmax, codebook):

@@ -390,51 +390,27 @@ void gemv_4bit_inference_fp32(
 #if BUILD_CUDA || BUILD_HIP
 
 // Forward declarations of ops.cu template functions
-template <int K> void test_pack_unpack_kbit(const unsigned char*, unsigned char*, int);
-template <int K> void test_pack_write_kbit(const unsigned char*, unsigned int*, int);
-template <int K> void test_read_unpack_kbit(const unsigned int*, unsigned char*, int);
-template <int K> void test_codebook_lookup_kbit(const unsigned char*, const float*, float*, int);
 template <typename T, int K> void quantizeBlockwise_kbit(const float*, const T*, float*, unsigned int*, int);
-template <typename T, int K> void dequantizeBlockwise_kbit(const unsigned int*, const float*, const float*, T*, int, cudaStream_t);
 template <int K> void dequantizeBlockwise_kbit_half_fp16abs(const unsigned int*, const float*, const half*, half*, int, cudaStream_t);
 template <int K> void dequantizeBlockwise_kbit_half_u8abs(const unsigned int*, const float*, const unsigned char*, half*, int, cudaStream_t);
 
-// Unmangled test wrappers
-#define MAKE_TEST_KBIT(K) \
-    void test_pack_unpack_k##K(const unsigned char* indices, unsigned char* recovered, int n) { \
-        test_pack_unpack_kbit<K>(indices, recovered, n); } \
-    void test_pack_write_k##K(const unsigned char* indices, unsigned int* packed_out, int n) { \
-        test_pack_write_kbit<K>(indices, packed_out, n); } \
-    void test_read_unpack_k##K(const unsigned int* packed_in, unsigned char* indices_out, int n) { \
-        test_read_unpack_kbit<K>(packed_in, indices_out, n); } \
-    void test_codebook_lookup_k##K(const unsigned char* indices, const float* codebook, float* out, int n) { \
-        test_codebook_lookup_kbit<K>(indices, codebook, out, n); }
-
-MAKE_TEST_KBIT(2)
-MAKE_TEST_KBIT(3)
-MAKE_TEST_KBIT(4)
-MAKE_TEST_KBIT(5)
-
-// Unmangled production wrappers
-#define MAKE_KBIT_QUANT(tname, T, K) \
+// Unmangled production wrappers (quantize only)
+#define MAKE_KBIT_QUANT_ONLY(tname, T, K) \
     void quantize_kbit_##tname##_k##K(const float* codebook, const T* A, float* absmax, unsigned int* packed_out, int n) { \
-        quantizeBlockwise_kbit<T, K>(codebook, A, absmax, packed_out, n); } \
-    void dequantize_kbit_##tname##_k##K(const unsigned int* packed_in, const float* codebook, const float* absmax, \
-                                        T* out, int n, cudaStream_t stream) { \
-        dequantizeBlockwise_kbit<T, K>(packed_in, codebook, absmax, out, n, stream); }
+        quantizeBlockwise_kbit<T, K>(codebook, A, absmax, packed_out, n); }
 
-MAKE_KBIT_QUANT(fp16, half, 2)
-MAKE_KBIT_QUANT(fp16, half, 3)
-MAKE_KBIT_QUANT(fp16, half, 4)
-MAKE_KBIT_QUANT(fp16, half, 5)
-MAKE_KBIT_QUANT(bf16, __nv_bfloat16, 2)
-MAKE_KBIT_QUANT(bf16, __nv_bfloat16, 3)
-MAKE_KBIT_QUANT(bf16, __nv_bfloat16, 4)
-MAKE_KBIT_QUANT(bf16, __nv_bfloat16, 5)
-MAKE_KBIT_QUANT(fp32, float, 2)
-MAKE_KBIT_QUANT(fp32, float, 3)
-MAKE_KBIT_QUANT(fp32, float, 4)
-MAKE_KBIT_QUANT(fp32, float, 5)
+MAKE_KBIT_QUANT_ONLY(fp16, half, 2)
+MAKE_KBIT_QUANT_ONLY(fp16, half, 3)
+MAKE_KBIT_QUANT_ONLY(fp16, half, 4)
+MAKE_KBIT_QUANT_ONLY(fp16, half, 5)
+MAKE_KBIT_QUANT_ONLY(bf16, __nv_bfloat16, 2)
+MAKE_KBIT_QUANT_ONLY(bf16, __nv_bfloat16, 3)
+MAKE_KBIT_QUANT_ONLY(bf16, __nv_bfloat16, 4)
+MAKE_KBIT_QUANT_ONLY(bf16, __nv_bfloat16, 5)
+MAKE_KBIT_QUANT_ONLY(fp32, float, 2)
+MAKE_KBIT_QUANT_ONLY(fp32, float, 3)
+MAKE_KBIT_QUANT_ONLY(fp32, float, 4)
+MAKE_KBIT_QUANT_ONLY(fp32, float, 5)
 
 // fp16 absmax dequant wrappers (half output only)
 #define MAKE_KBIT_DEQUANT_FP16ABS(K) \
@@ -970,30 +946,11 @@ bool has_avx512bf16_cpu() { return has_avx512bf16(); }
 // ===========================================================================
 #if BUILD_CUDA || BUILD_HIP
 
-// Test kernels (Stage 1-3)
-#define MAKE_CTEST_KBIT(K) \
-    void ctest_pack_unpack_k##K(const unsigned char* indices, unsigned char* recovered, int n) { \
-        test_pack_unpack_k##K(indices, recovered, n); } \
-    void ctest_pack_write_k##K(const unsigned char* indices, unsigned int* packed_out, int n) { \
-        test_pack_write_k##K(indices, packed_out, n); } \
-    void ctest_read_unpack_k##K(const unsigned int* packed_in, unsigned char* indices_out, int n) { \
-        test_read_unpack_k##K(packed_in, indices_out, n); } \
-    void ctest_codebook_lookup_k##K(const unsigned char* indices, const float* codebook, float* out, int n) { \
-        test_codebook_lookup_k##K(indices, codebook, out, n); }
-
-MAKE_CTEST_KBIT(2)
-MAKE_CTEST_KBIT(3)
-MAKE_CTEST_KBIT(4)
-MAKE_CTEST_KBIT(5)
-
-// Production kernels (Stage 4-5)
+// Production kernels (Stage 4-5) - quantize only
 #define MAKE_CKBIT(tname, T, K) \
     void cquantize_kbit_##tname##_k##K(const float* codebook, const T* A, float* absmax, \
                                         unsigned int* packed_out, int n) { \
-        quantize_kbit_##tname##_k##K(codebook, A, absmax, packed_out, n); } \
-    void cdequantize_kbit_##tname##_k##K(const unsigned int* packed_in, const float* codebook, \
-                                          const float* absmax, T* out, int n, cudaStream_t stream) { \
-        dequantize_kbit_##tname##_k##K(packed_in, codebook, absmax, out, n, stream); }
+        quantize_kbit_##tname##_k##K(codebook, A, absmax, packed_out, n); }
 
 MAKE_CKBIT(fp16, half, 2)
 MAKE_CKBIT(fp16, half, 3)

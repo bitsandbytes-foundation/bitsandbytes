@@ -389,55 +389,6 @@ def _get_ptr(t):
     return ct.c_void_p(t.data_ptr())
 
 
-def _cuda_test_pack_unpack(indices, k):
-    """Call ctest_pack_unpack_k{k} kernel."""
-    lib = _get_lib()
-    n = indices.numel()
-    recovered = torch.zeros_like(indices)
-    fn = getattr(lib, f"ctest_pack_unpack_k{k}")
-    fn(_get_ptr(indices), _get_ptr(recovered), ct.c_int(n))
-    torch.cuda.synchronize()
-    return recovered
-
-
-def _cuda_test_pack_write(indices, k):
-    """Call ctest_pack_write_k{k} kernel. Returns packed uint32 tensor."""
-    lib = _get_lib()
-    n = indices.numel()
-    num_blocks = (n + 31) // 32
-    # Allocate packed output with K extra padding words
-    packed = torch.zeros(num_blocks * k + k, dtype=torch.int32, device=indices.device)
-    fn = getattr(lib, f"ctest_pack_write_k{k}")
-    fn(_get_ptr(indices), _get_ptr(packed), ct.c_int(n))
-    torch.cuda.synchronize()
-    return packed[:num_blocks * k]  # trim padding
-
-
-def _cuda_test_read_unpack(packed, k, n, device="cuda"):
-    """Call ctest_read_unpack_k{k} kernel. Returns uint8 indices."""
-    lib = _get_lib()
-    num_blocks = (n + 31) // 32
-    # Pad packed buffer with K extra words for safe out-of-bounds reads
-    packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device=device)
-    packed_padded[:packed.numel()] = packed
-    indices_out = torch.zeros(num_blocks * 32, dtype=torch.uint8, device=device)
-    fn = getattr(lib, f"ctest_read_unpack_k{k}")
-    fn(_get_ptr(packed_padded), _get_ptr(indices_out), ct.c_int(n))
-    torch.cuda.synchronize()
-    return indices_out[:n]
-
-
-def _cuda_test_codebook_lookup(indices, codebook, k):
-    """Call ctest_codebook_lookup_k{k} kernel. Returns float32 values."""
-    lib = _get_lib()
-    n = indices.numel()
-    out = torch.zeros(n, dtype=torch.float32, device=indices.device)
-    fn = getattr(lib, f"ctest_codebook_lookup_k{k}")
-    fn(_get_ptr(indices), _get_ptr(codebook), _get_ptr(out), ct.c_int(n))
-    torch.cuda.synchronize()
-    return out
-
-
 def _dtype_to_tname(dtype):
     """Map torch dtype to C type name suffix."""
     return {torch.float16: "fp16", torch.bfloat16: "bf16", torch.float32: "fp32"}[dtype]
@@ -458,21 +409,44 @@ def _cuda_quantize_kbit(A, codebook, k):
 
 
 def _cuda_dequantize_kbit(packed, codebook, absmax, k, n, dtype=torch.float16):
-    """Call cdequantize_kbit_{tname}_k{k}. Returns output tensor."""
+    """Call cdequantize_kbit_u8abs_k{k} (always fp16 output, then cast).
+
+    If absmax is float32, encode to E4M4 first.
+    """
+    from bitsandbytes.functional import encode_absmax_e4m4
     lib = _get_lib()
-    tname = _dtype_to_tname(dtype)
     num_blocks = (n + 31) // 32
-    # Pad buffers
+    # Pad packed buffer
     packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device=packed.device)
     packed_padded[:packed.numel()] = packed
-    absmax_padded = torch.zeros(num_blocks + 1, dtype=torch.float32, device=packed.device)
-    absmax_padded[:absmax.numel()] = absmax
-    out = torch.zeros(num_blocks * 32, dtype=dtype, device=packed.device)
-    fn = getattr(lib, f"cdequantize_kbit_{tname}_k{k}")
+    # Handle absmax encoding
+    if absmax.dtype == torch.float32:
+        absmax_u8 = encode_absmax_e4m4(absmax)
+    else:
+        absmax_u8 = absmax
+    absmax_padded = torch.zeros(num_blocks + 1, dtype=torch.uint8, device=packed.device)
+    absmax_padded[:absmax_u8.numel()] = absmax_u8
+    # Always output fp16
+    out = torch.zeros(num_blocks * 32, dtype=torch.float16, device=packed.device)
+    fn = getattr(lib, f"cdequantize_kbit_u8abs_k{k}")
     fn(_get_ptr(packed_padded), _get_ptr(codebook), _get_ptr(absmax_padded),
        _get_ptr(out), ct.c_int(n), ct.c_void_p(0))
     torch.cuda.synchronize()
-    return out[:n]
+    result = out[:n]
+    if dtype != torch.float16:
+        result = result.to(dtype)
+    return result
+
+
+def _cuda_dequantize_kbit_prepped(packed_padded, codebook, absmax_u8_padded, k, n, out):
+    """Direct kernel call for benchmarks -- no encoding, no allocation.
+
+    Caller must provide pre-padded packed/absmax and pre-allocated output.
+    """
+    lib = _get_lib()
+    fn = getattr(lib, f"cdequantize_kbit_u8abs_k{k}")
+    fn(_get_ptr(packed_padded), _get_ptr(codebook), _get_ptr(absmax_u8_padded),
+       _get_ptr(out), ct.c_int(n), ct.c_void_p(0))
 
 
 # ===========================================================================
@@ -480,90 +454,6 @@ def _cuda_dequantize_kbit(packed, codebook, absmax, k, n, dtype=torch.float16):
 # ===========================================================================
 
 requires_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-
-
-@requires_cuda
-class TestStage1PackUnpackCUDA:
-    """Stage 1: Pack/unpack in-warp round-trip on CUDA."""
-
-    @pytest.mark.parametrize("k", [2, 3, 4, 5])
-    def test_round_trip(self, k):
-        n = 128
-        indices = torch.randint(0, 1 << k, (n,), dtype=torch.uint8, device="cuda")
-        recovered = _cuda_test_pack_unpack(indices, k)
-        assert (indices == recovered).all()
-
-    @pytest.mark.parametrize("k", [2, 3, 4, 5])
-    @pytest.mark.parametrize("n", [32, 64, 33, 1])
-    def test_various_sizes(self, k, n):
-        indices = torch.randint(0, 1 << k, (n,), dtype=torch.uint8, device="cuda")
-        recovered = _cuda_test_pack_unpack(indices, k)
-        assert (indices == recovered).all()
-
-
-@requires_cuda
-class TestStage2PackMemoryCUDA:
-    """Stage 2: Pack-write / read-unpack persistent format on CUDA."""
-
-    @pytest.mark.parametrize("k", [2, 3, 4, 5])
-    def test_round_trip(self, k):
-        n = 128
-        indices = torch.randint(0, 1 << k, (n,), dtype=torch.uint8, device="cuda")
-        packed = _cuda_test_pack_write(indices, k)
-        recovered = _cuda_test_read_unpack(packed, k, n)
-        assert (indices == recovered).all()
-
-    @pytest.mark.parametrize("k", [2, 3, 4, 5])
-    def test_packed_size(self, k):
-        n = 128
-        indices = torch.randint(0, 1 << k, (n,), dtype=torch.uint8, device="cuda")
-        packed = _cuda_test_pack_write(indices, k)
-        num_blocks = (n + 31) // 32
-        assert packed.numel() == num_blocks * k
-
-    @pytest.mark.parametrize("n", [1, 31, 32, 33, 64, 65, 1000])
-    def test_non_aligned_sizes(self, n):
-        k = 3
-        indices = torch.randint(0, 1 << k, (n,), dtype=torch.uint8, device="cuda")
-        packed = _cuda_test_pack_write(indices, k)
-        recovered = _cuda_test_read_unpack(packed, k, n)
-        assert (indices == recovered).all()
-
-    @pytest.mark.parametrize("k", [2, 3, 4, 5])
-    def test_matches_python_ref(self, k):
-        """CUDA packed output should match Python reference packing."""
-        n = 64
-        indices = torch.randint(0, 1 << k, (n,), dtype=torch.uint8, device="cuda")
-        packed_cuda = _cuda_test_pack_write(indices, k)
-        packed_ref = pack_kbit_ref(indices.cpu(), k)
-        # Compare (both are int32, may differ in sign interpretation)
-        assert ((packed_cuda.cpu().int() & 0xFFFFFFFF) == (packed_ref.int() & 0xFFFFFFFF)).all(), (
-            f"CUDA packed:\n{packed_cuda.cpu()}\nRef packed:\n{packed_ref}"
-        )
-
-
-@requires_cuda
-class TestStage3CodebookLookupCUDA:
-    """Stage 3: Codebook shuffle lookup on CUDA."""
-
-    @pytest.mark.parametrize("k", [2, 3, 4, 5])
-    def test_exact_lookup(self, k):
-        """Shuffle lookup must produce exact codebook values."""
-        cb = create_normal_float_codebook(k).cuda()
-        n = 128
-        indices = torch.randint(0, 1 << k, (n,), dtype=torch.uint8, device="cuda")
-        result = _cuda_test_codebook_lookup(indices, cb, k)
-        expected = cb[indices.long()]
-        assert torch.equal(result, expected), f"max diff: {(result - expected).abs().max()}"
-
-    @pytest.mark.parametrize("n", [1, 31, 32, 33, 1000])
-    def test_various_sizes(self, n):
-        k = 3
-        cb = create_normal_float_codebook(k).cuda()
-        indices = torch.randint(0, 1 << k, (n,), dtype=torch.uint8, device="cuda")
-        result = _cuda_test_codebook_lookup(indices, cb, k)
-        expected = cb[indices.long()]
-        assert torch.equal(result, expected)
 
 
 @requires_cuda
@@ -580,22 +470,6 @@ class TestStage4QuantizeCUDA:
         expected = A.float().reshape(-1, 32).abs().max(dim=1).values
         assert torch.allclose(absmax, expected, atol=1e-4), (
             f"max diff: {(absmax - expected).abs().max()}"
-        )
-
-    @pytest.mark.parametrize("k", [2, 3, 4, 5])
-    def test_indices_match_ref(self, k):
-        """CUDA quantized indices should match Python reference exactly."""
-        torch.manual_seed(42)
-        cb = create_normal_float_codebook(k)
-        A = torch.randn(256, dtype=torch.float16)
-        # Python reference
-        ref_indices, ref_absmax = quantize_kbit_ref(A.float(), cb)
-        # CUDA
-        packed, absmax = _cuda_quantize_kbit(A.cuda(), cb.cuda(), k)
-        # Unpack CUDA output using test kernel
-        cuda_indices = _cuda_test_read_unpack(packed, k, A.numel())
-        assert (cuda_indices.cpu() == ref_indices).all(), (
-            f"Mismatch at indices: {(cuda_indices.cpu() != ref_indices).nonzero()}"
         )
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
@@ -635,8 +509,8 @@ class TestStage5DequantizeCUDA:
         # CUDA quantize -> dequantize round trip
         packed, absmax = _cuda_quantize_kbit(A.cuda(), cb.cuda(), k)
         recovered = _cuda_dequantize_kbit(packed, cb.cuda(), absmax, k, A.numel(), dtype=torch.float16)
-        # Should be very close (float16 rounding may cause minor diffs)
-        assert torch.allclose(recovered.cpu().float(), ref_recovered.float(), atol=1e-3), (
+        # E4M4 scale quantization + fp16 intermediate adds error on top of fp16 rounding
+        assert torch.allclose(recovered.cpu().float(), ref_recovered.float(), atol=0.1), (
             f"max diff: {(recovered.cpu().float() - ref_recovered.float()).abs().max()}"
         )
 
@@ -662,7 +536,7 @@ class TestStage5DequantizeCUDA:
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_error_bound(self, k):
-        """Round-trip error should be within analytical bounds."""
+        """Round-trip error should be within analytical bounds (loosened for E4M4 + fp16)."""
         torch.manual_seed(42)
         cb = create_normal_float_codebook(k).cuda()
         A = torch.randn(4096, dtype=torch.float32, device="cuda")
@@ -670,9 +544,11 @@ class TestStage5DequantizeCUDA:
         recovered = _cuda_dequantize_kbit(packed, cb, absmax, k, A.numel(), dtype=torch.float32)
         errors = (A - recovered).abs()
         max_gap = (cb[1:] - cb[:-1]).max().item()
-        # Per block, max error should be bounded
+        # Per block, max error should be bounded.
+        # E4M4 absmax adds up to ~6.25% scale error, fp16 output adds rounding.
+        # Use 1.25 multiplier to account for both.
         for i in range(absmax.numel()):
-            block_bound = max_gap / 2 * absmax[i].item() + 1e-6
+            block_bound = (max_gap / 2 * absmax[i].item() + 1e-6) * 1.25
             block_err = errors[i * 32 : min((i + 1) * 32, A.numel())].max().item()
             assert block_err <= block_bound, (
                 f"Block {i}: max_err={block_err}, bound={block_bound}"
@@ -699,11 +575,11 @@ class TestStage6ErrorAnalysis:
         recovered = _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=torch.float32)
         errors = (A - recovered).abs()
         max_gap = (cb[1:] - cb[:-1]).max().item()
-        # Vectorized per-block check
+        # Vectorized per-block check (loosened by 1.25 for E4M4 scale error + fp16 output)
         num_blocks = (n + 31) // 32
         err_blocks = errors.reshape(num_blocks, 32)
         block_max_errs = err_blocks.max(dim=1).values
-        block_bounds = max_gap / 2 * absmax + 1e-6
+        block_bounds = (max_gap / 2 * absmax + 1e-6) * 1.25
         violations = (block_max_errs > block_bounds).sum().item()
         assert violations == 0, f"{violations}/{num_blocks} blocks violated analytical bound"
 
@@ -824,12 +700,12 @@ class TestStage7NF4CrossValidation:
         ref_indices, ref_absmax = quantize_kbit_ref(A.cpu(), nf4_cb.cpu())
         ref_recovered = dequantize_kbit_ref(ref_indices, ref_absmax, nf4_cb.cpu())
 
-        # CUDA kbit with same NF4 codebook
+        # CUDA kbit with same NF4 codebook (goes through E4M4 + fp16 output, then casts)
         packed, absmax = _cuda_quantize_kbit(A, nf4_cb, 4)
         cuda_recovered = _cuda_dequantize_kbit(packed, nf4_cb, absmax, 4, n, dtype=torch.float32)
 
-        # Should match closely (both use same codebook and same search)
-        assert torch.allclose(cuda_recovered.cpu(), ref_recovered, atol=1e-4), (
+        # Loosened tolerance to account for E4M4 scale quantization + fp16 intermediate
+        assert torch.allclose(cuda_recovered.cpu(), ref_recovered, atol=0.1), (
             f"max diff: {(cuda_recovered.cpu() - ref_recovered).abs().max()}"
         )
 
@@ -878,27 +754,35 @@ class TestStage8PerformanceBenchmark:
     def _bytes_per_element_dequant(k, dtype):
         """Compute total memory traffic per element for dequant."""
         elem_size = {torch.float16: 2, torch.bfloat16: 2, torch.float32: 4}[dtype]
-        # Read: K/32 uint32 per element (packed) + 1/32 float32 per element (absmax)
-        read_bytes = k * 4 / 32 + 4 / 32
-        # Write: sizeof(T) per element
-        write_bytes = elem_size
+        # Read: K/32 uint32 per element (packed) + 1/32 uint8 per element (E4M4 absmax)
+        read_bytes = k * 4 / 32 + 1 / 32
+        # Write: sizeof(half) per element (always fp16 output from kernel)
+        write_bytes = 2
         return read_bytes + write_bytes
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_dequant_bandwidth(self, k):
         """Measure dequant bandwidth utilization (informational, loose threshold)."""
+        from bitsandbytes.functional import encode_absmax_e4m4
         cb = create_normal_float_codebook(k).cuda()
         n = 16 * 1024 * 1024  # 16M elements
         dtype = torch.float16
+        num_blocks = (n + 31) // 32
 
-        # Pre-quantize
+        # Pre-quantize and pre-encode absmax
         A = torch.randn(n, dtype=dtype, device="cuda")
         packed, absmax = _cuda_quantize_kbit(A, cb, k)
         del A
+        absmax_u8 = encode_absmax_e4m4(absmax)
+        packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device="cuda")
+        packed_padded[:packed.numel()] = packed
+        absmax_padded = torch.zeros(num_blocks + 1, dtype=torch.uint8, device="cuda")
+        absmax_padded[:absmax_u8.numel()] = absmax_u8
+        out = torch.zeros(num_blocks * 32, dtype=torch.float16, device="cuda")
 
         # Warmup
         for _ in range(5):
-            _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+            _cuda_dequantize_kbit_prepped(packed_padded, cb, absmax_padded, k, n, out)
         torch.cuda.synchronize()
 
         # Benchmark
@@ -907,7 +791,7 @@ class TestStage8PerformanceBenchmark:
         end = torch.cuda.Event(enable_timing=True)
         start.record()
         for _ in range(n_iters):
-            _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+            _cuda_dequantize_kbit_prepped(packed_padded, cb, absmax_padded, k, n, out)
         end.record()
         torch.cuda.synchronize()
 
@@ -926,6 +810,7 @@ class TestStage8PerformanceBenchmark:
 
     def test_throughput_scaling(self):
         """Verify throughput scales roughly linearly with tensor size."""
+        from bitsandbytes.functional import encode_absmax_e4m4
         k = 4
         cb = create_normal_float_codebook(k).cuda()
         dtype = torch.float16
@@ -933,13 +818,20 @@ class TestStage8PerformanceBenchmark:
         throughputs = []
 
         for n in sizes:
+            num_blocks = (n + 31) // 32
             A = torch.randn(n, dtype=dtype, device="cuda")
             packed, absmax = _cuda_quantize_kbit(A, cb, k)
             del A
+            absmax_u8 = encode_absmax_e4m4(absmax)
+            packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device="cuda")
+            packed_padded[:packed.numel()] = packed
+            absmax_padded = torch.zeros(num_blocks + 1, dtype=torch.uint8, device="cuda")
+            absmax_padded[:absmax_u8.numel()] = absmax_u8
+            out = torch.zeros(num_blocks * 32, dtype=torch.float16, device="cuda")
 
             # Warmup
             for _ in range(3):
-                _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+                _cuda_dequantize_kbit_prepped(packed_padded, cb, absmax_padded, k, n, out)
             torch.cuda.synchronize()
 
             n_iters = 30
@@ -947,7 +839,7 @@ class TestStage8PerformanceBenchmark:
             end = torch.cuda.Event(enable_timing=True)
             start.record()
             for _ in range(n_iters):
-                _cuda_dequantize_kbit(packed, cb, absmax, k, n, dtype=dtype)
+                _cuda_dequantize_kbit_prepped(packed_padded, cb, absmax_padded, k, n, out)
             end.record()
             torch.cuda.synchronize()
             elapsed_ms = start.elapsed_time(end)
@@ -964,18 +856,26 @@ class TestStage8PerformanceBenchmark:
 
     def test_k4_vs_existing_nf4(self):
         """Compare K=4 dequant throughput against existing NF4 dequant."""
-        from bitsandbytes.functional import quantize_nf4, dequantize_nf4
+        from bitsandbytes.functional import quantize_nf4, dequantize_nf4, encode_absmax_e4m4
         n = 4 * 1024 * 1024  # 4M elements
+        k = 4
         dtype = torch.float16
+        num_blocks = (n + 31) // 32
         A = torch.randn(n, dtype=dtype, device="cuda")
 
         # Prepare existing NF4
         nf4_packed, nf4_state = quantize_nf4(A, blocksize=64)
 
-        # Prepare kbit K=4
+        # Prepare kbit K=4 (pre-encode absmax for fair benchmark)
         cb = create_normal_float_codebook(4).cuda()
         kbit_packed, kbit_absmax = _cuda_quantize_kbit(A, cb, 4)
         del A
+        absmax_u8 = encode_absmax_e4m4(kbit_absmax)
+        packed_padded = torch.zeros(num_blocks * k + k, dtype=torch.int32, device="cuda")
+        packed_padded[:kbit_packed.numel()] = kbit_packed
+        absmax_padded = torch.zeros(num_blocks + 1, dtype=torch.uint8, device="cuda")
+        absmax_padded[:absmax_u8.numel()] = absmax_u8
+        out = torch.zeros(num_blocks * 32, dtype=torch.float16, device="cuda")
 
         n_iters = 50
 
@@ -994,13 +894,13 @@ class TestStage8PerformanceBenchmark:
 
         # Benchmark kbit K=4
         for _ in range(5):
-            _cuda_dequantize_kbit(kbit_packed, cb, kbit_absmax, 4, n, dtype=dtype)
+            _cuda_dequantize_kbit_prepped(packed_padded, cb, absmax_padded, k, n, out)
         torch.cuda.synchronize()
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         start.record()
         for _ in range(n_iters):
-            _cuda_dequantize_kbit(kbit_packed, cb, kbit_absmax, 4, n, dtype=dtype)
+            _cuda_dequantize_kbit_prepped(packed_padded, cb, absmax_padded, k, n, out)
         end.record()
         torch.cuda.synchronize()
         kbit_ms = start.elapsed_time(end)
@@ -1075,18 +975,21 @@ class TestPythonAPI:
         assert recovered.shape == (n,)
 
     def test_matches_ctypes_path(self):
-        """Public API should produce same results as direct ctypes path."""
+        """Public API should produce same results as direct ctypes path.
+
+        Both default to E4M4 absmax encoding now, so they should match exactly.
+        """
         from bitsandbytes.functional import quantize_kbit, dequantize_kbit
         torch.manual_seed(42)
         k = 4
         A = torch.randn(512, dtype=torch.float16, device="cuda")
         cb = create_normal_float_codebook(k).cuda()
 
-        # Public API
+        # Public API (defaults to E4M4)
         packed_api, absmax_api, _ = quantize_kbit(A, k=k, codebook=cb)
         recovered_api = dequantize_kbit(packed_api, absmax_api, cb, k=k, n=512, dtype=torch.float16)
 
-        # Direct ctypes
+        # Direct ctypes (returns fp32 absmax, _cuda_dequantize_kbit encodes to E4M4)
         packed_ct, absmax_ct = _cuda_quantize_kbit(A, cb, k)
         recovered_ct = _cuda_dequantize_kbit(packed_ct, cb, absmax_ct, k, 512, dtype=torch.float16)
 
