@@ -487,6 +487,18 @@ class QuantState:
         self.state2 = state2
         self.nested = state2 is not None
 
+    def __getattr__(self, name):
+        # Support attribute access for packed state_dict keys like "bitsandbytes__nf4".
+        # PyTorch's FSDP state_dict traversal (_get_fqns) resolves dotted FQN paths via
+        # getattr. The packed key "quant_state.bitsandbytes__nf4" causes it to call
+        # getattr(quant_state_obj, "bitsandbytes__nf4"), which we handle here.
+        if name.startswith("bitsandbytes__"):
+            qs_dict = self.as_dict(packed=True)
+            packed_key = "quant_state." + name
+            if packed_key in qs_dict:
+                return qs_dict[packed_key]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     def __getitem__(self, idx):
         """
         ensures compatibility with older quant state scheme with nested lists.
