@@ -1,3 +1,7 @@
+# Coordinating agent work on GitHub issues
+
+To analyze open issues, generate prompts, and launch parallel worker agents, follow `agents/coordinator_guide.md`. This uses the GitHub issue tools in `~/git/lab_tools/github/` — see `agents/github_tools_guide.md` for the bitsandbytes-specific reference.
+
 # Parallel sessions
 
 To work on multiple branches at once, use git worktrees:
