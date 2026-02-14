@@ -341,8 +341,8 @@ class Optimizer8bit(torch.optim.Optimizer):
         config["weight_decay"] = group["weight_decay"]
         config["lr"] = group["lr"]
         config["alpha"] = group.get("alpha", 0.0)
-        config["t_alpha"] = group.get("t_alpha", 0)
-        config["t_beta3"] = group.get("t_beta3", 0)
+        config["t_alpha"] = group.get("t_alpha", None)
+        config["t_beta3"] = group.get("t_beta3", None)
         config["optim_bits"] = self.args.optim_bits
         config["min_8bit_size"] = self.args.min_8bit_size
         config["percentile_clipping"] = self.args.percentile_clipping
