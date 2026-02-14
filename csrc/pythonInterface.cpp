@@ -472,6 +472,7 @@ MAKE_KBIT_REPACK(5)
 // Forward declarations of GEMM launchers
 template <int K> void kbitGemmMinimal(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int);
 template <int K> void kbitGemmPipelined(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int);
+template <int K> void kbitGemmSplitK(const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int);
 
 // Unmangled GEMM wrappers (Stage 3: minimal, Stage 4: pipelined)
 #define MAKE_KBIT_GEMM(K)                                                                                              \
@@ -486,6 +487,12 @@ template <int K> void kbitGemmPipelined(const half*, const unsigned int*, const 
         int M, int K_dim, int N                                                                                        \
     ) {                                                                                                                \
         kbitGemmPipelined<K>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                         \
+    }                                                                                                                  \
+    void kbit_gemm_splitk_fp16_k##K(                                                                                   \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+    ) {                                                                                                                \
+        kbitGemmSplitK<K>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);     \
     }
 
 MAKE_KBIT_GEMM(2)
@@ -1093,6 +1100,13 @@ MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 5)
         int M, int K_dim, int N                                                                                        \
     ) {                                                                                                                \
         kbit_gemm_pipelined_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                               \
+    }                                                                                                                  \
+    void ckbit_gemm_splitk_fp16_k##K(                                                                                  \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+    ) {                                                                                                                \
+        kbit_gemm_splitk_fp16_k##K(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N,       \
+                                   k_chunks);                                                                          \
     }
 
 MAKE_CKBIT_GEMM(2)

@@ -1403,6 +1403,297 @@ void kbitGemmPipelined(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+// ---- Stage 5: Split-K fused kbit dequant + GEMM kernel ----
+// Extends Stage 4 with split-K: multiple blocks share an output tile, each handling
+// a subset of k-tiles. Partial sums accumulated via atomicAdd in fp32 workspace.
+// Grid: (n_tiles, m_tiles) for k_chunks=1, (n_tiles, m_tiles, k_chunks) for k_chunks>1.
+
+template <int K_BITS>
+__global__ void kbit_gemm_splitk(
+    const half* __restrict__ A, const unsigned int* __restrict__ B_packed, const unsigned char* __restrict__ B_absmax,
+    const float* __restrict__ codebook, half* __restrict__ C, float* __restrict__ C_workspace,
+    int* __restrict__ tile_counters, const int M, const int K_dim, const int N, const int k_chunks
+) {
+    constexpr int TILE_M = 16;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int BS = 32;
+    constexpr int KB_PER_TILE = TILE_K / BS;
+    constexpr int B_COL_WORDS = KB_PER_TILE * K_BITS;
+    constexpr int N_BLOCKS = 2;
+
+    constexpr int A_STAGE_ELEMS = TILE_M * TILE_K;
+    constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;
+    constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE;
+
+    constexpr int A_STAGE_BYTES = A_STAGE_ELEMS * sizeof(half);
+    constexpr int B_STAGE_BYTES_VAL = B_STAGE_WORDS * sizeof(unsigned int);
+    constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
+    constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES_VAL + ABS_STAGE_ALIGNED;
+
+    const int n_tile = blockIdx.x;
+    const int m_tile = blockIdx.y;
+    const int k_chunk_id = (k_chunks > 1) ? blockIdx.z : 0;
+    const int n_tiles = N / TILE_N;
+    const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
+    const int tiles_per_chunk = (k_tiles + k_chunks - 1) / k_chunks;
+    const int kt_start = k_chunk_id * tiles_per_chunk;
+    const int kt_end = min(kt_start + tiles_per_chunk, k_tiles);
+
+    const int warp_id = threadIdx.x / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int gid = lane_id / 4;
+    const int tid = lane_id % 4;
+    const int warp_n_base = warp_id * (TILE_N / 8);
+    const int m_base = m_tile * TILE_M;
+
+    // Double-buffered shared memory
+    extern __shared__ char smem[];
+    auto sh_a = [&](int stage) -> half* {
+        return reinterpret_cast<half*>(smem + stage * STAGE_BYTES);
+    };
+    auto sh_b = [&](int stage) -> unsigned int* {
+        return reinterpret_cast<unsigned int*>(smem + stage * STAGE_BYTES + A_STAGE_BYTES);
+    };
+    auto sh_abs = [&](int stage) -> unsigned char* {
+        return reinterpret_cast<unsigned char*>(smem + stage * STAGE_BYTES + A_STAGE_BYTES + B_STAGE_BYTES_VAL);
+    };
+
+    half cb_h = (lane_id < (1 << K_BITS)) ? __float2half(codebook[lane_id]) : __float2half(0.0f);
+
+    float frag_c[N_BLOCKS][4];
+#pragma unroll
+    for (int nb = 0; nb < N_BLOCKS; nb++)
+        frag_c[nb][0] = frag_c[nb][1] = frag_c[nb][2] = frag_c[nb][3] = 0.0f;
+
+    // Early exit if this chunk has no tiles
+    if (kt_start >= k_tiles)
+        return;
+
+    // Fetch tile lambda (same as Stage 4)
+    auto fetch_tile = [&](int stage, int kt) {
+        const int k_base = kt * TILE_K;
+        const int tile_idx = kt * n_tiles + n_tile;
+
+        const int b_global_base = tile_idx * B_STAGE_WORDS;
+        constexpr int B_INT4S = B_STAGE_BYTES_VAL / 16;
+        const int4* b_src = reinterpret_cast<const int4*>(B_packed + b_global_base);
+        int4* b_dst = reinterpret_cast<int4*>(sh_b(stage));
+        for (int i = threadIdx.x; i < B_INT4S; i += blockDim.x)
+            cp_async_cg_16(&b_dst[i], &b_src[i]);
+
+        const int abs_global_base = tile_idx * ABS_STAGE_BYTES;
+        constexpr int ABS_INT4S = (ABS_STAGE_BYTES + 15) / 16;
+        const int4* abs_src = reinterpret_cast<const int4*>(B_absmax + abs_global_base);
+        int4* abs_dst = reinterpret_cast<int4*>(sh_abs(stage));
+        if (threadIdx.x < ABS_INT4S)
+            cp_async_cg_16(&abs_dst[threadIdx.x], &abs_src[threadIdx.x]);
+
+        half* a_dst = sh_a(stage);
+        for (int i = threadIdx.x; i < A_STAGE_ELEMS; i += blockDim.x) {
+            int row = i / TILE_K;
+            int col = i % TILE_K;
+            int gr = m_base + row;
+            int gc = k_base + col;
+            a_dst[row * TILE_K + col] = (gr < M && gc < K_dim) ? A[gr * K_dim + gc] : __float2half(0.0f);
+        }
+    };
+
+    // Compute tile lambda (same as Stage 4)
+    auto compute_tile = [&](int stage) {
+        half* a_ptr = sh_a(stage);
+        unsigned int* b_ptr = sh_b(stage);
+        unsigned char* abs_ptr = sh_abs(stage);
+
+#pragma unroll
+        for (int ks = 0; ks < 4; ks++) {
+            const int k_block = ks / 2;
+            const int half_idx = ks % 2;
+
+            uint32_t frag_a[4];
+            {
+                const int kc0 = ks * 16 + tid * 2;
+                const int kc1 = ks * 16 + tid * 2 + 8;
+                const int r0 = gid;
+                const int r1 = gid + 8;
+                half2 h_rlo_klo = __halves2half2(
+                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0] : __float2half(0.0f),
+                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                half2 h_rhi_klo = __halves2half2(
+                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0] : __float2half(0.0f),
+                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                half2 h_rlo_khi = __halves2half2(
+                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1] : __float2half(0.0f),
+                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                half2 h_rhi_khi = __halves2half2(
+                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1] : __float2half(0.0f),
+                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                frag_a[0] = *reinterpret_cast<uint32_t*>(&h_rlo_klo);
+                frag_a[1] = *reinterpret_cast<uint32_t*>(&h_rhi_klo);
+                frag_a[2] = *reinterpret_cast<uint32_t*>(&h_rlo_khi);
+                frag_a[3] = *reinterpret_cast<uint32_t*>(&h_rhi_khi);
+            }
+
+#pragma unroll
+            for (int nb = 0; nb < N_BLOCKS; nb++) {
+                int col = warp_n_base + nb * 8 + gid;
+                unsigned int planes[K_BITS];
+                int b_addr = col * B_COL_WORDS + k_block * K_BITS;
+#pragma unroll
+                for (int b = 0; b < K_BITS; b++)
+                    planes[b] = b_ptr[b_addr + b];
+
+                half scale = __float2half(decode_e4m4_absmax(abs_ptr[col * KB_PER_TILE + k_block]));
+
+                const int bit_offset = half_idx * 16;
+                const int rows[4] = {2 * tid, 2 * tid + 1, 2 * tid + 8, 2 * tid + 9};
+                half vals[4];
+#pragma unroll
+                for (int r = 0; r < 4; r++) {
+                    int bit_pos = bit_offset + rows[r];
+                    int idx = 0;
+#pragma unroll
+                    for (int b = 0; b < K_BITS; b++)
+                        idx |= ((planes[b] >> bit_pos) & 1) << b;
+                    vals[r] = __hmul(__shfl_sync(0xFFFFFFFF, cb_h, idx), scale);
+                }
+
+                uint32_t frag_b[2];
+                {
+                    half2 b0 = __halves2half2(vals[0], vals[1]);
+                    half2 b1 = __halves2half2(vals[2], vals[3]);
+                    frag_b[0] = *reinterpret_cast<uint32_t*>(&b0);
+                    frag_b[1] = *reinterpret_cast<uint32_t*>(&b1);
+                }
+
+                asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
+                             "{%0, %1, %2, %3}, "
+                             "{%4, %5, %6, %7}, "
+                             "{%8, %9}, "
+                             "{%10, %11, %12, %13};\n"
+                             : "=f"(frag_c[nb][0]), "=f"(frag_c[nb][1]), "=f"(frag_c[nb][2]),
+                               "=f"(frag_c[nb][3])
+                             : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
+                               "r"(frag_b[0]), "r"(frag_b[1]),
+                               "f"(frag_c[nb][0]), "f"(frag_c[nb][1]), "f"(frag_c[nb][2]),
+                               "f"(frag_c[nb][3]));
+            }
+        }
+    };
+
+    // ---- Pipeline over [kt_start, kt_end) ----
+    fetch_tile(0, kt_start);
+    cp_async_fence();
+
+    for (int kt = kt_start; kt < kt_end; kt++) {
+        int cur = (kt - kt_start) % 2;
+        if (kt + 1 < kt_end) {
+            fetch_tile((kt + 1 - kt_start) % 2, kt + 1);
+            cp_async_fence();
+            cp_async_wait<1>();
+        } else {
+            cp_async_wait<0>();
+        }
+        __syncthreads();
+        compute_tile(cur);
+        __syncthreads();
+    }
+
+    // ---- Write output ----
+    if (k_chunks == 1) {
+        // No split-K: write fp16 directly (same as Stage 4)
+#pragma unroll
+        for (int nb = 0; nb < N_BLOCKS; nb++) {
+            int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+            int m_row0 = m_base + gid;
+            int m_row1 = m_base + gid + 8;
+            if (m_row0 < M) {
+                C[m_row0 * N + c_col] = __float2half(frag_c[nb][0]);
+                C[m_row0 * N + c_col + 1] = __float2half(frag_c[nb][1]);
+            }
+            if (m_row1 < M) {
+                C[m_row1 * N + c_col] = __float2half(frag_c[nb][2]);
+                C[m_row1 * N + c_col + 1] = __float2half(frag_c[nb][3]);
+            }
+        }
+    } else {
+        // Split-K: atomicAdd partial sums to fp32 workspace (pre-zeroed by host)
+#pragma unroll
+        for (int nb = 0; nb < N_BLOCKS; nb++) {
+            int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+            int m_row0 = m_base + gid;
+            int m_row1 = m_base + gid + 8;
+            if (m_row0 < M) {
+                atomicAdd(&C_workspace[m_row0 * N + c_col], frag_c[nb][0]);
+                atomicAdd(&C_workspace[m_row0 * N + c_col + 1], frag_c[nb][1]);
+            }
+            if (m_row1 < M) {
+                atomicAdd(&C_workspace[m_row1 * N + c_col], frag_c[nb][2]);
+                atomicAdd(&C_workspace[m_row1 * N + c_col + 1], frag_c[nb][3]);
+            }
+        }
+
+        // Ensure all atomicAdds from this block are globally visible
+        __threadfence();
+
+        // Signal completion and check if we're the last contributor
+        __shared__ int is_last;
+        if (threadIdx.x == 0) {
+            int mn_id = m_tile * n_tiles + n_tile;
+            int done = atomicAdd(&tile_counters[mn_id], 1);
+            is_last = (done == k_chunks - 1) ? 1 : 0;
+        }
+        __syncthreads();
+
+        // Last contributor: convert fp32 workspace -> fp16 output for this tile
+        if (is_last) {
+            for (int i = threadIdx.x; i < TILE_M * TILE_N; i += blockDim.x) {
+                int row = m_base + i / TILE_N;
+                int col = n_tile * TILE_N + i % TILE_N;
+                if (row < M)
+                    C[row * N + col] = __float2half(C_workspace[row * N + col]);
+            }
+        }
+    }
+}
+
+// Stage 5 split-K GEMM launcher
+template <int K>
+void kbitGemmSplitK(
+    const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks
+) {
+    constexpr int TILE_M = 16;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int BS = 32;
+    constexpr int KB_PER_TILE = TILE_K / BS;
+    constexpr int B_COL_WORDS = KB_PER_TILE * K;
+
+    constexpr int A_STAGE_BYTES = TILE_M * TILE_K * sizeof(half);
+    constexpr int B_STAGE_BYTES = TILE_N * B_COL_WORDS * sizeof(unsigned int);
+    constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE;
+    constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
+    constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES + ABS_STAGE_ALIGNED;
+
+    int m_tiles = (M + TILE_M - 1) / TILE_M;
+    int n_tiles = N / TILE_N;
+
+    dim3 block(256);
+    int smem_size = 2 * STAGE_BYTES;
+
+    if (k_chunks <= 1) {
+        dim3 grid(n_tiles, m_tiles);
+        kbit_gemm_splitk<K><<<grid, block, smem_size>>>(
+            A, B_packed, B_absmax, codebook, C, nullptr, nullptr, M, K_dim, N, 1);
+    } else {
+        dim3 grid(n_tiles, m_tiles, k_chunks);
+        kbit_gemm_splitk<K><<<grid, block, smem_size>>>(
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+    }
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 // ---- Debug: Simple MMA test kernel ----
 // Takes fp16 A[16,16] and fp16 B[16,8] (B stored row-major), outputs fp32 C[16,8].
 __global__ void test_mma_kernel(const half* __restrict__ A, const half* __restrict__ B, float* __restrict__ C) {
@@ -1524,7 +1815,8 @@ INSTANTIATE_KBIT_REPACK(5)
 // GEMM instantiations: one per K value (fp16 only)
 #define INSTANTIATE_KBIT_GEMM(K) \
     template void kbitGemmMinimal<K>(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int); \
-    template void kbitGemmPipelined<K>(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int);
+    template void kbitGemmPipelined<K>(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int); \
+    template void kbitGemmSplitK<K>(const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int);
 
 INSTANTIATE_KBIT_GEMM(2)
 INSTANTIATE_KBIT_GEMM(3)

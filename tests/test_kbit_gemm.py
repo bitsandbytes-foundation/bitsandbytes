@@ -949,3 +949,117 @@ class TestGemmPipelinedCUDA:
         assert torch.allclose(C_pipelined_cpu, C_direct, rtol=0.15, atol=atol), \
             f"Pipelined GEMM does not match Python reference.\n" \
             f"Max diff: {(C_pipelined_cpu - C_direct).abs().max().item():.6f}"
+
+
+def _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks):
+    """Quantize W, repack, and run split-K GEMM. Returns fp16 CUDA tensor."""
+    indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
+    packed_flat = pack_kbit_ref(indices, k)
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
+        packed_flat.cuda(), absmax.cuda(), K_dim, N, k
+    )
+    return torch.ops.bitsandbytes.kbit_gemm_splitk(
+        A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k, k_chunks
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+class TestGemmSplitKCUDA:
+    """Test split-K (Stage 5) GEMM kernel."""
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_splitk1_matches_pipelined(self, k):
+        """Split-K with k_chunks=1 must match pipelined GEMM bit-for-bit."""
+        M, K_dim, N = 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
+        C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=1)
+
+        assert torch.equal(C_pipelined, C_splitk), \
+            f"K={k}: split-K (k_chunks=1) does not match pipelined bit-for-bit.\n" \
+            f"Max diff: {(C_pipelined.float() - C_splitk.float()).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("k", [4])
+    @pytest.mark.parametrize("M", [1, 4, 8, 16])
+    def test_splitk1_various_M(self, k, M):
+        """Split-K with k_chunks=1 works for various batch sizes."""
+        K_dim, N = 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
+        C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=1)
+
+        assert torch.equal(C_pipelined, C_splitk), \
+            f"M={M}: split-K (k_chunks=1) does not match pipelined.\n" \
+            f"Max diff: {(C_pipelined.float() - C_splitk.float()).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_splitk2_matches_reference(self, k):
+        """Split-K with k_chunks=2 matches Python reference within tolerance."""
+        M, K_dim, N = 4, 128, 128
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=2)
+        C_splitk_cpu = C_splitk.float().cpu()
+
+        # Split-K uses atomicAdd so may have small fp32 rounding differences
+        atol = 0.1 * C_direct.abs().mean().item()
+        assert torch.allclose(C_splitk_cpu, C_direct, rtol=0.15, atol=atol), \
+            f"K={k}: split-K (k_chunks=2) does not match reference.\n" \
+            f"Max diff: {(C_splitk_cpu - C_direct).abs().max().item():.6f}"
+
+    @pytest.mark.parametrize("k", [4])
+    @pytest.mark.parametrize("k_chunks", [1, 2])
+    @pytest.mark.parametrize("M,K_dim,N", [
+        (4, 128, 128), (4, 128, 256), (4, 256, 128), (4, 256, 256),
+    ])
+    def test_splitk_various_sizes(self, k, k_chunks, M, K_dim, N):
+        """Split-K works for various matrix sizes and chunk counts."""
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_direct = kbit_gemm_ref_direct(A, W, codebook, k)
+        C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=k_chunks)
+        C_splitk_cpu = C_splitk.float().cpu()
+
+        atol = 0.1 * C_direct.abs().mean().item()
+        assert torch.allclose(C_splitk_cpu, C_direct, rtol=0.15, atol=atol), \
+            f"({M},{K_dim},{N}) k_chunks={k_chunks}: split-K does not match reference.\n" \
+            f"Max diff: {(C_splitk_cpu - C_direct).abs().max().item():.6f}"
+
+    def test_splitk_sqnr(self):
+        """Split-K GEMM should have reasonable SQNR for K=4."""
+        k, M, K_dim, N = 4, 8, 256, 256
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K_dim)
+        W = torch.randn(N, K_dim)
+        codebook = create_normal_float_codebook(k)
+
+        C_fp16 = (A.half() @ W.half().T).float()
+        C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=2)
+        C_splitk_cpu = C_splitk.float().cpu()
+
+        noise = C_splitk_cpu - C_fp16
+        signal_power = (C_fp16**2).mean()
+        noise_power = (noise**2).mean()
+        sqnr = 10 * torch.log10(signal_power / noise_power).item()
+
+        assert sqnr > 10, f"K=4 split-K SQNR too low: {sqnr:.1f} dB (expected > 10 dB)"
