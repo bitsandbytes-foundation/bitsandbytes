@@ -1170,8 +1170,12 @@ class TestQuantize4BitFunctional:
 
         err_mean, err_std = error_stats[quant_type]["err"][blocksize]
         relerr_mean, relerr_std = error_stats[quant_type]["rel_err"][blocksize]
-        assert err < err_mean + N_SIGMA * err_std, f"abs error {err:.6f} exceeds {err_mean:.6f} + {N_SIGMA}*{err_std:.6f}"
-        assert relerr < relerr_mean + N_SIGMA * relerr_std, f"rel error {relerr:.6f} exceeds {relerr_mean:.6f} + {N_SIGMA}*{relerr_std:.6f}"
+        assert err < err_mean + N_SIGMA * err_std, (
+            f"abs error {err:.6f} exceeds {err_mean:.6f} + {N_SIGMA}*{err_std:.6f}"
+        )
+        assert relerr < relerr_mean + N_SIGMA * relerr_std, (
+            f"rel error {relerr:.6f} exceeds {relerr_mean:.6f} + {N_SIGMA}*{relerr_std:.6f}"
+        )
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
@@ -1378,14 +1382,22 @@ class TestQuantize4BitFunctional:
         maxratio = relerr2 / relerr3
 
         # Expected (mean, std) for err1, relerr1, maxerr1 per dtype/dim group.
-        # Measured from 100 iterations × all storage_type/kind/DQ combos on RTX 4090.
+        # Measured from 100 iterations x all storage_type/kind/DQ combos on RTX 4090.
         # std is for individual iterations (not the average), so thresholds are generous
         # enough to accommodate GPU architecture differences (e.g., T4, XPU, Blackwell).
         N_SIGMA = 7
         gemv_thresholds = {
             torch.float16: {
-                "le512": {"err1": (0.000052, 0.0000063), "relerr1": (0.00024, 0.000357), "maxerr1": (0.00042, 0.0000687)},
-                "gt512": {"err1": (0.000018, 0.0000028), "relerr1": (0.00010, 0.000197), "maxerr1": (0.00017, 0.0000179)},
+                "le512": {
+                    "err1": (0.000052, 0.0000063),
+                    "relerr1": (0.00024, 0.000357),
+                    "maxerr1": (0.00042, 0.0000687),
+                },
+                "gt512": {
+                    "err1": (0.000018, 0.0000028),
+                    "relerr1": (0.00010, 0.000197),
+                    "maxerr1": (0.00017, 0.0000179),
+                },
             },
             torch.float32: {
                 "le512": {"err1": (2e-8, 2e-9), "relerr1": (8e-7, 1.2e-6), "maxerr1": (6e-8, 2e-8)},

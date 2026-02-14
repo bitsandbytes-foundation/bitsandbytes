@@ -88,8 +88,12 @@ def test_replace_parameter_4bit(device, dtype, quant_type, compress_statistics, 
 
     abs_mean, abs_std = expected_errors[quant_type][blocksize]["abs"]
     rel_mean, rel_std = expected_errors[quant_type][blocksize]["rel"]
-    assert err_mean < abs_mean + N_SIGMA * abs_std, f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
-    assert relerr < rel_mean + N_SIGMA * rel_std, f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
+    assert err_mean < abs_mean + N_SIGMA * abs_std, (
+        f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
+    )
+    assert relerr < rel_mean + N_SIGMA * rel_std, (
+        f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
+    )
 
 
 @pytest.mark.parametrize("device", get_available_devices())
@@ -129,8 +133,12 @@ def test_moe_parameter_shape(device, dtype):
     abs_mean, abs_std = 0.072802, 0.000072
     rel_mean, rel_std = 0.203327, 0.000312
 
-    assert err_mean < abs_mean + N_SIGMA * abs_std, f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
-    assert relerr < rel_mean + N_SIGMA * rel_std, f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
+    assert err_mean < abs_mean + N_SIGMA * abs_std, (
+        f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
+    )
+    assert relerr < rel_mean + N_SIGMA * rel_std, (
+        f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
+    )
 
 
 @pytest.mark.parametrize("device", get_available_devices())
@@ -398,8 +406,12 @@ def test_parametrization_forward_method():
     N_SIGMA = 7
     abs_mean, abs_std = 0.072842, 0.001180
     rel_mean, rel_std = 0.202648, 0.004729
-    assert err_mean < abs_mean + N_SIGMA * abs_std, f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
-    assert relerr < rel_mean + N_SIGMA * rel_std, f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
+    assert err_mean < abs_mean + N_SIGMA * abs_std, (
+        f"Mean abs error {err_mean:.6f} exceeds {abs_mean:.6f} + {N_SIGMA}*{abs_std:.6f}"
+    )
+    assert relerr < rel_mean + N_SIGMA * rel_std, (
+        f"Mean rel error {relerr:.6f} exceeds {rel_mean:.6f} + {N_SIGMA}*{rel_std:.6f}"
+    )
 
 
 @pytest.mark.parametrize("device", get_available_devices())
