@@ -187,4 +187,22 @@ void gemm_4bit_inference_naive(
 
 template <typename T, int FUNC> void func(T* A, T* B, T value, long n);
 
+// K-bit scalar GEMV: C[M,N] = A[M,K] * W_kbit^T (M=1..4)
+// C=1 architecture: 1 col/block, 4 warps split K. No split-K, no workspace.
+template <int K, typename scalar_t>
+void kbitScalarGemv(
+    const scalar_t* A, const unsigned int* B_packed,
+    const float* B_absmax, const float* codebook,
+    scalar_t* C, int M, int K_dim, int N
+);
+
+// K-bit grouped scalar GEMV for MoE expert dispatch
+template <int K, typename scalar_t>
+void kbitGroupedScalarGemv(
+    const scalar_t* A_concat, const unsigned int* B_packed_all,
+    const unsigned char* B_absmax_all, const float* codebook,
+    scalar_t* C_concat, const int* d_expert_offsets,
+    int K_dim, int N, int num_experts
+);
+
 #endif
