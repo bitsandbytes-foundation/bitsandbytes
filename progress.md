@@ -7,9 +7,9 @@ kernel in bitsandbytes. It is written to be fully self-contained: a developer
 reading this document should understand the entire project state, why every
 decision was made, what was tried and what failed, and what the path forward is.
 
-**Companion document:** [`optimization2.md`](optimization2.md) contains the
-Phase 2 optimization analysis with detailed GPU architecture constraints and
-the grouped expert GEMM plan.
+**Companion document:** [`optimization.md`](optimization.md) contains the
+current kernel strategy and optimization plan, including the three-kernel
+dispatch (scalar GEMV, grouped GEMM, dequant+cuBLAS) with benchmark data.
 
 ---
 
