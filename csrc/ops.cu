@@ -2561,17 +2561,16 @@ static int get_num_sms() {
 // Scalar GEMV kernel: C[M,N] = A[M,K_dim] * W_kbit^T  (M=1..4)
 // ===================================================================
 //
-// Warp-Level Interleaving (Option 1):
-// - Each warp processes 2 columns interleaved to hide memory latency
-// - While computing column N, load data for column N+1
-// - Grid = (N + 7) / 8 blocks, each with 128 threads (4 warps x 2 cols)
-// - No __syncthreads barriers
-// - CUB WarpReduce for final reduction
+// V6: Higher Occupancy + Streaming Loads
+// - 64 threads/block (2 warps) for 2x occupancy (24 vs 12 blocks/SM)
+// - LDG streaming loads (__ldcg) for B_packed to bypass L1 cache
+// - Each warp handles 1 column, 2 columns per block
+// - Keep 2-block ILP per lane for instruction-level parallelism
 //
-// This hides memory latency by having independent loads/compute for 2 columns.
+// Grid = (N + 1) / 2 blocks, each with 64 threads (2 warps).
 
 template <int K_BITS, int M_VAL, typename scalar_t>
-__global__ void __launch_bounds__(128, 12)
+__global__ void __launch_bounds__(64, 24)
 kbit_scalar_gemv(
     const scalar_t* __restrict__ A,
     const unsigned int* __restrict__ B_packed,   // flat: [N * num_k_blocks * K_BITS] uint32
@@ -2584,119 +2583,95 @@ kbit_scalar_gemv(
     constexpr int VALUES_PER_ITER = 32;     // Each lane processes 32 values per iteration
 
     typedef cub::WarpReduce<float> WarpReduce;
-    __shared__ typename WarpReduce::TempStorage temp_storage[4];  // 4 warps
+    __shared__ typename WarpReduce::TempStorage temp_storage[2];  // 2 warps
 
     const int warp_id = threadIdx.x / 32;
     const int lane_id = threadIdx.x % 32;
 
-    // Each warp handles 2 columns. 8 columns per block (4 warps x 2).
-    const int col_base = blockIdx.x * 8 + warp_id * 2;
-    if (col_base >= N) return;
+    // Each warp handles 1 column. 2 columns per block.
+    const int col = blockIdx.x * 2 + warp_id;
+    if (col >= N) return;
 
     const int num_k_blocks = K_dim / BS;
 
     // Codebook in registers (shuffle-based lookup)
     float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
 
-    // Column base pointers for both columns
-    const unsigned int* B_col_0 = B_packed + col_base * num_k_blocks * K_BITS;
-    const unsigned int* B_col_1 = (col_base + 1 < N) ? B_col_0 + num_k_blocks * K_BITS : B_col_0;
-    const float* abs_col_0 = B_absmax + col_base * num_k_blocks;
-    const float* abs_col_1 = (col_base + 1 < N) ? abs_col_0 + num_k_blocks : abs_col_0;
+    // Column base pointers (flat layout)
+    const unsigned int* B_col = B_packed + col * num_k_blocks * K_BITS;
+    const float* abs_col = B_absmax + col * num_k_blocks;
 
-    // Accumulators for both columns
-    float acc_0[M_VAL];
-    float acc_1[M_VAL];
+    // Accumulators
+    float acc[M_VAL];
     #pragma unroll
-    for (int m = 0; m < M_VAL; m++) {
-        acc_0[m] = 0.0f;
-        acc_1[m] = 0.0f;
-    }
+    for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
 
-    // Stride through K dimension: all lanes process same K-blocks for both columns
-    for (int k_iter = lane_id * VALUES_PER_ITER; k_iter < K_dim; k_iter += 32 * VALUES_PER_ITER) {
-        const int block_idx = k_iter / BS;
-        const int k_remainder = k_iter % BS;
-        
-        // Load absmax for both columns (independent loads, can coalesce)
-        float amax_0 = abs_col_0[block_idx];
-        float amax_1 = (col_base + 1 < N) ? abs_col_1[block_idx] : 0.0f;
-        
-        // Load bit-plane words for both columns
-        unsigned int planes_0[K_BITS];
-        unsigned int planes_1[K_BITS];
+    // Interleaved 2-block processing for increased ILP and latency hiding
+    // Each lane processes blocks: lane_id, lane_id+32, lane_id+64, ...
+    for (int k_base = lane_id * VALUES_PER_ITER; k_base < K_dim; k_base += 32 * VALUES_PER_ITER * 2) {
+        // Process block pair
         #pragma unroll
-        for (int b = 0; b < K_BITS; b++) {
-            planes_0[b] = B_col_0[block_idx * K_BITS + b];
-            planes_1[b] = (col_base + 1 < N) ? B_col_1[block_idx * K_BITS + b] : 0u;
-        }
-        
-        // Process 32 elements in 4 chunks of 8 (int4 vector loads)
-        #pragma unroll
-        for (int sub = 0; sub < 4; sub++) {
-            const int k_offset = k_remainder + sub * 8;
-            if (k_offset >= BS) break;
+        for (int block_pair = 0; block_pair < 2; block_pair++) {
+            const int k_iter = k_base + block_pair * 32 * VALUES_PER_ITER;
+            if (k_iter >= K_dim) break;
             
-            const int k_pos = k_iter + sub * 8;
-            if (k_pos >= K_dim) break;
+            const int block_idx = k_iter / BS;
+            const int k_remainder = k_iter % BS;
             
+            // Load absmax (L2 cache is fine here, small data)
+            float amax = abs_col[block_idx];
+            
+            // Load bit-plane words with streaming hint (bypass L1, sequential access)
+            unsigned int planes[K_BITS];
             #pragma unroll
-            for (int m = 0; m < M_VAL; m++) {
-                // Vector-load 8 A values (shared between both columns)
-                int4 av = *reinterpret_cast<const int4*>(&A[m * K_dim + k_pos]);
-                const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av);
+            for (int b = 0; b < K_BITS; b++) {
+                planes[b] = __ldcg(&B_col[block_idx * K_BITS + b]);
+            }
+            
+            // Process 32 elements in 4 chunks of 8 (int4 vector loads)
+            #pragma unroll
+            for (int sub = 0; sub < 4; sub++) {
+                const int k_offset = k_remainder + sub * 8;
+                if (k_offset >= BS) break;
                 
-                // Dequant + FMA for 8 elements - COLUMN 0
+                const int k_pos = k_iter + sub * 8;
+                if (k_pos >= K_dim) break;
+                
                 #pragma unroll
-                for (int j = 0; j < 8; j++) {
-                    const int elem_idx = k_offset + j;
-                    if (elem_idx >= BS) break;
+                for (int m = 0; m < M_VAL; m++) {
+                    // Vector-load 8 A values
+                    int4 av = *reinterpret_cast<const int4*>(&A[m * K_dim + k_pos]);
+                    const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av);
                     
-                    int idx_0 = 0;
-                    #pragma unroll
-                    for (int b = 0; b < K_BITS; b++)
-                        idx_0 |= ((planes_0[b] >> elem_idx) & 1) << b;
-                    
-                    float w_0 = __shfl_sync(0xFFFFFFFF, cb, idx_0) * amax_0;
-                    acc_0[m] += w_0 * ScalarOps<scalar_t>::to_float(ap[j]);
-                }
-                
-                // Dequant + FMA for 8 elements - COLUMN 1 (if valid)
-                if (col_base + 1 < N) {
+                    // Dequant + FMA for 8 elements
                     #pragma unroll
                     for (int j = 0; j < 8; j++) {
                         const int elem_idx = k_offset + j;
                         if (elem_idx >= BS) break;
                         
-                        int idx_1 = 0;
+                        // Extract k-bit index
+                        int idx = 0;
                         #pragma unroll
                         for (int b = 0; b < K_BITS; b++)
-                            idx_1 |= ((planes_1[b] >> elem_idx) & 1) << b;
+                            idx |= ((planes[b] >> elem_idx) & 1) << b;
                         
-                        float w_1 = __shfl_sync(0xFFFFFFFF, cb, idx_1) * amax_1;
-                        acc_1[m] += w_1 * ScalarOps<scalar_t>::to_float(ap[j]);
+                        // Codebook lookup + scale + FMA
+                        float w = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+                        acc[m] += w * ScalarOps<scalar_t>::to_float(ap[j]);
                     }
                 }
             }
         }
     }
 
-    // Warp-level reduction for both columns
+    // Warp-level reduction using CUB
     #pragma unroll
     for (int m = 0; m < M_VAL; m++) {
-        acc_0[m] = WarpReduce(temp_storage[warp_id]).Sum(acc_0[m]);
+        acc[m] = WarpReduce(temp_storage[warp_id]).Sum(acc[m]);
         
-        // Lane 0 writes output for column 0
+        // Lane 0 writes output
         if (lane_id == 0 && m < M) {
-            C[m * N + col_base] = ScalarOps<scalar_t>::from_float(acc_0[m]);
-        }
-        
-        // Column 1 reduction and write
-        if (col_base + 1 < N) {
-            acc_1[m] = WarpReduce(temp_storage[warp_id]).Sum(acc_1[m]);
-            if (lane_id == 0 && m < M) {
-                C[m * N + col_base + 1] = ScalarOps<scalar_t>::from_float(acc_1[m]);
-            }
+            C[m * N + col] = ScalarOps<scalar_t>::from_float(acc[m]);
         }
     }
 }
@@ -2708,8 +2683,8 @@ static void kbitScalarGemvLaunch(
     const float* B_absmax, const float* codebook,
     scalar_t* C, int M, int K_dim, int N
 ) {
-    constexpr int BLOCK_SIZE = 128;  // 4 warps, each handling 2 columns
-    constexpr int COLS_PER_BLOCK = 8;
+    constexpr int BLOCK_SIZE = 64;   // 2 warps, each handling 1 column
+    constexpr int COLS_PER_BLOCK = 2;
     int grid_size = (N + COLS_PER_BLOCK - 1) / COLS_PER_BLOCK;
 
     kbit_scalar_gemv<K, MV, scalar_t><<<grid_size, BLOCK_SIZE>>>(
