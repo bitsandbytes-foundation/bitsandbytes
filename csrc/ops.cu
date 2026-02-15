@@ -2546,6 +2546,280 @@ void kbitGroupedGemmProd(
     CUDA_CHECK_RETURN(cudaFree(d_work_offsets));
 }
 
+// Cached SM count to avoid repeated cudaGetDevice/cudaDeviceGetAttribute calls
+static int cached_num_sms = 0;
+static int get_num_sms() {
+    if (cached_num_sms == 0) {
+        int dev;
+        cudaGetDevice(&dev);
+        cudaDeviceGetAttribute(&cached_num_sms, cudaDevAttrMultiProcessorCount, dev);
+    }
+    return cached_num_sms;
+}
+
+// ===================================================================
+// Scalar GEMV kernel: C[M,N] = A[M,K_dim] * W_kbit^T  (M=1..4)
+// ===================================================================
+//
+// Optimized following bnb gemv_4bit pattern:
+// - One warp per output column (no inter-warp reduction needed)
+// - Direct register-file loads from global memory (no shared memory tiles)
+// - No __syncthreads barriers
+// - CUB WarpReduce for final reduction
+// - Vector loads (int4) for B_packed and A
+//
+// Grid = (N + 3) / 4 blocks, each with 128 threads (4 warps).
+// Each warp handles one output column independently.
+
+template <int K_BITS, int M_VAL, typename scalar_t>
+__global__ void __launch_bounds__(128, 12)
+kbit_scalar_gemv(
+    const scalar_t* __restrict__ A,
+    const unsigned int* __restrict__ B_packed,   // flat: [N * num_k_blocks * K_BITS] uint32
+    const float* __restrict__ B_absmax,          // flat: [N * num_k_blocks] float32
+    const float* __restrict__ codebook,
+    scalar_t* __restrict__ C,
+    const int M, const int K_dim, const int N
+) {
+    constexpr int BS = 32;          // quantization block size
+    constexpr int ELEMENTS_PER_BLOCK = BS;  // 32 elements per quantization block
+    constexpr int VALUES_PER_ITER = 32;     // Each lane processes 32 values per iteration
+
+    typedef cub::WarpReduce<float> WarpReduce;
+    __shared__ typename WarpReduce::TempStorage temp_storage[4];  // 4 warps
+
+    const int warp_id = threadIdx.x / 32;
+    const int lane_id = threadIdx.x % 32;
+
+    // Each warp handles one column. 4 columns per block.
+    const int col = blockIdx.x * 4 + warp_id;
+    if (col >= N) return;
+
+    const int num_k_blocks = K_dim / BS;
+
+    // Codebook in registers (shuffle-based lookup)
+    float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
+
+    // Column base pointers (flat layout)
+    const unsigned int* B_col = B_packed + col * num_k_blocks * K_BITS;
+    const float* abs_col = B_absmax + col * num_k_blocks;
+
+    // Accumulators
+    float acc[M_VAL];
+    #pragma unroll
+    for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
+
+    // Interleaved 2-block processing for increased ILP
+    // Each lane processes 2 blocks per iteration to hide latency
+    // Stride: lane 0 handles blocks (0,16), (32,48), ... lane 1 handles (1,17), (33,49), ...
+    constexpr int BLOCK_STRIDE = 16;  // Process 2 blocks 16 apart for L2 cache friendliness
+    
+    for (int k_base = lane_id * VALUES_PER_ITER; k_base < K_dim; k_base += 32 * VALUES_PER_ITER * 2) {
+        // Process block pair: k_base and k_base + 16*32 (next block for this lane)
+        #pragma unroll
+        for (int block_pair = 0; block_pair < 2; block_pair++) {
+            const int k_iter = k_base + block_pair * 32 * VALUES_PER_ITER;
+            if (k_iter >= K_dim) break;
+            
+            const int block_idx = k_iter / BS;
+            const int k_remainder = k_iter % BS;
+            
+            // Load absmax for this block
+            float amax = abs_col[block_idx];
+            
+            // Load k bit-plane words for this block
+            unsigned int planes[K_BITS];
+            #pragma unroll
+            for (int b = 0; b < K_BITS; b++)
+                planes[b] = B_col[block_idx * K_BITS + b];
+            
+            // Process 32 elements in 4 chunks of 8 (int4 vector loads)
+            #pragma unroll
+            for (int sub = 0; sub < 4; sub++) {
+                const int k_offset = k_remainder + sub * 8;
+                if (k_offset >= BS) break;
+                
+                #pragma unroll
+                for (int m = 0; m < M_VAL; m++) {
+                    const int k_pos = k_iter + sub * 8;
+                    if (k_pos >= K_dim) break;
+                    
+                    // Vector-load 8 A values
+                    int4 av = *reinterpret_cast<const int4*>(&A[m * K_dim + k_pos]);
+                    const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av);
+                    
+                    // Dequant + FMA for 8 elements
+                    #pragma unroll
+                    for (int j = 0; j < 8; j++) {
+                        const int elem_idx = k_offset + j;
+                        if (elem_idx >= BS) break;
+                        
+                        // Extract k-bit index
+                        int idx = 0;
+                        #pragma unroll
+                        for (int b = 0; b < K_BITS; b++)
+                            idx |= ((planes[b] >> elem_idx) & 1) << b;
+                        
+                        // Codebook lookup + scale + FMA
+                        float w = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+                        acc[m] += w * ScalarOps<scalar_t>::to_float(ap[j]);
+                    }
+                }
+            }
+        }
+    }
+
+    // Warp-level reduction using CUB (no __syncthreads needed!)
+    #pragma unroll
+    for (int m = 0; m < M_VAL; m++) {
+        acc[m] = WarpReduce(temp_storage[warp_id]).Sum(acc[m]);
+
+        // Lane 0 writes output
+        if (lane_id == 0 && m < M) {
+            C[m * N + col] = ScalarOps<scalar_t>::from_float(acc[m]);
+        }
+    }
+}
+
+// ---- Scalar GEMV launcher ----
+template <int K, int MV, typename scalar_t>
+static void kbitScalarGemvLaunch(
+    const scalar_t* A, const unsigned int* B_packed,
+    const float* B_absmax, const float* codebook,
+    scalar_t* C, int M, int K_dim, int N
+) {
+    constexpr int BLOCK_SIZE = 128;  // 4 warps, each handling 1 column
+    constexpr int COLS_PER_BLOCK = 4;
+    int grid_size = (N + COLS_PER_BLOCK - 1) / COLS_PER_BLOCK;
+
+    kbit_scalar_gemv<K, MV, scalar_t><<<grid_size, BLOCK_SIZE>>>(
+        A, B_packed, B_absmax, codebook, C, M, K_dim, N);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Public entry point: selects M_VAL template
+template <int K, typename scalar_t>
+void kbitScalarGemv(
+    const scalar_t* A, const unsigned int* B_packed,
+    const float* B_absmax, const float* codebook,
+    scalar_t* C, int M, int K_dim, int N
+) {
+    #define LAUNCH_SCALAR_GEMV(MV) \
+        kbitScalarGemvLaunch<K, MV, scalar_t>( \
+            A, B_packed, B_absmax, codebook, C, M, K_dim, N)
+
+    if (M <= 1) { LAUNCH_SCALAR_GEMV(1); }
+    else if (M <= 2) { LAUNCH_SCALAR_GEMV(2); }
+    else if (M <= 3) { LAUNCH_SCALAR_GEMV(3); }
+    else { LAUNCH_SCALAR_GEMV(4); }
+
+    #undef LAUNCH_SCALAR_GEMV
+}
+
+// ===================================================================
+// Grouped scalar GEMV: MoE expert dispatch
+// ===================================================================
+
+template <int K_BITS, int M_VAL, typename scalar_t>
+__global__ void kbit_grouped_scalar_gemv(
+    const scalar_t* __restrict__ A_concat,
+    const unsigned int* __restrict__ B_packed_all,
+    const unsigned char* __restrict__ B_absmax_all,  // E4M4-encoded (tiled layout)
+    const float* __restrict__ codebook,
+    scalar_t* __restrict__ C_concat,
+    const int* __restrict__ expert_offsets,
+    const int K_dim, const int N, const int num_experts
+) {
+    constexpr int BS = 32;
+    constexpr int COLS_PER_BLOCK = 4;
+
+    const int warp_id = threadIdx.x / 32;
+    const int lane_id = threadIdx.x % 32;
+
+    const int expert_id = blockIdx.y;
+    const int n_group = blockIdx.x;
+    const int n_base = n_group * COLS_PER_BLOCK + warp_id;
+
+    if (n_base >= N) return;
+
+    const int row_start = expert_offsets[expert_id];
+    const int row_end = expert_offsets[expert_id + 1];
+    const int M = row_end - row_start;
+    if (M <= 0) return;
+
+    const int num_k_blocks = K_dim / BS;
+    const int expert_B_offset = expert_id * num_k_blocks * N * K_BITS;
+    const int expert_abs_offset = expert_id * num_k_blocks * N;
+
+    const unsigned int* B_col = B_packed_all + expert_B_offset + n_base * num_k_blocks * K_BITS;
+    const unsigned char* abs_col = B_absmax_all + expert_abs_offset + n_base * num_k_blocks;
+
+    float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
+
+    float acc[M_VAL];
+    #pragma unroll
+    for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
+
+    for (int block_idx = lane_id; block_idx < num_k_blocks; block_idx += 32) {
+        unsigned int planes[K_BITS];
+        #pragma unroll
+        for (int b = 0; b < K_BITS; b++)
+            planes[b] = B_col[block_idx * K_BITS + b];
+        float amax = load_absmax(abs_col, block_idx);
+
+        int k_base = block_idx * BS;
+
+        #pragma unroll
+        for (int j = 0; j < 32; j++) {
+            int idx = 0;
+            #pragma unroll
+            for (int b = 0; b < K_BITS; b++)
+                idx |= ((planes[b] >> j) & 1) << b;
+            float w = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+            #pragma unroll
+            for (int m = 0; m < M_VAL; m++) {
+                if (m < M)
+                    acc[m] += w * ScalarOps<scalar_t>::to_float(
+                        A_concat[(row_start + m) * K_dim + k_base + j]);
+            }
+        }
+    }
+
+    #pragma unroll
+    for (int m = 0; m < M_VAL; m++) {
+        #pragma unroll
+        for (int offset = 16; offset >= 1; offset /= 2)
+            acc[m] += __shfl_down_sync(0xFFFFFFFF, acc[m], offset);
+    }
+
+    if (lane_id == 0) {
+        #pragma unroll
+        for (int m = 0; m < M_VAL; m++)
+            if (m < M)
+                C_concat[(row_start + m) * N + n_base] =
+                    ScalarOps<scalar_t>::from_float(acc[m]);
+    }
+}
+
+// ---- Grouped scalar GEMV launcher ----
+template <int K, typename scalar_t>
+void kbitGroupedScalarGemv(
+    const scalar_t* A_concat, const unsigned int* B_packed_all,
+    const unsigned char* B_absmax_all, const float* codebook,
+    scalar_t* C_concat, const int* expert_offsets,
+    int K_dim, int N, int num_experts
+) {
+    constexpr int COLS_PER_BLOCK = 4;
+    constexpr int BLOCK_SIZE = 128;
+    int n_groups = (N + COLS_PER_BLOCK - 1) / COLS_PER_BLOCK;
+    dim3 grid(n_groups, num_experts);
+
+    kbit_grouped_scalar_gemv<K, 4, scalar_t><<<grid, BLOCK_SIZE>>>(
+        A_concat, B_packed_all, B_absmax_all, codebook, C_concat,
+        expert_offsets, K_dim, N, num_experts);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 // ---- Debug: Simple MMA test kernel ----
 // Takes fp16 A[16,16] and fp16 B[16,8] (B stored row-major), outputs fp32 C[16,8].
 __global__ void test_mma_kernel(const half* __restrict__ A, const half* __restrict__ B, float* __restrict__ C) {
@@ -2694,3 +2968,23 @@ INSTANTIATE_KBIT_GROUPED_GEMM_PROD(2)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(3)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(4)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(5)
+
+// Scalar GEMV instantiations (fp16 and bf16) — flat layout, float32 absmax, C=1
+#define INSTANTIATE_KBIT_SCALAR_GEMV(K) \
+    template void kbitScalarGemv<K, half>(const half*, const unsigned int*, const float*, const float*, half*, int, int, int); \
+    template void kbitScalarGemv<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const float*, const float*, __nv_bfloat16*, int, int, int);
+
+INSTANTIATE_KBIT_SCALAR_GEMV(2)
+INSTANTIATE_KBIT_SCALAR_GEMV(3)
+INSTANTIATE_KBIT_SCALAR_GEMV(4)
+INSTANTIATE_KBIT_SCALAR_GEMV(5)
+
+// Grouped scalar GEMV instantiations (fp16 and bf16)
+#define INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(K) \
+    template void kbitGroupedScalarGemv<K, half>(const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int); \
+    template void kbitGroupedScalarGemv<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*, int, int, int);
+
+INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(2)
+INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(3)
+INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(4)
+INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(5)
