@@ -177,12 +177,15 @@ typically have M=10-500 tokens and follow the same dispatch logic.
 Highest-impact item. Projected 3-5x full-model speedup at batch=1-4
 (the autoregressive decode case — the hot path for interactive inference).
 
+**Full implementation guide:** [`agents/scalar_gemv_guide.md`](agents/scalar_gemv_guide.md)
+
 Steps:
-1. Add `ComputeMode::SCALAR` template to the production kernel
-2. Scalar inner loop: vectorized kbit load → dequant → FMA accumulate
-3. Support both grouped (MoE) and single-matrix (dense) via same dispatch
-4. Benchmark against cuBLAS at M=1,2,4 for all target shapes
-5. Integrate into `kbit_gemm_prod` with auto-dispatch based on M
+1. CUDA kernel in `csrc/ops.cu` — scalar inner loop with cp.async B-tile
+   pipeline, A loaded to registers, codebook via `__shfl_sync`
+2. C wrappers in `csrc/pythonInterface.cpp`
+3. Python op registration and dispatch
+4. Correctness tests against dequant + torch.mm reference
+5. Benchmark against cuBLAS at M=1,2,4 for all target shapes
 
 ### P1: Dispatch Logic
 
