@@ -9,6 +9,7 @@
 #include <limits>
 #include <ops.cuh>
 #include <type_traits>
+#include <vector>
 
 #define ERR_NOT_IMPLEMENTED 100
 
@@ -2171,6 +2172,380 @@ void kbitGemmProd(
     }
 }
 
+// ---- Grouped Expert GEMM ----
+// Batches multiple MoE expert GEMM invocations into one kernel launch.
+// All experts share K_dim, N, k, codebook. Each expert has its own
+// B weights and a variable number of tokens (M_i).
+// No split-K: the whole point of grouping is to have enough tiles.
+
+template <int K_BITS, int M_BLOCKS, typename scalar_t>
+__global__ void kbit_grouped_gemm_prod(
+    const scalar_t* __restrict__ A_concat,
+    const unsigned int* __restrict__ B_packed_all,
+    const unsigned char* __restrict__ B_absmax_all,
+    const float* __restrict__ codebook,
+    scalar_t* __restrict__ C_concat,
+    const int* __restrict__ expert_offsets,
+    const int* __restrict__ work_offsets,
+    const int K_dim, const int N,
+    const int num_experts,
+    const int total_work
+) {
+    using Ops = ScalarOps<scalar_t>;
+    constexpr int TILE_M = M_BLOCKS * 16;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int BS = 32;
+    constexpr int KB_PER_TILE = TILE_K / BS;
+    constexpr int B_COL_WORDS = KB_PER_TILE * K_BITS;
+    constexpr int N_BLOCKS = 2;
+
+    constexpr int A_STAGE_ELEMS = TILE_M * TILE_K;
+    constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;
+    constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE;
+
+    constexpr int A_STAGE_BYTES = A_STAGE_ELEMS * sizeof(scalar_t);
+    constexpr int B_STAGE_BYTES_VAL = B_STAGE_WORDS * sizeof(unsigned int);
+    constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
+    constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES_VAL + ABS_STAGE_ALIGNED;
+
+    const int n_tiles = N / TILE_N;
+    const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
+
+    // Per-expert B data sizes (same for all experts since K_dim, N are shared)
+    const int b_packed_per_expert = k_tiles * n_tiles * B_STAGE_WORDS;
+    const int b_absmax_per_expert = k_tiles * n_tiles * ABS_STAGE_BYTES;
+
+    const int warp_id = threadIdx.x / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int gid = lane_id / 4;
+    const int tid = lane_id % 4;
+    const int warp_n_base = warp_id * (TILE_N / 8);
+
+    // Double-buffered shared memory
+    extern __shared__ char smem[];
+    auto sh_a = [&](int stage) -> scalar_t* {
+        return reinterpret_cast<scalar_t*>(smem + stage * STAGE_BYTES);
+    };
+    auto sh_b = [&](int stage) -> unsigned int* {
+        return reinterpret_cast<unsigned int*>(smem + stage * STAGE_BYTES + A_STAGE_BYTES);
+    };
+    auto sh_abs = [&](int stage) -> unsigned char* {
+        return reinterpret_cast<unsigned char*>(smem + stage * STAGE_BYTES + A_STAGE_BYTES + B_STAGE_BYTES_VAL);
+    };
+
+    // Codebook in registers
+    scalar_t cb_val = (lane_id < (1 << K_BITS)) ? Ops::from_float(codebook[lane_id]) : Ops::from_float(0.0f);
+
+    float frag_c[M_BLOCKS][N_BLOCKS][4];
+
+    // Persistent work loop
+    for (int work_id = blockIdx.x; work_id < total_work; work_id += gridDim.x) {
+        // Binary search work_offsets to find expert_id
+        int lo = 0, hi = num_experts - 1;
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            if (work_offsets[mid] <= work_id)
+                lo = mid;
+            else
+                hi = mid - 1;
+        }
+        const int expert_id = lo;
+
+        const int local_work_id = work_id - work_offsets[expert_id];
+        const int n_tile = local_work_id % n_tiles;
+        const int m_tile = local_work_id / n_tiles;
+
+        // Per-expert parameters
+        const int a_row_offset = expert_offsets[expert_id];
+        const int M_e = expert_offsets[expert_id + 1] - expert_offsets[expert_id];
+        const int m_base = m_tile * TILE_M;
+
+        // Expert-specific pointers
+        const scalar_t* A = A_concat + a_row_offset * K_dim;
+        const unsigned int* B_packed = B_packed_all + expert_id * b_packed_per_expert;
+        const unsigned char* B_absmax = B_absmax_all + expert_id * b_absmax_per_expert;
+        scalar_t* C = C_concat + a_row_offset * N;
+
+        // Zero accumulators
+#pragma unroll
+        for (int mb = 0; mb < M_BLOCKS; mb++)
+#pragma unroll
+            for (int nb = 0; nb < N_BLOCKS; nb++)
+                frag_c[mb][nb][0] = frag_c[mb][nb][1] = frag_c[mb][nb][2] = frag_c[mb][nb][3] = 0.0f;
+
+        // Fetch tile lambda
+        auto fetch_tile = [&](int stage, int kt) {
+            const int k_base = kt * TILE_K;
+            const int tile_idx = kt * n_tiles + n_tile;
+
+            // B tile via cp.async
+            const int b_global_base = tile_idx * B_STAGE_WORDS;
+            constexpr int B_INT4S = B_STAGE_BYTES_VAL / 16;
+            const int4* b_src = reinterpret_cast<const int4*>(B_packed + b_global_base);
+            int4* b_dst = reinterpret_cast<int4*>(sh_b(stage));
+            for (int i = threadIdx.x; i < B_INT4S; i += blockDim.x)
+                cp_async_cg_16(&b_dst[i], &b_src[i]);
+
+            // Absmax via cp.async
+            const int abs_global_base = tile_idx * ABS_STAGE_BYTES;
+            constexpr int ABS_INT4S = (ABS_STAGE_BYTES + 15) / 16;
+            const int4* abs_src = reinterpret_cast<const int4*>(B_absmax + abs_global_base);
+            int4* abs_dst = reinterpret_cast<int4*>(sh_abs(stage));
+            for (int i = threadIdx.x; i < ABS_INT4S; i += blockDim.x)
+                cp_async_cg_16(&abs_dst[i], &abs_src[i]);
+
+            // A tile via cp.async with XOR swizzle
+            scalar_t* a_dst = sh_a(stage);
+            constexpr int A_GROUPS = A_STAGE_ELEMS / 8;
+            const bool a_interior = (m_base + TILE_M <= M_e) && (k_base + TILE_K <= K_dim);
+
+            if (a_interior) {
+                for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
+                    int row = i / (TILE_K / 8);
+                    int col_group = i % (TILE_K / 8);
+                    int swizzled_group = col_group ^ (row % 8);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    const int4* src = reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
+                    cp_async_cg_16(dst, src);
+                }
+            } else {
+                for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
+                    int row = i / (TILE_K / 8);
+                    int col_group = i % (TILE_K / 8);
+                    int swizzled_group = col_group ^ (row % 8);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    int gr = m_base + row;
+                    int gc = k_base + col_group * 8;
+                    if (gr < M_e && gc < K_dim) {
+                        const int4* src = reinterpret_cast<const int4*>(&A[gr * K_dim + gc]);
+                        cp_async_cg_16(dst, src);
+                    } else {
+                        *dst = make_int4(0, 0, 0, 0);
+                    }
+                }
+            }
+        };
+
+        // Compute tile lambda — identical to v1 production kernel
+        auto compute_tile = [&](int stage) {
+            scalar_t* a_ptr = sh_a(stage);
+            unsigned int* b_ptr = sh_b(stage);
+            unsigned char* abs_ptr = sh_abs(stage);
+
+#pragma unroll
+            for (int ks = 0; ks < 4; ks++) {
+                const int k_block = ks / 2;
+                const int half_idx = ks % 2;
+
+                uint32_t frag_a[M_BLOCKS][4];
+#pragma unroll
+                for (int mb = 0; mb < M_BLOCKS; mb++) {
+                    const int mb_row_offset = mb * 16;
+                    const int matrix_id = lane_id / 8;
+                    const int row_in_matrix = lane_id % 8;
+                    const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
+                    const int col_start = ks * 16 + (matrix_id / 2) * 8;
+                    const int col_group = col_start / 8;
+                    const int swizzled_group = col_group ^ (a_row % 8);
+                    const int swizzled_col_start = swizzled_group * 8;
+
+                    const scalar_t* addr = &a_ptr[a_row * TILE_K + swizzled_col_start];
+                    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
+
+                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
+                                 : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
+                                 : "r"(smem_addr));
+                }
+
+#pragma unroll
+                for (int nb = 0; nb < N_BLOCKS; nb++) {
+                    int col = warp_n_base + nb * 8 + gid;
+                    unsigned int planes[K_BITS];
+                    int b_addr = col * B_COL_WORDS + k_block * K_BITS;
+#pragma unroll
+                    for (int b = 0; b < K_BITS; b++)
+                        planes[b] = b_ptr[b_addr + b];
+
+                    scalar_t scale = Ops::from_float(decode_e4m4_absmax_branchless(abs_ptr[col * KB_PER_TILE + k_block]));
+
+                    const int bit_offset = half_idx * 16;
+                    const int rows[4] = {2 * tid, 2 * tid + 1, 2 * tid + 8, 2 * tid + 9};
+
+                    int bp0 = bit_offset + rows[0];
+                    int bp1 = bit_offset + rows[1];
+                    int bp2 = bit_offset + rows[2];
+                    int bp3 = bit_offset + rows[3];
+
+                    int idx0 = 0, idx1 = 0, idx2 = 0, idx3 = 0;
+#pragma unroll
+                    for (int b = 0; b < K_BITS; b++) {
+                        unsigned int p = planes[b];
+                        idx0 |= ((p >> bp0) & 1) << b;
+                        idx1 |= ((p >> bp1) & 1) << b;
+                        idx2 |= ((p >> bp2) & 1) << b;
+                        idx3 |= ((p >> bp3) & 1) << b;
+                    }
+
+                    scalar_t vals[4];
+                    vals[0] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx0), scale);
+                    vals[1] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx1), scale);
+                    vals[2] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx2), scale);
+                    vals[3] = Ops::mul(__shfl_sync(0xFFFFFFFF, cb_val, idx3), scale);
+
+                    uint32_t frag_b[2];
+                    frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
+                    frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
+
+#pragma unroll
+                    for (int mb = 0; mb < M_BLOCKS; mb++) {
+                        mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                    }
+                }
+            }
+        };
+
+        // Pipeline: double-buffered cp.async
+        fetch_tile(0, 0);
+        cp_async_fence();
+
+        for (int kt = 0; kt < k_tiles; kt++) {
+            int cur = kt % 2;
+            if (kt + 1 < k_tiles) {
+                fetch_tile((kt + 1) % 2, kt + 1);
+                cp_async_fence();
+                cp_async_wait<1>();
+            } else {
+                cp_async_wait<0>();
+            }
+            __syncthreads();
+            compute_tile(cur);
+            __syncthreads();
+        }
+
+        // Direct write — no split-K needed for grouped GEMM
+#pragma unroll
+        for (int mb = 0; mb < M_BLOCKS; mb++) {
+#pragma unroll
+            for (int nb = 0; nb < N_BLOCKS; nb++) {
+                int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+                int m_row0 = m_base + mb * 16 + gid;
+                int m_row1 = m_base + mb * 16 + gid + 8;
+                if (m_row0 < M_e) {
+                    C[m_row0 * N + c_col] = Ops::from_float(frag_c[mb][nb][0]);
+                    C[m_row0 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][1]);
+                }
+                if (m_row1 < M_e) {
+                    C[m_row1 * N + c_col] = Ops::from_float(frag_c[mb][nb][2]);
+                    C[m_row1 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][3]);
+                }
+            }
+        }
+    } // end persistent work loop
+}
+
+// Grouped GEMM launcher
+template <int K, int MB, typename scalar_t>
+static void kbitGroupedGemmProdLaunch(
+    const scalar_t* A_concat, const unsigned int* B_packed_all,
+    const unsigned char* B_absmax_all, const float* codebook,
+    scalar_t* C_concat, const int* expert_offsets, const int* work_offsets,
+    int K_dim, int N, int num_experts, int total_work
+) {
+    constexpr int TILE_M = MB * 16;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int BS = 32;
+    constexpr int KB_PER_TILE = TILE_K / BS;
+    constexpr int B_COL_WORDS = KB_PER_TILE * K;
+
+    constexpr int A_STAGE_BYTES = TILE_M * TILE_K * sizeof(scalar_t);
+    constexpr int B_STAGE_BYTES = TILE_N * B_COL_WORDS * sizeof(unsigned int);
+    constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE;
+    constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
+    constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES + ABS_STAGE_ALIGNED;
+
+    int dev;
+    cudaGetDevice(&dev);
+    int num_sms;
+    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, dev);
+
+    int grid_size = min(num_sms, total_work);
+    dim3 block(256);
+    int smem_size = 2 * STAGE_BYTES;
+
+    kbit_grouped_gemm_prod<K, MB, scalar_t><<<grid_size, block, smem_size>>>(
+        A_concat, B_packed_all, B_absmax_all, codebook, C_concat,
+        expert_offsets, work_offsets,
+        K_dim, N, num_experts, total_work);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Public entry point: reads expert_offsets from device, computes work_offsets
+// and max_M internally to avoid Python-side GPU→CPU sync.
+template <int K, typename scalar_t>
+void kbitGroupedGemmProd(
+    const scalar_t* A_concat, const unsigned int* B_packed_all,
+    const unsigned char* B_absmax_all, const float* codebook,
+    scalar_t* C_concat, const int* d_expert_offsets,
+    int K_dim, int N, int num_experts
+) {
+    // Copy expert_offsets from device to host (tiny: num_experts+1 ints)
+    std::vector<int> h_offsets(num_experts + 1);
+    CUDA_CHECK_RETURN(cudaMemcpy(h_offsets.data(), d_expert_offsets,
+                                  (num_experts + 1) * sizeof(int), cudaMemcpyDeviceToHost));
+
+    // Compute max_M and M_BLOCKS
+    int max_M = 0;
+    for (int i = 0; i < num_experts; i++) {
+        int M_i = h_offsets[i + 1] - h_offsets[i];
+        if (M_i > max_M) max_M = M_i;
+    }
+
+    int m_blocks = 1;
+    if (max_M > 48) m_blocks = 4;
+    else if (max_M > 32) m_blocks = 3;
+    else if (max_M > 16) m_blocks = 2;
+
+    int tile_m = m_blocks * 16;
+    int n_tiles = N / 128;
+
+    // Compute work_offsets on host
+    std::vector<int> h_work_offsets(num_experts + 1);
+    h_work_offsets[0] = 0;
+    for (int i = 0; i < num_experts; i++) {
+        int M_i = h_offsets[i + 1] - h_offsets[i];
+        int m_tiles = (M_i + tile_m - 1) / tile_m;
+        h_work_offsets[i + 1] = h_work_offsets[i] + m_tiles * n_tiles;
+    }
+    int total_work = h_work_offsets[num_experts];
+
+    if (total_work == 0) return;
+
+    // Copy work_offsets to device
+    int* d_work_offsets;
+    CUDA_CHECK_RETURN(cudaMalloc(&d_work_offsets, (num_experts + 1) * sizeof(int)));
+    CUDA_CHECK_RETURN(cudaMemcpy(d_work_offsets, h_work_offsets.data(),
+                                  (num_experts + 1) * sizeof(int), cudaMemcpyHostToDevice));
+
+    switch (m_blocks) {
+    case 4:
+        kbitGroupedGemmProdLaunch<K, 4, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        break;
+    case 3:
+        kbitGroupedGemmProdLaunch<K, 3, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        break;
+    case 2:
+        kbitGroupedGemmProdLaunch<K, 2, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        break;
+    default:
+        kbitGroupedGemmProdLaunch<K, 1, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        break;
+    }
+
+    CUDA_CHECK_RETURN(cudaFree(d_work_offsets));
+}
+
 // ---- Debug: Simple MMA test kernel ----
 // Takes fp16 A[16,16] and fp16 B[16,8] (B stored row-major), outputs fp32 C[16,8].
 __global__ void test_mma_kernel(const half* __restrict__ A, const half* __restrict__ B, float* __restrict__ C) {
@@ -2309,3 +2684,13 @@ INSTANTIATE_KBIT_GEMM_PROD(2)
 INSTANTIATE_KBIT_GEMM_PROD(3)
 INSTANTIATE_KBIT_GEMM_PROD(4)
 INSTANTIATE_KBIT_GEMM_PROD(5)
+
+// Grouped expert GEMM instantiations (fp16 and bf16)
+#define INSTANTIATE_KBIT_GROUPED_GEMM_PROD(K) \
+    template void kbitGroupedGemmProd<K, half>(const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int); \
+    template void kbitGroupedGemmProd<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*, int, int, int);
+
+INSTANTIATE_KBIT_GROUPED_GEMM_PROD(2)
+INSTANTIATE_KBIT_GROUPED_GEMM_PROD(3)
+INSTANTIATE_KBIT_GROUPED_GEMM_PROD(4)
+INSTANTIATE_KBIT_GROUPED_GEMM_PROD(5)

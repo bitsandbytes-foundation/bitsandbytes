@@ -1078,3 +1078,48 @@ def _(
         )
 
     return C
+
+
+@register_kernel("bitsandbytes::kbit_grouped_gemm", "cuda")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    num_experts: int,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"kbit_grouped_gemm supports float16 and bfloat16, got {A_concat.dtype}",
+    )
+    torch._check(B_packed_all.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed_all.dtype}")
+    torch._check(B_absmax_all.dtype == torch.uint8, lambda: f"B_absmax must be uint8 (E4M4), got {B_absmax_all.dtype}")
+    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
+    torch._check(expert_offsets.dtype == torch.int32, lambda: f"expert_offsets must be int32, got {expert_offsets.dtype}")
+    torch._check(N % 128 == 0, lambda: f"N ({N}) must be divisible by 128")
+
+    total_M = A_concat.shape[0]
+    C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
+
+    dtype_suffix = "fp16" if A_concat.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(A_concat):
+        fn = getattr(lib, f"ckbit_grouped_gemm_prod_{dtype_suffix}_k{k}")
+        fn(
+            get_ptr(A_concat),
+            get_ptr(B_packed_all),
+            get_ptr(B_absmax_all),
+            get_ptr(codebook),
+            get_ptr(C_concat),
+            get_ptr(expert_offsets),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            ct.c_int(num_experts),
+        )
+
+    return C_concat
