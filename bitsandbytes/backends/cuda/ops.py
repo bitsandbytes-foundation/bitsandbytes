@@ -788,7 +788,7 @@ def _(A: torch.Tensor, codebook: torch.Tensor, k: int) -> tuple[torch.Tensor, to
     n = A.numel()
     num_blocks = -(n // -32)
     packed = torch.zeros(num_blocks * k + k, device=A.device, dtype=torch.int32)
-    absmax = torch.zeros(num_blocks + 1, device=A.device, dtype=torch.float32)
+    absmax = torch.zeros(num_blocks + 1, device=A.device, dtype=torch.uint8)
 
     with _cuda_device_of(A):
         tname = _KBIT_DTYPE_SUFFIX[A.dtype]
@@ -861,7 +861,7 @@ def _(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(packed_flat.dtype == torch.int32, lambda: f"packed_flat must be int32, got {packed_flat.dtype}")
-    torch._check(absmax_flat.dtype == torch.float32, lambda: f"absmax_flat must be float32, got {absmax_flat.dtype}")
+    torch._check(absmax_flat.dtype == torch.uint8, lambda: f"absmax_flat must be uint8 (E4M4), got {absmax_flat.dtype}")
 
     TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
     torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
@@ -1152,9 +1152,10 @@ def _kbit_scalar_gemv_impl(
 ) -> None:
     M = A.shape[0]
     dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
+    abs_suffix = "_fp16abs" if B_absmax.dtype == torch.float16 else ""
 
     with _cuda_device_of(A):
-        fn = getattr(lib, f"ckbit_scalar_gemv_{dtype_suffix}_k{k}")
+        fn = getattr(lib, f"ckbit_scalar_gemv_{dtype_suffix}{abs_suffix}_k{k}")
         fn(
             get_ptr(A),
             get_ptr(B_packed),
@@ -1222,7 +1223,10 @@ def _(
         lambda: f"kbit_grouped_scalar_gemv supports float16 and bfloat16, got {A_concat.dtype}",
     )
     torch._check(B_packed_all.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed_all.dtype}")
-    torch._check(B_absmax_all.dtype == torch.float32, lambda: f"B_absmax must be float32, got {B_absmax_all.dtype}")
+    torch._check(
+        B_absmax_all.dtype in (torch.uint8, torch.float16),
+        lambda: f"B_absmax must be uint8 (E4M4) or float16, got {B_absmax_all.dtype}",
+    )
     torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
     torch._check(expert_offsets.dtype == torch.int32, lambda: f"expert_offsets must be int32, got {expert_offsets.dtype}")
 
@@ -1230,9 +1234,10 @@ def _(
     C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
 
     dtype_suffix = "fp16" if A_concat.dtype == torch.float16 else "bf16"
+    abs_suffix = "_fp16abs" if B_absmax_all.dtype == torch.float16 else ""
 
     with _cuda_device_of(A_concat):
-        fn = getattr(lib, f"ckbit_grouped_scalar_gemv_{dtype_suffix}_k{k}")
+        fn = getattr(lib, f"ckbit_grouped_scalar_gemv_{dtype_suffix}{abs_suffix}_k{k}")
         fn(
             get_ptr(A_concat),
             get_ptr(B_packed_all),

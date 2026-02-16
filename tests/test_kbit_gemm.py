@@ -54,7 +54,9 @@ def quantize_kbit_ref(A, codebook, blocksize=BLOCKSIZE):
     distances = (norm_exp - cb).abs()
     indices = distances.argmin(dim=2).to(torch.uint8)
     indices = indices.reshape(-1)[:n]
-    return indices, absmax
+    # Encode absmax as uint8 E4M4 (matches CUDA quantize_kbit)
+    absmax_e4m4 = encode_absmax_e4m4(absmax)
+    return indices, absmax_e4m4
 
 
 def dequantize_kbit_ref(indices, absmax, codebook, dtype=torch.float32, blocksize=BLOCKSIZE):
@@ -66,7 +68,9 @@ def dequantize_kbit_ref(indices, absmax, codebook, dtype=torch.float32, blocksiz
     num_blocks = n_padded // blocksize
     cb_values = codebook.float()[indices.long()]
     cb_values = cb_values.reshape(num_blocks, blocksize)
-    out = cb_values * absmax.unsqueeze(1)
+    # Decode E4M4 absmax to float for scaling
+    absmax_float = decode_absmax_e4m4(absmax) if absmax.dtype == torch.uint8 else absmax
+    out = cb_values * absmax_float.unsqueeze(1)
     out = out.reshape(-1)[:n]
     return out.to(dtype)
 
@@ -214,8 +218,8 @@ def repack_kbit_ref(packed_flat, absmax_flat, K_dim, N, k, tile_k=TILE_K, tile_n
     packed_tiled = torch.zeros(total_tile_words, dtype=torch.int32)
     absmax_tiled = torch.zeros(total_tile_absmax, dtype=torch.uint8)
 
-    # E4M4 encode the absmax
-    absmax_e4m4 = encode_absmax_e4m4(absmax_flat)
+    # absmax_flat is already uint8 E4M4 from quantize_kbit
+    absmax_e4m4 = absmax_flat
 
     # W is [N, K_dim] row-major. Element (n, kk) is at flat index n * K_dim + kk.
     # block_id for element (n, kk) = (n * K_dim + kk) // 32
@@ -401,10 +405,10 @@ class TestRepackRef:
         W = torch.randn(N, K_dim)
         codebook = create_normal_float_codebook(k)
 
-        # Quantize (produces flat packed data)
+        # Quantize (produces flat packed data, absmax already E4M4 uint8)
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        absmax_e4m4 = encode_absmax_e4m4(absmax)
+        absmax_e4m4 = absmax  # already E4M4 encoded
 
         # Repack to tiled layout
         packed_tiled, absmax_tiled = repack_kbit_ref(
