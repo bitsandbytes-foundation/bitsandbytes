@@ -14,6 +14,18 @@ import bitsandbytes  # noqa: F401
 from bitsandbytes import _ops  # noqa: F401
 
 BLOCKSIZE = 32
+E4M4_BIAS = 11
+
+
+def decode_e4m4_absmax(raw: torch.Tensor) -> torch.Tensor:
+    """Decode uint8 E4M4 absmax values to float32."""
+    raw_int = raw.int()
+    e = raw_int >> 4
+    m = raw_int & 0xF
+    # Normal: 2^(e - BIAS) * (1 + m/16)
+    result = (2.0 ** (e.float() - E4M4_BIAS)) * (1.0 + m.float() / 16.0)
+    result[raw == 0] = 0.0
+    return result
 
 
 def create_normal_float_codebook(k: int) -> torch.Tensor:
@@ -40,7 +52,7 @@ def prepare_weights(K_dim, N, k):
 
 
 def dequant_reference(packed_flat, absmax_flat, codebook, k, N, K_dim):
-    """Dequantize using float32 absmax directly (no E4M4 encoding).
+    """Dequantize using E4M4-decoded absmax.
     Matches the GEMV kernel's precision exactly."""
     num_blocks = N * (K_dim // 32)
     packed = packed_flat[:num_blocks * k].view(num_blocks, k)  # [B, k] int32
@@ -52,8 +64,11 @@ def dequant_reference(packed_flat, absmax_flat, codebook, k, N, K_dim):
         bits = (packed[:, b:b+1] >> j.unsqueeze(0)) & 1  # [B, 32]
         indices += bits << b
 
+    # Decode E4M4 absmax to float for reference computation
+    absmax_decoded = decode_e4m4_absmax(absmax_flat[:num_blocks])
+
     # Codebook lookup + absmax scale
-    W_flat = codebook[indices.long()] * absmax_flat[:num_blocks].unsqueeze(1)
+    W_flat = codebook[indices.long()] * absmax_decoded.unsqueeze(1)
     return W_flat.reshape(N, K_dim)
 
 

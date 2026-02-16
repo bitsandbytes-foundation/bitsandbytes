@@ -449,7 +449,7 @@ def _(A: torch.Tensor, codebook: torch.Tensor, k: int) -> tuple[torch.Tensor, to
     num_blocks = -(n // -32)
     # packed: num_blocks * k int32 words + k padding words
     packed = torch.empty(num_blocks * k + k, device=A.device, dtype=torch.int32)
-    absmax = torch.empty(num_blocks + 1, device=A.device, dtype=torch.float32)
+    absmax = torch.empty(num_blocks + 1, device=A.device, dtype=torch.uint8)
     return packed, absmax
 
 

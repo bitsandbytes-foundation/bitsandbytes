@@ -82,7 +82,7 @@ if KERNEL in ("mma", "scalar"):
             fn = lambda: torch.ops.bitsandbytes.kbit_gemm_prod(
                 A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, 1)
         else:
-            # Scalar GEMV uses flat layout with float32 absmax
+            # Scalar GEMV uses flat layout with uint8 E4M4 absmax
             fn = lambda: torch.ops.bitsandbytes.kbit_scalar_gemv(
                 A, packed_flat, absmax_flat, codebook, K_dim, N, k)
 
@@ -108,7 +108,7 @@ elif KERNEL == "grouped":
                 W = torch.randn(K_dim * N, device=dev, dtype=torch.float32)
                 pf, af = torch.ops.bitsandbytes.quantize_kbit(W, codebook, k)
                 packed_list.append(pf[:expected_packed])
-                absmax_list.append(af.cuda()[:expected_absmax])
+                absmax_list.append(af[:expected_absmax])
             B_packed_all = torch.cat(packed_list, dim=0)
             B_absmax_all = torch.cat(absmax_list, dim=0)
             moe_data[(name, k)] = (K_dim, N, B_packed_all, B_absmax_all, codebook)

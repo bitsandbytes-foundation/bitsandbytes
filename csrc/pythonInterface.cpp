@@ -390,14 +390,14 @@ void gemv_4bit_inference_fp32(
 #if BUILD_CUDA || BUILD_HIP
 
 // Forward declarations of ops.cu template functions
-template <typename T, int K> void quantizeBlockwise_kbit(const float*, const T*, float*, unsigned int*, int);
+template <typename T, int K> void quantizeBlockwise_kbit(const float*, const T*, unsigned char*, unsigned int*, int);
 template <typename T, int K, typename ABSMAX_T>
 void dequantizeBlockwise_kbit(const unsigned int*, const float*, const ABSMAX_T*, T*, int, cudaStream_t);
 
 // Unmangled quantize wrappers
 #define MAKE_KBIT_QUANT(tname, T, K)                                                                                   \
     void quantize_kbit_##tname##_k##K(                                                                                 \
-        const float* codebook, const T* A, float* absmax, unsigned int* packed_out, int n                              \
+        const float* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n                      \
     ) {                                                                                                                \
         quantizeBlockwise_kbit<T, K>(codebook, A, absmax, packed_out, n);                                              \
     }
@@ -467,12 +467,12 @@ MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 4)
 MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 5)
 
 // Forward declaration of repack launcher
-template <int K> void repackKbit(const unsigned int*, const float*, unsigned int*, unsigned char*, int, int);
+template <int K> void repackKbit(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int);
 
 // Unmangled repack wrappers
 #define MAKE_KBIT_REPACK(K)                                                                                            \
     void repack_kbit_k##K(                                                                                             \
-        const unsigned int* packed_flat, const float* absmax_flat, unsigned int* packed_tiled,                          \
+        const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                  \
         unsigned char* absmax_tiled, int K_dim, int N                                                                  \
     ) {                                                                                                                \
         repackKbit<K>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);                                 \
@@ -564,24 +564,24 @@ MAKE_KBIT_GROUPED_GEMM_PROD(3)
 MAKE_KBIT_GROUPED_GEMM_PROD(4)
 MAKE_KBIT_GROUPED_GEMM_PROD(5)
 
-// Forward declaration of scalar GEMV launchers (flat layout, float32 absmax, C=1)
-template <int K, typename scalar_t> void kbitScalarGemv(const scalar_t*, const unsigned int*, const float*, const float*, scalar_t*, int, int, int);
-template <int K, typename scalar_t> void kbitGroupedScalarGemv(const scalar_t*, const unsigned int*, const unsigned char*, const float*, scalar_t*, const int*, int, int, int);
+// Forward declaration of scalar GEMV launchers (flat layout, templated on absmax type)
+template <int K, typename scalar_t, typename ABSMAX_T> void kbitScalarGemv(const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, int, int, int);
+template <int K, typename scalar_t, typename ABSMAX_T> void kbitGroupedScalarGemv(const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, const int*, int, int, int, int);
 
-// Unmangled scalar GEMV wrappers (fp16 and bf16) — C=1, no workspace
+// Unmangled scalar GEMV wrappers — C=1, uint8 E4M4 absmax
 #define MAKE_KBIT_SCALAR_GEMV(K)                                                                                       \
     void kbit_scalar_gemv_fp16_k##K(                                                                                   \
-        const half* A, const unsigned int* B_packed, const float* B_absmax, const float* codebook, half* C,            \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
         int M, int K_dim, int N                                                                                        \
     ) {                                                                                                                \
-        kbitScalarGemv<K, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                      \
+        kbitScalarGemv<K, half, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                       \
     }                                                                                                                  \
     void kbit_scalar_gemv_bf16_k##K(                                                                                   \
-        const __nv_bfloat16* A, const unsigned int* B_packed, const float* B_absmax,                                   \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax,                           \
         const float* codebook, __nv_bfloat16* C,                                                                       \
         int M, int K_dim, int N                                                                                        \
     ) {                                                                                                                \
-        kbitScalarGemv<K, __nv_bfloat16>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                             \
+        kbitScalarGemv<K, __nv_bfloat16, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);              \
     }
 
 MAKE_KBIT_SCALAR_GEMV(2)
@@ -589,29 +589,74 @@ MAKE_KBIT_SCALAR_GEMV(3)
 MAKE_KBIT_SCALAR_GEMV(4)
 MAKE_KBIT_SCALAR_GEMV(5)
 
-// Unmangled grouped scalar GEMV wrappers (fp16 and bf16)
+// fp16 absmax scalar GEMV wrappers
+#define MAKE_KBIT_SCALAR_GEMV_FP16ABS(K)                                                                               \
+    void kbit_scalar_gemv_fp16_fp16abs_k##K(                                                                           \
+        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
+        int M, int K_dim, int N                                                                                        \
+    ) {                                                                                                                \
+        kbitScalarGemv<K, half, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                \
+    }                                                                                                                  \
+    void kbit_scalar_gemv_bf16_fp16abs_k##K(                                                                           \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax,                                    \
+        const float* codebook, __nv_bfloat16* C,                                                                       \
+        int M, int K_dim, int N                                                                                        \
+    ) {                                                                                                                \
+        kbitScalarGemv<K, __nv_bfloat16, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                       \
+    }
+
+MAKE_KBIT_SCALAR_GEMV_FP16ABS(2)
+MAKE_KBIT_SCALAR_GEMV_FP16ABS(3)
+MAKE_KBIT_SCALAR_GEMV_FP16ABS(4)
+MAKE_KBIT_SCALAR_GEMV_FP16ABS(5)
+
+// Unmangled grouped scalar GEMV wrappers — uint8 E4M4 absmax
 #define MAKE_KBIT_GROUPED_SCALAR_GEMV(K)                                                                               \
     void kbit_grouped_scalar_gemv_fp16_k##K(                                                                           \
-        const half* A_concat, const unsigned int* B_packed_all, const float* B_absmax_all,                             \
+        const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                     \
         const float* codebook, half* C_concat, const int* expert_offsets,                                              \
         int K_dim, int N, int num_experts, int max_M                                                                   \
     ) {                                                                                                                \
-        kbitGroupedScalarGemv<K, half>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,                       \
+        kbitGroupedScalarGemv<K, half, unsigned char>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,        \
                                        expert_offsets, K_dim, N, num_experts, max_M);                                   \
     }                                                                                                                  \
     void kbit_grouped_scalar_gemv_bf16_k##K(                                                                           \
-        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const float* B_absmax_all,                    \
+        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
         const float* codebook, __nv_bfloat16* C_concat, const int* expert_offsets,                                     \
         int K_dim, int N, int num_experts, int max_M                                                                   \
     ) {                                                                                                                \
-        kbitGroupedScalarGemv<K, __nv_bfloat16>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,             \
-                                                 expert_offsets, K_dim, N, num_experts, max_M);                         \
+        kbitGroupedScalarGemv<K, __nv_bfloat16, unsigned char>(A_concat, B_packed_all, B_absmax_all, codebook,         \
+                                                 C_concat, expert_offsets, K_dim, N, num_experts, max_M);               \
     }
 
 MAKE_KBIT_GROUPED_SCALAR_GEMV(2)
 MAKE_KBIT_GROUPED_SCALAR_GEMV(3)
 MAKE_KBIT_GROUPED_SCALAR_GEMV(4)
 MAKE_KBIT_GROUPED_SCALAR_GEMV(5)
+
+// fp16 absmax grouped scalar GEMV wrappers
+#define MAKE_KBIT_GROUPED_SCALAR_GEMV_FP16ABS(K)                                                                       \
+    void kbit_grouped_scalar_gemv_fp16_fp16abs_k##K(                                                                   \
+        const half* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all,                              \
+        const float* codebook, half* C_concat, const int* expert_offsets,                                              \
+        int K_dim, int N, int num_experts, int max_M                                                                   \
+    ) {                                                                                                                \
+        kbitGroupedScalarGemv<K, half, half>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,                 \
+                                       expert_offsets, K_dim, N, num_experts, max_M);                                   \
+    }                                                                                                                  \
+    void kbit_grouped_scalar_gemv_bf16_fp16abs_k##K(                                                                   \
+        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all,                     \
+        const float* codebook, __nv_bfloat16* C_concat, const int* expert_offsets,                                     \
+        int K_dim, int N, int num_experts, int max_M                                                                   \
+    ) {                                                                                                                \
+        kbitGroupedScalarGemv<K, __nv_bfloat16, half>(A_concat, B_packed_all, B_absmax_all, codebook,                  \
+                                                 C_concat, expert_offsets, K_dim, N, num_experts, max_M);               \
+    }
+
+MAKE_KBIT_GROUPED_SCALAR_GEMV_FP16ABS(2)
+MAKE_KBIT_GROUPED_SCALAR_GEMV_FP16ABS(3)
+MAKE_KBIT_GROUPED_SCALAR_GEMV_FP16ABS(4)
+MAKE_KBIT_GROUPED_SCALAR_GEMV_FP16ABS(5)
 
 // Debug MMA test
 void testMMA(const half*, const half*, float*);
@@ -1131,7 +1176,7 @@ bool has_avx512bf16_cpu() { return has_avx512bf16(); }
 // Production kernels (Stage 4-5) - quantize only
 #define MAKE_CKBIT(tname, T, K)                                                                                        \
     void cquantize_kbit_##tname##_k##K(                                                                                \
-        const float* codebook, const T* A, float* absmax, unsigned int* packed_out, int n                              \
+        const float* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n                      \
     ) {                                                                                                                \
         quantize_kbit_##tname##_k##K(codebook, A, absmax, packed_out, n);                                              \
     }
@@ -1175,7 +1220,7 @@ MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 5)
 // Repack extern C wrappers
 #define MAKE_CKBIT_REPACK(K)                                                                                           \
     void crepack_kbit_k##K(                                                                                            \
-        const unsigned int* packed_flat, const float* absmax_flat, unsigned int* packed_tiled,                          \
+        const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                  \
         unsigned char* absmax_tiled, int K_dim, int N                                                                  \
     ) {                                                                                                                \
         repack_kbit_k##K(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);                              \
@@ -1290,16 +1335,16 @@ MAKE_CKBIT_GROUPED_GEMM_PROD(3)
 MAKE_CKBIT_GROUPED_GEMM_PROD(4)
 MAKE_CKBIT_GROUPED_GEMM_PROD(5)
 
-// Scalar GEMV extern C wrappers (fp16 and bf16) — C=1, no workspace
+// Scalar GEMV extern C wrappers (fp16 and bf16) — C=1, uint8 E4M4 absmax
 #define MAKE_CKBIT_SCALAR_GEMV(K)                                                                                      \
     void ckbit_scalar_gemv_fp16_k##K(                                                                                  \
-        const half* A, const unsigned int* B_packed, const float* B_absmax, const float* codebook, half* C,            \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
         int M, int K_dim, int N                                                                                        \
     ) {                                                                                                                \
         kbit_scalar_gemv_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                  \
     }                                                                                                                  \
     void ckbit_scalar_gemv_bf16_k##K(                                                                                  \
-        const __nv_bfloat16* A, const unsigned int* B_packed, const float* B_absmax,                                   \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax,                           \
         const float* codebook, __nv_bfloat16* C,                                                                       \
         int M, int K_dim, int N                                                                                        \
     ) {                                                                                                                \
@@ -1314,7 +1359,7 @@ MAKE_CKBIT_SCALAR_GEMV(5)
 // Grouped scalar GEMV extern C wrappers (fp16 and bf16)
 #define MAKE_CKBIT_GROUPED_SCALAR_GEMV(K)                                                                              \
     void ckbit_grouped_scalar_gemv_fp16_k##K(                                                                          \
-        const half* A_concat, const unsigned int* B_packed_all, const float* B_absmax_all,                             \
+        const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                     \
         const float* codebook, half* C_concat, const int* expert_offsets,                                              \
         int K_dim, int N, int num_experts, int max_M                                                                   \
     ) {                                                                                                                \
@@ -1322,7 +1367,7 @@ MAKE_CKBIT_SCALAR_GEMV(5)
                                             expert_offsets, K_dim, N, num_experts, max_M);                              \
     }                                                                                                                  \
     void ckbit_grouped_scalar_gemv_bf16_k##K(                                                                          \
-        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const float* B_absmax_all,                    \
+        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
         const float* codebook, __nv_bfloat16* C_concat, const int* expert_offsets,                                     \
         int K_dim, int N, int num_experts, int max_M                                                                   \
     ) {                                                                                                                \
@@ -1334,6 +1379,51 @@ MAKE_CKBIT_GROUPED_SCALAR_GEMV(2)
 MAKE_CKBIT_GROUPED_SCALAR_GEMV(3)
 MAKE_CKBIT_GROUPED_SCALAR_GEMV(4)
 MAKE_CKBIT_GROUPED_SCALAR_GEMV(5)
+
+// fp16 absmax scalar GEMV extern C wrappers
+#define MAKE_CKBIT_SCALAR_GEMV_FP16ABS(K)                                                                              \
+    void ckbit_scalar_gemv_fp16_fp16abs_k##K(                                                                          \
+        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
+        int M, int K_dim, int N                                                                                        \
+    ) {                                                                                                                \
+        kbit_scalar_gemv_fp16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                           \
+    }                                                                                                                  \
+    void ckbit_scalar_gemv_bf16_fp16abs_k##K(                                                                          \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax,                                    \
+        const float* codebook, __nv_bfloat16* C,                                                                       \
+        int M, int K_dim, int N                                                                                        \
+    ) {                                                                                                                \
+        kbit_scalar_gemv_bf16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                           \
+    }
+
+MAKE_CKBIT_SCALAR_GEMV_FP16ABS(2)
+MAKE_CKBIT_SCALAR_GEMV_FP16ABS(3)
+MAKE_CKBIT_SCALAR_GEMV_FP16ABS(4)
+MAKE_CKBIT_SCALAR_GEMV_FP16ABS(5)
+
+// fp16 absmax grouped scalar GEMV extern C wrappers
+#define MAKE_CKBIT_GROUPED_SCALAR_GEMV_FP16ABS(K)                                                                      \
+    void ckbit_grouped_scalar_gemv_fp16_fp16abs_k##K(                                                                  \
+        const half* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all,                              \
+        const float* codebook, half* C_concat, const int* expert_offsets,                                              \
+        int K_dim, int N, int num_experts, int max_M                                                                   \
+    ) {                                                                                                                \
+        kbit_grouped_scalar_gemv_fp16_fp16abs_k##K(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,           \
+                                                    expert_offsets, K_dim, N, num_experts, max_M);                      \
+    }                                                                                                                  \
+    void ckbit_grouped_scalar_gemv_bf16_fp16abs_k##K(                                                                  \
+        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all,                     \
+        const float* codebook, __nv_bfloat16* C_concat, const int* expert_offsets,                                     \
+        int K_dim, int N, int num_experts, int max_M                                                                   \
+    ) {                                                                                                                \
+        kbit_grouped_scalar_gemv_bf16_fp16abs_k##K(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,           \
+                                                    expert_offsets, K_dim, N, num_experts, max_M);                      \
+    }
+
+MAKE_CKBIT_GROUPED_SCALAR_GEMV_FP16ABS(2)
+MAKE_CKBIT_GROUPED_SCALAR_GEMV_FP16ABS(3)
+MAKE_CKBIT_GROUPED_SCALAR_GEMV_FP16ABS(4)
+MAKE_CKBIT_GROUPED_SCALAR_GEMV_FP16ABS(5)
 
 #endif
 }

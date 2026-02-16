@@ -1166,8 +1166,8 @@ def quantize_kbit(
     A_flat = A.contiguous().view(-1)
     packed, absmax = torch.ops.bitsandbytes.quantize_kbit(A_flat, codebook, k)
 
-    if absmax_format == "e4m4":
-        absmax = encode_absmax_e4m4(absmax)
+    # The CUDA kernel now encodes absmax as uint8 E4M4 natively.
+    # No Python-side encode needed.
 
     return packed, absmax, codebook
 
