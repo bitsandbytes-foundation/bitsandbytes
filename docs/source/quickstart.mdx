@@ -41,6 +41,8 @@ outputs = model.generate(**inputs, max_new_tokens=20)
 print(tokenizer.decode(outputs[0]))
 ```
 
+> **Learn more:** See the [Integrations guide](./integrations) for more details on using bitsandbytes with Transformers.
+
 ### 4-bit Quantization
 
 For even greater memory savings:
@@ -91,6 +93,8 @@ model = get_peft_model(model, lora_config)
 # Now train with your preferred trainer
 ```
 
+> **Learn more:** See the [FSDP-QLoRA guide](./fsdp_qlora) for advanced training techniques and the [Integrations guide](./integrations) for using with PEFT.
+
 ### 8-bit Optimizers
 
 Use 8-bit optimizers to reduce training memory by 75%:
@@ -110,6 +114,8 @@ for batch in dataloader:
     optimizer.step()
     optimizer.zero_grad()
 ```
+
+> **Learn more:** See the [8-bit Optimizers guide](./optimizers) for detailed usage and configuration options.
 
 ### Custom Quantized Layers
 
