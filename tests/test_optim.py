@@ -49,16 +49,16 @@ str2optimizers["momentum_pytorch"] = (
 )
 
 str2optimizers["adam"] = (torch.optim.Adam, bnb.optim.Adam)
-str2optimizers["adam8bit_blockwise"] = (torch.optim.Adam, lambda pxx: bnb.optim.Adam8bit(pxx, block_wise=True))
+str2optimizers["adam8bit_blockwise"] = (torch.optim.Adam, lambda pxx: bnb.optim.Adam8bit(pxx))
 str2optimizers["paged_adam"] = (torch.optim.Adam, bnb.optim.PagedAdam)
 str2optimizers["paged_adamw"] = (torch.optim.AdamW, bnb.optim.PagedAdamW)
 str2optimizers["paged_adam8bit_blockwise"] = (
     torch.optim.Adam,
-    lambda pxx: bnb.optim.PagedAdam8bit(pxx, block_wise=True),
+    lambda pxx: bnb.optim.PagedAdam8bit(pxx),
 )
 str2optimizers["paged_adamw8bit_blockwise"] = (
     torch.optim.AdamW,
-    lambda pxx: bnb.optim.PagedAdamW8bit(pxx, block_wise=True),
+    lambda pxx: bnb.optim.PagedAdamW8bit(pxx),
 )
 
 str2optimizers["ademamix"] = (bnb.optim.ademamix._ReferenceAdEMAMix, bnb.optim.AdEMAMix)
@@ -90,25 +90,25 @@ str2optimizers["paged_ademamix8bit_blockwise_scheduled"] = (
 
 str2optimizers["lion"] = (Lion, bnb.optim.Lion)
 str2optimizers["paged_lion"] = (Lion, bnb.optim.PagedLion)
-str2optimizers["lion8bit_blockwise"] = (Lion, lambda pxx: bnb.optim.Lion8bit(pxx, block_wise=True))
-str2optimizers["paged_lion8bit_blockwise"] = (Lion, lambda pxx: bnb.optim.PagedLion8bit(pxx, block_wise=True))
+str2optimizers["lion8bit_blockwise"] = (Lion, lambda pxx: bnb.optim.Lion8bit(pxx))
+str2optimizers["paged_lion8bit_blockwise"] = (Lion, lambda pxx: bnb.optim.PagedLion8bit(pxx))
 
 str2optimizers["momentum"] = (
     lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9, block_wise=False),
+    lambda pxx: bnb.optim.SGD(pxx, 0.01, 0.9),
 )
 str2optimizers["momentum8bit_blockwise"] = (
     lambda pxx: torch.optim.SGD(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.SGD8bit(pxx, 0.01, 0.9, block_wise=True),
+    lambda pxx: bnb.optim.SGD8bit(pxx, 0.01, 0.9),
 )
 
 str2optimizers["rmsprop"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=False),
+    lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9),
 )
 str2optimizers["rmsprop8bit_blockwise"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
-    lambda pxx: bnb.optim.RMSprop8bit(pxx, 0.01, 0.9, block_wise=True),
+    lambda pxx: bnb.optim.RMSprop8bit(pxx, 0.01, 0.9),
 )
 
 str2statenames = {}
@@ -460,94 +460,6 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
         torch.testing.assert_close(p1.to(gtype), p2)
         for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
             torch_optimizer.state[p1][name1].copy_(s.data)
-
-
-@pytest.mark.parametrize("optim_bits", [32, 8], ids=id_formatter("optim_bits"))
-@pytest.mark.parametrize("gtype", [torch.float32], ids=describe_dtype)
-@pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
-@pytest.mark.deprecated
-def test_adam_percentile_clipping(requires_cuda, dim1, dim2, gtype, optim_bits):
-    if dim1 == 1 and dim2 == 1:
-        return
-    p1 = torch.randn(dim1, dim2, device="cpu", dtype=gtype) * 0.1
-    beta1 = 0.9
-    beta2 = 0.999
-    lr = 0.001
-    eps = 1e-8
-    p1 = p1.cuda()
-    p2 = p1.clone()
-    adam1 = bnb.optim.Adam([p1], lr, (beta1, beta2), eps, optim_bits=optim_bits)
-    adam2 = bnb.optim.Adam(
-        [p2],
-        lr,
-        (beta1, beta2),
-        eps,
-        optim_bits=optim_bits,
-        percentile_clipping=5,
-    )
-
-    gnorm_vec = torch.zeros(100).cuda()
-    step = 0
-
-    for i in range(50):
-        step += 1
-        g1 = torch.randn(dim1, dim2, device="cuda", dtype=gtype) * 0.1 + (0.01 * i)
-        g2 = g1.clone()
-        p2.grad = g2
-
-        _current_gnorm, _clip_val, gnorm_scale = F.percentile_clipping(g1, gnorm_vec, step, 5)
-        g1 = (g1.float() * gnorm_scale).to(gtype)
-        p1.grad = g1
-
-        adam1.step()
-        adam2.step()
-
-        # gnorm_scale is not deterministic (warp reductions), as such there can be slight differences in state
-        if optim_bits == 32:
-            torch.testing.assert_close(p1, p2)
-            torch.testing.assert_close(
-                adam1.state[p1]["state1"],
-                adam2.state[p2]["state1"],
-                atol=5e-5,
-                rtol=1e-4,
-            )
-            torch.testing.assert_close(
-                adam1.state[p1]["state2"],
-                adam2.state[p2]["state2"],
-                atol=5e-5,
-                rtol=1e-4,
-            )
-        elif optim_bits == 8:
-            torch.testing.assert_close(p1, p2, atol=1e-4, rtol=1e-3)
-            torch.testing.assert_close(
-                adam1.state[p1]["state1"],
-                adam2.state[p2]["state1"],
-                atol=2,
-                rtol=1e-3,
-            )
-            torch.testing.assert_close(
-                adam1.state[p1]["state2"],
-                adam2.state[p2]["state2"],
-                atol=2,
-                rtol=1e-3,
-            )
-            adam1.state[p1]["state1"].copy_(adam2.state[p2]["state1"])
-            adam1.state[p1]["state2"].copy_(adam2.state[p2]["state2"])
-        if i % 10 == 0 and i > 0:
-            path = get_temp_dir()
-            torch.save(adam2.state_dict(), join(path, "opt.pt"))
-            del adam2
-            adam2 = None
-            adam2 = bnb.optim.Adam(
-                [p2],
-                lr,
-                (beta1, beta2),
-                eps,
-                optim_bits=optim_bits,
-                percentile_clipping=5,
-            )
-            adam2.load_state_dict(torch.load(join(path, "opt.pt")))
 
 
 optimizer_names_benchmark = [
