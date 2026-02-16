@@ -200,9 +200,9 @@ void kbitScalarGemv(
 template <int K, typename scalar_t>
 void kbitGroupedScalarGemv(
     const scalar_t* A_concat, const unsigned int* B_packed_all,
-    const unsigned char* B_absmax_all, const float* codebook,
+    const float* B_absmax_all, const float* codebook,
     scalar_t* C_concat, const int* d_expert_offsets,
-    int K_dim, int N, int num_experts
+    int K_dim, int N, int num_experts, int max_M
 );
 
 #endif

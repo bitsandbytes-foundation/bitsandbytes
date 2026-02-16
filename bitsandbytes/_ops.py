@@ -606,7 +606,7 @@ def _(
 torch.library.define(
     "bitsandbytes::kbit_grouped_gemm",
     "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
-    "Tensor expert_offsets, int K_dim, int N, int k, int num_experts) -> Tensor",
+    "Tensor expert_offsets, int K_dim, int N, int k, int num_experts, int max_M) -> Tensor",
 )
 
 
@@ -621,6 +621,7 @@ def _(
     N: int,
     k: int,
     num_experts: int,
+    max_M: int,
 ) -> torch.Tensor:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
@@ -682,7 +683,7 @@ def _(
 torch.library.define(
     "bitsandbytes::kbit_grouped_scalar_gemv",
     "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
-    "Tensor expert_offsets, int K_dim, int N, int k, int num_experts) -> Tensor",
+    "Tensor expert_offsets, int K_dim, int N, int k, int num_experts, int max_M) -> Tensor",
 )
 
 
@@ -697,6 +698,7 @@ def _(
     N: int,
     k: int,
     num_experts: int,
+    max_M: int,
 ) -> torch.Tensor:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")

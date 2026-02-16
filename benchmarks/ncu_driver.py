@@ -1,9 +1,9 @@
 """ncu kernel driver — runs all shape x k x M configs in a single process.
 
 Used by bench_ncu.sh. Env vars:
-  KERNEL: "mma", "scalar", or "grouped"
+  KERNEL: "mma", "scalar", "grouped", or "grouped_mma"
   M_VALS: comma-separated M values (default "1,2,3,4,5,6,7,8")
-  NUM_EXPERTS: number of active experts for grouped kernel (default 8)
+  NUM_EXPERTS: number of active experts for grouped/grouped_mma kernel (default 8)
 
 Each config runs WARMUP + PROFILED kernel launches. ncu captures all
 matching launches; the sweep script skips warmup and averages profiled.
@@ -27,7 +27,7 @@ KERNEL = os.environ.get("KERNEL", "mma")
 m_vals = [int(x) for x in os.environ.get("M_VALS", "1,2,3,4,5,6,7,8").split(",")]
 NUM_EXPERTS = int(os.environ.get("NUM_EXPERTS", "8"))
 
-# Scalar and grouped kernels only support M<=4
+# Scalar and grouped scalar kernels only support M<=4
 if KERNEL in ("scalar", "grouped"):
     m_vals = [m for m in m_vals if m <= 4]
 
@@ -94,7 +94,52 @@ if KERNEL in ("mma", "scalar"):
         torch.cuda.synchronize()
 
 elif KERNEL == "grouped":
-    # Pre-quantize MoE expert weights (NUM_EXPERTS copies per shape)
+    # Pre-quantize MoE expert weights (NUM_EXPERTS copies, flat layout)
+    moe_data = {}
+    for name, K_dim, N in moe_shapes:
+        for k in k_bits_list:
+            codebook = create_normal_float_codebook(k, device=dev)
+            packed_list = []
+            absmax_list = []
+            num_k_blocks = K_dim // 32
+            expected_packed = N * num_k_blocks * k
+            expected_absmax = N * num_k_blocks
+            for _ in range(NUM_EXPERTS):
+                W = torch.randn(K_dim * N, device=dev, dtype=torch.float32)
+                pf, af = torch.ops.bitsandbytes.quantize_kbit(W, codebook, k)
+                packed_list.append(pf[:expected_packed])
+                absmax_list.append(af.cuda()[:expected_absmax])
+            B_packed_all = torch.cat(packed_list, dim=0)
+            B_absmax_all = torch.cat(absmax_list, dim=0)
+            moe_data[(name, k)] = (K_dim, N, B_packed_all, B_absmax_all, codebook)
+
+    configs = []
+    for name, K_dim, N in moe_shapes:
+        for k in k_bits_list:
+            for M in m_vals:
+                configs.append((name, k, M))
+
+    for name, k, M in configs:
+        K_dim, N, B_packed_all, B_absmax_all, codebook = moe_data[(name, k)]
+        # M tokens per expert (all experts get same M for benchmarking)
+        total_tokens = M * NUM_EXPERTS
+        A_concat = torch.randn(total_tokens, K_dim, dtype=torch.float16, device=dev)
+        offsets = list(range(0, total_tokens + 1, M))
+        expert_offsets = torch.tensor(offsets, dtype=torch.int32, device=dev)
+
+        fn = lambda: torch.ops.bitsandbytes.kbit_grouped_scalar_gemv(
+            A_concat, B_packed_all, B_absmax_all, codebook,
+            expert_offsets, K_dim, N, k, NUM_EXPERTS, M)
+
+        for _ in range(WARMUP):
+            fn()
+        torch.cuda.synchronize()
+        for _ in range(PROFILED):
+            fn()
+        torch.cuda.synchronize()
+
+elif KERNEL == "grouped_mma":
+    # Pre-quantize MoE expert weights (NUM_EXPERTS copies, tiled layout for MMA)
     moe_data = {}
     for name, K_dim, N in moe_shapes:
         for k in k_bits_list:
@@ -119,15 +164,14 @@ elif KERNEL == "grouped":
 
     for name, k, M in configs:
         K_dim, N, B_packed_all, B_absmax_all, codebook = moe_data[(name, k)]
-        # M tokens per expert (all experts get same M for benchmarking)
         total_tokens = M * NUM_EXPERTS
         A_concat = torch.randn(total_tokens, K_dim, dtype=torch.float16, device=dev)
         offsets = list(range(0, total_tokens + 1, M))
         expert_offsets = torch.tensor(offsets, dtype=torch.int32, device=dev)
 
-        fn = lambda: torch.ops.bitsandbytes.kbit_grouped_scalar_gemv(
+        fn = lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
             A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, NUM_EXPERTS)
+            expert_offsets, K_dim, N, k, NUM_EXPERTS, M)
 
         for _ in range(WARMUP):
             fn()

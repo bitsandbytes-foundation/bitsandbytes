@@ -1085,6 +1085,7 @@ def _(
     N: int,
     k: int,
     num_experts: int,
+    max_M: int,
 ) -> torch.Tensor:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(
@@ -1114,6 +1115,7 @@ def _(
             ct.c_int(K_dim),
             ct.c_int(N),
             ct.c_int(num_experts),
+            ct.c_int(max_M),
         )
 
     return C_concat
@@ -1193,6 +1195,7 @@ def _(
     N: int,
     k: int,
     num_experts: int,
+    max_M: int,
 ) -> torch.Tensor:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(
@@ -1200,10 +1203,9 @@ def _(
         lambda: f"kbit_grouped_scalar_gemv supports float16 and bfloat16, got {A_concat.dtype}",
     )
     torch._check(B_packed_all.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed_all.dtype}")
-    torch._check(B_absmax_all.dtype == torch.uint8, lambda: f"B_absmax must be uint8 (E4M4), got {B_absmax_all.dtype}")
+    torch._check(B_absmax_all.dtype == torch.float32, lambda: f"B_absmax must be float32, got {B_absmax_all.dtype}")
     torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
     torch._check(expert_offsets.dtype == torch.int32, lambda: f"expert_offsets must be int32, got {expert_offsets.dtype}")
-    torch._check(N % 128 == 0, lambda: f"N ({N}) must be divisible by 128")
 
     total_M = A_concat.shape[0]
     C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
@@ -1222,6 +1224,7 @@ def _(
             ct.c_int(K_dim),
             ct.c_int(N),
             ct.c_int(num_experts),
+            ct.c_int(max_M),
         )
 
     return C_concat

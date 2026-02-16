@@ -5,7 +5,7 @@ value. Each row is a (shape, k) combination. Columns show all kernel timings
 side by side, the best kernel, and speedup vs cuBLAS fp16.
 
 Dense shapes have MMA, Scalar, fp16 columns.
-MoE shapes have Grouped, fp16 (bmm) columns.
+MoE shapes have Grouped (scalar), Grp MMA, fp16 (bmm) columns.
 """
 import os, sys
 
@@ -64,9 +64,10 @@ def main():
     mma = parse_results(os.path.join(results_dir, "mma.txt"))
     scalar = parse_results(os.path.join(results_dir, "scalar.txt"))
     grouped = parse_results(os.path.join(results_dir, "grouped.txt"))
+    grouped_mma = parse_results(os.path.join(results_dir, "grouped_mma.txt"))
     cublas_dense, cublas_moe = parse_cublas(os.path.join(results_dir, "cublas.txt"))
 
-    if not mma and not scalar and not grouped:
+    if not mma and not scalar and not grouped and not grouped_mma:
         print("No benchmark results found. Run bench_ncu.sh first.")
         return
 
@@ -78,24 +79,21 @@ def main():
 
     # Collect all M values
     all_M = set()
-    for key in list(mma.keys()) + list(scalar.keys()) + list(grouped.keys()):
-        all_M.add(key[2])
+    for d in [mma, scalar, grouped, grouped_mma]:
+        for key in d:
+            all_M.add(key[2])
     all_M = sorted(all_M)
 
-    # Column widths
+    # Column widths — 6 kernel columns
     SEP = "+"
-    HDR = (f"{SEP}--------+-----+-------+--------+---------+-------+--------+---------{SEP}")
-    TOP = (f"{SEP}========+=====+=======+========+=========+=======+========+========={SEP}")
+    HDR = f"{SEP}--------+-----+-------+--------+---------+---------+-------+--------+---------{SEP}"
+    TOP = f"{SEP}========+=====+=======+========+=========+=========+=======+========+========={SEP}"
 
     for M in all_M:
         print(f"\n  M={M}:")
         print(f"  {TOP}")
-        print(f"  | {'shape':<6} | {'k':>3} | {'MMA':>5} | {'Scalar':>6} | {'Grouped':>7} | {'fp16':>5} | {'Best':>6} | {'vs fp16':>7} |")
+        print(f"  | {'shape':<6} | {'k':>3} | {'MMA':>5} | {'Scalar':>6} | {'Grouped':>7} | {'Grp MMA':>7} | {'fp16':>5} | {'Best':>6} | {'vs fp16':>7} |")
         print(f"  {HDR}")
-
-        total_best = 0.0
-        total_fp16 = 0.0
-        all_complete = True
 
         for shape in all_shapes:
             is_moe = shape in moe_shapes
@@ -105,6 +103,7 @@ def main():
                 m_us = mma.get((shape, k, M)) if not is_moe else None
                 s_us = scalar.get((shape, k, M)) if not is_moe else None
                 g_us = grouped.get((shape, k, M)) if is_moe else None
+                gm_us = grouped_mma.get((shape, k, M)) if is_moe else None
                 fp16 = cublas_moe.get((shape, M)) if is_moe else cublas_dense.get((shape, M))
 
                 # Find best kbit kernel
@@ -115,6 +114,8 @@ def main():
                     candidates["Scalar"] = s_us
                 if g_us is not None:
                     candidates["Grouped"] = g_us
+                if gm_us is not None:
+                    candidates["Grp MMA"] = gm_us
 
                 if candidates:
                     best_name = min(candidates, key=candidates.get)
@@ -122,33 +123,23 @@ def main():
                 else:
                     best_name, best_us = None, None
 
-                # Compare against fp16.
-                # "Best" = fastest kbit kernel. "vs fp16" = fp16 / Best.
-                # >1.00x means kbit wins, <1.00x means fp16 wins (slowdown).
-                # When no kbit kernel exists, Best falls back to fp16 and shows "-".
                 if best_us is not None and fp16 is not None:
                     speedup = f"{fp16 / best_us:5.2f}x"
-                    total_best += best_us
-                    total_fp16 += fp16
                 elif fp16 is not None and best_us is None:
-                    # No kbit kernel for this config — fp16 only
                     best_name = "-"
                     best_us = fp16
                     speedup = "     -"
-                    total_best += fp16
-                    total_fp16 += fp16
                 else:
                     speedup = "   N/A"
-                    all_complete = False
 
                 best_str = best_name if best_name else "N/A"
 
-                print(f"  | {shape:<6} | {k:>3} | {fmt(m_us)} | {fmt(s_us):>6} | {fmt(g_us):>7} | {fmt(fp16)} | {best_str:>6} | {speedup:>7} |")
+                print(f"  | {shape:<6} | {k:>3} | {fmt(m_us)} | {fmt(s_us):>6} | {fmt(g_us):>7} | {fmt(gm_us):>7} | {fmt(fp16)} | {best_str:>7} | {speedup:>7} |")
 
             print(f"  {HDR}")
 
         # Per-k total rows: sum best_us and fp16 across all shapes for each k
-        print(f"  | {'TOTAL':<6} |     |       |        |         |       |        |         |")
+        print(f"  | {'TOTAL':<6} |     |       |        |         |         |       |        |         |")
         for k in k_bits:
             k_best = 0.0
             k_fp16 = 0.0
@@ -158,6 +149,7 @@ def main():
                 m_us = mma.get((shape, k, M)) if not is_moe else None
                 s_us = scalar.get((shape, k, M)) if not is_moe else None
                 g_us = grouped.get((shape, k, M)) if is_moe else None
+                gm_us = grouped_mma.get((shape, k, M)) if is_moe else None
                 fp16 = cublas_moe.get((shape, M)) if is_moe else cublas_dense.get((shape, M))
 
                 candidates = {}
@@ -167,6 +159,8 @@ def main():
                     candidates["Scalar"] = s_us
                 if g_us is not None:
                     candidates["Grouped"] = g_us
+                if gm_us is not None:
+                    candidates["Grp MMA"] = gm_us
 
                 if candidates:
                     best_us = min(candidates.values())
@@ -182,9 +176,9 @@ def main():
 
             if k_complete and k_best > 0 and k_fp16 > 0:
                 overall = k_fp16 / k_best
-                print(f"  |  k={k:<3} | {k:>3} |       |        |         |       | {k_best:6.1f} | {overall:5.2f}x  |")
+                print(f"  |  k={k:<3} | {k:>3} |       |        |         |         |       | {k_best:6.1f} | {overall:5.2f}x  |")
             else:
-                print(f"  |  k={k:<3} | {k:>3} |       |        |         |       |   N/A  |    N/A  |")
+                print(f"  |  k={k:<3} | {k:>3} |       |        |         |         |       |   N/A  |    N/A  |")
         print(f"  {TOP}")
 
 

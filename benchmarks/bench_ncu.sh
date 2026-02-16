@@ -87,6 +87,13 @@ else
     echo "(no M<=4 values requested)" | tee "$RESULTS_DIR/grouped.txt"
 fi
 
+# ---- Grouped MMA kernel (all M values) ----
+echo ""
+echo "=== Grouped MMA (${NUM_EXPERTS} experts, all M) ==="
+printf "%-8s %2s %2s %10s\n" "shape" "k" "M" "avg_us"
+echo "---"
+run_ncu_bench grouped_mma "kbit_grouped_gemm_prod" "['moe_gu','moe_dn']" "$ALL_M" | tee "$RESULTS_DIR/grouped_mma.txt"
+
 # ---- cuBLAS fp16 baselines (CUDA events, all M values) ----
 echo ""
 echo "=== cuBLAS fp16 (dense mm + MoE bmm) ==="

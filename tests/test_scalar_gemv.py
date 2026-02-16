@@ -58,28 +58,42 @@ def dequant_reference(packed_flat, absmax_flat, codebook, k, N, K_dim):
 
 
 def prepare_expert_weights(K_dim, N, k, num_experts):
-    """Quantize and repack weights for multiple experts."""
+    """Quantize weights for multiple experts using flat layout (no repack).
+
+    quantize_kbit pads output by a few elements; we truncate to the exact
+    expected size so that concatenated experts can be indexed arithmetically.
+    """
     codebook = create_normal_float_codebook(k).cuda()
+    num_k_blocks = K_dim // 32
+    expected_packed = N * num_k_blocks * k
+    expected_absmax = N * num_k_blocks
 
     packed_list = []
     absmax_list = []
     W_list = []
+    # Also keep tiled versions for MMA reference kernel
+    packed_tiled_list = []
+    absmax_tiled_list = []
 
     for _ in range(num_experts):
         W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
-        packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(
+        packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(
             W.reshape(-1), codebook, k
         )
         packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat, absmax.cuda(), K_dim, N, k
+            packed_flat, absmax_flat.cuda(), K_dim, N, k
         )
-        packed_list.append(packed_tiled)
-        absmax_list.append(absmax_tiled)
+        packed_list.append(packed_flat[:expected_packed])
+        absmax_list.append(absmax_flat.cuda()[:expected_absmax])
+        packed_tiled_list.append(packed_tiled)
+        absmax_tiled_list.append(absmax_tiled)
         W_list.append(W)
 
     B_packed_all = torch.cat(packed_list, dim=0)
     B_absmax_all = torch.cat(absmax_list, dim=0)
 
+    # packed_list/absmax_list = flat per-expert (for scalar GEMV reference)
+    # packed_tiled_list/absmax_tiled_list = tiled per-expert (for MMA reference)
     return B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list
 
 
@@ -181,7 +195,7 @@ class TestScalarGemv:
 
 
 class TestGroupedScalarGemv:
-    """Test grouped scalar GEMV against individual kbit_gemm_prod calls."""
+    """Test grouped scalar GEMV against individual kbit_scalar_gemv calls."""
 
     @pytest.mark.parametrize("k", [4])
     def test_basic_grouped(self, k):
@@ -205,14 +219,14 @@ class TestGroupedScalarGemv:
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_scalar_gemv(
             A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            expert_offsets, K_dim, N, k, num_experts, 1,
         )
 
         C_individual_list = []
         for i in range(num_experts):
-            C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
+            C_i = torch.ops.bitsandbytes.kbit_scalar_gemv(
                 A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                K_dim, N, k,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)
@@ -243,14 +257,14 @@ class TestGroupedScalarGemv:
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_scalar_gemv(
             A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            expert_offsets, K_dim, N, k, num_experts, max(M_values),
         )
 
         C_individual_list = []
         for i in range(num_experts):
-            C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
+            C_i = torch.ops.bitsandbytes.kbit_scalar_gemv(
                 A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                K_dim, N, k,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)
@@ -266,21 +280,28 @@ class TestGroupedScalarGemv:
         num_experts = 4
 
         codebook = create_normal_float_codebook(k).cuda()
-        packed_list = []
-        absmax_list = []
+        num_k_blocks = K_dim // 32
+        expected_packed = N * num_k_blocks * k
+        expected_absmax = N * num_k_blocks
+        packed_flat_list = []
+        absmax_flat_list = []
+        packed_tiled_list = []
+        absmax_tiled_list = []
         for _ in range(num_experts):
             W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
-            packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(
+            packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(
                 W.reshape(-1), codebook, k
             )
             packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-                packed_flat, absmax.cuda(), K_dim, N, k
+                packed_flat, absmax_flat.cuda(), K_dim, N, k
             )
-            packed_list.append(packed_tiled)
-            absmax_list.append(absmax_tiled)
+            packed_flat_list.append(packed_flat[:expected_packed])
+            absmax_flat_list.append(absmax_flat.cuda()[:expected_absmax])
+            packed_tiled_list.append(packed_tiled)
+            absmax_tiled_list.append(absmax_tiled)
 
-        B_packed_all = torch.cat(packed_list, dim=0)
-        B_absmax_all = torch.cat(absmax_list, dim=0)
+        B_packed_all = torch.cat(packed_flat_list, dim=0)
+        B_absmax_all = torch.cat(absmax_flat_list, dim=0)
 
         A_list = []
         offsets = [0]
@@ -294,14 +315,14 @@ class TestGroupedScalarGemv:
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_scalar_gemv(
             A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            expert_offsets, K_dim, N, k, num_experts, 2,
         )
 
         C_individual_list = []
         for i in range(num_experts):
-            C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
-                A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+            C_i = torch.ops.bitsandbytes.kbit_scalar_gemv(
+                A_list[i], packed_flat_list[i], absmax_flat_list[i], codebook,
+                K_dim, N, k,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)
@@ -332,14 +353,14 @@ class TestGroupedScalarGemv:
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_scalar_gemv(
             A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            expert_offsets, K_dim, N, k, num_experts, 1,
         )
 
         C_individual_list = []
         for i in range(num_experts):
-            C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
+            C_i = torch.ops.bitsandbytes.kbit_scalar_gemv(
                 A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                K_dim, N, k,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)

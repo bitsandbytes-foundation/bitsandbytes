@@ -2187,7 +2187,6 @@ __global__ void kbit_grouped_gemm_prod(
     const float* __restrict__ codebook,
     scalar_t* __restrict__ C_concat,
     const int* __restrict__ expert_offsets,
-    const int* __restrict__ work_offsets,
     const int K_dim, const int N,
     const int num_experts,
     const int total_work
@@ -2242,18 +2241,23 @@ __global__ void kbit_grouped_gemm_prod(
 
     // Persistent work loop
     for (int work_id = blockIdx.x; work_id < total_work; work_id += gridDim.x) {
-        // Binary search work_offsets to find expert_id
-        int lo = 0, hi = num_experts - 1;
-        while (lo < hi) {
-            int mid = (lo + hi + 1) / 2;
-            if (work_offsets[mid] <= work_id)
-                lo = mid;
-            else
-                hi = mid - 1;
+        // Linear scan to find expert_id from expert_offsets (no pre-computed work_offsets needed).
+        // For each expert, compute its tile count on the fly. With 8 active experts this is
+        // 8 iterations of simple integer math — faster than binary search with unpredictable branches.
+        int expert_id = 0;
+        int tiles_so_far = 0;
+        for (int e = 0; e < num_experts; e++) {
+            int M_e_tmp = expert_offsets[e + 1] - expert_offsets[e];
+            int m_tiles_e = (M_e_tmp + TILE_M - 1) / TILE_M;
+            int expert_tiles = m_tiles_e * n_tiles;
+            if (work_id < tiles_so_far + expert_tiles) {
+                expert_id = e;
+                break;
+            }
+            tiles_so_far += expert_tiles;
         }
-        const int expert_id = lo;
 
-        const int local_work_id = work_id - work_offsets[expert_id];
+        const int local_work_id = work_id - tiles_so_far;
         const int n_tile = local_work_id % n_tiles;
         const int m_tile = local_work_id / n_tiles;
 
@@ -2450,7 +2454,7 @@ template <int K, int MB, typename scalar_t>
 static void kbitGroupedGemmProdLaunch(
     const scalar_t* A_concat, const unsigned int* B_packed_all,
     const unsigned char* B_absmax_all, const float* codebook,
-    scalar_t* C_concat, const int* expert_offsets, const int* work_offsets,
+    scalar_t* C_concat, const int* expert_offsets,
     int K_dim, int N, int num_experts, int total_work
 ) {
     constexpr int TILE_M = MB * 16;
@@ -2477,32 +2481,20 @@ static void kbitGroupedGemmProdLaunch(
 
     kbit_grouped_gemm_prod<K, MB, scalar_t><<<grid_size, block, smem_size>>>(
         A_concat, B_packed_all, B_absmax_all, codebook, C_concat,
-        expert_offsets, work_offsets,
+        expert_offsets,
         K_dim, N, num_experts, total_work);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-// Public entry point: reads expert_offsets from device, computes work_offsets
-// and max_M internally to avoid Python-side GPU→CPU sync.
+// Public entry point: caller passes max_M to select M_BLOCKS template.
+// total_work is computed on host from max_M, num_experts, N — no device sync needed.
 template <int K, typename scalar_t>
 void kbitGroupedGemmProd(
     const scalar_t* A_concat, const unsigned int* B_packed_all,
     const unsigned char* B_absmax_all, const float* codebook,
     scalar_t* C_concat, const int* d_expert_offsets,
-    int K_dim, int N, int num_experts
+    int K_dim, int N, int num_experts, int max_M
 ) {
-    // Copy expert_offsets from device to host (tiny: num_experts+1 ints)
-    std::vector<int> h_offsets(num_experts + 1);
-    CUDA_CHECK_RETURN(cudaMemcpy(h_offsets.data(), d_expert_offsets,
-                                  (num_experts + 1) * sizeof(int), cudaMemcpyDeviceToHost));
-
-    // Compute max_M and M_BLOCKS
-    int max_M = 0;
-    for (int i = 0; i < num_experts; i++) {
-        int M_i = h_offsets[i + 1] - h_offsets[i];
-        if (M_i > max_M) max_M = M_i;
-    }
-
     int m_blocks = 1;
     if (max_M > 48) m_blocks = 4;
     else if (max_M > 32) m_blocks = 3;
@@ -2511,40 +2503,27 @@ void kbitGroupedGemmProd(
     int tile_m = m_blocks * 16;
     int n_tiles = N / 128;
 
-    // Compute work_offsets on host
-    std::vector<int> h_work_offsets(num_experts + 1);
-    h_work_offsets[0] = 0;
-    for (int i = 0; i < num_experts; i++) {
-        int M_i = h_offsets[i + 1] - h_offsets[i];
-        int m_tiles = (M_i + tile_m - 1) / tile_m;
-        h_work_offsets[i + 1] = h_work_offsets[i] + m_tiles * n_tiles;
-    }
-    int total_work = h_work_offsets[num_experts];
+    // Compute total_work assuming each expert has max_M tokens (upper bound).
+    // The kernel handles actual per-expert M via expert_offsets.
+    int m_tiles_per_expert = (max_M + tile_m - 1) / tile_m;
+    int total_work = num_experts * m_tiles_per_expert * n_tiles;
 
     if (total_work == 0) return;
 
-    // Copy work_offsets to device
-    int* d_work_offsets;
-    CUDA_CHECK_RETURN(cudaMalloc(&d_work_offsets, (num_experts + 1) * sizeof(int)));
-    CUDA_CHECK_RETURN(cudaMemcpy(d_work_offsets, h_work_offsets.data(),
-                                  (num_experts + 1) * sizeof(int), cudaMemcpyHostToDevice));
-
     switch (m_blocks) {
     case 4:
-        kbitGroupedGemmProdLaunch<K, 4, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        kbitGroupedGemmProdLaunch<K, 4, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, K_dim, N, num_experts, total_work);
         break;
     case 3:
-        kbitGroupedGemmProdLaunch<K, 3, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        kbitGroupedGemmProdLaunch<K, 3, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, K_dim, N, num_experts, total_work);
         break;
     case 2:
-        kbitGroupedGemmProdLaunch<K, 2, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        kbitGroupedGemmProdLaunch<K, 2, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, K_dim, N, num_experts, total_work);
         break;
     default:
-        kbitGroupedGemmProdLaunch<K, 1, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        kbitGroupedGemmProdLaunch<K, 1, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, K_dim, N, num_experts, total_work);
         break;
     }
-
-    CUDA_CHECK_RETURN(cudaFree(d_work_offsets));
 }
 
 // Cached SM count to avoid repeated cudaGetDevice/cudaDeviceGetAttribute calls
@@ -2734,26 +2713,26 @@ void kbitScalarGemv(
 // ===================================================================
 
 template <int K_BITS, int M_VAL, typename scalar_t>
-__global__ void kbit_grouped_scalar_gemv(
+__global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16)
+kbit_grouped_scalar_gemv(
     const scalar_t* __restrict__ A_concat,
-    const unsigned int* __restrict__ B_packed_all,
-    const unsigned char* __restrict__ B_absmax_all,  // E4M4-encoded (tiled layout)
+    const unsigned int* __restrict__ B_packed_all,   // flat: [num_experts * N * num_k_blocks * K_BITS] uint32
+    const float* __restrict__ B_absmax_all,          // flat: [num_experts * N * num_k_blocks] float32
     const float* __restrict__ codebook,
     scalar_t* __restrict__ C_concat,
     const int* __restrict__ expert_offsets,
     const int K_dim, const int N, const int num_experts
 ) {
-    constexpr int BS = 32;
-    constexpr int COLS_PER_BLOCK = 4;
+    constexpr int BS = 32;          // quantization block size
+    constexpr int BLOCK_SIZE = 64;
+    constexpr int NUM_WARPS = 2;
+    constexpr int M_MAX = 4;
 
     const int warp_id = threadIdx.x / 32;
     const int lane_id = threadIdx.x % 32;
 
+    const int col = blockIdx.x;       // one column per block (C=1)
     const int expert_id = blockIdx.y;
-    const int n_group = blockIdx.x;
-    const int n_base = n_group * COLS_PER_BLOCK + warp_id;
-
-    if (n_base >= N) return;
 
     const int row_start = expert_offsets[expert_id];
     const int row_end = expert_offsets[expert_id + 1];
@@ -2761,49 +2740,82 @@ __global__ void kbit_grouped_scalar_gemv(
     if (M <= 0) return;
 
     const int num_k_blocks = K_dim / BS;
-    const int expert_B_offset = expert_id * num_k_blocks * N * K_BITS;
-    const int expert_abs_offset = expert_id * num_k_blocks * N;
 
-    const unsigned int* B_col = B_packed_all + expert_B_offset + n_base * num_k_blocks * K_BITS;
-    const unsigned char* abs_col = B_absmax_all + expert_abs_offset + n_base * num_k_blocks;
+    // Per-expert column base pointers (flat layout)
+    const unsigned int* B_col = B_packed_all + (expert_id * N + col) * num_k_blocks * K_BITS;
+    const float* abs_col = B_absmax_all + (expert_id * N + col) * num_k_blocks;
 
+    // Codebook in registers (shuffle-based lookup)
     float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
 
+    // Accumulators
     float acc[M_VAL];
     #pragma unroll
     for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
 
-    // max_iters ensures all lanes iterate the same number of times,
-    // preventing warp divergence deadlock at __shfl_sync when num_k_blocks < 32.
-    const int max_iters = (num_k_blocks + 31) / 32;
+    // 64 threads stride through K blocks: thread t handles blocks t, t+64, t+128, ...
+    // max_iters ensures all lanes iterate the same number of times (no warp divergence at __shfl_sync).
+    const int max_iters = (num_k_blocks + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
     for (int iter = 0; iter < max_iters; iter++) {
-        const int block_idx = lane_id + iter * 32;
+        const int block_idx = threadIdx.x + iter * BLOCK_SIZE;
         const bool valid = (block_idx < num_k_blocks);
 
+        // Load k bit-plane words (guarded; invalid threads get 0)
         unsigned int planes[K_BITS];
-        #pragma unroll
-        for (int b = 0; b < K_BITS; b++)
-            planes[b] = valid ? B_col[block_idx * K_BITS + b] : 0u;
-        float amax = valid ? load_absmax(abs_col, block_idx) : 0.0f;
-
-        int k_base = block_idx * BS;
-
-        #pragma unroll
-        for (int j = 0; j < 32; j++) {
-            int idx = 0;
+        if constexpr (K_BITS == 2) {
+            uint2 pv = valid ? *reinterpret_cast<const uint2*>(&B_col[block_idx * 2]) : make_uint2(0u, 0u);
+            planes[0] = pv.x; planes[1] = pv.y;
+        } else if constexpr (K_BITS == 4) {
+            int4 pv;
+            if (valid) pv = *reinterpret_cast<const int4*>(&B_col[block_idx * 4]);
+            else { pv.x = 0; pv.y = 0; pv.z = 0; pv.w = 0; }
+            planes[0] = (unsigned int)pv.x; planes[1] = (unsigned int)pv.y;
+            planes[2] = (unsigned int)pv.z; planes[3] = (unsigned int)pv.w;
+        } else {
             #pragma unroll
             for (int b = 0; b < K_BITS; b++)
-                idx |= ((planes[b] >> j) & 1) << b;
-            float w = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+                planes[b] = valid ? B_col[block_idx * K_BITS + b] : 0u;
+        }
+
+        // Load absmax (guarded; invalid threads get 0)
+        float amax = valid ? abs_col[block_idx] : 0.0f;
+
+        const int k_base = block_idx * BS;
+
+        // Dequant-once loop: decode weight once per element, FMA across all M rows.
+        // sub iterates 4 groups of 8 elements within the 32-element quant block.
+        #pragma unroll
+        for (int sub = 0; sub < 4; sub++) {
+            // Load A for all M rows (int4 = 8 fp16 values each)
+            int4 av[M_VAL];
             #pragma unroll
             for (int m = 0; m < M_VAL; m++) {
-                if (valid && m < M)
-                    acc[m] += w * ScalarOps<scalar_t>::to_float(
-                        A_concat[(row_start + m) * K_dim + k_base + j]);
+                if (valid)
+                    av[m] = *reinterpret_cast<const int4*>(
+                        &A_concat[(row_start + m) * K_dim + k_base + sub * 8]);
+            }
+
+            // Dequant each element once, then FMA across M rows
+            #pragma unroll
+            for (int j = 0; j < 8; j++) {
+                int idx = 0;
+                #pragma unroll
+                for (int b = 0; b < K_BITS; b++)
+                    idx |= ((planes[b] >> (sub * 8 + j)) & 1) << b;
+                float w = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+
+                #pragma unroll
+                for (int m = 0; m < M_VAL; m++) {
+                    const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av[m]);
+                    if (valid)
+                        acc[m] += w * ScalarOps<scalar_t>::to_float(ap[j]);
+                }
             }
         }
     }
 
+    // Phase 1: Intra-warp reduction via shuffle
     #pragma unroll
     for (int m = 0; m < M_VAL; m++) {
         #pragma unroll
@@ -2811,32 +2823,65 @@ __global__ void kbit_grouped_scalar_gemv(
             acc[m] += __shfl_down_sync(0xFFFFFFFF, acc[m], offset);
     }
 
+    // Phase 2: Inter-warp reduction via shared memory (2 warps)
+    __shared__ float s_partial[NUM_WARPS * M_MAX];
+
     if (lane_id == 0) {
         #pragma unroll
         for (int m = 0; m < M_VAL; m++)
-            if (m < M)
-                C_concat[(row_start + m) * N + n_base] =
-                    ScalarOps<scalar_t>::from_float(acc[m]);
+            s_partial[warp_id * M_MAX + m] = acc[m];
+    }
+    __syncthreads();
+
+    // Thread 0 sums both warps and writes output
+    if (threadIdx.x == 0) {
+        #pragma unroll
+        for (int m = 0; m < M_VAL; m++) {
+            if (m < M) {
+                float sum = s_partial[0 * M_MAX + m] + s_partial[1 * M_MAX + m];
+                C_concat[(row_start + m) * N + col] =
+                    ScalarOps<scalar_t>::from_float(sum);
+            }
+        }
     }
 }
 
 // ---- Grouped scalar GEMV launcher ----
-template <int K, typename scalar_t>
-void kbitGroupedScalarGemv(
+template <int K, int MV, typename scalar_t>
+static void kbitGroupedScalarGemvLaunch(
     const scalar_t* A_concat, const unsigned int* B_packed_all,
-    const unsigned char* B_absmax_all, const float* codebook,
+    const float* B_absmax_all, const float* codebook,
     scalar_t* C_concat, const int* expert_offsets,
     int K_dim, int N, int num_experts
 ) {
-    constexpr int COLS_PER_BLOCK = 4;
-    constexpr int BLOCK_SIZE = 128;
-    int n_groups = (N + COLS_PER_BLOCK - 1) / COLS_PER_BLOCK;
-    dim3 grid(n_groups, num_experts);
+    constexpr int BLOCK_SIZE = 64;
+    dim3 grid(N, num_experts);
 
-    kbit_grouped_scalar_gemv<K, 4, scalar_t><<<grid, BLOCK_SIZE>>>(
+    kbit_grouped_scalar_gemv<K, MV, scalar_t><<<grid, BLOCK_SIZE>>>(
         A_concat, B_packed_all, B_absmax_all, codebook, C_concat,
         expert_offsets, K_dim, N, num_experts);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Public entry point: selects M_VAL template based on max M across experts
+template <int K, typename scalar_t>
+void kbitGroupedScalarGemv(
+    const scalar_t* A_concat, const unsigned int* B_packed_all,
+    const float* B_absmax_all, const float* codebook,
+    scalar_t* C_concat, const int* expert_offsets,
+    int K_dim, int N, int num_experts, int max_M
+) {
+    #define LAUNCH_GROUPED_GEMV(MV) \
+        kbitGroupedScalarGemvLaunch<K, MV, scalar_t>( \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, \
+            expert_offsets, K_dim, N, num_experts)
+
+    if (max_M <= 1) { LAUNCH_GROUPED_GEMV(1); }
+    else if (max_M <= 2) { LAUNCH_GROUPED_GEMV(2); }
+    else if (max_M <= 3) { LAUNCH_GROUPED_GEMV(3); }
+    else { LAUNCH_GROUPED_GEMV(4); }
+
+    #undef LAUNCH_GROUPED_GEMV
 }
 
 // ---- Debug: Simple MMA test kernel ----
@@ -2994,8 +3039,8 @@ INSTANTIATE_KBIT_GEMM_PROD(5)
 
 // Grouped expert GEMM instantiations (fp16 and bf16)
 #define INSTANTIATE_KBIT_GROUPED_GEMM_PROD(K) \
-    template void kbitGroupedGemmProd<K, half>(const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int); \
-    template void kbitGroupedGemmProd<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*, int, int, int);
+    template void kbitGroupedGemmProd<K, half>(const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int, int); \
+    template void kbitGroupedGemmProd<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*, int, int, int, int);
 
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(2)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(3)
@@ -3012,10 +3057,10 @@ INSTANTIATE_KBIT_SCALAR_GEMV(3)
 INSTANTIATE_KBIT_SCALAR_GEMV(4)
 INSTANTIATE_KBIT_SCALAR_GEMV(5)
 
-// Grouped scalar GEMV instantiations (fp16 and bf16)
+// Grouped scalar GEMV instantiations (fp16 and bf16) — flat layout, float32 absmax
 #define INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(K) \
-    template void kbitGroupedScalarGemv<K, half>(const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int); \
-    template void kbitGroupedScalarGemv<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*, int, int, int);
+    template void kbitGroupedScalarGemv<K, half>(const half*, const unsigned int*, const float*, const float*, half*, const int*, int, int, int, int); \
+    template void kbitGroupedScalarGemv<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const float*, const float*, __nv_bfloat16*, const int*, int, int, int, int);
 
 INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(2)
 INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(3)
