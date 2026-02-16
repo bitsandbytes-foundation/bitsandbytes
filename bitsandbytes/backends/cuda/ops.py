@@ -1042,17 +1042,16 @@ def _(
     torch._check(B_packed.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed.dtype}")
     torch._check(B_absmax.dtype == torch.uint8, lambda: f"B_absmax must be uint8 (E4M4), got {B_absmax.dtype}")
     torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
-    torch._check(N % 128 == 0, lambda: f"N ({N}) must be divisible by 128")
+    torch._check(N % 64 == 0, lambda: f"N ({N}) must be divisible by 64")
     torch._check(k_chunks >= 1, lambda: f"k_chunks must be >= 1, got {k_chunks}")
 
     M = A.shape[0]
     C = torch.empty(M, N, device=A.device, dtype=A.dtype)
 
-    # The persistent kernel auto-selects k_splits internally. When
-    # k_splits > 1, it needs a zeroed fp32 workspace and tile counters.
-    # Always allocate these since the C++ decides at runtime.
+    # The persistent kernel auto-selects k_splits and TILE_N internally.
+    # TILE_N=64 for M<=16 gives more tiles; allocate for worst case.
     TILE_M = 16
-    TILE_N = 128
+    TILE_N = 64  # worst case (most tiles)
     m_tiles = (M + TILE_M - 1) // TILE_M
     n_tiles = N // TILE_N
 
