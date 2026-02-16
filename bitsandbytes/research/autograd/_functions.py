@@ -235,7 +235,7 @@ class SwitchBackBnb(torch.autograd.Function):
         # 2. Quantize B
         if state.has_fp16_weights:
             # print('B shape', B.shape)
-            has_grad = True if (getattr(B, "grad", None) is not None) else False
+            has_grad = getattr(B, "grad", None) is not None
             is_transposed = not B.is_contiguous() and B.shape[0] == B.stride(1)
             if is_transposed:
                 B = B.contiguous()
@@ -307,8 +307,8 @@ class SwitchBackBnb(torch.autograd.Function):
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
-        CAt, subA, A = ctx.tensors
-        SCAt, idx = ctx.tensor_states
+        _CAt, _subA, A = ctx.tensors
+        _SCAt, _idx = ctx.tensor_states
         state = ctx.state
         grad_A = grad_B = grad_bias = None
 
@@ -320,7 +320,7 @@ class SwitchBackBnb(torch.autograd.Function):
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        Cgrad, Cgradt, SCgrad, SCgradt, outlier_cols = F.int8_double_quant(grad_output.to(torch.float16))
+        _Cgrad, _Cgradt, _SCgrad, _SCgradt, _outlier_cols = F.int8_double_quant(grad_output.to(torch.float16))
 
         if req_gradB:
             # print('back A shape', A.shape)

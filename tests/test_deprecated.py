@@ -1,76 +1,10 @@
-import numpy as np
 import pytest
-from scipy.stats import norm
 import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import functional as F
 from tests.helpers import BOOLEAN_TRIPLES, describe_dtype, get_test_dims, id_formatter
 from tests.test_autograd import TRANSPOSE_VALS
-
-
-@pytest.mark.deprecated
-def test_kbit_quantile_estimation():
-    for i in range(100):
-        data = torch.randn(1024, 1024, device="cuda")
-        for bits in range(2, 9):
-            p = np.linspace(1.3e-4, 1 - 1.3e-4, 2**bits)
-            val1 = torch.Tensor(norm.ppf(p)).cuda()
-            val2 = F.estimate_quantiles(data, offset=0, num_quantiles=2**bits)
-            err = torch.abs(val1 - val2).mean()
-            assert err < 0.038
-
-    for i in range(100):
-        data = torch.randn(1024, 1024, device="cuda")
-        for bits in range(2, 4):
-            total_values = 2**bits - 1
-            p = np.linspace(0, 1, 2 * total_values + 1)
-            idx = np.arange(1, 2 * total_values + 1, 2)
-            p = p[idx]
-            offset = 1 / (2 * total_values)
-            p = np.linspace(offset, 1 - offset, total_values)
-            val1 = torch.Tensor(norm.ppf(p)).cuda()
-            val2 = F.estimate_quantiles(data, num_quantiles=2**bits - 1)
-            err = torch.abs(val1 - val2).mean()
-            assert err < 0.035
-
-
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=["float", "half"])
-@pytest.mark.deprecated
-def test_estimate_quantiles(dtype):
-    A = torch.rand(1024, 1024, device="cuda")
-    A = A.to(dtype)
-    code = F.estimate_quantiles(A)
-
-    percs = torch.linspace(1 / 512, 511 / 512, 256, device=A.device)
-    torch.testing.assert_close(percs, code, atol=1e-3, rtol=1e-2)
-
-    A = torch.randn(1024, 1024, device="cuda")
-    A = A.to(dtype)
-    code = F.estimate_quantiles(A)
-
-    quantiles = torch.quantile(A.float(), percs)
-    diff = torch.abs(code - quantiles)
-    assert (diff > 5e-02).sum().item() == 0
-
-
-@pytest.mark.deprecated
-def test_quantile_quantization():
-    for i in range(100):
-        A1 = torch.randn(1024, 1024, device="cuda")
-        code = F.estimate_quantiles(A1)
-        C = F.quantize_no_absmax(A1, code)
-        A2 = F.dequantize_no_absmax(C, code)
-        diff = torch.abs(A1 - A2).mean().item()
-        assert diff < 0.0075
-
-        A1 = torch.rand(1024, 1024, device="cuda")
-        code = F.estimate_quantiles(A1)
-        C = F.quantize_no_absmax(A1, code)
-        A2 = F.dequantize_no_absmax(C, code)
-        diff = torch.abs(A1 - A2).mean().item()
-        torch.testing.assert_close(A1, A2, atol=5e-3, rtol=0)
-        assert diff < 0.001
 
 
 @pytest.mark.deprecated
@@ -118,7 +52,7 @@ def test_percentile_clipping(gtype):
         else:
             gnorm_vec1[step % 100] = gnorm2
 
-        vals, idx = torch.sort(gnorm_vec1)
+        vals, _ = torch.sort(gnorm_vec1)
         clip1 = vals[percentile]
 
         torch.testing.assert_close(gnorm_vec1, torch.sqrt(gnorm_vec2))
@@ -208,3 +142,34 @@ def test_matmul_fp8(dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose):
                     grad_err = (gradB1 - gradB2).abs().mean()
                     assert grad_err.item() < 0.003
                     torch.testing.assert_close(gradB1, gradB2, atol=0.18, rtol=0.3)
+
+
+@pytest.mark.deprecated
+def test_fp8linear():
+    b = 10
+    h = 1024
+    inp = torch.randn(b, h).cuda()
+    fp32 = torch.nn.Linear(h, h * 2).cuda()
+    fp8 = bnb.research.nn.LinearFP8Mixed(h, h * 2).cuda()
+    fp32b = torch.nn.Linear(h * 2, h).cuda()
+    fp8b = bnb.research.nn.LinearFP8Mixed(h * 2, h).cuda()
+
+    fp8.weight.data.copy_(fp32.weight.data)
+    fp8.bias.data.copy_(fp32.bias.data)
+    fp8b.weight.data.copy_(fp32b.weight.data)
+    fp8b.bias.data.copy_(fp32b.bias.data)
+
+    a = fp32b(torch.nn.functional.gelu(fp32(inp)))
+    b = fp8b(torch.nn.functional.gelu(fp8(inp)))
+
+    err = (a - b).abs().mean()
+
+    a.mean().backward()
+    b.mean().backward()
+
+    graderr = (fp8.weight.grad - fp32.weight.grad).abs().mean()
+    bgraderr = (fp8.bias.grad - fp32.bias.grad).abs().mean()
+
+    assert err < 0.05
+    assert graderr < 0.00002
+    assert bgraderr < 0.00002

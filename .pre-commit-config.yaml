@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.2
+    rev: v0.14.3
     hooks:
       - id: ruff
         args:
@@ -17,7 +17,14 @@ repos:
       - id: mixed-line-ending
         args:
           - --fix=lf
+        exclude: '\.bat$'
   - repo: https://github.com/crate-ci/typos
     rev: v1.26.0
     hooks:
       - id: typos
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v20.1.6
+    hooks:
+    - id: clang-format
+      types_or: [c++, c, cuda]
+      files: ^csrc/

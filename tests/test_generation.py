@@ -112,7 +112,7 @@ def test_pi(requires_cuda, model_and_tokenizer, inference_kernel, DQ, dtype):
     assert len(outputs) == n_cases
     failure_count = 0
     for i in range(n_cases):
-        if not outputs[i][: len(str(math.pi))] == str(math.pi):
+        if outputs[i][: len(str(math.pi))] != str(math.pi):
             failure_count += 1
     failure_max = 2 if fixture_config[0] == "huggyllama/llama-7b" else 4
     if failure_count > failure_max:

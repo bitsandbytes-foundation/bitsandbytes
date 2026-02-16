@@ -1,14 +1,12 @@
 from dataclasses import dataclass
 from math import prod
-from typing import Callable, Optional
+from typing import Optional
 import warnings
 from warnings import warn
 
 import torch
-from typing_extensions import deprecated
 
 import bitsandbytes.functional as F
-from bitsandbytes.functional import ipex_cpu, ipex_xpu
 
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
@@ -50,68 +48,7 @@ class GlobalOutlierPooler:
         return torch.Tensor(list(self.outliers)).to(torch.int64)
 
 
-@deprecated(
-    "This function is deprecated and will be removed in a future release.",
-    category=FutureWarning,
-)
-def get_inverse_transform_indices(
-    transform_tile: Callable[[torch.Tensor], torch.Tensor],
-    tile_size: tuple[int, int],
-):
-    """
-    Compute a permutation of indices that invert the specified (tiled) matrix transformation
-
-    :param transform_tile: a function that applies forward transform to a tensor of shape [dim1, dim2]
-    :param tile_size: higher-level tile dimensions, i.e. (8, 32) for Turing and (32, 32) for Ampere
-    :note: we assume that tile_transform applies to a cpu-based int8 tensor of shape tile_size
-    :example: transform_tile function for the turing layout (bitsandbytes.functional as F)
-    :returns: indices
-    """
-    d1, d2 = tile_size
-    assert 0 < d1 * d2 < 2**64
-    tile_indices = torch.arange(d1 * d2, dtype=torch.int64).view(d1, d2)
-    # encode each position in tile as a tuple of <= 8 unique bytes
-    permuted_tile_indices = torch.zeros_like(tile_indices)
-    for i in range(8):
-        # select i-th byte, apply transformation and trace where each index ended up
-        ith_dim_indices = torch.div(tile_indices, 256**i, rounding_mode="trunc") % 256
-        sample_tile_i = (ith_dim_indices - 128).to(torch.int8).contiguous()
-        assert torch.all(sample_tile_i.int() + 128 == ith_dim_indices), "int overflow"
-        permuted_tile_i = transform_tile(sample_tile_i)
-        ith_permuted_indices = permuted_tile_i.to(tile_indices.dtype) + 128
-        permuted_tile_indices += ith_permuted_indices * (256**i)
-        if d1 * d2 < 256**i:
-            break  # if all indices fit in i bytes, stop early
-    return permuted_tile_indices
-
-
-# torch.compiler.is_compiling() is available only in torch >= 2.3
-if hasattr(torch.compiler, "is_compiling"):
-    _is_compiling = torch.compiler.is_compiling
-else:
-    _is_compiling = torch._dynamo.is_compiling
-
-
-@deprecated(
-    "This function is deprecated and will be removed in a future release.",
-    category=FutureWarning,
-)
-def undo_layout(permuted_tensor: torch.Tensor, tile_indices: torch.LongTensor) -> torch.Tensor:
-    """
-    Undo a tiled permutation such as turing or ampere layout
-
-    :param permuted_tensor: torch tensor in a permuted layout
-    :param tile_indices: reverse transformation indices, from get_inverse_transform_indices
-    :return: contiguous row-major tensor
-    """
-    (rows, cols), (tile_rows, tile_cols) = permuted_tensor.shape, tile_indices.shape
-    assert rows % tile_rows == cols % tile_cols == 0, "tensor must contain a whole number of tiles"
-    tensor = permuted_tensor.reshape(-1, tile_indices.numel()).t()
-    outputs = torch.empty_like(tensor)  # note: not using .index_copy because it was slower on cuda
-    outputs[tile_indices.flatten()] = tensor
-    outputs = outputs.reshape(tile_rows, tile_cols, cols // tile_cols, rows // tile_rows)
-    outputs = outputs.permute(3, 0, 2, 1)  # (rows // tile_rows, tile_rows), (cols // tile_cols, tile_cols)
-    return outputs.reshape(rows, cols).contiguous()
+_is_compiling = torch.compiler.is_compiling
 
 
 @dataclass
@@ -262,7 +199,7 @@ class MatMul8bitLt(torch.autograd.Function):
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
         req_gradA, req_gradB, _, req_gradBias, _ = ctx.needs_input_grad
-        CAt, subA, A = ctx.tensors
+        CAt, subA, _A = ctx.tensors
         SCAt, idx = ctx.tensor_states
         state: MatmulLtState = ctx.state
         grad_A = grad_B = grad_bias = None
@@ -320,8 +257,6 @@ class MatMul8bitFp(torch.autograd.Function):
 
         CB = state.CB.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))
         output = torch.nn.functional.linear(A, CB, bias)
-        # to pass the test: tests/test_modules.py::test_linear8bitlt_no_fp16_weights[2.0-xpu]
-        state.idx = False
         ctx.state = state
         ctx.dtype_A = A.dtype
         ctx.grad_shape = A.shape
@@ -431,7 +366,7 @@ def matmul(
         state.threshold = threshold
     # MatMul8bitLt is slower because no fast kernel for quant/dequant 8bit in CPU/XPU
     if state.is_training:
-        if (A.device.type == "cpu" and ipex_cpu) or (A.device.type == "xpu" and ipex_xpu):
+        if A.device.type in ("cpu", "xpu"):
             return MatMul8bitFp.apply(A, B, out, bias, state)
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
@@ -444,11 +379,11 @@ def matmul_4bit(
     bias: Optional[torch.Tensor] = None,
 ):
     assert quant_state is not None
+    # Change dtype to input dtype on CPU
+    if A.device.type == "cpu":
+        quant_state.dtype = A.dtype
 
-    if A.device.type in ("cpu", "xpu") and A.requires_grad == False:
-        if getattr(quant_state, "ipex", False):
-            # IPEX CPU will change weight to 4D so don't need transpose
-            B = B.t() if B.dim() == 2 else B
+        if getattr(quant_state, "packing_format_for_cpu", False):
             out = F.gemv_4bit(A, B, out, state=quant_state)
             if bias is not None:
                 out += bias
@@ -456,7 +391,7 @@ def matmul_4bit(
         else:
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
 
-    if A.numel() == A.shape[-1] and A.requires_grad == False:
+    if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "hpu":
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(
                 f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",

@@ -2,17 +2,20 @@ import copy
 import os
 import pickle
 import platform
+import sys
 from tempfile import TemporaryDirectory
 
 import pytest
 import torch
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import ROCM_WARP_SIZE_64
 from tests.helpers import (
     TRUE_FALSE,
     describe_dtype,
     get_available_devices,
     id_formatter,
+    is_supported_on_hpu,
     torch_load_from_buffer,
     torch_save_to_buffer,
 )
@@ -27,12 +30,17 @@ storage = {
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_storage", ["uint8", "float16", "bfloat16", "float32"])
+@pytest.mark.parametrize("original_dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("save_before_forward", TRUE_FALSE, ids=id_formatter("save_before_forward"))
-def test_linear_serialization(device, quant_type, compress_statistics, bias, quant_storage, save_before_forward):
-    original_dtype = torch.float16
+def test_linear_serialization(
+    device, quant_type, original_dtype, compress_statistics, bias, quant_storage, save_before_forward
+):
+    if device == "hpu" and not is_supported_on_hpu(quant_type, original_dtype, storage[quant_storage]):
+        pytest.skip("This configuration is not supported on HPU.")
+
     compute_dtype = None
     layer_shape = (300, 400)
 
@@ -185,9 +193,12 @@ def test_linear_serialization(device, quant_type, compress_statistics, bias, qua
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("blocksize", [32, 64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
     tensor = torch.randn(300, 400)
     param = bnb.nn.Params4bit(
         data=tensor,
@@ -204,9 +215,81 @@ def test_copy_param(device, quant_type, blocksize, compress_statistics):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+def test_params4bit_torch_chunk_split(device, quant_type):
+    """Test that torch.chunk and torch.split preserve Params4bit subclass for FSDP2 compatibility."""
+    if device == "hpu" and not is_supported_on_hpu(quant_type, torch.float16, torch.uint8):
+        pytest.skip("This configuration is not supported on HPU.")
+
+    if device == "cpu":
+        pytest.skip("CPU quantization causes segfault, skipping CPU test")
+
+    original_tensor = torch.randn(8, 4, dtype=torch.float16, device="cpu")
+
+    params4bit = bnb.nn.Params4bit(data=original_tensor, quant_type=quant_type, requires_grad=False)
+
+    if device != "cpu":
+        params4bit = params4bit.to(device)
+
+    chunks = torch.chunk(params4bit, 2, dim=0)
+
+    assert isinstance(chunks, tuple), "torch.chunk should return tuple"
+    for chunk in chunks:
+        assert isinstance(chunk, bnb.nn.Params4bit), "Chunk should preserve Params4bit subclass"
+        assert hasattr(chunk, "quant_type"), "Should preserve metadata"
+        assert chunk.quant_type == params4bit.quant_type, "Should preserve quant_type value"
+
+    splits = torch.split(params4bit, 2, dim=0)
+
+    assert isinstance(splits, tuple), "torch.split should return tuple"
+    assert len(splits) > 0, "Should have at least one split"
+    for split in splits:
+        assert isinstance(split, bnb.nn.Params4bit), "Split should preserve Params4bit subclass"
+        assert hasattr(split, "quant_type"), "Should preserve metadata"
+        assert split.quant_type == params4bit.quant_type, "Should preserve quant_type value"
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize(
+    "quant_storage",
+    [torch.uint8, torch.float16, torch.bfloat16, torch.float32],
+    ids=describe_dtype,
+)
+def test_quant_storage_shard_roundtrip(device, quant_type, quant_storage):
+    """Test that quantized weights survive a flatten-chunk-reassemble roundtrip.
+
+    Non-uint8 quant_storage exists so that FSDP can shard quantized tensors
+    without splitting packed 4-bit pairs. This test simulates FSDP's
+    shard/gather pattern and verifies numerical correctness after reassembly.
+    """
+    M, K = 256, 128
+    A = torch.randn(1, K, dtype=torch.float16, device=device)
+    B = torch.randn(M, K, dtype=torch.float16, device=device)
+
+    qB, state = bnb.functional.quantize_4bit(B, quant_type=quant_type, quant_storage=quant_storage)
+    ref = bnb.functional.gemv_4bit(A, qB.t(), state=state)
+
+    # Simulate FSDP: flatten, split into shards, reassemble
+    flat = qB.flatten()
+    n_shards = 4
+    shards = flat.chunk(n_shards)
+    reassembled = torch.cat(shards).reshape(qB.shape)
+
+    assert reassembled.dtype == qB.dtype
+    assert torch.equal(reassembled.view(torch.uint8), qB.view(torch.uint8)), "Bytes changed after shard roundtrip"
+
+    out = bnb.functional.gemv_4bit(A, reassembled.t(), state=state)
+    torch.testing.assert_close(out, ref)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("blocksize", [32, 64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
     tensor = torch.randn(300, 400)
     param = bnb.nn.Params4bit(
         data=tensor,
@@ -230,9 +313,12 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128])
+@pytest.mark.parametrize("blocksize", [32, 64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
     original_tensor = torch.randn(300, 400)
     original_param = bnb.nn.Params4bit(
         data=original_tensor,
@@ -269,11 +355,14 @@ def test_params4bit_real_serialization(device, quant_type, blocksize, compress_s
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
+@pytest.mark.skipif(
+    torch.__version__ < (2, 10) and sys.version_info >= (3, 14), reason="Not supported in Python 3.14 until torch 2.10"
+)
 def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_statistics, bias, fullgraph, mode):
-    if device == "cpu" and quant_type == "fp4":
-        pytest.skip("FP4 is not supported for CPU")
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
 
-    if fullgraph and torch.__version__ < (2, 8):
+    if fullgraph and torch.__version__ < (2, 8, 0, "dev"):
         pytest.skip("fullgraph mode requires torch 2.8 or higher")
 
     if device == "cuda" and platform.system() == "Windows":
@@ -317,7 +406,8 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
         ref_output = net(x)
 
     # Compile the model
-    compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode)
+    compile_backend = "hpu_backend" if device == "hpu" else "inductor"
+    compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode, backend=compile_backend)
 
     # Get output from compiled model
     with torch.no_grad():

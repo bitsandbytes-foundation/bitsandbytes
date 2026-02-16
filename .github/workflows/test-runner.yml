@@ -1,0 +1,225 @@
+name: Test Runner
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        required: true
+        description: "Platform: linux-x64, linux-aarch64, windows, macos"
+      backend:
+        type: string
+        required: true
+        description: "Backend: cpu, cuda"
+      torch_version:
+        type: string
+        required: true
+        description: "PyTorch version to install"
+      pypi_index:
+        type: string
+        default: "https://download.pytorch.org/whl/cpu"
+        description: "PyPI index URL for torch installation"
+      cuda_version:
+        type: string
+        default: ""
+        description: "CUDA version (required for cuda backend)"
+      gpu_type:
+        type: string
+        default: ""
+        description: "GPU type for CUDA testing: T4, L40S"
+      # cpu_type currently only affects linux x64 CPU testing to select specific CPU architectures
+      cpu_type:
+        type: string
+        default: ""
+        description: "CPU architecture for testing: icelake, cascadelake (default: platform default runner)"
+
+env:
+  BNB_SKIP_CMAKE: 1
+
+jobs:
+  build:
+    runs-on: >-
+      ${{
+        inputs.platform == 'linux-x64' && 'ubuntu-22.04' ||
+        inputs.platform == 'linux-aarch64' && 'ubuntu-22.04-arm' ||
+        inputs.platform == 'macos' && 'macos-15' ||
+        'windows-2025'
+      }}
+    outputs:
+      test_runner: ${{ steps.config.outputs.test_runner }}
+      artifact_name: ${{ steps.config.outputs.artifact_name }}
+      build_os: ${{ steps.config.outputs.build_os }}
+      arch: ${{ steps.config.outputs.arch }}
+    steps:
+      - name: Configure test runner and paths
+        id: config
+        shell: bash
+        run: |
+          # Map platform to OS identifiers, architecture, and test runner
+          case "${{ inputs.platform }}" in
+            linux-x64)
+              BUILD_OS="ubuntu-22.04"
+              ARCH="x64"
+              if [[ "${{ inputs.backend }}" == "cuda" ]]; then
+                case "${{ inputs.gpu_type }}" in
+                  T4)
+                    TEST_RUNNER="bandb-aws-g4dn-4xlarge-plus-use1-public-80"
+                    ;;
+                  L40S)
+                    TEST_RUNNER="bandb-aws-g6e-4xlarge-plus-use1-public-80"
+                    ;;
+                  *)
+                    echo "::error::Must specify gpu_type (T4 or L40S) for linux-x64 cuda backend"
+                    exit 1
+                    ;;
+                esac
+              else
+                case "${{ inputs.cpu_type }}" in
+                  icelake)
+                    TEST_RUNNER="banb-aws-general-8-plus-use1-public-80"
+                    ;;
+                  cascadelake)
+                    TEST_RUNNER="bandb-aws-g4dn-4xlarge-plus-use1-public-80"
+                    ;;
+                  "")
+                    TEST_RUNNER="ubuntu-22.04"
+                    ;;
+                  *)
+                    echo "::error::Invalid cpu_type: ${{ inputs.cpu_type }}"
+                    exit 1
+                    ;;
+                esac
+              fi
+              ;;
+            linux-aarch64)
+              BUILD_OS="ubuntu-22.04-arm"
+              ARCH="aarch64"
+              TEST_RUNNER="ubuntu-22.04-arm"
+              ;;
+            macos)
+              BUILD_OS="macos-15"
+              ARCH="arm64"
+              TEST_RUNNER="macos-15"
+              ;;
+            windows)
+              BUILD_OS="windows-2025"
+              ARCH="x64"
+              if [[ "${{ inputs.backend }}" == "cuda" ]]; then
+                TEST_RUNNER="CUDA-Windows-x64"
+              else
+                TEST_RUNNER="windows-2025"
+              fi
+              ;;
+            *)
+              echo "::error::Unsupported platform: ${{ inputs.platform }}"
+              exit 1
+              ;;
+          esac
+
+          # Create unique artifact name per configuration
+          ARTIFACT="lib_${{ inputs.backend }}_${BUILD_OS}_${ARCH}"
+          if [[ "${{ inputs.backend }}" == "cuda" ]]; then
+            ARTIFACT="${ARTIFACT}_${{ inputs.cuda_version }}_${{ inputs.gpu_type }}"
+          else
+            ARTIFACT="${ARTIFACT}_${{ inputs.cpu_type }}"
+          fi
+          ARTIFACT="${ARTIFACT}_torch${{ inputs.torch_version }}_${{ github.run_id }}_${{ github.run_attempt }}"
+
+          echo "test_runner=${TEST_RUNNER}" >> $GITHUB_OUTPUT
+          echo "artifact_name=${ARTIFACT}" >> $GITHUB_OUTPUT
+          echo "build_os=${BUILD_OS}" >> $GITHUB_OUTPUT
+          echo "arch=${ARCH}" >> $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+
+      - name: Set build environment variables
+        shell: bash
+        run: |
+          echo "build_os=${{ steps.config.outputs.build_os }}" >> $GITHUB_ENV
+          echo "build_arch=${{ steps.config.outputs.arch }}" >> $GITHUB_ENV
+
+      # Windows + CUDA: Install CUDA Toolkit
+      - name: Install CUDA Toolkit
+        if: inputs.backend == 'cuda' && inputs.platform == 'windows'
+        uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2 # v0.2.29
+        with:
+          cuda: ${{ inputs.cuda_version }}
+          method: "network"
+          sub-packages: '["nvcc","cudart","cusparse","cublas","thrust","nvrtc_dev","cublas_dev","cusparse_dev"]'
+          use-github-cache: false
+
+      # Windows: Setup MSVC (needed for both CPU and CUDA builds)
+      - name: Setup MSVC
+        if: inputs.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+
+      # Build CPU backend
+      - name: Build C++
+        if: inputs.backend == 'cpu'
+        run: bash .github/scripts/build-cpu.sh
+
+      # Build CUDA backend
+      - name: Build C++ / CUDA
+        if: inputs.backend == 'cuda'
+        run: bash .github/scripts/build-cuda.sh
+        env:
+          cuda_version: ${{ inputs.cuda_version }}
+          cuda_targets: "75;89"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.config.outputs.artifact_name }}
+          path: output/${{ steps.config.outputs.build_os }}/${{ steps.config.outputs.arch }}/*
+          retention-days: 7
+
+  test:
+    needs: build
+    runs-on: ${{ needs.build.outputs.test_runner }}
+    env:
+      BNB_TEST_DEVICE: ${{ inputs.backend }}
+    steps:
+      # CUDA: Show GPU information
+      - name: Show GPU Information
+        if: inputs.backend == 'cuda'
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: bitsandbytes/
+          merge-multiple: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # Windows: Setup MSVC for torch.compile
+      - name: Setup MSVC
+        if: inputs.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+
+      - name: Install dependencies
+        run: |
+          pip install torch==${{ inputs.torch_version }} --index-url ${{ inputs.pypi_index }}
+          pip install -e ".[test]" -v
+          pip install pytest-cov
+
+      # Windows: Downgrade NumPy for torch<2.4.1 compatibility
+      # See: https://github.com/pytorch/pytorch/issues/131668
+      - name: Downgrade NumPy
+        if: inputs.platform == 'windows' && startsWith(inputs.torch_version, '2.3.')
+        run: pip install "numpy<2"
+
+      - name: Show installed packages
+        run: pip list
+
+      - name: Show environment information
+        run: python -m torch.utils.collect_env
+
+      - name: Run tests
+        run: pytest --durations=100

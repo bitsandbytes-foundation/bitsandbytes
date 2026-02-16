@@ -3,12 +3,14 @@ import copy
 import os
 import pickle
 import platform
+import sys
 from tempfile import TemporaryDirectory
 
 import pytest
 import torch
 
 import bitsandbytes as bnb
+from bitsandbytes.cextension import ROCM_WARP_SIZE_64
 from bitsandbytes.nn.modules import Linear8bitLt
 from tests.helpers import (
     TRUE_FALSE,
@@ -233,6 +235,10 @@ def test_linear8bit_serialization(linear8bit):
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
+@pytest.mark.skipif(
+    torch.__version__ < (2, 10) and sys.version_info >= (3, 14), reason="Not supported in Python 3.14 until torch 2.10"
+)
+@pytest.mark.skipif(ROCM_WARP_SIZE_64, reason="this test is not supported on ROCm yet")
 def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
@@ -257,7 +263,8 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
             ref_output = net(x)
 
         # Compile the model
-        compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode)
+        compile_backend = "hpu_backend" if device == "hpu" else "inductor"
+        compiled_net = torch.compile(net, fullgraph=fullgraph, mode=mode, backend=compile_backend)
 
         # Get output from compiled model
         with torch.no_grad():
@@ -271,14 +278,11 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
 
         # Test with gradients. Currently only works with threshold=0.
         # Has a strange regression on Linux aarch64 CPU in torch==2.6.0.
-        # There is also an issue with torch==2.7.0 on x86-64 with IPEX.
         is_broken_platform = (
             device == "cpu"
             and platform.system() == "Linux"
-            and (
-                (platform.machine() == "aarch64" and (2, 6) <= torch.__version__ < (2, 7))
-                or (platform.machine() == "x86_64" and bnb.functional.ipex_cpu)
-            )
+            and platform.machine() == "aarch64"
+            and (2, 6) <= torch.__version__ < (2, 7)
         )
 
         if threshold == 0 and not is_broken_platform:
@@ -293,3 +297,41 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
             grad_compiled = x.grad.clone()
 
             torch.testing.assert_close(grad_compiled, grad_ref)
+
+
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+@pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
+def test_linear8bitlt_device_movement(device):
+    """Test moving a Linear8bitLt layer between CPU and an accelerator device."""
+
+    # Create a Linear8bitLt layer on CPU
+    layer = bnb.nn.Linear8bitLt(32, 128, bias=False, has_fp16_weights=False)
+    torch.nn.init.xavier_uniform_(layer.weight)
+
+    # Create a sample input.
+    x = torch.randn(4, 32, dtype=torch.float16, device="cpu")
+
+    # Move to the device. This should quantize the weights.
+    layer = layer.to(device)
+    assert layer.weight.data.dtype == torch.int8
+
+    # Call the layer on the accelerator device.
+    out_accelerator = layer(x.to(device))
+
+    # Move back to CPU and call again.
+    layer = layer.to("cpu")
+    out_cpu = layer(x)
+
+    # Move back to the accelerator device and call again.
+    layer = layer.to(device)
+    out_accelerator_2 = layer(x.to(device))
+
+    # Move back to the CPU and call one last time.
+    layer = layer.to("cpu")
+    out_cpu_2 = layer(x)
+
+    # CPU outputs should match both times.
+    torch.testing.assert_close(out_cpu_2, out_cpu, rtol=1e-8, atol=1e-8)
+
+    # Accelerator outputs should match both times.
+    torch.testing.assert_close(out_accelerator_2, out_accelerator, rtol=1e-8, atol=1e-8)

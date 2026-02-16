@@ -9,7 +9,13 @@ from typing import Optional
 import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
-from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_cuda_version_tuple
+from bitsandbytes.cuda_specs import (
+    CUDASpecs,
+    get_cuda_specs,
+    get_cuda_version_tuple,
+    get_rocm_gpu_arch,
+    get_rocm_warpsize,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,11 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     override_value = os.environ.get("BNB_CUDA_VERSION")
     if override_value:
         library_name = re.sub(r"cuda\d+", f"cuda{override_value}", library_name, count=1)
+        if torch.version.hip:
+            raise RuntimeError(
+                f"BNB_CUDA_VERSION={override_value} detected for ROCm!! \n"
+                f"Clear the variable and retry: export BNB_CUDA_VERSION=\n"
+            )
         logger.warning(
             f"WARNING: BNB_CUDA_VERSION={override_value} environment variable detected; loading {library_name}.\n"
             "This can be used to load a bitsandbytes version built with a CUDA version that is different from the PyTorch CUDA version.\n"
@@ -75,10 +86,11 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
 
 def get_available_cuda_binary_versions() -> list[str]:
     """Get formatted CUDA versions from existing library files using cuda_specs logic"""
-    lib_pattern = f"libbitsandbytes_cuda*{DYNAMIC_LIBRARY_SUFFIX}"
+    lib_pattern = f"libbitsandbytes_{BNB_BACKEND.lower()}*{DYNAMIC_LIBRARY_SUFFIX}"
     versions = []
     for lib in Path(__file__).parent.glob(lib_pattern):
-        match = re.search(r"cuda(\d{3})", lib.name)
+        pattern = rf"{BNB_BACKEND.lower()}(\d+)"
+        match = re.search(pattern, lib.name)
         if match:
             ver_code = int(match.group(1))
             major = ver_code // 10
@@ -89,8 +101,8 @@ def get_available_cuda_binary_versions() -> list[str]:
 
 def parse_cuda_version(version_str: str) -> str:
     """Convert raw version string (e.g. '118' from env var) to formatted version (e.g. '11.8')"""
-    if version_str.isdigit() and len(version_str) == 3:
-        return f"{version_str[:2]}.{version_str[2]}"
+    if version_str.isdigit():
+        return f"{version_str[:-1]}.{version_str[-1]}"
     return version_str  # fallback as safety net
 
 
@@ -151,7 +163,7 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
         """Format detailed error message for library loading failures"""
         analysis = ""
         no_cpu_lib_found = "libbitsandbytes_cpu.so: cannot open" in original_error
-        no_cuda_lib_found = "CUDA binary not found" in original_error
+        no_cuda_lib_found = f"{BNB_BACKEND} binary not found" in original_error
 
         if no_cpu_lib_found:
             analysis = "\n🚨 Failed to load CPU-only bitsandbytes library 🚨\n\n"
@@ -160,9 +172,9 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
             version_list_str = "\n  - " + "\n  - ".join(available_versions) if available_versions else "NONE"
             analysis = (
                 (
-                    f"\n🚨 CUDA VERSION MISMATCH 🚨\n"
-                    f"Requested CUDA version:          {requested_version}\n"
-                    f"Detected PyTorch CUDA version:   {user_cuda_version}\n"
+                    f"\n🚨 {BNB_BACKEND} VERSION MISMATCH 🚨\n"
+                    f"Requested {BNB_BACKEND} version:          {requested_version}\n"
+                    f"Detected PyTorch {BNB_BACKEND} version:   {user_cuda_version}\n"
                     f"Available pre-compiled versions: {version_list_str}\n\n"
                     "This means:\n"
                     "The version you're trying to use is NOT distributed with this package\n\n"
@@ -177,42 +189,47 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
 
         troubleshooting = (
             (
-                "This typically happens when:\n"
-                "1. bitsandbytes doesn't ship with a pre-compiled binary for your CUDA version\n"
-                "2. The library wasn't compiled properly during installation from source\n\n"
+                f"This typically happens when:\n"
+                f"1. bitsandbytes doesn't ship with a pre-compiled binary for your {BNB_BACKEND} version\n"
+                f"2. The library wasn't compiled properly during installation from source\n\n"
             )
             if no_cuda_lib_found
-            else "This typically happens when you checked the code out from source and your torch installation doesn't detect CUDA on your machine.\n\n"
+            else f"This typically happens when you checked the code out from source and your torch installation doesn't detect {BNB_BACKEND} on your machine.\n\n"
         )
 
         note = (
             (
-                "To make bitsandbytes work, the compiled library version MUST exactly match the linked CUDA version.\n"
-                "If your CUDA version doesn't have a pre-compiled binary, you MUST compile from source.\n\n"
+                f"To make bitsandbytes work, the compiled library version MUST exactly match the linked {BNB_BACKEND} version.\n"
+                f"If your {BNB_BACKEND} version doesn't have a pre-compiled binary, you MUST compile from source.\n\n"
             )
             if no_cuda_lib_found
             else ""
         )
 
         compile_instructions = (
-            (
+            ("COMPILE FROM SOURCE for CPU-only:\n  `cmake -DCOMPUTE_BACKEND=cpu -S . && make`\n\n")
+            if not no_cuda_lib_found
+            else (
                 "You have two options:\n"
                 "1. COMPILE FROM SOURCE (required if no binary exists):\n"
                 "   https://huggingface.co/docs/bitsandbytes/main/en/installation#cuda-compile\n"
                 "2. Use BNB_CUDA_VERSION to specify a DIFFERENT CUDA version from the detected one, which is installed on your machine and matching an available pre-compiled version listed above\n\n"
             )
-            if no_cuda_lib_found
-            else "COMPILE FROM SOURCE for CPU-only:\n  `cmake -DCOMPUTE_BACKEND=cpu -S . && make`\n\n"
+            if not HIP_ENVIRONMENT
+            else (
+                "You can COMPILE FROM SOURCE as mentioned here:\n"
+                "   https://huggingface.co/docs/bitsandbytes/main/en/installation?backend=AMD+ROCm#amd-gpu\n"
+            )
         )
 
         diagnostics = (
-            "🔍 Run this command for detailed diagnostics:\n"
-            "python -m bitsandbytes\n\n"
-            "If you've tried everything and still have issues:\n"
-            "1. Include ALL version info (operating system, bitsandbytes, pytorch, cuda, python)\n"
-            "2. Describe what you've tried in detail\n"
-            "3. Open an issue with this information:\n"
-            "   https://github.com/bitsandbytes-foundation/bitsandbytes/issues\n\n"
+            f"🔍 Run this command for detailed diagnostics:\n"
+            f"python -m bitsandbytes\n\n"
+            f"If you've tried everything and still have issues:\n"
+            f"1. Include ALL version info (operating system, bitsandbytes, pytorch, {BNB_BACKEND.lower()}, python)\n"
+            f"2. Describe what you've tried in detail\n"
+            f"3. Open an issue with this information:\n"
+            f"   https://github.com/bitsandbytes-foundation/bitsandbytes/issues\n\n"
         )
 
         return f"{analysis}{base_msg}{troubleshooting}{note}{compile_instructions}{original_error}\n{diagnostics}"
@@ -227,18 +244,19 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
         )
 
         return (
-            f"\n🚨 CUDA SETUP ERROR: Missing dependency: {missing_lib} 🚨\n\n"
-            f"CUDA {cuda_major_version}.x runtime libraries were not found in the LD_LIBRARY_PATH.\n\n"
+            f"\n🚨 {BNB_BACKEND} SETUP ERROR: Missing dependency: {missing_lib} 🚨\n\n"
+            f"{BNB_BACKEND} {cuda_major_version}.x runtime libraries were not found in the LD_LIBRARY_PATH.\n\n"
             f"To fix this, make sure that:\n"
-            f"1. You have installed CUDA {cuda_major_version}.x toolkit on your system\n"
-            f"2. The CUDA runtime libraries are in your LD_LIBRARY_PATH\n\n"
+            f"1. You have installed {BNB_BACKEND} {cuda_major_version}.x toolkit on your system\n"
+            f"2. The {BNB_BACKEND} runtime libraries are in your LD_LIBRARY_PATH\n\n"
             f"You can add them with (and persist the change by adding the line to your .bashrc):\n"
-            f"   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/cuda-{cuda_major_version}.x/lib64\n\n"
+            f"   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/{BNB_BACKEND.lower()}-{cuda_major_version}.x/\
+                    {'lib64' if not HIP_ENVIRONMENT else 'lib'}\n\n"
             f"Original error: {self.error_msg}\n\n"
             f"🔍 Run this command for detailed diagnostics:\n"
             f"python -m bitsandbytes\n\n"
             f"If you've tried everything and still have issues:\n"
-            f"1. Include ALL version info (operating system, bitsandbytes, pytorch, cuda, python)\n"
+            f"1. Include ALL version info (operating system, bitsandbytes, pytorch, {BNB_BACKEND.lower()}, python)\n"
             f"2. Describe what you've tried in detail\n"
             f"3. Open an issue with this information:\n"
             f"   https://github.com/bitsandbytes-foundation/bitsandbytes/issues\n\n"
@@ -267,9 +285,12 @@ def get_native_library() -> BNBNativeLibrary:
         cuda_binary_path = get_cuda_bnb_library_path(cuda_specs)
 
         if not cuda_binary_path.exists():
-            raise RuntimeError(f"Configured CUDA binary not found at {cuda_binary_path}")
+            raise RuntimeError(f"Configured {BNB_BACKEND} binary not found at {cuda_binary_path}")
 
         binary_path = cuda_binary_path
+
+    if torch._C._has_xpu:
+        binary_path = PACKAGE_DIR / f"libbitsandbytes_xpu{DYNAMIC_LIBRARY_SUFFIX}"
 
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
 
@@ -279,33 +300,33 @@ def get_native_library() -> BNBNativeLibrary:
     if hasattr(dll, "get_context"):  # only a CUDA-built library exposes this
         return CudaBNBNativeLibrary(dll)
 
-    logger.warning(
-        "The installed version of bitsandbytes was compiled without GPU support. "
-        "8-bit optimizers and GPU quantization are unavailable."
-    )
     return BNBNativeLibrary(dll)
 
 
-try:
-    # to support Intel CPU/GPU (XPU) backend
-    import intel_extension_for_pytorch as ipex
+ROCM_GPU_ARCH = get_rocm_gpu_arch()
+ROCM_WARP_SIZE_64 = True if get_rocm_warpsize() == 64 else False
 
-    ipex_cpu = ipex if ipex._C._has_cpu() else None
-    ipex_xpu = ipex if ipex._C._has_xpu() else None
-except BaseException:
-    ipex_cpu = None
-    ipex_xpu = None
-
+HIP_ENVIRONMENT = False
+BNB_BACKEND = "CPU"
+if torch.version.hip:
+    HIP_ENVIRONMENT = True
+    BNB_BACKEND = "ROCm"
+elif torch.cuda.is_available():
+    BNB_BACKEND = "CUDA"
+elif torch._C._has_xpu:
+    BNB_BACKEND = "XPU"
 
 try:
     lib = get_native_library()
 except Exception as e:
-    error_msg = str(e)
-    if not (ipex_cpu or ipex_xpu):
+    if BNB_BACKEND in ("CPU", "XPU"):
+        lib = ErrorHandlerMockBNBNativeLibrary("XPU/CPU can run without native library.")
+    else:
+        error_msg = str(e)
         logger.error(
-            f"bitsandbytes library load error: {error_msg}\n If you are using Intel CPU/XPU, please install intel_extension_for_pytorch to enable required ops",
+            f"bitsandbytes library load error: {error_msg}",
             exc_info=True,
         )
 
-    # create a mock with error messaging as fallback
-    lib = ErrorHandlerMockBNBNativeLibrary(error_msg)
+        # create a mock with error messaging as fallback
+        lib = ErrorHandlerMockBNBNativeLibrary(error_msg)

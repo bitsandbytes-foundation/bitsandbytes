@@ -156,3 +156,5 @@ dmypy.json
 dependencies
 cuda_build
 output/
+cuda-spec.md
+cuda-spec-additions.md

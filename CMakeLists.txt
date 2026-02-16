@@ -23,19 +23,21 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Define included source files
-set(CPP_FILES csrc/common.cpp csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
+set(CPP_FILES csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
 set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
+set(HIP_FILES csrc/ops.hip csrc/kernels.hip)
 set(MPS_FILES csrc/mps_ops.mm)
 set(METAL_FILES csrc/mps_kernels.metal)
+set(XPU_FILES csrc/xpu_ops.cpp csrc/xpu_kernels.cpp)
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, mps)")
-set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda mps)
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, mps, xpu)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps xpu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
-  set(CMAKE_OSX_DEPLOYMENT_TARGET 13.1)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET 14.0)
 endif()
 
 set(BNB_OUTPUT_NAME "bitsandbytes")
@@ -47,18 +49,45 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
         message(FATAL_ERROR "CUDA is not supported on macOS" )
     endif()
     set(BUILD_CUDA ON)
+    set(BUILD_HIP OFF)
+    set(BUILD_MPS OFF)
+elseif(${COMPUTE_BACKEND} STREQUAL "hip")
+    if(APPLE)
+        message(FATAL_ERROR "HIP is not supported on macOS" )
+    endif()
+    set(BUILD_CUDA OFF)
+    set(BUILD_HIP ON)
     set(BUILD_MPS OFF)
 elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
+    set(BUILD_HIP OFF)
     set(BUILD_MPS ON)
+elseif(${COMPUTE_BACKEND} STREQUAL "xpu")
+    if(APPLE)
+        message(FATAL_ERROR "XPU is not supported on macOS" )
+    endif()
+    set(BUILD_CUDA OFF)
+    set(BUILD_HIP OFF)
+    set(BUILD_MPS OFF)
+    set(BUILD_XPU ON)
 else()
     set(BUILD_CUDA OFF)
+    set(BUILD_HIP OFF)
     set(BUILD_MPS OFF)
+    set(BUILD_XPU OFF)
+    set(BUILD_CPU ON)
 endif()
 
+
+if (BUILD_CPU)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" HOST_ARCH)
+    find_package(OpenMP)
+endif()
 
 if(BUILD_CUDA)
     # NVCC normally will only work with MSVC up to 1939. VS2022 17.10+ starts using versions 1940+.
@@ -93,37 +122,47 @@ if(BUILD_CUDA)
         )
     endif()
 
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.4")
-        message(FATAL_ERROR "CUDA Version < 11.4 is not supported")
-    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-        message(FATAL_ERROR "CUDA Version > 12 is not supported")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11.8")
+        message(FATAL_ERROR "CUDA Version < 11.8 is not supported")
+    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "14.0")
+        message(FATAL_ERROR "CUDA Version > 13 is not supported")
     endif()
 
     # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
     if(CMAKE_VERSION VERSION_LESS "3.23.0")
         message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
 
-        # 11.4+ supports these at a minimum.
-        set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87)
-        set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80)
+        if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+            # Starting in CUDA 13.0, Thor Blackwell is renamed to SM110.
+            # Support for architectures older than Turing (SM75) is removed.
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 75 80 86 87 88 89 90 100 103 110 120 121)
+            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 80 90 100 110 120)
+        else()
+            # 11.8-12.9 supports these at a minimum.
+            set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
+            set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80 90)
 
-        # CUDA 11.8 adds support for Ada and Hopper.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 89 90)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 90)
-        endif()
+            # CUDA 12.8 adds support for Blackwell.
+            if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120 121)
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+            endif()
 
-        # CUDA 12.8 adds support for Blackwell.
-        if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
+            # CUDA 12.9 adds SM103 (Blackwell B300).
+            if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.9")
+                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 103)
+            endif()
         endif()
     endif()
 
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
 
+    # It's safe for us to enable more aggressive compression for 13.0+
+    if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+        string(APPEND CMAKE_CUDA_FLAGS " --compress-mode=size")
+    endif()
+
     if(PTXAS_VERBOSE)
-        # Verbose? Outputs register usage information, and other things...
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
     endif()
 
@@ -160,6 +199,33 @@ if(BUILD_CUDA)
 
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
     add_compile_definitions(BUILD_CUDA)
+elseif(BUILD_HIP)
+    enable_language(HIP)
+    message(STATUS "HIP Compiler: ${CMAKE_HIP_COMPILER}")
+    if(DEFINED BNB_ROCM_ARCH)
+      set(CMAKE_HIP_ARCHITECTURES ${BNB_ROCM_ARCH})
+    else()
+      if (NOT AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
+        set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1150;gfx1151;gfx1200;gfx1201")
+      elseif (AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
+        set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
+      endif()
+    endif()
+    message(STATUS "HIP Targets: ${CMAKE_HIP_ARCHITECTURES}")
+
+    list(APPEND SRC_FILES ${HIP_FILES})
+
+    string(APPEND BNB_OUTPUT_NAME "_rocm")
+
+    # get hip version
+    execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
+    string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
+    string(REPLACE "." "" HIP_VERSION_SHORT "${HIP_VERSION}")
+
+    string(APPEND BNB_OUTPUT_NAME "${HIP_VERSION_SHORT}")
+    add_compile_definitions(__HIP_PLATFORM_AMD__)
+    add_compile_definitions(__HIP_PLATFORM_HCC__)
+    add_compile_definitions(BUILD_HIP)
 elseif(BUILD_MPS)
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
@@ -179,6 +245,15 @@ elseif(BUILD_MPS)
                 COMMENT "Compiling Metal kernels"
                 VERBATIM)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
+elseif(BUILD_XPU)
+    list(APPEND SRC_FILES ${XPU_FILES})
+    string(APPEND BNB_OUTPUT_NAME "_xpu")
+    add_compile_definitions(BUILD_XPU)
+    set(CMAKE_C_COMPILER icx)
+    set(CMAKE_CXX_COMPILER icpx)
+    if(WIN32)
+        set(CMAKE_CXX_COMPILER icx)
+    endif()
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
     set(GPU_SOURCES)
@@ -196,8 +271,39 @@ endif()
 
 set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
-target_compile_features(bitsandbytes PUBLIC cxx_std_14)
-target_include_directories(bitsandbytes PUBLIC csrc include)
+target_compile_features(bitsandbytes PUBLIC cxx_std_17)
+target_include_directories(bitsandbytes PUBLIC csrc)
+
+if (BUILD_CPU)
+    if (OpenMP_CXX_FOUND)
+        target_link_libraries(bitsandbytes PRIVATE OpenMP::OpenMP_CXX)
+        add_definitions(-DHAS_OPENMP)
+    endif()
+
+    if ((HOST_ARCH MATCHES "x86_64|amd64") AND (NOT MSVC))
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag(-mavx512f HAS_AVX512F_FLAG)
+        check_cxx_compiler_flag(-mavx512bf16 HAS_AVX512BF16_FLAG)
+        if (HAS_AVX512F_FLAG)
+            target_compile_options(bitsandbytes PRIVATE -mavx512f)
+            target_compile_options(bitsandbytes PRIVATE -mavx512dq)
+            target_compile_options(bitsandbytes PRIVATE -mavx512bw)
+            target_compile_options(bitsandbytes PRIVATE -mavx512vl)
+        endif()
+        if (HAS_AVX512BF16_FLAG)
+            target_compile_options(bitsandbytes PRIVATE -mavx512bf16)
+        endif()
+        target_compile_options(
+            bitsandbytes PRIVATE
+            -mprefer-vector-width=256
+            -mfma
+            -mavx2
+            -mlzcnt
+            -mbmi
+            -mbmi2
+        )
+    endif()
+endif()
 
 
 if(BUILD_CUDA)
@@ -208,9 +314,53 @@ if(BUILD_CUDA)
             CUDA_SEPARABLE_COMPILATION ON
     )
 endif()
+if(BUILD_HIP)
+    if(NOT DEFINED ENV{ROCM_PATH})
+      set(ROCM_PATH /opt/rocm)
+    else()
+      set(ROCM_PATH $ENV{ROCM_PATH})
+    endif()
+    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+    macro(find_package_and_print_version PACKAGE_NAME)
+      find_package("${PACKAGE_NAME}" ${ARGN})
+      message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+    endmacro()
+    find_package_and_print_version(hipblas REQUIRED)
+    find_package_and_print_version(hiprand REQUIRED)
+    find_package_and_print_version(hipsparse REQUIRED)
+
+    ## hacky way of excluding hip::amdhip64 (with it linked many tests unexpectedly fail e.g. adam8bit because of inaccuracies)
+    set_target_properties(hip::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
+    set_target_properties(hip-lang::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
+    set(CMAKE_HIP_IMPLICIT_LINK_LIBRARIES "")
+
+    target_include_directories(bitsandbytes PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include ${ROCM_PATH}/include /include)
+    target_link_directories(bitsandbytes PRIVATE ${ROCM_PATH}/lib /lib)
+    target_link_libraries(bitsandbytes PUBLIC roc::hipblas hip::hiprand roc::hipsparse)
+
+    target_compile_definitions(bitsandbytes PUBLIC BNB_USE_HIP)
+    set_source_files_properties(${HIP_FILES} PROPERTIES LANGUAGE HIP)
+    set_target_properties(bitsandbytes PROPERTIES LINKER_LANGUAGE CXX)
+
+    if(HIP_VERSION VERSION_LESS "6.1")
+	target_compile_definitions(bitsandbytes PUBLIC NO_HIPBLASLT)
+    else()
+	find_package(hipblaslt)
+        target_link_libraries(bitsandbytes PUBLIC roc::hipblaslt)
+    endif()
+endif()
 if(BUILD_MPS)
     add_dependencies(bitsandbytes metallib)
     target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
+endif()
+if(BUILD_XPU)
+    set(SYCL_LINK_FLAGS "-fsycl;--offload-compress;-fsycl-targets=spir64_gen,spir64;-Xs;-device pvc,xe-lpg,ats-m150 -options ' -cl-intel-enable-auto-large-GRF-mode -cl-poison-unsupported-fp64-kernels -cl-intel-greater-than-4GB-buffer-required'")
+    set(SYCL_COMPILE_FLAGS "-fsycl;-fhonor-nans;-fhonor-infinities;-fno-associative-math;-fno-approx-func;-fno-sycl-instrument-device-code;--offload-compress;-fsycl-targets=spir64_gen,spir64;")
+
+    set_property(TARGET bitsandbytes PROPERTY CXX_STANDARD 20)
+    target_compile_options(bitsandbytes PRIVATE ${SYCL_COMPILE_FLAGS})
+    target_link_options(bitsandbytes PRIVATE ${SYCL_LINK_FLAGS})
+
 endif()
 
 if(WIN32)

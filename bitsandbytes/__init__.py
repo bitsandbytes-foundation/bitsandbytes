@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import importlib
 import sys
 
 import torch
@@ -26,7 +27,7 @@ supported_torch_devices = {
     "cpu",
     "cuda",  # NVIDIA/AMD GPU
     "xpu",  # Intel GPU
-    "hpu",  # Gaudi
+    "hpu",  # Intel Gaudi
     "npu",  # Ascend NPU
     "mps",  # Apple Silicon
 }
@@ -37,6 +38,13 @@ if torch.cuda.is_available():
 if hasattr(torch, "xpu") and torch.xpu.is_available():
     from .backends.xpu import ops as xpu_ops
 
+if importlib.util.find_spec("habana_frameworks") and importlib.util.find_spec("habana_frameworks.torch"):
+    # In case not automatically imported
+    import habana_frameworks.torch
+
+    if hasattr(torch, "hpu") and torch.hpu.is_available():
+        from .backends.hpu import ops as hpu_ops
+
 
 def _import_backends():
     """
@@ -46,10 +54,7 @@ def _import_backends():
     """
     from importlib.metadata import entry_points
 
-    if sys.version_info < (3, 10):
-        extensions = entry_points().get("bitsandbytes.backends", [])
-    else:
-        extensions = entry_points(group="bitsandbytes.backends")
+    extensions = entry_points(group="bitsandbytes.backends")
 
     for ext in extensions:
         try:
@@ -67,4 +72,4 @@ __pdoc__ = {
     "optim.optimizer.MockArgs": False,
 }
 
-__version__ = "0.47.0.dev0"
+__version__ = "0.49.2.dev0"

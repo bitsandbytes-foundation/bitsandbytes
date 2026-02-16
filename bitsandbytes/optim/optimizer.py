@@ -10,6 +10,7 @@ from typing import Optional
 import torch
 
 import bitsandbytes.functional as F
+from bitsandbytes.utils import sync_gpu
 
 
 class MockArgs:
@@ -64,9 +65,9 @@ class GlobalOptimManager:
            parameters (`torch.Tensor` or `list(torch.Tensors)`):
              The input parameters.
            key (`str`):
-             The hyperparamter to override.
+             The hyperparameter to override.
            value:
-             The hyperparameter values.
+             The hyperparameter value.
            key_value_dict (`dict`):
              A dictionary with multiple key-values to override.
 
@@ -110,12 +111,14 @@ class GlobalOptimManager:
 
 
 class Optimizer8bit(torch.optim.Optimizer):
+    _FSDP_WRAPPED_QUANT_STATE_KEY = "__bnb_optimizer_quant_state__"
+
     def __init__(self, params, defaults, optim_bits=32, is_paged=False):
         """
         Base 8-bit optimizer class.
 
         Arguments:
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
@@ -151,6 +154,34 @@ class Optimizer8bit(torch.optim.Optimizer):
         self.name2qmap["dynamic"] = F.create_dynamic_map(signed=True)
         self.name2qmap["udynamic"] = F.create_dynamic_map(signed=False)
 
+    def state_dict(self):
+        """Return optimizer state, wrapping quantization tensors for FSDP compatibility.
+
+        FSDP's full_optim_state_dict gathers all tensor states across ranks.
+        Quantization states (state1, state2, absmax, etc.) have different shapes
+        than model parameters, causing gather operations to fail. By wrapping
+        these tensors in a nested dict, FSDP skips them during gathering.
+        """
+        state_dict = super().state_dict()
+
+        # Deep copy the state to avoid modifying the original optimizer state
+        # PyTorch's state_dict() only does a shallow copy
+        state_dict["state"] = {
+            k: {kk: vv for kk, vv in v.items()} if isinstance(v, dict) else v for k, v in state_dict["state"].items()
+        }
+
+        # Wrap quantization-specific tensors in a nested dict to hide from FSDP
+        for param_state in state_dict["state"].values():
+            if isinstance(param_state, dict):
+                quant_state = {}
+                keys_to_wrap = [k for k in param_state if k in self.non_castable_tensor_keys]
+                for key in keys_to_wrap:
+                    quant_state[key] = param_state.pop(key)
+                if quant_state:
+                    param_state[self._FSDP_WRAPPED_QUANT_STATE_KEY] = quant_state
+
+        return state_dict
+
     def __setstate__(self, state):
         super().__setstate__(state)
 
@@ -165,6 +196,13 @@ class Optimizer8bit(torch.optim.Optimizer):
         """
         # deepcopy, to be consistent with module API
         state_dict = deepcopy(state_dict)
+
+        # Unwrap quantization states that were wrapped for FSDP compatibility
+        for param_state in state_dict["state"].values():
+            if isinstance(param_state, dict) and self._FSDP_WRAPPED_QUANT_STATE_KEY in param_state:
+                quant_state = param_state.pop(self._FSDP_WRAPPED_QUANT_STATE_KEY)
+                param_state.update(quant_state)
+
         # Validate the state_dict
         groups = self.param_groups
         saved_groups = state_dict["param_groups"]
@@ -271,14 +309,13 @@ class Optimizer8bit(torch.optim.Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        overflows = []
-
         if not self.initialized:
             self.check_overrides()
             self.to_gpu()  # needed for fairseq pure fp16 training
             self.initialized = True
 
         # if self.is_paged: self.page_mng.prefetch_all()
+        p = None
         for gindex, group in enumerate(self.param_groups):
             for pindex, p in enumerate(group["params"]):
                 if p.grad is None:
@@ -289,11 +326,11 @@ class Optimizer8bit(torch.optim.Optimizer):
 
                 self.prefetch_state(p)
                 self.update_step(group, p, gindex, pindex)
-                torch.cuda.synchronize()
-        if self.is_paged:
-            # all paged operation are asynchronous, we need
+                sync_gpu(p)
+        if self.is_paged and p is not None:
+            # all paged operations are asynchronous, we need
             # to sync to make sure all tensors are in the right state
-            torch.cuda.synchronize()
+            sync_gpu(p)
 
         return loss
 
@@ -371,7 +408,7 @@ class Optimizer2State(Optimizer8bit):
         Arguments:
             optimizer_name (`str`):
                 The name of the optimizer.
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             lr (`float`, defaults to 1e-3):
                 The learning rate.
@@ -428,7 +465,6 @@ class Optimizer2State(Optimizer8bit):
         if args is None:
             args = {}
             args["optim_bits"] = optim_bits
-            args["percentile_clipping"] = 100
             args["min_8bit_size"] = min_8bit_size
             args["percentile_clipping"] = percentile_clipping
             args["block_wise"] = block_wise
@@ -508,7 +544,7 @@ class Optimizer2State(Optimizer8bit):
         step = state["step"]
 
         if config["percentile_clipping"] < 100:
-            current_gnorm, clip_value, gnorm_scale = F.percentile_clipping(
+            _current_gnorm, _clip_value, gnorm_scale = F.percentile_clipping(
                 grad,
                 state["gnorm_vec"],
                 step,
@@ -613,7 +649,7 @@ class Optimizer1State(Optimizer8bit):
         Arguments:
             optimizer_name (`str`):
                 The name of the optimizer.
-            params (`torch.tensor`):
+            params (`torch.Tensor`):
                 The input parameters to optimize.
             lr (`float`, defaults to 1e-3):
                 The learning rate.
@@ -655,7 +691,6 @@ class Optimizer1State(Optimizer8bit):
         if args is None:
             args = {}
             args["optim_bits"] = optim_bits
-            args["percentile_clipping"] = 100
             args["min_8bit_size"] = min_8bit_size
             args["percentile_clipping"] = percentile_clipping
             args["block_wise"] = block_wise
@@ -727,7 +762,7 @@ class Optimizer1State(Optimizer8bit):
         step = state["step"]
 
         if config["percentile_clipping"] < 100:
-            current_gnorm, clip_value, gnorm_scale = F.percentile_clipping(
+            _current_gnorm, _clip_value, gnorm_scale = F.percentile_clipping(
                 grad,
                 state["gnorm_vec"],
                 step,

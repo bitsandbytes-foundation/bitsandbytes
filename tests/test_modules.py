@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 import bitsandbytes as bnb
-from tests.helpers import get_available_devices, id_formatter
+from tests.helpers import get_available_devices, id_formatter, is_supported_on_hpu
 
 
 class MockArgs:
@@ -143,9 +143,8 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
-        if threshold > 0:
+        if threshold > 0 and device not in ("cpu", "xpu"):
             assert mlp.fc1.state.idx is not None
-        if threshold > 0:
             assert mlp.fc2.state.idx is not None
 
     mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).to(device).half()
@@ -156,9 +155,8 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
-        if threshold > 0:
+        if threshold > 0 and device not in ("cpu", "xpu"):
             assert mlp.fc1.state.idx is not None
-        if threshold > 0:
             assert mlp.fc2.state.idx is not None
 
     mlp = MLP8bit(32, 64, threshold=threshold, has_fp16_weights=False).half().to(device)
@@ -167,9 +165,8 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
-        if threshold > 0:
+        if threshold > 0 and device not in ("cpu", "xpu"):
             assert mlp.fc1.state.idx is not None
-        if threshold > 0:
             assert mlp.fc2.state.idx is not None
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
@@ -189,9 +186,8 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
-        if threshold > 0:
+        if threshold > 0 and device not in ("cpu", "xpu"):
             assert mlp.fc1.state.idx is not None
-        if threshold > 0:
             assert mlp.fc2.state.idx is not None
     assert mlp.fc1.weight.dtype == torch.int8
     assert mlp.fc2.weight.dtype == torch.int8
@@ -211,9 +207,8 @@ def test_linear8bitlt_no_fp16_weights(device, threshold):
         b1 = torch.randn(16, 8, 32, device=device, dtype=torch.float16)
         o1 = mlp(b1)
         assert o1.dtype == torch.float16
-        if threshold > 0:
+        if threshold > 0 and device not in ("cpu", "xpu"):
             assert mlp.fc1.state.idx is not None
-        if threshold > 0:
             assert mlp.fc2.state.idx is not None
 
     assert mlp.fc1.weight.dtype == torch.int8
@@ -276,18 +271,16 @@ module_dict = {
     "NF4": bnb.nn.LinearNF4,
     "FP4+C": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compress_statistics=True),
     "NF4+C": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compress_statistics=True),
-    "NF4+fp32": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float32),
-    "NF4+fp16": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.float16),
-    "NF4+bf16": lambda d1, d2: bnb.nn.LinearFP4(d1, d2, compute_dtype=torch.bfloat16),
+    "NF4+fp32": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compute_dtype=torch.float32),
+    "NF4+fp16": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compute_dtype=torch.float16),
+    "NF4+bf16": lambda d1, d2: bnb.nn.LinearNF4(d1, d2, compute_dtype=torch.bfloat16),
 }
 
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("module", module_dict.values(), ids=module_dict.keys())
-def test_kbit_backprop(device, module):
-    if device == "cpu":
-        pytest.xfail("Test is not yet supported on CPU")
-
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_kbit_backprop(device, module, dtype):
     b = 16
     dim1 = 36
     dim2 = 84
@@ -295,24 +288,34 @@ def test_kbit_backprop(device, module):
     # dim2 = 83
 
     ref = nn.Sequential(*[torch.nn.Linear(dim1, dim2), torch.nn.Linear(dim2, 128)])
-    # ref[1].weight.requires_grad = False
     torch.nn.init.kaiming_normal_(ref[0].weight)
     torch.nn.init.kaiming_normal_(ref[1].weight)
+    ref[1].weight.requires_grad_(False)
+
     kbit = nn.Sequential(*[torch.nn.Linear(dim1, dim2), module(dim2, 128)])
+
+    if (
+        device == "hpu"
+        and isinstance(kbit[1], bnb.nn.Linear4bit)
+        and not is_supported_on_hpu(kbit[1].weight.quant_type, dtype)
+    ):
+        pytest.skip("This configuration not supported on HPU")
+
     kbit[0].weight.detach().copy_(ref[0].weight)
     kbit[1].weight.detach().copy_(ref[1].weight)
     kbit[0].bias.detach().copy_(ref[0].bias)
     kbit[1].bias.detach().copy_(ref[1].bias)
-    ref = ref.half().to(device)
-    kbit = kbit.half().to(device)
-    kbit = kbit.half().to(device)
+    kbit[1].weight.requires_grad_(False)
+    ref = ref.to(device=device, dtype=dtype)
+    kbit = kbit.to(device=device, dtype=dtype)
+    kbit = kbit.to(device=device, dtype=dtype)
 
     errs1 = []
     errs2 = []
     relerrs1 = []
     relerrs2 = []
     for i in range(100):
-        batch = torch.randn(b, dim1, device=device, dtype=torch.float16)
+        batch = torch.randn(b, dim1, device=device, dtype=dtype)
         out1 = ref(batch)
         out2 = kbit(batch)
         out1.mean().backward()
@@ -345,37 +348,6 @@ def test_kbit_backprop(device, module):
         assert kbit[0].weight.grad is None or kbit[0].bias.grad.sum().item() == 0
 
 
-@pytest.mark.deprecated
-def test_fp8linear():
-    b = 10
-    h = 1024
-    inp = torch.randn(b, h).cuda()
-    fp32 = torch.nn.Linear(h, h * 2).cuda()
-    fp8 = bnb.research.nn.LinearFP8Mixed(h, h * 2).cuda()
-    fp32b = torch.nn.Linear(h * 2, h).cuda()
-    fp8b = bnb.research.nn.LinearFP8Mixed(h * 2, h).cuda()
-
-    fp8.weight.data.copy_(fp32.weight.data)
-    fp8.bias.data.copy_(fp32.bias.data)
-    fp8b.weight.data.copy_(fp32b.weight.data)
-    fp8b.bias.data.copy_(fp32b.bias.data)
-
-    a = fp32b(torch.nn.functional.gelu(fp32(inp)))
-    b = fp8b(torch.nn.functional.gelu(fp8(inp)))
-
-    err = (a - b).abs().mean()
-
-    a.mean().backward()
-    b.mean().backward()
-
-    graderr = (fp8.weight.grad - fp32.weight.grad).abs().mean()
-    bgraderr = (fp8.bias.grad - fp32.bias.grad).abs().mean()
-
-    assert err < 0.05
-    assert graderr < 0.00002
-    assert bgraderr < 0.00002
-
-
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("embedding_dim", [64, 65])
 @pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
@@ -391,6 +363,12 @@ def test_fp8linear():
     ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
 )
 def test_embedding_lossless(device, embedding_class, input_shape, embedding_dim, quant_storage):
+    if device == "hpu":
+        if embedding_class is bnb.nn.EmbeddingFP4:
+            pytest.skip("FP4 is not supported on HPU")
+        elif embedding_class is bnb.nn.EmbeddingNF4 and not is_supported_on_hpu("nf4", torch.float32, quant_storage):
+            pytest.skip("This configuration is not supported on HPU")
+
     num_embeddings = 128
 
     src_weight = (torch.randn((num_embeddings, embedding_dim), dtype=torch.float32) > 0).to(
@@ -436,6 +414,12 @@ def test_embedding_lossless(device, embedding_class, input_shape, embedding_dim,
     ids=lambda x: x.__name__ if inspect.isclass(x) else str(x),
 )
 def test_embedding_error(device, embedding_class, input_shape, embedding_dim, quant_storage):
+    if device == "hpu":
+        if embedding_class is bnb.nn.EmbeddingFP4:
+            pytest.skip("FP4 is not supported on HPU")
+        elif embedding_class is bnb.nn.EmbeddingNF4 and not is_supported_on_hpu("nf4", torch.float32, quant_storage):
+            pytest.skip("This configuration is not supported on HPU")
+
     is_8bit = embedding_class is bnb.nn.Embedding8bit
 
     num_embeddings = 128
@@ -473,31 +457,23 @@ def test_4bit_linear_warnings(device):
     dim1 = 64
 
     with pytest.warns(UserWarning, match=r"inference or training"):
-        net = nn.Sequential(
-            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
-        )
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(10, dim1, device=device, dtype=torch.float16)
         net(inp)
     with pytest.warns(UserWarning, match=r"inference."):
-        net = nn.Sequential(
-            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
-        )
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(1, dim1, device=device, dtype=torch.float16)
         net(inp)
 
     with pytest.warns(UserWarning) as record:
-        net = nn.Sequential(
-            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
-        )
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(10, dim1, device=device, dtype=torch.float16)
         net(inp)
 
-        net = nn.Sequential(
-            *[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4", compute_dtype=torch.float32) for i in range(10)]
-        )
+        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(1, dim1, device=device, dtype=torch.float16)
         net(inp)

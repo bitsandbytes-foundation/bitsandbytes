@@ -4,7 +4,8 @@ import pytest
 import torch
 
 import bitsandbytes
-from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter
+from bitsandbytes.cextension import ROCM_WARP_SIZE_64
+from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, is_supported_on_hpu
 
 # torch.library.opcheck is only available in torch 2.4 and later.
 # When testing with older versions, we will skip it as a no-op.
@@ -101,7 +102,7 @@ class TestLLMInt8Ops:
 class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [128, 256, 512])
     def test_quantize_blockwise(self, device, dtype, blocksize):
         if device == "cpu":
             if dtype != torch.float32:
@@ -125,7 +126,7 @@ class TestInt8BlockwiseQuantOps:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [128, 256, 512])
     def test_dequantize_blockwise(self, device, dtype, blocksize):
         if device == "cpu" and dtype != torch.float32:
             pytest.skip("CPU implementation is only available for float32")
@@ -143,10 +144,6 @@ class TestInt8BlockwiseQuantOps:
         assert out.dtype == dtype
         assert out.device == A.device
 
-        # TODO: Enable it
-        if device == "xpu":
-            pytest.skip("XPU implementation have torch.op inside torch.op, it will fail on op check")
-
         opcheck(torch.ops.bitsandbytes.dequantize_blockwise.default, (A, absmax, code, blocksize, dtype))
 
 
@@ -155,8 +152,11 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [64, 128, 256, 512])
     def test_quantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
         A = torch.randn(1024, 1024, dtype=dtype, device=device)
 
         out, absmax = torch.ops.bitsandbytes.quantize_4bit.default(A, blocksize, quant_type, storage_dtype)
@@ -170,14 +170,17 @@ class Test4bitBlockwiseQuantOps:
         if storage_dtype != torch.uint8:
             pytest.xfail("opcheck fails for storage_dtype != torch.uint8")
 
-        opcheck(torch.ops.bitsandbytes.quantize_4bit, (A, blocksize, quant_type, storage_dtype))
+        opcheck(torch.ops.bitsandbytes.quantize_4bit.default, (A, blocksize, quant_type, storage_dtype))
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [64, 128, 256, 512])
     def test_dequantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
         shape = (128, 128)
 
         n = prod(shape)
@@ -207,16 +210,34 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [128, 256, 512])
+    @pytest.mark.skipif(ROCM_WARP_SIZE_64, reason="this test is not supported on ROCm yet")
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
         out_features = 1024
         in_features = 256
+
+        if device == "cpu" and blocksize > in_features:
+            pytest.skip("CPU implementation only suppoer blocksize <= in_features")
 
         A = torch.randn((1, 1, in_features), dtype=dtype, device=device)
         B = torch.randn((out_features, in_features), dtype=dtype, device=A.device)
         B_q, absmax = torch.ops.bitsandbytes.quantize_4bit(B, blocksize, quant_type, storage_dtype)
         code = bitsandbytes.functional.get_4bit_type(quant_type, device=A.device, blocksize=blocksize)
 
+        if device == "cpu" and bitsandbytes.functional.has_avx512bf16():
+            state = bitsandbytes.functional.QuantState(
+                absmax=absmax,
+                shape=B.shape,
+                dtype=A.dtype,
+                blocksize=blocksize,
+                code=code,
+                quant_type=quant_type,
+            )
+            B_q, state = bitsandbytes.functional._convert_weight_packed_for_cpu(B_q, state)
+            absmax = state.absmax
         out = torch.ops.bitsandbytes.gemv_4bit.default(A, B_q, B.shape, absmax, code, blocksize)
 
         assert out.device == A.device
