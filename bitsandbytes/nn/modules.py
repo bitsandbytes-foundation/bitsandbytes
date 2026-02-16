@@ -11,7 +11,6 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.cextension import ROCM_WARP_SIZE_64
 from bitsandbytes.functional import (
     QuantState,
     _convert_weight_packed_for_cpu,
@@ -226,7 +225,7 @@ class Params4bit(torch.nn.Parameter):
             data = torch.empty(0)
 
         if blocksize is None:
-            blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
+            blocksize = 64
 
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
         self.blocksize = blocksize

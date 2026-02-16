@@ -267,7 +267,7 @@ def test_quant_state_preservation(device, dtype):
 
     module = ParametrizeTestModule(device=device, dtype=dtype)
 
-    blocksize = 128 if ROCM_WARP_SIZE_64 else 64
+    blocksize = 64
 
     # Apply parametrization with specific settings
     replace_parameter_4bit(module, "weight_2d", quant_type="nf4", compress_statistics=True, blocksize=blocksize)
