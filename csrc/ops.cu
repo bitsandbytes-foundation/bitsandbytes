@@ -2773,12 +2773,18 @@ __global__ void kbit_grouped_scalar_gemv(
     #pragma unroll
     for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
 
-    for (int block_idx = lane_id; block_idx < num_k_blocks; block_idx += 32) {
+    // max_iters ensures all lanes iterate the same number of times,
+    // preventing warp divergence deadlock at __shfl_sync when num_k_blocks < 32.
+    const int max_iters = (num_k_blocks + 31) / 32;
+    for (int iter = 0; iter < max_iters; iter++) {
+        const int block_idx = lane_id + iter * 32;
+        const bool valid = (block_idx < num_k_blocks);
+
         unsigned int planes[K_BITS];
         #pragma unroll
         for (int b = 0; b < K_BITS; b++)
-            planes[b] = B_col[block_idx * K_BITS + b];
-        float amax = load_absmax(abs_col, block_idx);
+            planes[b] = valid ? B_col[block_idx * K_BITS + b] : 0u;
+        float amax = valid ? load_absmax(abs_col, block_idx) : 0.0f;
 
         int k_base = block_idx * BS;
 
@@ -2791,7 +2797,7 @@ __global__ void kbit_grouped_scalar_gemv(
             float w = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
             #pragma unroll
             for (int m = 0; m < M_VAL; m++) {
-                if (m < M)
+                if (valid && m < M)
                     acc[m] += w * ScalarOps<scalar_t>::to_float(
                         A_concat[(row_start + m) * K_dim + k_base + j]);
             }
@@ -2942,6 +2948,20 @@ INSTANTIATE_KBIT_DEQUANT(float, 2, half)
 INSTANTIATE_KBIT_DEQUANT(float, 3, half)
 INSTANTIATE_KBIT_DEQUANT(float, 4, half)
 INSTANTIATE_KBIT_DEQUANT(float, 5, half)
+
+// float32 absmax (from quantize_kbit output directly)
+INSTANTIATE_KBIT_DEQUANT(half, 2, float)
+INSTANTIATE_KBIT_DEQUANT(half, 3, float)
+INSTANTIATE_KBIT_DEQUANT(half, 4, float)
+INSTANTIATE_KBIT_DEQUANT(half, 5, float)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 2, float)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 3, float)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 4, float)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 5, float)
+INSTANTIATE_KBIT_DEQUANT(float, 2, float)
+INSTANTIATE_KBIT_DEQUANT(float, 3, float)
+INSTANTIATE_KBIT_DEQUANT(float, 4, float)
+INSTANTIATE_KBIT_DEQUANT(float, 5, float)
 
 // Repack instantiations: one per K value
 #define INSTANTIATE_KBIT_REPACK(K) template void repackKbit<K>(const unsigned int*, const float*, unsigned int*, unsigned char*, int, int);

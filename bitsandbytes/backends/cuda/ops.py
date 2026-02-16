@@ -807,6 +807,7 @@ def _(A: torch.Tensor, codebook: torch.Tensor, k: int) -> tuple[torch.Tensor, to
 _KBIT_ABSMAX_SUFFIX = {
     torch.uint8: "u8abs",
     torch.float16: "fp16abs",
+    torch.float32: "fp32abs",
 }
 
 
@@ -829,12 +830,6 @@ def _(
         absmax.dtype in (torch.float32, torch.float16, torch.uint8),
         lambda: f"absmax must be float32, float16, or uint8 (E4M4), got {absmax.dtype}",
     )
-
-    # If fp32 absmax, encode to E4M4 first
-    if absmax.dtype == torch.float32:
-        from bitsandbytes.functional import encode_absmax_e4m4
-
-        absmax = encode_absmax_e4m4(absmax)
 
     num_blocks = -(n // -32)
     out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)

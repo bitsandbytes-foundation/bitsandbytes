@@ -452,6 +452,20 @@ MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 3)
 MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 4)
 MAKE_KBIT_DEQUANT(fp32, float, fp16abs, half, 5)
 
+// float32 absmax (from quantize_kbit output directly) - all output types
+MAKE_KBIT_DEQUANT(fp16, half, fp32abs, float, 2)
+MAKE_KBIT_DEQUANT(fp16, half, fp32abs, float, 3)
+MAKE_KBIT_DEQUANT(fp16, half, fp32abs, float, 4)
+MAKE_KBIT_DEQUANT(fp16, half, fp32abs, float, 5)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 3)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4)
+MAKE_KBIT_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 5)
+MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 2)
+MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 3)
+MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 4)
+MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 5)
+
 // Forward declaration of repack launcher
 template <int K> void repackKbit(const unsigned int*, const float*, unsigned int*, unsigned char*, int, int);
 
@@ -1185,6 +1199,20 @@ MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 2)
 MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 3)
 MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 4)
 MAKE_CKBIT_DEQUANT(fp32, float, fp16abs, half, 5)
+
+// float32 absmax - all output types
+MAKE_CKBIT_DEQUANT(fp16, half, fp32abs, float, 2)
+MAKE_CKBIT_DEQUANT(fp16, half, fp32abs, float, 3)
+MAKE_CKBIT_DEQUANT(fp16, half, fp32abs, float, 4)
+MAKE_CKBIT_DEQUANT(fp16, half, fp32abs, float, 5)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 3)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4)
+MAKE_CKBIT_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 5)
+MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 2)
+MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 3)
+MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 4)
+MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 5)
 
 // GEMM extern C wrappers
 #define MAKE_CKBIT_GEMM(K)                                                                                             \

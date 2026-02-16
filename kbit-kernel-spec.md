@@ -13,14 +13,44 @@ before a commit, not during development iterations.
    ```bash
    bash benchmarks/bench_ncu.sh
    ```
-   This runs the full grid: 5 shapes × 4 k-values × M=1,2,3,4,8
-   for MMA, scalar GEMV, and cuBLAS fp16 baselines. Takes ~30-60s.
-   Override M values with `M_VALS=3,4 bash benchmarks/bench_ncu.sh`.
+   Override M values: `M_VALS=1,2 bash benchmarks/bench_ncu.sh`.
+   Override expert count: `NUM_EXPERTS=16 bash benchmarks/bench_ncu.sh`.
 
-   The script uses ncu (single-process, time-only metric) for MMA and
-   scalar kernels, and CUDA events for cuBLAS fp16. Output is three
-   tables of `shape k M avg_us`. Compare the "after" numbers against
-   the "before" numbers to confirm improvement or regression.
+   Default runs M=1..8 (scalar/grouped limited to M<=4 automatically).
+
+   The script first prints raw per-kernel tables (MMA, Scalar, Grouped,
+   cuBLAS), then a model-level summary: **one table per M value** with
+   all kernels as columns, all (shape, k) combinations as rows:
+
+   ```
+   M=1:
+   +========+=====+=======+========+=========+=======+========+=========+
+   | shape  |   k |   MMA | Scalar | Grouped |  fp16 |   Best | vs fp16 |
+   +--------+-----+-------+--------+---------+-------+--------+---------+
+   | gateup |   2 |  15.3 |    9.4 |     -   |  18.2 | Scalar |   1.93x |
+   | gateup |   3 |  17.1 |   10.6 |     -   |  18.2 | Scalar |   1.71x |
+   ...
+   | moe_gu |   4 |   -   |    -   |    24.8 |  10.9 | Grouped |   0.44x |
+   ...
+   | TOTAL  |     |       |        |         |       |        |         |
+   |  k=2   |   2 |       |        |         |       |   72.1 |  1.63x  |
+   |  k=3   |   3 |       |        |         |       |   78.4 |  1.50x  |
+   |  k=4   |   4 |       |        |         |       |   85.2 |  1.38x  |
+   |  k=5   |   5 |       |        |         |       |   91.8 |  1.28x  |
+   +========+=====+=======+========+=========+=======+========+=========+
+   ```
+
+   Dense shapes (gateup, down, Q, O, KV) show MMA, Scalar, and fp16.
+   MoE shapes (moe_gu, moe_dn) show Grouped and fp16 (bmm).
+   "Best" picks the fastest kbit kernel (not fp16).
+   "vs fp16" is fp16 / Best — values >1.00x mean kbit wins, <1.00x mean
+   fp16 is faster. A dash "-" means no kbit kernel exists for that config.
+   TOTAL has one row per k-value: it sums the best kernel time across all
+   7 shapes for that k, giving the total weight matmul time per transformer
+   block at that quantization level. Each shape appears once per block.
+
+   Compare the "after" tables against the "before" tables to confirm
+   improvement or regression.
 3. **Repeat 1-2** until performance is satisfactory.
 4. **Run tests (pre-commit only).** Before committing, run the
    kbit matmul tests:
@@ -30,6 +60,27 @@ before a commit, not during development iterations.
    Do not run the full test suite. Only these two test files cover the
    kernels in this document.
 5. **Commit and push.**
+6. **Report results.** After benchmarking, print every per-M summary
+   table (M=1 through M=8) verbatim from the benchmark output. Write
+   the tables directly in your response text — do not summarize or
+   abbreviate. The user will inspect the tables themselves.
+
+### Dequant overhead benchmark (run only when requested)
+
+A separate benchmark measures the cost of dequantizing k-bit weights
+to fp16 before calling cuBLAS. This does not need to be run during
+normal kernel development — only run it if the user explicitly asks,
+or if the dequantize_kbit kernel or dispatch path changes.
+
+```bash
+bash benchmarks/bench_dequant.sh
+```
+
+This uses ncu to measure the actual `kDequantizeBlockwise_kbit_vec`
+kernel time (no Python dispatch overhead), then CUDA events for fp16
+matmul. Output is one table per k value showing fp16 time, dequant
+time, total, and a speed ratio (fp16 / total) where 1.00 = full fp16
+speed. Dequant time scales linearly with element count and k.
 
 ---
 
