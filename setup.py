@@ -37,7 +37,7 @@ class ExtBuildPy(build_py):
 cmdclass = {"build_py": ExtBuildPy}
 
 setup_kwargs = {
-    "version": "0.49.2",
+    "version": "0.50.0.dev0",
     "packages": find_packages(),
     "distclass": BinaryDistribution,
     "cmdclass": {"build_py": ExtBuildPy},
