@@ -1096,10 +1096,27 @@ def _(
     torch._check(B_absmax_all.dtype == torch.uint8, lambda: f"B_absmax must be uint8 (E4M4), got {B_absmax_all.dtype}")
     torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
     torch._check(expert_offsets.dtype == torch.int32, lambda: f"expert_offsets must be int32, got {expert_offsets.dtype}")
-    torch._check(N % 128 == 0, lambda: f"N ({N}) must be divisible by 128")
+    torch._check(N % 64 == 0, lambda: f"N ({N}) must be divisible by 64")
 
     total_M = A_concat.shape[0]
     C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
+
+    # Workspace for split-K atomicAdd reduction (zeroed each call)
+    C_workspace = torch.zeros(total_M, N, device=A_concat.device, dtype=torch.float32)
+    # Tile counters for split-K last-block detection
+    # Upper bound: num_experts * max_m_tiles * max_n_tiles
+    m_blocks = 1
+    if max_M > 48:
+        m_blocks = 4
+    elif max_M > 32:
+        m_blocks = 3
+    elif max_M > 16:
+        m_blocks = 2
+    tile_n = 64 if (m_blocks == 1 and N % 64 == 0) else 128
+    n_tiles = N // tile_n
+    m_tiles = (max_M + m_blocks * 16 - 1) // (m_blocks * 16)
+    mn_tiles = num_experts * m_tiles * n_tiles
+    tile_counters = torch.zeros(mn_tiles, device=A_concat.device, dtype=torch.int32)
 
     dtype_suffix = "fp16" if A_concat.dtype == torch.float16 else "bf16"
 
@@ -1111,6 +1128,8 @@ def _(
             get_ptr(B_absmax_all),
             get_ptr(codebook),
             get_ptr(C_concat),
+            get_ptr(C_workspace),
+            get_ptr(tile_counters),
             get_ptr(expert_offsets),
             ct.c_int(K_dim),
             ct.c_int(N),

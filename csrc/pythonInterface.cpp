@@ -538,25 +538,25 @@ MAKE_KBIT_GEMM_PROD(4)
 MAKE_KBIT_GEMM_PROD(5)
 
 // Forward declaration of grouped GEMM launcher
-template <int K, typename scalar_t> void kbitGroupedGemmProd(const scalar_t*, const unsigned int*, const unsigned char*, const float*, scalar_t*, const int*, int, int, int, int);
+template <int K, typename scalar_t> void kbitGroupedGemmProd(const scalar_t*, const unsigned int*, const unsigned char*, const float*, scalar_t*, float*, int*, const int*, int, int, int, int);
 
 // Unmangled grouped GEMM wrappers (fp16 and bf16)
 #define MAKE_KBIT_GROUPED_GEMM_PROD(K)                                                                                 \
     void kbit_grouped_gemm_prod_fp16_k##K(                                                                             \
         const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                      \
-        const float* codebook, half* C_concat, const int* expert_offsets,                                              \
-        int K_dim, int N, int num_experts, int max_M                                                                   \
+        const float* codebook, half* C_concat, float* C_workspace, int* tile_counters,                                 \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
     ) {                                                                                                                \
         kbitGroupedGemmProd<K, half>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,                         \
-                                     expert_offsets, K_dim, N, num_experts, max_M);                                    \
+                                     C_workspace, tile_counters, expert_offsets, K_dim, N, num_experts, max_M);        \
     }                                                                                                                  \
     void kbit_grouped_gemm_prod_bf16_k##K(                                                                             \
         const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
-        const float* codebook, __nv_bfloat16* C_concat, const int* expert_offsets,                                     \
-        int K_dim, int N, int num_experts, int max_M                                                                   \
+        const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
     ) {                                                                                                                \
         kbitGroupedGemmProd<K, __nv_bfloat16>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,               \
-                                              expert_offsets, K_dim, N, num_experts, max_M);                           \
+                                              C_workspace, tile_counters, expert_offsets, K_dim, N, num_experts, max_M); \
     }
 
 MAKE_KBIT_GROUPED_GEMM_PROD(2)
@@ -1270,19 +1270,19 @@ void ctest_mma(const half* A, const half* B, float* C) { testMMA(A, B, C); }
 #define MAKE_CKBIT_GROUPED_GEMM_PROD(K)                                                                                \
     void ckbit_grouped_gemm_prod_fp16_k##K(                                                                            \
         const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                      \
-        const float* codebook, half* C_concat, const int* expert_offsets,                                              \
-        int K_dim, int N, int num_experts, int max_M                                                                   \
+        const float* codebook, half* C_concat, float* C_workspace, int* tile_counters,                                 \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
     ) {                                                                                                                \
         kbit_grouped_gemm_prod_fp16_k##K(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,                    \
-                                          expert_offsets, K_dim, N, num_experts, max_M);                               \
+                                          C_workspace, tile_counters, expert_offsets, K_dim, N, num_experts, max_M);   \
     }                                                                                                                  \
     void ckbit_grouped_gemm_prod_bf16_k##K(                                                                            \
         const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
-        const float* codebook, __nv_bfloat16* C_concat, const int* expert_offsets,                                     \
-        int K_dim, int N, int num_experts, int max_M                                                                   \
+        const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
     ) {                                                                                                                \
         kbit_grouped_gemm_prod_bf16_k##K(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,                    \
-                                          expert_offsets, K_dim, N, num_experts, max_M);                               \
+                                          C_workspace, tile_counters, expert_offsets, K_dim, N, num_experts, max_M);   \
     }
 
 MAKE_CKBIT_GROUPED_GEMM_PROD(2)
