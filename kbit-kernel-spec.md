@@ -110,6 +110,14 @@ The batch size M seen by each kernel varies:
 - **M=1-32+**: dense layers (full batch)
 - **M=32-512+**: prefill / prompt processing
 
+See `token_analysis.md` for a detailed workload analysis using real
+token distributions from 397 Claude Code sessions. The analysis shows
+that in single-user inference, M=1 decode accounts for 80-84% of total
+GEMM time. In multi-user vLLM serving, the M distribution is bimodal
+(M=num_users for decode-only iterations, M=num_users+chunk for prefill
+iterations), and the crossover where quantized kernels become slower
+than fp16 is at ~16 concurrent users.
+
 ---
 
 ## Four-kernel strategy
@@ -136,6 +144,24 @@ Why four kernels instead of one:
   its compute pipeline.
 - MoE experts launched individually waste 88-97% of SMs. Grouping
   all active experts into one kernel launch solves this.
+
+**Practical importance (from workload analysis in `token_analysis.md`):**
+
+In real deployments, the M distribution is bimodal — not uniform. With
+vLLM continuous batching, iterations are either pure-decode (M=num_users)
+or decode+prefill (M=num_users+chunk_size). The MMA kernel's M=5-16
+range falls in the gap between these modes.
+
+| Scenario | Scalar share | MMA share | dq+cuBLAS share |
+|----------|-------------|-----------|-----------------|
+| 1 user | 87% | 0% | 13% |
+| 4 users | 59% | 0% | 41% |
+| 8 users | 0% | 45% | 55% |
+| 16 users | 0% | 24% | 76% |
+| 32+ users | 0% | 6% | 94% |
+
+Optimization priority: scalar GEMV (1-4 users) > dequant overhead
+reduction (16+ users) > MMA kernel (8-16 users only, narrow range).
 
 ---
 
@@ -306,20 +332,32 @@ the MMA dequant kernel takes ~68 us (instruction-limited, only 1.3%
 of execution is MMA). A fused dequant kernel would take ~5 us for
 this shape, so dequant + cuBLAS ~27 us would beat 68 us.
 
-**Current dequant implementation is not fused.** `dequantize_kbit`
-dispatches ~15 PyTorch elementwise kernels per call, giving a constant
-~800 us overhead regardless of shape. This makes dequant + cuBLAS
-non-competitive at M<64. A fused dequant CUDA kernel is needed for
-strategy 3 to be viable.
+**Dequant kernel** (`kDequantizeBlockwise_kbit_vec`): a single CUDA
+kernel that reads k-bit packed data + absmax and writes fp16 output.
+Templated on absmax type: float32 (from `quantize_kbit` directly),
+uint8 E4M4, or fp16. The float32 absmax path was added to eliminate
+a previous Python-side E4M4 conversion that launched ~15 PyTorch
+elementwise kernels (~800 us). Now it is a single kernel launch.
 
-The crossover point depends on shape. For DRAM-bound shapes (Llama3-8B
-gate/up at 4096x14336), the MMA dequant kernel wins at 1.5x over
-cuBLAS because the 3.2x bandwidth savings dominate. For L2-resident
-shapes (MoE experts, small dense layers), cuBLAS wins because the
-kernel is instruction-limited, not bandwidth-limited.
+Dequant GPU kernel times (ncu-measured, k=4):
+
+| Shape | Elements | Kernel time |
+|-------|----------|-------------|
+| gateup/down | 10.5M | ~30 us |
+| Q/O | 8.4M | ~25 us |
+| KV | 1.0M | ~5 us |
+
+Times scale linearly with element count and k.
+
+**Crossover vs MMA:** At M<=16, MMA beats dequant+cuBLAS on most
+shapes because the fixed dequant cost (~25-30 us) is large relative
+to the matmul. At M>=64, dequant+cuBLAS wins because cuBLAS scales
+efficiently while MMA is instruction-limited. The crossover is
+M=32-64 depending on shape.
 
 **Data format:** Uses flat layout (same as scalar GEMV). The
-`dequantize_kbit` launcher handles both uint8 E4M4 and float32 absmax.
+`dequantize_kbit` launcher handles float32, uint8 E4M4, and fp16
+absmax via the `_KBIT_ABSMAX_SUFFIX` dispatch map.
 
 ---
 
