@@ -1781,7 +1781,8 @@ __device__ __forceinline__ uint32_t pack_two(scalar_t a, scalar_t b) {
 }
 
 template <int K_BITS, int M_BLOCKS, int TILE_N_VAL = 128, typename scalar_t = half>
-__global__ void kbit_gemm_prod(
+__global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64 ? 12 : 1)
+kbit_gemm_prod(
     const scalar_t* __restrict__ A, const unsigned int* __restrict__ B_packed,
     const unsigned char* __restrict__ B_absmax, const float* __restrict__ codebook,
     scalar_t* __restrict__ C, float* __restrict__ C_workspace,
