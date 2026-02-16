@@ -2561,13 +2561,13 @@ static int get_num_sms() {
 // Scalar GEMV kernel: C[M,N] = A[M,K_dim] * W_kbit^T  (M=1..4)
 // ===================================================================
 //
-// V7: Warp Specialization - 2 Producers + 2 Consumers
+// V7c: Warp Specialization with Atomic Flag Sync
 //
-// 4 warps per block (128 threads):
-// - Warps 0,1 (Producers): Prefetch B data (absmax + planes) into shared memory
-// - Warps 2,3 (Consumers): Compute 2 columns using prefetched data
+// 4 warps per block:
+// - Warps 0,1 (Producers): Load B data into shmem, then atomicInc flag
+// - Warps 2,3 (Consumers): Poll flag with memory fence, then compute
 //
-// This hides B_packed load latency behind compute of previous blocks.
+// Uses atomic flag instead of __syncthreads for selective synchronization.
 
 template <int K_BITS, int M_VAL, typename scalar_t>
 __global__ void __launch_bounds__(128, 12)
@@ -2581,36 +2581,36 @@ kbit_scalar_gemv(
 ) {
     constexpr int BS = 32;
     constexpr int VALUES_PER_ITER = 32;
-    constexpr int NUM_PRODUCER_WARPS = 2;  // Warps 0,1
-    constexpr int NUM_CONSUMER_WARPS = 2;  // Warps 2,3
+    constexpr int NUM_PRODUCER_WARPS = 2;
+    constexpr int NUM_CONSUMER_WARPS = 2;
 
     const int warp_id = threadIdx.x / 32;
     const int lane_id = threadIdx.x % 32;
 
-    // 2 columns per block (1 per consumer warp)
     const int col_base = blockIdx.x * 2;
-    
     const int num_k_blocks = K_dim / BS;
 
-    // Shared memory for prefetch: 2 columns x (absmax + planes) per block
-    // Layout: [block0_col0_absmax][block0_col0_p0..pK][block0_col1_absmax][block0_col1_p0..pK]...
+    // Shared memory for prefetch and sync flag
     constexpr int WORDS_PER_COL = 1 + K_BITS;
     constexpr int WORDS_PER_BLOCK = 2 * WORDS_PER_COL;
-    __shared__ uint32_t prefetch_buffer[WORDS_PER_BLOCK * 64];  // Max 64 blocks
+    __shared__ uint32_t prefetch_buffer[WORDS_PER_BLOCK * 64];
+    __shared__ unsigned int producer_done_flag;  // Atomic flag
     
     typedef cub::WarpReduce<float> WarpReduce;
     __shared__ typename WarpReduce::TempStorage temp_storage[4];
 
-    // Codebook in registers (shuffle-based lookup)
+    // Initialize flag (warp 0, lane 0)
+    if (threadIdx.x == 0) producer_done_flag = 0;
+    __threadfence_block();
+
     float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
 
     // === PRODUCER WARPS (0,1) ===
     if (warp_id < NUM_PRODUCER_WARPS) {
-        // Each producer warp handles half the blocks
+        // Load B data for all blocks
         for (int block_idx = warp_id; block_idx < num_k_blocks; block_idx += NUM_PRODUCER_WARPS) {
             uint32_t* slot_ptr = &prefetch_buffer[block_idx * WORDS_PER_BLOCK];
             
-            // Prefetch for both columns
             #pragma unroll
             for (int c = 0; c < 2; c++) {
                 const int col = col_base + c;
@@ -2619,7 +2619,6 @@ kbit_scalar_gemv(
                 const float* abs_col = B_absmax + col * num_k_blocks;
                 const unsigned int* B_col = B_packed + col * num_k_blocks * K_BITS;
                 
-                // Store absmax and planes
                 slot_ptr[c * WORDS_PER_COL] = __float_as_uint(abs_col[block_idx]);
                 #pragma unroll
                 for (int b = 0; b < K_BITS; b++) {
@@ -2627,26 +2626,39 @@ kbit_scalar_gemv(
                 }
             }
         }
+        
+        // Memory fence to ensure writes are visible
+        __threadfence_block();
+        
+        // Signal completion (only lane 0 of each producer warp)
+        if (lane_id == 0) {
+            atomicInc(&producer_done_flag, 2);  // Increment, wrap at 2
+        }
     }
-    
-    __syncthreads();  // Ensure all data is ready
     
     // === CONSUMER WARPS (2,3) ===
     if (warp_id >= NUM_PRODUCER_WARPS) {
-        const int consumer_warp_id = warp_id - NUM_PRODUCER_WARPS;  // 0 or 1
+        const int consumer_warp_id = warp_id - NUM_PRODUCER_WARPS;
         const int col = col_base + consumer_warp_id;
         if (col >= N) return;
+        
+        // Poll flag until producers are done (with memory fence)
+        if (lane_id == 0) {
+            while (atomicAdd(&producer_done_flag, 0) < 2) {
+                __threadfence_block();  // Ensure we see updated flag
+            }
+        }
+        __syncwarp();  // Sync within warp after polling
         
         float acc[M_VAL];
         #pragma unroll
         for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
         
-        // Process K blocks using prefetched data
+        // Compute using prefetched data
         for (int k_iter = lane_id * VALUES_PER_ITER; k_iter < K_dim; k_iter += 32 * VALUES_PER_ITER) {
             const int block_idx = k_iter / BS;
             const int k_remainder = k_iter % BS;
             
-            // Read from prefetch buffer (fast shmem)
             uint32_t* slot_ptr = &prefetch_buffer[block_idx * WORDS_PER_BLOCK];
             float amax = __uint_as_float(slot_ptr[consumer_warp_id * WORDS_PER_COL]);
             
