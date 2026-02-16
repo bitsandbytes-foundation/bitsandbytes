@@ -550,6 +550,28 @@ MAKE_KBIT_GROUPED_GEMM_PROD(3)
 MAKE_KBIT_GROUPED_GEMM_PROD(4)
 MAKE_KBIT_GROUPED_GEMM_PROD(5)
 
+// Forward declarations of scalar GEMV launchers
+template <int K> void kbitScalarGemv(const half*, const unsigned int*, const float*, const float*, half*, int, int, int);
+template <int K> void kbitScalarGemv(const __nv_bfloat16*, const unsigned int*, const float*, const float*, __nv_bfloat16*, int, int, int);
+
+// Scalar GEMV extern C wrappers (fp16 and bf16) — flat layout, no workspace
+#define MAKE_KBIT_SCALAR_GEMV(K) \
+    void kbit_scalar_gemv_fp16_##K( \
+        const half* A, const unsigned int* B_packed, const float* B_absmax, \
+        const float* codebook, half* C, int M, int K_dim, int N) { \
+        kbitScalarGemv<K>(A, B_packed, B_absmax, codebook, C, M, K_dim, N); \
+    } \
+    void kbit_scalar_gemv_bf16_##K( \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const float* B_absmax, \
+        const float* codebook, __nv_bfloat16* C, int M, int K_dim, int N) { \
+        kbitScalarGemv<K>(A, B_packed, B_absmax, codebook, C, M, K_dim, N); \
+    }
+
+MAKE_KBIT_SCALAR_GEMV(2)
+MAKE_KBIT_SCALAR_GEMV(3)
+MAKE_KBIT_SCALAR_GEMV(4)
+MAKE_KBIT_SCALAR_GEMV(5)
+
 // Debug MMA test
 void testMMA(const half*, const half*, float*);
 

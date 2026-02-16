@@ -2546,6 +2546,208 @@ void kbitGroupedGemmProd(
     CUDA_CHECK_RETURN(cudaFree(d_work_offsets));
 }
 
+// ===================================================================
+// K-bit scalar GEMV: C[M,N] = A[M,K] * W_kbit^T  (M=1..4)
+// ===================================================================
+//
+// C=1 architecture: 1 output column per block, 4 warps split K.
+// Grid = N (direct mapping). No split-K, no workspace.
+// Element-at-a-time inner loop for low register pressure (~30 regs).
+// Two-phase shared memory reduction (warp shuffle + shmem).
+// B_packed and B_absmax are in flat (quantize_kbit) layout, no repack needed.
+
+template <int K_BITS, int M_VAL, typename scalar_t>
+__global__ void __launch_bounds__(128, 12)
+kbit_scalar_gemv(
+    const scalar_t* __restrict__ A,
+    const unsigned int* __restrict__ B_packed,   // flat: [N * num_k_blocks * K_BITS] uint32
+    const float* __restrict__ B_absmax,          // flat: [N * num_k_blocks] float32
+    const float* __restrict__ codebook,
+    scalar_t* __restrict__ C,
+    const int M, const int K_dim, const int N
+) {
+    constexpr int BS = 32;          // quantization block size
+    constexpr int NUM_WARPS = 4;
+    constexpr int M_MAX = 4;
+
+    const int warp_id = threadIdx.x / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int col = blockIdx.x;
+
+    const int num_k_blocks = K_dim / BS;
+
+    // Codebook in registers (shuffle-based lookup)
+    float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
+
+    // Column base pointers (flat layout)
+    const unsigned int* B_col = B_packed + col * num_k_blocks * K_BITS;
+    const float* abs_col = B_absmax + col * num_k_blocks;
+
+    // Accumulators
+    float acc[M_VAL];
+    #pragma unroll
+    for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
+
+    // All 128 threads stride through K blocks: thread t handles blocks t, t+128, t+256, ...
+    // max_iters ensures all lanes iterate same number of times (no warp divergence at __shfl_sync).
+    const int max_iters = (num_k_blocks + 127) / 128;
+
+    for (int iter = 0; iter < max_iters; iter++) {
+        const int block_idx = threadIdx.x + iter * 128;
+        const bool valid = (block_idx < num_k_blocks);
+
+        // Load k bit-plane words (guarded; invalid threads get 0)
+        unsigned int planes[K_BITS];
+        #pragma unroll
+        for (int b = 0; b < K_BITS; b++)
+            planes[b] = valid ? B_col[block_idx * K_BITS + b] : 0u;
+
+        // Load absmax (guarded; invalid threads get 0)
+        float amax = valid ? abs_col[block_idx] : 0.0f;
+
+        const int k_base = block_idx * BS;
+
+        // Double-buffered shared memory for async A loads
+        // Each thread loads 16 bytes per M row per sub-iteration
+        __shared__ int4 sh_A[2][M_MAX][128];  // [buffer][m][thread] = 2 * 4 * 128 * 16 = 16KB max
+
+        // Prefetch first sub-iteration before the loop
+        #pragma unroll
+        for (int m = 0; m < M_VAL; m++) {
+            if (valid) {
+                const int4* a_ptr = reinterpret_cast<const int4*>(
+                    &A[m * K_dim + k_base + 0 * 8]);
+                asm volatile("cp.async.ca.shared.global [%0], [%1], 16;" :
+                    : "r"((unsigned)&sh_A[0][m][threadIdx.x]), "l"((unsigned long long)a_ptr));
+            }
+        }
+        asm volatile("cp.async.commit_group;");
+
+        #pragma unroll
+        for (int sub = 0; sub < 4; sub++) {
+            const int buf = sub % 2;
+            const int next_buf = (sub + 1) % 2;
+
+            // Wait for previous prefetch to complete
+            asm volatile("cp.async.wait_group %0;" : : "n"(0));
+
+            // Prefetch next sub-iteration (if not last)
+            if (sub + 1 < 4) {
+                #pragma unroll
+                for (int m = 0; m < M_VAL; m++) {
+                    if (valid) {
+                        const int4* a_ptr = reinterpret_cast<const int4*>(
+                            &A[m * K_dim + k_base + (sub + 1) * 8]);
+                        asm volatile("cp.async.ca.shared.global [%0], [%1], 16;" :
+                            : "r"((unsigned)&sh_A[next_buf][m][threadIdx.x]), "l"((unsigned long long)a_ptr));
+                    }
+                }
+                asm volatile("cp.async.commit_group;");
+            }
+
+            // Cache 8 dequantized weights (same for all M rows)
+            // Optimized: pre-shift planes once, then extract with fewer ops
+            unsigned int sp[K_BITS];
+            #pragma unroll
+            for (int b = 0; b < K_BITS; b++)
+                sp[b] = planes[b] >> (sub * 8);
+
+            float w8[8];
+            #pragma unroll
+            for (int j = 0; j < 8; j++) {
+                // Extract j-th bit from each plane and combine into index
+                int idx = 0;
+                #pragma unroll
+                for (int b = 0; b < K_BITS; b++)
+                    idx |= ((sp[b] >> j) & 1) << b;
+                w8[j] = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+            }
+
+            // Compute using prefetched A from shared memory
+            #pragma unroll
+            for (int m = 0; m < M_VAL; m++) {
+                const int4 av = sh_A[buf][m][threadIdx.x];
+                const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av);
+
+                // FMA using cached weights
+                #pragma unroll
+                for (int j = 0; j < 8; j++) {
+                    if (valid)
+                        acc[m] += w8[j] * ScalarOps<scalar_t>::to_float(ap[j]);
+                }
+            }
+        }
+    }
+
+    // Phase 1: Intra-warp reduction via shuffle
+    #pragma unroll
+    for (int m = 0; m < M_VAL; m++) {
+        #pragma unroll
+        for (int offset = 16; offset >= 1; offset /= 2)
+            acc[m] += __shfl_down_sync(0xFFFFFFFF, acc[m], offset);
+    }
+
+    // Phase 2: Inter-warp reduction via shared memory
+    __shared__ float s_partial[NUM_WARPS * M_MAX];
+
+    if (lane_id == 0) {
+        #pragma unroll
+        for (int m = 0; m < M_VAL; m++)
+            s_partial[warp_id * M_MAX + m] = acc[m];
+    }
+    __syncthreads();
+
+    // Thread 0 sums all 4 warps and writes output
+    if (threadIdx.x == 0) {
+        #pragma unroll
+        for (int m = 0; m < M_VAL; m++) {
+            if (m < M) {
+                float sum = s_partial[0 * M_MAX + m] + s_partial[1 * M_MAX + m]
+                          + s_partial[2 * M_MAX + m] + s_partial[3 * M_MAX + m];
+                C[m * N + col] = ScalarOps<scalar_t>::from_float(sum);
+            }
+        }
+    }
+}
+
+// ---- Scalar GEMV launcher ----
+template <int K, int MV, typename scalar_t>
+static void kbitScalarGemvLaunch(
+    const scalar_t* A, const unsigned int* B_packed,
+    const float* B_absmax, const float* codebook,
+    scalar_t* C, int M, int K_dim, int N
+) {
+    constexpr int BLOCK_SIZE = 128; // 4 warps
+    int grid_size = N;  // C=1: one block per output column
+
+    kbit_scalar_gemv<K, MV, scalar_t><<<grid_size, BLOCK_SIZE>>>(
+        A, B_packed, B_absmax, codebook, C, M, K_dim, N);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Public entry point: selects M_VAL template
+template <int K, typename scalar_t>
+void kbitScalarGemv(
+    const scalar_t* A, const unsigned int* B_packed,
+    const float* B_absmax, const float* codebook,
+    scalar_t* C, int M, int K_dim, int N
+) {
+    #define LAUNCH_SCALAR_GEMV(MV) \
+        kbitScalarGemvLaunch<K, MV, scalar_t>( \
+            A, B_packed, B_absmax, codebook, C, M, K_dim, N)
+
+    if (M <= 1) { LAUNCH_SCALAR_GEMV(1); }
+    else if (M <= 2) { LAUNCH_SCALAR_GEMV(2); }
+    else if (M <= 3) { LAUNCH_SCALAR_GEMV(3); }
+    else { LAUNCH_SCALAR_GEMV(4); }
+
+    #undef LAUNCH_SCALAR_GEMV
+}
+
+// ===================================================================
+// Grouped scalar GEMV: MoE expert dispatch (no split-K needed)
+// ===================================================================
+
 // ---- Debug: Simple MMA test kernel ----
 // Takes fp16 A[16,16] and fp16 B[16,8] (B stored row-major), outputs fp32 C[16,8].
 __global__ void test_mma_kernel(const half* __restrict__ A, const half* __restrict__ B, float* __restrict__ C) {
@@ -2694,3 +2896,13 @@ INSTANTIATE_KBIT_GROUPED_GEMM_PROD(2)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(3)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(4)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(5)
+
+// Scalar GEMV instantiations (fp16 and bf16)
+#define INSTANTIATE_SCALAR_GEMV(K) \
+    template void kbitScalarGemv<K, half>(const half*, const unsigned int*, const float*, const float*, half*, int, int, int); \
+    template void kbitScalarGemv<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const float*, const float*, __nv_bfloat16*, int, int, int);
+
+INSTANTIATE_SCALAR_GEMV(2)
+INSTANTIATE_SCALAR_GEMV(3)
+INSTANTIATE_SCALAR_GEMV(4)
+INSTANTIATE_SCALAR_GEMV(5)

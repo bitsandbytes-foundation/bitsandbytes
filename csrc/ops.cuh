@@ -187,4 +187,41 @@ void gemm_4bit_inference_naive(
 
 template <typename T, int FUNC> void func(T* A, T* B, T value, long n);
 
+// ===================================================================
+// K-bit scalar GEMV: C[M,N] = A[M,K] * W_kbit^T  (M=1..4)
+// ===================================================================
+//
+// Computes M rows of GEMV where weights are k-bit quantized.
+// No split-K, no workspace. Grid=N direct mapping.
+//
+// Parameters:
+//   K_BITS: 2, 3, 4, or 5 (quantization bit width)
+//   M_VAL: 1, 2, 3, or 4 (batch size per call)
+//   scalar_t: half or __nv_bfloat16
+//
+// Layout:
+//   A: [M, K_dim] row-major fp16/bf16
+//   B_packed: [N * num_k_blocks * K_BITS] uint32 (flat, no repack needed)
+//   B_absmax: [N * num_k_blocks] float32
+//   codebook: [2^K_BITS] float32
+//   C: [M, N] row-major fp16/bf16
+
+template <int K, typename scalar_t>
+void kbitScalarGemv(
+    const scalar_t* A, const unsigned int* B_packed,
+    const float* B_absmax, const float* codebook,
+    scalar_t* C, int M, int K_dim, int N);
+
+// Grouped scalar GEMV for MoE expert dispatch
+template <int K, typename scalar_t>
+void kbitGroupedScalarGemv(
+    const scalar_t* A_concat,
+    const unsigned int* B_packed_all,
+    const unsigned char* B_absmax_all,
+    const float* codebook,
+    scalar_t* C_concat,
+    const int* expert_offsets,
+    const int* work_offsets,
+    int K_dim, int N, int num_experts, int total_work);
+
 #endif
