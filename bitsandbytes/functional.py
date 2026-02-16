@@ -15,7 +15,7 @@ from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
-from .cextension import ROCM_WARP_SIZE_64, lib
+from .cextension import lib
 
 name2qmap = {}
 
@@ -869,8 +869,6 @@ def quantize_fp4(
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
-    if blocksize is None:
-        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "fp4", quant_storage)
 
 
@@ -882,8 +880,6 @@ def quantize_nf4(
     compress_statistics=False,
     quant_storage=torch.uint8,
 ):
-    if blocksize is None:
-        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return quantize_4bit(A, absmax, out, blocksize, compress_statistics, "nf4", quant_storage)
 
 
@@ -905,7 +901,7 @@ def quantize_4bit(
         absmax (`torch.Tensor`, *optional*): A tensor to use to store the absmax values.
         out (`torch.Tensor`, *optional*): A tensor to use to store the result.
         blocksize (`int`, *optional*):
-            The size of the blocks. Defaults to 128 on ROCm and 64 otherwise.
+            The size of the blocks. Defaults to 64.
             Valid values are 32, 64, 128, 256, 512, 1024, 2048, and 4096.
         compress_statistics (`bool`, *optional*): Whether to additionally quantize the absmax values. Defaults to False.
         quant_type (`str`, *optional*): The data type to use: `nf4` or `fp4`. Defaults to `fp4`.
@@ -921,7 +917,7 @@ def quantize_4bit(
     """
 
     if blocksize is None:
-        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
+        blocksize = 64
 
     input_shape = A.shape
 
@@ -975,8 +971,6 @@ def dequantize_fp4(
     out: Optional[torch.Tensor] = None,
     blocksize: Optional[int] = None,
 ) -> torch.Tensor:
-    if blocksize is None:
-        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "fp4")
 
 
@@ -987,8 +981,6 @@ def dequantize_nf4(
     out: Optional[torch.Tensor] = None,
     blocksize: Optional[int] = None,
 ) -> torch.Tensor:
-    if blocksize is None:
-        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
     return dequantize_4bit(A, quant_state, absmax, out, blocksize, "nf4")
 
 
@@ -1016,7 +1008,7 @@ def dequantize_4bit(
             Required if `quant_state` is not provided and ignored otherwise.
         out (`torch.Tensor`, *optional*): A tensor to use to store the result.
         blocksize (`int`, *optional*):
-            The size of the blocks. Defaults to 128 on ROCm and 64 otherwise.
+            The size of the blocks. Defaults to 64.
             Valid values are 32, 64, 128, 256, 512, 1024, 2048, and 4096.
         quant_type (`str`, *optional*): The data type to use: `nf4` or `fp4`. Defaults to `fp4`.
 
@@ -1028,7 +1020,7 @@ def dequantize_4bit(
     """
 
     if blocksize is None:
-        blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
+        blocksize = 64
 
     if quant_state is None:
         assert absmax is not None and out is not None
