@@ -637,7 +637,7 @@ def _optimizer_update_32bit_impl(
     optim_fns = str2optimizer32bit.get(optimizer_name, None)
     if optim_fns is None:
         raise ValueError(
-            f"Unsupported optimizer name: {optimizer_name}. Supported optimizers: {list(str2optimizer8bit_blockwise.keys())}"
+            f"Unsupported optimizer name: {optimizer_name}. Supported optimizers: {list(str2optimizer32bit.keys())}"
         )
     if g.dtype == torch.float32:
         optim_func = optim_fns[0]
