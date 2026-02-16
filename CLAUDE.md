@@ -22,14 +22,13 @@ If a PR exists, review and build on it instead of starting from scratch. Do not 
 
 # MANDATORY: Run linting before every pull request
 
-Before pushing a PR branch, you MUST run linting and formatting checks. CI will reject PRs that fail these checks:
+Before pushing a PR branch, you MUST run the full pre-commit suite. CI will reject PRs that fail any check:
 
 ```bash
-ruff check --fix .
-ruff format .
+pre-commit run --all-files
 ```
 
-Review and commit any changes these tools make. Full details on all CI lint checks (ruff, typos, clang-format, trailing whitespace, etc.): `agents/linting_guide.md`
+This runs ruff, ruff format, typos, trailing-whitespace, clang-format, and all other CI lint hooks. Review and commit any changes it makes. Do NOT run only `ruff check` and `ruff format` — those are just 2 of 10 hooks. Full details: `agents/linting_guide.md`
 
 # Testing: only run relevant tests
 
@@ -48,3 +47,16 @@ To triage open GitHub issues, generate prompt files, and launch parallel worker 
 # Issue maintenance and triage
 
 To identify and close stale, duplicate, or resolved issues: `agents/issue_maintenance_guide.md`. Common closeable patterns (old CUDA setup, Windows pre-support, third-party app issues, etc.) are cataloged in `agents/issue_patterns.md`.
+
+# Pull request review
+
+When tasked with reviewing a pull request, you MUST read these guides before starting the review:
+
+1. `agents/pr_review_guide.md` — The complete review workflow (classification, checklists, verdict format, and posting instructions). This is the primary guide; follow its steps sequentially.
+2. `agents/architecture_guide.md` — Codebase architecture and patterns
+3. `agents/code_standards.md` — Code quality expectations
+4. `agents/api_surface.md` — Public API catalog (for detecting breaking changes)
+5. `agents/downstream_integrations.md` — How Transformers, PEFT, Accelerate, TGI, and vLLM depend on bitsandbytes (for assessing downstream impact)
+6. `agents/security_guide.md` — Trust model and security checklist (especially for external contributor PRs)
+
+For CUDA kernel changes, also read `agents/kbit_gemm_context.md`. The PR review guide references all of these at the appropriate steps.

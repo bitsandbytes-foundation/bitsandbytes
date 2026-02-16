@@ -4,18 +4,15 @@ This project enforces linting and formatting via CI on every pull request. The L
 
 ## Quick Reference
 
-Before committing and pushing, run:
-
-```bash
-ruff check --fix .
-ruff format .
-```
-
-Or equivalently, run the full pre-commit suite (requires `pre-commit` installed):
+Before committing and pushing, run the full pre-commit suite:
 
 ```bash
 pre-commit run --all-files
 ```
+
+This runs all 10 hooks (ruff, ruff format, typos, clang-format, trailing-whitespace,
+and others). Do **not** run only `ruff check` and `ruff format` — those are just 2 of
+the 10 hooks. CI runs the full suite and will reject PRs that fail any hook.
 
 If any hook makes changes, **stage and commit those changes** before pushing.
 
@@ -111,8 +108,7 @@ The `typos` checker scans all text. If it flags a false positive (e.g., a domain
 ## Recommended Workflow
 
 1. Make your code changes
-2. Run `ruff check --fix .` to auto-fix lint issues
-3. Run `ruff format .` to auto-fix formatting
-4. Review the changes the tools made (especially `--fix` auto-corrections)
-5. Stage everything and commit
-6. Optionally run `pre-commit run --all-files` as a final check before pushing
+2. Run `pre-commit run --all-files` to run all lint and formatting hooks
+3. Review the changes the hooks made (especially ruff `--fix` auto-corrections)
+4. Stage everything and commit
+5. Run `pre-commit run --all-files` again to confirm everything passes

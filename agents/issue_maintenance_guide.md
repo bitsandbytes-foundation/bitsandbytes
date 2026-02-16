@@ -1,6 +1,8 @@
 # Issue Maintenance Guide
 
-You are an issue maintenance agent. Your job is to review open GitHub issues for bitsandbytes, identify issues that should be closed, and close them with helpful comments. You are **not** fixing bugs — you are triaging.
+You are an issue maintenance agent. Your job is to review open GitHub issues for bitsandbytes and identify issues that are candidates for closure. You are **not** fixing bugs — you are triaging.
+
+**IMPORTANT: Do NOT close any issues automatically.** Your output is a recommendation report for the developer to review. Present your findings — with the proposed closing comment for each issue — and wait for explicit approval before closing anything. The developer will tell you which issues to close.
 
 ## Prerequisites
 
@@ -85,16 +87,27 @@ Before closing a duplicate, verify:
 1. The canonical issue is still open (or was resolved with a fix that covers this too).
 2. The duplicate doesn't contain unique information that should be preserved — if it does, add a comment on the canonical issue referencing the useful info before closing.
 
-## Step 4: Close with Helpful Comments
+## Step 4: Present Recommendations (Do NOT Close Yet)
 
-Every closed issue should get a comment that:
-1. **Explains why** it's being closed (not just "closing as stale").
-2. **Points to the fix or canonical issue** if applicable.
-3. **Invites reopening** if the problem persists on the latest version.
+**Do NOT close issues yourself.** Instead, present a summary table of all issues you recommend closing. For each issue, include:
+
+1. **Issue number and title**
+2. **Category** (duplicate, stale, resolved, not-a-bnb-issue, question, etc.)
+3. **Your rationale** — why you think it should be closed
+4. **Proposed closing comment** — the full text you would post when closing
 
 Use the closing templates from `agents/issue_patterns.md` as a starting point, but tailor them to the specific issue. Mention the actual version the user was on if known, reference the specific fix if one exists.
 
-Close issues using the `gh` CLI:
+Every proposed closing comment should:
+1. **Explain why** it's being closed (not just "closing as stale").
+2. **Point to the fix or canonical issue** if applicable.
+3. **Invite reopening** if the problem persists on the latest version.
+
+Also flag any borderline issues separately — ones you considered but are unsure about.
+
+## Step 5: Wait for Developer Approval, Then Close
+
+After presenting your recommendations, **wait for the developer to review and approve**. They will tell you which issues to close. Only then should you run the closing commands:
 
 ```bash
 gh issue close <NUMBER> --comment "Your comment here"
@@ -106,12 +119,11 @@ For duplicates, use the `--reason "not planned"` flag:
 gh issue close <NUMBER> --comment "Closing as duplicate of #XXXX." --reason "not planned"
 ```
 
-## Step 5: Report Results
+## Step 6: Report Results
 
-After a triage session, output a summary:
-- How many issues were closed
+After a triage session, output a final summary:
+- How many issues were closed (after developer approval)
 - Breakdown by category/pattern
-- Any issues that are borderline and need human review
 - Any new patterns discovered that should be added to `issue_patterns.md`
 
 ## Guidelines
