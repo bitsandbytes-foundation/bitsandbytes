@@ -2561,13 +2561,13 @@ static int get_num_sms() {
 // Scalar GEMV kernel: C[M,N] = A[M,K_dim] * W_kbit^T  (M=1..4)
 // ===================================================================
 //
-// V7c: Warp Specialization with Atomic Flag Sync
+// V7d: 3 Producers + 1 Consumer with Atomic Flag Sync
 //
 // 4 warps per block:
-// - Warps 0,1 (Producers): Load B data into shmem, then atomicInc flag
-// - Warps 2,3 (Consumers): Poll flag with memory fence, then compute
+// - Warps 0,1,2 (Producers): Load B data into shmem
+// - Warp 3 (Consumer): Compute 1 column using prefetched data
 //
-// Uses atomic flag instead of __syncthreads for selective synchronization.
+// More producers = faster prefetch, consumer never waits.
 
 template <int K_BITS, int M_VAL, typename scalar_t>
 __global__ void __launch_bounds__(128, 12)
@@ -2581,74 +2581,66 @@ kbit_scalar_gemv(
 ) {
     constexpr int BS = 32;
     constexpr int VALUES_PER_ITER = 32;
-    constexpr int NUM_PRODUCER_WARPS = 2;
-    constexpr int NUM_CONSUMER_WARPS = 2;
+    constexpr int NUM_PRODUCER_WARPS = 3;
+    constexpr int NUM_CONSUMER_WARPS = 1;
 
     const int warp_id = threadIdx.x / 32;
     const int lane_id = threadIdx.x % 32;
 
-    const int col_base = blockIdx.x * 2;
+    // 1 column per block (only 1 consumer warp)
+    const int col = blockIdx.x;
+    if (col >= N) return;
+    
     const int num_k_blocks = K_dim / BS;
 
     // Shared memory for prefetch and sync flag
     constexpr int WORDS_PER_COL = 1 + K_BITS;
-    constexpr int WORDS_PER_BLOCK = 2 * WORDS_PER_COL;
-    __shared__ uint32_t prefetch_buffer[WORDS_PER_BLOCK * 64];
-    __shared__ unsigned int producer_done_flag;  // Atomic flag
+    __shared__ uint32_t prefetch_buffer[WORDS_PER_COL * 64];  // Max 64 blocks
+    __shared__ unsigned int producer_done_flag;
     
     typedef cub::WarpReduce<float> WarpReduce;
     __shared__ typename WarpReduce::TempStorage temp_storage[4];
 
-    // Initialize flag (warp 0, lane 0)
+    // Initialize flag
     if (threadIdx.x == 0) producer_done_flag = 0;
     __threadfence_block();
 
     float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
 
-    // === PRODUCER WARPS (0,1) ===
+    // === PRODUCER WARPS (0,1,2) ===
     if (warp_id < NUM_PRODUCER_WARPS) {
-        // Load B data for all blocks
+        // Load B data for all blocks (strided)
         for (int block_idx = warp_id; block_idx < num_k_blocks; block_idx += NUM_PRODUCER_WARPS) {
-            uint32_t* slot_ptr = &prefetch_buffer[block_idx * WORDS_PER_BLOCK];
+            uint32_t* slot_ptr = &prefetch_buffer[block_idx * WORDS_PER_COL];
             
+            const float* abs_col = B_absmax + col * num_k_blocks;
+            const unsigned int* B_col = B_packed + col * num_k_blocks * K_BITS;
+            
+            slot_ptr[0] = __float_as_uint(abs_col[block_idx]);
             #pragma unroll
-            for (int c = 0; c < 2; c++) {
-                const int col = col_base + c;
-                if (col >= N) continue;
-                
-                const float* abs_col = B_absmax + col * num_k_blocks;
-                const unsigned int* B_col = B_packed + col * num_k_blocks * K_BITS;
-                
-                slot_ptr[c * WORDS_PER_COL] = __float_as_uint(abs_col[block_idx]);
-                #pragma unroll
-                for (int b = 0; b < K_BITS; b++) {
-                    slot_ptr[c * WORDS_PER_COL + 1 + b] = B_col[block_idx * K_BITS + b];
-                }
+            for (int b = 0; b < K_BITS; b++) {
+                slot_ptr[1 + b] = B_col[block_idx * K_BITS + b];
             }
         }
         
-        // Memory fence to ensure writes are visible
+        // Memory fence
         __threadfence_block();
         
-        // Signal completion (only lane 0 of each producer warp)
+        // Signal completion
         if (lane_id == 0) {
-            atomicInc(&producer_done_flag, 2);  // Increment, wrap at 2
+            atomicInc(&producer_done_flag, 3);  // 3 producers
         }
     }
     
-    // === CONSUMER WARPS (2,3) ===
-    if (warp_id >= NUM_PRODUCER_WARPS) {
-        const int consumer_warp_id = warp_id - NUM_PRODUCER_WARPS;
-        const int col = col_base + consumer_warp_id;
-        if (col >= N) return;
-        
-        // Poll flag until producers are done (with memory fence)
+    // === CONSUMER WARP (3) ===
+    if (warp_id == 3) {
+        // Poll flag until all 3 producers are done
         if (lane_id == 0) {
-            while (atomicAdd(&producer_done_flag, 0) < 2) {
-                __threadfence_block();  // Ensure we see updated flag
+            while (atomicAdd(&producer_done_flag, 0) < 3) {
+                __threadfence_block();
             }
         }
-        __syncwarp();  // Sync within warp after polling
+        __syncwarp();
         
         float acc[M_VAL];
         #pragma unroll
@@ -2659,13 +2651,13 @@ kbit_scalar_gemv(
             const int block_idx = k_iter / BS;
             const int k_remainder = k_iter % BS;
             
-            uint32_t* slot_ptr = &prefetch_buffer[block_idx * WORDS_PER_BLOCK];
-            float amax = __uint_as_float(slot_ptr[consumer_warp_id * WORDS_PER_COL]);
+            uint32_t* slot_ptr = &prefetch_buffer[block_idx * WORDS_PER_COL];
+            float amax = __uint_as_float(slot_ptr[0]);
             
             unsigned int planes[K_BITS];
             #pragma unroll
             for (int b = 0; b < K_BITS; b++) {
-                planes[b] = slot_ptr[consumer_warp_id * WORDS_PER_COL + 1 + b];
+                planes[b] = slot_ptr[1 + b];
             }
             
             // Compute
@@ -2717,8 +2709,8 @@ static void kbitScalarGemvLaunch(
     const float* B_absmax, const float* codebook,
     scalar_t* C, int M, int K_dim, int N
 ) {
-    constexpr int BLOCK_SIZE = 128;   // 4 warps: 2 producers + 2 consumers
-    constexpr int COLS_PER_BLOCK = 2; // 2 consumer warps, 1 column each
+    constexpr int BLOCK_SIZE = 128;   // 4 warps: 3 producers + 1 consumer
+    constexpr int COLS_PER_BLOCK = 1; // 1 consumer warp, 1 column
     int grid_size = (N + COLS_PER_BLOCK - 1) / COLS_PER_BLOCK;
 
     kbit_scalar_gemv<K, MV, scalar_t><<<grid_size, BLOCK_SIZE>>>(
