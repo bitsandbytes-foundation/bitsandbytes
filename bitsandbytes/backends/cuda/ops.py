@@ -209,12 +209,13 @@ def _get_col_absmax(
 
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
+    A = A.contiguous()
     torch._check_is_size(blocksize)
 
     if ROCM_WARP_SIZE_64:
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
-    else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    else:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32])
 
     torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
 
@@ -269,10 +270,11 @@ def _(
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
+    A = A.contiguous()
     if ROCM_WARP_SIZE_64:
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
-    else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    else:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32])
 
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     torch._check(
@@ -303,10 +305,11 @@ def _dequantize_blockwise_impl(
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    A = A.contiguous()
     if ROCM_WARP_SIZE_64:
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
-    else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    else:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32])
 
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(
@@ -385,10 +388,11 @@ def _dequantize_4bit_impl(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
+    A = A.contiguous()
     if ROCM_WARP_SIZE_64:
-        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128])
-    else:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
+    else:
+        torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32])
 
     torch._check(quant_type in ["fp4", "nf4"])
     torch._check(

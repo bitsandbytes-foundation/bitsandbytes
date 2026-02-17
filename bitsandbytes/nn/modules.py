@@ -11,7 +11,6 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.cextension import ROCM_WARP_SIZE_64
 from bitsandbytes.functional import (
     QuantState,
     _convert_weight_packed_for_cpu,
@@ -226,7 +225,7 @@ class Params4bit(torch.nn.Parameter):
             data = torch.empty(0)
 
         if blocksize is None:
-            blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
+            blocksize = 64
 
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
         self.blocksize = blocksize
@@ -986,6 +985,17 @@ class Linear8bitLt(nn.Linear):
                 Number of output features of the linear layer.
             bias (`bool`, defaults to `True`):
                 Whether the linear class uses the bias term as well.
+            has_fp16_weights (`bool`, defaults to `True`):
+                If False, weights are quantized to int8 on ``.to(device)``. If True,
+                weights remain in fp16 and are quantized on-the-fly during each forward pass.
+            threshold (`float`, defaults to `0.0`):
+                Outlier threshold for mixed-precision decomposition (LLM.int8()). During the
+                forward pass, activation columns where any value exceeds this threshold are
+                computed in fp16, while the remaining columns use int8. This operates on
+                **activations** (inputs), not on weight values. Set to 0.0 to disable
+                mixed-precision decomposition and quantize all columns to int8.
+            index: Indices for weight reordering (used internally).
+            device: Device to initialize the layer on.
         """
         super().__init__(input_features, output_features, bias, device)
         self.state = bnb.MatmulLtState()

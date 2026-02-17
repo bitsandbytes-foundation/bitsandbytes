@@ -152,7 +152,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [64, 128, 256, 512])
     def test_quantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
             pytest.skip("This configuration is not supported on HPU.")
@@ -176,7 +176,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [64, 128, 256, 512])
     def test_dequantize_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
             pytest.skip("This configuration is not supported on HPU.")
@@ -210,7 +210,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
-    @pytest.mark.parametrize("blocksize", [64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [128, 256, 512])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [128, 256, 512])
     @pytest.mark.skipif(ROCM_WARP_SIZE_64, reason="this test is not supported on ROCm yet")
     def test_gemv_4bit(self, device, dtype, storage_dtype, quant_type, blocksize):
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
@@ -246,3 +246,108 @@ class Test4bitBlockwiseQuantOps:
         assert out.isreal().all()
 
         opcheck(torch.ops.bitsandbytes.gemv_4bit.default, (A, B_q, B.shape, absmax, code, blocksize))
+
+
+class TestNonContiguousInputs:
+    """Regression tests for #1342 and #1690: quantization must handle non-contiguous tensors correctly."""
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("blocksize", [64, 128, 256])
+    def test_quantize_blockwise_non_contiguous(self, device, dtype, blocksize):
+        if device == "cpu":
+            pytest.skip("Non-contiguous fix targets CUDA backend only")
+
+        code = bitsandbytes.functional.create_dynamic_map().to(device)
+
+        # Create non-contiguous tensor via slicing
+        A_full = torch.randn(3, 4, 6, 256, dtype=dtype, device=device)
+        A_noncontig = A_full[:, ::2, :, :]
+        assert not A_noncontig.is_contiguous()
+
+        A_contig = A_noncontig.contiguous()
+
+        out_nc, absmax_nc = torch.ops.bitsandbytes.quantize_blockwise(A_noncontig, code, blocksize)
+        out_c, absmax_c = torch.ops.bitsandbytes.quantize_blockwise(A_contig, code, blocksize)
+
+        torch.testing.assert_close(absmax_nc, absmax_c)
+        torch.testing.assert_close(out_nc, out_c)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("blocksize", [64, 128, 256])
+    def test_dequantize_blockwise_non_contiguous(self, device, dtype, blocksize):
+        if device == "cpu":
+            pytest.skip("Non-contiguous fix targets CUDA backend only")
+
+        code = bitsandbytes.functional.create_dynamic_map().to(device, dtype=torch.float32)
+
+        # Quantize a contiguous tensor, then create non-contiguous uint8 via transpose
+        A = torch.randn(1024, 1024, dtype=dtype, device=device)
+        quantized, absmax = torch.ops.bitsandbytes.quantize_blockwise(A, code, blocksize)
+
+        # Create non-contiguous uint8 tensor by transposing and transposing back
+        q_noncontig = quantized.t().t()
+        # If that's still contiguous, use a different approach
+        if q_noncontig.is_contiguous():
+            # Pad and slice to force non-contiguity
+            q_padded = torch.zeros(1024, 1025, dtype=torch.uint8, device=device)
+            q_padded[:, :1024] = quantized
+            q_noncontig = q_padded[:, :1024]
+
+        assert not q_noncontig.is_contiguous()
+        q_contig = q_noncontig.contiguous()
+
+        out_nc = torch.ops.bitsandbytes.dequantize_blockwise(q_noncontig, absmax, code, blocksize, dtype)
+        out_c = torch.ops.bitsandbytes.dequantize_blockwise(q_contig, absmax, code, blocksize, dtype)
+
+        torch.testing.assert_close(out_nc, out_c)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256])
+    def test_quantize_4bit_non_contiguous(self, device, dtype, quant_type, blocksize):
+        if device != "cuda":
+            pytest.skip("Non-contiguous fix targets CUDA backend only")
+
+        # Reproduce issue #1342: non-contiguous tensor from slicing
+        A_full = torch.randn(3, 4, 6, 256, dtype=dtype, device=device)
+        A_noncontig = A_full[:, ::2, :, :]
+        assert not A_noncontig.is_contiguous()
+
+        A_contig = A_noncontig.contiguous()
+        storage_dtype = torch.uint8
+
+        out_nc, absmax_nc = torch.ops.bitsandbytes.quantize_4bit(A_noncontig, blocksize, quant_type, storage_dtype)
+        out_c, absmax_c = torch.ops.bitsandbytes.quantize_4bit(A_contig, blocksize, quant_type, storage_dtype)
+
+        torch.testing.assert_close(absmax_nc, absmax_c)
+        torch.testing.assert_close(out_nc, out_c)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256])
+    def test_quantize_4bit_roundtrip_non_contiguous(self, device, dtype, quant_type, blocksize):
+        """End-to-end test: quantize non-contiguous, dequantize, compare with contiguous path."""
+        if device != "cuda":
+            pytest.skip("Non-contiguous fix targets CUDA backend only")
+
+        A_full = torch.randn(3, 4, 6, 256, dtype=dtype, device=device)
+        A_noncontig = A_full[:, ::2, :, :]
+        assert not A_noncontig.is_contiguous()
+
+        A_contig = A_noncontig.contiguous()
+        storage_dtype = torch.uint8
+
+        # Quantize both
+        q_nc, absmax_nc = torch.ops.bitsandbytes.quantize_4bit(A_noncontig, blocksize, quant_type, storage_dtype)
+        q_c, absmax_c = torch.ops.bitsandbytes.quantize_4bit(A_contig, blocksize, quant_type, storage_dtype)
+
+        # Dequantize both
+        shape = A_contig.shape
+        deq_nc = torch.ops.bitsandbytes.dequantize_4bit(q_nc, absmax_nc, blocksize, quant_type, shape, dtype)
+        deq_c = torch.ops.bitsandbytes.dequantize_4bit(q_c, absmax_c, blocksize, quant_type, shape, dtype)
+
+        torch.testing.assert_close(deq_nc, deq_c)

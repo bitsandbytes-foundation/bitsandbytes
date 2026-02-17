@@ -193,7 +193,7 @@ def test_linear_serialization(
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128])
+@pytest.mark.parametrize("blocksize", [32, 64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_copy_param(device, quant_type, blocksize, compress_statistics):
     if device == "hpu" and not is_supported_on_hpu(quant_type):
@@ -250,7 +250,41 @@ def test_params4bit_torch_chunk_split(device, quant_type):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128])
+@pytest.mark.parametrize(
+    "quant_storage",
+    [torch.uint8, torch.float16, torch.bfloat16, torch.float32],
+    ids=describe_dtype,
+)
+def test_quant_storage_shard_roundtrip(device, quant_type, quant_storage):
+    """Test that quantized weights survive a flatten-chunk-reassemble roundtrip.
+
+    Non-uint8 quant_storage exists so that FSDP can shard quantized tensors
+    without splitting packed 4-bit pairs. This test simulates FSDP's
+    shard/gather pattern and verifies numerical correctness after reassembly.
+    """
+    M, K = 256, 128
+    A = torch.randn(1, K, dtype=torch.float16, device=device)
+    B = torch.randn(M, K, dtype=torch.float16, device=device)
+
+    qB, state = bnb.functional.quantize_4bit(B, quant_type=quant_type, quant_storage=quant_storage)
+    ref = bnb.functional.gemv_4bit(A, qB.t(), state=state)
+
+    # Simulate FSDP: flatten, split into shards, reassemble
+    flat = qB.flatten()
+    n_shards = 4
+    shards = flat.chunk(n_shards)
+    reassembled = torch.cat(shards).reshape(qB.shape)
+
+    assert reassembled.dtype == qB.dtype
+    assert torch.equal(reassembled.view(torch.uint8), qB.view(torch.uint8)), "Bytes changed after shard roundtrip"
+
+    out = bnb.functional.gemv_4bit(A, reassembled.t(), state=state)
+    torch.testing.assert_close(out, ref)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("blocksize", [32, 64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
     if device == "hpu" and not is_supported_on_hpu(quant_type):
@@ -279,7 +313,7 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
-@pytest.mark.parametrize("blocksize", [64, 128] if not ROCM_WARP_SIZE_64 else [128])
+@pytest.mark.parametrize("blocksize", [32, 64, 128] if not ROCM_WARP_SIZE_64 else [64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_real_serialization(device, quant_type, blocksize, compress_statistics):
     if device == "hpu" and not is_supported_on_hpu(quant_type):
