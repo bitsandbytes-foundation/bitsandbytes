@@ -38,7 +38,7 @@ def _(
     quant_type: str,
     quant_storage: torch.dtype,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(blocksize in [64, 128])
+    torch._check(blocksize in [64, 128, 256, 512])
     torch._check(quant_type in ("fp4", "nf4"))
 
     k = _get_kernel()
@@ -78,7 +78,7 @@ def _(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check(blocksize in [64, 128])
+    torch._check(blocksize in [64, 128, 256, 512])
     torch._check(quant_type in ("fp4", "nf4"))
     return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
 
