@@ -3,7 +3,7 @@
 <p align="center">
     <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/bitsandbytes-foundation/bitsandbytes.svg?color=blue"></a>
     <a href="https://pepy.tech/project/bitsandbytes"><img alt="Downloads" src="https://static.pepy.tech/badge/bitsandbytes/month"></a>
-    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/actions/workflows/tests.yml"><img alt="Nightly Unit Tests" src="https://img.shields.io/github/actions/workflow/status/bitsandbytes-foundation/bitsandbytes/tests.yml?logo=github&label=Nightly%20Tests"></a>
+    <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/actions/workflows/tests-nightly.yml"><img alt="Nightly Unit Tests" src="https://img.shields.io/github/actions/workflow/status/bitsandbytes-foundation/bitsandbytes/tests-nightly.yml?logo=github&label=Nightly%20Tests"></a>
     <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/bitsandbytes-foundation/bitsandbytes"></a>
     <a href="https://pypi.org/project/bitsandbytes/"><img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/bitsandbytes"></a>
 </p>
@@ -19,20 +19,21 @@ The library includes quantization primitives for 8-bit & 4-bit operations, throu
 ## System Requirements
 bitsandbytes has the following minimum requirements for all platforms:
 
-* Python 3.9+
+* Python 3.10+
 * [PyTorch](https://pytorch.org/get-started/locally/) 2.3+
   * _Note: While we aim to provide wide backwards compatibility, we recommend using the latest version of PyTorch for the best experience._
 
 #### Accelerator support:
 
 <small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
-[document in the 0.47.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.47.0/README.md#accelerator-support).
+[document in the 0.49.2 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.49.2/README.md#accelerator-support).
 </small>
 
 ##### Legend:
 🚧 = In Development,
 〰️ = Partially Supported,
 ✅ = Supported,
+🐢 = Slow Implementation Supported,
 ❌ = Not Supported
 
 <table>
@@ -53,7 +54,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td align="right">x86-64</td>
       <td>◻️ CPU</td>
-      <td>AVX2</td>
+      <td>Minimum: AVX2<br>Optimized: AVX512F, AVX512BF16</td>
       <td>✅</td>
       <td>✅</td>
       <td>❌</td>
@@ -70,11 +71,11 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>🟥 AMD GPU <br><code>cuda</code></td>
       <td>
-        CDNA: gfx90a, gfx942<br>
-        RDNA: gfx1100
+        CDNA: gfx90a, gfx942, gfx950<br>
+        RDNA: gfx1100, gfx1101, gfx1150, gfx1151, gfx1200, gfx1201
       </td>
       <td>✅</td>
-      <td>〰️</td>
+      <td>✅</td>
       <td>✅</td>
     </tr>
     <tr>
@@ -92,7 +93,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟪 Intel Gaudi <br><code>hpu</code></td>
-      <td>Gaudi1, Gaudi2, Gaudi3</td>
+      <td>Gaudi2, Gaudi3</td>
       <td>✅</td>
       <td>〰️</td>
       <td>❌</td>
@@ -114,7 +115,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>✅</td>
     </tr>
     <tr>
-      <td colspan="6">🪟 <strong>Windows 11 / Windows Server 2019+</strong></td>
+      <td colspan="6">🪟 <strong>Windows 11 / Windows Server 2022+</strong></td>
     </tr>
     <tr>
       <td align="right">x86-64</td>
@@ -150,16 +151,16 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">arm64</td>
       <td>◻️ CPU</td>
       <td>Apple M1+</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>✅</td>
+      <td>✅</td>
       <td>❌</td>
     </tr>
     <tr>
       <td></td>
       <td>⬜ Metal <br><code>mps</code></td>
       <td>Apple M1+</td>
-      <td>🚧</td>
-      <td>🚧</td>
+      <td>🐢</td>
+      <td>🐢</td>
       <td>❌</td>
   </tbody>
 </table>
@@ -173,12 +174,12 @@ bitsandbytes has the following minimum requirements for all platforms:
 ## :heart: Sponsors
 The continued maintenance and development of `bitsandbytes` is made possible thanks to the generous support of our sponsors. Their contributions help ensure that we can keep improving the project and delivering valuable updates to the community.
 
-<a href="https://hf.co" target="_blank"><img width="100" src="https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg" alt="Hugging Face"></a>
+<kbd><a href="https://hf.co" target="_blank"><img width="100" src="https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg" alt="Hugging Face"></a></kbd>
+&nbsp;
+<kbd><a href="https://intel.com" target="_blank"><img width="100" src="https://avatars.githubusercontent.com/u/17888862?s=100&v=4" alt="Intel"></a></kbd>
 
 ## License
 `bitsandbytes` is MIT licensed.
-
-We thank Fabio Cannizzo for his work on [FastBinarySearch](https://github.com/fabiocannizzo/FastBinarySearch) which we use for CPU quantization.
 
 ## How to cite us
 If you found this library useful, please consider citing our work:

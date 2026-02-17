@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from functools import wraps
 from math import prod, sqrt
 from typing import Optional
 
@@ -6,6 +7,32 @@ import torch
 
 from ..._ops import register_kernel
 from ..utils import CODE
+
+
+def _try_torch_compile(func=None, **compile_kwargs):
+    """
+    Wrapper around torch.compile that falls back to the original function if compilation fails.
+    """
+
+    def decorator(fn):
+        try:
+            compiled_fn = torch.compile(fn, **compile_kwargs)
+
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                try:
+                    return compiled_fn(*args, **kwargs)
+                except Exception:
+                    return fn(*args, **kwargs)
+
+            return wrapper
+        except Exception:
+            return fn
+
+    if func is None:
+        return decorator
+    else:
+        return decorator(func)
 
 
 @register_kernel("bitsandbytes::int8_mm_dequant", "default")
@@ -232,8 +259,7 @@ def _(
     return packed, absmax.float()
 
 
-@register_kernel("bitsandbytes::dequantize_4bit", "default")
-def _(
+def _dequantize_4bit_impl(
     A: torch.Tensor,
     absmax: torch.Tensor,
     blocksize: int,
@@ -241,13 +267,6 @@ def _(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check_is_size(blocksize)
-    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
-    torch._check(
-        dtype in [torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
-    )
-
     # Enable non uint8 dtype
     if A.dtype != torch.uint8:
         A = A.view(torch.uint8)
@@ -281,6 +300,25 @@ def _(
     out = out.reshape(-1, *shape[1:]).to(dtype)
 
     return out
+
+
+@register_kernel("bitsandbytes::dequantize_4bit", "default")
+def _(
+    A: torch.Tensor,
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check_is_size(blocksize)
+    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
+    torch._check(
+        dtype in [torch.bfloat16, torch.float16, torch.float32],
+        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
+    )
+
+    return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "default")
@@ -321,7 +359,7 @@ name2optimizer_id = {
 }
 
 
-@torch.compile
+@_try_torch_compile
 def _optimizer_precondition_32bit(
     g: torch.Tensor,
     p: torch.Tensor,
@@ -382,7 +420,7 @@ def _optimizer_precondition_32bit(
     unorm_vec.add_(total_norm)
 
 
-@torch.compile
+@_try_torch_compile
 def _optimizer_update_32bit(
     g: torch.Tensor,
     p: torch.Tensor,

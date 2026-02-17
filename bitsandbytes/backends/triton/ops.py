@@ -82,7 +82,8 @@ def quantize_4bit(
     blocks = -(n // -(blocksize * 2))
 
     absmax = torch.empty((blocks * 2,), device=A.device, dtype=A.dtype)
-    out = torch.empty((n // 2, 1), device=A.device, dtype=torch.uint8)
+    # Use n - n//2 instead of (n+1)//2 to avoid integer overflow for large n
+    out = torch.empty((n - n // 2, 1), device=A.device, dtype=torch.uint8)
 
     with torch_accelerator_module.device(A.device):
         kernels_4bit.quantize_4bit_blockwise_triton(

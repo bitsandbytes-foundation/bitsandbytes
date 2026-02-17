@@ -5,6 +5,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <common_hip.cuh>
 #include <ops_hip.cuh>
 #include <kernels_hip.cuh>
 #include <hipcub/hipcub.hpp>
@@ -14,13 +15,11 @@
 #include <hipblaslt/hipblaslt.h>
 #endif
 #include <limits>
-#include <BinSearch.h>
 #include <cassert>
 #include <common.h>
 
 #define ERR_NOT_IMPLEMENTED 100
 
-using namespace BinSearch;
 using std::cout;
 using std::endl;
 
@@ -28,7 +27,7 @@ void quantize(float *code, float *A, unsigned char *out, int n)
 {
   int num_blocks = n/1024;
   num_blocks = n % 1024 == 0 ? num_blocks : num_blocks + 1;
- hipLaunchKernelGGL(( kQuantize), dim3(num_blocks), dim3(1024), 0, 0, code, A, out, n);
+  hipLaunchKernelGGL(( kQuantize), dim3(num_blocks), dim3(1024), 0, 0, code, A, out, n);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
@@ -57,27 +56,32 @@ template <typename T, int STOCHASTIC, int DATA_TYPE> void quantizeBlockwise(floa
    hipLaunchKernelGGL(( kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(128), 0, 0, code, A, absmax, out, rand, rand_offset, n);
   else if(blocksize == 128)
    hipLaunchKernelGGL(( kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(64), 0, 0, code, A, absmax, out, rand, rand_offset, n);
-  //else if(blocksize == 64)
-  // hipLaunchKernelGGL(( kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(32), 0, 0, code, A, absmax, out, rand, rand_offset, n);
-
+  else if(blocksize == 64) {
+    // For 4-bit (FP4/NF4): use specialized kernel that processes 2 blocks of 64 per thread block
+    // Works on all warp sizes (32 and 64) by using logical warps of 32
+    if constexpr(DATA_TYPE > 0)
+      hipLaunchKernelGGL(( kQuantizeBlockwise64<T, DATA_TYPE>), dim3((num_blocks + 1) / 2), dim3(64), 0, 0, code, A, absmax, out, rand, rand_offset, n);
+    else
+      hipLaunchKernelGGL(( kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>), dim3(num_blocks), dim3(32), 0, 0, code, A, absmax, out, rand, rand_offset, n);
+  }
 
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
 template<typename T, int DATA_TYPE> void dequantizeBlockwise(float *code, unsigned char *A, float *absmax, T *out, int blocksize, const int n, hipStream_t stream)
 {
-  int num_blocks = n/blocksize;
-  num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
   int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
 
+  // Upcast to int64 to avoid overflow for large n
+  int grid_blocks = ((int64_t)n + tile_size - 1) / tile_size;
+
   if(DATA_TYPE > 0)
-   hipLaunchKernelGGL(( kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>), dim3((n+tile_size-1)/tile_size), dim3(64), 0, stream, code, A, absmax, out, blocksize/2, n);
+    hipLaunchKernelGGL(( kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>), dim3(grid_blocks), dim3(64), 0, stream, code, A, absmax, out, blocksize / 2, n);
   else
-   hipLaunchKernelGGL(( kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>), dim3((n+tile_size-1)/tile_size), dim3(64), 0, stream, code, A, absmax, out, blocksize, n);
+    hipLaunchKernelGGL(( kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>), dim3(grid_blocks), dim3(64), 0, stream, code, A, absmax, out, blocksize, n);
 
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
-
 
 
 
@@ -96,10 +100,10 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       if(max_unorm > 0.0f)
 			{
 				CUDA_CHECK_RETURN(hipMemset(unorm, 0, 1*sizeof(float)));
-       hipLaunchKernelGGL(( kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8>), dim3(num_blocks), dim3(512), 0, 0, g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+        hipLaunchKernelGGL(( kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8>), dim3(num_blocks), dim3(512), 0, 0, g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(hipPeekAtLastError());
       }
-		hipLaunchKernelGGL((	kOptimizer32bit2State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, beta3, alpha, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+		  hipLaunchKernelGGL((	kOptimizer32bit2State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, beta3, alpha, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(hipPeekAtLastError());
 			break;
 		case MOMENTUM:
@@ -108,22 +112,22 @@ template<typename T, int OPTIMIZER> void optimizer32bit(T* g, T* p,
       if(max_unorm > 0.0f)
 			{
 				CUDA_CHECK_RETURN(hipMemset(unorm, 0, 1*sizeof(float)));
-			hipLaunchKernelGGL((	kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>), dim3(num_blocks), dim3(512), 0, 0, g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+			  hipLaunchKernelGGL((	kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>), dim3(num_blocks), dim3(512), 0, 0, g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(hipPeekAtLastError());
 			}
 
-		hipLaunchKernelGGL((	kOptimizer32bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+		  hipLaunchKernelGGL((	kOptimizer32bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(hipPeekAtLastError());
 			break;
     case LION:
       // in lion, the momentum update after the parameter update
-     hipLaunchKernelGGL(( kOptimizer32bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
+      hipLaunchKernelGGL(( kOptimizer32bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, skip_zeros, n);
       CUDA_CHECK_RETURN(hipPeekAtLastError());
 
       if(max_unorm > 0.0f)
       {
         CUDA_CHECK_RETURN(hipMemset(unorm, 0, 1*sizeof(float)));
-       hipLaunchKernelGGL(( kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>), dim3(num_blocks), dim3(512), 0, 0, g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+        hipLaunchKernelGGL(( kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>), dim3(num_blocks), dim3(512), 0, 0, g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
         CUDA_CHECK_RETURN(hipPeekAtLastError());
       }
       break;
@@ -150,9 +154,9 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
 		case ADAM:
 			CUDA_CHECK_RETURN(hipMemset(new_max1, 0, 1*sizeof(float)));
 			CUDA_CHECK_RETURN(hipMemset(new_max2, 0, 1*sizeof(float)));
-		hipLaunchKernelGGL((	kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>), dim3(num_blocks), dim3(256), 0, 0, p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n);
+		  hipLaunchKernelGGL((	kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER>), dim3(num_blocks), dim3(256), 0, 0, p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1, new_max2, gnorm_scale, n);
 			CUDA_CHECK_RETURN(hipPeekAtLastError());
-		hipLaunchKernelGGL((	kOptimizerStatic8bit2State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
+		  hipLaunchKernelGGL((	kOptimizerStatic8bit2State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
 																														quantiles1, quantiles2, max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(hipPeekAtLastError());
 		break;
@@ -160,20 +164,20 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bit(T* p, T* g,
     case RMSPROP:
     case ADAGRAD:
 			CUDA_CHECK_RETURN(hipMemset(new_max1, 0, 1*sizeof(float)));
-		hipLaunchKernelGGL((	kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(256), 0, 0, p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+		  hipLaunchKernelGGL((	kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(256), 0, 0, p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(hipPeekAtLastError());
-		hipLaunchKernelGGL((	kOptimizerStatic8bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
+		  hipLaunchKernelGGL((	kOptimizerStatic8bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
 																														quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
 			CUDA_CHECK_RETURN(hipPeekAtLastError());
 			break;
     case LION:
       // in lion, the momentum update happens after the parameter update
-     hipLaunchKernelGGL(( kOptimizerStatic8bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
+      hipLaunchKernelGGL(( kOptimizerStatic8bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(1024), 0, 0, p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr,
                                                             quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
       CUDA_CHECK_RETURN(hipPeekAtLastError());
 
       CUDA_CHECK_RETURN(hipMemset(new_max1, 0, 1*sizeof(float)));
-     hipLaunchKernelGGL(( kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(256), 0, 0, p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
+      hipLaunchKernelGGL(( kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER>), dim3(num_blocks), dim3(256), 0, 0, p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n);
       CUDA_CHECK_RETURN(hipPeekAtLastError());
       break;
 		default:
@@ -215,7 +219,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(
     case ADEMAMIX:
 			num_blocks = n/BLOCKSIZE_2STATE;
 			num_blocks = n % BLOCKSIZE_2STATE == 0 ? num_blocks : num_blocks + 1;
-		hipLaunchKernelGGL((	kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>), dim3(num_blocks), dim3(BLOCKSIZE_2STATE/NUM_2STATE), 0, 0, p, g, state1, state2, beta1, beta2, beta3, alpha, eps, step, lr,
+		  hipLaunchKernelGGL((	kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>), dim3(num_blocks), dim3(BLOCKSIZE_2STATE/NUM_2STATE), 0, 0, p, g, state1, state2, beta1, beta2, beta3, alpha, eps, step, lr,
 																														quantiles1, quantiles2, absmax1, absmax2, weight_decay, gnorm_scale, skip_zeros, n);
 			CUDA_CHECK_RETURN(hipPeekAtLastError());
 		break;
@@ -225,7 +229,7 @@ template<typename T, int OPTIMIZER> void optimizerStatic8bitBlockwise(
     case LION:
 			num_blocks = n/BLOCKSIZE_1STATE;
 			num_blocks = n % BLOCKSIZE_1STATE == 0 ? num_blocks : num_blocks + 1;
-		hipLaunchKernelGGL((	kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE>), dim3(num_blocks), dim3(BLOCKSIZE_1STATE/NUM_1STATE), 0, 0, p, g, state1, beta1, beta2, eps, step, lr,
+		  hipLaunchKernelGGL((	kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE>), dim3(num_blocks), dim3(BLOCKSIZE_1STATE/NUM_1STATE), 0, 0, p, g, state1, beta1, beta2, eps, step, lr,
 																														quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n);
 			CUDA_CHECK_RETURN(hipPeekAtLastError());
 		break;
@@ -239,7 +243,7 @@ template<typename T> void percentileClipping(T * g, float *gnorm_vec, int step, 
   int num_blocks = n/2048;
   num_blocks = n % 2048 == 0 ? num_blocks : num_blocks + 1;
 	CUDA_CHECK_RETURN(hipMemset(&gnorm_vec[step % 100], 0, 1*sizeof(float)));
- hipLaunchKernelGGL(( kPercentileClipping<T, 2048, 4>), dim3(num_blocks), dim3(512), 0, 0, g, gnorm_vec, step, n);
+  hipLaunchKernelGGL(( kPercentileClipping<T, 2048, 4>), dim3(num_blocks), dim3(512), 0, 0, g, gnorm_vec, step, n);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
@@ -318,75 +322,6 @@ void strided_gemmex(Context *context, bool transposeA, bool transposeB, int m, i
 
 int roundoff(int v, int d) {
     return (v + d - 1) / d * d;
-}
-
-#ifdef NO_HIPBLASLT
-#else
-template<int ORDER> hipblasLtOrder_t get_order()
-{
-	switch(ORDER)
-	{
-		case ROW:
-      return HIPBLASLT_ORDER_ROW;
-			break;
-    case COL:
-      return HIPBLASLT_ORDER_COL;
-      break;
-    case COL32:
-      //return HIPBLASLT_ORDER_COL32;
-      return HIPBLASLT_ORDER_COL;
-      break;
-    case COL_TURING:
-      //return HIPBLASLT_ORDER_COL4_4R2_8C;
-      return HIPBLASLT_ORDER_COL;
-     break;
-    case COL_AMPERE:
-      //return HIPBLASLT_ORDER_COL32_2R_4R4;
-      return HIPBLASLT_ORDER_COL;
-      break;
-		default:
-			break;
-  }
-
-	return HIPBLASLT_ORDER_ROW;
-}
-
-template hipblasLtOrder_t get_order<ROW>();
-template hipblasLtOrder_t get_order<COL>();
-template hipblasLtOrder_t get_order<COL32>();
-//template hipblasLtOrder_t get_order<COL_TURING>();
-//template hipblasLtOrder_t get_order<COL_AMPERE>();
-#endif
-
-template<int ORDER> int get_leading_dim(int dim1, int dim2)
-{
-	switch(ORDER)
-	{
-		case ROW:
-      return dim2;
-			break;
-    case COL:
-      return dim1;
-      break;
-    default:
-      return dim1;
-      break;
-    /*case COL32:
-      // 32*row tiles
-      return dim1*32;
-      break;
-    case COL_TURING:
-      return 32*roundoff(dim1, 8);
-      break;
-    case COL_AMPERE:
-      // 32*32 tiles
-      return 32*roundoff(dim1, 32);
-      break;
-		default:
-			return 0;
-			break;
-     */
-  }
 }
 
 static std::string hipError_to_string(const hipError_t ret)
@@ -597,14 +532,6 @@ void int8VectorQuant(half * __restrict__ A, int8_t *out, float *rowStats, float 
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
-void getRowStats(half *A, float *rowStats, float threshold, int rows, int cols, hipStream_t stream) {
-  if (threshold == 0.0)
-    kgetRowStats<half, 1024, 0><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
-  else
-    kgetRowStats<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
-  CUDA_CHECK_RETURN(hipPeekAtLastError());
-}
-
 void spmm_coo(hipsparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C, bool transposed_B)
 {
 
@@ -663,27 +590,8 @@ void spmm_coo(hipsparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_va
 template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
 {
 
- hipLaunchKernelGGL(( kspmm_coo_very_sparse_naive<T, 8, BITS>), dim3(nnz_rows), dim3(256), 0, 0, max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB);
+  hipLaunchKernelGGL(( kspmm_coo_very_sparse_naive<T, 8, BITS>), dim3(nnz_rows), dim3(256), 0, 0, max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
-}
-
-template <typename T> void gemm_host(int m, int n, int k, T * A,  T* B,  T * out,  int lda, int ldb, int ldc, int bits)
-{
-
-	int num_blocks = (m+31)/32;
-
-  if(bits == 32)
-   hipLaunchKernelGGL(( gemm_device<T, 32, 32>),  dim3(num_blocks), dim3(32), 0, 0, m,  n,  k, A,  B,  out, lda, ldb, ldc);
-  if(bits == 16)
-   hipLaunchKernelGGL(( gemm_device<T, 16, 160>),  dim3(num_blocks), dim3(160), 0, 0, m,  n,  k, A,  B,  out, lda, ldb, ldc);
-}
-
-template <typename T> void gemm_4bit_inference(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, T * out,  int lda, int ldb, int ldc, int blocksize)
-{
-
-	int num_blocks = (m+31)/32;
-
- hipLaunchKernelGGL(( kgemm_4bit_inference<T, 96>),  dim3(num_blocks), dim3(96), 0, 0, m,  n,  k, A,  B, absmax, out, lda, ldb, ldc, blocksize);
 }
 
 template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, hipStream_t stream)
@@ -692,7 +600,7 @@ template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int
 	//warpsize - 32
         int num_blocks = (m+3)/4;
 	//warpsize - 64
-        if (warpSize == 64) {
+        if (BNB_WARP_SIZE == 64) {
           num_blocks = (m+1)/2;
         }
 
@@ -706,7 +614,7 @@ template <typename T, int FUNC> void func(T *A, T *B, T value, long n)
   int blocks = n/threads;
   blocks = n % threads == 0 ? blocks : blocks + 1;
   blocks = blocks > 65535 ? 65535 : blocks;
- hipLaunchKernelGGL(( kfunc<T, FUNC>), dim3(blocks), dim3(512), 0, 0, A, B, value, n);
+  hipLaunchKernelGGL(( kfunc<T, FUNC>), dim3(blocks), dim3(512), 0, 0, A, B, value, n);
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
@@ -719,13 +627,9 @@ template void func<unsigned char, FILL>(unsigned char *A, unsigned char *B, unsi
 template void func<float, ARANGE>(float *A, float *B, float value, long n);
 template void func<float, _MUL>(float *A, float *B, float value, long n);
 
-template void gemm_4bit_inference<half>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, half * out,  int lda, int ldb, int ldc, int blocksize);
 template void gemm_4bit_inference_naive<half, 16>(int m, int n, int k, half * A,  unsigned char* B,  float *absmax, float *datatype, half * out,  int lda, int ldb, int ldc, int blocksize, hipStream_t stream);
 template void gemm_4bit_inference_naive<hip_bfloat16, 16>(int m, int n, int k, hip_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, hip_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize, hipStream_t stream);
 template void gemm_4bit_inference_naive<float, 32>(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize, hipStream_t stream);
-
-//template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc, int bits);
-template void gemm_host<half>(int m, int n, int k, half * A,  half* B,  half * out,  int lda, int ldb, int ldc, int bits);
 
 template void spmm_coo_very_sparse_naive<half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
@@ -829,7 +733,3 @@ MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);
 
 template void percentileClipping(float * g, float *gnorm_vec, int step, const int n);
 template void percentileClipping(half * g, float *gnorm_vec, int step, const int n);
-
-template int get_leading_dim<ROW>(int dim1, int dim2);
-template int get_leading_dim<COL>(int dim1, int dim2);
-template int get_leading_dim<COL32>(int dim1, int dim2);

@@ -180,7 +180,7 @@ class AdEMAMix(Optimizer2State):
     def update_step(self, group, p, gindex, pindex):
         config = self.get_config(gindex, pindex, group)
 
-        if config["t_alpha"] is None and config["t_beta3"] is None:
+        if not config["t_alpha"] and not config["t_beta3"]:
             # Not using alpha/beta3 scheduler; we can fall through.
             super().update_step(group, p, gindex, pindex)
             return
@@ -201,13 +201,13 @@ class AdEMAMix(Optimizer2State):
         t_beta3 = config["t_beta3"]
 
         # Apply scheduler for alpha
-        if t_alpha is not None:
+        if t_alpha:
             alpha_t = min(step * alpha / t_alpha, alpha)
         else:
             alpha_t = alpha
 
         # Apply scheduler for beta3
-        if t_beta3 is not None:
+        if t_beta3:
             ln_beta1 = math.log(beta1)
             ln_beta3 = math.log(beta3)
             step_scale = step / t_beta3

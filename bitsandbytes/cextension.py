@@ -9,7 +9,13 @@ from typing import Optional
 import torch
 
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX, PACKAGE_DIR
-from bitsandbytes.cuda_specs import CUDASpecs, get_cuda_specs, get_cuda_version_tuple, get_rocm_gpu_arch
+from bitsandbytes.cuda_specs import (
+    CUDASpecs,
+    get_cuda_specs,
+    get_cuda_version_tuple,
+    get_rocm_gpu_arch,
+    get_rocm_warpsize,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -294,13 +300,11 @@ def get_native_library() -> BNBNativeLibrary:
     if hasattr(dll, "get_context"):  # only a CUDA-built library exposes this
         return CudaBNBNativeLibrary(dll)
 
-    # TODO: Remove this log for XPU after 8-bit optimizer is supported
-    logger.warning("The 8-bit optimizer is not available on your device, only available on CUDA for now.")
-
     return BNBNativeLibrary(dll)
 
 
 ROCM_GPU_ARCH = get_rocm_gpu_arch()
+ROCM_WARP_SIZE_64 = True if get_rocm_warpsize() == 64 else False
 
 HIP_ENVIRONMENT = False
 BNB_BACKEND = "CPU"

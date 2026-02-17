@@ -3,9 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <BinSearch.h>
 #include <cassert>
-#include <common.h>
 #include <cub/device/device_scan.cuh>
 #include <kernels.cuh>
 #include <limits>
@@ -13,7 +11,6 @@
 
 #define ERR_NOT_IMPLEMENTED 100
 
-using namespace BinSearch;
 using std::cout;
 using std::endl;
 
@@ -53,6 +50,14 @@ void quantizeBlockwise(
         kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 64)
         kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
+    else if (blocksize == 32) {
+        // For 4-bit: use specialized kernel (kQuantizeBlockwise32) that processes 2 blocks per warp
+        // Each CUDA block handles 2 quantization blocks, so divide num_blocks by 2
+        if (DATA_TYPE > 0) {
+            int num_blocks_adjusted = (num_blocks + 1) / 2;
+            kQuantizeBlockwise32<T, DATA_TYPE><<<num_blocks_adjusted, 32>>>(code, A, absmax, out, rand, rand_offset, n);
+        }
+    }
 
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -61,16 +66,17 @@ template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(
     float* code, unsigned char* A, float* absmax, T* out, int blocksize, const int n, cudaStream_t stream
 ) {
-    // printf("stream==%d\n",stream);
-    int num_blocks = n / blocksize;
-    num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
-    int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
+    constexpr int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
+
+    // Upcast to int64 to avoid overflow for large n
+    int grid_blocks = ((int64_t)n + tile_size - 1) / tile_size;
+
     if (DATA_TYPE > 0)
         kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>
-            <<<(n + tile_size - 1) / tile_size, 64, 0, stream>>>(code, A, absmax, out, blocksize / 2, n);
+            <<<grid_blocks, 64, 0, stream>>>(code, A, absmax, out, blocksize / 2, n);
     else
         kDequantizeBlockwise<T, 512, 64, 8, DATA_TYPE>
-            <<<(n + tile_size - 1) / tile_size, 64, 0, stream>>>(code, A, absmax, out, blocksize, n);
+            <<<grid_blocks, 64, 0, stream>>>(code, A, absmax, out, blocksize, n);
 
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -291,61 +297,6 @@ void strided_gemmex(
 
 int roundoff(int v, int d) { return (v + d - 1) / d * d; }
 
-template <int ORDER> cublasLtOrder_t get_order() {
-    switch (ORDER) {
-    case ROW:
-        return CUBLASLT_ORDER_ROW;
-        break;
-    case COL:
-        return CUBLASLT_ORDER_COL;
-        break;
-    case COL32:
-        return CUBLASLT_ORDER_COL32;
-        break;
-    case COL_TURING:
-        return CUBLASLT_ORDER_COL4_4R2_8C;
-        break;
-    case COL_AMPERE:
-        return CUBLASLT_ORDER_COL32_2R_4R4;
-        break;
-    default:
-        break;
-    }
-
-    return CUBLASLT_ORDER_ROW;
-}
-
-template cublasLtOrder_t get_order<ROW>();
-template cublasLtOrder_t get_order<COL>();
-template cublasLtOrder_t get_order<COL32>();
-template cublasLtOrder_t get_order<COL_TURING>();
-template cublasLtOrder_t get_order<COL_AMPERE>();
-
-template <int ORDER> int get_leading_dim(int dim1, int dim2) {
-    switch (ORDER) {
-    case ROW:
-        return dim2;
-        break;
-    case COL:
-        return dim1;
-        break;
-    case COL32:
-        // 32*row tiles
-        return dim1 * 32;
-        break;
-    case COL_TURING:
-        return 32 * roundoff(dim1, 8);
-        break;
-    case COL_AMPERE:
-        // 32*32 tiles
-        return 32 * roundoff(dim1, 32);
-        break;
-    default:
-        return 0;
-        break;
-    }
-}
-
 template <int DTYPE_OUT, int SCALE_ROWS>
 int igemmlt(
     cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
@@ -448,14 +399,6 @@ void int8VectorQuant(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-void getRowStats(half* A, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream) {
-    if (threshold == 0.0)
-        kgetRowStats<half, 1024, 0><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
-    else
-        kgetRowStats<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, rowStats, threshold, rows, cols);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
 void spmm_coo(
     cusparseHandle_t handle, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols, int B_cols,
     int ldb, half* B, int ldc, half* C, bool transposed_B
@@ -516,26 +459,6 @@ void spmm_coo_very_sparse_naive(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template <typename T> void gemm_host(int m, int n, int k, T* A, T* B, T* out, int lda, int ldb, int ldc, int bits) {
-
-    int num_blocks = (m + 31) / 32;
-
-    if (bits == 32)
-        gemm_device<T, 32, 32><<<num_blocks, 32, 0, 0>>>(m, n, k, A, B, out, lda, ldb, ldc);
-    if (bits == 16)
-        gemm_device<T, 16, 160><<<num_blocks, 160, 0, 0>>>(m, n, k, A, B, out, lda, ldb, ldc);
-}
-
-template <typename T>
-void gemm_4bit_inference(
-    int m, int n, int k, T* A, unsigned char* B, float* absmax, T* out, int lda, int ldb, int ldc, int blocksize
-) {
-
-    int num_blocks = (m + 31) / 32;
-
-    kgemm_4bit_inference<T, 96><<<num_blocks, 96, 0, 0>>>(m, n, k, A, B, absmax, out, lda, ldb, ldc, blocksize);
-}
-
 template <typename T, int BITS>
 void gemm_4bit_inference_naive(
     int m, int n, int k, T* A, unsigned char* B, float* absmax, float* datatype, T* out, int lda, int ldb, int ldc,
@@ -566,9 +489,6 @@ template void func<unsigned char, FILL>(unsigned char* A, unsigned char* B, unsi
 template void func<float, ARANGE>(float* A, float* B, float value, long n);
 template void func<float, _MUL>(float* A, float* B, float value, long n);
 
-template void gemm_4bit_inference<half>(
-    int m, int n, int k, half* A, unsigned char* B, float* absmax, half* out, int lda, int ldb, int ldc, int blocksize
-);
 template void gemm_4bit_inference_naive<half, 16>(
     int m, int n, int k, half* A, unsigned char* B, float* absmax, float* datatype, half* out, int lda, int ldb,
     int ldc, int blocksize, cudaStream_t stream
@@ -581,10 +501,6 @@ template void gemm_4bit_inference_naive<float, 32>(
     int m, int n, int k, float* A, unsigned char* B, float* absmax, float* datatype, float* out, int lda, int ldb,
     int ldc, int blocksize, cudaStream_t stream
 );
-
-// template void gemm_host<float>(int m, int n, int k, float * A,  float* B,  float * out,  int lda, int ldb, int ldc,
-// int bits);
-template void gemm_host<half>(int m, int n, int k, half* A, half* B, half* out, int lda, int ldb, int ldc, int bits);
 
 template void spmm_coo_very_sparse_naive<half, 16>(
     int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, half* B, half* out,
@@ -729,7 +645,3 @@ MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);
 
 template void percentileClipping(float* g, float* gnorm_vec, int step, const int n);
 template void percentileClipping(half* g, float* gnorm_vec, int step, const int n);
-
-template int get_leading_dim<ROW>(int dim1, int dim2);
-template int get_leading_dim<COL>(int dim1, int dim2);
-template int get_leading_dim<COL32>(int dim1, int dim2);

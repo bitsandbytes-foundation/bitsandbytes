@@ -2,9 +2,6 @@
 
 // TODO: Let's make some of these constexpr and put in a namespace.
 
-#define BNB_CC_MAXWELL 500
-#define BNB_CC_MAXWELL2 520
-#define BNB_CC_MAXWELL2_X1 530
 #define BNB_CC_PASCAL 600
 #define BNB_CC_PASCAL_X2 620
 #define BNB_CC_VOLTA 700
@@ -17,7 +14,6 @@
 #define BNB_CC_HOPPER 900
 #define BNB_CC_BLACKWELL 1000
 
-#define BNB_FP16_AVAILABLE (__CUDA_ARCH__ >= BNB_CC_MAXWELL2_X1)
 #define BNB_FP16_MMA_AVAILABLE (__CUDA_ARCH__ >= BNB_CC_VOLTA)
 #define BNB_INT8_MMA_AVAILABLE (__CUDA_ARCH__ >= BNB_CC_VOLTA_XAVIER)
 #define BNB_BF16_AVAILABLE (__CUDA_ARCH__ >= BNB_CC_AMPERE)

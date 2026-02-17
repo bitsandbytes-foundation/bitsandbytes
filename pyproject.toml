@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core", "setuptools >= 63.0.0"]
+requires = ["scikit-build-core", "setuptools >= 77.0.3", "trove-classifiers>=2025.8.6.13"]
 build-backend = "scikit_build_core.setuptools.build_meta"
 
 [project]
@@ -11,9 +11,10 @@ maintainers = [
     {name="Titus von Köller", email="titus@huggingface.co"},
     {name="Matthew Douglas", email="matthew.douglas@huggingface.co"}
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 readme = "README.md"
-license = {file="LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = [
     "gpu",
     "optimizers",
@@ -24,27 +25,27 @@ keywords = [
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "License :: OSI Approved :: MIT License",
-    "Environment :: GPU :: NVIDIA CUDA :: 11",
+    "Environment :: GPU :: NVIDIA CUDA :: 11.8",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
+    "Environment :: GPU :: NVIDIA CUDA :: 13",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX :: Linux",
-    # "Operating System :: MacOS",
+    "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: C++",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
     "torch>=2.3,<3",
     "numpy>=1.17",
-    "packaging>=20.9"
+    "packaging>=20.9",
 ]
 
 [project.urls]
@@ -59,7 +60,7 @@ docs = ["hf-doc-builder==0.5.0"]
 dev = [
     "bitsandbytes[test]",
     "build>=1.0.0,<2",
-    "ruff==0.11.2",
+    "ruff~=0.14.3",
     "pre-commit>=3.5.0,<4",
     "wheel>=0.42,<1"
 ]
@@ -67,7 +68,7 @@ test = [
     "einops~=0.8.0",
     "lion-pytorch==0.2.3",
     "pytest~=8.3",
-    "scipy>=1.11.4,<2; python_version >= '3.9'",
+    "scipy>=1.11.4,<2",
     "transformers>=4.30.1,<5"
 ]
 
@@ -107,7 +108,7 @@ src = [
     "tests",
     "benchmarking"
 ]
-target-version = "py39"
+target-version = "py310"
 line-length = 119
 
 [tool.ruff.lint]
@@ -124,13 +125,14 @@ select = [
 ignore = [
     "B007",  # Loop control variable not used within the loop body (TODO: enable)
     "B028",  # Warning without stacklevel (TODO: enable)
+    "B905",  # zip without explicit `strict=` kwarg
     "E501",  # Suppress line-too-long warnings: trust yapf's judgement on this one.
     "E701",  # Multiple statements on one line (TODO: enable)
     "E712",  # Allow using if x == False, as it's not always equivalent to if x.
     "E731",  # Do not use lambda
-    "RUF012",  # Mutable class attribute annotations
-    "RUF034", # Useless if-else (TODO: enable)
-    "ISC001",   # single-line-implicit-string-concatenation incompatible with formatter
+    "RUF012",# Mutable class attribute annotations
+    "RUF034",# Useless if-else (TODO: enable)
+    "UP045", # Use `X | None` instead of `Optional[X]`
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]
@@ -143,6 +145,9 @@ ignore = [
     "E731",
     "F841",
     "UP030",
+]
+"bitsandbytes/**/triton/**/*.py" = [
+    "I001",  # import order
 ]
 
 [tool.ruff.lint.isort]
@@ -158,3 +163,8 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "scipy.stats"
 ignore_missing_imports = true
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.build-args = ["--config", "Release"]
+wheel.cmake = false

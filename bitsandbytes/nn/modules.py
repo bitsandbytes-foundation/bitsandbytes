@@ -11,8 +11,12 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.cextension import HIP_ENVIRONMENT
-from bitsandbytes.functional import QuantState
+from bitsandbytes.functional import (
+    QuantState,
+    _convert_weight_packed_for_cpu,
+    _convert_weight_packed_for_cpu_inverse,
+    has_avx512bf16,
+)
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
 
@@ -221,7 +225,7 @@ class Params4bit(torch.nn.Parameter):
             data = torch.empty(0)
 
         if blocksize is None:
-            blocksize = 64 if not HIP_ENVIRONMENT else 128
+            blocksize = 64
 
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
         self.blocksize = blocksize
@@ -310,28 +314,32 @@ class Params4bit(torch.nn.Parameter):
     def cpu(self):
         return self.to(device="cpu")
 
-    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
+        if getattr(self.quant_state, "packing_format_for_cpu", False):
+            self.data, self.quant_state = _convert_weight_packed_for_cpu_inverse(self.data, self.quant_state)
         return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
 
-    def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def xpu(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
+        if getattr(self.quant_state, "packing_format_for_cpu", False):
+            self.data, self.quant_state = _convert_weight_packed_for_cpu_inverse(self.data, self.quant_state)
         return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     @overload
     def to(
         self: T,
-        device: Optional[Union[int, device]] = ...,
-        dtype: Optional[Union[dtype, str]] = ...,
+        device: Optional[int | device] = ...,
+        dtype: Optional[dtype | str] = ...,
         non_blocking: bool = ...,
     ) -> T: ...
 
     @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T: ...
+    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
 
     @overload
     def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
 
     def to(self, *args, **kwargs):
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
 
         if device is not None and device.type != "meta" and not self.bnb_quantized:
             return self._quantize(device)
@@ -479,6 +487,7 @@ class Linear4bit(nn.Linear):
         self.compute_type_is_set = compute_dtype is not None
         self.quant_state = None
         self.quant_storage = quant_storage
+        self.support_avx512bf16_for_cpu = has_avx512bf16()
 
     def set_compute_type(self, x):
         if x.dtype in [torch.float32, torch.bfloat16]:
@@ -505,14 +514,29 @@ class Linear4bit(nn.Linear):
         save weight and bias,
         then fill state_dict with components of quant_state
         """
+        if getattr(self.weight, "quant_state", None) is not None and getattr(
+            self.weight.quant_state, "packing_format_for_cpu", False
+        ):
+            self.weight.data, self.weight.quant_state = _convert_weight_packed_for_cpu_inverse(
+                self.weight.data, self.weight.quant_state
+            )
         super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
-
         if getattr(self.weight, "quant_state", None) is not None:
             for k, v in self.weight.quant_state.as_dict(packed=True).items():
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
     def forward(self, x: torch.Tensor):
         fix_4bit_weight_quant_state_from_module(self)
+        quant_state = self.weight.quant_state
+
+        if (
+            not getattr(quant_state, "packing_format_for_cpu", False)
+            and x.device.type == "cpu"
+            and self.support_avx512bf16_for_cpu
+            and not self.training
+            and x.requires_grad == False
+        ):
+            self.weight.data, quant_state = _convert_weight_packed_for_cpu(self.weight.data, quant_state)
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:
@@ -527,9 +551,9 @@ class Linear4bit(nn.Linear):
             x = x.to(self.compute_dtype)
 
         bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        weight = self.weight.t()
+        weight = self.weight if getattr(quant_state, "packing_format_for_cpu", False) else self.weight.t()
 
-        return bnb.matmul_4bit(x, weight, bias=bias, quant_state=self.weight.quant_state).to(inp_dtype)
+        return bnb.matmul_4bit(x, weight, bias=bias, quant_state=quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):
@@ -644,10 +668,10 @@ class Int8Params(torch.nn.Parameter):
     def cpu(self):
         return self.to(device="cpu")
 
-    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
 
-    def xpu(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def xpu(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="xpu" if device is None else device, non_blocking=non_blocking)
 
     def __deepcopy__(self, memo):
@@ -665,33 +689,40 @@ class Int8Params(torch.nn.Parameter):
     @overload
     def to(
         self: T,
-        device: Optional[Union[int, device]] = ...,
-        dtype: Optional[Union[dtype, str]] = ...,
+        device: Optional[int | device] = ...,
+        dtype: Optional[dtype | str] = ...,
         non_blocking: bool = ...,
     ) -> T: ...
 
     @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T: ...
+    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
 
     @overload
     def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
 
     def to(self, *args, **kwargs):
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
 
-        if device is not None and device.type != "meta" and self.data.device.type == "cpu":
-            if device.type != "cpu" or self.data.dtype != torch.int8:
-                return self._quantize(device)
-            elif self.data.dtype == torch.int8 and device.type == "cpu":
-                self.CB = self.data
+        is_quantized = self.data.dtype == torch.int8
 
+        if not is_quantized and device is not None and device.type != "meta" and self.data.device.type == "cpu":
+            # We're moving from a CPU device to a non-meta device.
+            # In this circumstance, we want to quantize if we haven't already.
+            return self._quantize(device)
+
+        # Create a new parameter on the target device.
         new_param = Int8Params(
             super().to(device=device, dtype=dtype, non_blocking=non_blocking),
             requires_grad=self.requires_grad,
             has_fp16_weights=self.has_fp16_weights,
         )
-        new_param.CB = self.CB
-        new_param.SCB = self.SCB
+
+        # If we had already quantized, move the statistics appropriately.
+        if is_quantized:
+            new_param.CB = new_param.data
+
+            if device is not None and self.SCB is not None and self.SCB.device.type != "meta":
+                new_param.SCB = self.SCB.to(device)
 
         return new_param
 
@@ -954,6 +985,17 @@ class Linear8bitLt(nn.Linear):
                 Number of output features of the linear layer.
             bias (`bool`, defaults to `True`):
                 Whether the linear class uses the bias term as well.
+            has_fp16_weights (`bool`, defaults to `True`):
+                If False, weights are quantized to int8 on ``.to(device)``. If True,
+                weights remain in fp16 and are quantized on-the-fly during each forward pass.
+            threshold (`float`, defaults to `0.0`):
+                Outlier threshold for mixed-precision decomposition (LLM.int8()). During the
+                forward pass, activation columns where any value exceeds this threshold are
+                computed in fp16, while the remaining columns use int8. This operates on
+                **activations** (inputs), not on weight values. Set to 0.0 to disable
+                mixed-precision decomposition and quantize all columns to int8.
+            index: Indices for weight reordering (used internally).
+            device: Device to initialize the layer on.
         """
         super().__init__(input_features, output_features, bias, device)
         self.state = bnb.MatmulLtState()
@@ -1036,6 +1078,21 @@ class Linear8bitLt(nn.Linear):
         self.state.SCB = self.weight.SCB
         self.weight.CB = None
         self.weight.SCB = None
+
+    def to(self, *args, **kwargs):
+        # Call the parent to() method to handle standard parameter/buffer movement
+        result = super().to(*args, **kwargs)
+
+        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
+
+        # Handle state tensors if needed.
+        if device is not None:
+            if result.state.CB is not None:
+                result.state.CB = result.state.CB.to(device)
+            if result.state.SCB is not None:
+                result.state.SCB = result.state.SCB.to(device)
+
+        return result
 
     def forward(self, x: torch.Tensor):
         self.state.is_training = self.training

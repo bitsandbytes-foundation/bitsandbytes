@@ -1,4 +1,3 @@
-#include <common.h>
 #include <xpu_kernels.h>
 #include <xpu_ops.h>
 
@@ -11,7 +10,8 @@ void dequantizeBlockwise(
     const int num_per_th = 4;
     const int tile_size = workgroup_size * num_per_th;
     if (DATA_TYPE > 0) {
-        const int workgroup_num = (n + tile_size * 2 - 1) / (tile_size * 2);
+        // Upcast to int64 to avoid overflow for large n (same as CUDA)
+        const int workgroup_num = (static_cast<int64_t>(n) + tile_size * 2 - 1) / (tile_size * 2);
         sycl::range<1> local_range{(size_t)workgroup_size};
         sycl::range<1> global_range{(size_t)workgroup_num * (size_t)workgroup_size};
         kDequantizeBlockwise<T, tile_size, num_per_th, DATA_TYPE> kfn(code, A, absmax, out, blocksize / 2, n);
@@ -19,7 +19,8 @@ void dequantizeBlockwise(
             sycl::nd_range<1>(sycl::range<1>(global_range), sycl::range<1>(local_range)), queue, kfn
         );
     } else {
-        const int workgroup_num = (n + tile_size - 1) / tile_size;
+        // Upcast to int64 to avoid overflow for large n (same as CUDA)
+        const int workgroup_num = (static_cast<int64_t>(n) + tile_size - 1) / tile_size;
         sycl::range<1> local_range{(size_t)workgroup_size};
         sycl::range<1> global_range{(size_t)workgroup_num * (size_t)workgroup_size};
         kDequantizeBlockwise<T, tile_size, num_per_th, DATA_TYPE> kfn(code, A, absmax, out, blocksize, n);

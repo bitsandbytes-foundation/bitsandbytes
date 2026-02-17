@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 from bitsandbytes import functional as F
-from bitsandbytes.cextension import HIP_ENVIRONMENT
+from bitsandbytes.cextension import ROCM_WARP_SIZE_64
 from bitsandbytes.nn.parametrize import (
     Bnb4bitParametrization,
     replace_parameter_4bit,
@@ -37,10 +37,7 @@ class ParametrizeTestModule(nn.Module):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
-@pytest.mark.parametrize(
-    "blocksize",
-    [64, 128, 256] if not HIP_ENVIRONMENT else [128, 256],
-)
+@pytest.mark.parametrize("blocksize", [64, 128, 256])
 def test_replace_parameter_4bit(device, dtype, quant_type, compress_statistics, blocksize):
     """Test basic parameter replacement with 4-bit quantization on different dtypes."""
     if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
@@ -95,7 +92,7 @@ def test_moe_parameter_shape(device, dtype):
     if device == "hpu" and not is_supported_on_hpu("nf4", dtype):
         pytest.skip("This configuration is not supported on HPU.")
 
-    param_shape = (8, 64, 32)
+    param_shape = (8, 64, 64)
 
     # Create module with custom parameter shape directly on target device
     class MoEModule(nn.Module):
@@ -246,14 +243,14 @@ def test_error_conditions():
         replace_parameter_4bit(module, "nonexistent")
 
     # Test TypeError for non-Parameter attribute
-    with pytest.raises(TypeError, match="Parameter 'not_param' is not an instance of nn.Parameter"):
+    with pytest.raises(TypeError, match="Parameter 'not_param' is not an instance of nn\\.Parameter"):
         replace_parameter_4bit(module, "not_param")
 
     # Test same errors for prequantized version
     with pytest.raises(AttributeError, match="Module does not have parameter 'nonexistent'"):
         replace_parameter_4bit_prequantized(module, "nonexistent", {}, torch.device("cpu"))
 
-    with pytest.raises(TypeError, match="Parameter 'not_param' is not an instance of nn.Parameter"):
+    with pytest.raises(TypeError, match="Parameter 'not_param' is not an instance of nn\\.Parameter"):
         replace_parameter_4bit_prequantized(module, "not_param", {}, torch.device("cpu"))
 
 
@@ -267,7 +264,7 @@ def test_quant_state_preservation(device, dtype):
 
     module = ParametrizeTestModule(device=device, dtype=dtype)
 
-    blocksize = 128 if HIP_ENVIRONMENT else 64
+    blocksize = 64
 
     # Apply parametrization with specific settings
     replace_parameter_4bit(module, "weight_2d", quant_type="nf4", compress_statistics=True, blocksize=blocksize)
@@ -326,7 +323,7 @@ def test_multiple_parameters(device, dtype):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize(
     "blocksize",
-    [64, 128, 256] if not HIP_ENVIRONMENT else [128, 256],
+    [64, 128, 256] if not ROCM_WARP_SIZE_64 else [128, 256],
 )
 def test_different_blocksizes(device, dtype, blocksize):
     """Test parametrization with different block sizes to verify flexibility."""
@@ -364,7 +361,7 @@ def test_parametrization_forward_method():
     device = "cpu"
 
     # Create test tensor and manually quantize it
-    original_tensor = torch.randn(64, 32, dtype=torch.float32, device=device)
+    original_tensor = torch.randn(64, 64, dtype=torch.float32, device=device)
     quantized_data, quant_state = F.quantize_4bit(original_tensor, quant_type="nf4")
 
     # Create parametrization instance
