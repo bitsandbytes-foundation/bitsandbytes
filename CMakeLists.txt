@@ -25,7 +25,16 @@ if(WIN32 AND COMPUTE_BACKEND STREQUAL "hip")
     endif()
     # On Windows, the HIP compiler needs explicit paths to find device libraries.
     if(ROCM_PATH)
-        set(CMAKE_HIP_FLAGS "--rocm-path=${ROCM_PATH} --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+        find_path(ROCM_DEVICE_LIB_PATH
+            NAMES oclc_abi_version_400.bc ocml.bc
+            PATHS "${ROCM_PATH}/amdgcn/bitcode"
+                  "${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
+            NO_DEFAULT_PATH
+        )
+        set(CMAKE_HIP_FLAGS "--rocm-path=${ROCM_PATH}")
+        if(ROCM_DEVICE_LIB_PATH)
+            set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_DEVICE_LIB_PATH}")
+        endif()
     endif()
 endif()
 
