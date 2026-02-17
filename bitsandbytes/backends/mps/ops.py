@@ -6,7 +6,6 @@ HuggingFace Kernels Hub.
 
 from collections.abc import Sequence
 from math import prod
-from typing import Optional
 
 import torch
 
