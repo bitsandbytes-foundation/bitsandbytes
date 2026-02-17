@@ -26,7 +26,7 @@ on:
       gpu_type:
         type: string
         default: ""
-        description: "GPU type for CUDA testing: T4, L40S"
+        description: "GPU type for CUDA testing: T4, A10,L40S"
       # cpu_type currently only affects linux x64 CPU testing to select specific CPU architectures
       cpu_type:
         type: string
@@ -65,11 +65,14 @@ jobs:
                   T4)
                     TEST_RUNNER="bandb-aws-g4dn-4xlarge-plus-use1-public-80"
                     ;;
+                  A10)
+                    TEST_RUNNER="bandb-aws-g5-4xlarge-plus-use1-public-80"
+                    ;;
                   L40S)
                     TEST_RUNNER="bandb-aws-g6e-4xlarge-plus-use1-public-80"
                     ;;
                   *)
-                    echo "::error::Must specify gpu_type (T4 or L40S) for linux-x64 cuda backend"
+                    echo "::error::Must specify gpu_type (T4, A10, L40S) for linux-x64 cuda backend"
                     exit 1
                     ;;
                 esac
