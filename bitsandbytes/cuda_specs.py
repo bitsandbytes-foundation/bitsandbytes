@@ -95,7 +95,7 @@ def get_rocm_gpu_arch() -> str:
             result = subprocess.run(cmd, capture_output=True, text=True)
             match = re.search(arch_pattern, result.stdout)
             if match:
-                return f"gfx{match.group(1)}"
+                return "gfx" + match.group(1)
             else:
                 return "unknown"
         else:
