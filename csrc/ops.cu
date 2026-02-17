@@ -2507,6 +2507,11 @@ __global__ void kbit_grouped_gemm_prod(
     } // end persistent work loop
 }
 
+// [REMOVED: Warp-specialized and dequant-once grouped GEMM kernels.
+//  Both were correct but slower than the baseline on Ada (sm_89) due to
+//  register pressure from multiple accumulator sets. See moe-kernel-spec.md
+//  for the full analysis. Code removed in dead-code cleanup.]
+
 // Grouped GEMM launcher — supports TILE_N=64/128 and auto k_splits
 template <int K, int MB, int TN, typename scalar_t>
 static void kbitGroupedGemmProdLaunch(
@@ -2605,16 +2610,6 @@ void kbitGroupedGemmProd(
     }
 }
 
-// Cached SM count to avoid repeated cudaGetDevice/cudaDeviceGetAttribute calls
-static int cached_num_sms = 0;
-static int get_num_sms() {
-    if (cached_num_sms == 0) {
-        int dev;
-        cudaGetDevice(&dev);
-        cudaDeviceGetAttribute(&cached_num_sms, cudaDevAttrMultiProcessorCount, dev);
-    }
-    return cached_num_sms;
-}
 
 // ===================================================================
 // Scalar GEMV kernel: C[M,N] = A[M,K_dim] * W_kbit^T  (M=1..4)

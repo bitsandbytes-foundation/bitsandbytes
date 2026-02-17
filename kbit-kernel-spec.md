@@ -19,29 +19,31 @@ before a commit, not during development iterations.
    Default runs M=1..8 (scalar/grouped limited to M<=4 automatically).
 
    The script first prints raw per-kernel tables (MMA, Scalar, Grouped,
-   cuBLAS), then a model-level summary: **one table per M value** with
-   all kernels as columns, all (shape, k) combinations as rows:
+   Grouped MMA, cuBLAS), then a model-level summary: **one table per M
+   value** with all kernels as columns, all (shape, k) combinations as
+   rows:
 
    ```
    M=1:
-   +========+=====+=======+========+=========+=======+========+=========+
-   | shape  |   k |   MMA | Scalar | Grouped |  fp16 |   Best | vs fp16 |
-   +--------+-----+-------+--------+---------+-------+--------+---------+
-   | gateup |   2 |  15.3 |    9.4 |     -   |  18.2 | Scalar |   1.93x |
-   | gateup |   3 |  17.1 |   10.6 |     -   |  18.2 | Scalar |   1.71x |
+   +========+=====+=======+========+=========+=========+=======+========+=========+
+   | shape  |   k |   MMA | Scalar | Grouped | Grp MMA |  fp16 |   Best | vs fp16 |
+   +--------+-----+-------+--------+---------+---------+-------+--------+---------+
+   | gateup |   2 |  15.3 |    9.6 |     -   |     -   |  18.5 | Scalar |   1.93x |
+   | gateup |   3 |  16.8 |   10.8 |     -   |     -   |  18.5 | Scalar |   1.72x |
    ...
-   | moe_gu |   4 |   -   |    -   |    24.8 |  10.9 | Grouped |   0.44x |
+   | moe_gu |   4 |   -   |    -   |    11.5 |    11.7 |  10.8 | Grouped |   0.94x |
+   | moe_dn |   4 |   -   |    -   |    24.8 |    12.0 |  12.3 | Grp MMA |   1.03x |
    ...
-   | TOTAL  |     |       |        |         |       |        |         |
-   |  k=2   |   2 |       |        |         |       |   72.1 |  1.63x  |
-   |  k=3   |   3 |       |        |         |       |   78.4 |  1.50x  |
-   |  k=4   |   4 |       |        |         |       |   85.2 |  1.38x  |
-   |  k=5   |   5 |       |        |         |       |   91.8 |  1.28x  |
-   +========+=====+=======+========+=========+=======+========+=========+
+   | TOTAL  |     |       |        |         |         |       |        |         |
+   |  k=2   |   2 |       |        |         |         |       |   57.5 |  1.73x  |
+   |  k=3   |   3 |       |        |         |         |       |   65.6 |  1.51x  |
+   |  k=4   |   4 |       |        |         |         |       |   74.3 |  1.34x  |
+   |  k=5   |   5 |       |        |         |         |       |   82.7 |  1.20x  |
+   +========+=====+=======+========+=========+=========+=======+========+=========+
    ```
 
    Dense shapes (gateup, down, Q, O, KV) show MMA, Scalar, and fp16.
-   MoE shapes (moe_gu, moe_dn) show Grouped and fp16 (bmm).
+   MoE shapes (moe_gu, moe_dn) show Grouped, Grp MMA, and fp16 (bmm).
    "Best" picks the fastest kbit kernel (not fp16).
    "vs fp16" is fp16 / Best — values >1.00x mean kbit wins, <1.00x mean
    fp16 is faster. A dash "-" means no kbit kernel exists for that config.
@@ -120,19 +122,20 @@ than fp16 is at ~16 concurrent users.
 
 ---
 
-## Four-kernel strategy
+## Five-kernel strategy
 
 Each kernel covers a range of M where it has a structural advantage.
 The dispatch logic selects the best kernel per (layer_type, M) pair.
 
 | Kernel | M range | Layer types | Data format |
 |--------|---------|-------------|-------------|
-| 1. Scalar GEMV | 1-4 | Dense, attention | Flat (quantize_kbit) |
-| 2. MMA dequant | 5-16 | Dense, attention | Tiled (repack_kbit) |
+| 1. Scalar GEMV | 1-4 | Dense, attention | Flat (quantize_kbit), float32 absmax |
+| 2. MMA dequant | 5-16 | Dense, attention | Tiled (repack_kbit), E4M4 absmax |
 | 3. Dequant + cuBLAS | 17+ | Dense, attention | Flat -> fp16 |
-| 4. Grouped expert GEMV | 1-4 | MoE experts | Tiled (repack_kbit) |
+| 4. Grouped scalar GEMV | 1-4 | MoE experts | Flat (quantize_kbit), float32 absmax |
+| 5. Grouped MMA | 1+ | MoE experts | Tiled (repack_kbit), E4M4 absmax |
 
-Why four kernels instead of one:
+Why five kernels instead of one:
 - At M=1, tensor cores waste 94% of their compute (m16n8k16 pads 15
   zero rows). A scalar kernel that avoids MMA entirely wins by 3-5x.
 - At M=5-16, MMA utilization rises to 31-100%. The 3.2x data
@@ -144,6 +147,10 @@ Why four kernels instead of one:
   its compute pipeline.
 - MoE experts launched individually waste 88-97% of SMs. Grouping
   all active experts into one kernel launch solves this.
+- The grouped scalar GEMV and grouped MMA serve complementary roles:
+  scalar wins at M=1-4 for moe_gu (K=2048, N=512) where its C=1
+  grid gives better parallelism; grouped MMA wins at all M for
+  moe_dn (K=512, N=2048) and at M>4 for moe_gu.
 
 **Practical importance (from workload analysis in `token_analysis.md`):**
 
@@ -160,14 +167,23 @@ range falls in the gap between these modes.
 | 16 users | 0% | 24% | 76% |
 | 32+ users | 0% | 6% | 94% |
 
-Optimization priority: scalar GEMV (1-4 users) > dequant overhead
-reduction (16+ users) > MMA kernel (8-16 users only, narrow range).
+**Current optimization priority:**
+
+1. **MoE grouped kernel at large M (prefill)** — the remaining
+   bottleneck. At M=544 (32-user prefill), the grouped MMA kernel is
+   ~1.7x slower than raw fp16 BMM. MoE layers account for 22-30% of
+   per-block time, making this the dominant source of regression at
+   scale. Potential fix: hybrid dispatch that switches to dq+cuBLAS
+   BMM for MoE layers when M exceeds a threshold.
+2. **Scalar GEMV at M=1-4** — highest absolute time contributor in
+   1-4 user decode (30-37% of total). Already well-optimized (V8).
+3. **Dense dequant overhead** — already well-optimized, barely matters.
 
 ---
 
 ## 1. Scalar GEMV (`kbit_scalar_gemv`)
 
-**Location:** `ops.cu:2571`
+**Location:** `ops.cu` (search for `kbit_scalar_gemv`)
 
 **Operation:** C[M,N] = A[M,K] * W_kbit^T, M=1..4.
 
@@ -208,19 +224,6 @@ gives the compiler 8 independent FMA chains for ILP.
 - Inter-warp: 2-phase shared memory (32 bytes), single `__syncthreads`
 - Thread 0 writes M output values to C
 
-**Performance (Qwen3 dense gate/up, K=2048 N=5120, k=4):**
-
-| M | Time (us) | BW (GB/s) | vs cuBLAS fp16 |
-|---|-----------|-----------|----------------|
-| 1 | 13.1 | 512 | 3.9x faster |
-| 2 | 14.8 | 450 | 1.2x slower |
-| 3 | 16.6 | 401 | 1.3x slower |
-| 4 | 19.8 | 337 | 1.6x slower |
-
-The kernel is purely DRAM-bound (arithmetic intensity = 3.2 FLOP/byte
-for k=4, far below the 82 FLOP/byte compute-to-memory ratio of
-RTX 4090).
-
 **Design decisions:**
 
 | Decision | Choice | Rationale |
@@ -235,7 +238,7 @@ RTX 4090).
 
 ## 2. MMA dequant kernel (`kbit_gemm_prod`)
 
-**Location:** `ops.cu:1784`
+**Location:** `ops.cu` (search for `kbit_gemm_prod`)
 
 **Operation:** C[M,N] = A[M,K] * W_kbit^T, M=1..64+.
 
@@ -272,12 +275,6 @@ grid = min(512, mn_tiles * k_splits)
 
 Split-K uses atomicAdd + tile_counters for the last-arriving split to
 do the final reduction.
-
-**Performance characteristics:**
-- Wins 31/48 benchmark configs vs scalar GEMV (dominates at large K)
-- Dense_down (5120x2048): 1.72x over scalar GEMV at M=4
-- KV_proj (2048x512): loses to scalar GEMV (too few N-tiles)
-- At M>=4 for most shapes, MMA amortizes the dequant cost
 
 **The fundamental constraint on Ada:**
 `mma.sync` is synchronous — the warp stalls until the MMA completes
@@ -361,49 +358,129 @@ absmax via the `_KBIT_ABSMAX_SUFFIX` dispatch map.
 
 ---
 
-## 4. Grouped expert GEMV (`kbit_grouped_scalar_gemv`)
+## 4. Grouped scalar GEMV (`kbit_grouped_scalar_gemv`)
 
-**Location:** `ops.cu:2736`
+**Location:** `ops.cu` (search for `kbit_grouped_scalar_gemv`)
 
 **Operation:** For each expert e: C_e[M_e, N] = A_e[M_e, K] * W_e^T,
 all experts in one kernel launch.
 
-**Current architecture (needs V8 optimizations):**
-- 128 threads (4 warps), COLS_PER_BLOCK=4 (each warp handles 1 column)
-- Grid = (ceil(N/4), num_experts) — Y-dimension indexes experts
-- Uses tiled layout with E4M4 absmax (from `repack_kbit`)
-- Hard-coded M_VAL=4 template (no M-dispatch)
-- Element-at-a-time A loads (old V1 inner loop)
+**Architecture (V8):**
+- 64 threads (2 warps), one output column per block (C=1)
+- Grid = (N, num_experts) — Y-dimension indexes experts
+- `__launch_bounds__(64, 24)` for M<=2, `__launch_bounds__(64, 16)` for M>2
+- M_VAL dispatch (1/2/3/4 templates)
 
-**What needs to change:**
+**Data format:**
+- B_packed_all: flat from `quantize_kbit` — concatenated per-expert,
+  each `[N * num_k_blocks * k]` uint32 (truncated to exact size)
+- B_absmax_all: flat float32 — concatenated per-expert,
+  each `[N * num_k_blocks]` float32 (truncated to exact size)
+- No repack step needed. Uses same flat layout as the dense scalar GEMV.
 
-The grouped kernel inner loop is the pre-V8 design. It is missing:
-- int4 vectorized A loads (sub-loop of 4 groups of 8 elements)
-- 64-thread / 2-warp configuration with `__launch_bounds__` tuning
-- M_VAL dispatch (1/2/3/4 templates instead of always 4)
+**Inner loop:** Identical to the dense scalar GEMV (V8): vectorized
+int4 A loads, 4-group sub-loop of 8 elements, shuffle codebook lookup.
+The only difference is per-expert pointer arithmetic using
+`expert_offsets[expert_id]` to find each expert's A, B, and C regions.
 
-The decision on data format is open: the scalar GEMV uses flat layout
-with float32 absmax (no repack), while the grouped kernel currently
-uses tiled layout with E4M4. The flat format avoids the repack step
-but uses 4x more bandwidth for absmax. For MoE shapes where expert
-weights are L2-resident, the extra absmax bandwidth may not matter.
+**Why grouped scalar wins for moe_gu (K=2048, N=512) at M<=4:**
+With C=1, the grid is N × num_experts = 512 × 8 = 4096 blocks. This
+gives full SM utilization (32 blocks/SM). The grouped MMA at this shape
+has far fewer blocks due to tiling overhead.
 
-**Why grouping is necessary:**
+**Quantize_kbit padding:** `quantize_kbit` appends a small padding
+(4 packed words + 1 absmax) to each expert's output. The test and
+benchmark helpers truncate each expert's data to the exact expected
+size before concatenation, so the kernel's arithmetic indexing
+(`expert_id * N * num_k_blocks * K_BITS`) works correctly.
 
-Individual expert launches for Qwen3 MoE:
-- gate/up (2048x512): 4 tiles on 128 SMs = 3% utilization
-- Kernel time: ~70 us (instruction-limited, L2-resident)
-- cuBLAS: ~22 us (also underutilized)
+---
 
-Grouped launch with 256 expert invocations (batch=32, top-8):
-- 256 * 4 tiles = 1024 tiles across 128 SMs = full utilization
-- Total weight data: ~32-64 MB across unique experts -> DRAM-bound
-- The 3.2x compression advantage now applies
+## 5. Grouped MMA (`kbit_grouped_gemm_prod`)
 
-**There is also a grouped MMA variant** (`kbit_grouped_gemm_prod` at
-`ops.cu:2182`) that uses the MMA kernel inner loop with a persistent
-work distribution across experts. This handles M>4 per expert. It uses
-binary search on work_offsets to find the expert for each work item.
+**Location:** `ops.cu` (search for `kbit_grouped_gemm_prod`)
+
+**Operation:** For each expert e: C_e[M_e, N] = A_e[M_e, K] * W_e^T,
+all experts in one kernel launch. Handles all M values (no M<=4 limit).
+
+**Architecture:**
+- TILE_N=64 for M<=16 (128 threads, 4 warps) — doubles N-tiles for
+  small-N shapes like moe_gu (N=512)
+- TILE_N=128 for M>16 (256 threads, 8 warps)
+- TILE_K=64, TILE_M=16*M_BLOCKS (M_BLOCKS=1..4)
+- Double-buffered cp.async pipeline (same as dense MMA kernel)
+- Persistent kernel with auto k_splits
+- Caller passes `max_M` to select M_BLOCKS template and compute
+  total_work on the host (no device-to-host sync needed)
+
+**Data format:**
+- B_packed_all: tiled from `repack_kbit` — concatenated per-expert
+- B_absmax_all: E4M4 uint8 tiled — concatenated per-expert
+- Uses same tiled layout as the dense MMA kernel
+
+**Work distribution (inline linear scan):**
+
+Each block gets a flat `work_id` and maps it to (expert, m_tile,
+n_tile, k_split) via a linear scan over `expert_offsets`:
+```
+tiles_so_far = 0
+for e = 0..num_experts-1:
+    M_e = expert_offsets[e+1] - expert_offsets[e]
+    m_tiles_e = ceil(M_e / TILE_M)
+    mn_tiles_e = m_tiles_e * n_tiles
+    expert_total = mn_tiles_e * k_splits
+    if work_id < tiles_so_far + expert_total:
+        expert_id = e
+        break
+    tiles_so_far += expert_total
+```
+
+With 8 active experts, this is 8 iterations of integer math — faster
+than binary search with unpredictable branches, and eliminates the
+previous `cudaMemcpy` + `cudaMalloc` + `cudaFree` that computed
+work_offsets on the host.
+
+**k_splits heuristic:**
+Same as dense MMA: targets 4 blocks/SM for TILE_N=64, 1 block/SM for
+TILE_N=128. For moe_gu (K=2048, N=512) at M=1 with TILE_N=64:
+8 N-tiles × 8 experts = 64 mn_tiles, target = 512, so k_splits = 8
+(K=2048 has 32 k-tiles). Total work = 512 blocks, 4 per SM.
+
+**Split-K write-back:**
+When k_splits > 1, partial results are atomicAdd'd to a float32
+workspace. The last block to arrive (tracked by `tile_counters`)
+converts the workspace to the output dtype. The workspace and
+tile_counters are allocated and zeroed per-call in the Python backend.
+
+**Performance (k=4, 8 experts):**
+
+| Shape | M | Grp MMA (us) | fp16 BMM (us) | vs fp16 |
+|-------|---|-------------|---------------|---------|
+| moe_gu (2048×512) | 1 | 11.7 | 10.8 | 0.94x |
+| moe_gu | 4 | 11.8 | 12.3 | 1.04x |
+| moe_gu | 8 | 12.3 | 12.5 | 1.02x |
+| moe_gu | 32 | 19.3 | 12.5 | 0.65x |
+| moe_gu | 64 | 28.3 | 17.0 | 0.60x |
+| moe_dn (512×2048) | 1 | 12.0 | 12.3 | 1.03x |
+| moe_dn | 4 | 12.2 | 12.3 | 1.01x |
+| moe_dn | 8 | 13.1 | 12.0 | 0.91x |
+| moe_dn | 32 | 15.4 | 24.2 | 1.57x |
+| moe_dn | 64 | 22.3 | 12.6 | 0.57x |
+
+The kernel wins or matches at M=1-8, is competitive at M=16, and
+loses at M=32+ where cuBLAS BMM becomes compute-bound. At large M
+(prefill), the MoE grouped kernel is ~1.7x slower than fp16 BMM,
+which is the dominant source of regression at 16-32 concurrent users
+(MoE layers account for 22-30% of per-block time).
+
+**Known issue: large-M MoE regression.**
+At prefill M=8/expert (512 experts), moe_gu takes 33.6 us vs 12.2 us
+fp16 — a 2.75x gap. The theoretical limit with perfect dequant/MMA
+overlap is 4.5 us (2.7x *faster* than fp16). The kernel is 7.4x off
+this limit due to serialized dequant. See `moe-kernel-spec.md` for the
+optimization plan: Phase 1 (tile tuning, hours) targets 22 us, Phase 2
+(warp-specialized producer/consumer pipeline, same idea as Marlin)
+targets < 10 us.
 
 ---
 
@@ -414,18 +491,28 @@ Two formats exist, and which kernel uses which matters:
 **Flat (from `quantize_kbit`):**
 - B_packed: `[N * num_k_blocks * k]` uint32, row-major per column
 - B_absmax: `[N * num_k_blocks]` float32
-- No preprocessing. Used by: scalar GEMV, dequant kernel.
+- No preprocessing. Used by: scalar GEMV, grouped scalar GEMV,
+  dequant kernel.
 
 **Tiled (from `repack_kbit`):**
 - B_packed: reorganized into `[k_tiles * n_tiles * TILE_N * B_COL_WORDS]`
   for coalesced cp.async loads per tile
 - B_absmax: E4M4-encoded uint8, same tiled layout
-- Requires a one-time repack pass. Used by: MMA kernel, grouped kernels.
+- Requires a one-time repack pass. Used by: MMA kernel, grouped MMA
+  kernel.
 
 E4M4 encodes each float32 absmax as a single byte (4-bit exponent +
 4-bit mantissa). Decode is branchless: `ldexp(mantissa, exponent-bias)`.
 This saves 4x bandwidth for absmax reads but adds a decode step in
 the inner loop.
+
+**Note:** The grouped scalar GEMV and grouped MMA use different data
+formats. The grouped scalar GEMV uses flat layout with float32 absmax
+(same as the dense scalar GEMV), while the grouped MMA uses tiled
+layout with E4M4 absmax (same as the dense MMA). This means MoE
+expert weights must be stored in both formats if both kernels are used
+in the dispatch, or a runtime conversion must happen. Currently the
+benchmark prepares each format separately.
 
 ---
 
@@ -452,7 +539,7 @@ per element; for k=2, ~8 ops.
 
 | GPU | SM | MMA instruction | Async MMA? | Kernel strategy |
 |-----|-----|-----------------|------------|----------------|
-| RTX 4090 | sm_89 | mma.sync | No | All 4 kernels as described |
+| RTX 4090 | sm_89 | mma.sync | No | All 5 kernels as described |
 | RTX 5090 | sm_120 | mma.sync (ext) | No | Same strategy, more SMs (192) |
 | H100/H200 | sm_90a | wgmma.mma_async | Yes | Could overlap dequant + MMA |
 | B200/GB200 | sm_100a | tcgen05.mma | Yes | Could overlap dequant + MMA |
