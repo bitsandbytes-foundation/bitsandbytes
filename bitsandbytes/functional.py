@@ -526,7 +526,7 @@ class QuantState:
                     "nested_offset": self.offset.item(),
                 },
             )
-        if not packed:
+        if not packed or self.quant_type is None:
             return qs_dict
 
         # packed format allows serialization of non-tensor components, critical for saving in safetensors format
