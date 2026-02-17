@@ -87,7 +87,7 @@ def get_rocm_gpu_arch() -> str:
             # On Windows, use hipinfo.exe; on Linux, use rocminfo
             if platform.system() == "Windows":
                 cmd = ["hipinfo.exe"]
-                arch_pattern = r"gcnArchName:\s+(gfx[a-zA-Z\d]+)"
+                arch_pattern = r"gcnArchName:\s+gfx([a-zA-Z\d]+)"
             else:
                 cmd = ["rocminfo"]
                 arch_pattern = r"Name:\s+gfx([a-zA-Z\d]+)"
@@ -95,10 +95,7 @@ def get_rocm_gpu_arch() -> str:
             result = subprocess.run(cmd, capture_output=True, text=True)
             match = re.search(arch_pattern, result.stdout)
             if match:
-                if platform.system() == "Windows":
-                    return match.group(1)
-                else:
-                    return "gfx" + match.group(1)
+                return f"gfx{match.group(1)}"
             else:
                 return "unknown"
         else:

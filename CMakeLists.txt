@@ -23,6 +23,10 @@ if(WIN32 AND COMPUTE_BACKEND STREQUAL "hip")
     if(ROCM_PATH AND NOT DEFINED CMAKE_HIP_COMPILER)
         set(CMAKE_HIP_COMPILER "${ROCM_PATH}/lib/llvm/bin/clang++.exe")
     endif()
+    # On Windows, the HIP compiler needs explicit paths to find device libraries.
+    if(ROCM_PATH)
+        set(CMAKE_HIP_FLAGS "--rocm-path=${ROCM_PATH} --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+    endif()
 endif()
 
 project(bitsandbytes LANGUAGES CXX)
@@ -213,31 +217,18 @@ if(BUILD_CUDA)
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
     add_compile_definitions(BUILD_CUDA)
 elseif(BUILD_HIP)
-    # Auto-detect GPU architecture on Windows using hipinfo.exe
-    if(WIN32 AND NOT DEFINED BNB_ROCM_ARCH AND NOT DEFINED AMDGPU_TARGETS AND NOT DEFINED CMAKE_HIP_ARCHITECTURES)
-      execute_process(
-        COMMAND hipinfo
-        OUTPUT_VARIABLE HIPINFO_OUTPUT
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-      )
-      if(HIPINFO_OUTPUT MATCHES "gcnArchName:[ \t]*([a-z0-9]+)")
-        set(CMAKE_HIP_ARCHITECTURES "${CMAKE_MATCH_1}")
-        message(STATUS "Auto-detected HIP architecture: ${CMAKE_HIP_ARCHITECTURES}")
-      endif()
+    # Set target architectures before enable_language(HIP), which would otherwise
+    # auto-detect a single GPU and override the defaults.
+    if(DEFINED BNB_ROCM_ARCH)
+      set(CMAKE_HIP_ARCHITECTURES ${BNB_ROCM_ARCH})
+    elseif(AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
+      set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
+    elseif(NOT CMAKE_HIP_ARCHITECTURES)
+      set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1150;gfx1151;gfx1200;gfx1201")
     endif()
 
     enable_language(HIP)
     message(STATUS "HIP Compiler: ${CMAKE_HIP_COMPILER}")
-    if(DEFINED BNB_ROCM_ARCH)
-      set(CMAKE_HIP_ARCHITECTURES ${BNB_ROCM_ARCH})
-    else()
-      if (NOT AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
-        set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1150;gfx1151;gfx1200;gfx1201")
-      elseif (AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
-        set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
-      endif()
-    endif()
     message(STATUS "HIP Targets: ${CMAKE_HIP_ARCHITECTURES}")
 
     list(APPEND SRC_FILES ${HIP_FILES})
@@ -371,11 +362,10 @@ if(BUILD_HIP)
     target_link_directories(bitsandbytes PRIVATE ${ROCM_PATH}/lib /lib)
     target_link_libraries(bitsandbytes PUBLIC roc::hipblas hip::hiprand roc::hipsparse)
 
-    # On Windows, link the HIP runtime and rocblas directly using full paths
+    # On Windows, rocblas is not pulled in transitively by roc::hipblas
+    # and is needed because ops_hip.cuh uses rocblas_handle directly.
     if(WIN32)
-        target_link_libraries(bitsandbytes PUBLIC
-            "${ROCM_PATH}/lib/amdhip64.lib"
-            "${ROCM_PATH}/lib/rocblas.lib")
+        target_link_libraries(bitsandbytes PUBLIC rocblas)
     endif()
 
     target_compile_definitions(bitsandbytes PUBLIC BNB_USE_HIP)

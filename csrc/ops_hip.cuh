@@ -13,9 +13,6 @@
 #include <stdio.h>
 
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
 #include <io.h>
 #include <process.h>
 #include <windows.h>
