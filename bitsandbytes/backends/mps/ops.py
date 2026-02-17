@@ -18,13 +18,15 @@ from ..._ops import register_kernel
 _QUANT_MAP = {"fp4": 1, "nf4": 2}
 _kernel = None
 
+
 def _get_kernel():
     """Lazily load the bitsandbytes-mps kernel (local build or Hub)."""
     global _kernel
     if _kernel is None:
-            from kernels import get_kernel
-            # TODO: use kernels-community/bitsandbytes-mps when it's available
-            _kernel = get_kernel("medmekk/bitsandbytes-mps")
+        from kernels import get_kernel
+
+        # TODO: use kernels-community/bitsandbytes-mps when it's available
+        _kernel = get_kernel("medmekk/bitsandbytes-mps")
     return _kernel
 
 
