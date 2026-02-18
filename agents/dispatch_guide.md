@@ -7,7 +7,7 @@ You are the Dispatcher. Your job is to analyze open GitHub issues for bitsandbyt
 Before starting, refresh the issue data:
 
 ```bash
-python3 ~/git/lab_tools/github/fetch_issues.py
+python3 agents/fetch_issues.py
 ```
 
 Read `agents/github_tools_guide.md` for the full reference on how to use the query tools.
@@ -17,8 +17,8 @@ Read `agents/github_tools_guide.md` for the full reference on how to use the que
 Start by getting the landscape of open issues:
 
 ```bash
-python3 ~/git/lab_tools/github/query_issues.py list
-python3 ~/git/lab_tools/github/query_issues.py list --sort reactions
+python3 agents/query_issues.py list
+python3 agents/query_issues.py list --sort reactions
 ```
 
 Look for issues that are actionable — see the "Identifying Actionable Issues" section of `agents/github_tools_guide.md`. Good candidates have:
@@ -32,13 +32,13 @@ Also check for low-hanging fruit:
 
 ```bash
 # Issues with open PRs that may just need review/testing/completion
-python3 ~/git/lab_tools/github/query_issues.py search "PR" --state open
+python3 agents/query_issues.py search "PR" --state open
 
 # Issues already labeled for external contribution
-python3 ~/git/lab_tools/github/query_issues.py list --label "Contributions Welcome"
+python3 agents/query_issues.py list --label "Contributions Welcome"
 
 # Issues proposed for closing (may just need verification)
-python3 ~/git/lab_tools/github/query_issues.py list --label "Proposing to Close"
+python3 agents/query_issues.py list --label "Proposing to Close"
 ```
 
 ## Step 2: Deep-Dive Each Candidate
@@ -47,20 +47,20 @@ For each candidate issue, gather full context. This step is critical — the qua
 
 ```bash
 # Full issue with all comments
-python3 ~/git/lab_tools/github/query_issues.py show <NUMBER>
+python3 agents/query_issues.py show <NUMBER>
 
 # Check for existing open PRs that already address this issue
 gh pr list --search "<NUMBER>" --state open
 gh pr list --search "keyword from issue" --state open
 
 # Find related/duplicate issues (with body previews and last comments)
-python3 ~/git/lab_tools/github/query_issues.py related <NUMBER> -v
+python3 agents/query_issues.py related <NUMBER> -v
 
 # Check if it was already resolved
-python3 ~/git/lab_tools/github/query_issues.py related <NUMBER> --state closed -v
+python3 agents/query_issues.py related <NUMBER> --state closed -v
 
 # Targeted searches for specific error messages or terms from the issue
-python3 ~/git/lab_tools/github/query_issues.py search "specific error text"
+python3 agents/query_issues.py search "specific error text"
 ```
 
 For each promising related issue that shows up, run `show` on it to get the full context. Don't stop at the `related` output — read the full body and comments of related issues, especially closed ones where the resolution may be documented.
