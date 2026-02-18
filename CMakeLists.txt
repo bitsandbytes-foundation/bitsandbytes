@@ -10,6 +10,10 @@
 #                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90;100;120`
 #                        Check your compute capability here: https://developer.nvidia.com/cuda-gpus
 #  - PTXAS_VERBOSE: Pass the `-v` option to the PTX Assembler
+#  - ROCM_VERSION: Override the ROCm version shortcode used in the output library name.
+#                  Useful when PyTorch was built against a different ROCm version than the
+#                  system install. For example, `-DROCM_VERSION=70` produces
+#                  libbitsandbytes_rocm70.so even if the system has ROCm 7.2.
 cmake_minimum_required(VERSION 3.22.1)
 
 project(bitsandbytes LANGUAGES CXX)
@@ -222,7 +226,15 @@ elseif(BUILD_HIP)
     string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
     string(REPLACE "." "" HIP_VERSION_SHORT "${HIP_VERSION}")
 
-    string(APPEND BNB_OUTPUT_NAME "${HIP_VERSION_SHORT}")
+    # Expose a cache variable that the user can set to override the ROCm version in the library name
+    set(ROCM_VERSION "${HIP_VERSION_SHORT}" CACHE STRING "Expected ROCm Version Shortcode")
+
+    message(STATUS "ROCm Version: ${HIP_VERSION_SHORT} (from hipconfig)")
+    if(NOT ROCM_VERSION STREQUAL "${HIP_VERSION_SHORT}")
+        message(WARNING "Overriding ROCm version in library name: ${HIP_VERSION_SHORT} -> ${ROCM_VERSION}")
+    endif()
+
+    string(APPEND BNB_OUTPUT_NAME "${ROCM_VERSION}")
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     add_compile_definitions(__HIP_PLATFORM_HCC__)
     add_compile_definitions(BUILD_HIP)
