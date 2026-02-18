@@ -141,7 +141,9 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
         self.error_msg = error_msg
         self.user_cuda_version = get_cuda_version_tuple()
         self.available_versions = get_available_cuda_binary_versions()
-        self.override_value = os.environ.get("BNB_ROCM_VERSION") if HIP_ENVIRONMENT else os.environ.get("BNB_CUDA_VERSION")
+        self.override_value = (
+            os.environ.get("BNB_ROCM_VERSION") if HIP_ENVIRONMENT else os.environ.get("BNB_CUDA_VERSION")
+        )
         self.requested_version = (
             parse_cuda_version(self.override_value)
             if self.override_value

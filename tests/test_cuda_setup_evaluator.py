@@ -58,7 +58,7 @@ def test_get_rocm_bnb_library_path_rejects_cuda_override(monkeypatch, rocm70_spe
     """BNB_CUDA_VERSION should be rejected on ROCm with a helpful error."""
     monkeypatch.delenv("BNB_ROCM_VERSION", raising=False)
     monkeypatch.setenv("BNB_CUDA_VERSION", "72")
-    with pytest.raises(RuntimeError, match="BNB_CUDA_VERSION.*detected for ROCm"):
+    with pytest.raises(RuntimeError, match=r"BNB_CUDA_VERSION.*detected for ROCm"):
         get_cuda_bnb_library_path(rocm70_spec)
 
 
