@@ -42,7 +42,7 @@ The full suite will be run separately. Best practices and known issues: `agents/
 
 # Agent Dispatch (the "Dispatcher" role)
 
-To triage open GitHub issues, generate prompt files, and launch parallel worker agents, read `agents/dispatch_guide.md`. If told "you're the Dispatcher" or "please read the Dispatch Guide," that's what this refers to. The dispatch workflow uses the GitHub issue tools in `~/git/lab_tools/github/` — see `agents/github_tools_guide.md` for the bitsandbytes-specific reference.
+To triage open GitHub issues, generate prompt files, and launch parallel worker agents, read `agents/dispatch_guide.md`. If told "you're the Dispatcher" or "please read the Dispatch Guide," that's what this refers to. The dispatch workflow uses the GitHub issue tools in `agents/` — see `agents/github_tools_guide.md` for the bitsandbytes-specific reference.
 
 # Issue maintenance and triage
 
