@@ -25,7 +25,7 @@ def _get_kernel():
         from kernels import get_kernel
 
         # TODO: use kernels-community/bitsandbytes-mps when it's available
-        _kernel = get_kernel("medmekk/bitsandbytes-mps")
+        _kernel = get_kernel("kernels-community/bitsandbytes-mps")
     return _kernel
 
 
