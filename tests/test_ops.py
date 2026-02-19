@@ -219,8 +219,8 @@ class Test4bitBlockwiseQuantOps:
         out_features = 1024
         in_features = 256
 
-        if device == "cpu" and blocksize > in_features:
-            pytest.skip("CPU implementation only suppoer blocksize <= in_features")
+        if device in ("cpu", "mps") and blocksize > in_features:
+            pytest.skip("CPU/MPS implementation only supports blocksize <= in_features")
 
         A = torch.randn((1, 1, in_features), dtype=dtype, device=device)
         B = torch.randn((out_features, in_features), dtype=dtype, device=A.device)
