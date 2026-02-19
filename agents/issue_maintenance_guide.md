@@ -9,7 +9,7 @@ You are an issue maintenance agent. Your job is to review open GitHub issues for
 Refresh the issue data:
 
 ```bash
-python3 ~/git/lab_tools/github/fetch_issues.py
+python3 agents/fetch_issues.py
 ```
 
 Read `agents/github_tools_guide.md` for the full reference on query tools, and `agents/issue_patterns.md` for known closeable patterns.
@@ -18,15 +18,15 @@ Read `agents/github_tools_guide.md` for the full reference on query tools, and `
 
 ```bash
 # All open issues
-python3 ~/git/lab_tools/github/query_issues.py list
+python3 agents/query_issues.py list
 
 # Low-hanging fruit
-python3 ~/git/lab_tools/github/query_issues.py list --label "Duplicate"
-python3 ~/git/lab_tools/github/query_issues.py list --label "Proposing to Close"
-python3 ~/git/lab_tools/github/query_issues.py list --label "Waiting for Info"
-python3 ~/git/lab_tools/github/query_issues.py list --label "Question"
-python3 ~/git/lab_tools/github/query_issues.py list --label "Likely Not a BNB Issue"
-python3 ~/git/lab_tools/github/query_issues.py list --unlabeled
+python3 agents/query_issues.py list --label "Duplicate"
+python3 agents/query_issues.py list --label "Proposing to Close"
+python3 agents/query_issues.py list --label "Waiting for Info"
+python3 agents/query_issues.py list --label "Question"
+python3 agents/query_issues.py list --label "Likely Not a BNB Issue"
+python3 agents/query_issues.py list --unlabeled
 ```
 
 ## Step 2: Identify Closeable Issues
@@ -74,13 +74,13 @@ When two or more issues look related:
 
 ```bash
 # Full context on both
-python3 ~/git/lab_tools/github/query_issues.py show <NUMBER1> <NUMBER2>
+python3 agents/query_issues.py show <NUMBER1> <NUMBER2>
 
 # Find more related issues
-python3 ~/git/lab_tools/github/query_issues.py related <NUMBER> -v
+python3 agents/query_issues.py related <NUMBER> -v
 
 # Check if already resolved
-python3 ~/git/lab_tools/github/query_issues.py related <NUMBER> --state closed -v
+python3 agents/query_issues.py related <NUMBER> --state closed -v
 ```
 
 Before closing a duplicate, verify:

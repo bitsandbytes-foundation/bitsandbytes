@@ -243,6 +243,9 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
 
+    if device == "cuda" and mode == "reduce-overhead" and fullgraph and threshold > 0 and torch.__version__ >= (2, 10):
+        pytest.xfail("Failure due to regression in torch 2.10 related to reduced overhead mode and CUDA.")
+
     dim = 256
     batch_size = 16
 
