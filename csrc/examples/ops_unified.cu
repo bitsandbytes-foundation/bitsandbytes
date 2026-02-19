@@ -1,35 +1,17 @@
-// ops_unified.cu — EXAMPLE of merged host wrappers for CUDA/HIP
+// Copyright (c) Facebook, Inc. and its affiliates.
 //
-// This replaces both csrc/ops.cu and csrc/ops.hip. Shows representative
-// functions covering all categories of differences.
-//
-// Key points:
-//   - <<<grid, block>>> works on both CUDA and HIP (no hipLaunchKernelGGL needed)
-//   - BNB_CHECK_RETURN replaces CUDA_CHECK_RETURN / hip equivalent
-//   - bnb_stream_t replaces cudaStream_t / hipStream_t
-//   - #if BNB_HIP only for genuinely different library code (igemmlt, spmm_coo)
-
-#include "common.cuh"
-#include "compat.cuh"
-#include "kernels.cuh"
-#include "ops_unified.cuh"
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the root directory of this source tree.
 
 #include <cassert>
-#include <common.h>
+#include <kernels.cuh>
 #include <limits>
-
-#if !BNB_HIP
-#include <cub/device/device_scan.cuh>
-#endif
+#include <ops.cuh>
 
 #define ERR_NOT_IMPLEMENTED 100
 
 using std::cout;
 using std::endl;
-
-// ============================================================================
-// Quantize / Dequantize — fully shared, <<<>>> works on both platforms
-// ============================================================================
 
 void quantize(float* code, float* A, unsigned char* out, int n) {
     int num_blocks = n / 1024;
@@ -44,10 +26,6 @@ void dequantize(float* code, unsigned char* A, float* out, int n, bnb_stream_t s
     kDequantize<<<num_blocks, 1024, 0, stream>>>(code, A, out, n);
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
-
-// ============================================================================
-// quantizeBlockwise — mostly shared, small warp-size dispatch difference
-// ============================================================================
 
 template <typename T, int STOCHASTIC, int DATA_TYPE>
 void quantizeBlockwise(
@@ -69,30 +47,38 @@ void quantizeBlockwise(
         kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE><<<num_blocks, 128>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 128)
         kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
-    else if (blocksize == 64)
+    else if (blocksize == 64) {
+#if BNB_HIP
+        // On HIP with 64-wide warps (CDNA), use specialized kernel for 4-bit types
+        if constexpr (DATA_TYPE > 0) {
+            kQuantizeBlockwiseSmall<T, DATA_TYPE>
+                <<<(num_blocks + 1) / 2, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+        } else {
+            kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
+        }
+#else
         kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
-    // Smallest blocksize: uses unified kQuantizeBlockwiseSmall
-    // BNB_WARP_SIZE is the compile-time block size (32 on CUDA, 32 or 64 on HIP)
-    else if (blocksize == BNB_WARP_SIZE) {
+#endif
+    } else if (blocksize == 32) {
+        // For 4-bit: use specialized kernel that processes 2 blocks per warp
+        // Each CUDA block handles 2 quantization blocks, so divide num_blocks by 2
         if constexpr (DATA_TYPE > 0) {
             int num_blocks_adjusted = (num_blocks + 1) / 2;
             kQuantizeBlockwiseSmall<T, DATA_TYPE>
-                <<<num_blocks_adjusted, BNB_WARP_SIZE>>>(code, A, absmax, out, rand, rand_offset, n);
+                <<<num_blocks_adjusted, 32>>>(code, A, absmax, out, rand, rand_offset, n);
         }
     }
 
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
 
-// ============================================================================
-// dequantizeBlockwise — fully shared
-// ============================================================================
-
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(
     float* code, unsigned char* A, float* absmax, T* out, int blocksize, const int n, bnb_stream_t stream
 ) {
     constexpr int tile_size = (DATA_TYPE > 0) ? 1024 : 512;
+
+    // Upcast to int64 to avoid overflow for large n
     int grid_blocks = ((int64_t)n + tile_size - 1) / tile_size;
 
     if (DATA_TYPE > 0)
@@ -105,94 +91,321 @@ void dequantizeBlockwise(
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
 
-// ============================================================================
-// gemm_4bit_inference_naive — small warp-size difference in block count
-// ============================================================================
-
-template <typename T, int BITS>
-void gemm_4bit_inference_naive(
-    int m, int n, int k, T* A, unsigned char* B, float* absmax, float* datatype, T* out, int lda, int ldb, int ldc,
-    int blocksize, bnb_stream_t stream
+template <typename T, int OPTIMIZER>
+void optimizer32bit(
+    T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, const float beta1,
+    const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay, const int step,
+    const float lr, const float gnorm_scale, bool skip_zeros, const int n
 ) {
-    // Warp size affects how many rows each block processes
-    int num_blocks;
-    if constexpr (BNB_WARP_SIZE == 64)
-        num_blocks = (m + 1) / 2;
-    else
-        num_blocks = (m + 3) / 4;
+    int num_blocks = n / 4096;
+    num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
+    switch (OPTIMIZER) {
+    case ADAM:
+    case ADEMAMIX:
+        if (max_unorm > 0.0f) {
+            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(unorm, 0, 1 * sizeof(float)));
+            kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(
+                g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n
+            );
+            BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        }
+        kOptimizer32bit2State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+            g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, beta3, alpha, eps, weight_decay, step, lr,
+            gnorm_scale, skip_zeros, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        break;
+    case MOMENTUM:
+    case RMSPROP:
+    case ADAGRAD:
+        if (max_unorm > 0.0f) {
+            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(unorm, 0, 1 * sizeof(float)));
+            kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>
+                <<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+            BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        }
 
-    kgemm_4bit_inference_naive<T, 128, BITS>
-        <<<num_blocks, 128, 0, stream>>>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize);
+        kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+            g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale,
+            skip_zeros, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        break;
+    case LION:
+        // in lion, the momentum update after the parameter update
+        kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+            g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale,
+            skip_zeros, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+
+        if (max_unorm > 0.0f) {
+            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(unorm, 0, 1 * sizeof(float)));
+            kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>
+                <<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+            BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        }
+        break;
+    }
+}
+
+template <typename T, int OPTIMIZER>
+void optimizerStatic8bit(
+    T* p, T* g, unsigned char* state1, unsigned char* state2, float* unorm, float max_unorm, float param_norm,
+    float beta1, float beta2, float eps, int step, float lr, float* quantiles1, float* quantiles2, float* max1,
+    float* max2, float* new_max1, float* new_max2, float weight_decay, const float gnorm_scale, int n
+) {
+    int num_blocks = n / 4096;
+    num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
+
+    if (max_unorm > 0.0f) {
+        BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(unorm, 0, 1 * sizeof(float)));
+    }
+
+    switch (OPTIMIZER) {
+    case ADAM:
+        BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(new_max1, 0, 1 * sizeof(float)));
+        BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(new_max2, 0, 1 * sizeof(float)));
+        kPreconditionOptimizerStatic8bit2State<T, OPTIMIZER><<<num_blocks, 256>>>(
+            p, g, state1, state2, unorm, beta1, beta2, eps, step, quantiles1, quantiles2, max1, max2, new_max1,
+            new_max2, gnorm_scale, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        kOptimizerStatic8bit2State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+            p, g, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2,
+            max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        break;
+    case MOMENTUM:
+    case RMSPROP:
+    case ADAGRAD:
+        BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(new_max1, 0, 1 * sizeof(float)));
+        kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(
+            p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        kOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+            p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1,
+            weight_decay, gnorm_scale, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        break;
+    case LION:
+        // in lion, the momentum update happens after the parameter update
+        kOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+            p, g, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, max1, new_max1,
+            weight_decay, gnorm_scale, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+
+        BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(new_max1, 0, 1 * sizeof(float)));
+        kPreconditionOptimizerStatic8bit1State<T, OPTIMIZER><<<num_blocks, 256>>>(
+            p, g, state1, unorm, beta1, beta2, eps, step, quantiles1, max1, new_max1, weight_decay, gnorm_scale, n
+        );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        break;
+    default:
+        break;
+    }
+}
+
+#define BLOCKSIZE_2STATE 256
+#define NUM_2STATE 1
+#define BLOCKSIZE_1STATE 256
+#define NUM_1STATE 1
+
+template <typename T, int OPTIMIZER>
+void optimizerStatic8bitBlockwise(
+    T* p, T* g, unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3, float alpha,
+    float eps, int step, float lr, float* quantiles1, float* quantiles2, float* absmax1, float* absmax2,
+    float weight_decay, const float gnorm_scale, bool skip_zeros, int n
+) {
+
+    int num_blocks = 0;
+    switch (OPTIMIZER) {
+    case ADAM:
+    case ADEMAMIX:
+        num_blocks = n / BLOCKSIZE_2STATE;
+        num_blocks = n % BLOCKSIZE_2STATE == 0 ? num_blocks : num_blocks + 1;
+        kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>
+            <<<num_blocks, BLOCKSIZE_2STATE / NUM_2STATE>>>(
+                p, g, state1, state2, beta1, beta2, beta3, alpha, eps, step, lr, quantiles1, quantiles2, absmax1,
+                absmax2, weight_decay, gnorm_scale, skip_zeros, n
+            );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        break;
+    case MOMENTUM:
+    case RMSPROP:
+    case ADAGRAD:
+    case LION:
+        num_blocks = n / BLOCKSIZE_1STATE;
+        num_blocks = n % BLOCKSIZE_1STATE == 0 ? num_blocks : num_blocks + 1;
+        kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE>
+            <<<num_blocks, BLOCKSIZE_1STATE / NUM_1STATE>>>(
+                p, g, state1, beta1, beta2, eps, step, lr, quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n
+            );
+        BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+        break;
+    }
+}
+
+template <typename T> void percentileClipping(T* g, float* gnorm_vec, int step, const int n) {
+    int num_blocks = n / 2048;
+    num_blocks = n % 2048 == 0 ? num_blocks : num_blocks + 1;
+    BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(&gnorm_vec[step % 100], 0, 1 * sizeof(float)));
+    kPercentileClipping<T, 2048, 4><<<num_blocks, 512>>>(g, gnorm_vec, step, n);
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
 
-// ============================================================================
-// igemmlt — BLAS library calls genuinely differ between cuBLAS and hipBLAS
-//
-// This is one of the few functions requiring substantial #if BNB_HIP blocks.
-// The algorithm is the same but hipBLAS requires explicit heuristic selection
-// while cuBLAS auto-selects.
-// ============================================================================
+void gemmex(
+    Context* context, bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda,
+    int ldb, int ldc
+) {
+    const int falpha = 1;
+    const int fbeta = 0;
+    const void* alpha = &falpha;
+    const void* beta = &fbeta;
+
+#if BNB_HIP
+    hipblasStatus_t status;
+
+    status = hipblasGemmEx(
+        context->m_handle, transposeA ? HIPBLAS_OP_T : HIPBLAS_OP_N, transposeB ? HIPBLAS_OP_T : HIPBLAS_OP_N, m, n, k,
+        alpha, A, HIP_R_8I, lda, B, HIP_R_8I, ldb, beta, C, HIP_R_32I, ldc, HIPBLAS_COMPUTE_32I, HIPBLAS_GEMM_DEFAULT
+    );
+
+    if (status != HIPBLAS_STATUS_SUCCESS) {
+        std::cout << "HIPBLAS ERROR: Status " << status << std::endl;
+    }
+#else
+    cublasStatus_t status;
+
+    status = cublasGemmEx(
+        context->m_handle, transposeA ? CUBLAS_OP_T : CUBLAS_OP_N, transposeB ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k,
+        alpha, A, CUDA_R_8I, lda, B, CUDA_R_8I, ldb, beta, C, CUDA_R_32I, ldc, CUDA_R_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP
+    );
+
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        std::cout << "CUBLAS ERROR: Status " << status << std::endl;
+    }
+#endif
+}
+
+void strided_gemmex(
+    Context* context, bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda,
+    int ldb, int ldc, long long int strideA, long long int strideB, long long int strideC, int batchCount
+) {
+    const int falpha = 1;
+    const int fbeta = 0;
+    const void* alpha = &falpha;
+    const void* beta = &fbeta;
+
+#if BNB_HIP
+    hipblasStatus_t status;
+
+    status = hipblasGemmStridedBatchedEx(
+        context->m_handle, transposeA ? HIPBLAS_OP_T : HIPBLAS_OP_N, transposeB ? HIPBLAS_OP_T : HIPBLAS_OP_N, m, n, k,
+        alpha, A, HIP_R_8I, lda, (long long int)strideA, B, HIP_R_8I, ldb, (long long int)strideB, beta, C, HIP_R_32I,
+        ldc, (long long int)strideC, batchCount, HIPBLAS_COMPUTE_32I, HIPBLAS_GEMM_DEFAULT
+    );
+
+    if (status != HIPBLAS_STATUS_SUCCESS) {
+        std::cout << "HIPBLAS ERROR: Status " << status << std::endl;
+    }
+#else
+    cublasStatus_t status;
+
+    status = cublasGemmStridedBatchedEx(
+        context->m_handle, transposeA ? CUBLAS_OP_T : CUBLAS_OP_N, transposeB ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k,
+        alpha, A, CUDA_R_8I, lda, (long long int)strideA, B, CUDA_R_8I, ldb, (long long int)strideB, beta, C,
+        CUDA_R_32I, ldc, (long long int)strideC, batchCount, CUDA_R_32I, CUBLAS_GEMM_DEFAULT
+    );
+
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        std::cout << "CUBLAS ERROR: Status " << status << std::endl;
+    }
+#endif
+}
+
+int roundoff(int v, int d) { return (v + d - 1) / d * d; }
 
 template <int DTYPE_OUT, int SCALE_ROWS>
 int igemmlt(
     bnb_blasLt_handle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
     int lda, int ldb, int ldc, bnb_stream_t stream
 ) {
+
 #if BNB_HIP && defined(NO_HIPBLASLT)
     return ERR_NOT_IMPLEMENTED;
 #else
+
+    // Calculate C = A^T @ B, in col-major layout.
+    //
+    // Use the IMMA kernels requires:
+    // * A must be transposed and B must be non-transposed.
+    // * Dimensions m and k must be multiples of 4.
+    // * All pointers must be 4-byte aligned; 16-byte alignment preferred.
+
     int has_error = 0;
 
     bnb_blasLt_matmul_desc_t matmulDesc;
     bnb_blasLt_layout_t aDesc, bDesc, cDesc;
+    auto opT = BNB_BLASLT_OP_T;
 
     auto outType = DTYPE_OUT == 32 ? BNB_R_32I : BNB_R_8I;
     auto scaleType = DTYPE_OUT == 32 ? BNB_R_32I : BNB_R_32F;
-    auto opT = BNB_BLASLT_OP_T;
+
+    auto pointerMode = BNB_BLASLT_PTR_MODE_ALPHA_VEC;
 
     has_error |= checkBlasLtStatus(bnb_blasLtLayoutCreate(&aDesc, BNB_R_8I, m, k, lda));
     has_error |= checkBlasLtStatus(bnb_blasLtLayoutCreate(&bDesc, BNB_R_8I, m, n, ldb));
     has_error |= checkBlasLtStatus(bnb_blasLtLayoutCreate(&cDesc, outType, k, n, ldc));
 
+    // Default layout order is col major
+
     has_error |= checkBlasLtStatus(bnb_blasLtMatmulDescCreate(&matmulDesc, BNB_BLASLT_COMPUTE_32I, scaleType));
     has_error |= checkBlasLtStatus(bnb_blasLtMatmulDescSetAttr(matmulDesc, BNB_BLASLT_DESC_TRANSA, &opT, sizeof(opT)));
 
     if (DTYPE_OUT == 32) {
-        int alpha = 1, beta = 0;
-
 #if BNB_HIP
-        // HIP requires explicit algorithm heuristic selection
+        // HIP requires heuristic algo selection
+        const int64_t max_workspace_size = 0; // set to 0 to avoid choosing GSU kernel
+
         bnb_blasLt_preference_t pref;
-        const int64_t max_workspace_size = 0;
         checkBlasLtStatus(bnb_blasLtPrefCreate(&pref));
         checkBlasLtStatus(
             bnb_blasLtPrefSetAttr(pref, BNB_BLASLT_PREF_MAX_WORKSPACE, &max_workspace_size, sizeof(max_workspace_size))
         );
 
-        bnb_blasLt_heuristic_t heuristicResult[1];
+        const int request_solutions = 1;
+        bnb_blasLt_heuristic_t heuristicResult[request_solutions];
         int returnedAlgoCount = 0;
         checkBlasLtStatus(bnb_blasLtAlgoGetHeuristic(
-            ltHandle, matmulDesc, aDesc, bDesc, cDesc, cDesc, pref, 1, heuristicResult, &returnedAlgoCount
+            ltHandle, matmulDesc, aDesc, bDesc, cDesc, cDesc, pref, request_solutions, heuristicResult,
+            &returnedAlgoCount
         ));
 
         if (returnedAlgoCount == 0) {
             has_error = 1;
             fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
         } else {
+            int alpha = 1, beta = 0;
             has_error |= checkBlasLtStatus(bnb_blasLtMatmul(
                 ltHandle, matmulDesc, &alpha, A, aDesc, B, bDesc, &beta, (int32_t*)C, cDesc, (int32_t*)C, cDesc,
                 &heuristicResult[0].algo, NULL, 0, stream
             ));
         }
 #else
-        // CUDA: cuBLAS auto-selects algorithm
+        int alpha = 1, beta = 0;
         has_error |= checkBlasLtStatus(bnb_blasLtMatmul(
             ltHandle, matmulDesc, &alpha, A, aDesc, B, bDesc, &beta, (int32_t*)C, cDesc, (int32_t*)C, cDesc, NULL, NULL,
             0, stream
         ));
 #endif
     } else {
+        // This path is unlikely to be used, as 8-bit accumulation can lead to likely overflows.
+
         if (!SCALE_ROWS) {
             float alpha = 1.0f, beta = 0.0f;
             has_error |= checkBlasLtStatus(bnb_blasLtMatmul(
@@ -200,10 +413,10 @@ int igemmlt(
                 NULL, 0, stream
             ));
         } else {
-            auto pointerMode = BNB_BLASLT_PTR_MODE_ALPHA_VEC;
+            auto alphaVec = BNB_BLASLT_PTR_MODE_ALPHA_VEC;
             float beta = 0.0f;
             has_error |= checkBlasLtStatus(
-                bnb_blasLtMatmulDescSetAttr(matmulDesc, BNB_BLASLT_DESC_POINTER_MODE, &pointerMode, sizeof(pointerMode))
+                bnb_blasLtMatmulDescSetAttr(matmulDesc, BNB_BLASLT_DESC_POINTER_MODE, &pointerMode, sizeof(alphaVec))
             );
             has_error |= checkBlasLtStatus(bnb_blasLtMatmul(
                 ltHandle, matmulDesc, row_scale, A, aDesc, B, bDesc, &beta, (int8_t*)C, cDesc, (int8_t*)C, cDesc, NULL,
@@ -221,56 +434,21 @@ int igemmlt(
         printf("error detected");
 
     return has_error;
-#endif
+#endif // NO_HIPBLASLT
 }
 
-// ============================================================================
-// spmm_coo — sparse library calls differ but structure is identical
-// Uses unified CHECK_SPARSE and bnb_sparse* macros from compat.cuh
-// ============================================================================
-
-void spmm_coo(
-    bnb_sparse_handle_t handle, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols,
-    int B_cols, int ldb, half* B, int ldc, half* C, bool transposed_B
-) {
-#if BNB_HIP && defined(NO_HIPBLASLT)
-    // No sparse support on older ROCm
-#else
-    float alpha = 1.0f;
-    float beta = 0.0f;
-    void* dBuffer = NULL;
-    size_t bufferSize = 0;
-
-    // Note: all of these use the bnb_sparse* macros from compat.cuh
-    // which resolve to cusparse* or hipsparse* as appropriate
-
-    // bnb_sparseCreateCoo → cusparseCreateCoo / hipsparseCreateCoo
-    // BNB_R_16F → CUDA_R_16F / HIP_R_16F
-    // etc.
-
-    // Omitting the body as it would be identical to what compat.cuh provides
-    // (see full macro mappings in compat.cuh)
-
-    CHECK_SPARSE(bnb_sparseCreateCoo(
-        NULL, A_rows, A_cols, A_nnz, A_rowidx, A_colidx, A_vals, BNB_SPARSE_INDEX_32I, BNB_SPARSE_INDEX_BASE_ZERO,
-        BNB_R_16F
-    ));
-
-    // ... (rest of spmm_coo using bnb_sparse* macros — same pattern)
-#endif
+int fill_up_to_nearest_multiple(int value, int multiple) {
+    return value + (value % multiple == 0 ? 0 : (multiple - (value % multiple)));
 }
-
-// ============================================================================
-// Simple kernel launchers — fully shared
-// ============================================================================
 
 void dequant_mm_int32_fp16(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, bnb_stream_t stream
 ) {
     const int threads = 512;
     const int num_per_thread = 4;
+    const int num_per_block = threads * num_per_thread;
     const int n = numRows * numCols;
-    const int num_blocks = (n + threads * num_per_thread - 1) / (threads * num_per_thread);
+    const int num_blocks = (n + num_per_block - 1) / num_per_block;
 
     kdequant_mm_int32_fp16<num_per_thread, threads>
         <<<num_blocks, threads, 0, stream>>>(A, rowStats, colStats, out, bias, numRows, numCols, n);
@@ -288,6 +466,87 @@ void int8VectorQuant(
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
 
+void spmm_coo(
+    bnb_sparse_handle_t handle, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols,
+    int B_cols, int ldb, half* B, int ldc, half* C, bool transposed_B
+) {
+#if BNB_HIP && defined(NO_HIPBLASLT)
+    return;
+#else
+    bnb_sparseSpMatDescr_t descA;
+    bnb_sparseDnMatDescr_t descB, descC;
+
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    void* dBuffer = NULL;
+    size_t bufferSize = 0;
+
+    CHECK_SPARSE(bnb_sparseCreateCoo(
+        &descA, A_rows, A_cols, A_nnz, A_rowidx, A_colidx, A_vals, BNB_SPARSE_INDEX_32I, BNB_SPARSE_INDEX_BASE_ZERO,
+        BNB_R_16F
+    ));
+    // Create dense matrix C
+    CHECK_SPARSE(bnb_sparseCreateDnMat(&descC, A_rows, B_cols, ldc, C, BNB_R_16F, BNB_SPARSE_ORDER_ROW));
+    // Create dense matrix B
+    if (transposed_B) {
+        int tmp = A_cols;
+        A_cols = B_cols;
+        B_cols = tmp;
+    }
+
+    CHECK_SPARSE(bnb_sparseCreateDnMat(&descB, A_cols, B_cols, ldb, B, BNB_R_16F, BNB_SPARSE_ORDER_ROW));
+    // allocate an external buffer if needed
+    CHECK_SPARSE(bnb_sparseSpMM_bufSize(
+        handle, BNB_SPARSE_OP_NON_TRANSPOSE, transposed_B ? BNB_SPARSE_OP_TRANSPOSE : BNB_SPARSE_OP_NON_TRANSPOSE,
+        &alpha, descA, descB, &beta, descC, BNB_R_32F, BNB_SPARSE_SPMM_ALG_DEFAULT, &bufferSize
+    ));
+    BNB_CHECK_RETURN(BNB_DEVICE_MALLOC(&dBuffer, bufferSize));
+
+    // execute SpMM
+    CHECK_SPARSE(bnb_sparseSpMM(
+        handle, BNB_SPARSE_OP_NON_TRANSPOSE, transposed_B ? BNB_SPARSE_OP_TRANSPOSE : BNB_SPARSE_OP_NON_TRANSPOSE,
+        &alpha, descA, descB, &beta, descC, BNB_R_32F, BNB_SPARSE_SPMM_ALG_DEFAULT, dBuffer
+    ));
+
+    // destroy matrix/vector descriptors
+    CHECK_SPARSE(bnb_sparseDestroySpMat(descA));
+    CHECK_SPARSE(bnb_sparseDestroyDnMat(descB));
+    CHECK_SPARSE(bnb_sparseDestroyDnMat(descC));
+    BNB_CHECK_RETURN(BNB_DEVICE_FREE(dBuffer));
+#endif
+}
+
+template <typename T, int BITS>
+void spmm_coo_very_sparse_naive(
+    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, T* B, half* out,
+    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
+) {
+
+    kspmm_coo_very_sparse_naive<T, 8, BITS><<<nnz_rows, 256>>>(
+        max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB
+    );
+    BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+}
+
+template <typename T, int BITS>
+void gemm_4bit_inference_naive(
+    int m, int n, int k, T* A, unsigned char* B, float* absmax, float* datatype, T* out, int lda, int ldb, int ldc,
+    int blocksize, bnb_stream_t stream
+) {
+
+    int num_blocks = (m + 3) / 4;
+#if BNB_HIP
+    // On 64-wide warp architectures, each warp processes 2 rows instead of 4
+    if (BNB_WARP_SIZE == 64) {
+        num_blocks = (m + 1) / 2;
+    }
+#endif
+
+    kgemm_4bit_inference_naive<T, 128, BITS>
+        <<<num_blocks, 128, 0, stream>>>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize);
+    BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+}
+
 template <typename T, int FUNC> void func(T* A, T* B, T value, long n) {
     int threads = 512;
     int blocks = n / threads;
@@ -297,9 +556,9 @@ template <typename T, int FUNC> void func(T* A, T* B, T value, long n) {
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
 
-// ============================================================================
-// Template instantiations
-// ============================================================================
+//==============================================================
+//                   TEMPLATE DEFINITIONS
+//==============================================================
 
 template void func<float, FILL>(float* A, float* B, float value, long n);
 template void func<unsigned char, FILL>(unsigned char* A, unsigned char* B, unsigned char value, long n);
@@ -319,6 +578,15 @@ template void gemm_4bit_inference_naive<float, 32>(
     int ldc, int blocksize, bnb_stream_t stream
 );
 
+template void spmm_coo_very_sparse_naive<half, 16>(
+    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, half* B, half* out,
+    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
+);
+template void spmm_coo_very_sparse_naive<signed char, 8>(
+    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, signed char* B, half* out,
+    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
+);
+
 template int igemmlt<32, 0>(
     bnb_blasLt_handle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
     int lda, int ldb, int ldc, bnb_stream_t stream
@@ -331,3 +599,125 @@ template int igemmlt<8, 1>(
     bnb_blasLt_handle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
     int lda, int ldb, int ldc, bnb_stream_t stream
 );
+
+template void quantizeBlockwise<half, 1, General8bit>(
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<half, 0, General8bit>(
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<half, 0, FP4>(
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<half, 0, NF4>(
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<float, 1, General8bit>(
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<float, 0, General8bit>(
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<float, 0, FP4>(
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<float, 0, NF4>(
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<bnb_bfloat16, 1, General8bit>(
+    float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
+    const int n
+);
+template void quantizeBlockwise<bnb_bfloat16, 0, General8bit>(
+    float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
+    const int n
+);
+template void quantizeBlockwise<bnb_bfloat16, 0, FP4>(
+    float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
+    const int n
+);
+template void quantizeBlockwise<bnb_bfloat16, 0, NF4>(
+    float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
+    const int n
+);
+
+template void dequantizeBlockwise<float, General8bit>(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<float, FP4>(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<float, NF4>(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<half, General8bit>(
+    float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<half, FP4>(
+    float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<half, NF4>(
+    float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<bnb_bfloat16, General8bit>(
+    float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<bnb_bfloat16, FP4>(
+    float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<bnb_bfloat16, NF4>(
+    float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
+);
+
+#define MAKE_optimizer32bit(name, gtype)                                                                               \
+    template void optimizer32bit<gtype, name>(                                                                         \
+        gtype * g, gtype * p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm,           \
+        const float beta1, const float beta2, const float beta3, const float alpha, const float eps,                   \
+        const float weight_decay, const int step, const float lr, const float gnorm_scale, const bool skip_zeros,      \
+        const int n                                                                                                    \
+    );
+
+MAKE_optimizer32bit(ADAM, half) MAKE_optimizer32bit(ADAM, float) MAKE_optimizer32bit(ADAM, bnb_bfloat16) MAKE_optimizer32bit(MOMENTUM, half) MAKE_optimizer32bit(MOMENTUM, float) MAKE_optimizer32bit(MOMENTUM, bnb_bfloat16) MAKE_optimizer32bit(RMSPROP, half) MAKE_optimizer32bit(RMSPROP, float) MAKE_optimizer32bit(RMSPROP, bnb_bfloat16) MAKE_optimizer32bit(
+    LION, half
+) MAKE_optimizer32bit(LION, float) MAKE_optimizer32bit(LION, bnb_bfloat16) MAKE_optimizer32bit(ADAGRAD, half) MAKE_optimizer32bit(ADAGRAD, float) MAKE_optimizer32bit(ADAGRAD, bnb_bfloat16) MAKE_optimizer32bit(ADEMAMIX, half) MAKE_optimizer32bit(ADEMAMIX, bnb_bfloat16) MAKE_optimizer32bit(ADEMAMIX, float)
+
+#define MAKE_optimizerStatic8bit(name, gtype)                                                                          \
+    template void optimizerStatic8bit<gtype, name>(                                                                    \
+        gtype * p, gtype * g, unsigned char* state1, unsigned char* state2, float* unorm, float max_unorm,             \
+        float param_norm, float beta1, float beta2, float eps, int step, float lr, float* quantiles1,                  \
+        float* quantiles2, float* max1, float* max2, float* new_max1, float* new_max2, float weight_decay,             \
+        const float gnorm_scale, int n                                                                                 \
+    );
+
+    MAKE_optimizerStatic8bit(ADAM, half) MAKE_optimizerStatic8bit(ADAM, float) MAKE_optimizerStatic8bit(MOMENTUM, half) MAKE_optimizerStatic8bit(MOMENTUM, float) MAKE_optimizerStatic8bit(
+        RMSPROP, half
+    ) MAKE_optimizerStatic8bit(RMSPROP, float) MAKE_optimizerStatic8bit(LION, half) MAKE_optimizerStatic8bit(LION, float) MAKE_optimizerStatic8bit(ADAGRAD, half) MAKE_optimizerStatic8bit(ADAGRAD, float)
+
+#define MAKE_optimizerStatic8bitBlockwise(gtype, optim_name)                                                           \
+    template void optimizerStatic8bitBlockwise<gtype, optim_name>(                                                     \
+        gtype * p, gtype * g, unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3,     \
+        float alpha, float eps, int step, float lr, float* quantiles1, float* quantiles2, float* absmax1,              \
+        float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n                            \
+    );
+
+        MAKE_optimizerStatic8bitBlockwise(half, ADAM);
+MAKE_optimizerStatic8bitBlockwise(float, ADAM);
+MAKE_optimizerStatic8bitBlockwise(bnb_bfloat16, ADAM);
+MAKE_optimizerStatic8bitBlockwise(half, MOMENTUM);
+MAKE_optimizerStatic8bitBlockwise(float, MOMENTUM);
+MAKE_optimizerStatic8bitBlockwise(bnb_bfloat16, MOMENTUM);
+MAKE_optimizerStatic8bitBlockwise(half, RMSPROP);
+MAKE_optimizerStatic8bitBlockwise(float, RMSPROP);
+MAKE_optimizerStatic8bitBlockwise(bnb_bfloat16, RMSPROP);
+MAKE_optimizerStatic8bitBlockwise(half, LION);
+MAKE_optimizerStatic8bitBlockwise(float, LION);
+MAKE_optimizerStatic8bitBlockwise(bnb_bfloat16, LION);
+MAKE_optimizerStatic8bitBlockwise(half, ADAGRAD);
+MAKE_optimizerStatic8bitBlockwise(float, ADAGRAD);
+MAKE_optimizerStatic8bitBlockwise(bnb_bfloat16, ADAGRAD);
+MAKE_optimizerStatic8bitBlockwise(half, ADEMAMIX);
+MAKE_optimizerStatic8bitBlockwise(bnb_bfloat16, ADEMAMIX);
+MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);
+
+template void percentileClipping(float* g, float* gnorm_vec, int step, const int n);
+template void percentileClipping(half* g, float* gnorm_vec, int step, const int n);

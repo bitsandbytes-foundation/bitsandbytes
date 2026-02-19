@@ -1,7 +1,7 @@
-// ops_unified.cuh — EXAMPLE of merged host API declarations for CUDA/HIP
+// Copyright (c) Facebook, Inc. and its affiliates.
 //
-// This replaces both csrc/ops.cuh and csrc/ops_hip.cuh.
-// Uses compat.cuh types for all platform-specific identifiers.
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the root directory of this source tree.
 
 #ifndef ops_H
 #define ops_H
@@ -17,7 +17,7 @@
 #include <common.h>
 
 // ============================================================================
-// Error checking helpers — unified via compat.cuh types
+// Error checking helpers
 // ============================================================================
 
 inline void checkDeviceStatus(bnb_error_t status) {
@@ -36,10 +36,12 @@ inline int checkBlasLtStatus(bnb_blas_status_t status) {
 }
 
 // ============================================================================
-// Enums — identical on both platforms
+// Enums
 // ============================================================================
 
-typedef enum Operations_t { ksmul = 0 } Operations_t;
+typedef enum Operations_t {
+    ksmul = 0,
+} Operations_t;
 
 typedef enum Optimizer_t {
     ADAM = 0,
@@ -51,13 +53,14 @@ typedef enum Optimizer_t {
     ADEMAMIX = 6,
 } Optimizer_t;
 
-typedef enum Funcs_t { FILL = 0, ARANGE = 1, _MUL = 2 } Funcs_t;
+typedef enum Funcs_t {
+    FILL = 0,
+    ARANGE = 1,
+    _MUL = 2,
+} Funcs_t;
 
 // ============================================================================
-// Context classes — platform-specific handles via #if BNB_HIP
-//
-// This is one of the few places where #if BNB_HIP is needed, because
-// the BLAS handle types and creation APIs genuinely differ.
+// Context classes
 // ============================================================================
 
 class Context {
@@ -104,12 +107,11 @@ class ContextSparse {
 };
 
 // ============================================================================
-// Function declarations — use bnb_stream_t / bnb_sparse_handle_t
+// Function declarations
 // ============================================================================
 
 void quantize(float* code, float* A, unsigned char* out, int n);
 void dequantize(float* code, unsigned char* A, float* out, int n, bnb_stream_t stream);
-
 template <typename T, int STOCHASTIC, int DATA_TYPE>
 void quantizeBlockwise(
     float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
@@ -146,6 +148,10 @@ void gemmex(
     Context* context, bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda,
     int ldb, int ldc
 );
+void strided_gemmex(
+    Context* context, bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda,
+    int ldb, int ldc, long long int strideA, long long int strideB, long long int strideC, int batchCount
+);
 
 template <int DTYPE_OUT, int SCALE_ROWS>
 int igemmlt(
@@ -153,10 +159,12 @@ int igemmlt(
     int lda, int ldb, int ldc, bnb_stream_t stream
 );
 
+void cutlass_igemm(
+    bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda, int ldb, int ldc
+);
 void dequant_mm_int32_fp16(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, bnb_stream_t stream
 );
-
 void int8VectorQuant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
 );

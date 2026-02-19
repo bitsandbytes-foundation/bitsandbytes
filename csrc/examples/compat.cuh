@@ -28,62 +28,14 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_math_constants.h>
 #include <hip/hip_runtime.h>
+#include <hipblas/hipblas.h>
+#include <rocblas/rocblas.h>
 
 #else // CUDA
 
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
-#include <math_constants.h>
-#include <mma.h>
-
-#endif
-
-// ============================================================================
-// CUB / hipCUB — namespace alias
-//
-// Usage: bnb_cub::BlockLoad<...>, bnb_cub::BlockReduce<...>, etc.
-// This single alias eliminates ~90% of the cub:: vs hipcub:: differences.
-// ============================================================================
-
-#if BNB_HIP
-
-#include <hipcub/hipcub.hpp>
-namespace bnb_cub = hipcub;
-
-#else // CUDA
-
-#include <cub/block/block_discontinuity.cuh>
-#include <cub/block/block_load.cuh>
-#include <cub/block/block_radix_sort.cuh>
-#include <cub/block/block_reduce.cuh>
-#include <cub/block/block_store.cuh>
-#include <cub/cub.cuh>
-#include <cub/warp/warp_reduce.cuh>
-namespace bnb_cub = cub;
-
-#endif
-
-// ============================================================================
-// Reduction operators — CUB's Max()/Sum() API differs across versions
-// ============================================================================
-
-#if BNB_HIP
-
-#define BNB_MAX_OP hipcub::Max()
-#define BNB_SUM_OP hipcub::Sum()
-
-#else // CUDA
-
-// CCCL 2.8.2+ moved to cuda::maximum<>{}, older versions use cub::Max()
-#if defined(CCCL_VERSION) && CCCL_VERSION >= 2008002
-#include <cuda/std/functional>
-#define BNB_MAX_OP                                                                                                     \
-    cuda::maximum<> {}
-#else
-#define BNB_MAX_OP cub::Max()
-#endif
-#define BNB_SUM_OP cub::Sum()
 
 #endif
 
@@ -101,6 +53,7 @@ using bnb_error_t = hipError_t;
 #define BNB_GET_ERROR_STRING(e) hipGetErrorString(e)
 #define BNB_DEVICE_MALLOC(p, s) hipMalloc(p, s)
 #define BNB_DEVICE_FREE(p) hipFree(p)
+#define BNB_DEVICE_MEMSET(p, v, s) hipMemset(p, v, s)
 
 #else // CUDA
 
@@ -112,6 +65,7 @@ using bnb_error_t = cudaError_t;
 #define BNB_GET_ERROR_STRING(e) cudaGetErrorString(e)
 #define BNB_DEVICE_MALLOC(p, s) cudaMalloc(p, s)
 #define BNB_DEVICE_FREE(p) cudaFree(p)
+#define BNB_DEVICE_MEMSET(p, v, s) cudaMemset(p, v, s)
 
 #endif
 
@@ -239,6 +193,8 @@ using bnb_blas_status_t = cublasStatus_t;
 #include <hipsparse/hipsparse.h>
 
 using bnb_sparse_handle_t = hipsparseHandle_t;
+using bnb_sparseSpMatDescr_t = hipsparseSpMatDescr_t;
+using bnb_sparseDnMatDescr_t = hipsparseDnMatDescr_t;
 
 #define bnb_sparseCreate hipsparseCreate
 #define bnb_sparseCreateCoo hipsparseCreateCoo
@@ -269,6 +225,8 @@ using bnb_sparse_handle_t = hipsparseHandle_t;
 #include <cusparse.h>
 
 using bnb_sparse_handle_t = cusparseHandle_t;
+using bnb_sparseSpMatDescr_t = cusparseSpMatDescr_t;
+using bnb_sparseDnMatDescr_t = cusparseDnMatDescr_t;
 
 #define bnb_sparseCreate cusparseCreate
 #define bnb_sparseCreateCoo cusparseCreateCoo

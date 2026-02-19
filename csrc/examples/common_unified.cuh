@@ -1,6 +1,6 @@
-// common_unified.cuh — Merged architecture constants for CUDA and HIP
+// common.cuh — Merged architecture constants for CUDA and HIP
 //
-// This replaces both csrc/common.cuh and csrc/common_hip.cuh.
+// This replaces both the old csrc/common.cuh and csrc/common_hip.cuh.
 // Platform detection uses compat.cuh's BNB_HIP macro.
 
 #pragma once
