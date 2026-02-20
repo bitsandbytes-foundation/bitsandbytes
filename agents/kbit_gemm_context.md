@@ -1089,7 +1089,7 @@ void kbit_gemm(
     cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev);
     int max_shmem;
     cudaDeviceGetAttribute(&max_shmem,
-        cudaDevAttrMaxSharedMemoryPerBlockOptin, dev);
+        cudaDevAttrMaxSharedMemoryPerBlockOption, dev);
 
     // Choose M-blocking
     int m_blocks;
