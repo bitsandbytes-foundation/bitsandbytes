@@ -352,6 +352,13 @@ class Optimizer8bit(torch.optim.Optimizer):
 
         if (gindex, pindex) in self.mng.index2config:
             config.update(self.mng.index2config[(gindex, pindex)])
+
+        # Also check pid2config as a fallback so that override_config works
+        # regardless of whether it was called before or after register_parameters.
+        p = self.param_groups[gindex]["params"][pindex]
+        if id(p) in self.mng.pid2config:
+            config.update(self.mng.pid2config[id(p)])
+
         return config
 
     def init_state(self, group, p, gindex, pindex):
