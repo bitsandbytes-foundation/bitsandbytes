@@ -27,12 +27,12 @@ bitsandbytes provides three main features:
 Load and run a model using 8-bit quantization:
 
 ```py
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 model = AutoModelForCausalLM.from_pretrained(
     "meta-llama/Llama-2-7b-hf",
     device_map="auto",
-    load_in_8bit=True,
+    quantization_config=BitsAndBytesConfig(load_in_8bit=True),
 )
 
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
