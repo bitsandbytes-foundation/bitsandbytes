@@ -102,6 +102,11 @@ str2optimizers["momentum8bit_blockwise"] = (
     lambda pxx: bnb.optim.SGD8bit(pxx, 0.01, 0.9, block_wise=True),
 )
 
+str2optimizers["lars"] = (
+    lambda pxx: bnb.optim.PytorchLARS(pxx, 0.01, 0.9),
+    lambda pxx: bnb.optim.LARS(pxx, 0.01, 0.9),
+)
+
 str2optimizers["rmsprop"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=False),
@@ -118,6 +123,7 @@ str2statenames["paged_adam"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["lion"] = [("exp_avg", "state1")]
 str2statenames["paged_lion"] = [("exp_avg", "state1")]
 str2statenames["momentum"] = [("momentum_buffer", "state1")]
+str2statenames["lars"] = [("momentum_buffer", "state1")]
 str2statenames["lamb"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["rmsprop"] = [("square_avg", "state1")]
 
@@ -155,6 +161,7 @@ optimizer_names_32bit = [
     "paged_adamw",
     "paged_adam",
     "momentum",
+    "lars",
     "rmsprop",
     "lion",
     "paged_lion",
@@ -181,7 +188,7 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
     if optim_name.startswith("paged_") and device == "xpu":
         pytest.skip("Paged optimizers are not supported on XPU currently.")
 
-    if gtype == torch.bfloat16 and optim_name in ["momentum", "rmsprop"]:
+    if gtype == torch.bfloat16 and optim_name in ["momentum", "lars", "rmsprop"]:
         pytest.skip()
     if dim1 == 1 and dim2 == 1:
         return
