@@ -108,9 +108,10 @@ def find_cudart_libraries() -> Iterator[Path]:
 
 
 def _print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
-    print(
-        f"PyTorch settings found: CUDA_VERSION={cuda_specs.cuda_version_string}, "
-        f"Highest Compute Capability: {cuda_specs.highest_compute_capability}.",
+    logger.info(
+        "PyTorch settings found: CUDA_VERSION=%s, Highest Compute Capability: %s.",
+        cuda_specs.cuda_version_string,
+        cuda_specs.highest_compute_capability,
     )
 
     binary_path = get_cuda_bnb_library_path(cuda_specs)
@@ -133,7 +134,7 @@ def _print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
 
 
 def _print_hip_diagnostics(cuda_specs: CUDASpecs) -> None:
-    print(f"PyTorch settings found: ROCM_VERSION={cuda_specs.cuda_version_string}")
+    logger.info("PyTorch settings found: ROCM_VERSION=%s", cuda_specs.cuda_version_string)
 
     binary_path = get_cuda_bnb_library_path(cuda_specs)
     if not binary_path.exists():
@@ -165,7 +166,7 @@ def print_diagnostics(cuda_specs: CUDASpecs) -> None:
 def _print_cuda_runtime_diagnostics() -> None:
     cudart_paths = list(find_cudart_libraries())
     if not cudart_paths:
-        print("CUDA SETUP: WARNING! CUDA runtime files not found in any environmental path.")
+        logger.warning("CUDA SETUP: WARNING! CUDA runtime files not found in any environmental path.")
     elif len(cudart_paths) > 1:
         print_dedented(
             f"""
@@ -186,13 +187,13 @@ def _print_cuda_runtime_diagnostics() -> None:
             """,
         )
         for pth in cudart_paths:
-            print(f"* Found CUDA runtime at: {pth}")
+            logger.info("* Found CUDA runtime at: %s", pth)
 
 
 def _print_hip_runtime_diagnostics() -> None:
     cudart_paths = list(find_cudart_libraries())
     if not cudart_paths:
-        print("WARNING! ROCm runtime files not found in any environmental path.")
+        logger.warning("WARNING! ROCm runtime files not found in any environmental path.")
     elif len(cudart_paths) > 1:
         print_dedented(
             f"""
@@ -209,7 +210,7 @@ def _print_hip_runtime_diagnostics() -> None:
         )
 
         for pth in cudart_paths:
-            print(f"* Found ROCm runtime at: {pth}")
+            logger.info("* Found ROCm runtime at: %s", pth)
 
 
 def print_runtime_diagnostics() -> None:
