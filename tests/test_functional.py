@@ -439,6 +439,15 @@ class TestIGEMMFunctional:
     @pytest.mark.parametrize("seq_dim", [16, 256], ids=id_formatter("seq_dim"))
     @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
     def test_igemm(self, hidden_dim, batch_dim, transpose, seq_dim):
+        if (
+            torch.version.cuda == "13.0"
+            and torch.__version__ >= (2, 10)
+            and not any(transpose)
+            and batch_dim == 256
+            and seq_dim == 256
+        ):
+            pytest.xfail("Failure due to regression in cuBLAS for CUDA Toolkit 13.0.2.")
+
         hidden_dim = hidden_dim - (hidden_dim % 32)
         batch_dim = batch_dim - (batch_dim % 16)
         seq_dim = seq_dim - (seq_dim % 16)
@@ -579,6 +588,9 @@ class TestIGEMMFunctional:
     @pytest.mark.parametrize("dim4", [32, 256], ids=id_formatter("dim4"))
     @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
     def test_ibmm(self, dim1, dim2, dim3, dim4, transpose):
+        if torch.version.cuda == "13.0" and torch.__version__ >= (2, 10) and dim1 == 64:
+            pytest.xfail("Failure due to regression in cuBLAS for CUDA Toolkit 13.0.2.")
+
         dim2 = dim2 - (dim2 % 16)
         dim3 = dim3 - (dim3 % 16)
         dim4 = dim4 - (dim4 % 16)
