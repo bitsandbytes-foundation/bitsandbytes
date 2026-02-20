@@ -88,7 +88,7 @@ exclude_also = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "-rP -m 'not slow and not benchmark'"
+addopts = "-rP -m 'not slow and not benchmark and not deprecated'"
 #    ; --cov=bitsandbytes
 #    ; # contexts: record which test ran which line; can be seen in html coverage report
 #    ; --cov-context=test
@@ -98,6 +98,7 @@ log_cli_level = "INFO"
 log_file = "logs/pytest.log"
 markers = [
     "benchmark: mark test as a benchmark",
+    "deprecated: mark test as covering a deprecated feature",
     "slow: mark test as slow",
 ]
 
