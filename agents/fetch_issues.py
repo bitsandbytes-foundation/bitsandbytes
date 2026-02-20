@@ -2,12 +2,12 @@
 """Fetch all issues (open and closed) from a GitHub repository via GraphQL and store as structured JSON."""
 
 import argparse
+from datetime import datetime, timezone
 import json
+from pathlib import Path
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
-from pathlib import Path
 
 GRAPHQL_QUERY = """
 query($owner: String!, $repo: String!, $cursor: String, $states: [IssueState!]) {
@@ -72,7 +72,9 @@ def gh_graphql(query: str, variables: dict) -> dict:
     payload = json.dumps({"query": query, "variables": clean_vars})
     result = subprocess.run(
         ["gh", "api", "graphql", "--input", "-"],
-        input=payload, capture_output=True, text=True,
+        input=payload,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         raise RuntimeError(f"gh api graphql failed: {result.stderr}")
@@ -121,13 +123,15 @@ def transform_issue(raw: dict) -> dict:
     """Transform a raw GraphQL issue node into our clean structure."""
     comments = []
     for c in raw["comments"]["nodes"]:
-        comments.append({
-            "author": c["author"]["login"] if c.get("author") else None,
-            "body": c["body"],
-            "created_at": c["createdAt"],
-            "updated_at": c["updatedAt"],
-            "reactions": transform_reactions(c.get("reactionGroups", [])),
-        })
+        comments.append(
+            {
+                "author": c["author"]["login"] if c.get("author") else None,
+                "body": c["body"],
+                "created_at": c["createdAt"],
+                "updated_at": c["updatedAt"],
+                "reactions": transform_reactions(c.get("reactionGroups", [])),
+            }
+        )
 
     timeline = []
     for t in raw["timelineItems"]["nodes"]:
@@ -145,7 +149,7 @@ def transform_issue(raw: dict) -> dict:
         "updated_at": raw["updatedAt"],
         "closed_at": raw["closedAt"],
         "assignees": [a["login"] for a in raw["assignees"]["nodes"]],
-        "labels": [l["name"] for l in raw["labels"]["nodes"]],
+        "labels": [label["name"] for label in raw["labels"]["nodes"]],
         "milestone": raw.get("milestone"),
         "reactions": transform_reactions(raw.get("reactionGroups", [])),
         "comment_count": raw["comments"]["totalCount"],
@@ -168,12 +172,18 @@ def fetch_all_issues(owner: str, repo: str, states: list[str] | None = None) -> 
         for attempt in range(max_retries):
             try:
                 print(f"Fetching {label} issues page {page}...", file=sys.stderr)
-                data = gh_graphql(GRAPHQL_QUERY, {
-                    "owner": owner, "repo": repo, "cursor": cursor, "states": states,
-                })
+                data = gh_graphql(
+                    GRAPHQL_QUERY,
+                    {
+                        "owner": owner,
+                        "repo": repo,
+                        "cursor": cursor,
+                        "states": states,
+                    },
+                )
                 break
             except RuntimeError as e:
-                wait = min(2 ** attempt, 60)
+                wait = min(2**attempt, 60)
                 print(f"Error on attempt {attempt + 1}: {e}", file=sys.stderr)
                 if attempt < max_retries - 1:
                     print(f"Retrying in {wait}s...", file=sys.stderr)
@@ -215,8 +225,9 @@ def main():
     parser.add_argument("--owner", default="bitsandbytes-foundation", help="Repository owner")
     parser.add_argument("--repo", default="bitsandbytes", help="Repository name")
     parser.add_argument("--open-only", action="store_true", help="Only fetch open issues")
-    parser.add_argument("-o", "--output", default=None,
-                        help="Output JSON file path (default: <repo>_issues.json in script dir)")
+    parser.add_argument(
+        "-o", "--output", default=None, help="Output JSON file path (default: <repo>_issues.json in script dir)"
+    )
     args = parser.parse_args()
 
     output_path = args.output or str(Path(__file__).parent / f"{args.repo}_issues.json")
@@ -242,8 +253,7 @@ def main():
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
 
-    print(f"Wrote {len(open_issues)} open + {len(closed_issues)} closed issues to {output_path}",
-          file=sys.stderr)
+    print(f"Wrote {len(open_issues)} open + {len(closed_issues)} closed issues to {output_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":
