@@ -18,8 +18,6 @@ class Adam(Optimizer2State):
         optim_bits=32,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
         is_paged=False,
     ):
         """
@@ -44,10 +42,6 @@ class Adam(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
@@ -61,8 +55,6 @@ class Adam(Optimizer2State):
             optim_bits,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             is_paged=is_paged,
         )
 
@@ -79,8 +71,6 @@ class Adam8bit(Optimizer2State):
         optim_bits=32,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
         is_paged=False,
     ):
         """
@@ -107,10 +97,6 @@ class Adam8bit(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
@@ -133,8 +119,6 @@ class Adam8bit(Optimizer2State):
             8,  # Hardcoded to 8 bits
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             is_paged=is_paged,
         )
 
@@ -151,8 +135,6 @@ class Adam32bit(Optimizer2State):
         optim_bits=32,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
         is_paged=False,
     ):
         """
@@ -177,10 +159,6 @@ class Adam32bit(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
@@ -194,8 +172,6 @@ class Adam32bit(Optimizer2State):
             32,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             is_paged=is_paged,
         )
 
@@ -212,8 +188,6 @@ class PagedAdam(Optimizer2State):
         optim_bits=32,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
         is_paged=False,
     ):
         """
@@ -238,10 +212,6 @@ class PagedAdam(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
@@ -255,8 +225,6 @@ class PagedAdam(Optimizer2State):
             optim_bits,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             is_paged=True,
         )
 
@@ -273,8 +241,6 @@ class PagedAdam8bit(Optimizer2State):
         optim_bits=32,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
         is_paged=False,
     ):
         """
@@ -301,10 +267,6 @@ class PagedAdam8bit(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
@@ -327,8 +289,6 @@ class PagedAdam8bit(Optimizer2State):
             8,  # Hardcoded to 8 bits
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             is_paged=True,
         )
 
@@ -345,8 +305,6 @@ class PagedAdam32bit(Optimizer2State):
         optim_bits=32,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
         is_paged=False,
     ):
         """
@@ -371,10 +329,6 @@ class PagedAdam32bit(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
@@ -388,7 +342,5 @@ class PagedAdam32bit(Optimizer2State):
             32,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             is_paged=True,
         )

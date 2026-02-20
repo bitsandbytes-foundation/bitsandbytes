@@ -22,8 +22,8 @@ TRANSPOSE_VALS = [(False, True), (False, False)]
 @pytest.mark.parametrize("decomp", [0.0, 6.0], ids=id_formatter("decomp"))
 @pytest.mark.parametrize(
     "funcs",
-    [(torch.matmul, bnb.matmul), (torch.matmul, bnb.research.switchback_bnb)],
-    ids=["func=matmul", "func=switchback_bnb"],
+    [(torch.matmul, bnb.matmul)],
+    ids=["func=matmul"],
 )
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
 @pytest.mark.parametrize("req_grad", BOOLEAN_TRIPLES, ids=id_formatter("req_grad"))
@@ -34,10 +34,6 @@ def test_matmullt(
     device, dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights, has_bias
 ):
     if device != "cuda":
-        if funcs[1] == bnb.research.switchback_bnb:
-            # TODO: Deprecate/remove?
-            pytest.skip("switchback_bnb only works on CUDA.")
-
         if req_grad[1]:
             # This will be deprecated for CUDA in the future. We don't expect
             # this to work on any other device.

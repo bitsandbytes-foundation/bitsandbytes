@@ -53,16 +53,12 @@ _is_compiling = torch.compiler.is_compiling
 
 @dataclass
 class MatmulLtState:
-    _tile_indices: Optional[torch.Tensor] = None  # TODO: remove
-
     force_no_igemmlt: bool = False
 
     CB: Optional[torch.Tensor] = None
-    CxB: Optional[torch.Tensor] = None  # TODO: Deprecate/remove
     SB: Optional[torch.Tensor] = None
     SCB: Optional[torch.Tensor] = None
 
-    CxBt: Optional[torch.Tensor] = None  # TODO: Deprecate/remove
     SBt: Optional[torch.Tensor] = None
     CBt: Optional[torch.Tensor] = None
 
@@ -75,21 +71,28 @@ class MatmulLtState:
     is_training = True
     has_fp16_weights = True
     use_pool = False
-    formatB = "row"  # TODO: Deprecate/remove
+
+    # Deprecated attributes kept for downstream compatibility (TGI, vLLM).
+    # These are always None and will be fully removed in the next release.
+    _deprecated_fields = frozenset({"CxB", "CxBt", "formatB", "_tile_indices"})
+
+    def __getattr__(self, name):
+        if name in MatmulLtState._deprecated_fields:
+            warnings.warn(
+                f"MatmulLtState.{name} is deprecated and will be removed in the next bitsandbytes release.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            return None
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def reset_grads(self):
         self.CB = None
-        self.CxB = None
         self.SB = None
         self.SCB = None
 
-        self.CxBt = None
         self.SBt = None
         self.CBt = None
-
-    @property
-    def tile_indices(self):
-        raise ValueError("tile_indices is no longer supported.")
 
 
 class MatMul8bitLt(torch.autograd.Function):
@@ -293,7 +296,6 @@ class MatMul8bitFp(torch.autograd.Function):
 
 class MatMul4Bit(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
-    # backward is mostly the same, but adds one extra clause (see "elif state.CxB is not None")
 
     @staticmethod
     def forward(ctx, A, B, out=None, bias=None, quant_state: Optional[F.QuantState] = None):

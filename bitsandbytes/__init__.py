@@ -9,7 +9,7 @@ import sys
 
 import torch
 
-from . import _ops, research, utils
+from . import _ops, utils
 from .autograd._functions import (
     MatmulLtState,
     matmul,

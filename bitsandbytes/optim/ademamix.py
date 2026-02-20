@@ -129,8 +129,6 @@ class AdEMAMix(Optimizer2State):
             optim_bits=optim_bits,
             args=None,
             min_8bit_size=min_8bit_size,
-            percentile_clipping=100,
-            block_wise=True,
             is_paged=is_paged,
             alpha=alpha,
             t_alpha=t_alpha,
@@ -142,8 +140,6 @@ class AdEMAMix(Optimizer2State):
         # In our AdEMAMix implementation, we use `state` to hold
         # both the fast and slow EMAs. Here we override the base
         # `Optimizer2State` to allocate a buffer twice as large.
-        # Additional consideration: we do not support block_wise=False,
-        # percentile clipping, or max_unorm.
 
         config = self.get_config(gindex, pindex, group)
 
@@ -380,8 +376,6 @@ class AdEMAMix32bit(Optimizer2State):
             optim_bits=32,
             args=None,
             min_8bit_size=min_8bit_size,
-            percentile_clipping=100,
-            block_wise=True,
             is_paged=is_paged,
             alpha=alpha,
             t_alpha=t_alpha,

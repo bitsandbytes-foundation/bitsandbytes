@@ -16,11 +16,4 @@ from .modules import (
     OutlierAwareLinear,
     Params4bit,
     StableEmbedding,
-    SwitchBackLinearBnb,
-)
-from .triton_based_modules import (
-    StandardLinear,
-    SwitchBackLinear,
-    SwitchBackLinearGlobal,
-    SwitchBackLinearVectorwise,
 )
