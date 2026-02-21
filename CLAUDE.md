@@ -8,7 +8,9 @@ git worktree add ~/git/bnb-fix-<NUMBER> -b fix/issue-<NUMBER>
 cd ~/git/bnb-fix-<NUMBER>
 ```
 
-This keeps the main checkout clean and allows parallel sessions. If you are already inside a worktree directory, you do not need to create another one. Full guide: `agents/worktree_guide.md`
+This keeps the main checkout clean and allows parallel sessions. If you are already inside a worktree directory, you do not need to create another one.
+
+**Before creating a worktree**, check the worktree registry for existing ones — see the Git Worktrees section in `~/.claude/CLAUDE.md`. Bitsandbytes-specific naming conventions: `agents/worktree_guide.md`. General worktree guide: `~/git/lab_tools/worktree_guide.md`.
 
 # MANDATORY: Check for existing PRs before starting work
 
