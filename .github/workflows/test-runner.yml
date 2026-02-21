@@ -133,7 +133,7 @@ jobs:
           echo "build_os=${BUILD_OS}" >> $GITHUB_OUTPUT
           echo "arch=${ARCH}" >> $GITHUB_OUTPUT
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set build environment variables
         shell: bash
@@ -144,7 +144,7 @@ jobs:
       # Windows + CUDA: Install CUDA Toolkit
       - name: Install CUDA Toolkit
         if: inputs.backend == 'cuda' && inputs.platform == 'windows'
-        uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2 # v0.2.29
+        uses: Jimver/cuda-toolkit@b6fc3a9f3f15256d9d94ffe1254f9c5a2565cde6 # v0.2.30
         with:
           cuda: ${{ inputs.cuda_version }}
           method: "network"
@@ -154,7 +154,7 @@ jobs:
       # Windows: Setup MSVC (needed for both CPU and CUDA builds)
       - name: Setup MSVC
         if: inputs.platform == 'windows'
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       # Build CPU backend
       - name: Build C++
@@ -170,7 +170,7 @@ jobs:
           cuda_targets: "75;80;89"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.config.outputs.artifact_name }}
           path: output/${{ steps.config.outputs.build_os }}/${{ steps.config.outputs.arch }}/*
@@ -187,42 +187,41 @@ jobs:
         if: inputs.backend == 'cuda'
         run: nvidia-smi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download build artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ needs.build.outputs.artifact_name }}
           path: bitsandbytes/
           merge-multiple: true
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b
         with:
           python-version: '3.10'
+          activate-environment: 'true'
 
       # Windows: Setup MSVC for torch.compile
       - name: Setup MSVC
         if: inputs.platform == 'windows'
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       - name: Install dependencies
         run: |
-          pip install torch==${{ inputs.torch_version }} --index-url ${{ inputs.pypi_index }}
-          pip install -e ".[test]" -v
-          pip install pytest-cov
+          uv pip install torch==${{ inputs.torch_version }} --index-url ${{ inputs.pypi_index }}
+          uv pip install pytest-cov -e ".[test]"
 
       # Windows: Downgrade NumPy for torch<2.4.1 compatibility
       # See: https://github.com/pytorch/pytorch/issues/131668
       - name: Downgrade NumPy
         if: inputs.platform == 'windows' && startsWith(inputs.torch_version, '2.3.')
-        run: pip install "numpy<2"
+        run: uv pip install "numpy<2"
 
       - name: Show installed packages
-        run: pip list
+        run: uv pip list
 
       - name: Show environment information
-        run: python -m torch.utils.collect_env
+        run: uv run -m torch.utils.collect_env
 
       - name: Run tests
-        run: pytest --durations=100
+        run: uv run pytest --durations=100

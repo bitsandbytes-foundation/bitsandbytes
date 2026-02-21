@@ -1978,7 +1978,7 @@ __global__ void kspmm_coo_very_sparse_naive(
 
     // 0. load balancing: We process rows with most columns first (count_vec)and we process one row per block
     //    If a block finishes, the next one is scheduled. Since the last blocks like have fewer
-    //    elements they finish faster "fillin up" the gaps left by larger blocks
+    //    elements they finish faster "filling up" the gaps left by larger blocks
 
     // without tensor cores
     // 1. use rowidx_length to find what to load (as many blocks as there are rows)

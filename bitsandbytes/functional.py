@@ -297,13 +297,13 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     has_sign = 1 if signed else 0
     assert e + p == total_bits - has_sign
     # the exponent is biased to 2^(e-1) -1 == 0
-    evalues = []
+    e_values = []
     for i, val in enumerate(range(-(2 ** (exponent_bits - has_sign)), 2 ** (exponent_bits - has_sign), 1)):
-        evalues.append(2**val)
+        e_values.append(2**val)
 
     values = []
     lst = list(itertools.product([0, 1], repeat=precision_bits))
-    # for ev in evalues:
+    # for ev in e_values:
     bias = 2 ** (exponent_bits - 1)
     for evalue in range(2 ** (exponent_bits)):
         for bit_pattern in lst:
@@ -1573,7 +1573,7 @@ def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8
 
     if not correct:
         raise ValueError(
-            f"Tensor dimensions incorrect for matrix mulitiplication: A x B: {sA} x {sB} with transpose for A x B: {tA} x {tB}.",
+            f"Tensor dimensions incorrect for matrix multiplication: A x B: {sA} x {sB} with transpose for A x B: {tA} x {tB}.",
         )
 
     return sout
