@@ -772,3 +772,127 @@ def _optimizer_update_8bit_blockwise_impl(
 
 register_kernel("bitsandbytes::optimizer_update_8bit_blockwise", "cuda")(_optimizer_update_8bit_blockwise_impl)
 register_kernel("bitsandbytes::optimizer_update_32bit", "cuda")(_optimizer_update_32bit_impl)
+
+
+# NVFP4 quantization
+@register_kernel("bitsandbytes::quantize_nvfp4", "cuda")
+def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    A = A.contiguous()
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    torch._check(
+        A.dtype in [torch.float16, torch.bfloat16, torch.float32],
+        lambda: f"NVFP4 quantization requires float16/bfloat16/float32, got {A.dtype}",
+    )
+
+    if tensor_scale is None:
+        tensor_scale = A.abs().max().item()
+
+    packed = torch.zeros(n // 2, dtype=torch.uint8, device=A.device)
+    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=A.device)
+
+    with _cuda_device_of(A):
+        if A.dtype == torch.float16:
+            lib.cquantize_nvfp4_fp16(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+        elif A.dtype == torch.bfloat16:
+            lib.cquantize_nvfp4_bf16(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+        else:
+            lib.cquantize_nvfp4_fp32(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+
+    ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
+# NVFP4 dequantization
+@register_kernel("bitsandbytes::dequantize_nvfp4", "cuda")
+def _(
+    packed: torch.Tensor, block_scales: torch.Tensor, tensor_scale: float, numel: int, dtype: torch.dtype
+) -> torch.Tensor:
+    packed = packed.contiguous()
+    block_scales = block_scales.contiguous()
+    output = torch.zeros(numel, dtype=dtype, device=packed.device)
+
+    with _cuda_device_of(packed):
+        if dtype == torch.float16:
+            lib.cdequantize_nvfp4_fp16(get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), get_ptr(output), ct.c_int(numel), ct.c_void_p(0))
+        elif dtype == torch.bfloat16:
+            lib.cdequantize_nvfp4_bf16(get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), get_ptr(output), ct.c_int(numel), ct.c_void_p(0))
+        else:
+            lib.cdequantize_nvfp4_fp32(get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), get_ptr(output), ct.c_int(numel), ct.c_void_p(0))
+
+    return output
+
+
+# NVFP4 Hadamard rotation (in-place)
+@register_kernel("bitsandbytes::hadamard_rotate_nvfp4", "cuda")
+def _(A: torch.Tensor) -> None:
+    A_contig = A.contiguous()
+    n = A_contig.numel()
+    torch._check(n % 16 == 0, lambda: f"Hadamard rotation requires numel divisible by 16, got {n}")
+
+    with _cuda_device_of(A_contig):
+        if A_contig.dtype == torch.float16:
+            lib.chadamard_rotate16_fp16(get_ptr(A_contig), ct.c_int(n))
+        elif A_contig.dtype == torch.bfloat16:
+            lib.chadamard_rotate16_bf16(get_ptr(A_contig), ct.c_int(n))
+        else:
+            lib.chadamard_rotate16_fp32(get_ptr(A_contig), ct.c_int(n))
+
+    if not A.is_contiguous():
+        A.copy_(A_contig)
+
+
+# Fused Hadamard rotation + NVFP4 quantize
+@register_kernel("bitsandbytes::fused_hadamard_quantize_nvfp4", "cuda")
+def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    A = A.contiguous()
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+
+    if tensor_scale is None:
+        # Compute scale on rotated data
+        A_copy = A.clone()
+        torch.ops.bitsandbytes.hadamard_rotate_nvfp4(A_copy)
+        tensor_scale = A_copy.abs().max().item()
+
+    packed = torch.zeros(n // 2, dtype=torch.uint8, device=A.device)
+    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=A.device)
+
+    with _cuda_device_of(A):
+        if A.dtype == torch.float16:
+            lib.cfused_hadamard_quantize_nvfp4_fp16(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+        elif A.dtype == torch.bfloat16:
+            lib.cfused_hadamard_quantize_nvfp4_bf16(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+        else:
+            lib.cfused_hadamard_quantize_nvfp4_fp32(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+
+    ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
+# NVFP4 GEMM
+@register_kernel("bitsandbytes::gemm_nvfp4", "cuda")
+def _(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    A_tensor_scale: float,
+    B_tensor_scale: float,
+    M: int,
+    N: int,
+    K: int,
+) -> torch.Tensor:
+    D_out = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
+
+    with _cuda_device_of(A_packed):
+        lib.cgemm_nvfp4(
+            get_ptr(A_packed), get_ptr(B_packed),
+            get_ptr(A_scales), get_ptr(B_scales),
+            get_ptr(D_out),
+            ct.c_int(M), ct.c_int(N), ct.c_int(K),
+        )
+
+    # Apply tensor scales (the GEMM kernel operates on raw quantized values)
+    D_out.mul_(A_tensor_scale * B_tensor_scale)
+    return D_out

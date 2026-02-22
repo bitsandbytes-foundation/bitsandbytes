@@ -431,3 +431,90 @@ def _(
             qmap2.dtype == absmax2.dtype == torch.float32,
             lambda: f"Expected qmap2 and absmax2 to be float32, got qmap2.dtype={qmap2.dtype}, absmax2.dtype={absmax2.dtype}",
         )
+
+
+# NVFP4 quantization (E2M1 with two-level scaling: E4M3 block scales + FP32 tensor scale)
+torch.library.define(
+    "bitsandbytes::quantize_nvfp4",
+    "(Tensor A, float? tensor_scale) -> (Tensor, Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::quantize_nvfp4")
+def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    packed = torch.empty(n // 2, dtype=torch.uint8, device=A.device)
+    block_scales = torch.empty(n // 16, dtype=torch.uint8, device=A.device)
+    ts_out = torch.empty(1, dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
+# NVFP4 dequantization
+torch.library.define(
+    "bitsandbytes::dequantize_nvfp4",
+    "(Tensor packed, Tensor block_scales, float tensor_scale, int numel, ScalarType dtype) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::dequantize_nvfp4")
+def _(
+    packed: torch.Tensor, block_scales: torch.Tensor, tensor_scale: float, numel: int, dtype: torch.dtype
+) -> torch.Tensor:
+    return torch.empty(numel, dtype=dtype, device=packed.device)
+
+
+# NVFP4 Hadamard rotation (in-place)
+torch.library.define(
+    "bitsandbytes::hadamard_rotate_nvfp4",
+    "(Tensor(a!) A) -> ()",
+)
+
+
+@register_fake("bitsandbytes::hadamard_rotate_nvfp4")
+def _(A: torch.Tensor) -> None:
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"Hadamard rotation requires numel divisible by 16, got {n}")
+
+
+# Fused Hadamard rotation + NVFP4 quantize
+torch.library.define(
+    "bitsandbytes::fused_hadamard_quantize_nvfp4",
+    "(Tensor A, float? tensor_scale) -> (Tensor, Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::fused_hadamard_quantize_nvfp4")
+def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    packed = torch.empty(n // 2, dtype=torch.uint8, device=A.device)
+    block_scales = torch.empty(n // 16, dtype=torch.uint8, device=A.device)
+    ts_out = torch.empty(1, dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
+# NVFP4 GEMM (A @ B^T with block-scaled FP4 inputs)
+torch.library.define(
+    "bitsandbytes::gemm_nvfp4",
+    "(Tensor A_packed, Tensor B_packed, Tensor A_scales, Tensor B_scales, "
+    "float A_tensor_scale, float B_tensor_scale, int M, int N, int K) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::gemm_nvfp4")
+def _(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    A_tensor_scale: float,
+    B_tensor_scale: float,
+    M: int,
+    N: int,
+    K: int,
+) -> torch.Tensor:
+    torch._check_is_size(M)
+    torch._check_is_size(N)
+    torch._check_is_size(K)
+    return torch.empty(M, N, dtype=torch.float32, device=A_packed.device)

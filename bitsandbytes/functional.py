@@ -1077,6 +1077,138 @@ def dequantize_4bit(
     return out
 
 
+# ---------------------------------------------------------------------------
+# NVFP4 (E2M1) quantization with two-level scaling
+# ---------------------------------------------------------------------------
+
+
+class NVFP4QuantState:
+    """Quantization state for NVFP4 (E2M1 format with block scales).
+
+    Stores the quantized data, E4M3 block scales (per 16 elements),
+    FP32 tensor scale, and metadata needed for dequantization.
+    """
+
+    def __init__(
+        self,
+        packed_data: torch.Tensor,
+        block_scales: torch.Tensor,
+        tensor_scale: float,
+        shape: tuple,
+        dtype: torch.dtype,
+        rotated: bool = False,
+    ):
+        self.packed_data = packed_data
+        self.block_scales = block_scales
+        self.tensor_scale = tensor_scale
+        self.shape = shape
+        self.dtype = dtype
+        self.rotated = rotated
+
+    def to(self, device):
+        return NVFP4QuantState(
+            packed_data=self.packed_data.to(device),
+            block_scales=self.block_scales.to(device),
+            tensor_scale=self.tensor_scale,
+            shape=self.shape,
+            dtype=self.dtype,
+            rotated=self.rotated,
+        )
+
+
+def quantize_nvfp4(
+    A: torch.Tensor,
+    tensor_scale: Optional[float] = None,
+    rotate: bool = False,
+) -> tuple[torch.Tensor, NVFP4QuantState]:
+    """Quantize a tensor to NVFP4 (E2M1) format.
+
+    Args:
+        A: Input tensor (float16, bfloat16, or float32). Must have numel divisible by 16.
+        tensor_scale: Optional pre-computed tensor scale. If None, computed as abs(max(A)).
+        rotate: If True, apply Hadamard rotation before quantization (fused kernel).
+
+    Returns:
+        Tuple of (packed_data, NVFP4QuantState).
+    """
+    input_shape = A.shape
+    input_dtype = A.dtype
+    A_flat = A.reshape(-1).contiguous()
+
+    if rotate:
+        packed, block_scales, ts = torch.ops.bitsandbytes.fused_hadamard_quantize_nvfp4(A_flat, tensor_scale)
+    else:
+        packed, block_scales, ts = torch.ops.bitsandbytes.quantize_nvfp4(A_flat, tensor_scale)
+
+    state = NVFP4QuantState(
+        packed_data=packed,
+        block_scales=block_scales,
+        tensor_scale=ts.item(),
+        shape=input_shape,
+        dtype=input_dtype,
+        rotated=rotate,
+    )
+    return packed, state
+
+
+def dequantize_nvfp4(
+    packed_data: torch.Tensor,
+    quant_state: NVFP4QuantState,
+    out_dtype: Optional[torch.dtype] = None,
+) -> torch.Tensor:
+    """Dequantize NVFP4 packed data back to floating point.
+
+    Args:
+        packed_data: Packed FP4 data (uint8, 2 values per byte).
+        quant_state: Quantization state from quantize_nvfp4.
+        out_dtype: Output dtype. Defaults to the original dtype.
+
+    Returns:
+        Dequantized tensor with the original shape.
+    """
+    dtype = out_dtype or quant_state.dtype
+    numel = 1
+    for s in quant_state.shape:
+        numel *= s
+
+    out = torch.ops.bitsandbytes.dequantize_nvfp4(
+        packed_data, quant_state.block_scales, quant_state.tensor_scale, numel, dtype
+    )
+
+    if quant_state.rotated:
+        # Apply inverse Hadamard rotation
+        torch.ops.bitsandbytes.hadamard_rotate_nvfp4(out)
+
+    return out.reshape(quant_state.shape)
+
+
+def gemm_nvfp4(
+    A_data: torch.Tensor,
+    A_state: NVFP4QuantState,
+    B_data: torch.Tensor,
+    B_state: NVFP4QuantState,
+) -> torch.Tensor:
+    """NVFP4 GEMM: compute A @ B^T using block-scaled FP4 inputs.
+
+    Args:
+        A_data: Packed FP4 data for A (M*K/2 bytes).
+        A_state: Quantization state for A (M x K).
+        B_data: Packed FP4 data for B (N*K/2 bytes, stored as N rows of K).
+        B_state: Quantization state for B (N x K).
+
+    Returns:
+        Output tensor of shape (M, N) in float32 with tensor scales applied.
+    """
+    M = A_state.shape[0]
+    K = A_state.shape[1]
+    N = B_state.shape[0]
+
+    return torch.ops.bitsandbytes.gemm_nvfp4(
+        A_data, B_data, A_state.block_scales, B_state.block_scales,
+        A_state.tensor_scale, B_state.tensor_scale, M, N, K,
+    )
+
+
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def quantize(
     A: Tensor,
