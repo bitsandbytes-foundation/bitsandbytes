@@ -1,6 +1,8 @@
 """Test NVFP4 GEMM kernel on SM_120 (Blackwell consumer GPUs).
 
 Tests the block-scaled mma.sync GEMM kernel via ctypes.
+Uses the CUDA quantize/dequantize kernels to prepare inputs,
+ensuring the data format matches what the hardware expects.
 """
 
 import ctypes
@@ -20,295 +22,249 @@ def get_lib():
     raise RuntimeError(f"Could not find bitsandbytes CUDA library in {lib_dir}")
 
 
-# E2M1 representable magnitudes (unsigned)
-E2M1_VALUES = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
-
-
-def float_to_e2m1(x):
-    """Quantize a float to nearest E2M1 value (magnitude only)."""
-    ax = abs(x)
-    # Decision boundaries (midpoints between consecutive E2M1 values)
-    boundaries = [0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0]
-    for i, b in enumerate(boundaries):
-        if ax < b:
-            return E2M1_VALUES[i] * (1 if x >= 0 else -1)
-    return E2M1_VALUES[7] * (1 if x >= 0 else -1)
-
-
-def float_to_e4m3(x):
-    """Quantize a positive float to UE4M3 (unsigned E4M3, bias=7)."""
-    if x <= 0:
-        return 0, 0.0
-    # Clamp to max representable value (~448)
-    x = min(x, 448.0)
-    if x == 0:
-        return 0, 0.0
-    # Find the exponent
-    import math
-    e = math.floor(math.log2(x))
-    e = max(e, -6)  # min exponent with bias=7 is -6
-    e = min(e, 8)   # max exponent with bias=7 is 8
-    # Mantissa
-    m = x / (2.0 ** e) - 1.0
-    m = max(0, min(m, 0.875))  # 3 mantissa bits -> 7/8 max
-    m_int = round(m * 8)
-    m_int = min(m_int, 7)
-    # Encode
-    e_biased = e + 7
-    e_biased = max(0, min(e_biased, 15))
-    code = (e_biased << 3) | m_int
-    # Decode to get actual value
-    actual = (1.0 + m_int / 8.0) * (2.0 ** (e_biased - 7))
-    if e_biased == 0:
-        actual = m_int / 8.0 * (2.0 ** -6)
-    return code, actual
-
-
-def quantize_tensor_reference(x_flat):
-    """Reference quantization: float tensor -> packed FP4 + block scales + tensor scale.
-
-    Returns (packed_bytes, block_scale_bytes, tensor_scale) in the format
-    expected by the GEMM kernel.
-    """
-    n = len(x_flat)
+def cuda_quantize_nvfp4(x, tensor_scale=None):
+    """Quantize using the CUDA kernel (same as test_nvfp4.py)."""
+    lib = get_lib()
+    n = x.numel()
     assert n % 16 == 0
-    num_blocks = n // 16
-
-    tensor_scale = max(abs(v) for v in x_flat)
-    if tensor_scale == 0:
-        tensor_scale = 1.0
-
-    packed = []
-    block_scales = []
-
-    for b in range(num_blocks):
-        block = x_flat[b * 16:(b + 1) * 16]
-        # Normalize by tensor scale
-        normalized = [v / tensor_scale for v in block]
-        # Block absmax
-        block_max = max(abs(v) for v in normalized)
-        if block_max == 0:
-            block_max = 1e-10
-
-        # Block scale = block_max / 6.0 (max E2M1 value)
-        raw_scale = block_max / 6.0
-        scale_code, scale_actual = float_to_e4m3(raw_scale)
-        block_scales.append(scale_code)
-
-        if scale_actual == 0:
-            scale_actual = 1e-10
-
-        # Quantize each element
-        nibbles = []
-        for v in normalized:
-            scaled_v = v / scale_actual
-            qval = float_to_e2m1(scaled_v)
-            # Encode: sign in bit 3, magnitude in bits 0-2
-            mag = abs(qval)
-            mag_idx = E2M1_VALUES.index(mag) if mag in E2M1_VALUES else 0
-            code = mag_idx
-            if qval < 0:
-                code |= 0x8
-            nibbles.append(code)
-
-        # Pack 2 per byte (low nibble = even index, high nibble = odd index)
-        for i in range(0, 16, 2):
-            byte_val = (nibbles[i] & 0xF) | ((nibbles[i + 1] & 0xF) << 4)
-            packed.append(byte_val)
-
+    if tensor_scale is None:
+        tensor_scale = x.abs().max().item()
+    packed = torch.zeros(n // 2, dtype=torch.uint8, device=x.device)
+    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=x.device)
+    if x.dtype == torch.float16:
+        func = lib.cquantize_nvfp4_fp16
+    elif x.dtype == torch.bfloat16:
+        func = lib.cquantize_nvfp4_bf16
+    else:
+        func = lib.cquantize_nvfp4_fp32
+    func(
+        ctypes.c_void_p(x.data_ptr()),
+        ctypes.c_void_p(packed.data_ptr()),
+        ctypes.c_void_p(block_scales.data_ptr()),
+        ctypes.c_float(tensor_scale),
+        ctypes.c_int(n),
+    )
+    torch.cuda.synchronize()
     return packed, block_scales, tensor_scale
 
 
-def dequantize_reference(packed, block_scales, tensor_scale, M, K):
-    """Reference dequantization for verification."""
-    n = M * K
-    result = []
-    for i in range(n):
-        byte_idx = i // 2
-        block_idx = i // 16
-        byte_val = packed[byte_idx]
-        if i % 2 == 0:
-            code = byte_val & 0xF
-        else:
-            code = (byte_val >> 4) & 0xF
-
-        sign = -1.0 if (code & 0x8) else 1.0
-        mag_idx = code & 0x7
-        mag = E2M1_VALUES[mag_idx]
-
-        # Decode block scale
-        sf_code = block_scales[block_idx]
-        sf_e = (sf_code >> 3) & 0xF
-        sf_m = sf_code & 0x7
-        if sf_e == 0:
-            sf_val = sf_m / 8.0 * (2.0 ** -6)
-        else:
-            sf_val = (1.0 + sf_m / 8.0) * (2.0 ** (sf_e - 7))
-
-        result.append(sign * mag * sf_val * tensor_scale)
-    return result
+def cuda_dequantize_nvfp4(packed, block_scales, tensor_scale, n, dtype=torch.float32):
+    """Dequantize using the CUDA kernel."""
+    lib = get_lib()
+    output = torch.zeros(n, dtype=dtype, device=packed.device)
+    if dtype == torch.float16:
+        func = lib.cdequantize_nvfp4_fp16
+    elif dtype == torch.bfloat16:
+        func = lib.cdequantize_nvfp4_bf16
+    else:
+        func = lib.cdequantize_nvfp4_fp32
+    func(
+        ctypes.c_void_p(packed.data_ptr()),
+        ctypes.c_void_p(block_scales.data_ptr()),
+        ctypes.c_float(tensor_scale),
+        ctypes.c_void_p(output.data_ptr()),
+        ctypes.c_int(n),
+        ctypes.c_void_p(0),
+    )
+    torch.cuda.synchronize()
+    return output
 
 
-def prepare_gemm_inputs(M, N, K, seed=42):
-    """Create random FP4-quantized inputs for GEMM testing.
-
-    Returns CUDA tensors ready for the GEMM kernel, plus reference
-    dequantized matrices for verification.
-    """
-    import random
-    random.seed(seed)
-
-    # Generate random float values
-    A_flat = [random.gauss(0, 1) for _ in range(M * K)]
-    B_flat = [random.gauss(0, 1) for _ in range(N * K)]  # B is N x K (transposed)
-
-    # Quantize
-    A_packed, A_sf, A_ts = quantize_tensor_reference(A_flat)
-    B_packed, B_sf, B_ts = quantize_tensor_reference(B_flat)
-
-    # Dequantize for reference
-    A_deq = dequantize_reference(A_packed, A_sf, A_ts, M, K)
-    B_deq = dequantize_reference(B_packed, B_sf, B_ts, N, K)
-
-    # Reshape for torch.matmul: A is M x K, B^T is N x K -> B is K x N
-    A_ref = torch.tensor(A_deq, dtype=torch.float32).reshape(M, K)
-    B_ref = torch.tensor(B_deq, dtype=torch.float32).reshape(N, K).T  # K x N
-
-    # Reference output
-    D_ref = A_ref @ B_ref  # M x N
-
-    # Create CUDA tensors
-    A_data = torch.tensor(A_packed, dtype=torch.uint8, device="cuda")
-    B_data = torch.tensor(B_packed, dtype=torch.uint8, device="cuda")
-    A_scales = torch.tensor(A_sf, dtype=torch.uint8, device="cuda")
-    B_scales = torch.tensor(B_sf, dtype=torch.uint8, device="cuda")
-
-    return A_data, B_data, A_scales, B_scales, A_ts, B_ts, D_ref
+def cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K):
+    """Run GEMM using the CUDA kernel."""
+    lib = get_lib()
+    D_out = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
+    lib.cgemm_nvfp4(
+        ctypes.c_void_p(A_packed.data_ptr()),
+        ctypes.c_void_p(B_packed.data_ptr()),
+        ctypes.c_void_p(A_scales.data_ptr()),
+        ctypes.c_void_p(B_scales.data_ptr()),
+        ctypes.c_void_p(D_out.data_ptr()),
+        ctypes.c_int(M),
+        ctypes.c_int(N),
+        ctypes.c_int(K),
+    )
+    torch.cuda.synchronize()
+    return D_out
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 class TestGemmNVFP4:
     """Test NVFP4 GEMM kernel correctness."""
 
-    def _run_gemm(self, M, N, K, seed=42):
-        """Run the GEMM kernel and return (output, reference).
-
-        The kernel computes D_raw = (A_fp4 * SFA) @ (B_fp4 * SFB)^T.
-        The tensor scales are applied post-hoc: D = D_raw * A_ts * B_ts.
-        """
-        lib = get_lib()
-        assert hasattr(lib, "cgemm_nvfp4"), "cgemm_nvfp4 symbol not found in library"
-
-        A_data, B_data, A_scales, B_scales, A_ts, B_ts, D_ref = prepare_gemm_inputs(M, N, K, seed)
-
-        D_out = torch.zeros(M, N, dtype=torch.float32, device="cuda")
-
-        lib.cgemm_nvfp4(
-            ctypes.c_void_p(A_data.data_ptr()),
-            ctypes.c_void_p(B_data.data_ptr()),
-            ctypes.c_void_p(A_scales.data_ptr()),
-            ctypes.c_void_p(B_scales.data_ptr()),
-            ctypes.c_void_p(D_out.data_ptr()),
-            ctypes.c_int(M),
-            ctypes.c_int(N),
-            ctypes.c_int(K),
-        )
-        torch.cuda.synchronize()
-
-        # Apply tensor scales (not handled by kernel)
-        D_out_scaled = D_out.cpu() * A_ts * B_ts
-
-        return D_out_scaled, D_ref
-
-    def test_gemm_nvfp4_random_single_tile(self):
-        """Test 16x8x64 (single MMA tile) with random data."""
-        D_out, D_ref = self._run_gemm(16, 8, 64)
-        print(f"Output[0:4, 0:4]:\n{D_out[0:4, 0:4]}")
-        print(f"Reference[0:4, 0:4]:\n{D_ref[0:4, 0:4]}")
-        assert torch.isfinite(D_out).all(), "Output contains non-finite values"
-        # Compare: both are products of FP4-quantized values, so they should
-        # be close. The main error source is quantization of the input.
-        abs_err = (D_out - D_ref).abs()
-        max_abs_err = abs_err.max().item()
-        mean_abs_err = abs_err.mean().item()
-        ref_magnitude = D_ref.abs().mean().item()
-        print(f"Max abs error: {max_abs_err:.4f}")
-        print(f"Mean abs error: {mean_abs_err:.4f}")
-        print(f"Reference mean magnitude: {ref_magnitude:.4f}")
-        # Relative error should be reasonable (FP4 quantization has ~25% relative error)
-        if ref_magnitude > 0:
-            rel_err = mean_abs_err / ref_magnitude
-            print(f"Relative error: {rel_err:.4f}")
-            assert rel_err < 2.0, f"Relative error {rel_err:.4f} too large"
-
-    def test_gemm_nvfp4_identity_scales(self):
-        """Test with all-ones data and scale=1 to verify basic MMA correctness."""
+    def test_identity_scales_single_tile(self):
+        """All 1.0 values, scale 1.0 -> output = K (for m16n8k64)."""
         lib = get_lib()
         M, N, K = 16, 8, 64
-
-        # All values = 1.0 in E2M1: code = 0b0010 = 2
-        # Pack: byte = (2) | (2 << 4) = 0x22
+        # E2M1 code for 1.0: magnitude index 2, sign 0 -> code 0x2
+        # Pack: byte = (0x2) | (0x2 << 4) = 0x22
         A_packed = torch.full((M * K // 2,), 0x22, dtype=torch.uint8, device="cuda")
         B_packed = torch.full((N * K // 2,), 0x22, dtype=torch.uint8, device="cuda")
-
-        # Scale = 1.0 in UE4M3: exponent=7 (bias=7, so 2^0=1), mantissa=0
-        # Code = (7 << 3) | 0 = 56 = 0x38
+        # UE4M3 scale 1.0: exponent=7 (2^0), mantissa=0 -> code = 0x38
         A_scales = torch.full((M * (K // 16),), 0x38, dtype=torch.uint8, device="cuda")
         B_scales = torch.full((N * (K // 16),), 0x38, dtype=torch.uint8, device="cuda")
 
-        D_out = torch.zeros(M, N, dtype=torch.float32, device="cuda")
-
-        lib.cgemm_nvfp4(
-            ctypes.c_void_p(A_packed.data_ptr()),
-            ctypes.c_void_p(B_packed.data_ptr()),
-            ctypes.c_void_p(A_scales.data_ptr()),
-            ctypes.c_void_p(B_scales.data_ptr()),
-            ctypes.c_void_p(D_out.data_ptr()),
-            ctypes.c_int(M),
-            ctypes.c_int(N),
-            ctypes.c_int(K),
-        )
-        torch.cuda.synchronize()
-
-        # Each output element = sum of K products: 1.0 * 1.0 * K = 64
+        D = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
         expected = 64.0
-        D_cpu = D_out.cpu()
-        print(f"Identity test output:\n{D_cpu}")
-        assert torch.allclose(D_cpu, torch.full((M, N), expected)), (
-            f"Expected all {expected}, got min={D_cpu.min():.1f} max={D_cpu.max():.1f}"
+        assert torch.allclose(D, torch.full((M, N), expected, device="cuda")), (
+            f"Expected all {expected}, got min={D.min():.1f} max={D.max():.1f}"
         )
 
-    def test_gemm_nvfp4_multi_k_tiles(self):
-        """Test with K > 64 to verify K-loop accumulation."""
-        lib = get_lib()
-        M, N, K = 16, 8, 128  # 2 k-tiles
-
-        # All values = 1.0
+    def test_multi_k_tiles(self):
+        """K > 64: verify K-loop accumulation works."""
+        M, N, K = 16, 8, 128
         A_packed = torch.full((M * K // 2,), 0x22, dtype=torch.uint8, device="cuda")
         B_packed = torch.full((N * K // 2,), 0x22, dtype=torch.uint8, device="cuda")
         A_scales = torch.full((M * (K // 16),), 0x38, dtype=torch.uint8, device="cuda")
         B_scales = torch.full((N * (K // 16),), 0x38, dtype=torch.uint8, device="cuda")
 
-        D_out = torch.zeros(M, N, dtype=torch.float32, device="cuda")
-
-        lib.cgemm_nvfp4(
-            ctypes.c_void_p(A_packed.data_ptr()),
-            ctypes.c_void_p(B_packed.data_ptr()),
-            ctypes.c_void_p(A_scales.data_ptr()),
-            ctypes.c_void_p(B_scales.data_ptr()),
-            ctypes.c_void_p(D_out.data_ptr()),
-            ctypes.c_int(M),
-            ctypes.c_int(N),
-            ctypes.c_int(K),
+        D = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
+        expected = float(K)
+        assert torch.allclose(D, torch.full((M, N), expected, device="cuda")), (
+            f"Expected all {expected}, got min={D.min():.1f} max={D.max():.1f}"
         )
-        torch.cuda.synchronize()
 
-        expected = float(K)  # 1.0 * 1.0 * K
-        D_cpu = D_out.cpu()
-        print(f"Multi-K test output (expect {expected}):\n{D_cpu[0, :]}")
-        assert torch.allclose(D_cpu, torch.full((M, N), expected)), (
-            f"Expected all {expected}, got min={D_cpu.min():.1f} max={D_cpu.max():.1f}"
+    def test_multi_mn_tiles(self):
+        """M and N > single tile: verify output tiling works."""
+        M, N, K = 32, 16, 64
+        A_packed = torch.full((M * K // 2,), 0x22, dtype=torch.uint8, device="cuda")
+        B_packed = torch.full((N * K // 2,), 0x22, dtype=torch.uint8, device="cuda")
+        A_scales = torch.full((M * (K // 16),), 0x38, dtype=torch.uint8, device="cuda")
+        B_scales = torch.full((N * (K // 16),), 0x38, dtype=torch.uint8, device="cuda")
+
+        D = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
+        expected = float(K)
+        assert torch.allclose(D, torch.full((M, N), expected, device="cuda")), (
+            f"Expected all {expected}, got min={D.min():.1f} max={D.max():.1f}"
         )
+
+    def test_varied_values(self):
+        """Test with non-uniform FP4 values and scale=1.0.
+
+        A is all 2.0 (E2M1 code 0x4), B is all 0.5 (E2M1 code 0x1).
+        Each output element = sum_{k=0}^{K-1} (2.0 * 0.5) = K.
+        """
+        M, N, K = 16, 8, 64
+        # 2.0 = magnitude index 4, code = 0x4
+        # Pack: byte = (0x4) | (0x4 << 4) = 0x44
+        A_packed = torch.full((M * K // 2,), 0x44, dtype=torch.uint8, device="cuda")
+        # 0.5 = magnitude index 1, code = 0x1
+        # Pack: byte = (0x1) | (0x1 << 4) = 0x11
+        B_packed = torch.full((N * K // 2,), 0x11, dtype=torch.uint8, device="cuda")
+        A_scales = torch.full((M * (K // 16),), 0x38, dtype=torch.uint8, device="cuda")
+        B_scales = torch.full((N * (K // 16),), 0x38, dtype=torch.uint8, device="cuda")
+
+        D = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
+        expected = 2.0 * 0.5 * K  # = 64
+        assert torch.allclose(D, torch.full((M, N), expected, device="cuda")), (
+            f"Expected all {expected}, got min={D.min():.1f} max={D.max():.1f}"
+        )
+
+    def test_with_block_scales(self):
+        """Test that block scales are applied correctly.
+
+        A is all 1.0 with scale 2.0, B is all 1.0 with scale 3.0.
+        Each output = sum(1.0*2.0 * 1.0*3.0) = 6.0 * K.
+        """
+        M, N, K = 16, 8, 64
+        A_packed = torch.full((M * K // 2,), 0x22, dtype=torch.uint8, device="cuda")
+        B_packed = torch.full((N * K // 2,), 0x22, dtype=torch.uint8, device="cuda")
+        # UE4M3 for 2.0: exponent=8 (bias=7, 2^1=2), mantissa=0 -> code = (8<<3)|0 = 0x40
+        A_scales = torch.full((M * (K // 16),), 0x40, dtype=torch.uint8, device="cuda")
+        # UE4M3 for 3.0: exponent=8 (2^1=2), mantissa=4 (1 + 4/8 = 1.5, 2*1.5=3)
+        # code = (8<<3)|4 = 0x44
+        B_scales = torch.full((N * (K // 16),), 0x44, dtype=torch.uint8, device="cuda")
+
+        D = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
+        expected = 1.0 * 2.0 * 1.0 * 3.0 * K  # = 384
+        print(f"Block scales test: expected={expected}, got first element={D[0,0].item():.1f}")
+        assert torch.allclose(D, torch.full((M, N), expected, device="cuda"), rtol=0.01), (
+            f"Expected all {expected}, got min={D.min():.1f} max={D.max():.1f}"
+        )
+
+    def test_random_data_cuda_quantize(self):
+        """Test GEMM with CUDA-quantized random data.
+
+        Uses the CUDA quantize/dequantize kernels to prepare inputs,
+        ensuring perfect format compatibility with the GEMM kernel.
+        """
+        torch.manual_seed(42)
+        M, N, K = 16, 8, 64
+
+        # Generate random data
+        A_float = torch.randn(M, K, dtype=torch.float32, device="cuda")
+        B_float = torch.randn(N, K, dtype=torch.float32, device="cuda")  # B is N x K (TN layout)
+
+        # Quantize with CUDA kernels
+        A_flat = A_float.reshape(-1)
+        B_flat = B_float.reshape(-1)
+        A_packed, A_scales, A_ts = cuda_quantize_nvfp4(A_flat)
+        B_packed, B_scales, B_ts = cuda_quantize_nvfp4(B_flat)
+
+        # Dequantize to get ground truth values
+        A_deq = cuda_dequantize_nvfp4(A_packed, A_scales, A_ts, M * K).reshape(M, K)
+        B_deq = cuda_dequantize_nvfp4(B_packed, B_scales, B_ts, N * K).reshape(N, K)
+
+        # Reference: matmul on dequantized values
+        D_ref = A_deq @ B_deq.T  # M x N
+
+        # GEMM kernel (output doesn't include tensor scales)
+        D_kernel = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
+
+        # Scale by tensor scales
+        D_out = D_kernel * A_ts * B_ts
+
+        # Compare
+        abs_err = (D_out - D_ref).abs()
+        max_err = abs_err.max().item()
+        mean_err = abs_err.mean().item()
+        ref_mag = D_ref.abs().mean().item()
+
+        print(f"CUDA-quantized random test (M={M}, N={N}, K={K}):")
+        print(f"  Reference mean magnitude: {ref_mag:.4f}")
+        print(f"  Max abs error: {max_err:.4f}")
+        print(f"  Mean abs error: {mean_err:.4f}")
+        if ref_mag > 0:
+            rel_err = mean_err / ref_mag
+            print(f"  Mean relative error: {rel_err:.4f}")
+            # Error should be small — both use the same quantized data
+            # The only error source is the register layout mapping
+            assert rel_err < 0.5, f"Relative error {rel_err:.4f} too large"
+
+        print(f"  Output[0,:4]: {D_out[0,:4].tolist()}")
+        print(f"  Reference[0,:4]: {D_ref[0,:4].tolist()}")
+
+    def test_random_data_larger(self):
+        """Test GEMM with CUDA-quantized data on a larger matrix (multiple tiles)."""
+        torch.manual_seed(123)
+        M, N, K = 32, 16, 128
+
+        A_float = torch.randn(M, K, dtype=torch.float32, device="cuda")
+        B_float = torch.randn(N, K, dtype=torch.float32, device="cuda")
+
+        A_packed, A_scales, A_ts = cuda_quantize_nvfp4(A_float.reshape(-1))
+        B_packed, B_scales, B_ts = cuda_quantize_nvfp4(B_float.reshape(-1))
+
+        A_deq = cuda_dequantize_nvfp4(A_packed, A_scales, A_ts, M * K).reshape(M, K)
+        B_deq = cuda_dequantize_nvfp4(B_packed, B_scales, B_ts, N * K).reshape(N, K)
+
+        D_ref = A_deq @ B_deq.T
+        D_kernel = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
+        D_out = D_kernel * A_ts * B_ts
+
+        abs_err = (D_out - D_ref).abs()
+        ref_mag = D_ref.abs().mean().item()
+        mean_err = abs_err.mean().item()
+        max_err = abs_err.max().item()
+
+        print(f"Larger random test (M={M}, N={N}, K={K}):")
+        print(f"  Reference mean magnitude: {ref_mag:.4f}")
+        print(f"  Max abs error: {max_err:.4f}")
+        print(f"  Mean abs error: {mean_err:.4f}")
+        if ref_mag > 0:
+            rel_err = mean_err / ref_mag
+            print(f"  Mean relative error: {rel_err:.4f}")
+            assert rel_err < 0.5, f"Relative error {rel_err:.4f} too large"
 
 
 if __name__ == "__main__":
