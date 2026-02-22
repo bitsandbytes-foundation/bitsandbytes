@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "compat.cuh"
+#include <common.h>
 #include "common.cuh"
 
 // ============================================================================
