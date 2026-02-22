@@ -227,6 +227,24 @@ if(BUILD_CUDA)
 
     list(APPEND SRC_FILES ${CUDA_FILES})
 
+    # SM_120a NVFP4 GEMM kernel: requires compute_120a for block-scaled MMA
+    # Only include if 120 or 121 is in the target architectures
+    set(_HAS_SM120 FALSE)
+    foreach(_cap IN LISTS COMPUTE_CAPABILITY)
+        if(_cap MATCHES "^12[01]$")
+            set(_HAS_SM120 TRUE)
+        endif()
+    endforeach()
+    if(_HAS_SM120)
+        set(SM120A_FILE csrc/kernels_nvfp4_sm120.cu)
+        list(APPEND SRC_FILES ${SM120A_FILE})
+        set_source_files_properties(${SM120A_FILE} PROPERTIES
+            COMPILE_FLAGS "-gencode=arch=compute_120a,code=sm_120a"
+            CUDA_ARCHITECTURES "OFF"
+        )
+        message(STATUS "NVFP4 SM_120a GEMM kernel enabled")
+    endif()
+
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
     add_compile_definitions(BUILD_CUDA)
 elseif(BUILD_HIP)
