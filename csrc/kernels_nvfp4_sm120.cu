@@ -510,8 +510,10 @@ __global__ void kGemmNVFP4_simple(
 // Host-side launcher — uses shared memory kernel with auto split-K
 // ============================================================================
 
-// Target: enough blocks to fill 84 SMs with 4 blocks/SM = 336 blocks
-static const int TARGET_BLOCKS = 336;
+// Target: enough blocks to fill the GPU reasonably.
+// 84 SMs × 2 blocks/SM = 168. Only split-K when occupancy is clearly low.
+// Higher thresholds cause regression on medium-M shapes due to atomicAdd/memset overhead.
+static const int TARGET_BLOCKS = 168;
 
 extern "C" void cgemm_nvfp4(
     const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
