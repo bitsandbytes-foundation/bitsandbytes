@@ -173,6 +173,11 @@ __global__ void kGemmNVFP4_simple(
         // ALayout: coord = t0*128 + t1 + v0*16 + v1*8 + v2*512
         // CuTE coord space is column-major in tile: m = coord%16, k = coord/16
         // Value decomposition: v = v0 + v1*8 + v2*16 (v0=0..7, v1=0..1, v2=0..1)
+        //
+        // CRITICAL: CuTE column-major M-index interleaves rows [0,8], [1,9], ...
+        // but the SM80_16x8 output layout expects consecutive row pairs [0,1], [2,3], ...
+        // We remap: actual_m = (cute_m % 8) * 2 + cute_m / 8
+        // so CuTE m=0 → actual 0, m=8 → actual 1, m=1 → actual 2, m=9 → actual 3, etc.
         uint32_t a_regs[4];
         for (int reg = 0; reg < 4; reg++) {
             uint32_t packed = 0;
@@ -183,8 +188,10 @@ __global__ void kGemmNVFP4_simple(
                 int v2 = v / 16;
 
                 int coord = t0 * 128 + t1 + v0 * 16 + v1 * 8 + v2 * 512;
-                int tile_row = coord % 16;   // M index within tile (column-major)
+                int cute_m = coord % 16;     // CuTE M index (interleaved)
                 int tile_col = coord / 16;   // K index within tile
+                // Remap from CuTE interleaved to sequential row order
+                int tile_row = (cute_m % 8) * 2 + cute_m / 8;
 
                 int global_m = tile_m + tile_row;
                 int global_k = k_start + tile_col;
@@ -246,8 +253,10 @@ __global__ void kGemmNVFP4_simple(
             int sf_thread_idx = (lane_id % 2) * 8 + (lane_id / 4);
             for (int sf_v = 0; sf_v < 4; sf_v++) {
                 int sf_element = sf_thread_idx + sf_v * 16;
-                int sf_row = sf_element % 16;  // M index in tile
-                int sf_col = sf_element / 16;  // K/16 index in tile
+                int cute_sf_m = sf_element % 16;  // CuTE M index (interleaved)
+                int sf_col = sf_element / 16;     // K/16 index in tile
+                // Same remapping as A data: CuTE interleaved → sequential
+                int sf_row = (cute_sf_m % 8) * 2 + cute_sf_m / 8;
 
                 int global_m = tile_m + sf_row;
                 int global_k_block = k_start / 16 + sf_col;
