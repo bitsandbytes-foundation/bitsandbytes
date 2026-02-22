@@ -1449,11 +1449,15 @@ static void kbitGemmProdLaunch(
     int mn_tiles = m_tiles * n_tiles;
 
     // k_splits heuristic: target enough blocks for good SM occupancy.
-    // With BLOCK_DIM threads/block, we want ~4 blocks/SM for latency hiding.
-    // BLOCK_DIM=128 (TN=64): 4 blocks/SM → 16 warps → 33% occupancy
-    // BLOCK_DIM=256 (TN=128): 1 block/SM → 8 warps → 16% occupancy (ok for large M)
-    constexpr int TARGET_BLOCKS_PER_SM = (BLOCK_DIM <= 128) ? 4 : 1;
-    int target_blocks = num_sms * TARGET_BLOCKS_PER_SM;
+    // Datacenter GPUs (H100) have higher bandwidth and can sustain more concurrent blocks.
+    // TN=64: 4 blocks/SM (consumer), 6 blocks/SM (datacenter) for better latency hiding
+    // TN=128: 1 block/SM (consumer), 2 blocks/SM (datacenter) to exploit larger shmem
+    int target_blocks_per_sm;
+    if constexpr (BLOCK_DIM <= 128)
+        target_blocks_per_sm = (num_sms > 130) ? 6 : 4; // H100: 132 SMs
+    else
+        target_blocks_per_sm = (num_sms > 130) ? 2 : 1;
+    int target_blocks = num_sms * target_blocks_per_sm;
 
     int k_splits = 1;
     if (mn_tiles < target_blocks && k_tiles > 1) {
@@ -1924,8 +1928,12 @@ static void kbitGroupedGemmProdLaunch(
     int mn_tiles = num_experts * m_tiles_per_expert * n_tiles;
 
     // k_splits heuristic: target enough blocks for good SM occupancy
-    constexpr int TARGET_BLOCKS_PER_SM = (BLOCK_DIM <= 128) ? 4 : 1;
-    int target_blocks = num_sms * TARGET_BLOCKS_PER_SM;
+    int target_blocks_per_sm;
+    if constexpr (BLOCK_DIM <= 128)
+        target_blocks_per_sm = (num_sms > 130) ? 6 : 4;
+    else
+        target_blocks_per_sm = (num_sms > 130) ? 2 : 1;
+    int target_blocks = num_sms * target_blocks_per_sm;
 
     int k_splits = 1;
     if (mn_tiles < target_blocks && k_tiles > 1) {
