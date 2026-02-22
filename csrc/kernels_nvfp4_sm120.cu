@@ -485,7 +485,7 @@ __global__ void kGemmNVFP4_simple(
 // ============================================================================
 extern "C" void cgemm_nvfp4(
     const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
-    int N, int K
+    int N, int K, cudaStream_t stream
 ) {
     int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
     int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
@@ -493,5 +493,5 @@ extern "C" void cgemm_nvfp4(
     dim3 grid(num_n_blocks, num_m_blocks);
     int threads_per_block = WARPS_PER_BLOCK * 32; // 256
 
-    kGemmNVFP4_smem<<<grid, threads_per_block>>>(A, B, SFA, SFB, D, M, N, K);
+    kGemmNVFP4_smem<<<grid, threads_per_block, 0, stream>>>(A, B, SFA, SFB, D, M, N, K);
 }

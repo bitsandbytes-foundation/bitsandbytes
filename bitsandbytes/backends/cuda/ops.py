@@ -928,6 +928,7 @@ def _(
             ct.c_int(M),
             ct.c_int(N),
             ct.c_int(K),
+            _get_tensor_stream(A_packed),
         )
 
     # Apply tensor scales (the GEMM kernel operates on raw quantized values)
