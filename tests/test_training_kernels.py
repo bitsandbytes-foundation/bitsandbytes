@@ -1,4 +1,4 @@
-"""Tests for CUDA training kernels: SwiGLU, RMSNorm, RoPE.
+"""Tests for CUDA training kernels: SwiGLU, RMSNorm, RoPE, Cross-Entropy.
 
 Tests compare CUDA kernel output against PyTorch reference implementations
 to verify correctness within fp16/bf16 tolerance.
@@ -8,7 +8,7 @@ import pytest
 import torch
 
 import bitsandbytes  # noqa: F401 — triggers op registration
-from bitsandbytes.autograd.training_kernels import rmsnorm, rope, swiglu
+from bitsandbytes.autograd.training_kernels import cross_entropy, rmsnorm, rope, swiglu
 
 
 def _ref_swiglu(gate, up):
@@ -285,3 +285,119 @@ class TestRoPE:
             ref = _ref_rope(q, cos_cache, sin_cache).to(torch.float16)
 
             torch.testing.assert_close(q_out, ref, atol=1e-2, rtol=1e-2)
+
+
+# ============================================================================
+# Cross-Entropy Loss Tests
+# ============================================================================
+
+
+class TestCrossEntropy:
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_forward_matches_pytorch(self, dtype):
+        """Verify forward loss matches torch.nn.functional.cross_entropy."""
+        N, V = 32, 1024
+        logits = torch.randn(N, V, device="cuda", dtype=dtype)
+        labels = torch.randint(0, V, (N,), device="cuda")
+
+        losses, _ = torch.ops.bitsandbytes.cross_entropy_forward(logits, labels, -100)
+
+        # Reference: per-sample CE loss
+        ref_losses = torch.nn.functional.cross_entropy(
+            logits.float(), labels, reduction="none",
+        )
+
+        torch.testing.assert_close(losses, ref_losses, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_autograd_forward_matches(self, dtype):
+        """Verify autograd wrapper mean loss matches PyTorch."""
+        N, V = 16, 512
+        logits = torch.randn(N, V, device="cuda", dtype=dtype, requires_grad=True)
+        labels = torch.randint(0, V, (N,), device="cuda")
+
+        loss = cross_entropy(logits, labels)
+        ref_loss = torch.nn.functional.cross_entropy(logits.float(), labels)
+
+        torch.testing.assert_close(loss.float(), ref_loss, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_backward_gradient(self, dtype):
+        """Verify backward produces correct gradients."""
+        N, V = 8, 256
+        logits = torch.randn(N, V, device="cuda", dtype=dtype, requires_grad=True)
+        labels = torch.randint(0, V, (N,), device="cuda")
+
+        loss = cross_entropy(logits, labels)
+        loss.backward()
+
+        # Reference gradient
+        logits_ref = logits.detach().clone().float().requires_grad_(True)
+        ref_loss = torch.nn.functional.cross_entropy(logits_ref, labels)
+        ref_loss.backward()
+
+        torch.testing.assert_close(
+            logits.grad.float(), logits_ref.grad, atol=5e-3, rtol=5e-3,
+        )
+
+    def test_ignore_index(self):
+        """Verify ignore_index (-100) is handled correctly."""
+        N, V = 16, 256
+        logits = torch.randn(N, V, device="cuda", dtype=torch.float16, requires_grad=True)
+        labels = torch.randint(0, V, (N,), device="cuda")
+        # Set some labels to ignore_index
+        labels[0] = -100
+        labels[5] = -100
+        labels[10] = -100
+
+        loss = cross_entropy(logits, labels)
+        loss.backward()
+
+        # Reference
+        logits_ref = logits.detach().clone().float().requires_grad_(True)
+        ref_loss = torch.nn.functional.cross_entropy(logits_ref, labels)
+        ref_loss.backward()
+
+        torch.testing.assert_close(loss.float(), ref_loss, atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(
+            logits.grad.float(), logits_ref.grad, atol=5e-3, rtol=5e-3,
+        )
+
+    def test_all_ignored(self):
+        """Verify all-ignored labels produce zero loss."""
+        N, V = 4, 64
+        logits = torch.randn(N, V, device="cuda", dtype=torch.float16, requires_grad=True)
+        labels = torch.full((N,), -100, device="cuda", dtype=torch.long)
+
+        loss = cross_entropy(logits, labels)
+        assert loss.item() == 0.0
+
+    def test_large_vocab(self):
+        """Test with a large vocabulary (> 65536) to stress the kernel."""
+        N, V = 4, 100000
+        logits = torch.randn(N, V, device="cuda", dtype=torch.float16)
+        labels = torch.randint(0, V, (N,), device="cuda")
+
+        losses, _ = torch.ops.bitsandbytes.cross_entropy_forward(logits, labels, -100)
+        ref_losses = torch.nn.functional.cross_entropy(
+            logits.float(), labels, reduction="none",
+        )
+
+        torch.testing.assert_close(losses, ref_losses, atol=5e-2, rtol=5e-2)
+
+    def test_gradient_with_large_vocab(self):
+        """Verify gradients with large vocab."""
+        N, V = 4, 100000
+        logits = torch.randn(N, V, device="cuda", dtype=torch.float16, requires_grad=True)
+        labels = torch.randint(0, V, (N,), device="cuda")
+
+        loss = cross_entropy(logits, labels)
+        loss.backward()
+
+        logits_ref = logits.detach().clone().float().requires_grad_(True)
+        ref_loss = torch.nn.functional.cross_entropy(logits_ref, labels)
+        ref_loss.backward()
+
+        torch.testing.assert_close(
+            logits.grad.float(), logits_ref.grad, atol=5e-2, rtol=5e-2,
+        )

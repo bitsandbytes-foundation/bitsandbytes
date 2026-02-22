@@ -782,3 +782,37 @@ torch.library.define(
 @register_fake("bitsandbytes::rope_forward")
 def _(q: torch.Tensor, cos_cache: torch.Tensor, sin_cache: torch.Tensor, n_heads: int) -> None:
     pass
+
+
+# Cross-Entropy Loss forward: per-sample loss + logsumexp for backward
+torch.library.define(
+    "bitsandbytes::cross_entropy_forward",
+    "(Tensor logits, Tensor labels, int ignore_index) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::cross_entropy_forward")
+def _(logits: torch.Tensor, labels: torch.Tensor, ignore_index: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(logits.dim() == 2, lambda: "logits must be 2D [N, V]")
+    N = logits.shape[0]
+    losses = torch.empty(N, device=logits.device, dtype=torch.float32)
+    logsumexp = torch.empty(N, device=logits.device, dtype=torch.float32)
+    return losses, logsumexp
+
+
+# Cross-Entropy Loss backward: grad_logits from grad_output
+torch.library.define(
+    "bitsandbytes::cross_entropy_backward",
+    "(Tensor logits, Tensor labels, Tensor grad_output, Tensor logsumexp, int ignore_index) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::cross_entropy_backward")
+def _(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    grad_output: torch.Tensor,
+    logsumexp: torch.Tensor,
+    ignore_index: int,
+) -> torch.Tensor:
+    return torch.empty_like(logits)

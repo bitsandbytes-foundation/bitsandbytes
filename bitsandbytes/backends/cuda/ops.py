@@ -1372,3 +1372,66 @@ def _(
             ct.c_int(n_heads),
             ct.c_int(head_dim),
         )
+
+
+@register_kernel("bitsandbytes::cross_entropy_forward", "cuda")
+def _(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    ignore_index: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(logits.dim() == 2, lambda: "logits must be 2D [N, V]")
+    torch._check(logits.is_contiguous(), lambda: "logits must be contiguous")
+    torch._check(
+        logits.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"cross_entropy supports float16/bfloat16, got {logits.dtype}",
+    )
+
+    N, V = logits.shape
+    losses = torch.empty(N, device=logits.device, dtype=torch.float32)
+    logsumexp = torch.empty(N, device=logits.device, dtype=torch.float32)
+    dtype_suffix = "fp16" if logits.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(logits):
+        fn = getattr(lib, f"ccross_entropy_forward_{dtype_suffix}_c")
+        fn(
+            get_ptr(logits),
+            get_ptr(labels),
+            get_ptr(losses),
+            get_ptr(logsumexp),
+            ct.c_int(N),
+            ct.c_int(V),
+            ct.c_int(ignore_index),
+        )
+
+    return losses, logsumexp
+
+
+@register_kernel("bitsandbytes::cross_entropy_backward", "cuda")
+def _(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    grad_output: torch.Tensor,
+    logsumexp: torch.Tensor,
+    ignore_index: int,
+) -> torch.Tensor:
+    torch._check(logits.is_contiguous(), lambda: "logits must be contiguous")
+
+    N, V = logits.shape
+    grad_logits = torch.empty_like(logits)
+    dtype_suffix = "fp16" if logits.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(logits):
+        fn = getattr(lib, f"ccross_entropy_backward_{dtype_suffix}_c")
+        fn(
+            get_ptr(logits),
+            get_ptr(labels),
+            get_ptr(grad_output),
+            get_ptr(logsumexp),
+            get_ptr(grad_logits),
+            ct.c_int(N),
+            ct.c_int(V),
+            ct.c_int(ignore_index),
+        )
+
+    return grad_logits

@@ -652,6 +652,29 @@ void crope_forward_bf16(__nv_bfloat16* q, const __nv_bfloat16* cos_cache, const 
     rope_forward<__nv_bfloat16>(q, cos_cache, sin_cache, total_tokens, n_heads, head_dim);
 }
 
+// Cross-entropy loss forward declarations
+template <typename T> void cross_entropy_forward(const T*, const long*, float*, float*, int, int, int);
+template <typename T> void cross_entropy_backward(const T*, const long*, const float*, const float*, T*, int, int, int);
+
+void ccross_entropy_forward_fp16(const half* logits, const long* labels, float* losses,
+                                 float* logsumexp, int N, int V, int ignore_index) {
+    cross_entropy_forward<half>(logits, labels, losses, logsumexp, N, V, ignore_index);
+}
+void ccross_entropy_backward_fp16(const half* logits, const long* labels, const float* grad_output,
+                                  const float* logsumexp, half* grad_logits,
+                                  int N, int V, int ignore_index) {
+    cross_entropy_backward<half>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+}
+void ccross_entropy_forward_bf16(const __nv_bfloat16* logits, const long* labels, float* losses,
+                                 float* logsumexp, int N, int V, int ignore_index) {
+    cross_entropy_forward<__nv_bfloat16>(logits, labels, losses, logsumexp, N, V, ignore_index);
+}
+void ccross_entropy_backward_bf16(const __nv_bfloat16* logits, const long* labels, const float* grad_output,
+                                  const float* logsumexp, __nv_bfloat16* grad_logits,
+                                  int N, int V, int ignore_index) {
+    cross_entropy_backward<__nv_bfloat16>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+}
+
 #endif // BUILD_CUDA || BUILD_HIP (kbit unmangled)
 
 extern "C" {
@@ -1398,6 +1421,25 @@ void crope_forward_fp16_c(half* q, const half* cos_cache, const half* sin_cache,
 void crope_forward_bf16_c(__nv_bfloat16* q, const __nv_bfloat16* cos_cache, const __nv_bfloat16* sin_cache,
                           int total_tokens, int n_heads, int head_dim) {
     crope_forward_bf16(q, cos_cache, sin_cache, total_tokens, n_heads, head_dim);
+}
+
+void ccross_entropy_forward_fp16_c(const half* logits, const long* labels, float* losses,
+                                   float* logsumexp, int N, int V, int ignore_index) {
+    ccross_entropy_forward_fp16(logits, labels, losses, logsumexp, N, V, ignore_index);
+}
+void ccross_entropy_backward_fp16_c(const half* logits, const long* labels, const float* grad_output,
+                                    const float* logsumexp, half* grad_logits,
+                                    int N, int V, int ignore_index) {
+    ccross_entropy_backward_fp16(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+}
+void ccross_entropy_forward_bf16_c(const __nv_bfloat16* logits, const long* labels, float* losses,
+                                   float* logsumexp, int N, int V, int ignore_index) {
+    ccross_entropy_forward_bf16(logits, labels, losses, logsumexp, N, V, ignore_index);
+}
+void ccross_entropy_backward_bf16_c(const __nv_bfloat16* logits, const long* labels, const float* grad_output,
+                                    const float* logsumexp, __nv_bfloat16* grad_logits,
+                                    int N, int V, int ignore_index) {
+    ccross_entropy_backward_bf16(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
 }
 
 #endif

@@ -145,3 +145,76 @@ def rope(
         Rotated query tensor (same shape).
     """
     return RoPEFunction.apply(q, cos_cache, sin_cache, n_heads)
+
+
+class CrossEntropyFunction(torch.autograd.Function):
+    """Cross-entropy loss using CUDA kernel.
+
+    Forward: loss = -log_softmax(logits)[label] per row
+    Backward: grad_logits = (softmax(logits) - one_hot(label)) * grad_output
+
+    Stores logsumexp from forward for efficient backward (avoids recomputing).
+    """
+
+    @staticmethod
+    def forward(ctx, logits, labels, ignore_index=-100):
+        # Flatten to 2D for the CUDA kernel
+        orig_shape = logits.shape
+        logits_2d = logits.reshape(-1, logits.shape[-1]).contiguous()
+        labels_flat = labels.reshape(-1)
+
+        losses, logsumexp = torch.ops.bitsandbytes.cross_entropy_forward(
+            logits_2d, labels_flat, ignore_index,
+        )
+
+        ctx.save_for_backward(logits_2d, labels_flat, logsumexp)
+        ctx.ignore_index = ignore_index
+
+        # Compute mean loss (ignoring padding)
+        valid_mask = labels_flat != ignore_index
+        n_valid = valid_mask.sum()
+        if n_valid > 0:
+            mean_loss = losses[valid_mask].sum() / n_valid.float()
+        else:
+            mean_loss = losses.sum() * 0.0  # zero but with grad
+
+        return mean_loss
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        logits_2d, labels_flat, logsumexp = ctx.saved_tensors
+
+        # Expand scalar grad_output to per-sample
+        N = logits_2d.shape[0]
+        valid_mask = labels_flat != ctx.ignore_index
+        n_valid = valid_mask.sum()
+
+        grad_per_sample = torch.zeros(N, device=logits_2d.device, dtype=torch.float32)
+        if n_valid > 0:
+            grad_per_sample[valid_mask] = grad_output.float() / n_valid.float()
+
+        grad_logits = torch.ops.bitsandbytes.cross_entropy_backward(
+            logits_2d, labels_flat, grad_per_sample, logsumexp, ctx.ignore_index,
+        )
+
+        return grad_logits, None, None
+
+
+def cross_entropy(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    ignore_index: int = -100,
+) -> torch.Tensor:
+    """Cross-entropy loss with CUDA kernel (autograd support).
+
+    Uses a numerically stable logsumexp-based implementation.
+
+    Args:
+        logits: Logit tensor (*, vocab_size), fp16 or bf16.
+        labels: Label tensor (*), int64.
+        ignore_index: Label value to ignore (default: -100).
+
+    Returns:
+        Scalar mean loss.
+    """
+    return CrossEntropyFunction.apply(logits, labels, ignore_index)

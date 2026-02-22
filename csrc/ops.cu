@@ -3263,3 +3263,143 @@ void rope_forward(T* q, const T* cos_cache, const T* sin_cache,
 
 template void rope_forward<half>(half*, const half*, const half*, int, int, int);
 template void rope_forward<__nv_bfloat16>(__nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, int, int, int);
+
+// ---------- Cross-Entropy Loss forward+backward ----------
+// Forward: loss = -log_softmax(logits)[label] per row
+//        = -(logits[label] - logsumexp(logits))
+// Uses chunked logsumexp for numerical stability with large vocab.
+// Backward: grad_logits = (softmax(logits) - one_hot(label)) * grad_output
+// One thread block per row (sample in the batch).
+
+template <typename T, int BLOCK_SIZE>
+__global__ void kCrossEntropyForward(
+    const T* __restrict__ logits,   // [N, V]
+    const long* __restrict__ labels, // [N]
+    float* __restrict__ losses,      // [N]
+    float* __restrict__ logsumexp_out, // [N] stored for backward
+    int N, int V, int ignore_index
+) {
+    int row = blockIdx.x;
+    if (row >= N) return;
+
+    long label = labels[row];
+    if (label == ignore_index) {
+        losses[row] = 0.0f;
+        logsumexp_out[row] = 0.0f;
+        return;
+    }
+
+    const T* logits_row = logits + row * V;
+
+    // Phase 1: find max for numerical stability
+    __shared__ float shared[BLOCK_SIZE];
+    float thread_max = -1e30f;
+    for (int i = threadIdx.x; i < V; i += BLOCK_SIZE) {
+        float val = float(logits_row[i]);
+        thread_max = fmaxf(thread_max, val);
+    }
+    shared[threadIdx.x] = thread_max;
+    __syncthreads();
+
+    for (int s = BLOCK_SIZE / 2; s > 0; s >>= 1) {
+        if (threadIdx.x < s) {
+            shared[threadIdx.x] = fmaxf(shared[threadIdx.x], shared[threadIdx.x + s]);
+        }
+        __syncthreads();
+    }
+    float row_max = shared[0];
+
+    // Phase 2: compute sum(exp(x - max))
+    float thread_sum = 0.0f;
+    for (int i = threadIdx.x; i < V; i += BLOCK_SIZE) {
+        thread_sum += expf(float(logits_row[i]) - row_max);
+    }
+    shared[threadIdx.x] = thread_sum;
+    __syncthreads();
+
+    for (int s = BLOCK_SIZE / 2; s > 0; s >>= 1) {
+        if (threadIdx.x < s) {
+            shared[threadIdx.x] += shared[threadIdx.x + s];
+        }
+        __syncthreads();
+    }
+    float sum_exp = shared[0];
+
+    float lse = row_max + logf(sum_exp);
+    float logit_label = float(logits_row[label]);
+    float loss = -(logit_label - lse);
+
+    if (threadIdx.x == 0) {
+        losses[row] = loss;
+        logsumexp_out[row] = lse;
+    }
+}
+
+template <typename T, int BLOCK_SIZE>
+__global__ void kCrossEntropyBackward(
+    const T* __restrict__ logits,       // [N, V]
+    const long* __restrict__ labels,     // [N]
+    const float* __restrict__ grad_output, // [N] scalar per sample
+    const float* __restrict__ logsumexp,   // [N] from forward
+    T* __restrict__ grad_logits,         // [N, V]
+    int N, int V, int ignore_index
+) {
+    int row = blockIdx.x;
+    if (row >= N) return;
+
+    long label = labels[row];
+    const T* logits_row = logits + row * V;
+    T* grad_row = grad_logits + row * V;
+    float go = grad_output[row];
+
+    if (label == ignore_index) {
+        for (int i = threadIdx.x; i < V; i += BLOCK_SIZE) {
+            grad_row[i] = T(0.0f);
+        }
+        return;
+    }
+
+    float lse = logsumexp[row];
+
+    for (int i = threadIdx.x; i < V; i += BLOCK_SIZE) {
+        float softmax_i = expf(float(logits_row[i]) - lse);
+        float grad_i = softmax_i;
+        if (i == label) {
+            grad_i -= 1.0f;
+        }
+        grad_row[i] = T(grad_i * go);
+    }
+}
+
+// C wrapper functions
+template <typename T>
+void cross_entropy_forward(const T* logits, const long* labels, float* losses, float* logsumexp,
+                           int N, int V, int ignore_index) {
+    if (V <= 256) {
+        kCrossEntropyForward<T, 256><<<N, 256>>>(logits, labels, losses, logsumexp, N, V, ignore_index);
+    } else if (V <= 512) {
+        kCrossEntropyForward<T, 512><<<N, 512>>>(logits, labels, losses, logsumexp, N, V, ignore_index);
+    } else {
+        kCrossEntropyForward<T, 1024><<<N, 1024>>>(logits, labels, losses, logsumexp, N, V, ignore_index);
+    }
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <typename T>
+void cross_entropy_backward(const T* logits, const long* labels, const float* grad_output,
+                            const float* logsumexp, T* grad_logits,
+                            int N, int V, int ignore_index) {
+    if (V <= 256) {
+        kCrossEntropyBackward<T, 256><<<N, 256>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+    } else if (V <= 512) {
+        kCrossEntropyBackward<T, 512><<<N, 512>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+    } else {
+        kCrossEntropyBackward<T, 1024><<<N, 1024>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+    }
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template void cross_entropy_forward<half>(const half*, const long*, float*, float*, int, int, int);
+template void cross_entropy_forward<__nv_bfloat16>(const __nv_bfloat16*, const long*, float*, float*, int, int, int);
+template void cross_entropy_backward<half>(const half*, const long*, const float*, const float*, half*, int, int, int);
+template void cross_entropy_backward<__nv_bfloat16>(const __nv_bfloat16*, const long*, const float*, const float*, __nv_bfloat16*, int, int, int);
