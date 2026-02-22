@@ -8,16 +8,16 @@ Compares the V8 scalar GEMV kernel using:
 Uses representative shapes from Qwen3-Coder-Next 70B.
 """
 
-import torch
 import time
-import math
+
+import torch
+
 import bitsandbytes  # noqa: F401 — registers torch ops
-
 from bitsandbytes.functional import create_normal_float_codebook
-
 
 # ---- E4M4 encode (Python, matching CUDA encode_e4m4_absmax) ----
 E4M4_BIAS = 11
+
 
 def encode_e4m4_absmax(vals: torch.Tensor) -> torch.Tensor:
     """Encode float32 absmax values to uint8 E4M4 format."""
@@ -44,11 +44,11 @@ def encode_e4m4_absmax(vals: torch.Tensor) -> torch.Tensor:
 
 # ---- Benchmark config ----
 SHAPES = [
-    ("gateup",  7168, 18944),
-    ("down",   18944,  7168),
-    ("Q",       7168,  7168),
-    ("O",       7168,  7168),
-    ("KV",      7168,  1024),
+    ("gateup", 7168, 18944),
+    ("down", 18944, 7168),
+    ("Q", 7168, 7168),
+    ("O", 7168, 7168),
+    ("KV", 7168, 1024),
 ]
 K_BITS_LIST = [2, 3, 4, 5]
 M_VALS = [1, 2, 3, 4]
@@ -74,10 +74,12 @@ def bench():
 
                 # float32 absmax
                 fn_f32 = lambda: torch.ops.bitsandbytes.kbit_scalar_gemv(
-                    A, packed_flat, absmax_flat, codebook, K_dim, N, k)
+                    A, packed_flat, absmax_flat, codebook, K_dim, N, k
+                )
                 # uint8 E4M4 absmax
                 fn_u8 = lambda: torch.ops.bitsandbytes.kbit_scalar_gemv_u8(
-                    A, packed_flat, absmax_u8, codebook, K_dim, N, k)
+                    A, packed_flat, absmax_u8, codebook, K_dim, N, k
+                )
 
                 # Warmup
                 for _ in range(WARMUP):
@@ -99,7 +101,7 @@ def bench():
                 torch.cuda.synchronize()
                 t_u8 = (time.perf_counter() - start) / ITERS * 1e6
 
-                ratio = t_f32 / t_u8 if t_u8 > 0 else float('inf')
+                ratio = t_f32 / t_u8 if t_u8 > 0 else float("inf")
                 print(f"{name:>8s}  {k:>2d}  {M:>2d}  {t_f32:>12.1f}  {t_u8:>11.1f}  {ratio:>5.2f}x")
 
 

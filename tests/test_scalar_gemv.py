@@ -6,8 +6,8 @@ dequantize + matmul reference using the same flat-layout data.
 """
 
 import pytest
-import torch
 from scipy.stats import norm
+import torch
 
 import bitsandbytes  # noqa: F401
 from bitsandbytes import _ops  # noqa: F401
@@ -40,13 +40,9 @@ def prepare_weights(K_dim, N, k):
     and repacked data for MMA/grouped reference kernels."""
     codebook = create_normal_float_codebook(k).cuda()
     W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
-    packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(
-        W.reshape(-1), codebook, k
-    )
+    packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook, k)
     # Repacked data for MMA reference kernel
-    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-        packed_flat, absmax_flat.cuda(), K_dim, N, k
-    )
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax_flat.cuda(), K_dim, N, k)
     return packed_flat, absmax_flat, packed_tiled, absmax_tiled, codebook, W
 
 
@@ -54,13 +50,13 @@ def dequant_reference(packed_flat, absmax_flat, codebook, k, N, K_dim):
     """Dequantize using E4M4-decoded absmax.
     Matches the GEMV kernel's precision exactly."""
     num_blocks = N * (K_dim // 32)
-    packed = packed_flat[:num_blocks * k].view(num_blocks, k)  # [B, k] int32
+    packed = packed_flat[: num_blocks * k].view(num_blocks, k)  # [B, k] int32
     j = torch.arange(32, device=packed.device)  # [32]
 
     # Extract k-bit index for each of the 32 elements per block
     indices = torch.zeros(num_blocks, 32, dtype=torch.int32, device=packed.device)
     for b in range(k):
-        bits = (packed[:, b:b+1] >> j.unsqueeze(0)) & 1  # [B, 32]
+        bits = (packed[:, b : b + 1] >> j.unsqueeze(0)) & 1  # [B, 32]
         indices += bits << b
 
     # Decode E4M4 absmax to float for reference computation
@@ -95,12 +91,18 @@ class TestScalarGemv:
     def test_basic_correctness(self, M, k):
         """Compare scalar GEMV against dequant + matmul reference."""
         K_dim, N = 2048, 512
-        packed_flat, absmax_flat, _, _, codebook, W = prepare_weights(K_dim, N, k)
+        packed_flat, absmax_flat, _, _, codebook, _W = prepare_weights(K_dim, N, k)
 
         A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
 
         C_scalar = torch.ops.bitsandbytes.kbit_scalar_gemv(
-            A, packed_flat, absmax_flat, codebook, K_dim, N, k,
+            A,
+            packed_flat,
+            absmax_flat,
+            codebook,
+            K_dim,
+            N,
+            k,
         )
         W_deq = dequant_reference(packed_flat, absmax_flat, codebook, k, N, K_dim)
         C_ref = (A.float() @ W_deq.T).to(A.dtype)
@@ -108,22 +110,31 @@ class TestScalarGemv:
         assert C_scalar.shape == C_ref.shape
         assert_close(C_scalar, C_ref, max_rel_err=0.10, label=f"k={k}, M={M}: ")
 
-    @pytest.mark.parametrize("K_dim,N", [
-        (2048, 5120),
-        (5120, 2048),
-        (2048, 4096),
-        (512, 2048),
-    ])
+    @pytest.mark.parametrize(
+        "K_dim,N",
+        [
+            (2048, 5120),
+            (5120, 2048),
+            (2048, 4096),
+            (512, 2048),
+        ],
+    )
     def test_various_shapes(self, K_dim, N):
         """Test with shapes matching real model projections."""
         k = 4
         M = 1
-        packed_flat, absmax_flat, _, _, codebook, W = prepare_weights(K_dim, N, k)
+        packed_flat, absmax_flat, _, _, codebook, _W = prepare_weights(K_dim, N, k)
 
         A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
 
         C_scalar = torch.ops.bitsandbytes.kbit_scalar_gemv(
-            A, packed_flat, absmax_flat, codebook, K_dim, N, k,
+            A,
+            packed_flat,
+            absmax_flat,
+            codebook,
+            K_dim,
+            N,
+            k,
         )
         W_deq = dequant_reference(packed_flat, absmax_flat, codebook, k, N, K_dim)
         C_ref = (A.float() @ W_deq.T).to(A.dtype)
@@ -135,12 +146,18 @@ class TestScalarGemv:
         """Test large shape with all M values."""
         k = 4
         K_dim, N = 2048, 5120
-        packed_flat, absmax_flat, _, _, codebook, W = prepare_weights(K_dim, N, k)
+        packed_flat, absmax_flat, _, _, codebook, _W = prepare_weights(K_dim, N, k)
 
         A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
 
         C_scalar = torch.ops.bitsandbytes.kbit_scalar_gemv(
-            A, packed_flat, absmax_flat, codebook, K_dim, N, k,
+            A,
+            packed_flat,
+            absmax_flat,
+            codebook,
+            K_dim,
+            N,
+            k,
         )
         W_deq = dequant_reference(packed_flat, absmax_flat, codebook, k, N, K_dim)
         C_ref = (A.float() @ W_deq.T).to(A.dtype)
@@ -153,12 +170,18 @@ class TestScalarGemv:
         k = 4
         K_dim, N = 2048, 512
         M = 2
-        packed_flat, absmax_flat, _, _, codebook, W = prepare_weights(K_dim, N, k)
+        packed_flat, absmax_flat, _, _, codebook, _W = prepare_weights(K_dim, N, k)
 
         A = torch.randn(M, K_dim, dtype=dtype, device="cuda")
 
         C_scalar = torch.ops.bitsandbytes.kbit_scalar_gemv(
-            A, packed_flat, absmax_flat, codebook, K_dim, N, k,
+            A,
+            packed_flat,
+            absmax_flat,
+            codebook,
+            K_dim,
+            N,
+            k,
         )
         W_deq = dequant_reference(packed_flat, absmax_flat, codebook, k, N, K_dim)
         C_ref = (A.float() @ W_deq.T).to(dtype)

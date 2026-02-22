@@ -2,6 +2,7 @@
 
 Uses CUDA events (accurate for fp16 bmm which has no Python overhead).
 """
+
 import torch
 
 NUM_EXPERTS = 8
@@ -12,7 +13,7 @@ dev = torch.device("cuda")
 
 shapes = [
     ("moe_gu", 2048, 512),
-    ("moe_dn",  512, 2048),
+    ("moe_dn", 512, 2048),
 ]
 
 m_vals = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]

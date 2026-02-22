@@ -16,9 +16,9 @@ import time
 import torch
 
 sys.path.insert(0, ".")
-import bitsandbytes  # noqa: E402
-from bitsandbytes import _ops  # noqa: E402, F401
-from scipy.stats import norm  # noqa: E402
+from scipy.stats import norm
+
+from bitsandbytes import _ops  # noqa: F401
 
 BLOCKSIZE = 32
 
@@ -39,12 +39,8 @@ def prepare_expert_weights(K_dim, N, k, num_experts):
 
     for _ in range(num_experts):
         W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
-        packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(
-            W.reshape(-1), codebook, k
-        )
-        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat, absmax.cuda(), K_dim, N, k
-        )
+        packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook, k)
+        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax.cuda(), K_dim, N, k)
         packed_list.append(packed_tiled)
         absmax_list.append(absmax_tiled)
         W_list.append(W)
@@ -54,21 +50,35 @@ def prepare_expert_weights(K_dim, N, k, num_experts):
     return B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list
 
 
-def bench_grouped_gemm(A_concat, B_packed_all, B_absmax_all, codebook,
-                       expert_offsets, K_dim, N, k, num_experts,
-                       warmup=20, iters=200):
+def bench_grouped_gemm(
+    A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, K_dim, N, k, num_experts, warmup=20, iters=200
+):
     for _ in range(warmup):
         torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
         )
     torch.cuda.synchronize()
 
     start = time.perf_counter()
     for _ in range(iters):
         torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
         )
     torch.cuda.synchronize()
     return (time.perf_counter() - start) / iters
@@ -87,13 +97,18 @@ def bench_batched_cublas(A_batched, W_batched_T, warmup=20, iters=200):
     return (time.perf_counter() - start) / iters
 
 
-def bench_individual_kbit(A_list, packed_list, absmax_list, codebook,
-                          K_dim, N, k, warmup=20, iters=200):
+def bench_individual_kbit(A_list, packed_list, absmax_list, codebook, K_dim, N, k, warmup=20, iters=200):
     for _ in range(warmup):
         for i in range(len(A_list)):
             torch.ops.bitsandbytes.kbit_gemm_prod(
-                A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                A_list[i],
+                packed_list[i],
+                absmax_list[i],
+                codebook,
+                K_dim,
+                N,
+                k,
+                1,
             )
     torch.cuda.synchronize()
 
@@ -101,8 +116,14 @@ def bench_individual_kbit(A_list, packed_list, absmax_list, codebook,
     for _ in range(iters):
         for i in range(len(A_list)):
             torch.ops.bitsandbytes.kbit_gemm_prod(
-                A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                A_list[i],
+                packed_list[i],
+                absmax_list[i],
+                codebook,
+                K_dim,
+                N,
+                k,
+                1,
             )
     torch.cuda.synchronize()
     return (time.perf_counter() - start) / iters
@@ -153,17 +174,19 @@ def main():
     print(f"Grouped Expert GEMM Benchmark: K={k}")
     print(f"Warmup={args.warmup}, Iters={args.iters}")
     print()
-    hdr = (f"{'Description':<28} | {'K':>4} {'N':>5} {'#e':>3} {'M':>2} | "
-           f"{'kbit grp':>8} {'bmm fp16':>8} {'kbit seq':>8} {'mm seq':>8} | "
-           f"{'vs bmm':>7} {'vs mm seq':>9}")
+    hdr = (
+        f"{'Description':<28} | {'K':>4} {'N':>5} {'#e':>3} {'M':>2} | "
+        f"{'kbit grp':>8} {'bmm fp16':>8} {'kbit seq':>8} {'mm seq':>8} | "
+        f"{'vs bmm':>7} {'vs mm seq':>9}"
+    )
     print(hdr)
     print("-" * len(hdr))
 
     for K_dim, N, num_experts, M_per_expert, desc in configs:
         N_padded = ((N + 127) // 128) * 128
 
-        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = (
-            prepare_expert_weights(K_dim, N_padded, k, num_experts)
+        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = prepare_expert_weights(
+            K_dim, N_padded, k, num_experts
         )
 
         # Build per-expert activations
@@ -179,43 +202,61 @@ def main():
 
         # Build batched tensors for torch.bmm: [num_experts, M, K] x [num_experts, K, N]
         A_batched = torch.stack(A_list, dim=0)  # [num_experts, M, K_dim]
-        W_batched_T = torch.stack(
-            [W.half().cuda().T for W in W_list], dim=0
-        )  # [num_experts, K_dim, N]
+        W_batched_T = torch.stack([W.half().cuda().T for W in W_list], dim=0)  # [num_experts, K_dim, N]
 
         # 1. Grouped kbit GEMM
         t_grouped = bench_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N_padded, k, num_experts,
-            warmup=args.warmup, iters=args.iters,
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N_padded,
+            k,
+            num_experts,
+            warmup=args.warmup,
+            iters=args.iters,
         )
 
         # 2. Batched cuBLAS (torch.bmm) — single launch, fairest comparison
         t_bmm = bench_batched_cublas(
-            A_batched, W_batched_T,
-            warmup=args.warmup, iters=args.iters,
+            A_batched,
+            W_batched_T,
+            warmup=args.warmup,
+            iters=args.iters,
         )
 
         # 3. Individual kbit_gemm_prod calls
         t_indiv_kbit = bench_individual_kbit(
-            A_list, packed_list, absmax_list, codebook,
-            K_dim, N_padded, k,
-            warmup=args.warmup, iters=args.iters,
+            A_list,
+            packed_list,
+            absmax_list,
+            codebook,
+            K_dim,
+            N_padded,
+            k,
+            warmup=args.warmup,
+            iters=args.iters,
         )
 
         # 4. Individual cuBLAS calls
         W_fp16_list = [W.half().cuda() for W in W_list]
         t_indiv_mm = bench_individual_cublas(
-            A_list, W_fp16_list,
-            warmup=args.warmup, iters=args.iters,
+            A_list,
+            W_fp16_list,
+            warmup=args.warmup,
+            iters=args.iters,
         )
 
         speedup_vs_bmm = t_bmm / t_grouped
         speedup_vs_mm_seq = t_indiv_mm / t_grouped
 
-        print(f"{desc:<28} | {K_dim:4d} {N_padded:5d} {num_experts:3d} {M_per_expert:2d} | "
-              f"{t_grouped*1e6:7.0f}us {t_bmm*1e6:7.0f}us {t_indiv_kbit*1e6:7.0f}us {t_indiv_mm*1e6:7.0f}us | "
-              f"{speedup_vs_bmm:6.2f}x {speedup_vs_mm_seq:8.2f}x")
+        print(
+            f"{desc:<28} | {K_dim:4d} {N_padded:5d} {num_experts:3d} {M_per_expert:2d} | "
+            f"{t_grouped * 1e6:7.0f}us {t_bmm * 1e6:7.0f}us {t_indiv_kbit * 1e6:7.0f}us {t_indiv_mm * 1e6:7.0f}us | "
+            f"{speedup_vs_bmm:6.2f}x {speedup_vs_mm_seq:8.2f}x"
+        )
 
     print()
 

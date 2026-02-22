@@ -14,7 +14,10 @@ Env: M_VALS (default "4,8,16,32,64,128,256,512,1024,2048,4096")
      DEQUANT_CSV: comma-separated dequant times injected by bench_dequant.sh
                   (order: k=2 × 5 shapes, k=3 × 5, k=4 × 5, k=5 × 5)
 """
-import os, sys, argparse
+
+import argparse
+import os
+import sys
 
 for p in [".", ".."]:
     if os.path.isdir(os.path.join(p, "bitsandbytes")):
@@ -22,24 +25,24 @@ for p in [".", ".."]:
         break
 
 import torch
-import bitsandbytes  # noqa: E402
+
 from bitsandbytes.functional import create_normal_float_codebook  # noqa: E402
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--use-events", action="store_true",
-                    help="Use CUDA events for dequant timing (includes dispatch overhead)")
+parser.add_argument(
+    "--use-events", action="store_true", help="Use CUDA events for dequant timing (includes dispatch overhead)"
+)
 args = parser.parse_args()
 
 shapes = [
     ("gateup", 2048, 5120),
-    ("down",   5120, 2048),
-    ("Q",      2048, 4096),
-    ("O",      4096, 2048),
-    ("KV",     2048,  512),
+    ("down", 5120, 2048),
+    ("Q", 2048, 4096),
+    ("O", 4096, 2048),
+    ("KV", 2048, 512),
 ]
 k_bits_list = [2, 3, 4, 5]
-m_vals = [int(x) for x in os.environ.get(
-    "M_VALS", "4,8,16,32,64,128,256,512,1024,2048,4096").split(",")]
+m_vals = [int(x) for x in os.environ.get("M_VALS", "4,8,16,32,64,128,256,512,1024,2048,4096").split(",")]
 
 dev = torch.device("cuda")
 start_ev = torch.cuda.Event(enable_timing=True)
@@ -68,13 +71,11 @@ elif args.use_events:
             W = torch.randn(n_elements, device=dev, dtype=torch.float32)
             packed, absmax = torch.ops.bitsandbytes.quantize_kbit(W, codebook, k)
             for _ in range(WARMUP):
-                torch.ops.bitsandbytes.dequantize_kbit(
-                    packed, codebook, absmax, k, n_elements, torch.float16)
+                torch.ops.bitsandbytes.dequantize_kbit(packed, codebook, absmax, k, n_elements, torch.float16)
             torch.cuda.synchronize()
             start_ev.record()
             for _ in range(ITERS):
-                torch.ops.bitsandbytes.dequantize_kbit(
-                    packed, codebook, absmax, k, n_elements, torch.float16)
+                torch.ops.bitsandbytes.dequantize_kbit(packed, codebook, absmax, k, n_elements, torch.float16)
             end_ev.record()
             torch.cuda.synchronize()
             dequant_us[(name, k)] = start_ev.elapsed_time(end_ev) * 1000 / ITERS
@@ -86,7 +87,7 @@ else:
 print("=== Dequant kernel time (us) ===")
 print(f"{'shape':<8}", end="")
 for k in k_bits_list:
-    print(f" {'k='+str(k):>8}", end="")
+    print(f" {'k=' + str(k):>8}", end="")
 print()
 print("---")
 for name, _, _ in shapes:

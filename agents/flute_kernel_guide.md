@@ -490,7 +490,7 @@ Copy operations:
   G2SCopySizeA, G2SCopySizeQ, etc. — transfer granularity
 
 MMA configuration:
-  MmaThrM, MmaThrN, MmaThrK — thread layout within MMA
+  MmaTheM, MmaTheN, MmaTheK — thread layout within MMA
   MmaPrmM, MmaPrmN, MmaPrmK — permutation within MMA
 ```
 
@@ -965,7 +965,7 @@ Both kernels use the same fundamental MMA instruction: `m16n8k16` with FP16
 inputs and FP32 accumulation.
 
 **FLUTE**: CuTe's `SM80_16x8x16_F32F16F16F32` atom, configured via `TiledMma`
-with customizable thread layout (`MmaThrM × MmaThrN × MmaThrK`) and
+with customizable thread layout (`MmaTheM × MmaTheN × MmaTheK`) and
 permutation (`MmaPrmM × MmaPrmN × MmaPrmK`).
 
 **kbit**: Direct inline PTX `mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32`

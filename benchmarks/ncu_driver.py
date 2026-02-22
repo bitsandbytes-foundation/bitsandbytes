@@ -11,7 +11,11 @@ matching launches; the sweep script skips warmup and averages profiled.
 For scalar kernel, M values > 4 are skipped (kernel only supports M<=4).
 The script prints the actual M values used to stderr for the shell script.
 """
-import os, sys, torch
+
+import os
+import sys
+
+import torch
 
 # Allow running from repo root or benchmarks/
 for p in [".", ".."]:
@@ -19,7 +23,6 @@ for p in [".", ".."]:
         sys.path.insert(0, os.path.abspath(p))
         break
 
-import bitsandbytes  # noqa: E402
 from bitsandbytes.functional import create_normal_float_codebook  # noqa: E402
 
 KERNEL = os.environ.get("KERNEL", "mma")
@@ -36,16 +39,16 @@ print(f"ACTUAL_M_VALS={','.join(str(m) for m in m_vals)}", file=sys.stderr)
 # Dense/attention shapes
 dense_shapes = [
     ("gateup", 2048, 5120),
-    ("down",   5120, 2048),
-    ("Q",      2048, 4096),
-    ("O",      4096, 2048),
-    ("KV",     2048,  512),
+    ("down", 5120, 2048),
+    ("Q", 2048, 4096),
+    ("O", 4096, 2048),
+    ("KV", 2048, 512),
 ]
 
 # MoE expert shapes (Qwen3-Coder-Next 70B)
 moe_shapes = [
     ("moe_gu", 2048, 512),
-    ("moe_dn",  512, 2048),
+    ("moe_dn", 512, 2048),
 ]
 
 k_bits_list = [2, 3, 4, 5]
@@ -62,10 +65,8 @@ if KERNEL in ("mma", "scalar"):
             codebook = create_normal_float_codebook(k, device=dev)
             W = torch.randn(K_dim * N, device=dev, dtype=torch.float32)
             packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(W, codebook, k)
-            packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-                packed_flat, absmax_flat, K_dim, N, k)
-            data[(name, k)] = (K_dim, N, packed_flat, absmax_flat,
-                               packed_tiled, absmax_tiled, codebook)
+            packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax_flat, K_dim, N, k)
+            data[(name, k)] = (K_dim, N, packed_flat, absmax_flat, packed_tiled, absmax_tiled, codebook)
 
     configs = []
     for name, K_dim, N in dense_shapes:
@@ -78,12 +79,10 @@ if KERNEL in ("mma", "scalar"):
         A = torch.randn(M, K_dim, dtype=torch.float16, device=dev)
 
         if KERNEL == "mma":
-            fn = lambda: torch.ops.bitsandbytes.kbit_gemm_prod(
-                A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, 1)
+            fn = lambda: torch.ops.bitsandbytes.kbit_gemm_prod(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, 1)
         else:
             # Scalar GEMV uses flat layout with uint8 E4M4 absmax
-            fn = lambda: torch.ops.bitsandbytes.kbit_scalar_gemv(
-                A, packed_flat, absmax_flat, codebook, K_dim, N, k)
+            fn = lambda: torch.ops.bitsandbytes.kbit_scalar_gemv(A, packed_flat, absmax_flat, codebook, K_dim, N, k)
 
         for _ in range(WARMUP):
             fn()
@@ -124,8 +123,8 @@ elif KERNEL == "grouped_mma":
         expert_offsets = torch.tensor(offsets, dtype=torch.int32, device=dev)
 
         fn = lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, NUM_EXPERTS, M)
+            A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, K_dim, N, k, NUM_EXPERTS, M
+        )
 
         for _ in range(WARMUP):
             fn()

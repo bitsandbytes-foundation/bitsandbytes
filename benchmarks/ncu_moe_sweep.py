@@ -3,14 +3,17 @@
 Only k=4, but all power-of-2 M values from 1 to 4096.
 Usage: ncu --kernel-name "kbit_grouped_gemm_prod" --metrics gpu__time_duration.avg python benchmarks/ncu_moe_sweep.py
 """
-import os, sys, torch
+
+import os
+import sys
+
+import torch
 
 for p in [".", ".."]:
     if os.path.isdir(os.path.join(p, "bitsandbytes")):
         sys.path.insert(0, os.path.abspath(p))
         break
 
-import bitsandbytes
 from bitsandbytes.functional import create_normal_float_codebook
 
 NUM_EXPERTS = 8
@@ -23,7 +26,7 @@ codebook = create_normal_float_codebook(K_BITS, device=dev)
 
 shapes = [
     ("moe_gu", 2048, 512),
-    ("moe_dn",  512, 2048),
+    ("moe_dn", 512, 2048),
 ]
 
 m_vals = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
@@ -54,8 +57,8 @@ for name, K_dim, N in shapes:
         expert_offsets = torch.tensor(offsets, dtype=torch.int32, device=dev)
 
         fn = lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, K_BITS, NUM_EXPERTS, M)
+            A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, K_dim, N, K_BITS, NUM_EXPERTS, M
+        )
 
         for _ in range(WARMUP):
             fn()

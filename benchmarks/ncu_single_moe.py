@@ -1,8 +1,11 @@
 """Single MoE kernel invocation for detailed NCU profiling."""
-import torch, sys
+
+import sys
+
+import torch
+
 sys.path.insert(0, ".")
-import bitsandbytes
-from bitsandbytes.functional import quantize_kbit, create_normal_float_codebook
+from bitsandbytes.functional import create_normal_float_codebook, quantize_kbit
 
 torch.manual_seed(42)
 k, K_dim, N, num_experts, M = 4, 2048, 512, 8, 512
@@ -35,10 +38,12 @@ eo = torch.tensor(offsets, dtype=torch.int32, device="cuda")
 # Warmup
 for _ in range(3):
     C = torch.ops.bitsandbytes.kbit_grouped_gemm(
-        A_concat, B_packed_all, B_absmax_all, codebook, eo, K_dim, N, k, num_experts, M)
+        A_concat, B_packed_all, B_absmax_all, codebook, eo, K_dim, N, k, num_experts, M
+    )
 torch.cuda.synchronize()
 
 # Profiled call
 C = torch.ops.bitsandbytes.kbit_grouped_gemm(
-    A_concat, B_packed_all, B_absmax_all, codebook, eo, K_dim, N, k, num_experts, M)
+    A_concat, B_packed_all, B_absmax_all, codebook, eo, K_dim, N, k, num_experts, M
+)
 torch.cuda.synchronize()

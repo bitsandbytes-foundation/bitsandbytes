@@ -4,18 +4,21 @@ Benchmarks dense matmul (torch.mm) and batched MoE matmul (torch.bmm).
 
 Env: M_VALS (default "1,2,3,4,8"), NUM_EXPERTS (default "8")
 """
-import os, torch
+
+import os
+
+import torch
 
 dense_shapes = [
     ("gateup", 2048, 5120),
-    ("down",   5120, 2048),
-    ("Q",      2048, 4096),
-    ("O",      4096, 2048),
-    ("KV",     2048,  512),
+    ("down", 5120, 2048),
+    ("Q", 2048, 4096),
+    ("O", 4096, 2048),
+    ("KV", 2048, 512),
 ]
 moe_shapes = [
     ("moe_gu", 2048, 512),
-    ("moe_dn",  512, 2048),
+    ("moe_dn", 512, 2048),
 ]
 
 m_vals = [int(x) for x in os.environ.get("M_VALS", "1,2,3,4,8").split(",")]

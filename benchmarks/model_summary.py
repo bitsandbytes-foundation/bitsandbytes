@@ -7,7 +7,9 @@ side by side, the best kernel, and speedup vs cuBLAS fp16.
 Dense shapes have MMA, Scalar, fp16 columns.
 MoE shapes have Grouped (scalar), Grp MMA, fp16 (bmm) columns.
 """
-import os, sys
+
+import os
+import sys
 
 
 def parse_results(path):
@@ -92,7 +94,9 @@ def main():
     for M in all_M:
         print(f"\n  M={M}:")
         print(f"  {TOP}")
-        print(f"  | {'shape':<6} | {'k':>3} | {'MMA':>5} | {'Scalar':>6} | {'Grouped':>7} | {'Grp MMA':>7} | {'fp16':>5} | {'Best':>6} | {'vs fp16':>7} |")
+        print(
+            f"  | {'shape':<6} | {'k':>3} | {'MMA':>5} | {'Scalar':>6} | {'Grouped':>7} | {'Grp MMA':>7} | {'fp16':>5} | {'Best':>6} | {'vs fp16':>7} |"
+        )
         print(f"  {HDR}")
 
         for shape in all_shapes:
@@ -134,7 +138,9 @@ def main():
 
                 best_str = best_name if best_name else "N/A"
 
-                print(f"  | {shape:<6} | {k:>3} | {fmt(m_us)} | {fmt(s_us):>6} | {fmt(g_us):>7} | {fmt(gm_us):>7} | {fmt(fp16)} | {best_str:>7} | {speedup:>7} |")
+                print(
+                    f"  | {shape:<6} | {k:>3} | {fmt(m_us)} | {fmt(s_us):>6} | {fmt(g_us):>7} | {fmt(gm_us):>7} | {fmt(fp16)} | {best_str:>7} | {speedup:>7} |"
+                )
 
             print(f"  {HDR}")
 
@@ -176,7 +182,9 @@ def main():
 
             if k_complete and k_best > 0 and k_fp16 > 0:
                 overall = k_fp16 / k_best
-                print(f"  |  k={k:<3} | {k:>3} |       |        |         |         |       | {k_best:6.1f} | {overall:5.2f}x  |")
+                print(
+                    f"  |  k={k:<3} | {k:>3} |       |        |         |         |       | {k_best:6.1f} | {overall:5.2f}x  |"
+                )
             else:
                 print(f"  |  k={k:<3} | {k:>3} |       |        |         |         |       |   N/A  |    N/A  |")
         print(f"  {TOP}")

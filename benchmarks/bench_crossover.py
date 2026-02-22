@@ -14,10 +14,10 @@ import time
 import torch
 
 sys.path.insert(0, ".")
-import bitsandbytes  # noqa: E402
-from bitsandbytes import _ops  # noqa: E402, F401
-from bitsandbytes.functional import encode_absmax_e4m4  # noqa: E402
-from scipy.stats import norm  # noqa: E402
+from scipy.stats import norm
+
+from bitsandbytes import _ops  # noqa: F401
+from bitsandbytes.functional import encode_absmax_e4m4
 
 
 def create_normal_float_codebook(k: int) -> torch.Tensor:
@@ -41,15 +41,14 @@ def bench(fn, warmup=30, iters=300):
 
 # ─── Dense layer benchmarks (varying M) ────────────────────────────────────
 
+
 def bench_dense_crossover(K_dim, N, k, codebook, M_values):
     """Benchmark fused kbit GEMM vs dequant+cuBLAS vs cuBLAS-only at varying M."""
     N_padded = ((N + 127) // 128) * 128
 
     # Quantize weight
     W = torch.randn(N_padded, K_dim, dtype=torch.float16, device="cuda")
-    packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(
-        W.reshape(-1), codebook, k
-    )
+    packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook, k)
     # repack_kbit expects fp32 absmax (does its own E4M4 encoding)
     packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
         packed_flat, absmax_flat.cuda(), K_dim, N_padded, k
@@ -66,9 +65,18 @@ def bench_dense_crossover(K_dim, N, k, codebook, M_values):
         A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
 
         # 1. Fused kbit GEMM (production kernel)
-        t_fused = bench(lambda: torch.ops.bitsandbytes.kbit_gemm_prod(
-            A, packed_tiled, absmax_tiled, codebook, K_dim, N_padded, k, 1,
-        ))
+        t_fused = bench(
+            lambda: torch.ops.bitsandbytes.kbit_gemm_prod(
+                A,
+                packed_tiled,
+                absmax_tiled,
+                codebook,
+                K_dim,
+                N_padded,
+                k,
+                1,
+            )
+        )
 
         # 2. cuBLAS fp16 (baseline — assumes weights already in fp16)
         t_cublas = bench(lambda: torch.mm(A, W_fp16))
@@ -76,30 +84,44 @@ def bench_dense_crossover(K_dim, N, k, codebook, M_values):
         # 3. Dequant + cuBLAS (absmax already E4M4, no re-encoding)
         def dequant_then_mm():
             deq = torch.ops.bitsandbytes.dequantize_kbit(
-                packed_flat, codebook, absmax_e4m4,
-                k, n_elements, torch.float16,
+                packed_flat,
+                codebook,
+                absmax_e4m4,
+                k,
+                n_elements,
+                torch.float16,
             )
             return torch.mm(A, deq.view(N_padded, K_dim).T)
+
         t_dq_mm = bench(dequant_then_mm)
 
         # 4. Just the dequant (to see its cost)
-        t_dq_only = bench(lambda: torch.ops.bitsandbytes.dequantize_kbit(
-            packed_flat, codebook, absmax_e4m4,
-            k, n_elements, torch.float16,
-        ))
+        t_dq_only = bench(
+            lambda: torch.ops.bitsandbytes.dequantize_kbit(
+                packed_flat,
+                codebook,
+                absmax_e4m4,
+                k,
+                n_elements,
+                torch.float16,
+            )
+        )
 
-        results.append({
-            "M": M,
-            "fused_us": t_fused * 1e6,
-            "cublas_us": t_cublas * 1e6,
-            "dq_mm_us": t_dq_mm * 1e6,
-            "dq_only_us": t_dq_only * 1e6,
-        })
+        results.append(
+            {
+                "M": M,
+                "fused_us": t_fused * 1e6,
+                "cublas_us": t_cublas * 1e6,
+                "dq_mm_us": t_dq_mm * 1e6,
+                "dq_only_us": t_dq_only * 1e6,
+            }
+        )
 
     return results
 
 
 # ─── MoE layer benchmarks (varying batch → varying experts) ────────────────
+
 
 def expected_unique_experts(batch_size, total_experts, top_k):
     p_miss = (1 - top_k / total_experts) ** batch_size
@@ -124,8 +146,7 @@ def bench_moe_layer(K_dim, N, k, codebook, num_experts, M_per_expert):
     B_absmax_all = torch.cat(absmax_list)
 
     # Build activations
-    A_list = [torch.randn(M_per_expert, K_dim, dtype=torch.float16, device="cuda")
-              for _ in range(num_experts)]
+    A_list = [torch.randn(M_per_expert, K_dim, dtype=torch.float16, device="cuda") for _ in range(num_experts)]
     offsets = [0]
     for i in range(num_experts):
         offsets.append(offsets[-1] + M_per_expert)
@@ -133,10 +154,19 @@ def bench_moe_layer(K_dim, N, k, codebook, num_experts, M_per_expert):
     expert_offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
 
     # 1. Grouped kbit GEMM
-    t_grouped = bench(lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
-        A_concat, B_packed_all, B_absmax_all, codebook,
-        expert_offsets, K_dim, N_padded, k, num_experts,
-    ))
+    t_grouped = bench(
+        lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N_padded,
+            k,
+            num_experts,
+        )
+    )
 
     # 2. cuBLAS bmm
     A_batched = torch.stack(A_list, dim=0)
@@ -148,6 +178,7 @@ def bench_moe_layer(K_dim, N, k, codebook, num_experts, M_per_expert):
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────
+
 
 def main():
     k = 4
@@ -162,7 +193,7 @@ def main():
             (2048, 5120, "dense gate/up"),
             (5120, 2048, "dense down"),
             (2048, 4096, "Q proj"),
-            (2048, 512,  "KV proj"),
+            (2048, 512, "KV proj"),
             (4096, 2048, "O proj"),
         ],
         "GLM4.7": [
@@ -173,9 +204,9 @@ def main():
 
     M_values = [1, 2, 4, 8, 16, 32, 64, 128]
 
-    print(f"{'='*100}")
+    print(f"{'=' * 100}")
     print(f"  Part 1: Dense Layer Crossover (K={k}, fused kbit vs dequant+cuBLAS vs cuBLAS)")
-    print(f"{'='*100}")
+    print(f"{'=' * 100}")
     print()
 
     # Store results for Part 3
@@ -188,8 +219,10 @@ def main():
             N_padded = ((N + 127) // 128) * 128
             print(f"  {layer_name} ({K_dim} x {N_padded}):")
 
-            hdr = (f"    {'M':>4} | {'fused':>8} {'cuBLAS':>8} {'dq+mm':>8} "
-                   f"{'dq only':>8} | {'fused/cub':>9} {'dq+mm/cub':>9} {'best':>12}")
+            hdr = (
+                f"    {'M':>4} | {'fused':>8} {'cuBLAS':>8} {'dq+mm':>8} "
+                f"{'dq only':>8} | {'fused/cub':>9} {'dq+mm/cub':>9} {'best':>12}"
+            )
             print(hdr)
             print("    " + "-" * (len(hdr) - 4))
 
@@ -203,10 +236,12 @@ def main():
                 best_kbit = min(r["fused_us"], r["dq_mm_us"])
                 best_ratio = r["cublas_us"] / best_kbit
                 best_label = "fused" if r["fused_us"] <= r["dq_mm_us"] else "dq+mm"
-                print(f"    {r['M']:4d} | {r['fused_us']:7.0f}us {r['cublas_us']:7.0f}us "
-                      f"{r['dq_mm_us']:7.0f}us {r['dq_only_us']:7.0f}us | "
-                      f"{fused_ratio:8.2f}x {dq_ratio:8.2f}x "
-                      f"{best_ratio:5.2f}x ({best_label})")
+                print(
+                    f"    {r['M']:4d} | {r['fused_us']:7.0f}us {r['cublas_us']:7.0f}us "
+                    f"{r['dq_mm_us']:7.0f}us {r['dq_only_us']:7.0f}us | "
+                    f"{fused_ratio:8.2f}x {dq_ratio:8.2f}x "
+                    f"{best_ratio:5.2f}x ({best_label})"
+                )
             print()
         print()
 
@@ -214,9 +249,9 @@ def main():
     # Part 2: MoE layer performance at realistic batch sizes
     # ════════════════════════════════════════════════════════════════════════
 
-    print(f"{'='*100}")
-    print(f"  Part 2: MoE Expert Layers (grouped kbit GEMM vs cuBLAS bmm)")
-    print(f"{'='*100}")
+    print(f"{'=' * 100}")
+    print("  Part 2: MoE Expert Layers (grouped kbit GEMM vs cuBLAS bmm)")
+    print(f"{'=' * 100}")
     print()
 
     moe_configs = {
@@ -263,9 +298,7 @@ def main():
             parts_str = []
 
             for K_dim, N, name in shapes:
-                t_grp, t_bmm = bench_moe_layer(
-                    K_dim, N, k, codebook, num_active_int, M_per_expert
-                )
+                t_grp, t_bmm = bench_moe_layer(K_dim, N, k, codebook, num_active_int, M_per_expert)
                 total_grp += t_grp
                 total_bmm += t_bmm
                 ratio = t_bmm / t_grp
@@ -286,9 +319,9 @@ def main():
     # Part 3: Full model speedup per batch size
     # ════════════════════════════════════════════════════════════════════════
 
-    print(f"{'='*100}")
-    print(f"  Part 3: Full Model Speedup (all layers, per batch size)")
-    print(f"{'='*100}")
+    print(f"{'=' * 100}")
+    print("  Part 3: Full Model Speedup (all layers, per batch size)")
+    print(f"{'=' * 100}")
     print()
     print("  Strategy: for each layer, pick the fastest kbit approach (fused or dq+cuBLAS)")
     print("  and compare total time against cuBLAS fp16 (no quantization).")
@@ -302,7 +335,7 @@ def main():
         "Qwen3": {
             "dense": [
                 (2048, 4096, "Q proj", 1),
-                (2048, 512,  "KV proj", 1),
+                (2048, 512, "KV proj", 1),
                 (4096, 2048, "O proj", 1),
                 (2048, 5120, "dense gate/up", 1),
                 (5120, 2048, "dense down", 1),
@@ -317,7 +350,7 @@ def main():
                 (10240, 2048, "shared down", 1),
                 # Attention projections (estimated, hidden=2048)
                 (2048, 2048, "Q proj", 1),
-                (2048, 512,  "KV proj", 1),
+                (2048, 512, "KV proj", 1),
                 (2048, 2048, "O proj", 1),
             ],
             "moe_shapes": ["routed gate/up", "routed down"],
@@ -330,7 +363,7 @@ def main():
     # (they weren't in Part 1). Do it now.
     glm_attn_shapes = [
         (2048, 2048, "Q proj"),
-        (2048, 512,  "KV proj"),
+        (2048, 512, "KV proj"),
         (2048, 2048, "O proj"),
     ]
     for K_dim, N, layer_name in glm_attn_shapes:
@@ -340,14 +373,16 @@ def main():
             dense_crossover_data[key] = results
 
     for model_name, cfg in model_layers.items():
-        print(f"{'─'*80}")
+        print(f"{'─' * 80}")
         print(f"  {model_name}")
-        print(f"{'─'*80}")
+        print(f"{'─' * 80}")
         print()
 
-        hdr = (f"  {'batch':>5} | {'dense kbit':>10} {'dense cub':>10} "
-               f"{'MoE kbit':>10} {'MoE cub':>10} | "
-               f"{'total kbit':>10} {'total cub':>10} {'speedup':>8}")
+        hdr = (
+            f"  {'batch':>5} | {'dense kbit':>10} {'dense cub':>10} "
+            f"{'MoE kbit':>10} {'MoE cub':>10} | "
+            f"{'total kbit':>10} {'total cub':>10} {'speedup':>8}"
+        )
         print(hdr)
         print("  " + "-" * (len(hdr) - 2))
 
@@ -401,9 +436,11 @@ def main():
             total_cublas = total_dense_cublas_us + total_moe_cublas_us
             speedup = total_cublas / total_kbit if total_kbit > 0 else 0
 
-            print(f"  {bs:5d} | {total_dense_kbit_us:9.0f}us {total_dense_cublas_us:9.0f}us "
-                  f"{total_moe_kbit_us:9.0f}us {total_moe_cublas_us:9.0f}us | "
-                  f"{total_kbit:9.0f}us {total_cublas:9.0f}us {speedup:7.2f}x")
+            print(
+                f"  {bs:5d} | {total_dense_kbit_us:9.0f}us {total_dense_cublas_us:9.0f}us "
+                f"{total_moe_kbit_us:9.0f}us {total_moe_cublas_us:9.0f}us | "
+                f"{total_kbit:9.0f}us {total_cublas:9.0f}us {speedup:7.2f}x"
+            )
 
         print()
 
@@ -411,9 +448,9 @@ def main():
     # Part 4: Projected speedup with scalar kernel (theoretical)
     # ════════════════════════════════════════════════════════════════════════
 
-    print(f"{'='*100}")
-    print(f"  Part 4: Projected Model Speedup WITH Scalar Kernel (theoretical)")
-    print(f"{'='*100}")
+    print(f"{'=' * 100}")
+    print("  Part 4: Projected Model Speedup WITH Scalar Kernel (theoretical)")
+    print(f"{'=' * 100}")
     print()
     print("  Uses 1.8x overhead factor for scalar kernel estimate at M<=4.")
     print("  Dense layers at M<=4: scalar estimate instead of fused GEMM.")
@@ -447,14 +484,16 @@ def main():
         total_exp = moe_cfg["total_experts"]
         top_k_val = moe_cfg["top_k"]
 
-        print(f"{'─'*80}")
+        print(f"{'─' * 80}")
         print(f"  {model_name}")
-        print(f"{'─'*80}")
+        print(f"{'─' * 80}")
         print()
 
-        hdr = (f"  {'batch':>5} | {'dense kbit':>10} {'dense cub':>10} "
-               f"{'MoE kbit':>10} {'MoE cub':>10} | "
-               f"{'total kbit':>10} {'total cub':>10} {'speedup':>8}")
+        hdr = (
+            f"  {'batch':>5} | {'dense kbit':>10} {'dense cub':>10} "
+            f"{'MoE kbit':>10} {'MoE cub':>10} | "
+            f"{'total kbit':>10} {'total cub':>10} {'speedup':>8}"
+        )
         print(hdr)
         print("  " + "-" * (len(hdr) - 2))
 
@@ -465,7 +504,7 @@ def main():
             total_invocations = bs * top_k_val
             M_per_expert = max(1, round(total_invocations / num_active))
 
-            use_scalar = (bs <= 4)
+            use_scalar = bs <= 4
 
             # --- Dense layers ---
             total_dense_kbit_us = 0
@@ -497,9 +536,7 @@ def main():
                 N_moe = [s[1] for s in moe_cfg["shapes"] if s[2] == moe_name][0]
 
                 if use_scalar:
-                    t_scalar = scalar_estimate_us(
-                        K_dim_moe, N_moe, k, num_active_int, M_per_expert
-                    )
+                    t_scalar = scalar_estimate_us(K_dim_moe, N_moe, k, num_active_int, M_per_expert)
                     t_kbit = t_scalar
                 else:
                     key = (model_name, moe_name, bs)
@@ -524,9 +561,11 @@ def main():
             speedup = total_cublas / total_kbit if total_kbit > 0 else 0
 
             marker = " ← scalar" if use_scalar else ""
-            print(f"  {bs:5d} | {total_dense_kbit_us:9.0f}us {total_dense_cublas_us:9.0f}us "
-                  f"{total_moe_kbit_us:9.0f}us {total_moe_cublas_us:9.0f}us | "
-                  f"{total_kbit:9.0f}us {total_cublas:9.0f}us {speedup:7.2f}x{marker}")
+            print(
+                f"  {bs:5d} | {total_dense_kbit_us:9.0f}us {total_dense_cublas_us:9.0f}us "
+                f"{total_moe_kbit_us:9.0f}us {total_moe_cublas_us:9.0f}us | "
+                f"{total_kbit:9.0f}us {total_cublas:9.0f}us {speedup:7.2f}x{marker}"
+            )
 
         print()
 

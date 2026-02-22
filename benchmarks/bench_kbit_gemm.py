@@ -14,9 +14,9 @@ import torch
 
 # Ensure bitsandbytes is importable from the worktree
 sys.path.insert(0, ".")
-import bitsandbytes  # noqa: E402
-from bitsandbytes import _ops  # noqa: E402, F401
-from scipy.stats import norm  # noqa: E402
+from scipy.stats import norm
+
+from bitsandbytes import _ops  # noqa: F401
 
 BLOCKSIZE = 32
 
@@ -75,14 +75,11 @@ def prepare_weights(K_dim, N, k):
     W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
     # Use CUDA quantize kernel (fast)
     packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook.cuda(), k)
-    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-        packed_flat, absmax.cuda(), K_dim, N, k
-    )
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax.cuda(), K_dim, N, k)
     return packed_tiled, absmax_tiled, codebook.cuda(), W
 
 
-def bench_kbit_gemm(M, K_dim, N, k, k_chunks, dtype, packed_tiled, absmax_tiled, codebook,
-                    warmup=10, iters=100):
+def bench_kbit_gemm(M, K_dim, N, k, k_chunks, dtype, packed_tiled, absmax_tiled, codebook, warmup=10, iters=100):
     """Benchmark the production kbit GEMM kernel."""
     A = torch.randn(M, K_dim, dtype=dtype, device="cuda")
 
@@ -148,8 +145,10 @@ def main():
     print(f"kbit GEMM Benchmark: K={k}, dtype={args.dtype}, k_chunks={args.k_chunks}")
     print(f"Warmup={args.warmup}, Iters={args.iters}")
     print()
-    print(f"{'M':>5} {'K_dim':>6} {'N':>6} | {'kbit (us)':>10} {'kbit TFLOPS':>12} {'kbit GB/s':>10} | "
-          f"{'cuBLAS (us)':>12} {'cuBLAS TFLOPS':>14} | {'Speedup':>8}")
+    print(
+        f"{'M':>5} {'K_dim':>6} {'N':>6} | {'kbit (us)':>10} {'kbit TFLOPS':>12} {'kbit GB/s':>10} | "
+        f"{'cuBLAS (us)':>12} {'cuBLAS TFLOPS':>14} | {'Speedup':>8}"
+    )
     print("-" * 115)
 
     for M, K_dim, N in configs:
@@ -160,13 +159,22 @@ def main():
         packed_tiled, absmax_tiled, codebook, W = prepare_weights(K_dim, N_padded, k)
 
         # Benchmark kbit GEMM
-        t_kbit = bench_kbit_gemm(M, K_dim, N_padded, k, args.k_chunks, dtype,
-                                 packed_tiled, absmax_tiled, codebook,
-                                 warmup=args.warmup, iters=args.iters)
+        t_kbit = bench_kbit_gemm(
+            M,
+            K_dim,
+            N_padded,
+            k,
+            args.k_chunks,
+            dtype,
+            packed_tiled,
+            absmax_tiled,
+            codebook,
+            warmup=args.warmup,
+            iters=args.iters,
+        )
 
         # Benchmark cuBLAS
-        t_cublas = bench_cublas(M, K_dim, N_padded, dtype, W.half(),
-                                warmup=args.warmup, iters=args.iters)
+        t_cublas = bench_cublas(M, K_dim, N_padded, dtype, W.half(), warmup=args.warmup, iters=args.iters)
 
         # Compute metrics
         flops = 2 * M * K_dim * N_padded
@@ -182,8 +190,10 @@ def main():
 
         speedup = t_cublas / t_kbit
 
-        print(f"{M:5d} {K_dim:6d} {N_padded:6d} | {t_kbit*1e6:10.1f} {tflops_kbit:12.3f} {gbps_kbit:10.1f} | "
-              f"{t_cublas*1e6:12.1f} {tflops_cublas:14.3f} | {speedup:8.2f}x")
+        print(
+            f"{M:5d} {K_dim:6d} {N_padded:6d} | {t_kbit * 1e6:10.1f} {tflops_kbit:12.3f} {gbps_kbit:10.1f} | "
+            f"{t_cublas * 1e6:12.1f} {tflops_cublas:14.3f} | {speedup:8.2f}x"
+        )
 
     print()
 
