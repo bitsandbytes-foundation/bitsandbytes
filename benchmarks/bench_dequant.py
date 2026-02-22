@@ -26,7 +26,7 @@ for p in [".", ".."]:
 
 import torch
 
-from bitsandbytes.functional import create_normal_float_codebook  # noqa: E402
+from bitsandbytes.functional import create_normal_float_codebook
 
 parser = argparse.ArgumentParser()
 parser.add_argument(

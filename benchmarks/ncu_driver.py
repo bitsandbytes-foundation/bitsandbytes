@@ -23,7 +23,7 @@ for p in [".", ".."]:
         sys.path.insert(0, os.path.abspath(p))
         break
 
-from bitsandbytes.functional import create_normal_float_codebook  # noqa: E402
+from bitsandbytes.functional import create_normal_float_codebook
 
 KERNEL = os.environ.get("KERNEL", "mma")
 m_vals = [int(x) for x in os.environ.get("M_VALS", "1,2,3,4,5,6,7,8").split(",")]
