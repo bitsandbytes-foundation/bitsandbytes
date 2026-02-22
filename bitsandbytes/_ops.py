@@ -431,3 +431,74 @@ def _(
             qmap2.dtype == absmax2.dtype == torch.float32,
             lambda: f"Expected qmap2 and absmax2 to be float32, got qmap2.dtype={qmap2.dtype}, absmax2.dtype={absmax2.dtype}",
         )
+
+
+# K-bit blockwise quantization (K=2..5, blocksize=32)
+
+torch.library.define(
+    "bitsandbytes::quantize_kbit",
+    "(Tensor A, Tensor codebook, int k) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::quantize_kbit")
+def _(A: torch.Tensor, codebook: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(codebook.numel() == (1 << k), lambda: f"codebook must have {1 << k} entries for k={k}")
+    n = A.numel()
+    num_blocks = -(n // -32)
+    # packed: num_blocks * k int32 words + k padding words
+    packed = torch.empty(num_blocks * k + k, device=A.device, dtype=torch.int32)
+    absmax = torch.empty(num_blocks + 1, device=A.device, dtype=torch.float32)
+    return packed, absmax
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_kbit",
+    "(Tensor packed, Tensor codebook, Tensor absmax, int k, int n, ScalarType dtype) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::dequantize_kbit")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        absmax.dtype in (torch.float32, torch.uint8),
+        lambda: f"absmax must be float32 or uint8 (E4M4), got {absmax.dtype}",
+    )
+    num_blocks = -(n // -32)
+    return torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_kbit_",
+    "(Tensor packed, Tensor codebook, Tensor absmax, int k, int n, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::dequantize_kbit_")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        absmax.dtype in (torch.float32, torch.uint8),
+        lambda: f"absmax must be float32 or uint8 (E4M4), got {absmax.dtype}",
+    )
+    num_blocks = -(n // -32)
+    torch._check(out.numel() >= num_blocks * 32, lambda: f"out must have at least {num_blocks * 32} elements")
+    torch._check(out.dtype == dtype, lambda: f"out dtype {out.dtype} must match requested dtype {dtype}")
+    return out

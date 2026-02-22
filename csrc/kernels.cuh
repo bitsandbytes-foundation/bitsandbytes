@@ -125,4 +125,7 @@ __global__ void kgemm_4bit_inference_naive(
 
 template <typename T, int FUNC> __global__ void kfunc(T* A, T* B, T value, long n);
 
+// K-bit kernel definitions live in ops.cu (not kernels.cu) to keep kernel
+// and launch wrapper in the same compilation unit. No declarations needed here.
+
 #endif

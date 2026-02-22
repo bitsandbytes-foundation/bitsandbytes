@@ -645,3 +645,225 @@ MAKE_optimizerStatic8bitBlockwise(float, ADEMAMIX);
 
 template void percentileClipping(float* g, float* gnorm_vec, int step, const int n);
 template void percentileClipping(half* g, float* gnorm_vec, int step, const int n);
+
+// ===========================================================================
+// K-bit blockwise quantization/dequantization (blocksize=32, K=2..5)
+//
+// Kernel definitions and launch wrappers in the same compilation unit
+// to avoid RDC device linking issues with template instantiations.
+// ===========================================================================
+
+// ---- Device helpers ----
+
+__device__ __forceinline__ float warp_reduce_absmax_kbit(float val) {
+#pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1)
+        val = fmaxf(val, __shfl_down_sync(0xFFFFFFFF, val, offset));
+    return __shfl_sync(0xFFFFFFFF, val, 0);
+}
+
+template <int K> __device__ __forceinline__ void pack_kbit_warp(unsigned char qval, unsigned int* packed_words) {
+#pragma unroll
+    for (int bit = 0; bit < K; bit++)
+        packed_words[bit] = __ballot_sync(0xFFFFFFFF, (qval >> bit) & 1);
+}
+
+template <int K>
+__device__ __forceinline__ unsigned char unpack_kbit_warp(const unsigned int* packed_words, int lane_id) {
+    unsigned char val = 0;
+#pragma unroll
+    for (int bit = 0; bit < K; bit++)
+        val |= ((packed_words[bit] >> lane_id) & 1) << bit;
+    return val;
+}
+
+// ---- Stage 4: Full quantize kernel ----
+
+template <typename T, int K>
+__global__ void kQuantizeBlockwise_kbit(
+    const float* __restrict__ codebook, const T* __restrict__ A, float* __restrict__ absmax,
+    unsigned int* __restrict__ packed_out, const int n
+) {
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_id * 32;
+    if (block_start >= n)
+        return;
+    float val = (block_start + lane_id < n) ? (float)A[block_start + lane_id] : 0.0f;
+    float amax = warp_reduce_absmax_kbit(fabsf(val));
+    float amax_safe = fmaxf(amax, 1e-8f);
+    if (lane_id == 0)
+        absmax[warp_id] = amax;
+    float normalized = val / amax_safe;
+    float cb = (lane_id < (1 << K)) ? codebook[lane_id] : 0.0f;
+    unsigned char best_idx = 0;
+    float best_dist = 1e10f;
+#pragma unroll
+    for (int i = 0; i < (1 << K); i++) {
+        float cb_val = __shfl_sync(0xFFFFFFFF, cb, i);
+        float dist = fabsf(normalized - cb_val);
+        bool closer = (dist < best_dist);
+        best_dist = closer ? dist : best_dist;
+        best_idx = closer ? (unsigned char)i : best_idx;
+    }
+    unsigned int packed[K];
+    pack_kbit_warp<K>(best_idx, packed);
+    if (lane_id < K)
+        packed_out[warp_id * K + lane_id] = packed[lane_id];
+}
+
+// ---- E4M4 absmax decode ----
+// uint8 -> float: E4M4 format with configurable bias and IEEE-style subnormals.
+// Normal   (e > 0): 2^(e - BIAS) * (1 + m/16)
+// Subnormal (e = 0): 2^(1 - BIAS) * (m/16)
+// Zero     (e = 0, m = 0): 0.0
+constexpr int E4M4_BIAS = 11;
+
+__device__ __forceinline__ float decode_e4m4_absmax(unsigned char raw) {
+    if (raw == 0)
+        return 0.0f;
+    int e = raw >> 4;
+    int m = raw & 0xF;
+    if (e == 0) {
+        // Subnormal (extremely rare in practice): 2^(1-BIAS) * m/16
+        return ldexpf((float)m, 1 - E4M4_BIAS - 4);
+    }
+    // Normal: construct IEEE 754 float directly via bit manipulation.
+    // Target: 2^(e - BIAS) * (1 + m/16)
+    // IEEE 754: exponent_field = (e - BIAS) + 127, mantissa_field = m << 19
+    unsigned int ieee = (unsigned int)(e - E4M4_BIAS + 127) << 23 | (unsigned int)m << 19;
+    return __uint_as_float(ieee);
+}
+
+// Template helper: convert ABSMAX_T to float.
+// Specialization for unsigned char uses E4M4 decode.
+template <typename ABSMAX_T> __device__ __forceinline__ float load_absmax(const ABSMAX_T* absmax, int idx) {
+    return (float)absmax[idx];
+}
+
+template <> __device__ __forceinline__ float load_absmax<unsigned char>(const unsigned char* absmax, int idx) {
+    return decode_e4m4_absmax(absmax[idx]);
+}
+
+// ---- Stage 5: Full dequantize kernel ----
+
+// Vectorized version: each warp processes BLOCKS_PER_WARP quant blocks,
+// amortizing codebook load across multiple blocks.
+// Templated on T (output type) and ABSMAX_T (absmax format).
+template <typename T, int K, int BLOCKS_PER_WARP, typename ABSMAX_T>
+__global__ void kDequantizeBlockwise_kbit_vec(
+    const unsigned int* __restrict__ packed_in, const float* __restrict__ codebook, const ABSMAX_T* __restrict__ absmax,
+    T* __restrict__ out, const int n
+) {
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int base_block = warp_id * BLOCKS_PER_WARP;
+
+    if (base_block * 32 >= n)
+        return;
+
+    // Load codebook into lane registers (one-time, amortized across BLOCKS_PER_WARP blocks)
+    float cb = (lane_id < (1 << K)) ? codebook[lane_id] : 0.0f;
+
+#pragma unroll
+    for (int b = 0; b < BLOCKS_PER_WARP; b++) {
+        const int block_id = base_block + b;
+        const int block_start = block_id * 32;
+        if (block_start >= n)
+            break;
+
+        float amax = load_absmax(absmax, block_id);
+        unsigned int packed[K];
+#pragma unroll
+        for (int bit = 0; bit < K; bit++) {
+            unsigned int word = (lane_id == bit) ? packed_in[block_id * K + bit] : 0;
+            packed[bit] = __shfl_sync(0xFFFFFFFF, word, bit);
+        }
+        unsigned char idx = unpack_kbit_warp<K>(packed, lane_id);
+        float val = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+
+        if (block_start + lane_id < n)
+            out[block_start + lane_id] = (T)val;
+    }
+}
+
+// ---- Launch wrappers ----
+
+#define KBIT_WARPS_PER_BLOCK 8
+#define KBIT_THREADS_PER_BLOCK (KBIT_WARPS_PER_BLOCK * 32) // 256
+
+// ---- Production kernel launchers (Stage 4-5) ----
+
+template <typename T, int K>
+void quantizeBlockwise_kbit(const float* codebook, const T* A, float* absmax, unsigned int* packed_out, int n) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kQuantizeBlockwise_kbit<T, K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(codebook, A, absmax, packed_out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Generic dequant launcher: supports all output types and absmax formats.
+template <typename T, int K, typename ABSMAX_T>
+void dequantizeBlockwise_kbit(
+    const unsigned int* packed_in, const float* codebook, const ABSMAX_T* absmax, T* out, int n, cudaStream_t stream
+) {
+    constexpr int BPW = 4; // blocks per warp
+    int num_blocks_quant = (n + 31) / 32;
+    int num_warps = (num_blocks_quant + BPW - 1) / BPW;
+    int num_cuda_blocks = (num_warps + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kDequantizeBlockwise_kbit_vec<T, K, BPW, ABSMAX_T>
+        <<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(packed_in, codebook, absmax, out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// ---- Template instantiations ----
+
+#define INSTANTIATE_KBIT_QUANT(T, K)                                                                                   \
+    template void quantizeBlockwise_kbit<T, K>(const float*, const T*, float*, unsigned int*, int);
+
+INSTANTIATE_KBIT_QUANT(half, 2)
+INSTANTIATE_KBIT_QUANT(half, 3)
+INSTANTIATE_KBIT_QUANT(half, 4)
+INSTANTIATE_KBIT_QUANT(half, 5)
+INSTANTIATE_KBIT_QUANT(__nv_bfloat16, 2)
+INSTANTIATE_KBIT_QUANT(__nv_bfloat16, 3)
+INSTANTIATE_KBIT_QUANT(__nv_bfloat16, 4)
+INSTANTIATE_KBIT_QUANT(__nv_bfloat16, 5)
+INSTANTIATE_KBIT_QUANT(float, 2)
+INSTANTIATE_KBIT_QUANT(float, 3)
+INSTANTIATE_KBIT_QUANT(float, 4)
+INSTANTIATE_KBIT_QUANT(float, 5)
+
+// Dequant instantiations: all output types × absmax types × K values
+#define INSTANTIATE_KBIT_DEQUANT(T, K, ABSMAX_T)                                                                       \
+    template void dequantizeBlockwise_kbit<T, K, ABSMAX_T>(                                                            \
+        const unsigned int*, const float*, const ABSMAX_T*, T*, int, cudaStream_t                                      \
+    );
+
+// uint8 E4M4 absmax (default)
+INSTANTIATE_KBIT_DEQUANT(half, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(half, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(half, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(half, 5, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 5, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(float, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(float, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(float, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT(float, 5, unsigned char)
+
+// fp16 absmax (option)
+INSTANTIATE_KBIT_DEQUANT(half, 2, half)
+INSTANTIATE_KBIT_DEQUANT(half, 3, half)
+INSTANTIATE_KBIT_DEQUANT(half, 4, half)
+INSTANTIATE_KBIT_DEQUANT(half, 5, half)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 2, half)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 3, half)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 4, half)
+INSTANTIATE_KBIT_DEQUANT(__nv_bfloat16, 5, half)
+INSTANTIATE_KBIT_DEQUANT(float, 2, half)
+INSTANTIATE_KBIT_DEQUANT(float, 3, half)
+INSTANTIATE_KBIT_DEQUANT(float, 4, half)
+INSTANTIATE_KBIT_DEQUANT(float, 5, half)

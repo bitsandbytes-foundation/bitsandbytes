@@ -2601,3 +2601,5 @@ MAKE_OptimizerStatic8bit1StateBlockwise(LION, __nv_bfloat16, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, half, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, __nv_bfloat16, 256, 1)
+
+// K-bit kernel definitions moved to ops.cu to avoid RDC device linking issues.
