@@ -8,7 +8,7 @@
 #include <ops.cuh>
 #endif
 #if BUILD_HIP
-#include <ops_hip.cuh>
+#include <ops.cuh>
 #endif
 #if BUILD_MPS
 // #include <mps_ops.h>
@@ -23,7 +23,6 @@
 #define cudaStream_t hipStream_t
 #define __nv_bfloat16 hip_bfloat16
 #define cublasLtHandle_t hipblasLtHandle_t
-#define ContextCusparse ContextHipsparse
 #define cusparseHandle_t hipsparseHandle_t
 #define cudaMallocManaged hipMallocManaged
 #define cudaMemAttachHost hipMemAttachHost
@@ -600,7 +599,7 @@ void cbatched_igemm(
 
 Context* get_context() { return new Context(); }
 
-ContextCusparse* get_cusparse() { return new ContextCusparse(); }
+ContextSparse* get_cusparse() { return new ContextSparse(); }
 
 int cigemmlt_32(
     Context* context, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale, int lda,
@@ -636,7 +635,7 @@ void cint8_vector_quant(
 }
 
 void cspmm_coo(
-    ContextCusparse* context, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols, int B_cols,
+    ContextSparse* context, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols, int B_cols,
     int ldb, half* B, int ldc, half* C, bool transposed_B
 ) {
     spmm_coo(

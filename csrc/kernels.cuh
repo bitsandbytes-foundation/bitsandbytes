@@ -18,7 +18,7 @@ __global__ void kQuantizeBlockwise(
     const int rand_offset, const int n
 );
 template <typename T, int DATA_TYPE>
-__global__ void kQuantizeBlockwise32(
+__global__ void kQuantizeBlockwiseSmall(
     float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
     const int rand_offset, const int n
 );

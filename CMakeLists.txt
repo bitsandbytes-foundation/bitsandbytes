@@ -24,8 +24,7 @@ endif()
 
 # Define included source files
 set(CPP_FILES csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
-set(CUDA_FILES csrc/ops.cu csrc/kernels.cu)
-set(HIP_FILES csrc/ops.hip csrc/kernels.hip)
+set(GPU_FILES csrc/ops.cu csrc/kernels.cu)
 set(MPS_FILES csrc/mps_ops.mm)
 set(METAL_FILES csrc/mps_kernels.metal)
 set(XPU_FILES csrc/xpu_ops.cpp csrc/xpu_kernels.cpp)
@@ -195,7 +194,7 @@ if(BUILD_CUDA)
     message(STATUS "CUDA Targets: ${CMAKE_CUDA_ARCHITECTURES}")
     message(STATUS "CUDA NVCC Flags: ${CMAKE_CUDA_FLAGS}")
 
-    list(APPEND SRC_FILES ${CUDA_FILES})
+    list(APPEND SRC_FILES ${GPU_FILES})
 
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
     add_compile_definitions(BUILD_CUDA)
@@ -213,7 +212,7 @@ elseif(BUILD_HIP)
     endif()
     message(STATUS "HIP Targets: ${CMAKE_HIP_ARCHITECTURES}")
 
-    list(APPEND SRC_FILES ${HIP_FILES})
+    list(APPEND SRC_FILES ${GPU_FILES})
 
     string(APPEND BNB_OUTPUT_NAME "_rocm")
 
@@ -339,7 +338,7 @@ if(BUILD_HIP)
     target_link_libraries(bitsandbytes PUBLIC roc::hipblas hip::hiprand roc::hipsparse)
 
     target_compile_definitions(bitsandbytes PUBLIC BNB_USE_HIP)
-    set_source_files_properties(${HIP_FILES} PROPERTIES LANGUAGE HIP)
+    set_source_files_properties(${GPU_FILES} PROPERTIES LANGUAGE HIP)
     set_target_properties(bitsandbytes PROPERTIES LINKER_LANGUAGE CXX)
 
     if(HIP_VERSION VERSION_LESS "6.1")

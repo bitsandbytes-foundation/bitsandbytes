@@ -4,25 +4,8 @@
 // LICENSE file in the root directory of this source tree.
 
 #include "common.cuh"
+#include "compat_device.cuh"
 #include "kernels.cuh"
-#include <cub/block/block_discontinuity.cuh>
-#include <cub/block/block_load.cuh>
-#include <cub/block/block_radix_sort.cuh>
-#include <cub/block/block_reduce.cuh>
-#include <cub/block/block_store.cuh>
-#include <cub/cub.cuh>
-#include <cub/warp/warp_reduce.cuh>
-#include <cuda_fp16.h>
-#include <math_constants.h>
-#include <mma.h>
-
-#if CCCL_VERSION >= 2008002
-#include <cuda/std/functional>
-#define CUB_REDUCTIONOP_MAX                                                                                            \
-    cuda::maximum<> {}
-#else
-#define CUB_REDUCTIONOP_MAX cub::Max()
-#endif
 
 #define HLF_MAX 65504
 #define TH 1024
@@ -60,6 +43,8 @@ __device__ static float nf4_dequantization_lut[16] = {
 };
 
 // source: https://stackoverflow.com/questions/17399119/how-do-i-use-atomicmax-on-floating-point-values-in-cuda
+// HIP has native atomicMax for float; CUDA needs a CAS loop
+#if !BNB_HIP
 __device__ float atomicMax(float* address, float val) {
     int* address_as_i = reinterpret_cast<int*>(address);
     int old = *address_as_i, assumed;
@@ -69,6 +54,7 @@ __device__ float atomicMax(float* address, float val) {
     } while (assumed != old);
     return __int_as_float(old);
 }
+#endif // !BNB_HIP
 
 __device__ __forceinline__ float dDequantizeFP4Tree(unsigned char val) {
     float sign = 1.0f - 2 * ((val & 0b1000) >> 3);
@@ -290,8 +276,8 @@ __launch_bounds__(TH, 4) __global__
     unsigned char qvals[NUM];
     // const int lane_id = threadIdx.x % 2;
 
-    typedef cub::BlockLoad<float, TH, NUM, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-    typedef cub::BlockStore<unsigned char, TH, NUM, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+    typedef bnb_cub::BlockLoad<float, TH, NUM, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+    typedef bnb_cub::BlockStore<unsigned char, TH, NUM, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
 
     __shared__ typename LoadFloat::TempStorage loadf;
     __shared__ typename StoreChar::TempStorage storec;
@@ -341,13 +327,14 @@ __global__ void kQuantizeBlockwise(
     float local_abs_max = 0.0f;
     int local_rand_idx = 0;
 
-    typedef cub::BlockLoad<T, BLOCK_SIZE / NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    typedef cub::BlockStore<
+    typedef bnb_cub::BlockLoad<T, BLOCK_SIZE / NUM_PER_TH, NUM_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockStore<
         unsigned char, BLOCK_SIZE / NUM_PER_TH, (DATA_TYPE > 0) ? NUM_PER_TH / 2 : NUM_PER_TH,
-        cub::BLOCK_STORE_WARP_TRANSPOSE>
+        bnb_cub::BLOCK_STORE_WARP_TRANSPOSE>
         StoreChar;
-    typedef cub::BlockReduce<float, BLOCK_SIZE / NUM_PER_TH> BlockReduce;
-    typedef cub::BlockLoad<float, BLOCK_SIZE / NUM_PER_TH, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+    typedef bnb_cub::BlockReduce<float, BLOCK_SIZE / NUM_PER_TH> BlockReduce;
+    typedef bnb_cub::BlockLoad<float, BLOCK_SIZE / NUM_PER_TH, NUM_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE>
+        LoadFloat;
 
     __shared__ typename LoadT::TempStorage loadt;
     __shared__ typename LoadFloat::TempStorage loadf;
@@ -375,7 +362,7 @@ __global__ void kQuantizeBlockwise(
         for (int j = 0; j < NUM_PER_TH; j++)
             local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
 
-        local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, CUB_REDUCTIONOP_MAX, valid_items);
+        local_abs_max = BlockReduce(reduce).Reduce(local_abs_max, BNB_MAX_OP, valid_items);
 
         if (threadIdx.x == 0) {
             smem_absmax_value[0] = 1.0f / local_abs_max;
@@ -423,20 +410,22 @@ __global__ void kQuantizeBlockwise(
     }
 }
 
-// Specialized kernel for blocksize=32 with 4-bit quantization
-// Processes 2 blocks of 32 values per warp to maintain full thread utilization
-// Uses 32 threads total: threads 0-15 handle block 0, threads 16-31 handle block 1
+// Unified small-blocksize kernel for 4-bit quantization
+// Processes 2 blocks of BNB_WARP_SIZE values per thread block
+// On CUDA (warp=32): blocksize=32, 32 threads, WarpReduce<16>
+// On HIP  (warp=64): blocksize=64, 64 threads, WarpReduce<32>
+// On HIP  (warp=32): blocksize=32, 32 threads, WarpReduce<16>
 template <typename T, int DATA_TYPE>
-__global__ void kQuantizeBlockwise32(
+__global__ void kQuantizeBlockwiseSmall(
     float* code, T* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,
     const int rand_offset, const int n
 ) {
-    constexpr int BLOCK_SIZE = 32;        // Size of each quantization block
-    constexpr int NUM_PER_TH = 2;         // Values per thread (for 4-bit packing)
-    constexpr int THREADS = 32;           // Total threads (full warp)
-    constexpr int THREADS_PER_BLOCK = 16; // Threads handling each quantization block
+    constexpr int BLOCK_SIZE = BNB_WARP_SIZE;            // Size of each quantization block
+    constexpr int NUM_PER_TH = 2;                        // Values per thread (for 4-bit packing)
+    constexpr int THREADS = BNB_WARP_SIZE;               // Total threads (one full warp)
+    constexpr int THREADS_PER_BLOCK = BNB_WARP_SIZE / 2; // Half-warp per quantization block
 
-    const int base_idx = blockIdx.x * BLOCK_SIZE * 2; // 2 blocks per CUDA block
+    const int base_idx = blockIdx.x * BLOCK_SIZE * 2; // 2 blocks per thread block
 
     T vals[NUM_PER_TH];
     unsigned char qvals[NUM_PER_TH / 2]; // For 4-bit: 2 values per byte
@@ -445,10 +434,10 @@ __global__ void kQuantizeBlockwise32(
     const int block_id = threadIdx.x / THREADS_PER_BLOCK;        // 0 for threads 0-15, 1 for threads 16-31
     const int local_thread_id = threadIdx.x % THREADS_PER_BLOCK; // Thread ID within the block (0-15)
 
-    typedef cub::BlockLoad<T, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    typedef cub::BlockStore<unsigned char, THREADS, NUM_PER_TH / 2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-    typedef cub::WarpReduce<float, 16>
-        WarpReduce; // Logical warp size of 16: threads 0-15 and 16-31 reduce independently
+    typedef bnb_cub::BlockLoad<T, THREADS, NUM_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockStore<unsigned char, THREADS, NUM_PER_TH / 2, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
+    typedef bnb_cub::WarpReduce<float, THREADS_PER_BLOCK>
+        WarpReduce; // Half-warp logical reduction: each half reduces independently
 
     __shared__ typename LoadT::TempStorage loadt;
     __shared__ typename StoreChar::TempStorage storec;
@@ -471,7 +460,7 @@ __global__ void kQuantizeBlockwise32(
         local_abs_max = fmaxf(local_abs_max, fabsf((float)vals[j]));
 
     // Reduce within each logical warp of 16 threads independently
-    local_abs_max = WarpReduce(warp_reduce[block_id]).Reduce(local_abs_max, CUB_REDUCTIONOP_MAX);
+    local_abs_max = WarpReduce(warp_reduce[block_id]).Reduce(local_abs_max, BNB_MAX_OP);
 
     if (local_thread_id == 0) {
         if (block_valid) {
@@ -520,8 +509,9 @@ __global__ void
     unsigned char qvals[NUM_PER_TH];
     float local_abs_max = -FLT_MAX;
 
-    typedef cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
-    typedef cub::BlockStore<T, THREADS, NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1), cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+    typedef bnb_cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+    typedef bnb_cub::BlockStore<T, THREADS, NUM_PER_TH*((DATA_TYPE > 0) ? 2 : 1), bnb_cub::BLOCK_STORE_WARP_TRANSPOSE>
+        StoreT;
 
     __shared__ typename LoadChar::TempStorage loadchar;
     __shared__ typename StoreT::TempStorage storet;
@@ -606,9 +596,9 @@ __launch_bounds__(BLOCK_SIZE / NUM_VALS, 1) __global__ void kPreconditionOptimiz
     const float correction1 = 1.0f / (1.0f - powf(beta1, step));
     const float correction2 = 1.0f / (1.0f - powf(beta2, step));
 
-    typedef cub::BlockLoad<T, BLOCK_SIZE / NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-    typedef cub::BlockLoad<float, BLOCK_SIZE / NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-    typedef cub::BlockReduce<float, BLOCK_SIZE / NUM_VALS> BlockReduce;
+    typedef bnb_cub::BlockLoad<T, BLOCK_SIZE / NUM_VALS, NUM_VALS, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
+    typedef bnb_cub::BlockLoad<float, BLOCK_SIZE / NUM_VALS, NUM_VALS, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+    typedef bnb_cub::BlockReduce<float, BLOCK_SIZE / NUM_VALS> BlockReduce;
 
     __shared__ union {
         typename Load::TempStorage load;
@@ -701,11 +691,11 @@ __launch_bounds__(TH, 1) __global__ void kOptimizer32bit2State(
         update_scale = 1.0f;
     }
 
-    typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-    typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
+    typedef bnb_cub::BlockLoad<T, TH, NUM_PER_THREAD, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
+    typedef bnb_cub::BlockStore<T, TH, NUM_PER_THREAD, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
 
-    typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-    typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
+    typedef bnb_cub::BlockLoad<float, TH, NUM_PER_THREAD, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+    typedef bnb_cub::BlockStore<float, TH, NUM_PER_THREAD, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
 
     __shared__ union {
         typename Load::TempStorage load;
@@ -800,9 +790,9 @@ __launch_bounds__(BLOCK_SIZE / NUM_VALS, 1) __global__ void kPreconditionOptimiz
 
     float s1_vals[NUM_VALS];
 
-    typedef cub::BlockLoad<T, BLOCK_SIZE / NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-    typedef cub::BlockLoad<float, BLOCK_SIZE / NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-    typedef cub::BlockReduce<float, BLOCK_SIZE / NUM_VALS> BlockReduce;
+    typedef bnb_cub::BlockLoad<T, BLOCK_SIZE / NUM_VALS, NUM_VALS, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
+    typedef bnb_cub::BlockLoad<float, BLOCK_SIZE / NUM_VALS, NUM_VALS, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+    typedef bnb_cub::BlockReduce<float, BLOCK_SIZE / NUM_VALS> BlockReduce;
 
     __shared__ union {
         typename Load::TempStorage load;
@@ -892,11 +882,11 @@ __launch_bounds__(TH, 1) __global__ void kOptimizer32bit1State(
 
     float s1_vals[NUM_PER_THREAD];
 
-    typedef cub::BlockLoad<T, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
-    typedef cub::BlockStore<T, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
+    typedef bnb_cub::BlockLoad<T, TH, NUM_PER_THREAD, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> Load;
+    typedef bnb_cub::BlockStore<T, TH, NUM_PER_THREAD, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> Store;
 
-    typedef cub::BlockLoad<float, TH, NUM_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
-    typedef cub::BlockStore<float, TH, NUM_PER_THREAD, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
+    typedef bnb_cub::BlockLoad<float, TH, NUM_PER_THREAD, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadFloat;
+    typedef bnb_cub::BlockStore<float, TH, NUM_PER_THREAD, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreFloat;
 
     __shared__ union {
         typename Load::TempStorage load;
@@ -986,9 +976,9 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     unsigned char m_c1[NUM8BIT];
     unsigned char r_c2[NUM8BIT];
 
-    typedef cub::BlockLoad<T, NUM_THREADS, NUM8BIT, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    typedef cub::BlockLoad<unsigned char, NUM_THREADS, NUM8BIT, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadUInt8;
-    typedef cub::BlockReduce<float, NUM_THREADS> BlockReduce;
+    typedef bnb_cub::BlockLoad<T, NUM_THREADS, NUM8BIT, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockLoad<unsigned char, NUM_THREADS, NUM8BIT, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadUInt8;
+    typedef bnb_cub::BlockReduce<float, NUM_THREADS> BlockReduce;
 
     __shared__ union {
         typename LoadT::TempStorage loadh;
@@ -1048,9 +1038,9 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     }
 
     __syncthreads();
-    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, CUB_REDUCTIONOP_MAX, valid_items);
+    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, BNB_MAX_OP, valid_items);
     __syncthreads();
-    local_max_s2 = BlockReduce(temp_storage.reduce).Reduce(local_max_s2, CUB_REDUCTIONOP_MAX, valid_items);
+    local_max_s2 = BlockReduce(temp_storage.reduce).Reduce(local_max_s2, BNB_MAX_OP, valid_items);
     if (unorm != NULL) {
         __syncthreads();
         local_unorm = BlockReduce(temp_storage.reduce).Sum(local_unorm, valid_items);
@@ -1106,11 +1096,13 @@ __global__ void __launch_bounds__(NUM_THREADS2, 1) kOptimizerStatic8bit2State(
     unsigned char c2s[NUM_PER_THREAD2];
     T p_vals[NUM_PER_THREAD2];
     T g_vals[NUM_PER_THREAD2];
-    typedef cub::BlockLoad<T, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    typedef cub::BlockLoad<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+    typedef bnb_cub::BlockLoad<T, NUM_THREADS2, NUM_PER_THREAD2, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockLoad<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE>
+        LoadChar;
 
-    typedef cub::BlockStore<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-    typedef cub::BlockStore<T, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+    typedef bnb_cub::BlockStore<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE>
+        StoreChar;
+    typedef bnb_cub::BlockStore<T, NUM_THREADS2, NUM_PER_THREAD2, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
     __shared__ float smem_quantiles1[256];
     __shared__ float smem_quantiles2[256];
@@ -1206,9 +1198,9 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     T g_vals[NUM8BIT];
     unsigned char m_c1[NUM8BIT];
 
-    typedef cub::BlockLoad<T, NUM_THREADS, NUM8BIT, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    typedef cub::BlockLoad<unsigned char, NUM_THREADS, NUM8BIT, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadUInt8;
-    typedef cub::BlockReduce<float, NUM_THREADS> BlockReduce;
+    typedef bnb_cub::BlockLoad<T, NUM_THREADS, NUM8BIT, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockLoad<unsigned char, NUM_THREADS, NUM8BIT, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadUInt8;
+    typedef bnb_cub::BlockReduce<float, NUM_THREADS> BlockReduce;
 
     __shared__ union {
         typename LoadT::TempStorage loadh;
@@ -1259,7 +1251,7 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     }
 
     __syncthreads();
-    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, CUB_REDUCTIONOP_MAX, valid_items);
+    local_max_s1 = BlockReduce(temp_storage.reduce).Reduce(local_max_s1, BNB_MAX_OP, valid_items);
     if (threadIdx.x == 0) {
         atomicMax(&new_max1[0], local_max_s1);
     }
@@ -1302,11 +1294,13 @@ __global__ void __launch_bounds__(1024, 1) kOptimizerStatic8bit1State(
     unsigned char c1s[NUM_PER_THREAD2];
     T p_vals[NUM_PER_THREAD2];
     T g_vals[NUM_PER_THREAD2];
-    typedef cub::BlockLoad<T, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    typedef cub::BlockLoad<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+    typedef bnb_cub::BlockLoad<T, NUM_THREADS2, NUM_PER_THREAD2, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockLoad<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE>
+        LoadChar;
 
-    typedef cub::BlockStore<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-    typedef cub::BlockStore<T, NUM_THREADS2, NUM_PER_THREAD2, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+    typedef bnb_cub::BlockStore<unsigned char, NUM_THREADS2, NUM_PER_THREAD2, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE>
+        StoreChar;
+    typedef bnb_cub::BlockStore<T, NUM_THREADS2, NUM_PER_THREAD2, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
     __shared__ float smem_quantiles1[256];
 
@@ -1398,8 +1392,8 @@ __global__ void kPercentileClipping(T* __restrict__ g, float* gnorm_vec, int ste
     const int n_full = (BLOCK_SIZE * (n / BLOCK_SIZE)) + (n % BLOCK_SIZE == 0 ? 0 : BLOCK_SIZE);
     int valid_items = 0;
 
-    typedef cub::BlockReduce<float, BLOCK_SIZE / NUM_VALS> BlockReduce;
-    typedef cub::BlockLoad<T, BLOCK_SIZE / NUM_VALS, NUM_VALS, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockReduce<float, BLOCK_SIZE / NUM_VALS> BlockReduce;
+    typedef bnb_cub::BlockLoad<T, BLOCK_SIZE / NUM_VALS, NUM_VALS, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
 
     __shared__ typename BlockReduce::TempStorage reduce;
 
@@ -1468,17 +1462,19 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit2StateBlockwise(
 
     T g_vals[N_PER_TH];
     T p_vals[N_PER_TH];
-    typedef cub::BlockLoad<T, BLOCK_SIZE / N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    typedef cub::BlockLoad<unsigned char, BLOCK_SIZE / N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+    typedef bnb_cub::BlockLoad<T, BLOCK_SIZE / N_PER_TH, N_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockLoad<unsigned char, BLOCK_SIZE / N_PER_TH, N_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE>
+        LoadChar;
 
-    typedef cub::BlockStore<unsigned char, BLOCK_SIZE / N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-    typedef cub::BlockStore<T, BLOCK_SIZE / N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+    typedef bnb_cub::BlockStore<unsigned char, BLOCK_SIZE / N_PER_TH, N_PER_TH, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE>
+        StoreChar;
+    typedef bnb_cub::BlockStore<T, BLOCK_SIZE / N_PER_TH, N_PER_TH, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
     __shared__ float smem_quantiles1[LANES][257];
     __shared__ float smem_quantiles2[LANES][257];
-    typedef cub::BlockReduce<float, BLOCK_SIZE / N_PER_TH> BlockReduce1;
-    typedef cub::BlockReduce<float, BLOCK_SIZE / N_PER_TH> BlockReduce2;
-    typedef cub::BlockReduce<float, BLOCK_SIZE / N_PER_TH> BlockReduce3;
+    typedef bnb_cub::BlockReduce<float, BLOCK_SIZE / N_PER_TH> BlockReduce1;
+    typedef bnb_cub::BlockReduce<float, BLOCK_SIZE / N_PER_TH> BlockReduce2;
+    typedef bnb_cub::BlockReduce<float, BLOCK_SIZE / N_PER_TH> BlockReduce3;
     __shared__ typename BlockReduce1::TempStorage reduce1;
     __shared__ typename BlockReduce2::TempStorage reduce2;
     __shared__ typename BlockReduce2::TempStorage reduce3;
@@ -1570,11 +1566,11 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit2StateBlockwise(
         }
 
         //  reduce: 2.51/1.60 -> 2.67/1.69
-        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, CUB_REDUCTIONOP_MAX);
-        new_local_abs_max2 = BlockReduce2(reduce2).Reduce(new_local_abs_max2, CUB_REDUCTIONOP_MAX);
+        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, BNB_MAX_OP);
+        new_local_abs_max2 = BlockReduce2(reduce2).Reduce(new_local_abs_max2, BNB_MAX_OP);
 
         if (OPTIMIZER == ADEMAMIX) {
-            new_local_abs_max3 = BlockReduce3(reduce3).Reduce(new_local_abs_max3, CUB_REDUCTIONOP_MAX);
+            new_local_abs_max3 = BlockReduce3(reduce3).Reduce(new_local_abs_max3, BNB_MAX_OP);
         }
 
         if (threadIdx.x == 0) {
@@ -1692,14 +1688,16 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit1StateBlockwise(
     T g_vals[N_PER_TH];
     T p_vals[N_PER_TH];
 
-    typedef cub::BlockLoad<T, BLOCK_SIZE / N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
-    typedef cub::BlockLoad<unsigned char, BLOCK_SIZE / N_PER_TH, N_PER_TH, cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+    typedef bnb_cub::BlockLoad<T, BLOCK_SIZE / N_PER_TH, N_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadT;
+    typedef bnb_cub::BlockLoad<unsigned char, BLOCK_SIZE / N_PER_TH, N_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE>
+        LoadChar;
 
-    typedef cub::BlockStore<unsigned char, BLOCK_SIZE / N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreChar;
-    typedef cub::BlockStore<T, BLOCK_SIZE / N_PER_TH, N_PER_TH, cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+    typedef bnb_cub::BlockStore<unsigned char, BLOCK_SIZE / N_PER_TH, N_PER_TH, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE>
+        StoreChar;
+    typedef bnb_cub::BlockStore<T, BLOCK_SIZE / N_PER_TH, N_PER_TH, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
 
     __shared__ float smem_quantiles1[LANES][257];
-    typedef cub::BlockReduce<float, BLOCK_SIZE / N_PER_TH> BlockReduce1;
+    typedef bnb_cub::BlockReduce<float, BLOCK_SIZE / N_PER_TH> BlockReduce1;
     __shared__ typename BlockReduce1::TempStorage reduce1;
     __shared__ float smem_exchange1[1];
 
@@ -1783,7 +1781,7 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit1StateBlockwise(
         }
 
         //  reduce: 2.51/1.60 -> 2.67/1.69
-        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, CUB_REDUCTIONOP_MAX);
+        new_local_abs_max1 = BlockReduce1(reduce1).Reduce(new_local_abs_max1, BNB_MAX_OP);
 
         if (threadIdx.x == 0)
             smem_exchange1[0] = new_local_abs_max1;
@@ -1851,7 +1849,7 @@ template <typename T, int THREADS, int SPARSE_DECOMP>
 __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     void kInt8VectorQuant(T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols) {
 
-    using BlockReduceT = cub::BlockReduce<T, THREADS>;
+    using BlockReduceT = bnb_cub::BlockReduce<T, THREADS>;
 
     // One block per row.
     // Threads load column values in a striped arrangement.
@@ -1881,7 +1879,7 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     }
 
     // Reduce thread-local absmax across the block.
-    const T row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, CUB_REDUCTIONOP_MAX, cols);
+    const T row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, BNB_MAX_OP, cols);
     if (threadIdx.x == 0) {
         // Save our block's absmax to shared memory for the quantization step.
         rowStats[row_id] = smem_row_absmax = row_absmax;
@@ -1929,7 +1927,7 @@ __global__ void kdequant_mm_int32_fp16(
     float local_colStats[ITEMS_PER_THREAD];
     float local_biasValue[ITEMS_PER_THREAD];
 
-    typedef cub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_VECTORIZE> LoadInt32;
+    typedef bnb_cub::BlockLoad<int, THREADS, ITEMS_PER_THREAD, bnb_cub::BLOCK_LOAD_VECTORIZE> LoadInt32;
     __shared__ typename LoadInt32::TempStorage loadint32;
 
     int row_idx, col_idx;
@@ -2121,7 +2119,7 @@ __global__ void kgemm_4bit_inference_naive(
     // load step-by-step in chunks of [32,warps]: 1x32 * [32,warps] -> [1,warps]
     // 4 warps -> 4 loads per iter
     // 1x32 * 32x4 -> 1x4 outputs per thread block
-    typedef cub::WarpReduce<float> WarpReduce;
+    typedef bnb_cub::WarpReduce<float> WarpReduce;
     __shared__ typename WarpReduce::TempStorage temp_storage[THREADS / 32];
 
     const int warp_idx = threadIdx.x / 32;
@@ -2257,9 +2255,9 @@ template __global__ void kgemm_4bit_inference_naive<half, 128, 16>(
     int M, int N, int K, half* __restrict__ const A, unsigned char* B, float* absmax, const float* datatype, half* out,
     int lda, int ldb, int ldc, int blocksize
 );
-template __global__ void kgemm_4bit_inference_naive<__nv_bfloat16, 128, 16>(
-    int M, int N, int K, __nv_bfloat16* __restrict__ const A, unsigned char* B, float* absmax, const float* datatype,
-    __nv_bfloat16* out, int lda, int ldb, int ldc, int blocksize
+template __global__ void kgemm_4bit_inference_naive<bnb_bfloat16, 128, 16>(
+    int M, int N, int K, bnb_bfloat16* __restrict__ const A, unsigned char* B, float* absmax, const float* datatype,
+    bnb_bfloat16* out, int lda, int ldb, int ldc, int blocksize
 );
 template __global__ void kgemm_4bit_inference_naive<float, 128, 32>(
     int M, int N, int K, float* __restrict__ const A, unsigned char* B, float* absmax, const float* datatype,
@@ -2307,16 +2305,16 @@ template __device__ unsigned char dQuantize<1>(float* smem_code, const float ran
 
 MAKE_PreconditionOptimizer32bit1State(MOMENTUM, half)
 MAKE_PreconditionOptimizer32bit1State(MOMENTUM, float)
-MAKE_PreconditionOptimizer32bit1State(MOMENTUM, __nv_bfloat16)
+MAKE_PreconditionOptimizer32bit1State(MOMENTUM, bnb_bfloat16)
 MAKE_PreconditionOptimizer32bit1State(RMSPROP, half)
 MAKE_PreconditionOptimizer32bit1State(RMSPROP, float)
-MAKE_PreconditionOptimizer32bit1State(RMSPROP, __nv_bfloat16)
+MAKE_PreconditionOptimizer32bit1State(RMSPROP, bnb_bfloat16)
 MAKE_PreconditionOptimizer32bit1State(LION, half)
 MAKE_PreconditionOptimizer32bit1State(LION, float)
-MAKE_PreconditionOptimizer32bit1State(LION, __nv_bfloat16)
+MAKE_PreconditionOptimizer32bit1State(LION, bnb_bfloat16)
 MAKE_PreconditionOptimizer32bit1State(ADAGRAD, half)
 MAKE_PreconditionOptimizer32bit1State(ADAGRAD, float)
-MAKE_PreconditionOptimizer32bit1State(ADAGRAD, __nv_bfloat16)
+MAKE_PreconditionOptimizer32bit1State(ADAGRAD, bnb_bfloat16)
 
 #define MAKE_Optimizer32bit1State(oname, gtype)                                                                        \
     template __global__ void kOptimizer32bit1State<gtype, oname>(                                                      \
@@ -2327,16 +2325,16 @@ MAKE_PreconditionOptimizer32bit1State(ADAGRAD, __nv_bfloat16)
 
 MAKE_Optimizer32bit1State(MOMENTUM, half)
 MAKE_Optimizer32bit1State(MOMENTUM, float)
-MAKE_Optimizer32bit1State(MOMENTUM, __nv_bfloat16)
+MAKE_Optimizer32bit1State(MOMENTUM, bnb_bfloat16)
 MAKE_Optimizer32bit1State(RMSPROP, half)
 MAKE_Optimizer32bit1State(RMSPROP, float)
-MAKE_Optimizer32bit1State(RMSPROP, __nv_bfloat16)
+MAKE_Optimizer32bit1State(RMSPROP, bnb_bfloat16)
 MAKE_Optimizer32bit1State(LION, half)
 MAKE_Optimizer32bit1State(LION, float)
-MAKE_Optimizer32bit1State(LION, __nv_bfloat16)
+MAKE_Optimizer32bit1State(LION, bnb_bfloat16)
 MAKE_Optimizer32bit1State(ADAGRAD, half)
 MAKE_Optimizer32bit1State(ADAGRAD, float)
-MAKE_Optimizer32bit1State(ADAGRAD, __nv_bfloat16)
+MAKE_Optimizer32bit1State(ADAGRAD, bnb_bfloat16)
 
 #define MAKE_PreconditionOptimizer32bit2State(oname, gtype)                                                            \
     template __global__ void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 8>(                                 \
@@ -2347,10 +2345,10 @@ MAKE_Optimizer32bit1State(ADAGRAD, __nv_bfloat16)
 
 MAKE_PreconditionOptimizer32bit2State(ADAM, float)
 MAKE_PreconditionOptimizer32bit2State(ADAM, half)
-MAKE_PreconditionOptimizer32bit2State(ADAM, __nv_bfloat16)
+MAKE_PreconditionOptimizer32bit2State(ADAM, bnb_bfloat16)
 MAKE_PreconditionOptimizer32bit2State(ADEMAMIX, float)
 MAKE_PreconditionOptimizer32bit2State(ADEMAMIX, half)
-MAKE_PreconditionOptimizer32bit2State(ADEMAMIX, __nv_bfloat16)
+MAKE_PreconditionOptimizer32bit2State(ADEMAMIX, bnb_bfloat16)
 
 template __global__ void kOptimizer32bit2State<float, ADAM>(
     float* g, float* p, float* state1, float* state2, float* unorm, const float max_unorm, const float param_norm,
@@ -2364,8 +2362,8 @@ template __global__ void kOptimizer32bit2State<half, ADAM>(
     const float weight_decay, const int step, const float lr, const float gnorm_scale, const bool skip_zeros,
     const int n
 );
-template __global__ void kOptimizer32bit2State<__nv_bfloat16, ADAM>(
-    __nv_bfloat16* g, __nv_bfloat16* p, float* state1, float* state2, float* unorm, const float max_unorm,
+template __global__ void kOptimizer32bit2State<bnb_bfloat16, ADAM>(
+    bnb_bfloat16* g, bnb_bfloat16* p, float* state1, float* state2, float* unorm, const float max_unorm,
     const float param_norm, const float beta1, const float beta2, const float beta3, const float alpha, const float eps,
     const float weight_decay, const int step, const float lr, const float gnorm_scale, const bool skip_zeros,
     const int n
@@ -2382,8 +2380,8 @@ template __global__ void kOptimizer32bit2State<half, ADEMAMIX>(
     const float weight_decay, const int step, const float lr, const float gnorm_scale, const bool skip_zeros,
     const int n
 );
-template __global__ void kOptimizer32bit2State<__nv_bfloat16, ADEMAMIX>(
-    __nv_bfloat16* g, __nv_bfloat16* p, float* state1, float* state2, float* unorm, const float max_unorm,
+template __global__ void kOptimizer32bit2State<bnb_bfloat16, ADEMAMIX>(
+    bnb_bfloat16* g, bnb_bfloat16* p, float* state1, float* state2, float* unorm, const float max_unorm,
     const float param_norm, const float beta1, const float beta2, const float beta3, const float alpha, const float eps,
     const float weight_decay, const int step, const float lr, const float gnorm_scale, const bool skip_zeros,
     const int n
@@ -2501,42 +2499,44 @@ MAKE_kQuantizeBlockwise(float, 256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 128, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 64, 2, 0, NF4)
 
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 4096, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 4096, 4, 1, General8bit)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 2048, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 1024, 4, 0, General8bit)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 512, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 256, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 128, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 64, 2, 0, General8bit)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 4096, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 2048, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 1024, 4, 0, FP4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 512, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 256, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 128, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 64, 2, 0, FP4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 4096, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 2048, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 1024, 4, 0, NF4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 512, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 256, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 128, 2, 0, NF4)
-MAKE_kQuantizeBlockwise(__nv_bfloat16, 64, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 4096, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 4096, 4, 1, General8bit)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 2048, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 1024, 4, 0, General8bit)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 512, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 256, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 128, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 64, 2, 0, General8bit)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 4096, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 2048, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 1024, 4, 0, FP4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 512, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 256, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 128, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 64, 2, 0, FP4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 4096, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 2048, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 1024, 4, 0, NF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 512, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 256, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 128, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 64, 2, 0, NF4)
 
 // Template instantiations for blocksize=32 specialized kernel (4-bit only)
-#define MAKE_kQuantizeBlockwise32(dtype, data_type_name)                                                               \
-    template __global__ void kQuantizeBlockwise32<dtype, data_type_name>(                                              \
+#define MAKE_kQuantizeBlockwiseSmall(dtype, data_type_name)                                                            \
+    template __global__ void kQuantizeBlockwiseSmall<dtype, data_type_name>(                                           \
         float* code, dtype* __restrict__ const A, float* absmax, unsigned char* out, float* __restrict__ const rand,   \
         const int rand_offset, const int n                                                                             \
     );
 
 // FP4 instantiations for blocksize=32
-MAKE_kQuantizeBlockwise32(half, FP4) MAKE_kQuantizeBlockwise32(float, FP4) MAKE_kQuantizeBlockwise32(__nv_bfloat16, FP4)
+MAKE_kQuantizeBlockwiseSmall(half, FP4) MAKE_kQuantizeBlockwiseSmall(float, FP4) MAKE_kQuantizeBlockwiseSmall(
+    bnb_bfloat16, FP4
+)
 
     // NF4 instantiations for blocksize=32
-    MAKE_kQuantizeBlockwise32(half, NF4) MAKE_kQuantizeBlockwise32(float, NF4) MAKE_kQuantizeBlockwise32(
-        __nv_bfloat16, NF4
+    MAKE_kQuantizeBlockwiseSmall(half, NF4) MAKE_kQuantizeBlockwiseSmall(float, NF4) MAKE_kQuantizeBlockwiseSmall(
+        bnb_bfloat16, NF4
     )
 
         template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(
@@ -2557,14 +2557,14 @@ template __global__ void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(
 template __global__ void kDequantizeBlockwise<float, 512, 64, 8, NF4>(
     float* code, unsigned char* A, float* absmax, float* out, const int blocksize, const int n
 );
-template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, FP4>(
-    float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, const int blocksize, const int n
+template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, FP4>(
+    float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, const int blocksize, const int n
 );
-template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, General8bit>(
-    float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, const int blocksize, const int n
+template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, General8bit>(
+    float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, const int blocksize, const int n
 );
-template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, NF4>(
-    float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, const int blocksize, const int n
+template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, NF4>(
+    float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, const int blocksize, const int n
 );
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread)                              \
@@ -2577,10 +2577,10 @@ template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, NF4>(
 
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, float, 256, 1)
 MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, half, 256, 1)
-MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, __nv_bfloat16, 256, 1)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADAM, bnb_bfloat16, 256, 1)
 MAKE_OptimizerStatic8bit2StateBlockwise(ADEMAMIX, float, 256, 1)
 MAKE_OptimizerStatic8bit2StateBlockwise(ADEMAMIX, half, 256, 1)
-MAKE_OptimizerStatic8bit2StateBlockwise(ADEMAMIX, __nv_bfloat16, 256, 1)
+MAKE_OptimizerStatic8bit2StateBlockwise(ADEMAMIX, bnb_bfloat16, 256, 1)
 
 #define MAKE_OptimizerStatic8bit1StateBlockwise(oname, gtype, block_size, num_per_thread)                              \
     template __global__ void kOptimizerStatic8bit1StateBlockwise<gtype, oname, block_size, num_per_thread>(            \
@@ -2591,13 +2591,13 @@ MAKE_OptimizerStatic8bit2StateBlockwise(ADEMAMIX, __nv_bfloat16, 256, 1)
 
 MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, float, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, half, 256, 1)
-MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, __nv_bfloat16, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(MOMENTUM, bnb_bfloat16, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, float, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, half, 256, 1)
-MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, __nv_bfloat16, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(RMSPROP, bnb_bfloat16, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(LION, float, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(LION, half, 256, 1)
-MAKE_OptimizerStatic8bit1StateBlockwise(LION, __nv_bfloat16, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(LION, bnb_bfloat16, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, float, 256, 1)
 MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, half, 256, 1)
-MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, __nv_bfloat16, 256, 1)
+MAKE_OptimizerStatic8bit1StateBlockwise(ADAGRAD, bnb_bfloat16, 256, 1)
