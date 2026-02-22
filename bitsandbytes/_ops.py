@@ -513,7 +513,9 @@ torch.library.define(
 
 
 @register_fake("bitsandbytes::repack_kbit")
-def _(packed_flat: torch.Tensor, absmax_flat: torch.Tensor, K_dim: int, N: int, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+def _(
+    packed_flat: torch.Tensor, absmax_flat: torch.Tensor, K_dim: int, N: int, k: int
+) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
     torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
@@ -555,6 +557,40 @@ def _(
     return torch.empty(M, N, device=A.device, dtype=A.dtype)
 
 
+# K-bit fused dequant + GEMM with pre-allocated output and workspace (CUDA graph compatible)
+
+torch.library.define(
+    "bitsandbytes::kbit_gemm_prod_",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int k, int k_chunks, "
+    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::kbit_gemm_prod_")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    k_chunks: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    M = A.shape[0]
+    torch._check(out.shape == (M, N), lambda: f"out must be [{M}, {N}], got {list(out.shape)}")
+    torch._check(out.dtype == A.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A.dtype}")
+    torch._check(C_workspace.dtype == torch.float32, lambda: f"C_workspace must be float32, got {C_workspace.dtype}")
+    torch._check(tile_counters.dtype == torch.int32, lambda: f"tile_counters must be int32, got {tile_counters.dtype}")
+    return out
+
+
 # K-bit grouped expert GEMM: batch multiple MoE expert GEMMs into one launch
 
 torch.library.define(
@@ -586,6 +622,45 @@ def _(
     return torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
 
 
+# K-bit grouped expert GEMM with pre-allocated output and workspace (CUDA graph compatible)
+
+torch.library.define(
+    "bitsandbytes::kbit_grouped_gemm_",
+    "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
+    "Tensor expert_offsets, int K_dim, int N, int k, int num_experts, int max_M, "
+    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::kbit_grouped_gemm_")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    num_experts: int,
+    max_M: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A_concat.dtype}"
+    )
+    total_M = A_concat.shape[0]
+    torch._check(out.shape == (total_M, N), lambda: f"out must be [{total_M}, {N}], got {list(out.shape)}")
+    torch._check(out.dtype == A_concat.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A_concat.dtype}")
+    torch._check(C_workspace.dtype == torch.float32, lambda: f"C_workspace must be float32, got {C_workspace.dtype}")
+    torch._check(tile_counters.dtype == torch.int32, lambda: f"tile_counters must be int32, got {tile_counters.dtype}")
+    return out
+
+
 # K-bit scalar GEMV: C[M,N] = A[M,K_dim] * W_kbit^T (M=1..4, scalar FMA)
 
 torch.library.define(
@@ -595,8 +670,7 @@ torch.library.define(
 
 torch.library.define(
     "bitsandbytes::kbit_scalar_gemv.out",
-    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int k, "
-    "Tensor(a!) out) -> ()",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int k, Tensor(a!) out) -> ()",
 )
 
 

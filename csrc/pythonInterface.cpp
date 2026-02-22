@@ -472,7 +472,7 @@ template <int K> void repackKbit(const unsigned int*, const unsigned char*, unsi
 // Unmangled repack wrappers
 #define MAKE_KBIT_REPACK(K)                                                                                            \
     void repack_kbit_k##K(                                                                                             \
-        const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                  \
+        const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                 \
         unsigned char* absmax_tiled, int K_dim, int N                                                                  \
     ) {                                                                                                                \
         repackKbit<K>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);                                 \
@@ -484,23 +484,28 @@ MAKE_KBIT_REPACK(4)
 MAKE_KBIT_REPACK(5)
 
 // Forward declarations of GEMM launchers
-template <int K, typename scalar_t> void kbitGemmProd(const scalar_t*, const unsigned int*, const unsigned char*, const float*, scalar_t*, float*, int*, int, int, int, int);
+template <int K, typename scalar_t, typename ABSMAX_T>
+void kbitGemmProd(
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, float*, int*, int, int, int, int
+);
 
-// Production GEMM wrappers (fp16 and bf16)
+// Production GEMM wrappers — uint8 E4M4 absmax
 #define MAKE_KBIT_GEMM_PROD(K)                                                                                         \
     void kbit_gemm_prod_fp16_k##K(                                                                                     \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
-        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                  \
     ) {                                                                                                                \
-        kbitGemmProd<K, half>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks); \
+        kbitGemmProd<K, half, unsigned char>(                                                                          \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+        );                                                                                                             \
     }                                                                                                                  \
     void kbit_gemm_prod_bf16_k##K(                                                                                     \
-        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax,                           \
-        const float* codebook, __nv_bfloat16* C,                                                                       \
-        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                \
     ) {                                                                                                                \
-        kbitGemmProd<K, __nv_bfloat16>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters,                 \
-                                       M, K_dim, N, k_chunks);                                                        \
+        kbitGemmProd<K, __nv_bfloat16, unsigned char>(                                                                 \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+        );                                                                                                             \
     }
 
 MAKE_KBIT_GEMM_PROD(2)
@@ -508,26 +513,58 @@ MAKE_KBIT_GEMM_PROD(3)
 MAKE_KBIT_GEMM_PROD(4)
 MAKE_KBIT_GEMM_PROD(5)
 
-// Forward declaration of grouped GEMM launcher
-template <int K, typename scalar_t> void kbitGroupedGemmProd(const scalar_t*, const unsigned int*, const unsigned char*, const float*, scalar_t*, float*, int*, const int*, int, int, int, int);
+// Production GEMM wrappers — fp16 absmax
+#define MAKE_KBIT_GEMM_PROD_FP16ABS(K)                                                                                 \
+    void kbit_gemm_prod_fp16_fp16abs_k##K(                                                                             \
+        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                  \
+    ) {                                                                                                                \
+        kbitGemmProd<K, half, half>(                                                                                   \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+        );                                                                                                             \
+    }                                                                                                                  \
+    void kbit_gemm_prod_bf16_fp16abs_k##K(                                                                             \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                \
+    ) {                                                                                                                \
+        kbitGemmProd<K, __nv_bfloat16, half>(                                                                          \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+        );                                                                                                             \
+    }
 
-// Unmangled grouped GEMM wrappers (fp16 and bf16)
+MAKE_KBIT_GEMM_PROD_FP16ABS(2)
+MAKE_KBIT_GEMM_PROD_FP16ABS(3)
+MAKE_KBIT_GEMM_PROD_FP16ABS(4)
+MAKE_KBIT_GEMM_PROD_FP16ABS(5)
+
+// Forward declaration of grouped GEMM launcher
+template <int K, typename scalar_t, typename ABSMAX_T>
+void kbitGroupedGemmProd(
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, float*, int*, const int*, int, int,
+    int, int
+);
+
+// Unmangled grouped GEMM wrappers — uint8 E4M4 absmax
 #define MAKE_KBIT_GROUPED_GEMM_PROD(K)                                                                                 \
     void kbit_grouped_gemm_prod_fp16_k##K(                                                                             \
-        const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                      \
-        const float* codebook, half* C_concat, float* C_workspace, int* tile_counters,                                 \
-        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
+        const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                     \
+        const float* codebook, half* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets,      \
+        int K_dim, int N, int num_experts, int max_M                                                                   \
     ) {                                                                                                                \
-        kbitGroupedGemmProd<K, half>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,                         \
-                                     C_workspace, tile_counters, expert_offsets, K_dim, N, num_experts, max_M);        \
+        kbitGroupedGemmProd<K, half, unsigned char>(                                                                   \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
+            K_dim, N, num_experts, max_M                                                                               \
+        );                                                                                                             \
     }                                                                                                                  \
     void kbit_grouped_gemm_prod_bf16_k##K(                                                                             \
         const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
         const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
         const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
     ) {                                                                                                                \
-        kbitGroupedGemmProd<K, __nv_bfloat16>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,               \
-                                              C_workspace, tile_counters, expert_offsets, K_dim, N, num_experts, max_M); \
+        kbitGroupedGemmProd<K, __nv_bfloat16, unsigned char>(                                                          \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
+            K_dim, N, num_experts, max_M                                                                               \
+        );                                                                                                             \
     }
 
 MAKE_KBIT_GROUPED_GEMM_PROD(2)
@@ -535,8 +572,37 @@ MAKE_KBIT_GROUPED_GEMM_PROD(3)
 MAKE_KBIT_GROUPED_GEMM_PROD(4)
 MAKE_KBIT_GROUPED_GEMM_PROD(5)
 
+// Grouped GEMM wrappers — fp16 absmax
+#define MAKE_KBIT_GROUPED_GEMM_PROD_FP16ABS(K)                                                                         \
+    void kbit_grouped_gemm_prod_fp16_fp16abs_k##K(                                                                     \
+        const half* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all, const float* codebook,       \
+        half* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets, int K_dim, int N,           \
+        int num_experts, int max_M                                                                                     \
+    ) {                                                                                                                \
+        kbitGroupedGemmProd<K, half, half>(                                                                            \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
+            K_dim, N, num_experts, max_M                                                                               \
+        );                                                                                                             \
+    }                                                                                                                  \
+    void kbit_grouped_gemm_prod_bf16_fp16abs_k##K(                                                                     \
+        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all,                     \
+        const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
+    ) {                                                                                                                \
+        kbitGroupedGemmProd<K, __nv_bfloat16, half>(                                                                   \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
+            K_dim, N, num_experts, max_M                                                                               \
+        );                                                                                                             \
+    }
+
+MAKE_KBIT_GROUPED_GEMM_PROD_FP16ABS(2)
+MAKE_KBIT_GROUPED_GEMM_PROD_FP16ABS(3)
+MAKE_KBIT_GROUPED_GEMM_PROD_FP16ABS(4)
+MAKE_KBIT_GROUPED_GEMM_PROD_FP16ABS(5)
+
 // Forward declaration of scalar GEMV launchers (flat layout, templated on absmax type)
-template <int K, typename scalar_t, typename ABSMAX_T> void kbitScalarGemv(const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, int, int, int);
+template <int K, typename scalar_t, typename ABSMAX_T>
+void kbitScalarGemv(const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, int, int, int);
 
 // Unmangled scalar GEMV wrappers — C=1, uint8 E4M4 absmax
 #define MAKE_KBIT_SCALAR_GEMV(K)                                                                                       \
@@ -547,9 +613,8 @@ template <int K, typename scalar_t, typename ABSMAX_T> void kbitScalarGemv(const
         kbitScalarGemv<K, half, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                       \
     }                                                                                                                  \
     void kbit_scalar_gemv_bf16_k##K(                                                                                   \
-        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax,                           \
-        const float* codebook, __nv_bfloat16* C,                                                                       \
-        int M, int K_dim, int N                                                                                        \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
+        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
     ) {                                                                                                                \
         kbitScalarGemv<K, __nv_bfloat16, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);              \
     }
@@ -562,15 +627,14 @@ MAKE_KBIT_SCALAR_GEMV(5)
 // fp16 absmax scalar GEMV wrappers
 #define MAKE_KBIT_SCALAR_GEMV_FP16ABS(K)                                                                               \
     void kbit_scalar_gemv_fp16_fp16abs_k##K(                                                                           \
-        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
-        int M, int K_dim, int N                                                                                        \
+        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C, int M,      \
+        int K_dim, int N                                                                                               \
     ) {                                                                                                                \
         kbitScalarGemv<K, half, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                \
     }                                                                                                                  \
     void kbit_scalar_gemv_bf16_fp16abs_k##K(                                                                           \
-        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax,                                    \
-        const float* codebook, __nv_bfloat16* C,                                                                       \
-        int M, int K_dim, int N                                                                                        \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
+        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
     ) {                                                                                                                \
         kbitScalarGemv<K, __nv_bfloat16, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                       \
     }
@@ -1142,7 +1206,7 @@ MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 5)
 // Repack extern C wrappers
 #define MAKE_CKBIT_REPACK(K)                                                                                           \
     void crepack_kbit_k##K(                                                                                            \
-        const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                  \
+        const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                 \
         unsigned char* absmax_tiled, int K_dim, int N                                                                  \
     ) {                                                                                                                \
         repack_kbit_k##K(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);                              \
@@ -1185,18 +1249,19 @@ MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 5)
 #define MAKE_CKBIT_GEMM_PROD(K)                                                                                        \
     void ckbit_gemm_prod_fp16_k##K(                                                                                    \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
-        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                  \
     ) {                                                                                                                \
-        kbit_gemm_prod_fp16_k##K(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N,         \
-                                 k_chunks);                                                                            \
+        kbit_gemm_prod_fp16_k##K(                                                                                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+        );                                                                                                             \
     }                                                                                                                  \
     void ckbit_gemm_prod_bf16_k##K(                                                                                    \
-        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax,                           \
-        const float* codebook, __nv_bfloat16* C,                                                                       \
-        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                 \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                \
     ) {                                                                                                                \
-        kbit_gemm_prod_bf16_k##K(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N,         \
-                                 k_chunks);                                                                            \
+        kbit_gemm_prod_bf16_k##K(                                                                                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+        );                                                                                                             \
     }
 
 MAKE_CKBIT_GEMM_PROD(2)
@@ -1204,25 +1269,53 @@ MAKE_CKBIT_GEMM_PROD(3)
 MAKE_CKBIT_GEMM_PROD(4)
 MAKE_CKBIT_GEMM_PROD(5)
 
+// fp16 absmax production GEMM extern C wrappers
+#define MAKE_CKBIT_GEMM_PROD_FP16ABS(K)                                                                                \
+    void ckbit_gemm_prod_fp16_fp16abs_k##K(                                                                            \
+        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                  \
+    ) {                                                                                                                \
+        kbit_gemm_prod_fp16_fp16abs_k##K(                                                                              \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+        );                                                                                                             \
+    }                                                                                                                  \
+    void ckbit_gemm_prod_bf16_fp16abs_k##K(                                                                            \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                \
+    ) {                                                                                                                \
+        kbit_gemm_prod_bf16_fp16abs_k##K(                                                                              \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+        );                                                                                                             \
+    }
+
+MAKE_CKBIT_GEMM_PROD_FP16ABS(2)
+MAKE_CKBIT_GEMM_PROD_FP16ABS(3)
+MAKE_CKBIT_GEMM_PROD_FP16ABS(4)
+MAKE_CKBIT_GEMM_PROD_FP16ABS(5)
+
 void ctest_mma(const half* A, const half* B, float* C) { testMMA(A, B, C); }
 
-// Grouped GEMM extern C wrappers (fp16 and bf16)
+// Grouped GEMM extern C wrappers — uint8 E4M4 absmax
 #define MAKE_CKBIT_GROUPED_GEMM_PROD(K)                                                                                \
     void ckbit_grouped_gemm_prod_fp16_k##K(                                                                            \
-        const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                      \
-        const float* codebook, half* C_concat, float* C_workspace, int* tile_counters,                                 \
-        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
+        const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                     \
+        const float* codebook, half* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets,      \
+        int K_dim, int N, int num_experts, int max_M                                                                   \
     ) {                                                                                                                \
-        kbit_grouped_gemm_prod_fp16_k##K(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,                    \
-                                          C_workspace, tile_counters, expert_offsets, K_dim, N, num_experts, max_M);   \
+        kbit_grouped_gemm_prod_fp16_k##K(                                                                              \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
+            K_dim, N, num_experts, max_M                                                                               \
+        );                                                                                                             \
     }                                                                                                                  \
     void ckbit_grouped_gemm_prod_bf16_k##K(                                                                            \
         const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
         const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
         const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
     ) {                                                                                                                \
-        kbit_grouped_gemm_prod_bf16_k##K(A_concat, B_packed_all, B_absmax_all, codebook, C_concat,                    \
-                                          C_workspace, tile_counters, expert_offsets, K_dim, N, num_experts, max_M);   \
+        kbit_grouped_gemm_prod_bf16_k##K(                                                                              \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
+            K_dim, N, num_experts, max_M                                                                               \
+        );                                                                                                             \
     }
 
 MAKE_CKBIT_GROUPED_GEMM_PROD(2)
@@ -1230,20 +1323,47 @@ MAKE_CKBIT_GROUPED_GEMM_PROD(3)
 MAKE_CKBIT_GROUPED_GEMM_PROD(4)
 MAKE_CKBIT_GROUPED_GEMM_PROD(5)
 
+// fp16 absmax grouped GEMM extern C wrappers
+#define MAKE_CKBIT_GROUPED_GEMM_PROD_FP16ABS(K)                                                                        \
+    void ckbit_grouped_gemm_prod_fp16_fp16abs_k##K(                                                                    \
+        const half* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all, const float* codebook,       \
+        half* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets, int K_dim, int N,           \
+        int num_experts, int max_M                                                                                     \
+    ) {                                                                                                                \
+        kbit_grouped_gemm_prod_fp16_fp16abs_k##K(                                                                      \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
+            K_dim, N, num_experts, max_M                                                                               \
+        );                                                                                                             \
+    }                                                                                                                  \
+    void ckbit_grouped_gemm_prod_bf16_fp16abs_k##K(                                                                    \
+        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all,                     \
+        const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
+    ) {                                                                                                                \
+        kbit_grouped_gemm_prod_bf16_fp16abs_k##K(                                                                      \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
+            K_dim, N, num_experts, max_M                                                                               \
+        );                                                                                                             \
+    }
+
+MAKE_CKBIT_GROUPED_GEMM_PROD_FP16ABS(2)
+MAKE_CKBIT_GROUPED_GEMM_PROD_FP16ABS(3)
+MAKE_CKBIT_GROUPED_GEMM_PROD_FP16ABS(4)
+MAKE_CKBIT_GROUPED_GEMM_PROD_FP16ABS(5)
+
 // Scalar GEMV extern C wrappers (fp16 and bf16) — C=1, uint8 E4M4 absmax
 #define MAKE_CKBIT_SCALAR_GEMV(K)                                                                                      \
     void ckbit_scalar_gemv_fp16_k##K(                                                                                  \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
         int M, int K_dim, int N                                                                                        \
     ) {                                                                                                                \
-        kbit_scalar_gemv_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                  \
+        kbit_scalar_gemv_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                   \
     }                                                                                                                  \
     void ckbit_scalar_gemv_bf16_k##K(                                                                                  \
-        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax,                           \
-        const float* codebook, __nv_bfloat16* C,                                                                       \
-        int M, int K_dim, int N                                                                                        \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
+        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
     ) {                                                                                                                \
-        kbit_scalar_gemv_bf16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                  \
+        kbit_scalar_gemv_bf16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                   \
     }
 
 MAKE_CKBIT_SCALAR_GEMV(2)
@@ -1254,15 +1374,14 @@ MAKE_CKBIT_SCALAR_GEMV(5)
 // fp16 absmax scalar GEMV extern C wrappers
 #define MAKE_CKBIT_SCALAR_GEMV_FP16ABS(K)                                                                              \
     void ckbit_scalar_gemv_fp16_fp16abs_k##K(                                                                          \
-        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
-        int M, int K_dim, int N                                                                                        \
+        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C, int M,      \
+        int K_dim, int N                                                                                               \
     ) {                                                                                                                \
         kbit_scalar_gemv_fp16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                           \
     }                                                                                                                  \
     void ckbit_scalar_gemv_bf16_fp16abs_k##K(                                                                          \
-        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax,                                    \
-        const float* codebook, __nv_bfloat16* C,                                                                       \
-        int M, int K_dim, int N                                                                                        \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
+        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
     ) {                                                                                                                \
         kbit_scalar_gemv_bf16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                           \
     }

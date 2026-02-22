@@ -891,7 +891,9 @@ def _(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(packed_flat.dtype == torch.int32, lambda: f"packed_flat must be int32, got {packed_flat.dtype}")
-    torch._check(absmax_flat.dtype == torch.uint8, lambda: f"absmax_flat must be uint8 (E4M4), got {absmax_flat.dtype}")
+    torch._check(
+        absmax_flat.dtype == torch.uint8, lambda: f"absmax_flat must be uint8 (E4M4), got {absmax_flat.dtype}"
+    )
 
     TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
     torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
@@ -922,6 +924,47 @@ def _(
     return packed_tiled, absmax_tiled
 
 
+def _kbit_gemm_prod_check(A, B_packed, B_absmax, codebook, N, k, k_chunks):
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        A.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"kbit_gemm_prod supports float16 and bfloat16, got {A.dtype}",
+    )
+    torch._check(B_packed.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed.dtype}")
+    torch._check(
+        B_absmax.dtype in (torch.uint8, torch.float16),
+        lambda: f"B_absmax must be uint8 (E4M4) or float16, got {B_absmax.dtype}",
+    )
+    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
+    torch._check(N % 64 == 0, lambda: f"N ({N}) must be divisible by 64")
+    torch._check(k_chunks >= 1, lambda: f"k_chunks must be >= 1, got {k_chunks}")
+
+
+def _kbit_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, k, k_chunks, C, C_workspace, tile_counters):
+    dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
+    abs_suffix = "_fp16abs" if B_absmax.dtype == torch.float16 else ""
+
+    # Zero workspace and counters (required by atomicAdd accumulation)
+    C_workspace.zero_()
+    tile_counters.zero_()
+
+    with _cuda_device_of(A):
+        fn = getattr(lib, f"ckbit_gemm_prod_{dtype_suffix}{abs_suffix}_k{k}")
+        fn(
+            get_ptr(A),
+            get_ptr(B_packed),
+            get_ptr(B_absmax),
+            get_ptr(codebook),
+            get_ptr(C),
+            get_ptr(C_workspace),
+            get_ptr(tile_counters),
+            ct.c_int(A.shape[0]),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            ct.c_int(k_chunks),
+        )
+
+
 @register_kernel("bitsandbytes::kbit_gemm_prod", "cuda")
 def _(
     A: torch.Tensor,
@@ -933,16 +976,7 @@ def _(
     k: int,
     k_chunks: int,
 ) -> torch.Tensor:
-    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
-    torch._check(
-        A.dtype in (torch.float16, torch.bfloat16),
-        lambda: f"kbit_gemm_prod supports float16 and bfloat16, got {A.dtype}",
-    )
-    torch._check(B_packed.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed.dtype}")
-    torch._check(B_absmax.dtype == torch.uint8, lambda: f"B_absmax must be uint8 (E4M4), got {B_absmax.dtype}")
-    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
-    torch._check(N % 64 == 0, lambda: f"N ({N}) must be divisible by 64")
-    torch._check(k_chunks >= 1, lambda: f"k_chunks must be >= 1, got {k_chunks}")
+    _kbit_gemm_prod_check(A, B_packed, B_absmax, codebook, N, k, k_chunks)
 
     M = A.shape[0]
     C = torch.empty(M, N, device=A.device, dtype=A.dtype)
@@ -957,25 +991,85 @@ def _(
     C_workspace = torch.zeros(M, N, device=A.device, dtype=torch.float32)
     tile_counters = torch.zeros(m_tiles * n_tiles, device=A.device, dtype=torch.int32)
 
-    dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
+    _kbit_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, k, k_chunks, C, C_workspace, tile_counters)
+    return C
 
-    with _cuda_device_of(A):
-        fn = getattr(lib, f"ckbit_gemm_prod_{dtype_suffix}_k{k}")
+
+@register_kernel("bitsandbytes::kbit_gemm_prod_", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    k_chunks: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    _kbit_gemm_prod_check(A, B_packed, B_absmax, codebook, N, k, k_chunks)
+    _kbit_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, k, k_chunks, out, C_workspace, tile_counters)
+    return out
+
+
+def _kbit_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, k):
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"kbit_grouped_gemm supports float16 and bfloat16, got {A_concat.dtype}",
+    )
+    torch._check(B_packed_all.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed_all.dtype}")
+    torch._check(
+        B_absmax_all.dtype in (torch.uint8, torch.float16),
+        lambda: f"B_absmax must be uint8 (E4M4) or float16, got {B_absmax_all.dtype}",
+    )
+    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
+    torch._check(
+        expert_offsets.dtype == torch.int32, lambda: f"expert_offsets must be int32, got {expert_offsets.dtype}"
+    )
+    torch._check(N % 64 == 0, lambda: f"N ({N}) must be divisible by 64")
+
+
+def _kbit_grouped_gemm_impl(
+    A_concat,
+    B_packed_all,
+    B_absmax_all,
+    codebook,
+    expert_offsets,
+    K_dim,
+    N,
+    k,
+    num_experts,
+    max_M,
+    C_concat,
+    C_workspace,
+    tile_counters,
+):
+    dtype_suffix = "fp16" if A_concat.dtype == torch.float16 else "bf16"
+    abs_suffix = "_fp16abs" if B_absmax_all.dtype == torch.float16 else ""
+
+    # Zero workspace and counters (required by atomicAdd accumulation)
+    C_workspace.zero_()
+    tile_counters.zero_()
+
+    with _cuda_device_of(A_concat):
+        fn = getattr(lib, f"ckbit_grouped_gemm_prod_{dtype_suffix}{abs_suffix}_k{k}")
         fn(
-            get_ptr(A),
-            get_ptr(B_packed),
-            get_ptr(B_absmax),
+            get_ptr(A_concat),
+            get_ptr(B_packed_all),
+            get_ptr(B_absmax_all),
             get_ptr(codebook),
-            get_ptr(C),
+            get_ptr(C_concat),
             get_ptr(C_workspace),
             get_ptr(tile_counters),
-            ct.c_int(M),
+            get_ptr(expert_offsets),
             ct.c_int(K_dim),
             ct.c_int(N),
-            ct.c_int(k_chunks),
+            ct.c_int(num_experts),
+            ct.c_int(max_M),
         )
-
-    return C
 
 
 @register_kernel("bitsandbytes::kbit_grouped_gemm", "cuda")
@@ -991,21 +1085,12 @@ def _(
     num_experts: int,
     max_M: int,
 ) -> torch.Tensor:
-    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
-    torch._check(
-        A_concat.dtype in (torch.float16, torch.bfloat16),
-        lambda: f"kbit_grouped_gemm supports float16 and bfloat16, got {A_concat.dtype}",
-    )
-    torch._check(B_packed_all.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed_all.dtype}")
-    torch._check(B_absmax_all.dtype == torch.uint8, lambda: f"B_absmax must be uint8 (E4M4), got {B_absmax_all.dtype}")
-    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
-    torch._check(expert_offsets.dtype == torch.int32, lambda: f"expert_offsets must be int32, got {expert_offsets.dtype}")
-    torch._check(N % 64 == 0, lambda: f"N ({N}) must be divisible by 64")
+    _kbit_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, k)
 
     total_M = A_concat.shape[0]
     C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
 
-    # Workspace for split-K atomicAdd reduction (zeroed each call)
+    # Workspace for split-K atomicAdd reduction
     C_workspace = torch.zeros(total_M, N, device=A_concat.device, dtype=torch.float32)
     # Tile counters for split-K last-block detection
     # Upper bound: num_experts * max_m_tiles * max_n_tiles
@@ -1022,26 +1107,57 @@ def _(
     mn_tiles = num_experts * m_tiles * n_tiles
     tile_counters = torch.zeros(mn_tiles, device=A_concat.device, dtype=torch.int32)
 
-    dtype_suffix = "fp16" if A_concat.dtype == torch.float16 else "bf16"
-
-    with _cuda_device_of(A_concat):
-        fn = getattr(lib, f"ckbit_grouped_gemm_prod_{dtype_suffix}_k{k}")
-        fn(
-            get_ptr(A_concat),
-            get_ptr(B_packed_all),
-            get_ptr(B_absmax_all),
-            get_ptr(codebook),
-            get_ptr(C_concat),
-            get_ptr(C_workspace),
-            get_ptr(tile_counters),
-            get_ptr(expert_offsets),
-            ct.c_int(K_dim),
-            ct.c_int(N),
-            ct.c_int(num_experts),
-            ct.c_int(max_M),
-        )
-
+    _kbit_grouped_gemm_impl(
+        A_concat,
+        B_packed_all,
+        B_absmax_all,
+        codebook,
+        expert_offsets,
+        K_dim,
+        N,
+        k,
+        num_experts,
+        max_M,
+        C_concat,
+        C_workspace,
+        tile_counters,
+    )
     return C_concat
+
+
+@register_kernel("bitsandbytes::kbit_grouped_gemm_", "cuda")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    num_experts: int,
+    max_M: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    _kbit_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, k)
+    _kbit_grouped_gemm_impl(
+        A_concat,
+        B_packed_all,
+        B_absmax_all,
+        codebook,
+        expert_offsets,
+        K_dim,
+        N,
+        k,
+        num_experts,
+        max_M,
+        out,
+        C_workspace,
+        tile_counters,
+    )
+    return out
 
 
 def _kbit_scalar_gemv_impl(
