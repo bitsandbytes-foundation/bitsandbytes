@@ -266,6 +266,77 @@ class TestGemmNVFP4:
             print(f"  Mean relative error: {rel_err:.4f}")
             assert rel_err < 0.5, f"Relative error {rel_err:.4f} too large"
 
+    def _run_gemm_test(self, M, N, K, seed=42):
+        """Helper: quantize random data, run GEMM, compare against reference."""
+        torch.manual_seed(seed)
+        A_float = torch.randn(M, K, dtype=torch.float32, device="cuda")
+        B_float = torch.randn(N, K, dtype=torch.float32, device="cuda")
+
+        A_packed, A_scales, A_ts = cuda_quantize_nvfp4(A_float.reshape(-1))
+        B_packed, B_scales, B_ts = cuda_quantize_nvfp4(B_float.reshape(-1))
+
+        A_deq = cuda_dequantize_nvfp4(A_packed, A_scales, A_ts, M * K).reshape(M, K)
+        B_deq = cuda_dequantize_nvfp4(B_packed, B_scales, B_ts, N * K).reshape(N, K)
+
+        D_ref = A_deq @ B_deq.T
+        D_kernel = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
+        D_out = D_kernel * A_ts * B_ts
+
+        abs_err = (D_out - D_ref).abs()
+        ref_mag = D_ref.abs().mean().item()
+        mean_err = abs_err.mean().item()
+        max_err = abs_err.max().item()
+
+        if ref_mag > 0:
+            rel_err = mean_err / ref_mag
+        else:
+            rel_err = mean_err
+
+        return rel_err, max_err, mean_err, ref_mag
+
+    def test_gemm_medium(self):
+        """Medium matrices (128x128x128) — multiple tiles in all dimensions."""
+        rel_err, max_err, mean_err, ref_mag = self._run_gemm_test(128, 128, 128)
+        print(f"Medium (128x128x128): rel_err={rel_err:.6f}, max_err={max_err:.4f}")
+        assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large"
+
+    def test_gemm_large(self):
+        """Larger matrices (256x256x256)."""
+        rel_err, max_err, mean_err, ref_mag = self._run_gemm_test(256, 256, 256)
+        print(f"Large (256x256x256): rel_err={rel_err:.6f}, max_err={max_err:.4f}")
+        assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large"
+
+    @pytest.mark.parametrize(
+        "M,N,K",
+        [
+            (16, 8, 128),   # Single M/N tile, multi K
+            (48, 24, 64),   # M,N not multiples of tile (16,8)
+            (32, 8, 192),   # K not multiple of 64 (3 K-tiles)
+            (80, 40, 64),   # Larger non-aligned M,N
+        ],
+        ids=["16x8x128", "48x24x64", "32x8x192", "80x40x64"],
+    )
+    def test_gemm_various_shapes(self, M, N, K):
+        """Test various matrix shapes including non-tile-aligned."""
+        rel_err, max_err, mean_err, ref_mag = self._run_gemm_test(M, N, K)
+        print(f"Shape ({M}x{N}x{K}): rel_err={rel_err:.6f}, ref_mag={ref_mag:.4f}")
+        assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large for {M}x{N}x{K}"
+
+    @pytest.mark.parametrize(
+        "M,N,K",
+        [
+            (1, 128, 64),     # Single row (batch=1 inference)
+            (8, 128, 64),     # Small batch
+            (32, 128, 128),   # Medium batch
+        ],
+        ids=["1x128x64", "8x128x64", "32x128x128"],
+    )
+    def test_gemm_tall_skinny(self, M, N, K):
+        """Test tall/skinny shapes typical of LLM inference."""
+        rel_err, max_err, mean_err, ref_mag = self._run_gemm_test(M, N, K)
+        print(f"Tall/skinny ({M}x{N}x{K}): rel_err={rel_err:.6f}, ref_mag={ref_mag:.4f}")
+        assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large for {M}x{N}x{K}"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
