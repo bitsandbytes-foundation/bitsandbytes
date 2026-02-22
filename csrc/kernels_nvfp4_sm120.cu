@@ -63,19 +63,19 @@ __device__ __forceinline__ uint32_t pack_8_nibbles_slow(const unsigned char* dat
 }
 
 // ============================================================================
-// Double-buffered shared-memory NVFP4 GEMM kernel with cp.async
+// Pipelined shared-memory NVFP4 GEMM kernel
 //
 // Key optimizations:
 // 1. Cooperative tiling with coalesced global→smem loads
 // 2. Data reuse: A shared across N_WARPS (4x), B shared across M_WARPS (2x)
-// 3. Double buffering: overlaps global→smem loads for K-step k+1 with
-//    MMA compute for K-step k. Uses register-based pipelining: global loads
-//    go to registers first, compute runs, then registers write to smem.
+// 3. Register-based pipelining: global loads issue into registers, then MMA
+//    compute runs while loads are in flight, then registers write to smem
+//    for the next iteration. This overlaps load latency with compute.
 // 4. Fast register packing from smem (uint32 loads, no nibble loops)
 // 5. SFA/SFB packed as single uint32 loads (proved consecutive by CuTE analysis)
 //
 // Block tile: m32 x n128 (M_WARPS=2, N_WARPS=4, N_TILES_PER_WARP=4)
-// Shared memory: 2 × 5760 = 11520 bytes (double-buffered)
+// Shared memory: 5760 bytes (single buffer — pipeline uses registers)
 // ============================================================================
 
 // N-tiles per warp: each warp computes m16 x (N_TILES_PER_WARP * 8)
@@ -96,8 +96,8 @@ __device__ __forceinline__ uint32_t pack_8_nibbles_slow(const unsigned char* dat
 #define SMEM_SFB_BYTES (BLOCK_N_DIM * 4)  // 512
 #define SMEM_TOTAL (SMEM_A_BYTES + SMEM_B_BYTES + SMEM_SFA_BYTES + SMEM_SFB_BYTES)
 
-// 256 threads, target 3 blocks/SM (need ~80 regs for double-buffer registers)
-__global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 3) void kGemmNVFP4_smem(
+// 256 threads, target 4 blocks/SM for occupancy
+__global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
     const unsigned char* __restrict__ A,   // M x K/2 packed FP4 (row-major)
     const unsigned char* __restrict__ B,   // N x K/2 packed FP4 (B transposed, row-major)
     const unsigned char* __restrict__ SFA, // M x K/16 UE4M3 scales
@@ -105,8 +105,12 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 3) void kGemmNVFP4_smem(
     float* __restrict__ D,                 // M x N output (F32)
     int M, int N, int K
 ) {
-    // Double-buffered shared memory
-    __shared__ __align__(16) unsigned char smem[2 * SMEM_TOTAL]; // 11520 bytes
+    // Single-buffered shared memory
+    __shared__ __align__(16) unsigned char smem[SMEM_TOTAL]; // 5760 bytes
+    unsigned char* smem_A = smem;
+    unsigned char* smem_B = smem + SMEM_A_BYTES;
+    unsigned char* smem_SFA = smem + SMEM_A_BYTES + SMEM_B_BYTES;
+    unsigned char* smem_SFB = smem + SMEM_A_BYTES + SMEM_B_BYTES + SMEM_SFA_BYTES;
 
     const int tid = threadIdx.x;
     const int warp_in_block = tid / 32;
@@ -138,7 +142,7 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 3) void kGemmNVFP4_smem(
     const int cute_sf_m0 = sf_tidx % 16;
     const int sfa_local_row = m_warp * 16 + (cute_sf_m0 % 8) * 2 + cute_sf_m0 / 8;
 
-    // Precompute cooperative load addresses (per-thread, reused each K-step)
+    // Precompute cooperative load addresses
     const int a_off = tid * 4;
     const int a_load_row = a_off >> 5;
     const int a_load_col = a_off & 31;
@@ -149,125 +153,157 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 3) void kGemmNVFP4_smem(
     const int b_load_col = b_off & 31;
     const int b_gn = block_n + b_load_row;
 
+    // Precompute invariant boundary conditions
+    const bool a_gm_ok = (a_gm < M);
+    const bool b_gn_ok = (b_gn < N);
+    const int a_row_base = a_gm * half_K;
+    const int b_row_base = b_gn * half_K;
+
     // ================================================================
-    // Macro for cooperative load into a buffer
+    // Helper: issue global loads into registers (non-blocking)
     // ================================================================
-#define COOP_LOAD(BUF, K_BYTE, K_SCALE)                                                                                   \
+#define ISSUE_LOADS(K_BYTE, K_SCALE, REG_A, REG_B, REG_SFA, REG_SFB)                                                      \
     do {                                                                                                                   \
-        unsigned char* _sA = (BUF);                                                                                        \
-        unsigned char* _sB = (BUF) + SMEM_A_BYTES;                                                                         \
-        unsigned char* _sSFA = (BUF) + SMEM_A_BYTES + SMEM_B_BYTES;                                                        \
-        unsigned char* _sSFB = (BUF) + SMEM_A_BYTES + SMEM_B_BYTES + SMEM_SFA_BYTES;                                       \
-        /* A tile */                                                                                                       \
-        {                                                                                                                  \
-            uint32_t _av = 0;                                                                                              \
-            if (a_gm < M) {                                                                                                \
-                int _ga = a_gm * half_K + (K_BYTE) + a_load_col;                                                           \
-                if ((K_BYTE) + a_load_col + 3 < half_K)                                                                    \
-                    _av = *(const uint32_t*)(A + _ga);                                                                     \
-                else                                                                                                       \
-                    for (int _b = 0; _b < 4; _b++)                                                                         \
-                        if ((K_BYTE) + a_load_col + _b < half_K)                                                           \
-                            _av |= ((uint32_t)A[_ga + _b]) << (_b * 8);                                                   \
+        /* A: 1 × uint32 */                                                                                                \
+        (REG_A) = 0;                                                                                                       \
+        if (a_gm_ok) {                                                                                                     \
+            int _ga = a_row_base + (K_BYTE) + a_load_col;                                                                  \
+            if ((K_BYTE) + a_load_col + 3 < half_K)                                                                        \
+                (REG_A) = *(const uint32_t*)(A + _ga);                                                                     \
+            else                                                                                                           \
+                for (int _b = 0; _b < 4; _b++)                                                                             \
+                    if ((K_BYTE) + a_load_col + _b < half_K)                                                               \
+                        (REG_A) |= ((uint32_t)A[_ga + _b]) << (_b * 8);                                                   \
+        }                                                                                                                  \
+        /* B: 1 × uint4 stored as 4 uint32 */                                                                              \
+        if (b_gn_ok) {                                                                                                     \
+            int _gb = b_row_base + (K_BYTE) + b_load_col;                                                                  \
+            if ((K_BYTE) + b_load_col + 15 < half_K) {                                                                     \
+                uint4 _bv = *(const uint4*)(B + _gb);                                                                      \
+                (REG_B).x = _bv.x;                                                                                         \
+                (REG_B).y = _bv.y;                                                                                         \
+                (REG_B).z = _bv.z;                                                                                         \
+                (REG_B).w = _bv.w;                                                                                         \
+            } else {                                                                                                       \
+                unsigned char _buf[16] = {};                                                                                \
+                for (int _b = 0; _b < 16; _b++)                                                                            \
+                    if ((K_BYTE) + b_load_col + _b < half_K)                                                               \
+                        _buf[_b] = B[_gb + _b];                                                                            \
+                (REG_B) = *(uint4*)_buf;                                                                                   \
             }                                                                                                              \
-            *(uint32_t*)(_sA + a_off) = _av;                                                                               \
+        } else {                                                                                                           \
+            (REG_B) = make_uint4(0, 0, 0, 0);                                                                             \
         }                                                                                                                  \
-        /* B tile */                                                                                                       \
-        {                                                                                                                  \
-            if (b_gn < N) {                                                                                                \
-                int _gb = b_gn * half_K + (K_BYTE) + b_load_col;                                                           \
-                if ((K_BYTE) + b_load_col + 15 < half_K)                                                                   \
-                    *(uint4*)(_sB + b_off) = *(const uint4*)(B + _gb);                                                     \
-                else                                                                                                       \
-                    for (int _b = 0; _b < 16; _b++)                                                                        \
-                        _sB[b_off + _b] = ((K_BYTE) + b_load_col + _b < half_K) ? B[_gb + _b] : 0;                        \
-            } else                                                                                                         \
-                *(uint4*)(_sB + b_off) = make_uint4(0, 0, 0, 0);                                                          \
-        }                                                                                                                  \
-        /* SFA */                                                                                                          \
+        /* SFA: 1 × uint32 (first 32 threads) */                                                                           \
+        (REG_SFA) = 0;                                                                                                     \
         if (tid < BLOCK_M_DIM) {                                                                                           \
             int _gm = block_m + tid;                                                                                       \
-            uint32_t _sv = 0;                                                                                              \
             if (_gm < M) {                                                                                                 \
                 int _bs = _gm * scale_K + (K_SCALE);                                                                       \
                 if ((K_SCALE) + 3 < scale_K)                                                                               \
-                    _sv = *(const uint32_t*)(SFA + _bs);                                                                   \
+                    (REG_SFA) = *(const uint32_t*)(SFA + _bs);                                                             \
                 else                                                                                                       \
                     for (int _b = 0; _b < 4; _b++)                                                                         \
                         if ((K_SCALE) + _b < scale_K)                                                                      \
-                            _sv |= ((uint32_t)SFA[_bs + _b]) << (_b * 8);                                                 \
+                            (REG_SFA) |= ((uint32_t)SFA[_bs + _b]) << (_b * 8);                                           \
             }                                                                                                              \
-            *(uint32_t*)(_sSFA + tid * 4) = _sv;                                                                           \
         }                                                                                                                  \
-        /* SFB */                                                                                                          \
+        /* SFB: 1 × uint32 (first 128 threads) */                                                                          \
+        (REG_SFB) = 0;                                                                                                     \
         if (tid < BLOCK_N_DIM) {                                                                                           \
             int _gn = block_n + tid;                                                                                       \
-            uint32_t _sv = 0;                                                                                              \
             if (_gn < N) {                                                                                                 \
                 int _bs = _gn * scale_K + (K_SCALE);                                                                       \
                 if ((K_SCALE) + 3 < scale_K)                                                                               \
-                    _sv = *(const uint32_t*)(SFB + _bs);                                                                   \
+                    (REG_SFB) = *(const uint32_t*)(SFB + _bs);                                                             \
                 else                                                                                                       \
                     for (int _b = 0; _b < 4; _b++)                                                                         \
                         if ((K_SCALE) + _b < scale_K)                                                                      \
-                            _sv |= ((uint32_t)SFB[_bs + _b]) << (_b * 8);                                                 \
+                            (REG_SFB) |= ((uint32_t)SFB[_bs + _b]) << (_b * 8);                                           \
             }                                                                                                              \
-            *(uint32_t*)(_sSFB + tid * 4) = _sv;                                                                           \
         }                                                                                                                  \
     } while (0)
 
     // ================================================================
-    // Macro for compute step from a buffer
+    // Helper: write loaded registers to smem
     // ================================================================
-#define COMPUTE_STEP(BUF)                                                                                                  \
+#define STORE_TO_SMEM(REG_A, REG_B, REG_SFA, REG_SFB)                                                                     \
     do {                                                                                                                   \
-        const unsigned char* _cA = (BUF);                                                                                  \
-        const unsigned char* _cB = (BUF) + SMEM_A_BYTES;                                                                   \
-        const unsigned char* _cSFA = (BUF) + SMEM_A_BYTES + SMEM_B_BYTES;                                                  \
-        const unsigned char* _cSFB = (BUF) + SMEM_A_BYTES + SMEM_B_BYTES + SMEM_SFA_BYTES;                                 \
+        *(uint32_t*)(smem_A + a_off) = (REG_A);                                                                            \
+        *(uint4*)(smem_B + b_off) = (REG_B);                                                                               \
+        if (tid < BLOCK_M_DIM)                                                                                             \
+            *(uint32_t*)(smem_SFA + tid * 4) = (REG_SFA);                                                                  \
+        if (tid < BLOCK_N_DIM)                                                                                             \
+            *(uint32_t*)(smem_SFB + tid * 4) = (REG_SFB);                                                                  \
+    } while (0)
+
+    // ================================================================
+    // Helper: compute MMA step from smem
+    // ================================================================
+#define COMPUTE_STEP()                                                                                                     \
+    do {                                                                                                                   \
         uint32_t _ar[4];                                                                                                   \
-        _ar[0] = *(const uint32_t*)(_cA + a_local_row0 * 32 + t0 * 4);                                                    \
-        _ar[1] = *(const uint32_t*)(_cA + a_local_row1 * 32 + t0 * 4);                                                    \
-        _ar[2] = *(const uint32_t*)(_cA + a_local_row0 * 32 + t0 * 4 + 16);                                               \
-        _ar[3] = *(const uint32_t*)(_cA + a_local_row1 * 32 + t0 * 4 + 16);                                               \
-        uint32_t _sf = *(const uint32_t*)(_cSFA + sfa_local_row * 4);                                                      \
+        _ar[0] = *(const uint32_t*)(smem_A + a_local_row0 * 32 + t0 * 4);                                                 \
+        _ar[1] = *(const uint32_t*)(smem_A + a_local_row1 * 32 + t0 * 4);                                                 \
+        _ar[2] = *(const uint32_t*)(smem_A + a_local_row0 * 32 + t0 * 4 + 16);                                            \
+        _ar[3] = *(const uint32_t*)(smem_A + a_local_row1 * 32 + t0 * 4 + 16);                                            \
+        uint32_t _sf = *(const uint32_t*)(smem_SFA + sfa_local_row * 4);                                                   \
         _Pragma("unroll") for (int _nt = 0; _nt < N_TILES_PER_WARP; _nt++) {                                               \
             int _ln = n_warp * N_TILES_PER_WARP * 8 + _nt * 8;                                                            \
             int _br = _ln + t1;                                                                                            \
-            uint32_t _b0 = *(const uint32_t*)(_cB + _br * 32 + t0 * 4);                                                   \
-            uint32_t _b1 = *(const uint32_t*)(_cB + _br * 32 + t0 * 4 + 16);                                              \
-            uint32_t _sb = *(const uint32_t*)(_cSFB + (_ln + t1) * 4);                                                     \
+            uint32_t _b0 = *(const uint32_t*)(smem_B + _br * 32 + t0 * 4);                                                \
+            uint32_t _b1 = *(const uint32_t*)(smem_B + _br * 32 + t0 * 4 + 16);                                           \
+            uint32_t _sb = *(const uint32_t*)(smem_SFB + (_ln + t1) * 4);                                                  \
             mma_nvfp4_m16n8k64(acc[_nt][0], acc[_nt][1], acc[_nt][2], acc[_nt][3], _ar[0], _ar[1], _ar[2], _ar[3], _b0,   \
                                _b1, acc[_nt][0], acc[_nt][1], acc[_nt][2], acc[_nt][3], _sf, _sb);                         \
         }                                                                                                                  \
     } while (0)
 
     // ================================================================
-    // Prologue: load first K-step into buffer 0
+    // Pipelined K-loop:
+    //   1. Issue global loads for step k+1 → registers (non-blocking)
+    //   2. Compute MMA with smem (step k, already loaded)
+    //   3. __syncthreads (ensure compute done, loads complete)
+    //   4. Write registers → smem (for step k+1)
+    //   5. __syncthreads (ensure smem ready)
     // ================================================================
-    COOP_LOAD(smem, 0, 0);
+
+    // Pipeline state registers
+    uint32_t pipe_a;
+    uint4 pipe_b;
+    uint32_t pipe_sfa, pipe_sfb;
+
+    // Load first K-step directly into smem
+    ISSUE_LOADS(0, 0, pipe_a, pipe_b, pipe_sfa, pipe_sfb);
+    STORE_TO_SMEM(pipe_a, pipe_b, pipe_sfa, pipe_sfb);
     __syncthreads();
 
-    int cur = 0;
     for (int k_start = 0; k_start < K; k_start += 64) {
-        int nxt = 1 - cur;
-        unsigned char* cur_buf = smem + cur * SMEM_TOTAL;
-        unsigned char* nxt_buf = smem + nxt * SMEM_TOTAL;
-
-        // Issue loads for NEXT K-step into other buffer
-        if (k_start + 64 < K) {
-            COOP_LOAD(nxt_buf, (k_start + 64) / 2, (k_start + 64) / 16);
+        // Step 1: Issue loads for NEXT K-step into registers
+        bool has_next = (k_start + 64 < K);
+        if (has_next) {
+            ISSUE_LOADS((k_start + 64) / 2, (k_start + 64) / 16, pipe_a, pipe_b, pipe_sfa, pipe_sfb);
         }
 
-        // Compute with CURRENT buffer (overlaps with loads above)
-        COMPUTE_STEP(cur_buf);
+        // Step 2: Compute with CURRENT smem (overlaps with loads in flight)
+        COMPUTE_STEP();
 
-        // Single sync: ensures both loads and compute are done
+        // Step 3: Sync — ensure all warps done computing before smem overwrite
         __syncthreads();
-        cur = nxt;
+
+        // Step 4: Write next step's data to smem
+        if (has_next) {
+            STORE_TO_SMEM(pipe_a, pipe_b, pipe_sfa, pipe_sfb);
+        }
+
+        // Step 5: Sync — ensure smem writes visible to all warps
+        if (has_next) {
+            __syncthreads();
+        }
     }
 
-#undef COOP_LOAD
+#undef ISSUE_LOADS
+#undef STORE_TO_SMEM
 #undef COMPUTE_STEP
 
     // ---- Write output ----
