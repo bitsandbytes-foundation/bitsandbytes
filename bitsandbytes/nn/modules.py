@@ -921,6 +921,68 @@ class LinearKbit(nn.Linear):
         return out.to(inp_dtype)
 
 
+def prepare_model_for_kbit_training(
+    model: torch.nn.Module,
+    use_gradient_checkpointing: bool = True,
+    gradient_checkpointing_kwargs: Optional[dict] = None,
+) -> torch.nn.Module:
+    """Prepare a model with LinearKbit layers for QLoRA-style training.
+
+    This function:
+    1. Freezes all base model parameters (requires_grad=False)
+    2. Casts LayerNorm and other normalization layers to float32
+    3. Enables gradient checkpointing if requested
+    4. Registers the global weight buffer size from the model's largest layer
+
+    After calling this, add LoRA adapters (or any trainable parameters) and
+    those will be the only parameters that receive gradients.
+
+    Args:
+        model: A model containing LinearKbit layers.
+        use_gradient_checkpointing: Enable gradient checkpointing for memory savings.
+        gradient_checkpointing_kwargs: Kwargs passed to model.gradient_checkpointing_enable().
+
+    Returns:
+        The modified model (in-place).
+    """
+    # Freeze all parameters
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Cast normalization layers to float32 for training stability
+    for module in model.modules():
+        if isinstance(module, (torch.nn.LayerNorm, torch.nn.RMSNorm)):
+            module.float()
+
+    # Enable gradient checkpointing
+    if use_gradient_checkpointing:
+        if hasattr(model, "gradient_checkpointing_enable"):
+            kwargs = gradient_checkpointing_kwargs or {}
+            model.gradient_checkpointing_enable(**kwargs)
+        elif hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        model.is_gradient_checkpointing = True
+
+    # Register global weight buffer for the largest LinearKbit layer
+    max_elements = 0
+    compute_dtype = torch.float16
+    device = None
+    for module in model.modules():
+        if isinstance(module, LinearKbit) and module.weight.kbit_quantized:
+            w = module.weight
+            n = w.N_padded * w.K_dim
+            if n > max_elements:
+                max_elements = n
+                device = w.packed.device
+            if module.compute_dtype is not None:
+                compute_dtype = module.compute_dtype
+
+    if max_elements > 0 and device is not None:
+        _GlobalWeightBuffer.get_buffer(device, max_elements, compute_dtype)
+
+    return model
+
+
 class Int8Params(torch.nn.Parameter):
     def __new__(
         cls,

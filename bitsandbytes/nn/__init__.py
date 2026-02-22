@@ -20,6 +20,7 @@ from .modules import (
     StableEmbedding,
     SwitchBackLinearBnb,
     _GlobalWeightBuffer,
+    prepare_model_for_kbit_training,
 )
 from .triton_based_modules import (
     StandardLinear,

@@ -16,7 +16,7 @@ import torch
 
 import bitsandbytes as bnb
 from bitsandbytes import _ops  # noqa: F401 — ensure ops are registered
-from bitsandbytes.nn import LinearKbit, ParamsKbit, _GlobalWeightBuffer
+from bitsandbytes.nn import LinearKbit, ParamsKbit, _GlobalWeightBuffer, prepare_model_for_kbit_training
 
 # Skip all tests if CUDA not available
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
@@ -309,3 +309,40 @@ class TestMatMulKbit:
         loss.backward()
         assert x.grad is not None
         assert x.grad.shape == x.shape
+
+
+class TestPrepareModelForKbitTraining:
+    """Tests for prepare_model_for_kbit_training."""
+
+    def _make_model(self):
+        """Create a simple model with LinearKbit layers."""
+        model = torch.nn.Sequential(
+            LinearKbit(256, 128, bias=True, k=4),
+            torch.nn.LayerNorm(128),
+            LinearKbit(128, 64, bias=True, k=4),
+        ).to("cuda")
+        return model
+
+    def test_freezes_all_params(self):
+        """All parameters should be frozen after prepare."""
+        model = self._make_model()
+        prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
+        for param in model.parameters():
+            assert not param.requires_grad
+
+    def test_layernorm_float32(self):
+        """LayerNorm should be cast to float32."""
+        model = self._make_model()
+        prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
+        ln = model[1]
+        assert ln.weight.dtype == torch.float32
+
+    def test_buffer_pre_allocated(self):
+        """Global weight buffer should be sized for the largest layer."""
+        _GlobalWeightBuffer.clear()
+        model = self._make_model()
+        prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
+        # Largest layer is 256→128: K_dim=256, N_padded=128, so 256*128 = 32768
+        buf = _GlobalWeightBuffer._buffers.get(torch.device("cuda", 0))
+        assert buf is not None
+        assert buf.numel() >= 32768
