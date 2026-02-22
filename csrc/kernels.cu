@@ -2461,21 +2461,27 @@ MAKE_kQuantizeBlockwise(half, 1024, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(half, 512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half, 256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(half, 128, 2, 0, General8bit)
+#if BNB_WARP_SIZE == 32
 MAKE_kQuantizeBlockwise(half, 64, 2, 0, General8bit)
+#endif
 MAKE_kQuantizeBlockwise(half, 4096, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(half, 2048, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(half, 1024, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(half, 512, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(half, 256, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(half, 128, 2, 0, FP4)
+#if BNB_WARP_SIZE == 32
 MAKE_kQuantizeBlockwise(half, 64, 2, 0, FP4)
+#endif
 MAKE_kQuantizeBlockwise(half, 4096, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(half, 2048, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(half, 1024, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(half, 512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half, 256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half, 128, 2, 0, NF4)
+#if BNB_WARP_SIZE == 32
 MAKE_kQuantizeBlockwise(half, 64, 2, 0, NF4)
+#endif
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, General8bit)
@@ -2483,14 +2489,18 @@ MAKE_kQuantizeBlockwise(float, 1024, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 512, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 256, 2, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 128, 2, 0, General8bit)
+#if BNB_WARP_SIZE == 32
 MAKE_kQuantizeBlockwise(float, 64, 2, 0, General8bit)
+#endif
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 1024, 4, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 512, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 256, 2, 0, FP4)
 MAKE_kQuantizeBlockwise(float, 128, 2, 0, FP4)
+#if BNB_WARP_SIZE == 32
 MAKE_kQuantizeBlockwise(float, 64, 2, 0, FP4)
+#endif
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 1024, 4, 0, NF4)
