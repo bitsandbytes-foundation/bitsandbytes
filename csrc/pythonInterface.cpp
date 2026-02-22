@@ -466,6 +466,50 @@ MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 3)
 MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 4)
 MAKE_KBIT_DEQUANT(fp32, float, fp32abs, float, 5)
 
+// Forward declaration of tiled dequant launcher
+template <typename T, int K, typename ABSMAX_T>
+void dequantizeBlockwise_kbit_tiled(
+    const unsigned int* packed_in, const float* codebook, const ABSMAX_T* absmax, T* out, int K_dim, int N,
+    cudaStream_t stream
+);
+
+// Unmangled tiled dequant wrappers: output type × absmax type × K
+#define MAKE_KBIT_DEQUANT_TILED(tname, T, aname, ABSMAX_T, K)                                                          \
+    void dequantize_kbit_tiled_##tname##_##aname##_k##K(                                                               \
+        const unsigned int* packed_in, const float* codebook, const ABSMAX_T* absmax, T* out, int K_dim, int N,        \
+        cudaStream_t stream                                                                                            \
+    ) {                                                                                                                \
+        dequantizeBlockwise_kbit_tiled<T, K, ABSMAX_T>(packed_in, codebook, absmax, out, K_dim, N, stream);            \
+    }
+
+// uint8 E4M4 absmax
+MAKE_KBIT_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2)
+MAKE_KBIT_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 3)
+MAKE_KBIT_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 4)
+MAKE_KBIT_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 5)
+MAKE_KBIT_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_KBIT_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 3)
+MAKE_KBIT_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_KBIT_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 5)
+MAKE_KBIT_DEQUANT_TILED(fp32, float, u8abs, unsigned char, 2)
+MAKE_KBIT_DEQUANT_TILED(fp32, float, u8abs, unsigned char, 3)
+MAKE_KBIT_DEQUANT_TILED(fp32, float, u8abs, unsigned char, 4)
+MAKE_KBIT_DEQUANT_TILED(fp32, float, u8abs, unsigned char, 5)
+
+// fp16 absmax
+MAKE_KBIT_DEQUANT_TILED(fp16, half, fp16abs, half, 2)
+MAKE_KBIT_DEQUANT_TILED(fp16, half, fp16abs, half, 3)
+MAKE_KBIT_DEQUANT_TILED(fp16, half, fp16abs, half, 4)
+MAKE_KBIT_DEQUANT_TILED(fp16, half, fp16abs, half, 5)
+MAKE_KBIT_DEQUANT_TILED(bf16, __nv_bfloat16, fp16abs, half, 2)
+MAKE_KBIT_DEQUANT_TILED(bf16, __nv_bfloat16, fp16abs, half, 3)
+MAKE_KBIT_DEQUANT_TILED(bf16, __nv_bfloat16, fp16abs, half, 4)
+MAKE_KBIT_DEQUANT_TILED(bf16, __nv_bfloat16, fp16abs, half, 5)
+MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 2)
+MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 3)
+MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 4)
+MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 5)
+
 // Forward declaration of repack launcher
 template <int K> void repackKbit(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int);
 
@@ -1288,6 +1332,43 @@ MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 2)
 MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 3)
 MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 4)
 MAKE_CKBIT_DEQUANT(fp32, float, fp32abs, float, 5)
+
+// Tiled dequant extern C wrappers: output type × absmax type × K
+#define MAKE_CKBIT_DEQUANT_TILED(tname, T, aname, ABSMAX_T, K)                                                         \
+    void cdequantize_kbit_tiled_##tname##_##aname##_k##K(                                                              \
+        const unsigned int* packed_in, const float* codebook, const ABSMAX_T* absmax, T* out, int K_dim, int N,        \
+        cudaStream_t stream                                                                                            \
+    ) {                                                                                                                \
+        dequantize_kbit_tiled_##tname##_##aname##_k##K(packed_in, codebook, absmax, out, K_dim, N, stream);            \
+    }
+
+// uint8 E4M4 absmax
+MAKE_CKBIT_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2)
+MAKE_CKBIT_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 3)
+MAKE_CKBIT_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 4)
+MAKE_CKBIT_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 5)
+MAKE_CKBIT_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_CKBIT_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 3)
+MAKE_CKBIT_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_CKBIT_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 5)
+MAKE_CKBIT_DEQUANT_TILED(fp32, float, u8abs, unsigned char, 2)
+MAKE_CKBIT_DEQUANT_TILED(fp32, float, u8abs, unsigned char, 3)
+MAKE_CKBIT_DEQUANT_TILED(fp32, float, u8abs, unsigned char, 4)
+MAKE_CKBIT_DEQUANT_TILED(fp32, float, u8abs, unsigned char, 5)
+
+// fp16 absmax
+MAKE_CKBIT_DEQUANT_TILED(fp16, half, fp16abs, half, 2)
+MAKE_CKBIT_DEQUANT_TILED(fp16, half, fp16abs, half, 3)
+MAKE_CKBIT_DEQUANT_TILED(fp16, half, fp16abs, half, 4)
+MAKE_CKBIT_DEQUANT_TILED(fp16, half, fp16abs, half, 5)
+MAKE_CKBIT_DEQUANT_TILED(bf16, __nv_bfloat16, fp16abs, half, 2)
+MAKE_CKBIT_DEQUANT_TILED(bf16, __nv_bfloat16, fp16abs, half, 3)
+MAKE_CKBIT_DEQUANT_TILED(bf16, __nv_bfloat16, fp16abs, half, 4)
+MAKE_CKBIT_DEQUANT_TILED(bf16, __nv_bfloat16, fp16abs, half, 5)
+MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 2)
+MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 3)
+MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 4)
+MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 5)
 
 // Production GEMM extern C wrappers (fp16 and bf16)
 #define MAKE_CKBIT_GEMM_PROD(K)                                                                                        \

@@ -504,6 +504,59 @@ def _(
     return out
 
 
+# K-bit dequantize from tiled layout (repack_kbit output -> flat [N, K_dim] row-major)
+
+torch.library.define(
+    "bitsandbytes::dequantize_kbit_tiled",
+    "(Tensor packed, Tensor codebook, Tensor absmax, int k, int K_dim, int N, ScalarType dtype) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::dequantize_kbit_tiled")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        absmax.dtype in (torch.float32, torch.uint8, torch.float16),
+        lambda: f"absmax must be float32, uint8 (E4M4), or float16, got {absmax.dtype}",
+    )
+    n = N * K_dim
+    num_blocks = -(n // -32)
+    return torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_kbit_tiled_",
+    "(Tensor packed, Tensor codebook, Tensor absmax, int k, int K_dim, int N, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::dequantize_kbit_tiled_")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    n = N * K_dim
+    num_blocks = -(n // -32)
+    torch._check(out.numel() >= num_blocks * 32, lambda: f"out must have at least {num_blocks * 32} elements")
+    torch._check(out.dtype == dtype, lambda: f"out dtype {out.dtype} must match requested dtype {dtype}")
+    return out
+
+
 # K-bit repack: flat bit-plane layout -> GEMM-tiled layout
 
 torch.library.define(

@@ -1212,6 +1212,50 @@ def dequantize_kbit(
     return result[:n]
 
 
+def dequantize_kbit_tiled(
+    packed: Tensor,
+    absmax: Tensor,
+    codebook: Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype = torch.float16,
+    out: Optional[Tensor] = None,
+) -> Tensor:
+    """Dequantize a k-bit tiled-layout tensor (from repack_kbit output).
+
+    Reads from the GEMM-tiled layout produced by repack_kbit and writes
+    a flat [N, K_dim] row-major output suitable for cuBLAS matmul.
+
+    Args:
+        packed: int32 tensor of tiled bit-plane packed values (from repack_kbit).
+        absmax: Tensor of tiled per-block absmax values (from repack_kbit).
+        codebook: float32 codebook tensor with 2^k entries.
+        k: Bit width (2, 3, 4, or 5).
+        K_dim: Reduction dimension (inner dim of weight matrix).
+        N: Output columns (outer dim of weight matrix).
+        dtype: Output dtype. Defaults to float16.
+        out: Optional pre-allocated output tensor for CUDA graph compatibility.
+
+    Returns:
+        Dequantized tensor of shape (N * K_dim,) with the given dtype.
+    """
+    n = N * K_dim
+    num_blocks = -(n // -32)
+    padded_n = num_blocks * 32
+
+    if out is not None:
+        if out.numel() < padded_n:
+            raise ValueError(f"out tensor has {out.numel()} elements, need at least {padded_n}")
+        if out.dtype != dtype:
+            raise ValueError(f"out dtype {out.dtype} does not match requested dtype {dtype}")
+        torch.ops.bitsandbytes.dequantize_kbit_tiled_(packed, codebook, absmax, k, K_dim, N, dtype, out)
+        return out[:n]
+
+    result = torch.ops.bitsandbytes.dequantize_kbit_tiled(packed, codebook, absmax, k, K_dim, N, dtype)
+    return result[:n]
+
+
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def quantize(
     A: Tensor,

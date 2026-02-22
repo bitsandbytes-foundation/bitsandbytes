@@ -865,6 +865,85 @@ void dequantizeBlockwise_kbit(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+// Tiled-layout dequantize: reads from repack_kbit output (tiled bit-plane layout),
+// writes to flat [N, K_dim] row-major output for cuBLAS matmul.
+// block_id maps to (n_idx, k_block_idx) coordinates, then computes tiled read addresses.
+template <typename T, int K, int BLOCKS_PER_WARP, typename ABSMAX_T>
+__global__ void kDequantizeBlockwise_kbit_tiled(
+    const unsigned int* __restrict__ packed_in, const float* __restrict__ codebook, const ABSMAX_T* __restrict__ absmax,
+    T* __restrict__ out, const int K_dim, const int N
+) {
+    constexpr int BS = 32; // quantization block size
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int KB_PER_TILE = TILE_K / BS; // 2
+    constexpr int WORDS_PER_TILE = TILE_N * KB_PER_TILE * K;
+    constexpr int ABS_PER_TILE = TILE_N * KB_PER_TILE;
+
+    const int total_k_blocks = K_dim / BS;
+    const int n_tiles = N / TILE_N;
+    const int n = N * K_dim; // total elements
+
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int base_block = warp_id * BLOCKS_PER_WARP;
+
+    if (base_block * 32 >= n)
+        return;
+
+    float cb = (lane_id < (1 << K)) ? codebook[lane_id] : 0.0f;
+
+#pragma unroll
+    for (int b = 0; b < BLOCKS_PER_WARP; b++) {
+        const int block_id = base_block + b;
+        const int block_start = block_id * 32;
+        if (block_start >= n)
+            break;
+
+        // Decompose linear block_id into matrix coordinates
+        const int n_idx = block_id / total_k_blocks;
+        const int k_block_idx = block_id % total_k_blocks;
+
+        // Compute tiled addresses
+        const int k_tile = k_block_idx / KB_PER_TILE;
+        const int kb = k_block_idx % KB_PER_TILE;
+        const int n_tile = n_idx / TILE_N;
+        const int col_in_tile = n_idx % TILE_N;
+        const int tile_base = k_tile * n_tiles + n_tile;
+        const int word_base = tile_base * WORDS_PER_TILE + (col_in_tile * KB_PER_TILE + kb) * K;
+        const int abs_idx = tile_base * ABS_PER_TILE + col_in_tile * KB_PER_TILE + kb;
+
+        float amax = load_absmax(absmax, abs_idx);
+        unsigned int packed[K];
+#pragma unroll
+        for (int bit = 0; bit < K; bit++) {
+            unsigned int word = (lane_id == bit) ? packed_in[word_base + bit] : 0;
+            packed[bit] = __shfl_sync(0xFFFFFFFF, word, bit);
+        }
+        unsigned char idx = unpack_kbit_warp<K>(packed, lane_id);
+        float val = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
+
+        if (block_start + lane_id < n)
+            out[block_start + lane_id] = (T)val;
+    }
+}
+
+// Tiled dequant launcher
+template <typename T, int K, typename ABSMAX_T>
+void dequantizeBlockwise_kbit_tiled(
+    const unsigned int* packed_in, const float* codebook, const ABSMAX_T* absmax, T* out, int K_dim, int N,
+    cudaStream_t stream
+) {
+    constexpr int BPW = 4;
+    int n = N * K_dim;
+    int num_blocks_quant = (n + 31) / 32;
+    int num_warps = (num_blocks_quant + BPW - 1) / BPW;
+    int num_cuda_blocks = (num_warps + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kDequantizeBlockwise_kbit_tiled<T, K, BPW, ABSMAX_T>
+        <<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(packed_in, codebook, absmax, out, K_dim, N);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 // ---- Stage 2: Repack kernel (flat bit-plane -> GEMM-tiled layout) ----
 
 // Tile sizes matching the GEMM kernel design (compile-time constants).
@@ -2201,6 +2280,40 @@ INSTANTIATE_KBIT_DEQUANT(float, 2, float)
 INSTANTIATE_KBIT_DEQUANT(float, 3, float)
 INSTANTIATE_KBIT_DEQUANT(float, 4, float)
 INSTANTIATE_KBIT_DEQUANT(float, 5, float)
+
+// Tiled dequant instantiations: all output types × absmax types × K values
+#define INSTANTIATE_KBIT_DEQUANT_TILED(T, K, ABSMAX_T)                                                                 \
+    template void dequantizeBlockwise_kbit_tiled<T, K, ABSMAX_T>(                                                      \
+        const unsigned int*, const float*, const ABSMAX_T*, T*, int, int, cudaStream_t                                 \
+    );
+
+// uint8 E4M4 absmax
+INSTANTIATE_KBIT_DEQUANT_TILED(half, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(half, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(half, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(half, 5, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(__nv_bfloat16, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(__nv_bfloat16, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(__nv_bfloat16, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(__nv_bfloat16, 5, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(float, 2, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(float, 3, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(float, 4, unsigned char)
+INSTANTIATE_KBIT_DEQUANT_TILED(float, 5, unsigned char)
+
+// fp16 absmax
+INSTANTIATE_KBIT_DEQUANT_TILED(half, 2, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(half, 3, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(half, 4, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(half, 5, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(__nv_bfloat16, 2, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(__nv_bfloat16, 3, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(__nv_bfloat16, 4, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(__nv_bfloat16, 5, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(float, 2, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(float, 3, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(float, 4, half)
+INSTANTIATE_KBIT_DEQUANT_TILED(float, 5, half)
 
 // Repack instantiations: one per K value
 #define INSTANTIATE_KBIT_REPACK(K)                                                                                     \

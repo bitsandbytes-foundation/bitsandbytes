@@ -881,6 +881,80 @@ def _(
     return out
 
 
+def _dequantize_kbit_tiled_impl(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        dtype in _KBIT_DTYPE_SUFFIX,
+        lambda: f"dequantize_kbit_tiled only supports float16/bfloat16/float32, got {dtype}",
+    )
+    torch._check(codebook.dtype == torch.float32, lambda: f"codebook must be float32, got {codebook.dtype}")
+    torch._check(
+        absmax.dtype in (torch.float32, torch.float16, torch.uint8),
+        lambda: f"absmax must be float32, float16, or uint8 (E4M4), got {absmax.dtype}",
+    )
+
+    if absmax.dtype == torch.float32:
+        from bitsandbytes.functional import encode_absmax_e4m4
+
+        absmax = encode_absmax_e4m4(absmax)
+
+    tname = _KBIT_DTYPE_SUFFIX[dtype]
+    aname = _KBIT_ABSMAX_SUFFIX[absmax.dtype]
+
+    with _cuda_device_of(packed):
+        fn = getattr(lib, f"cdequantize_kbit_tiled_{tname}_{aname}_k{k}")
+        fn(
+            get_ptr(packed),
+            get_ptr(codebook),
+            get_ptr(absmax),
+            get_ptr(out),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            _get_tensor_stream(packed),
+        )
+
+
+@register_kernel("bitsandbytes::dequantize_kbit_tiled", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    n = N * K_dim
+    num_blocks = -(n // -32)
+    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+    _dequantize_kbit_tiled_impl(packed, codebook, absmax, k, K_dim, N, dtype, out)
+    return out
+
+
+@register_kernel("bitsandbytes::dequantize_kbit_tiled_", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    _dequantize_kbit_tiled_impl(packed, codebook, absmax, k, K_dim, N, dtype, out)
+    return out
+
+
 @register_kernel("bitsandbytes::repack_kbit", "cuda")
 def _(
     packed_flat: torch.Tensor,
