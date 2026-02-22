@@ -72,3 +72,18 @@ Despite the performance gap, the implementation provides:
   with 0.000000 relative error (same quantized data, different only in FP32 rounding)
 - **Full Python API**: quantize/dequantize/GEMM/LinearNVFP4 all working end-to-end
 - **NVFP4 output epilogue**: GEMM → quantize chain for layer chaining
+
+## LinearNVFP4 End-to-End Benchmarks
+
+LinearNVFP4 includes activation quantization overhead on top of the GEMM kernel.
+
+| Config | NVFP4 (ms) | FP16 (ms) | Speedup |
+|--------|-----------|----------|---------|
+| bs=1, 4096→4096 (proj) | 0.120 | 0.010 | 0.09x |
+| bs=1, 4096→11008 (FFN) | 0.128 | 0.019 | 0.15x |
+| bs=8, 4096→4096 (proj) | 0.128 | 0.010 | 0.08x |
+| bs=8, 4096→11008 (FFN) | 0.143 | 0.019 | 0.13x |
+| bs=32, 4096→4096 (proj) | 0.147 | 0.013 | 0.08x |
+| bs=32, 4096→11008 (FFN) | 0.228 | 0.021 | 0.09x |
+| bs=128, 4096→4096 (proj) | 0.315 | 0.019 | 0.06x |
+| bs=128, 4096→11008 (FFN) | 0.710 | 0.041 | 0.06x |
