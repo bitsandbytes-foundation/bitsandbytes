@@ -63,27 +63,26 @@ __device__ __forceinline__ uint32_t pack_8_nibbles_slow(const unsigned char* dat
 }
 
 // ============================================================================
-// Optimized NVFP4 GEMM kernel
+// Shared-memory NVFP4 GEMM kernel
 //
-// Key optimizations over kGemmNVFP4_simple:
-// 1. Vectorized uint32 loads: Each MMA register's 8 nibbles map to 4 consecutive
-//    bytes in memory. Load as uint32 instead of 8 individual nibble extractions.
-// 2. Multi-N per warp: Each warp computes m16 x nN_TILE_PER_WARP (4 MMA
-//    instructions per K-step), reusing A registers across N-slices.
-// 3. Shared memory A tile: All warps in a block share the same m16 tile of A.
-//    A is loaded cooperatively into shared memory, then each warp reads its
-//    registers from smem. This gives N_WARPS x reuse of A bandwidth.
+// Key optimizations:
+// 1. Cooperative tiling: All threads cooperatively load A/B/SFA/SFB tiles from
+//    global memory into shared memory with coalesced access patterns.
+// 2. Data reuse: A tile shared across N_WARPS (4x saving), B tile shared
+//    across M_WARPS (2x saving). Total ~2.4x bandwidth reduction.
+// 3. Fast register packing: MMA registers read from smem as uint32 loads.
+//    SFA/SFB packed registers loaded as single uint32 (all 4 bytes are
+//    consecutive in the same row — proven by CuTE layout analysis).
+// 4. Vectorized global loads: A uses uint32 (4B), B uses uint4 (16B).
 //
-// Register layout (derived from CuTE ALayout/BLayout analysis):
+// Register layout (from CuTE ALayout/BLayout):
 //   A reg[i] = A[tile_m + 2*t1 + (i&1), k_start + t0*8 + (i>>1)*32 .. +7]
 //   B reg[i] = B[tile_n + t1,            k_start + t0*8 + i*32     .. +7]
-//   where t0 = lane%4, t1 = lane/4 (CuTE thread decomposition)
-//   Each register's 8 nibbles = 4 consecutive packed bytes in memory.
+//   SFA packed = SFA[actual_m, k_blk 0..3] (consecutive in memory)
+//   SFB packed = SFB[tile_n + t1, k_blk 0..3] (consecutive in memory)
 //
-// Block/warp configuration:
-//   4 warps per block, block tile = m16 x n32
-//   Each warp handles a different n8 slice, all share same m16
-//   Shared memory: A tile (512 bytes) + SFA (64 bytes) per K-step
+// Block tile: m32 x n128 (M_WARPS=2, N_WARPS=4, N_TILES_PER_WARP=4)
+// Shared memory per K-step: 1024 + 4096 + 128 + 512 = 5760 bytes
 // ============================================================================
 
 // N-tiles per warp: each warp computes m16 x (N_TILES_PER_WARP * 8)
@@ -93,8 +92,19 @@ __device__ __forceinline__ uint32_t pack_8_nibbles_slow(const unsigned char* dat
 #define N_WARPS 4
 #define WARPS_PER_BLOCK (M_WARPS * N_WARPS) // 8
 
-// 256 threads, target 4 blocks/SM (limit regs to 48 via maxrregcount)
-__global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_opt(
+// Block tile dimensions
+#define BLOCK_M_DIM (M_WARPS * 16)                   // 32
+#define BLOCK_N_DIM (N_WARPS * N_TILES_PER_WARP * 8) // 128
+
+// Shared memory sizes (bytes per K-step)
+#define SMEM_A_BYTES (BLOCK_M_DIM * 32)   // 1024
+#define SMEM_B_BYTES (BLOCK_N_DIM * 32)   // 4096
+#define SMEM_SFA_BYTES (BLOCK_M_DIM * 4)  // 128
+#define SMEM_SFB_BYTES (BLOCK_N_DIM * 4)  // 512
+#define SMEM_TOTAL (SMEM_A_BYTES + SMEM_B_BYTES + SMEM_SFA_BYTES + SMEM_SFB_BYTES)
+
+// 256 threads, target 4 blocks/SM for occupancy
+__global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
     const unsigned char* __restrict__ A,   // M x K/2 packed FP4 (row-major)
     const unsigned char* __restrict__ B,   // N x K/2 packed FP4 (B transposed, row-major)
     const unsigned char* __restrict__ SFA, // M x K/16 UE4M3 scales
@@ -102,164 +112,177 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_opt(
     float* __restrict__ D,                 // M x N output (F32)
     int M, int N, int K
 ) {
-    // Block tile: m(M_WARPS*16) x n(N_WARPS * N_TILES_PER_WARP * 8)
-    // = m32 x n128 for 2x4 warps
-    const int BLOCK_M = M_WARPS * 16;
-    const int BLOCK_N = N_WARPS * N_TILES_PER_WARP * 8;
+    // Shared memory: 16-byte aligned for uint4 stores
+    __shared__ __align__(16) unsigned char smem[SMEM_TOTAL]; // 5760 bytes
+    unsigned char* smem_A = smem;
+    unsigned char* smem_B = smem + SMEM_A_BYTES;
+    unsigned char* smem_SFA = smem + SMEM_A_BYTES + SMEM_B_BYTES;
+    unsigned char* smem_SFB = smem + SMEM_A_BYTES + SMEM_B_BYTES + SMEM_SFA_BYTES;
 
-    int warp_in_block = threadIdx.x / 32;
-    int lane_id = threadIdx.x % 32;
+    const int tid = threadIdx.x;
+    const int warp_in_block = tid / 32;
+    const int lane_id = tid % 32;
+    const int m_warp = warp_in_block / N_WARPS; // 0..1
+    const int n_warp = warp_in_block % N_WARPS; // 0..3
 
-    // 2D warp mapping: m_warp along M, n_warp along N
-    int m_warp = warp_in_block / N_WARPS; // 0..(M_WARPS-1)
-    int n_warp = warp_in_block % N_WARPS; // 0..(N_WARPS-1)
+    const int block_m = blockIdx.y * BLOCK_M_DIM;
+    const int block_n = blockIdx.x * BLOCK_N_DIM;
+    const int tile_m = block_m + m_warp * 16;
+    const int warp_n_base = block_n + n_warp * N_TILES_PER_WARP * 8;
 
-    // Block-level tile position
-    int tile_m = blockIdx.y * BLOCK_M + m_warp * 16;
-    int tile_n_base = blockIdx.x * BLOCK_N;
+    const int t0 = lane_id % 4;
+    const int t1 = lane_id / 4;
+    const int half_K = K / 2;
+    const int scale_K = K / 16;
 
-    if (tile_m >= M)
-        return;
-
-    // This warp's N offset within the block
-    int warp_n_base = tile_n_base + n_warp * N_TILES_PER_WARP * 8;
-
-    // CuTE thread decomposition: t0 = lane%4 (0-3), t1 = lane/4 (0-7)
-    int t0 = lane_id % 4;
-    int t1 = lane_id / 4;
-
-    // Precompute A row indices for this thread's registers
-    // reg[0,2] → row0 = tile_m + 2*t1, reg[1,3] → row1 = tile_m + 2*t1 + 1
-    int a_row0 = tile_m + 2 * t1;
-    int a_row1 = a_row0 + 1;
-
-    int half_K = K / 2;
-    int scale_stride_K = K / 16;
-
-    // Accumulators: N_TILES_PER_WARP * 4 floats per thread
+    // Accumulators
     float acc[N_TILES_PER_WARP][4];
 #pragma unroll
     for (int nt = 0; nt < N_TILES_PER_WARP; nt++) {
-        acc[nt][0] = 0.0f;
-        acc[nt][1] = 0.0f;
-        acc[nt][2] = 0.0f;
-        acc[nt][3] = 0.0f;
+        acc[nt][0] = acc[nt][1] = acc[nt][2] = acc[nt][3] = 0.0f;
     }
+
+    // Precompute smem row indices for A register reads
+    const int a_local_row0 = m_warp * 16 + 2 * t1;
+    const int a_local_row1 = a_local_row0 + 1;
+
+    // Precompute SFA row for this thread (all 4 bytes come from the same row)
+    // sf_tidx = (lane%2)*8 + lane/4; cute_m_0 = sf_tidx % 16
+    // actual_m = (cute_m_0 % 8)*2 + cute_m_0/8
+    const int sf_tidx = (lane_id % 2) * 8 + (lane_id / 4);
+    const int cute_sf_m0 = sf_tidx % 16;
+    const int sfa_local_row = m_warp * 16 + (cute_sf_m0 % 8) * 2 + cute_sf_m0 / 8;
 
     // K-loop
     for (int k_start = 0; k_start < K; k_start += 64) {
-        // ---- Load A registers (4 x uint32) ----
-        // reg[0] = A[row0, k_start + t0*8 + 0..7]  → 4 bytes at row0*K/2 + (k_start+t0*8)/2
-        // reg[1] = A[row1, k_start + t0*8 + 0..7]
-        // reg[2] = A[row0, k_start + t0*8 + 32..39]
-        // reg[3] = A[row1, k_start + t0*8 + 32..39]
-        uint32_t a_regs[4];
-        int k_col_lo = k_start + t0 * 8;
-        int k_col_hi = k_col_lo + 32;
+        const int k_byte = k_start / 2;
+        const int k_scale = k_start / 16;
 
-        // Fast path: no boundary check needed
-        bool a_row0_ok = (a_row0 < M);
-        bool a_row1_ok = (a_row1 < M);
-        bool k_lo_ok = (k_col_lo + 7 < K);
-        bool k_hi_ok = (k_col_hi + 7 < K);
+        // ================================================================
+        // Phase 1: Cooperative load from global → shared memory
+        // ================================================================
 
-        if (a_row0_ok && k_lo_ok) {
-            a_regs[0] = *(const uint32_t*)(A + a_row0 * half_K + k_col_lo / 2);
-        } else {
-            a_regs[0] = pack_8_nibbles_slow(A, a_row0, k_col_lo, K, M, K);
-        }
-        if (a_row1_ok && k_lo_ok) {
-            a_regs[1] = *(const uint32_t*)(A + a_row1 * half_K + k_col_lo / 2);
-        } else {
-            a_regs[1] = pack_8_nibbles_slow(A, a_row1, k_col_lo, K, M, K);
-        }
-        if (a_row0_ok && k_hi_ok) {
-            a_regs[2] = *(const uint32_t*)(A + a_row0 * half_K + k_col_hi / 2);
-        } else {
-            a_regs[2] = pack_8_nibbles_slow(A, a_row0, k_col_hi, K, M, K);
-        }
-        if (a_row1_ok && k_hi_ok) {
-            a_regs[3] = *(const uint32_t*)(A + a_row1 * half_K + k_col_hi / 2);
-        } else {
-            a_regs[3] = pack_8_nibbles_slow(A, a_row1, k_col_hi, K, M, K);
-        }
-
-        // ---- Load SFA ----
-        // SFA layout: sf_thread_idx = (lane%2)*8 + (lane/4)
-        // Scale coord = sf_thread_idx + v*16 → cute_m = coord%16, k_blk = coord/16
-        // Remap: actual_m = (cute_m%8)*2 + cute_m/8
-        uint32_t sfa_packed = 0;
+        // ---- A tile: BLOCK_M×32 = 1024 bytes, 256 threads × 4 bytes each ----
         {
-            int sf_tidx = (lane_id % 2) * 8 + (lane_id / 4);
-            for (int sv = 0; sv < 4; sv++) {
-                int sfe = sf_tidx + sv * 16;
-                int cute_sf_m = sfe % 16;
-                int sf_col = sfe / 16;
-                int sf_row = (cute_sf_m % 8) * 2 + cute_sf_m / 8;
-                int gm = tile_m + sf_row;
-                int gkb = k_start / 16 + sf_col;
-                unsigned char sf_val = 0;
-                if (gm < M && gkb < scale_stride_K) {
-                    sf_val = SFA[gm * scale_stride_K + gkb];
+            const int off = tid * 4;       // byte offset in smem_A (0..1020)
+            const int row = off >> 5;      // off / 32 → local row (0..31)
+            const int col = off & 31;      // off % 32 → byte col (0,4,...,28)
+            const int gm = block_m + row;
+
+            uint32_t val = 0;
+            if (gm < M) {
+                const int gaddr = gm * half_K + k_byte + col;
+                if (k_byte + col + 3 < half_K) {
+                    val = *(const uint32_t*)(A + gaddr);
+                } else {
+                    // K-boundary: byte-by-byte
+                    for (int b = 0; b < 4; b++) {
+                        if (k_byte + col + b < half_K)
+                            val |= ((uint32_t)A[gaddr + b]) << (b * 8);
+                    }
                 }
-                sfa_packed |= ((uint32_t)sf_val << (sv * 8));
+            }
+            *(uint32_t*)(smem_A + off) = val;
+        }
+
+        // ---- B tile: BLOCK_N×32 = 4096 bytes, 256 threads × 16 bytes each ----
+        {
+            const int off = tid * 16;      // byte offset in smem_B (0..4080)
+            const int row = off >> 5;      // local row (0..127)
+            const int col = off & 31;      // 0 or 16
+            const int gn = block_n + row;
+
+            if (gn < N) {
+                const int gaddr = gn * half_K + k_byte + col;
+                if (k_byte + col + 15 < half_K) {
+                    *(uint4*)(smem_B + off) = *(const uint4*)(B + gaddr);
+                } else {
+                    // K-boundary: byte-by-byte
+                    for (int b = 0; b < 16; b++) {
+                        smem_B[off + b] = (k_byte + col + b < half_K) ? B[gaddr + b] : 0;
+                    }
+                }
+            } else {
+                // N-boundary: zero-fill
+                *(uint4*)(smem_B + off) = make_uint4(0, 0, 0, 0);
             }
         }
 
-        // ---- For each N-tile in this warp ----
+        // ---- SFA: BLOCK_M×4 = 128 bytes. First 32 threads load 4 bytes each ----
+        if (tid < BLOCK_M_DIM) {
+            const int gm = block_m + tid;
+            uint32_t val = 0;
+            if (gm < M) {
+                const int base = gm * scale_K + k_scale;
+                if (k_scale + 3 < scale_K) {
+                    val = *(const uint32_t*)(SFA + base);
+                } else {
+                    for (int b = 0; b < 4; b++) {
+                        if (k_scale + b < scale_K)
+                            val |= ((uint32_t)SFA[base + b]) << (b * 8);
+                    }
+                }
+            }
+            *(uint32_t*)(smem_SFA + tid * 4) = val;
+        }
+
+        // ---- SFB: BLOCK_N×4 = 512 bytes. First 128 threads load 4 bytes each ----
+        if (tid < BLOCK_N_DIM) {
+            const int gn = block_n + tid;
+            uint32_t val = 0;
+            if (gn < N) {
+                const int base = gn * scale_K + k_scale;
+                if (k_scale + 3 < scale_K) {
+                    val = *(const uint32_t*)(SFB + base);
+                } else {
+                    for (int b = 0; b < 4; b++) {
+                        if (k_scale + b < scale_K)
+                            val |= ((uint32_t)SFB[base + b]) << (b * 8);
+                    }
+                }
+            }
+            *(uint32_t*)(smem_SFB + tid * 4) = val;
+        }
+
+        __syncthreads();
+
+        // ================================================================
+        // Phase 2: Read MMA registers from smem and compute
+        // ================================================================
+
+        // A registers (shared across all N-tiles in this warp)
+        uint32_t a_regs[4];
+        a_regs[0] = *(const uint32_t*)(smem_A + a_local_row0 * 32 + t0 * 4);
+        a_regs[1] = *(const uint32_t*)(smem_A + a_local_row1 * 32 + t0 * 4);
+        a_regs[2] = *(const uint32_t*)(smem_A + a_local_row0 * 32 + t0 * 4 + 16);
+        a_regs[3] = *(const uint32_t*)(smem_A + a_local_row1 * 32 + t0 * 4 + 16);
+
+        // SFA: single uint32 load (all 4 bytes are in the same row)
+        uint32_t sfa_packed = *(const uint32_t*)(smem_SFA + sfa_local_row * 4);
+
+        // Per-N-tile: read B and SFB from smem, execute MMA
 #pragma unroll
         for (int nt = 0; nt < N_TILES_PER_WARP; nt++) {
-            int this_tile_n = warp_n_base + nt * 8;
-            if (this_tile_n >= N)
-                break;
+            int local_n = n_warp * N_TILES_PER_WARP * 8 + nt * 8;
+            int b_row = local_n + t1;
 
-            // Load B registers (2 x uint32)
-            // reg[0] = B[this_tile_n + t1, k_start + t0*8 + 0..7]
-            // reg[1] = B[this_tile_n + t1, k_start + t0*8 + 32..39]
+            // B registers: 2 × uint32 from smem
             uint32_t b_regs[2];
-            int b_row = this_tile_n + t1;
-            bool b_row_ok = (b_row < N);
+            b_regs[0] = *(const uint32_t*)(smem_B + b_row * 32 + t0 * 4);
+            b_regs[1] = *(const uint32_t*)(smem_B + b_row * 32 + t0 * 4 + 16);
 
-            if (b_row_ok && k_lo_ok) {
-                b_regs[0] = *(const uint32_t*)(B + b_row * half_K + k_col_lo / 2);
-            } else {
-                b_regs[0] = pack_8_nibbles_slow(B, b_row, k_col_lo, K, N, K);
-            }
-            if (b_row_ok && k_hi_ok) {
-                b_regs[1] = *(const uint32_t*)(B + b_row * half_K + k_col_hi / 2);
-            } else {
-                b_regs[1] = pack_8_nibbles_slow(B, b_row, k_col_hi, K, N, K);
-            }
+            // SFB: single uint32 load (4 consecutive bytes at row t1)
+            uint32_t sfb_packed = *(const uint32_t*)(smem_SFB + (local_n + t1) * 4);
 
-            // Load SFB for this N-tile
-            // SFB layout: sf_thread_idx = lane/4 = t1
-            // coord = t1 + v*8, n = coord%8, k_blk = coord/8
-            uint32_t sfb_packed = 0;
-            {
-                for (int sv = 0; sv < 4; sv++) {
-                    int sfe = t1 + sv * 8;
-                    int sf_n = sfe % 8;
-                    int sf_col = sfe / 8;
-                    int gn = this_tile_n + sf_n;
-                    int gkb = k_start / 16 + sf_col;
-                    unsigned char sf_val = 0;
-                    if (gn < N && gkb < scale_stride_K) {
-                        sf_val = SFB[gn * scale_stride_K + gkb];
-                    }
-                    sfb_packed |= ((uint32_t)sf_val << (sv * 8));
-                }
-            }
-
-            // Execute MMA: accumulate into this N-tile's accumulators
             mma_nvfp4_m16n8k64(acc[nt][0], acc[nt][1], acc[nt][2], acc[nt][3], a_regs[0], a_regs[1], a_regs[2], a_regs[3],
                                b_regs[0], b_regs[1], acc[nt][0], acc[nt][1], acc[nt][2], acc[nt][3], sfa_packed, sfb_packed);
         }
+
+        __syncthreads(); // Barrier before next K-step's smem writes
     }
 
     // ---- Write output ----
     // SM80_16x8_Row: octet = lane/4, quad = lane%4
-    // d[0] = C[octet*2, quad*2], d[1] = C[octet*2, quad*2+1]
-    // d[2] = C[octet*2+1, quad*2], d[3] = C[octet*2+1, quad*2+1]
     int octet = lane_id / 4;
     int quad = lane_id % 4;
     int out_row0 = tile_m + octet * 2;
@@ -434,20 +457,17 @@ __global__ void kGemmNVFP4_simple(
 }
 
 // ============================================================================
-// Host-side launcher — uses optimized kernel
+// Host-side launcher — uses shared memory kernel
 // ============================================================================
 extern "C" void cgemm_nvfp4(
     const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
     int N, int K
 ) {
-    const int BLOCK_M = M_WARPS * 16;
-    const int BLOCK_N = N_WARPS * N_TILES_PER_WARP * 8;
-
-    int num_m_blocks = (M + BLOCK_M - 1) / BLOCK_M;
-    int num_n_blocks = (N + BLOCK_N - 1) / BLOCK_N;
+    int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
+    int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
 
     dim3 grid(num_n_blocks, num_m_blocks);
     int threads_per_block = WARPS_PER_BLOCK * 32; // 256
 
-    kGemmNVFP4_opt<<<grid, threads_per_block>>>(A, B, SFA, SFB, D, M, N, K);
+    kGemmNVFP4_smem<<<grid, threads_per_block>>>(A, B, SFA, SFB, D, M, N, K);
 }
