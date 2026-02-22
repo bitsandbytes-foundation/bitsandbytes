@@ -1268,22 +1268,19 @@ def gemm_nvfp4_to_nvfp4(
         D_fp32.mul_(alpha)
 
     # Step 3: Quantize FP32 output → NVFP4
-    # Reshape to 2D (M, N) for quantization
+    # quantize_nvfp4 works on flattened data in blocks of 16.
+    # We need M*N to be divisible by 16. If not, pad the flat vector.
     M = A_state.shape[0]
     N = B_state.shape[0]
-    D_2d = D_fp32.reshape(M, N)
+    numel = M * N
+    D_flat = D_fp32.reshape(-1)
 
-    # Pad N to multiple of 16 if needed for quantization
-    N_padded = ((N + 15) // 16) * 16
-    if N_padded != N:
-        D_padded = torch.zeros(M, N_padded, dtype=D_fp32.dtype, device=D_fp32.device)
-        D_padded[:, :N] = D_2d
-        packed, out_state = quantize_nvfp4(D_padded.reshape(-1))
-        # Adjust state shape to reflect actual (unpadded) output
-        out_state.shape = (M, N)
-    else:
-        packed, out_state = quantize_nvfp4(D_2d.reshape(-1))
-        out_state.shape = (M, N)
+    numel_padded = ((numel + 15) // 16) * 16
+    if numel_padded != numel:
+        D_flat = torch.nn.functional.pad(D_flat, (0, numel_padded - numel))
+
+    packed, out_state = quantize_nvfp4(D_flat)
+    out_state.shape = (M, N)
 
     return packed, out_state
 
