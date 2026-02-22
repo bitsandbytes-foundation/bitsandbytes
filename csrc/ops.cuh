@@ -196,13 +196,4 @@ void kbitScalarGemv(
     scalar_t* C, int M, int K_dim, int N
 );
 
-// K-bit grouped scalar GEMV for MoE expert dispatch
-template <int K, typename scalar_t>
-void kbitGroupedScalarGemv(
-    const scalar_t* A_concat, const unsigned int* B_packed_all,
-    const float* B_absmax_all, const float* codebook,
-    scalar_t* C_concat, const int* d_expert_offsets,
-    int K_dim, int N, int num_experts, int max_M
-);
-
 #endif

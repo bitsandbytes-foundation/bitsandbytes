@@ -1,5 +1,5 @@
 #!/bin/bash
-# Full kernel benchmark: MMA + scalar + grouped (ncu) + cuBLAS fp16 (CUDA events).
+# Full kernel benchmark: MMA + scalar (ncu) + cuBLAS fp16 (CUDA events).
 # Then computes end-to-end model summary for Qwen3-Coder-Next 70B.
 #
 # Usage:
@@ -21,12 +21,12 @@ export NUM_EXPERTS="${NUM_EXPERTS:-8}"
 WARMUP=5
 PROFILED=5
 
-# Compute M subsets: scalar/grouped only support M<=4
+# Compute M subsets: scalar only supports M<=4
 SCALAR_M=$(python3 -c "print(','.join(str(m) for m in [int(x) for x in '$M_VALS'.split(',')] if m <= 4))")
 ALL_M="$M_VALS"
 
 echo "START: $(date)"
-echo "M values: $M_VALS (scalar/grouped: $SCALAR_M)"
+echo "M values: $M_VALS (scalar: $SCALAR_M)"
 echo "MoE experts: $NUM_EXPERTS"
 
 # Helper: run ncu and parse output for a kernel
@@ -74,17 +74,6 @@ if [ -n "$SCALAR_M" ]; then
     run_ncu_bench scalar "kbit_scalar_gemv" "['gateup','down','Q','O','KV']" "$SCALAR_M" | tee "$RESULTS_DIR/scalar.txt"
 else
     echo "(no M<=4 values requested)" | tee "$RESULTS_DIR/scalar.txt"
-fi
-
-# ---- Grouped expert kernel (M<=4 only) ----
-echo ""
-echo "=== Grouped scalar GEMV (${NUM_EXPERTS} experts, M<=4) ==="
-printf "%-8s %2s %2s %10s\n" "shape" "k" "M" "avg_us"
-echo "---"
-if [ -n "$SCALAR_M" ]; then
-    run_ncu_bench grouped "kbit_grouped_scalar_gemv" "['moe_gu','moe_dn']" "$SCALAR_M" | tee "$RESULTS_DIR/grouped.txt"
-else
-    echo "(no M<=4 values requested)" | tee "$RESULTS_DIR/grouped.txt"
 fi
 
 # ---- Grouped MMA kernel (all M values) ----

@@ -630,34 +630,3 @@ def _(
     out: torch.Tensor,
 ) -> None:
     pass
-
-
-# K-bit grouped scalar GEMV for MoE expert dispatch (M=1..4 per expert)
-
-torch.library.define(
-    "bitsandbytes::kbit_grouped_scalar_gemv",
-    "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
-    "Tensor expert_offsets, int K_dim, int N, int k, int num_experts, int max_M) -> Tensor",
-)
-
-
-@register_fake("bitsandbytes::kbit_grouped_scalar_gemv")
-def _(
-    A_concat: torch.Tensor,
-    B_packed_all: torch.Tensor,
-    B_absmax_all: torch.Tensor,
-    codebook: torch.Tensor,
-    expert_offsets: torch.Tensor,
-    K_dim: int,
-    N: int,
-    k: int,
-    num_experts: int,
-    max_M: int,
-) -> torch.Tensor:
-    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
-    torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
-    torch._check(
-        A_concat.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A_concat.dtype}"
-    )
-    total_M = A_concat.shape[0]
-    return torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
