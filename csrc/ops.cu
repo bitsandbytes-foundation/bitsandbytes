@@ -1853,13 +1853,13 @@ void kbitGroupedGemmProd(
 // int4 vector loads for A, dequant-once loop: weights decoded once, FMA'd across M rows.
 // Fully unrolled with __launch_bounds__ controlling register budget.
 // Two-phase shared memory reduction (warp shuffle + shmem).
-// B_packed and B_absmax are in flat (quantize_kbit) layout, no repack needed.
+// Supports both flat (quantize_kbit) and tiled (repack_kbit) B layouts.
 
-template <int K_BITS, int M_VAL, typename scalar_t, typename ABSMAX_T = unsigned char>
+template <int K_BITS, int M_VAL, bool TILED = false, typename scalar_t = half, typename ABSMAX_T = unsigned char>
 __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) kbit_scalar_gemv(
     const scalar_t* __restrict__ A,
-    const unsigned int* __restrict__ B_packed, // flat: [N * num_k_blocks * K_BITS] uint32
-    const ABSMAX_T* __restrict__ B_absmax,     // flat: [N * num_k_blocks]
+    const unsigned int* __restrict__ B_packed, // flat or tiled
+    const ABSMAX_T* __restrict__ B_absmax,     // flat or tiled
     const float* __restrict__ codebook, scalar_t* __restrict__ C, const int M, const int K_dim, const int N
 ) {
     constexpr int BS = 32; // quantization block size
@@ -1876,9 +1876,28 @@ __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) kbit_scalar_gemv(
     // Codebook in registers (shuffle-based lookup)
     float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
 
-    // Column base pointers (flat layout)
-    const unsigned int* B_col = B_packed + col * num_k_blocks * K_BITS;
-    const ABSMAX_T* abs_col = B_absmax + col * num_k_blocks;
+    // Tiled layout constants (only used when TILED=true)
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int KB_PER_TILE = TILE_K / BS; // 2
+    constexpr int WORDS_PER_TILE = TILE_N * KB_PER_TILE * K_BITS;
+    constexpr int ABS_PER_TILE = TILE_N * KB_PER_TILE;
+
+    // Flat layout: column base pointers
+    const unsigned int* B_col = nullptr;
+    const ABSMAX_T* abs_col = nullptr;
+
+    // Tiled layout: per-column tile coordinates
+    int n_tile = 0, col_in_tile = 0, n_tiles = 0;
+
+    if constexpr (!TILED) {
+        B_col = B_packed + col * num_k_blocks * K_BITS;
+        abs_col = B_absmax + col * num_k_blocks;
+    } else {
+        n_tiles = N / TILE_N;
+        n_tile = col / TILE_N;
+        col_in_tile = col % TILE_N;
+    }
 
     // Accumulators
     float acc[M_VAL];
@@ -1894,17 +1913,32 @@ __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) kbit_scalar_gemv(
         const int block_idx = threadIdx.x + iter * BLOCK_SIZE;
         const bool valid = (block_idx < num_k_blocks);
 
+        // Compute word base address for this K-block's bit-plane data
+        int word_base;
+        int abs_idx;
+        if constexpr (!TILED) {
+            word_base = block_idx * K_BITS;
+            abs_idx = block_idx;
+        } else {
+            const int k_tile = block_idx / KB_PER_TILE;
+            const int kb = block_idx % KB_PER_TILE;
+            const int tile_base = k_tile * n_tiles + n_tile;
+            word_base = tile_base * WORDS_PER_TILE + (col_in_tile * KB_PER_TILE + kb) * K_BITS;
+            abs_idx = tile_base * ABS_PER_TILE + col_in_tile * KB_PER_TILE + kb;
+        }
+
         // Load k bit-plane words (guarded; invalid threads get 0)
         // Vector loads for power-of-2 K_BITS, scalar for others.
+        const unsigned int* B_src = TILED ? B_packed : B_col;
         unsigned int planes[K_BITS];
         if constexpr (K_BITS == 2) {
-            uint2 pv = valid ? *reinterpret_cast<const uint2*>(&B_col[block_idx * 2]) : make_uint2(0u, 0u);
+            uint2 pv = valid ? *reinterpret_cast<const uint2*>(&B_src[word_base]) : make_uint2(0u, 0u);
             planes[0] = pv.x;
             planes[1] = pv.y;
         } else if constexpr (K_BITS == 4) {
             int4 pv;
             if (valid)
-                pv = *reinterpret_cast<const int4*>(&B_col[block_idx * 4]);
+                pv = *reinterpret_cast<const int4*>(&B_src[word_base]);
             else {
                 pv.x = 0;
                 pv.y = 0;
@@ -1918,11 +1952,12 @@ __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) kbit_scalar_gemv(
         } else {
 #pragma unroll
             for (int b = 0; b < K_BITS; b++)
-                planes[b] = valid ? B_col[block_idx * K_BITS + b] : 0u;
+                planes[b] = valid ? B_src[word_base + b] : 0u;
         }
 
-        // Load absmax (guarded; invalid threads get 0; E4M4 decode via load_absmax)
-        float amax = valid ? load_absmax(abs_col, block_idx) : 0.0f;
+        // Load absmax (guarded; invalid threads get 0)
+        const ABSMAX_T* abs_src = TILED ? B_absmax : abs_col;
+        float amax = valid ? load_absmax(abs_src, abs_idx) : 0.0f;
 
         const int k_base = block_idx * BS;
 
@@ -1988,7 +2023,7 @@ __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) kbit_scalar_gemv(
 }
 
 // ---- Scalar GEMV launcher ----
-template <int K, int MV, typename scalar_t, typename ABSMAX_T>
+template <int K, int MV, bool TILED, typename scalar_t, typename ABSMAX_T>
 static void kbitScalarGemvLaunch(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
     int M, int K_dim, int N
@@ -1996,19 +2031,19 @@ static void kbitScalarGemvLaunch(
     constexpr int BLOCK_SIZE = 64;
     int grid_size = N;
 
-    kbit_scalar_gemv<K, MV, scalar_t, ABSMAX_T>
+    kbit_scalar_gemv<K, MV, TILED, scalar_t, ABSMAX_T>
         <<<grid_size, BLOCK_SIZE>>>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-// Public entry point: selects M_VAL template
+// Public entry point: selects M_VAL template (flat layout)
 template <int K, typename scalar_t, typename ABSMAX_T>
 void kbitScalarGemv(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
     int M, int K_dim, int N
 ) {
 #define LAUNCH_SCALAR_GEMV(MV)                                                                                         \
-    kbitScalarGemvLaunch<K, MV, scalar_t, ABSMAX_T>(A, B_packed, B_absmax, codebook, C, M, K_dim, N)
+    kbitScalarGemvLaunch<K, MV, false, scalar_t, ABSMAX_T>(A, B_packed, B_absmax, codebook, C, M, K_dim, N)
 
     if (M <= 1) {
         LAUNCH_SCALAR_GEMV(1);
@@ -2021,6 +2056,28 @@ void kbitScalarGemv(
     }
 
 #undef LAUNCH_SCALAR_GEMV
+}
+
+// Public entry point: selects M_VAL template (tiled layout)
+template <int K, typename scalar_t, typename ABSMAX_T>
+void kbitScalarGemvTiled(
+    const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
+    int M, int K_dim, int N
+) {
+#define LAUNCH_SCALAR_GEMV_TILED(MV)                                                                                   \
+    kbitScalarGemvLaunch<K, MV, true, scalar_t, ABSMAX_T>(A, B_packed, B_absmax, codebook, C, M, K_dim, N)
+
+    if (M <= 1) {
+        LAUNCH_SCALAR_GEMV_TILED(1);
+    } else if (M <= 2) {
+        LAUNCH_SCALAR_GEMV_TILED(2);
+    } else if (M <= 3) {
+        LAUNCH_SCALAR_GEMV_TILED(3);
+    } else {
+        LAUNCH_SCALAR_GEMV_TILED(4);
+    }
+
+#undef LAUNCH_SCALAR_GEMV_TILED
 }
 
 // ---- Debug: Simple MMA test kernel ----
@@ -2235,3 +2292,28 @@ INSTANTIATE_KBIT_SCALAR_GEMV_FP16(2)
 INSTANTIATE_KBIT_SCALAR_GEMV_FP16(3)
 INSTANTIATE_KBIT_SCALAR_GEMV_FP16(4)
 INSTANTIATE_KBIT_SCALAR_GEMV_FP16(5)
+// Scalar GEMV instantiations — tiled layout
+// uint8 E4M4 absmax
+#define INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(K)                                                                       \
+    template void kbitScalarGemvTiled<K, half, unsigned char>(                                                         \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int                     \
+    );                                                                                                                 \
+    template void kbitScalarGemvTiled<K, __nv_bfloat16, unsigned char>(                                                \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, int, int, int   \
+    );
+INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(2)
+INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(3)
+INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(4)
+INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(5)
+// fp16 absmax
+#define INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(K)                                                                     \
+    template void kbitScalarGemvTiled<K, half, half>(                                                                  \
+        const half*, const unsigned int*, const half*, const float*, half*, int, int, int                              \
+    );                                                                                                                 \
+    template void kbitScalarGemvTiled<K, __nv_bfloat16, half>(                                                         \
+        const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, int, int, int            \
+    );
+INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(2)
+INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(3)
+INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(4)
+INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(5)
