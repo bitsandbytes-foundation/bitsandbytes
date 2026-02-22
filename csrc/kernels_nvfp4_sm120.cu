@@ -88,9 +88,13 @@ __device__ __forceinline__ uint32_t pack_8_nibbles_slow(const unsigned char* dat
 
 // N-tiles per warp: each warp computes m16 x (N_TILE_PER_WARP * 8)
 #define N_TILES_PER_WARP 4
-#define WARPS_PER_BLOCK 4
+// Block config: M_WARPS x N_WARPS warps per block
+// M_WARPS groups along M (each m16), N_WARPS groups along N (each handles N_TILES_PER_WARP n8-tiles)
+#define M_WARPS 2
+#define N_WARPS 4
+#define WARPS_PER_BLOCK (M_WARPS * N_WARPS) // 8
 
-__global__ void kGemmNVFP4_opt(
+__global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 2) void kGemmNVFP4_opt(
     const unsigned char* __restrict__ A,   // M x K/2 packed FP4 (row-major)
     const unsigned char* __restrict__ B,   // N x K/2 packed FP4 (B transposed, row-major)
     const unsigned char* __restrict__ SFA, // M x K/16 UE4M3 scales
@@ -98,22 +102,27 @@ __global__ void kGemmNVFP4_opt(
     float* __restrict__ D,                 // M x N output (F32)
     int M, int N, int K
 ) {
-    // Block tile: m16 x n(WARPS_PER_BLOCK * N_TILES_PER_WARP * 8)
-    // = m16 x n128 for 4 warps with 4 n-tiles each
-    const int BLOCK_N = WARPS_PER_BLOCK * N_TILES_PER_WARP * 8;
+    // Block tile: m(M_WARPS*16) x n(N_WARPS * N_TILES_PER_WARP * 8)
+    // = m32 x n128 for 2x4 warps
+    const int BLOCK_M = M_WARPS * 16;
+    const int BLOCK_N = N_WARPS * N_TILES_PER_WARP * 8;
 
     int warp_in_block = threadIdx.x / 32;
     int lane_id = threadIdx.x % 32;
 
+    // 2D warp mapping: m_warp along M, n_warp along N
+    int m_warp = warp_in_block / N_WARPS; // 0..(M_WARPS-1)
+    int n_warp = warp_in_block % N_WARPS; // 0..(N_WARPS-1)
+
     // Block-level tile position
-    int tile_m = blockIdx.y * 16;
+    int tile_m = blockIdx.y * BLOCK_M + m_warp * 16;
     int tile_n_base = blockIdx.x * BLOCK_N;
 
     if (tile_m >= M)
         return;
 
     // This warp's N offset within the block
-    int warp_n_base = tile_n_base + warp_in_block * N_TILES_PER_WARP * 8;
+    int warp_n_base = tile_n_base + n_warp * N_TILES_PER_WARP * 8;
 
     // CuTE thread decomposition: t0 = lane%4 (0-3), t1 = lane/4 (0-7)
     int t0 = lane_id % 4;
@@ -431,14 +440,14 @@ extern "C" void cgemm_nvfp4(
     const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
     int N, int K
 ) {
-    // Block tile: m16 x n(WARPS_PER_BLOCK * N_TILES_PER_WARP * 8)
-    const int BLOCK_N = WARPS_PER_BLOCK * N_TILES_PER_WARP * 8; // 128
+    const int BLOCK_M = M_WARPS * 16;
+    const int BLOCK_N = N_WARPS * N_TILES_PER_WARP * 8;
 
-    int num_m_tiles = (M + 15) / 16;
+    int num_m_blocks = (M + BLOCK_M - 1) / BLOCK_M;
     int num_n_blocks = (N + BLOCK_N - 1) / BLOCK_N;
 
-    dim3 grid(num_n_blocks, num_m_tiles);
-    int threads_per_block = WARPS_PER_BLOCK * 32; // 128
+    dim3 grid(num_n_blocks, num_m_blocks);
+    int threads_per_block = WARPS_PER_BLOCK * 32; // 256
 
     kGemmNVFP4_opt<<<grid, threads_per_block>>>(A, B, SFA, SFB, D, M, N, K);
 }
