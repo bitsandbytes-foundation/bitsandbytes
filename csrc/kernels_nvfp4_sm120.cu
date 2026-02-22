@@ -162,9 +162,10 @@ __global__ void kGemmNVFP4_simple(
     // Accumulator registers
     float acc0 = 0.0f, acc1 = 0.0f, acc2 = 0.0f, acc3 = 0.0f;
 
-    // Thread layout decomposition
-    int t0 = lane_id / 8;  // 0-3
-    int t1 = lane_id % 8;  // 0-7
+    // CuTE thread decomposition: Shape<_4,_8> means first mode is fastest
+    // T = t0 + t1*4, so t0 = T%4 (0-3), t1 = T/4 (0-7)
+    int t0 = lane_id % 4;  // 0-3
+    int t1 = lane_id / 4;  // 0-7
 
     // Iterate over K dimension in steps of 64
     for (int k_start = 0; k_start < K; k_start += 64) {
@@ -241,18 +242,13 @@ __global__ void kGemmNVFP4_simple(
 
         // Load SFA: 1 x uint32 (4 packed UE4M3 bytes)
         // SFALayout: Shape<Shape<_2,_2,_8>,_64>, Stride<Stride<_8,_0,_1>,_16>
-        // For thread t: t_decomp = (t0_sf=t/16, t1_sf=(t/8)%2, t2_sf=t%8)
-        //   t0_sf = lane_id / 16 (0-1)
-        //   t1_sf = (lane_id / 8) % 2 (0-1, but stride=0 so broadcast)
-        //   t2_sf = lane_id % 8 (0-7)
-        // Thread index into SF = t0_sf*8 + t2_sf = lane_id/16*8 + lane_id%8
-        // Value dimension: 4 values (4 scale factors), stride 16
-        // SF element = thread_idx + value_idx * 16
-        // With M16xK64: SF has 16 rows, 4 cols (K/16=4)
-        // thread_idx maps to the M dimension, value_idx to K/16 dimension
+        // CuTE: T = t0 + t1*2 + t2*4, so t0=T%2, t1=(T/2)%2, t2=T/4
+        // Strides: (8, 0, 1). t1 has stride 0 (broadcast).
+        // sf_thread_contrib = t0*8 + t2 = (lane%2)*8 + (lane/4)
+        // SF coord = sf_thread_contrib + v*16 (column-major: m=coord%16, k_blk=coord/16)
         uint32_t sfa_packed = 0;
         {
-            int sf_thread_idx = (lane_id / 16) * 8 + (lane_id % 8);
+            int sf_thread_idx = (lane_id % 2) * 8 + (lane_id / 4);
             for (int sf_v = 0; sf_v < 4; sf_v++) {
                 int sf_element = sf_thread_idx + sf_v * 16;
                 int sf_row = sf_element % 16;  // M index in tile
@@ -271,14 +267,12 @@ __global__ void kGemmNVFP4_simple(
 
         // Load SFB: 1 x uint32 (4 packed UE4M3 bytes)
         // SFBLayout: Shape<Shape<_4,_8>,_64>, Stride<Stride<_0,_1>,_8>
-        // t0_sfb = lane_id / 8 (0-3, but stride=0 so broadcast)
-        // t1_sfb = lane_id % 8 (0-7)
-        // Thread idx = t1_sfb = lane_id % 8
-        // SF element = thread_idx + value_idx * 8
-        // With N8xK64: SF has 8 rows, 4 cols (K/16=4)
+        // CuTE: T = t0 + t1*4, so t0=T%4 (stride=0, broadcast), t1=T/4
+        // sf_thread_contrib = t1 = lane/4
+        // SF coord = sf_thread_contrib + v*8 (column-major: n=coord%8, k_blk=coord/8)
         uint32_t sfb_packed = 0;
         {
-            int sf_thread_idx = lane_id % 8;
+            int sf_thread_idx = lane_id / 4;
             for (int sf_v = 0; sf_v < 4; sf_v++) {
                 int sf_element = sf_thread_idx + sf_v * 8;
                 int sf_row = sf_element % 8;   // N index in tile
