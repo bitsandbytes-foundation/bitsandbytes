@@ -65,9 +65,9 @@ def bench_dense_crossover(K_dim, N, k, codebook, M_values):
     for M in M_values:
         A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
 
-        # 1. Fused kbit GEMM
-        t_fused = bench(lambda: torch.ops.bitsandbytes.kbit_gemm(
-            A, packed_tiled, absmax_tiled, codebook, K_dim, N_padded, k,
+        # 1. Fused kbit GEMM (production kernel)
+        t_fused = bench(lambda: torch.ops.bitsandbytes.kbit_gemm_prod(
+            A, packed_tiled, absmax_tiled, codebook, K_dim, N_padded, k, 1,
         ))
 
         # 2. cuBLAS fp16 (baseline — assumes weights already in fp16)
