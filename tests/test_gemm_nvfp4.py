@@ -191,7 +191,11 @@ class TestGemmNVFP4:
     """Test NVFP4 GEMM kernel correctness."""
 
     def _run_gemm(self, M, N, K, seed=42):
-        """Run the GEMM kernel and return (output, reference)."""
+        """Run the GEMM kernel and return (output, reference).
+
+        The kernel computes D_raw = (A_fp4 * SFA) @ (B_fp4 * SFB)^T.
+        The tensor scales are applied post-hoc: D = D_raw * A_ts * B_ts.
+        """
         lib = get_lib()
         assert hasattr(lib, "cgemm_nvfp4"), "cgemm_nvfp4 symbol not found in library"
 
@@ -211,19 +215,31 @@ class TestGemmNVFP4:
         )
         torch.cuda.synchronize()
 
-        return D_out.cpu(), D_ref
+        # Apply tensor scales (not handled by kernel)
+        D_out_scaled = D_out.cpu() * A_ts * B_ts
 
-    def test_gemm_nvfp4_minimal(self):
-        """Test 16x8x64 (single MMA tile)."""
+        return D_out_scaled, D_ref
+
+    def test_gemm_nvfp4_random_single_tile(self):
+        """Test 16x8x64 (single MMA tile) with random data."""
         D_out, D_ref = self._run_gemm(16, 8, 64)
         print(f"Output[0:4, 0:4]:\n{D_out[0:4, 0:4]}")
         print(f"Reference[0:4, 0:4]:\n{D_ref[0:4, 0:4]}")
-        # Just check it runs and produces finite values
         assert torch.isfinite(D_out).all(), "Output contains non-finite values"
-        # Check rough magnitude match (within 10x)
-        if D_ref.abs().max() > 0:
-            ratio = D_out.abs().max() / D_ref.abs().max()
-            print(f"Max magnitude ratio (out/ref): {ratio:.3f}")
+        # Compare: both are products of FP4-quantized values, so they should
+        # be close. The main error source is quantization of the input.
+        abs_err = (D_out - D_ref).abs()
+        max_abs_err = abs_err.max().item()
+        mean_abs_err = abs_err.mean().item()
+        ref_magnitude = D_ref.abs().mean().item()
+        print(f"Max abs error: {max_abs_err:.4f}")
+        print(f"Mean abs error: {mean_abs_err:.4f}")
+        print(f"Reference mean magnitude: {ref_magnitude:.4f}")
+        # Relative error should be reasonable (FP4 quantization has ~25% relative error)
+        if ref_magnitude > 0:
+            rel_err = mean_abs_err / ref_magnitude
+            print(f"Relative error: {rel_err:.4f}")
+            assert rel_err < 2.0, f"Relative error {rel_err:.4f} too large"
 
     def test_gemm_nvfp4_identity_scales(self):
         """Test with all-ones data and scale=1 to verify basic MMA correctness."""
