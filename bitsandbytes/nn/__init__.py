@@ -13,6 +13,7 @@ from .modules import (
     Linear8bitLt,
     LinearFP4,
     LinearNF4,
+    LinearNVFP4,
     OutlierAwareLinear,
     Params4bit,
     StableEmbedding,

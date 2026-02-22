@@ -672,6 +672,79 @@ class LinearNF4(Linear4bit):
         )
 
 
+class LinearNVFP4(nn.Linear):
+    """NVFP4 (E2M1) quantized linear layer for Blackwell GPUs (SM_120).
+
+    Quantizes weights to NVFP4 on first forward pass. Uses the hardware
+    block-scaled MMA instruction for inference. Supports optional Hadamard
+    rotation for improved accuracy.
+
+    Args:
+        input_features: Number of input features.
+        output_features: Number of output features.
+        bias: Whether to use bias. Defaults to True.
+        rotate: Apply Hadamard rotation before quantization. Defaults to False.
+        device: Device for initialization.
+    """
+
+    def __init__(
+        self,
+        input_features,
+        output_features,
+        bias=True,
+        rotate=False,
+        device=None,
+    ):
+        super().__init__(input_features, output_features, bias, device)
+        self.rotate = rotate
+        self.weight_quantized = False
+        self.weight_packed = None
+        self.weight_state = None
+
+    def _quantize_weight(self):
+        """Quantize the weight tensor to NVFP4."""
+        from bitsandbytes.functional import quantize_nvfp4
+
+        # Weight is (out_features, in_features) = (N, K) in GEMM terms
+        w = self.weight.data.float().contiguous()
+        packed, state = quantize_nvfp4(w, rotate=self.rotate)
+        self.weight_packed = packed
+        self.weight_state = state
+        self.weight_quantized = True
+        # Free the original weight to save memory
+        self.weight = nn.Parameter(torch.empty(0, device=w.device, dtype=w.dtype), requires_grad=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.weight_quantized:
+            self._quantize_weight()
+
+        from bitsandbytes.functional import dequantize_nvfp4, gemm_nvfp4, quantize_nvfp4
+
+        inp_dtype = x.dtype
+        input_shape = x.shape
+
+        # Reshape input: (*, K) -> (M, K)
+        x_2d = x.reshape(-1, input_shape[-1]).float().contiguous()
+        M = x_2d.shape[0]
+        K = x_2d.shape[1]
+        N = self.weight_state.shape[0]  # out_features
+
+        # Quantize activations to NVFP4
+        x_packed, x_state = quantize_nvfp4(x_2d, rotate=self.rotate)
+
+        # Run NVFP4 GEMM: x @ weight^T
+        out = gemm_nvfp4(x_packed, x_state, self.weight_packed, self.weight_state)
+
+        # Reshape output back: (M, N) -> (*, N)
+        out = out.reshape(*input_shape[:-1], N)
+
+        # Add bias
+        if self.bias is not None:
+            out = out + self.bias.to(out.dtype)
+
+        return out.to(inp_dtype)
+
+
 class Int8Params(torch.nn.Parameter):
     def __new__(
         cls,
