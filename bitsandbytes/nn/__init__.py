@@ -12,11 +12,14 @@ from .modules import (
     Linear4bit,
     Linear8bitLt,
     LinearFP4,
+    LinearKbit,
     LinearNF4,
     OutlierAwareLinear,
     Params4bit,
+    ParamsKbit,
     StableEmbedding,
     SwitchBackLinearBnb,
+    _GlobalWeightBuffer,
 )
 from .triton_based_modules import (
     StandardLinear,
