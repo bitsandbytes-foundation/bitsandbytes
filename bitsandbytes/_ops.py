@@ -811,3 +811,37 @@ def _(
     torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
     torch._check(out.dtype == A.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A.dtype}")
     return out
+
+
+# K-bit scalar GEMV v2: tiled with shared memory + split-K (CUDA graph compatible)
+
+torch.library.define(
+    "bitsandbytes::kbit_scalar_gemv_v2_",
+    "(Tensor A, Tensor B_packed_tiled, Tensor B_absmax_tiled, Tensor codebook, int K_dim, int N, int k, "
+    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::kbit_scalar_gemv_v2_")
+def _(
+    A: torch.Tensor,
+    B_packed_tiled: torch.Tensor,
+    B_absmax_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.shape[0] <= 4, lambda: f"kbit_scalar_gemv_v2_ supports M<=4, got {A.shape[0]}")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    torch._check(out.dtype == A.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A.dtype}")
+    torch._check(C_workspace.dtype == torch.float32, lambda: f"C_workspace must be float32, got {C_workspace.dtype}")
+    torch._check(
+        tile_counters.dtype == torch.int32, lambda: f"tile_counters must be int32, got {tile_counters.dtype}"
+    )
+    return out

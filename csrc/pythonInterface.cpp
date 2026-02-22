@@ -742,6 +742,57 @@ MAKE_KBIT_SCALAR_GEMV_TILED_FP16ABS(3)
 MAKE_KBIT_SCALAR_GEMV_TILED_FP16ABS(4)
 MAKE_KBIT_SCALAR_GEMV_TILED_FP16ABS(5)
 
+// Forward declaration of tiled GEMV v2 launchers
+template <int K, typename scalar_t, typename ABSMAX_T>
+void kbitScalarGemvTiledV2(
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, float*, int*,
+    int, int, int, cudaStream_t
+);
+
+// Tiled GEMV v2 wrappers — uint8 E4M4 absmax
+#define MAKE_KBIT_SCALAR_GEMV_V2(K)                                                                                    \
+    void kbit_scalar_gemv_v2_fp16_k##K(                                                                                \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream                           \
+    ) {                                                                                                                \
+        kbitScalarGemvTiledV2<K, half, unsigned char>(                                                                 \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, stream);                      \
+    }                                                                                                                  \
+    void kbit_scalar_gemv_v2_bf16_k##K(                                                                                \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream         \
+    ) {                                                                                                                \
+        kbitScalarGemvTiledV2<K, __nv_bfloat16, unsigned char>(                                                        \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, stream);                      \
+    }
+
+MAKE_KBIT_SCALAR_GEMV_V2(2)
+MAKE_KBIT_SCALAR_GEMV_V2(3)
+MAKE_KBIT_SCALAR_GEMV_V2(4)
+MAKE_KBIT_SCALAR_GEMV_V2(5)
+
+// Tiled GEMV v2 wrappers — fp16 absmax
+#define MAKE_KBIT_SCALAR_GEMV_V2_FP16ABS(K)                                                                            \
+    void kbit_scalar_gemv_v2_fp16_fp16abs_k##K(                                                                        \
+        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream                           \
+    ) {                                                                                                                \
+        kbitScalarGemvTiledV2<K, half, half>(                                                                          \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, stream);                      \
+    }                                                                                                                  \
+    void kbit_scalar_gemv_v2_bf16_fp16abs_k##K(                                                                        \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream         \
+    ) {                                                                                                                \
+        kbitScalarGemvTiledV2<K, __nv_bfloat16, half>(                                                                 \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, stream);                      \
+    }
+
+MAKE_KBIT_SCALAR_GEMV_V2_FP16ABS(2)
+MAKE_KBIT_SCALAR_GEMV_V2_FP16ABS(3)
+MAKE_KBIT_SCALAR_GEMV_V2_FP16ABS(4)
+MAKE_KBIT_SCALAR_GEMV_V2_FP16ABS(5)
+
 // Debug MMA test
 void testMMA(const half*, const half*, float*);
 
@@ -1568,6 +1619,50 @@ MAKE_CKBIT_SCALAR_GEMV_TILED_FP16ABS(2)
 MAKE_CKBIT_SCALAR_GEMV_TILED_FP16ABS(3)
 MAKE_CKBIT_SCALAR_GEMV_TILED_FP16ABS(4)
 MAKE_CKBIT_SCALAR_GEMV_TILED_FP16ABS(5)
+
+// Tiled GEMV v2 extern C wrappers — uint8 E4M4 absmax
+#define MAKE_CKBIT_SCALAR_GEMV_V2(K)                                                                                   \
+    void ckbit_scalar_gemv_v2_fp16_k##K(                                                                               \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream                           \
+    ) {                                                                                                                \
+        kbit_scalar_gemv_v2_fp16_k##K(                                                                                 \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, stream);                      \
+    }                                                                                                                  \
+    void ckbit_scalar_gemv_v2_bf16_k##K(                                                                               \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream         \
+    ) {                                                                                                                \
+        kbit_scalar_gemv_v2_bf16_k##K(                                                                                 \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, stream);                      \
+    }
+
+MAKE_CKBIT_SCALAR_GEMV_V2(2)
+MAKE_CKBIT_SCALAR_GEMV_V2(3)
+MAKE_CKBIT_SCALAR_GEMV_V2(4)
+MAKE_CKBIT_SCALAR_GEMV_V2(5)
+
+// Tiled GEMV v2 extern C wrappers — fp16 absmax
+#define MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(K)                                                                           \
+    void ckbit_scalar_gemv_v2_fp16_fp16abs_k##K(                                                                       \
+        const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream                           \
+    ) {                                                                                                                \
+        kbit_scalar_gemv_v2_fp16_fp16abs_k##K(                                                                         \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, stream);                      \
+    }                                                                                                                  \
+    void ckbit_scalar_gemv_v2_bf16_fp16abs_k##K(                                                                       \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream         \
+    ) {                                                                                                                \
+        kbit_scalar_gemv_v2_bf16_fp16abs_k##K(                                                                         \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, stream);                      \
+    }
+
+MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(2)
+MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(3)
+MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(4)
+MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(5)
 
 #endif
 }
