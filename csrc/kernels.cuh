@@ -37,6 +37,15 @@ __global__ void kDequantizeNVFP4(
     const float tensor_scale, T* __restrict__ output, const int n
 );
 
+template <typename T>
+__global__ void kHadamardRotate16(T* __restrict__ data, const int n);
+
+template <typename T>
+__global__ void kFusedHadamardQuantizeNVFP4(
+    const T* __restrict__ input, unsigned char* __restrict__ output,
+    unsigned char* __restrict__ block_scales, const float tensor_scale, const int n
+);
+
 template <typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPreconditionOptimizer32bit2State(
     T* g, T* p, float* state1, float* state2, float* unorm, const float beta1, const float beta2, const float eps,

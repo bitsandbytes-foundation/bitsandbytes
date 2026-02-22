@@ -131,6 +131,15 @@ void dequantizeNVFP4(
     float tensor_scale, T* output, const int n, cudaStream_t stream
 );
 
+template <typename T>
+void hadamardRotate16(T* data, const int n);
+
+template <typename T>
+void fusedHadamardQuantizeNVFP4(
+    const T* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+);
+
 template <typename T, int OPTIMIZER>
 void optimizer32bit(
     T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, float beta1, float beta2,

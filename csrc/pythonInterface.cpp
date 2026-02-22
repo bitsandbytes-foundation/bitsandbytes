@@ -224,6 +224,37 @@ void quantizeNVFP4_fp32(
     quantizeNVFP4<float>(input, output, block_scales, tensor_scale, n);
 }
 
+// Hadamard rotation wrapper functions
+void hadamardRotate16_fp16(half* data, const int n) {
+    hadamardRotate16<half>(data, n);
+}
+void hadamardRotate16_bf16(__nv_bfloat16* data, const int n) {
+    hadamardRotate16<__nv_bfloat16>(data, n);
+}
+void hadamardRotate16_fp32(float* data, const int n) {
+    hadamardRotate16<float>(data, n);
+}
+
+// Fused Hadamard + NVFP4 quantize wrapper functions
+void fusedHadamardQuantizeNVFP4_fp16(
+    const half* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    fusedHadamardQuantizeNVFP4<half>(input, output, block_scales, tensor_scale, n);
+}
+void fusedHadamardQuantizeNVFP4_bf16(
+    const __nv_bfloat16* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    fusedHadamardQuantizeNVFP4<__nv_bfloat16>(input, output, block_scales, tensor_scale, n);
+}
+void fusedHadamardQuantizeNVFP4_fp32(
+    const float* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    fusedHadamardQuantizeNVFP4<float>(input, output, block_scales, tensor_scale, n);
+}
+
 // NVFP4 dequantize wrapper functions
 void dequantizeNVFP4_fp16(
     const unsigned char* input, const unsigned char* block_scales,
@@ -530,6 +561,37 @@ void cdequantize_blockwise_bf16_nf4(
     float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, int blocksize, const int n, cudaStream_t stream
 ) {
     dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n, stream);
+}
+
+// Hadamard rotation extern "C" wrappers
+void chadamard_rotate16_fp16(half* data, const int n) {
+    hadamardRotate16_fp16(data, n);
+}
+void chadamard_rotate16_bf16(__nv_bfloat16* data, const int n) {
+    hadamardRotate16_bf16(data, n);
+}
+void chadamard_rotate16_fp32(float* data, const int n) {
+    hadamardRotate16_fp32(data, n);
+}
+
+// Fused Hadamard + NVFP4 quantize extern "C" wrappers
+void cfused_hadamard_quantize_nvfp4_fp16(
+    const half* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    fusedHadamardQuantizeNVFP4_fp16(input, output, block_scales, tensor_scale, n);
+}
+void cfused_hadamard_quantize_nvfp4_bf16(
+    const __nv_bfloat16* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    fusedHadamardQuantizeNVFP4_bf16(input, output, block_scales, tensor_scale, n);
+}
+void cfused_hadamard_quantize_nvfp4_fp32(
+    const float* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    fusedHadamardQuantizeNVFP4_fp32(input, output, block_scales, tensor_scale, n);
 }
 
 // NVFP4 quantize extern "C" wrappers
