@@ -240,12 +240,15 @@ if(BUILD_CUDA)
         set(_HAS_SM120 TRUE)
     endif()
     if(_HAS_SM120)
-        set(SM120A_FILE csrc/kernels_nvfp4_sm120.cu)
-        list(APPEND SRC_FILES ${SM120A_FILE})
-        set_source_files_properties(${SM120A_FILE} PROPERTIES
-            COMPILE_FLAGS "-gencode=arch=compute_120a,code=sm_120a"
-            CUDA_ARCHITECTURES "OFF"
+        # Build as separate OBJECT library with its own CUDA_ARCHITECTURES
+        # to avoid conflict with the global architecture settings
+        add_library(nvfp4_sm120a OBJECT csrc/kernels_nvfp4_sm120.cu)
+        set_target_properties(nvfp4_sm120a PROPERTIES
+            CUDA_ARCHITECTURES "120a"
+            POSITION_INDEPENDENT_CODE ON
+            CUDA_SEPARABLE_COMPILATION OFF
         )
+        target_compile_options(nvfp4_sm120a PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>)
         message(STATUS "NVFP4 SM_120a GEMM kernel enabled")
     endif()
 
@@ -336,6 +339,11 @@ set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
 target_compile_features(bitsandbytes PUBLIC cxx_std_17)
 target_include_directories(bitsandbytes PUBLIC csrc)
+
+# Link NVFP4 SM_120a object library if available
+if(TARGET nvfp4_sm120a)
+    target_sources(bitsandbytes PRIVATE $<TARGET_OBJECTS:nvfp4_sm120a>)
+endif()
 
 if (BUILD_CPU)
     if (OpenMP_CXX_FOUND)
