@@ -338,5 +338,179 @@ class TestGemmNVFP4:
         assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large for {M}x{N}x{K}"
 
 
+class TestGemmNVFP4Output:
+    """Test GEMM with NVFP4 output (layer chaining) via Python API."""
+
+    def test_gemm_nvfp4_output_basic(self):
+        """GEMM with NVFP4 output: quantize → GEMM → quantize output → dequantize → compare."""
+        from bitsandbytes.functional import (
+            dequantize_nvfp4,
+            gemm_nvfp4_to_nvfp4,
+            quantize_nvfp4,
+        )
+
+        torch.manual_seed(42)
+        M, N, K = 32, 32, 64
+
+        A_float = torch.randn(M, K, dtype=torch.float32, device="cuda")
+        B_float = torch.randn(N, K, dtype=torch.float32, device="cuda")
+
+        # Quantize inputs
+        A_packed, A_state = quantize_nvfp4(A_float)
+        B_packed, B_state = quantize_nvfp4(B_float)
+
+        # GEMM with NVFP4 output
+        out_packed, out_state = gemm_nvfp4_to_nvfp4(A_packed, A_state, B_packed, B_state)
+
+        # Dequantize output
+        D_deq = dequantize_nvfp4(out_packed, out_state, out_dtype=torch.float32)
+
+        # Reference: dequantize inputs → matmul
+        A_deq = dequantize_nvfp4(A_packed, A_state, out_dtype=torch.float32)
+        B_deq = dequantize_nvfp4(B_packed, B_state, out_dtype=torch.float32)
+        D_ref = A_deq @ B_deq.T
+
+        # NVFP4 output adds a second layer of quantization error
+        ref_mag = D_ref.abs().mean().item()
+        mean_err = (D_deq - D_ref).abs().mean().item()
+        rel_err = mean_err / ref_mag if ref_mag > 0 else mean_err
+
+        print(f"GEMM NVFP4 output (M={M}, N={N}, K={K}):")
+        print(f"  Reference magnitude: {ref_mag:.4f}")
+        print(f"  Mean abs error: {mean_err:.4f}")
+        print(f"  Relative error: {rel_err:.4f}")
+        print(f"  Output shape: {D_deq.shape}")
+
+        assert D_deq.shape == (M, N), f"Wrong shape: {D_deq.shape}"
+        # Double quantization error: once for inputs, once for output
+        assert rel_err < 0.5, f"Relative error {rel_err:.4f} too large"
+
+    def test_gemm_nvfp4_output_alpha(self):
+        """GEMM with alpha scaling and NVFP4 output."""
+        from bitsandbytes.functional import (
+            dequantize_nvfp4,
+            gemm_nvfp4,
+            gemm_nvfp4_to_nvfp4,
+            quantize_nvfp4,
+        )
+
+        torch.manual_seed(123)
+        M, N, K = 16, 16, 64
+        alpha = 2.5
+
+        A_float = torch.randn(M, K, dtype=torch.float32, device="cuda")
+        B_float = torch.randn(N, K, dtype=torch.float32, device="cuda")
+
+        A_packed, A_state = quantize_nvfp4(A_float)
+        B_packed, B_state = quantize_nvfp4(B_float)
+
+        # GEMM without alpha (FP32 output)
+        D_fp32 = gemm_nvfp4(A_packed, A_state, B_packed, B_state)
+
+        # GEMM with alpha and NVFP4 output
+        out_packed, out_state = gemm_nvfp4_to_nvfp4(
+            A_packed, A_state, B_packed, B_state, alpha=alpha
+        )
+        D_nvfp4 = dequantize_nvfp4(out_packed, out_state, out_dtype=torch.float32)
+
+        # Reference: alpha * FP32 output
+        D_ref = D_fp32 * alpha
+
+        # Verify alpha is reflected in the output (within NVFP4 quantization error)
+        ref_mag = D_ref.abs().mean().item()
+        mean_err = (D_nvfp4 - D_ref).abs().mean().item()
+        rel_err = mean_err / ref_mag if ref_mag > 0 else mean_err
+
+        print(f"Alpha test (alpha={alpha}): rel_err={rel_err:.4f}")
+        assert rel_err < 0.5, f"Relative error {rel_err:.4f} too large"
+
+    def test_gemm_nvfp4_output_non_aligned_N(self):
+        """GEMM with NVFP4 output where N is not a multiple of 16."""
+        from bitsandbytes.functional import (
+            dequantize_nvfp4,
+            gemm_nvfp4_to_nvfp4,
+            quantize_nvfp4,
+        )
+
+        torch.manual_seed(77)
+        M, N, K = 16, 24, 64  # N=24, not multiple of 16
+
+        A_float = torch.randn(M, K, dtype=torch.float32, device="cuda")
+        B_float = torch.randn(N, K, dtype=torch.float32, device="cuda")
+
+        A_packed, A_state = quantize_nvfp4(A_float)
+        B_packed, B_state = quantize_nvfp4(B_float)
+
+        out_packed, out_state = gemm_nvfp4_to_nvfp4(A_packed, A_state, B_packed, B_state)
+        D_deq = dequantize_nvfp4(out_packed, out_state, out_dtype=torch.float32)
+
+        # Reference
+        A_deq = dequantize_nvfp4(A_packed, A_state, out_dtype=torch.float32)
+        B_deq = dequantize_nvfp4(B_packed, B_state, out_dtype=torch.float32)
+        D_ref = A_deq @ B_deq.T
+
+        assert D_deq.shape == (M, N), f"Wrong shape: {D_deq.shape}"
+        ref_mag = D_ref.abs().mean().item()
+        mean_err = (D_deq - D_ref).abs().mean().item()
+        rel_err = mean_err / ref_mag if ref_mag > 0 else mean_err
+        print(f"Non-aligned N test ({M}x{N}x{K}): rel_err={rel_err:.4f}")
+        assert rel_err < 0.5, f"Relative error {rel_err:.4f} too large"
+
+
+class TestNVFP4QuantStateSerialization:
+    """Test NVFP4QuantState save/load."""
+
+    def test_state_dict_round_trip(self):
+        """Serialize and deserialize NVFP4QuantState."""
+        from bitsandbytes.functional import NVFP4QuantState, dequantize_nvfp4, quantize_nvfp4
+
+        torch.manual_seed(42)
+        x = torch.randn(256, dtype=torch.float32, device="cuda")
+        packed, state = quantize_nvfp4(x)
+
+        # Serialize
+        sd = state.state_dict()
+        assert "packed_data" in sd
+        assert "block_scales" in sd
+        assert "tensor_scale" in sd
+        assert "shape" in sd
+        assert "dtype" in sd
+
+        # Deserialize
+        state2 = NVFP4QuantState.from_state_dict(sd, device="cuda")
+
+        # Verify fields match
+        assert torch.equal(state.packed_data, state2.packed_data)
+        assert torch.equal(state.block_scales, state2.block_scales)
+        assert state.tensor_scale == state2.tensor_scale
+        assert state.shape == state2.shape
+        assert state.dtype == state2.dtype
+        assert state.rotated == state2.rotated
+
+        # Verify dequantization produces same result
+        out1 = dequantize_nvfp4(packed, state, out_dtype=torch.float32)
+        out2 = dequantize_nvfp4(state2.packed_data, state2, out_dtype=torch.float32)
+        assert torch.equal(out1, out2), "Dequantized outputs differ after serialization"
+
+    def test_state_dict_save_load_file(self):
+        """Save to file and reload."""
+        import tempfile
+
+        from bitsandbytes.functional import NVFP4QuantState, quantize_nvfp4
+
+        torch.manual_seed(99)
+        x = torch.randn(128, dtype=torch.float16, device="cuda")
+        _, state = quantize_nvfp4(x)
+
+        with tempfile.NamedTemporaryFile(suffix=".pt") as f:
+            torch.save(state.state_dict(), f.name)
+            loaded = torch.load(f.name, weights_only=False)
+            state2 = NVFP4QuantState.from_state_dict(loaded, device="cuda")
+
+        assert torch.equal(state.packed_data, state2.packed_data)
+        assert state.tensor_scale == state2.tensor_scale
+        assert state.dtype == state2.dtype
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

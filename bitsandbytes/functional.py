@@ -1115,6 +1115,34 @@ class NVFP4QuantState:
             rotated=self.rotated,
         )
 
+    def state_dict(self) -> dict:
+        """Serialize to a dictionary for saving."""
+        return {
+            "packed_data": self.packed_data,
+            "block_scales": self.block_scales,
+            "tensor_scale": self.tensor_scale,
+            "shape": list(self.shape),
+            "dtype": str(self.dtype),
+            "rotated": self.rotated,
+        }
+
+    @classmethod
+    def from_state_dict(cls, d: dict, device="cpu") -> "NVFP4QuantState":
+        """Deserialize from a dictionary."""
+        dtype_map = {
+            "torch.float16": torch.float16,
+            "torch.bfloat16": torch.bfloat16,
+            "torch.float32": torch.float32,
+        }
+        return cls(
+            packed_data=d["packed_data"].to(device),
+            block_scales=d["block_scales"].to(device),
+            tensor_scale=float(d["tensor_scale"]),
+            shape=tuple(d["shape"]),
+            dtype=dtype_map.get(d["dtype"], torch.float16),
+            rotated=bool(d["rotated"]),
+        )
+
 
 def quantize_nvfp4(
     A: torch.Tensor,
@@ -1207,6 +1235,57 @@ def gemm_nvfp4(
         A_data, B_data, A_state.block_scales, B_state.block_scales,
         A_state.tensor_scale, B_state.tensor_scale, M, N, K,
     )
+
+
+def gemm_nvfp4_to_nvfp4(
+    A_data: torch.Tensor,
+    A_state: NVFP4QuantState,
+    B_data: torch.Tensor,
+    B_state: NVFP4QuantState,
+    alpha: float = 1.0,
+) -> tuple[torch.Tensor, NVFP4QuantState]:
+    """NVFP4 GEMM with NVFP4 output: compute A @ B^T and quantize the result.
+
+    This enables layer chaining without dequantizing between layers.
+    The GEMM is computed in FP32 internally, then the output is quantized
+    back to NVFP4 format (packed E2M1 + E4M3 block scales + FP32 tensor scale).
+
+    Args:
+        A_data: Packed FP4 data for A (M*K/2 bytes).
+        A_state: Quantization state for A (M x K).
+        B_data: Packed FP4 data for B (N*K/2 bytes, stored as N rows of K).
+        B_state: Quantization state for B (N x K).
+        alpha: Scalar multiplier applied to the GEMM result before quantization.
+
+    Returns:
+        Tuple of (packed_output, NVFP4QuantState) for the M x N output.
+    """
+    # Step 1: Compute GEMM → FP32
+    D_fp32 = gemm_nvfp4(A_data, A_state, B_data, B_state)
+
+    # Step 2: Apply alpha scaling
+    if alpha != 1.0:
+        D_fp32.mul_(alpha)
+
+    # Step 3: Quantize FP32 output → NVFP4
+    # Reshape to 2D (M, N) for quantization
+    M = A_state.shape[0]
+    N = B_state.shape[0]
+    D_2d = D_fp32.reshape(M, N)
+
+    # Pad N to multiple of 16 if needed for quantization
+    N_padded = ((N + 15) // 16) * 16
+    if N_padded != N:
+        D_padded = torch.zeros(M, N_padded, dtype=D_fp32.dtype, device=D_fp32.device)
+        D_padded[:, :N] = D_2d
+        packed, out_state = quantize_nvfp4(D_padded.reshape(-1))
+        # Adjust state shape to reflect actual (unpadded) output
+        out_state.shape = (M, N)
+    else:
+        packed, out_state = quantize_nvfp4(D_2d.reshape(-1))
+        out_state.shape = (M, N)
+
+    return packed, out_state
 
 
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
