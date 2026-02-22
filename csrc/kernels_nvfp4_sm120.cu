@@ -87,15 +87,14 @@ __device__ __forceinline__ uint32_t pack_8_nibbles_slow(const unsigned char* dat
 // ============================================================================
 
 // N-tiles per warp: each warp computes m16 x (N_TILES_PER_WARP * 8)
-#define N_TILES_PER_WARP 2
+#define N_TILES_PER_WARP 4
 // Block config: M_WARPS x N_WARPS warps per block
-// M_WARPS groups along M (each m16), N_WARPS groups along N (each handles N_TILES_PER_WARP n8-tiles)
-#define M_WARPS 4
+#define M_WARPS 2
 #define N_WARPS 4
-#define WARPS_PER_BLOCK (M_WARPS * N_WARPS) // 16
+#define WARPS_PER_BLOCK (M_WARPS * N_WARPS) // 8
 
-// 512 threads, target 2 blocks/SM for good occupancy
-__global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 2) void kGemmNVFP4_opt(
+// 256 threads, target 4 blocks/SM (limit regs to 48 via maxrregcount)
+__global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_opt(
     const unsigned char* __restrict__ A,   // M x K/2 packed FP4 (row-major)
     const unsigned char* __restrict__ B,   // N x K/2 packed FP4 (B transposed, row-major)
     const unsigned char* __restrict__ SFA, // M x K/16 UE4M3 scales
