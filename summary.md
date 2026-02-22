@@ -6,8 +6,8 @@ Base: `23f92e5` (feature/kbit-gemv-v8)
 ## What changed
 
 All kbit kernels now use uint8 E4M4 absmax by default, replacing float32.
-A float16 absmax alternative path is available for scalar GEMV and grouped
-scalar GEMV if higher absmax precision is needed.
+A float16 absmax alternative path is available for scalar GEMV if higher
+absmax precision is needed.
 
 ### Kernel changes
 
@@ -17,7 +17,6 @@ scalar GEMV if higher absmax precision is needed.
   re-encoding from float32.
 - **Scalar GEMV** (dense): `unsigned char*` absmax with `load_absmax<T>`
   decode. Templated on `ABSMAX_T` for uint8 (default) and float16.
-- **Grouped scalar GEMV** (MoE): Same treatment as dense scalar GEMV.
 - **MMA kernels** (dense + grouped): Already used uint8 E4M4 — no change.
 - **Dequantize**: Already supported uint8 — no change.
 
@@ -25,11 +24,11 @@ scalar GEMV if higher absmax precision is needed.
 
 - `csrc/ops.cu` — E4M4 encode/decode moved before quantize kernel,
   quantize writes uint8, repack accepts uint8, fp16abs template
-  instantiations for scalar/grouped GEMV
+  instantiations for scalar GEMV
 - `csrc/pythonInterface.cpp` — All wrappers updated for `unsigned char*`;
-  added 16 extern C symbols for fp16abs scalar/grouped GEMV
+  added extern C symbols for fp16abs scalar GEMV
 - `bitsandbytes/backends/cuda/ops.py` — uint8 allocation in quantize,
-  absmax dtype routing in scalar/grouped GEMV dispatch
+  absmax dtype routing in scalar GEMV dispatch
 - `bitsandbytes/_ops.py` — quantize_kbit fake op returns uint8
 - `bitsandbytes/functional.py` — Removed redundant Python-side E4M4 encode
 - `tests/test_scalar_gemv.py` — E4M4 decode in reference functions
@@ -62,10 +61,7 @@ RTX 4090, CUDA events timing, fp16.
 consistent direction. Run-to-run variance dominates. No measurable
 regression.
 
-**Grouped scalar GEMV / MoE** (8 configs, 8 experts):
-- M≥2: within noise (±3%)
-- M=1: possible ~5% overhead from E4M4 decode cost being a larger fraction
-  of the small per-warp workload. One outlier at +22% is likely noise.
+**MoE grouped MMA** (8 configs, 8 experts): No change (already uint8 E4M4).
 
 **MMA kernels**: No change (already uint8 E4M4).
 

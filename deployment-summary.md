@@ -14,18 +14,19 @@ is 80-84% of total GEMM wall-clock time in typical sessions.
 At 16+ concurrent users, the advantage disappears because large prefill
 chunks dominate and the dequant overhead exceeds the bandwidth savings.
 
-The system uses **5 CUDA kernels** dispatched per (layer_type, M):
+The system uses **4 CUDA kernels** dispatched by `kbit_linear` and
+`kbit_expert_linear` per (layer_type, M). All kernels read tiled
+format (from `repack_kbit`) with E4M4 absmax:
 
 | Kernel | M range | Layers | Mechanism |
 |--------|---------|--------|-----------|
 | Scalar GEMV | 1-4 | Dense + attn | 64 threads, shuffle codebook, no tensor cores |
 | MMA dequant | 5-16 | Dense + attn | Tensor core m16n8k16, inline dequant |
 | Dequant + cuBLAS | 17+ | Dense + attn | Separate dequant kernel → cuBLAS GEMM |
-| Grouped scalar GEMV | 1-4 | MoE experts | Same as scalar, batched across experts |
-| Grouped MMA | 1+ | MoE experts | Same as MMA, batched across experts |
+| Grouped MMA | 1-16 | MoE experts | Same as MMA, batched across experts |
 
-For MoE layers at large M (prefill), the grouped MMA kernel loses to
-fp16 BMM, so a hybrid dequant + cuBLAS BMM path is available.
+For MoE layers at max_M > 16 (prefill), `kbit_expert_linear` falls
+back to per-expert dequant + cuBLAS matmul.
 
 ---
 
@@ -188,40 +189,6 @@ Regardless of speed, kbit provides substantial memory savings:
 At k=4, a 70B model fits in 35 GB — comfortably on a single 4090 (24 GB
 VRAM) with context offloading, or two 4090s with room for KV cache. At
 fp16, the same model requires 140 GB (two H100s or four 4090s).
-
----
-
-## Grouped scalar GEMV: where it fits
-
-The grouped scalar GEMV (`kbit_grouped_scalar_gemv`) is a specialized
-kernel for MoE expert layers at M=1-4. It uses the same flat data format
-and shuffle codebook as the dense scalar GEMV.
-
-### When it wins
-
-Only for **moe_gu (K=2048, N=512) at M=1** — and barely:
-
-| Shape | M | Grouped scalar | Grp MMA | fp16 BMM | Winner |
-|-------|---|---------------|---------|----------|--------|
-| moe_gu | 1 | **11.3** | 11.6 | 11.7 | Grouped (by 0.3 us) |
-| moe_gu | 2 | 12.9 | **11.8** | 12.7 | Grp MMA |
-| moe_gu | 4 | 17.1 | **11.9** | 18.9 | Grp MMA |
-| moe_dn | 1 | 24.9 | **12.1** | 13.1 | Grp MMA |
-| moe_dn | 4 | 38.3 | **12.1** | 12.1 | Grp MMA |
-
-The grouped scalar is terrible on moe_dn (K=512): with only 512/64=8
-quant blocks per thread and C=1 (one column per block), the kernel is
-launch-overhead-dominated. The grouped MMA wins everywhere except that
-one moe_gu M=1 case.
-
-### Why it still exists
-
-1. It uses the flat data format (from `quantize_kbit` directly), no
-   repack step. If you only store weights in flat format, the grouped
-   scalar is the only MoE option at M=1-4.
-2. The moe_gu M=1 win is small but real in the most common workload
-   (single-user decode). Over thousands of layers, 0.3 us adds up.
-3. It provides a correctness cross-check against the grouped MMA.
 
 ---
 

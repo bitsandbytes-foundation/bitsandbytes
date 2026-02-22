@@ -122,20 +122,24 @@ than fp16 is at ~16 concurrent users.
 
 ---
 
-## Five-kernel strategy
+## Four-kernel strategy
 
 Each kernel covers a range of M where it has a structural advantage.
-The dispatch logic selects the best kernel per (layer_type, M) pair.
+The dispatch logic (`kbit_linear`, `kbit_expert_linear`) selects the
+best kernel per (layer_type, M) pair. All kernels read tiled format
+(from repack_kbit) with E4M4 absmax.
 
-| Kernel | M range | Layer types | Data format |
-|--------|---------|-------------|-------------|
-| 1. Scalar GEMV | 1-4 | Dense, attention | Flat (quantize_kbit), float32 absmax |
-| 2. MMA dequant | 5-16 | Dense, attention | Tiled (repack_kbit), E4M4 absmax |
-| 3. Dequant + cuBLAS | 17+ | Dense, attention | Flat -> fp16 |
-| 4. Grouped scalar GEMV | 1-4 | MoE experts | Flat (quantize_kbit), float32 absmax |
-| 5. Grouped MMA | 1+ | MoE experts | Tiled (repack_kbit), E4M4 absmax |
+| Kernel | M range | Layer types | Dispatch function |
+|--------|---------|-------------|-------------------|
+| 1. Scalar GEMV | 1-4 | Dense, attention | `kbit_linear` |
+| 2. MMA dequant | 5-16 | Dense, attention | `kbit_linear` |
+| 3. Dequant + cuBLAS | 17+ | Dense, attention | `kbit_linear` |
+| 4. Grouped MMA | 1-16 | MoE experts | `kbit_expert_linear` |
 
-Why five kernels instead of one:
+For MoE at max_M > 16, `kbit_expert_linear` falls back to per-expert
+dequant + cuBLAS matmul (no dedicated kernel needed).
+
+Why four kernels instead of one:
 - At M=1, tensor cores waste 94% of their compute (m16n8k16 pads 15
   zero rows). A scalar kernel that avoids MMA entirely wins by 3-5x.
 - At M=5-16, MMA utilization rises to 31-100%. The 3.2x data
@@ -147,10 +151,6 @@ Why five kernels instead of one:
   its compute pipeline.
 - MoE experts launched individually waste 88-97% of SMs. Grouping
   all active experts into one kernel launch solves this.
-- The grouped scalar GEMV and grouped MMA serve complementary roles:
-  scalar wins at M=1-4 for moe_gu (K=2048, N=512) where its C=1
-  grid gives better parallelism; grouped MMA wins at all M for
-  moe_dn (K=512, N=2048) and at M>4 for moe_gu.
 
 **Practical importance (from workload analysis in `token_analysis.md`):**
 
@@ -194,9 +194,10 @@ range falls in the gap between these modes.
 - No shared memory for B data, no cp.async, no split-K
 
 **Data format:**
-- B_packed: flat from `quantize_kbit` — `[N * num_k_blocks * k]` uint32
-- B_absmax: flat float32 — `[N * num_k_blocks]`
-- No repack step needed
+- B_packed: tiled from `repack_kbit` — tiles of `[TILE_N × KB_PER_TILE × k]` uint32
+- B_absmax: tiled uint8 E4M4 — tiles of `[TILE_N × KB_PER_TILE]`
+- Supports both flat and tiled layouts via `TILED` template bool
+- Flat layout preserved for standalone use; tiled layout used by dispatch
 
 **Inner loop (V8):**
 
@@ -204,7 +205,7 @@ Each thread strides through quantization blocks along K:
 ```
 for each quant block (stride 64):
     load k bit-plane words (vectorized: int2 for k=2, int4 for k=4)
-    load float32 absmax
+    load absmax (E4M4 → float decode)
 
     for sub = 0..3:            // 4 groups of 8 elements
         load A[m, k_base + sub*8 .. +7] via int4 (8 fp16 values)
@@ -329,12 +330,13 @@ the MMA dequant kernel takes ~68 us (instruction-limited, only 1.3%
 of execution is MMA). A fused dequant kernel would take ~5 us for
 this shape, so dequant + cuBLAS ~27 us would beat 68 us.
 
-**Dequant kernel** (`kDequantizeBlockwise_kbit_vec`): a single CUDA
-kernel that reads k-bit packed data + absmax and writes fp16 output.
-Templated on absmax type: float32 (from `quantize_kbit` directly),
-uint8 E4M4, or fp16. The float32 absmax path was added to eliminate
-a previous Python-side E4M4 conversion that launched ~15 PyTorch
-elementwise kernels (~800 us). Now it is a single kernel launch.
+**Dequant kernel:** Two variants:
+- `kDequantizeBlockwise_kbit_vec`: reads flat layout (from quantize_kbit)
+- `kDequantizeBlockwise_kbit_tiled`: reads tiled layout (from repack_kbit)
+
+Both are templated on absmax type (uint8 E4M4, fp16, float32) and
+output type (fp16, bf16, float32). The tiled variant is used by
+`kbit_linear` dispatch for the M>16 dequant+cuBLAS path.
 
 Dequant GPU kernel times (ncu-measured, k=4):
 
@@ -352,51 +354,15 @@ to the matmul. At M>=64, dequant+cuBLAS wins because cuBLAS scales
 efficiently while MMA is instruction-limited. The crossover is
 M=32-64 depending on shape.
 
-**Data format:** Uses flat layout (same as scalar GEMV). The
-`dequantize_kbit` launcher handles float32, uint8 E4M4, and fp16
-absmax via the `_KBIT_ABSMAX_SUFFIX` dispatch map.
+**Data format:** The flat variant (`dequantize_kbit`) reads flat layout
+from `quantize_kbit`. The tiled variant (`dequantize_kbit_tiled`) reads
+tiled layout from `repack_kbit`, used by `kbit_linear` dispatch.
+Both handle float32, uint8 E4M4, and fp16 absmax via the
+`_KBIT_ABSMAX_SUFFIX` dispatch map.
 
 ---
 
-## 4. Grouped scalar GEMV (`kbit_grouped_scalar_gemv`)
-
-**Location:** `ops.cu` (search for `kbit_grouped_scalar_gemv`)
-
-**Operation:** For each expert e: C_e[M_e, N] = A_e[M_e, K] * W_e^T,
-all experts in one kernel launch.
-
-**Architecture (V8):**
-- 64 threads (2 warps), one output column per block (C=1)
-- Grid = (N, num_experts) — Y-dimension indexes experts
-- `__launch_bounds__(64, 24)` for M<=2, `__launch_bounds__(64, 16)` for M>2
-- M_VAL dispatch (1/2/3/4 templates)
-
-**Data format:**
-- B_packed_all: flat from `quantize_kbit` — concatenated per-expert,
-  each `[N * num_k_blocks * k]` uint32 (truncated to exact size)
-- B_absmax_all: flat float32 — concatenated per-expert,
-  each `[N * num_k_blocks]` float32 (truncated to exact size)
-- No repack step needed. Uses same flat layout as the dense scalar GEMV.
-
-**Inner loop:** Identical to the dense scalar GEMV (V8): vectorized
-int4 A loads, 4-group sub-loop of 8 elements, shuffle codebook lookup.
-The only difference is per-expert pointer arithmetic using
-`expert_offsets[expert_id]` to find each expert's A, B, and C regions.
-
-**Why grouped scalar wins for moe_gu (K=2048, N=512) at M<=4:**
-With C=1, the grid is N × num_experts = 512 × 8 = 4096 blocks. This
-gives full SM utilization (32 blocks/SM). The grouped MMA at this shape
-has far fewer blocks due to tiling overhead.
-
-**Quantize_kbit padding:** `quantize_kbit` appends a small padding
-(4 packed words + 1 absmax) to each expert's output. The test and
-benchmark helpers truncate each expert's data to the exact expected
-size before concatenation, so the kernel's arithmetic indexing
-(`expert_id * N * num_k_blocks * K_BITS`) works correctly.
-
----
-
-## 5. Grouped MMA (`kbit_grouped_gemm_prod`)
+## 4. Grouped MMA (`kbit_grouped_gemm_prod`)
 
 **Location:** `ops.cu` (search for `kbit_grouped_gemm_prod`)
 
@@ -486,33 +452,31 @@ targets < 10 us.
 
 ## Data formats
 
-Two formats exist, and which kernel uses which matters:
+All inference kernels read **tiled format** (from `repack_kbit`).
+Flat format exists only as the intermediate output of `quantize_kbit`
+before repacking.
 
-**Flat (from `quantize_kbit`):**
+**Flat (from `quantize_kbit`) — intermediate only:**
 - B_packed: `[N * num_k_blocks * k]` uint32, row-major per column
-- B_absmax: `[N * num_k_blocks]` float32
-- No preprocessing. Used by: scalar GEMV, grouped scalar GEMV,
-  dequant kernel.
+- B_absmax: `[N * num_k_blocks]` float32 or uint8 E4M4
+- Used only during quantization. Converted to tiled by `repack_kbit`
+  at model load time, then discarded.
 
-**Tiled (from `repack_kbit`):**
+**Tiled (from `repack_kbit`) — runtime format:**
 - B_packed: reorganized into `[k_tiles * n_tiles * TILE_N * B_COL_WORDS]`
   for coalesced cp.async loads per tile
 - B_absmax: E4M4-encoded uint8, same tiled layout
-- Requires a one-time repack pass. Used by: MMA kernel, grouped MMA
-  kernel.
+- Used by: scalar GEMV, MMA kernel, grouped MMA kernel,
+  tiled dequant kernel (for dequant+cuBLAS path).
 
 E4M4 encodes each float32 absmax as a single byte (4-bit exponent +
 4-bit mantissa). Decode is branchless: `ldexp(mantissa, exponent-bias)`.
 This saves 4x bandwidth for absmax reads but adds a decode step in
 the inner loop.
 
-**Note:** The grouped scalar GEMV and grouped MMA use different data
-formats. The grouped scalar GEMV uses flat layout with float32 absmax
-(same as the dense scalar GEMV), while the grouped MMA uses tiled
-layout with E4M4 absmax (same as the dense MMA). This means MoE
-expert weights must be stored in both formats if both kernels are used
-in the dispatch, or a runtime conversion must happen. Currently the
-benchmark prepares each format separately.
+The flat dequant kernel (`kDequantizeBlockwise_kbit_vec`) is still
+available for standalone use (e.g., debugging), but `kbit_linear`
+dispatch uses the tiled dequant (`kDequantizeBlockwise_kbit_tiled`).
 
 ---
 
@@ -539,7 +503,7 @@ per element; for k=2, ~8 ops.
 
 | GPU | SM | MMA instruction | Async MMA? | Kernel strategy |
 |-----|-----|-----------------|------------|----------------|
-| RTX 4090 | sm_89 | mma.sync | No | All 5 kernels as described |
+| RTX 4090 | sm_89 | mma.sync | No | All 4 kernels as described |
 | RTX 5090 | sm_120 | mma.sync (ext) | No | Same strategy, more SMs (192) |
 | H100/H200 | sm_90a | wgmma.mma_async | Yes | Could overlap dequant + MMA |
 | B200/GB200 | sm_100a | tcgen05.mma | Yes | Could overlap dequant + MMA |

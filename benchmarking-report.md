@@ -5,16 +5,17 @@ All kernel times are NCU `gpu__time_duration.avg` unless stated otherwise.
 
 ## Kernel dispatch
 
-Five kernels cover the full inference workload. Dispatch selects the fastest
-kernel per (layer_type, M) pair:
+Four kernels cover the full inference workload. `kbit_linear` and
+`kbit_expert_linear` dispatch to the fastest kernel per (layer_type, M):
 
 | Kernel | M range | Layers | Status |
 |--------|---------|--------|--------|
 | Scalar GEMV | 1-4 | Dense + attention | Done (V8), 1.5-1.9x faster than fp16 at M=1 |
 | MMA dequant | 5-16 | Dense + attention | Done, ~1.0-1.3x vs fp16 |
 | Dequant + cuBLAS | 17+ | Dense + attention | Done, ~0.95-1.0x vs fp16 |
-| Grouped scalar GEMV | 1-4 | MoE experts | Done, competitive with fp16 |
-| Grouped MMA | 5+ | MoE experts | Done, competitive with fp16 |
+| Grouped MMA | 1-16 | MoE experts | Done, competitive with fp16 |
+
+All kernels read tiled format (from `repack_kbit`) with E4M4 absmax.
 
 ## Per-shape speedups at M=1 (decode, dominant workload)
 
@@ -166,10 +167,10 @@ kernel launches (dequant + matmul), doubling the dispatch tax.
    end-to-end throughput by up to 1.5x on top of the current kernel
    speedups.
 
-4. **MoE grouped kernels need V8 optimizations.** The grouped scalar GEMV
-   currently matches fp16 but does not beat it. Porting the V8 inner loop
-   (vectorized A loads, 2-warp config, M-dispatch) would bring it closer
-   to the 1.5-1.9x speedups seen on dense layers.
+4. **MoE dispatch is unified.** The grouped MMA handles M<=16 for MoE
+   layers; for larger M, `kbit_expert_linear` falls back to per-expert
+   dequant + cuBLAS matmul. The grouped scalar GEMV was removed (it only
+   won one shape at M=1 by 0.3 us).
 
 5. **Lower k is strictly better for inference speed, not just model size.**
    k=2 is fastest at every M value because it reads the least data. The
