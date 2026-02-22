@@ -1332,3 +1332,39 @@ def _(
             ct.c_int(N),
         )
     return out
+
+
+@register_kernel("bitsandbytes::kbit_scalar_gemv_tiled_", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed_tiled: torch.Tensor,
+    B_absmax_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(
+        A.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"kbit_scalar_gemv_tiled_ supports float16 and bfloat16, got {A.dtype}",
+    )
+
+    M = A.shape[0]
+    dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
+    abs_suffix = "_fp16abs" if B_absmax_tiled.dtype == torch.float16 else ""
+
+    with _cuda_device_of(A):
+        fn = getattr(lib, f"ckbit_scalar_gemv_tiled_{dtype_suffix}{abs_suffix}_k{k}")
+        fn(
+            get_ptr(A),
+            get_ptr(B_packed_tiled),
+            get_ptr(B_absmax_tiled),
+            get_ptr(codebook),
+            get_ptr(out),
+            ct.c_int(M),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+        )
+    return out

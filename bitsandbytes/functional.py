@@ -1299,11 +1299,9 @@ def kbit_linear(
     if M <= 4:
         # Scalar GEMV: tiled layout, one column per block
         if out is not None:
-            # scalar GEMV doesn't have an out variant for tiled yet,
-            # so compute into temp and copy
-            result = torch.ops.bitsandbytes.kbit_scalar_gemv_tiled(A, B_packed, B_absmax, codebook, K_dim, N, k)
-            out[:M, :N].copy_(result)
-            return out[:M]
+            return torch.ops.bitsandbytes.kbit_scalar_gemv_tiled_(
+                A, B_packed, B_absmax, codebook, K_dim, N, k, out[:M]
+            )
         return torch.ops.bitsandbytes.kbit_scalar_gemv_tiled(A, B_packed, B_absmax, codebook, K_dim, N, k)
 
     if M <= 16:

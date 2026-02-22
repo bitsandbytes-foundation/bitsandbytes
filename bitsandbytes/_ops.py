@@ -783,3 +783,31 @@ def _(
     torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
     M = A.shape[0]
     return torch.empty(M, N, device=A.device, dtype=A.dtype)
+
+
+# K-bit scalar GEMV tiled with pre-allocated output (CUDA graph compatible)
+
+torch.library.define(
+    "bitsandbytes::kbit_scalar_gemv_tiled_",
+    "(Tensor A, Tensor B_packed_tiled, Tensor B_absmax_tiled, Tensor codebook, int K_dim, int N, int k, "
+    "Tensor(a!) out) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::kbit_scalar_gemv_tiled_")
+def _(
+    A: torch.Tensor,
+    B_packed_tiled: torch.Tensor,
+    B_absmax_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    k: int,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.shape[0] <= 4, lambda: f"kbit_scalar_gemv_tiled_ supports M<=4, got {A.shape[0]}")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    torch._check(out.dtype == A.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A.dtype}")
+    return out
