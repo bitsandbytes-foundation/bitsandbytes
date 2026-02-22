@@ -810,15 +810,15 @@ _KBIT_ABSMAX_SUFFIX = {
 }
 
 
-@register_kernel("bitsandbytes::dequantize_kbit", "cuda")
-def _(
+def _dequantize_kbit_impl(
     packed: torch.Tensor,
     codebook: torch.Tensor,
     absmax: torch.Tensor,
     k: int,
     n: int,
     dtype: torch.dtype,
-) -> torch.Tensor:
+    out: torch.Tensor,
+) -> None:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(
         dtype in _KBIT_DTYPE_SUFFIX,
@@ -836,9 +836,6 @@ def _(
 
         absmax = encode_absmax_e4m4(absmax)
 
-    num_blocks = -(n // -32)
-    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
-
     tname = _KBIT_DTYPE_SUFFIX[dtype]
     aname = _KBIT_ABSMAX_SUFFIX[absmax.dtype]
 
@@ -853,4 +850,31 @@ def _(
             _get_tensor_stream(packed),
         )
 
+
+@register_kernel("bitsandbytes::dequantize_kbit", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    num_blocks = -(n // -32)
+    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+    _dequantize_kbit_impl(packed, codebook, absmax, k, n, dtype, out)
+    return out
+
+
+@register_kernel("bitsandbytes::dequantize_kbit_", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    _dequantize_kbit_impl(packed, codebook, absmax, k, n, dtype, out)
     return out
