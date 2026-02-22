@@ -1125,6 +1125,13 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
     constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
     constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES_VAL + ABS_STAGE_ALIGNED;
 
+    // Pipeline depth: 4 stages on datacenter GPUs (228KB shmem), 2 on consumer (100KB)
+#if BNB_DATACENTER_GPU
+    constexpr int NUM_STAGES = 4;
+#else
+    constexpr int NUM_STAGES = 2;
+#endif
+
     const int n_tiles = N / TILE_N;
     const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
     const int tiles_per_split = (k_tiles + k_splits - 1) / k_splits;
@@ -1138,7 +1145,7 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
     const int tid = lane_id % 4;
     const int warp_n_base = warp_id * COLS_PER_WARP;
 
-    // Double-buffered shared memory
+    // Multi-stage shared memory (NUM_STAGES stages)
     extern __shared__ char smem[];
     auto sh_a = [&](int stage) -> scalar_t* { return reinterpret_cast<scalar_t*>(smem + stage * STAGE_BYTES); };
     auto sh_b = [&](int stage) -> unsigned int* {
@@ -1307,22 +1314,31 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
             }
         };
 
-        // Pipeline: double-buffered cp.async
-        fetch_tile(0, kt_start);
-        cp_async_fence();
+        // Pipeline: NUM_STAGES-deep cp.async (2 on consumer, 4 on datacenter)
+        // Pre-fill first (NUM_STAGES - 1) tiles
+        {
+            int prefill_end = kt_start + NUM_STAGES - 1;
+            if (prefill_end > kt_end)
+                prefill_end = kt_end;
+            for (int pf = kt_start; pf < prefill_end; pf++) {
+                fetch_tile((pf - kt_start) % NUM_STAGES, pf);
+                cp_async_fence();
+            }
+        }
 
         for (int kt = kt_start; kt < kt_end; kt++) {
-            int cur = (kt - kt_start) % 2;
-            if (kt + 1 < kt_end) {
-                fetch_tile((kt + 1 - kt_start) % 2, kt + 1);
+            int cur = (kt - kt_start) % NUM_STAGES;
+            int fetch_kt = kt + NUM_STAGES - 1;
+            if (fetch_kt < kt_end) {
+                fetch_tile((fetch_kt - kt_start) % NUM_STAGES, fetch_kt);
                 cp_async_fence();
-                // L2 prefetch for tile kt+2 (warms L2 before next fetch_tile issues cp.async)
-                if (kt + 2 < kt_end) {
-                    const int pf_tile = (kt + 2) * n_tiles + n_tile;
+                // L2 prefetch for tile beyond the pipeline
+                if (fetch_kt + 1 < kt_end) {
+                    const int pf_tile = (fetch_kt + 1) * n_tiles + n_tile;
                     prefetch_l2(B_packed + pf_tile * B_STAGE_WORDS);
                     prefetch_l2(B_absmax + pf_tile * ABS_STAGE_ELEMS);
                 }
-                cp_async_wait<1>();
+                cp_async_wait<NUM_STAGES - 1>();
             } else {
                 cp_async_wait<0>();
             }
@@ -1392,6 +1408,19 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
     } // end persistent work loop
 }
 
+// Pipeline stage count: 4 on datacenter GPUs (more shmem), 2 on consumer.
+static int pipelineNumStages() {
+    static int cached = -1;
+    if (cached < 0) {
+        int major = 0, minor = 0;
+        cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, 0);
+        cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, 0);
+        int sm = major * 10 + minor;
+        cached = (sm == 90 || sm == 100) ? 4 : 2;
+    }
+    return cached;
+}
+
 // Production GEMM launcher — persistent kernel with auto k_splits
 template <int K, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
 static void kbitGemmProdLaunch(
@@ -1437,7 +1466,16 @@ static void kbitGemmProdLaunch(
     int grid_size = (k_splits == 1) ? total_work : min(target_blocks, total_work);
 
     dim3 block(BLOCK_DIM);
-    int smem_size = 2 * STAGE_BYTES;
+    int num_stages = pipelineNumStages();
+    int smem_size = num_stages * STAGE_BYTES;
+
+    // If shared memory exceeds default 48KB limit, increase it
+    if (smem_size > 48 * 1024) {
+        cudaFuncSetAttribute(
+            kbit_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T>,
+            cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
+        );
+    }
 
     kbit_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
         A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_splits, total_work
@@ -1538,6 +1576,13 @@ __global__ void kbit_grouped_gemm_prod(
     constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
     constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES_VAL + ABS_STAGE_ALIGNED;
 
+    // Pipeline depth: 4 stages on datacenter GPUs, 2 on consumer
+#if BNB_DATACENTER_GPU
+    constexpr int NUM_STAGES = 4;
+#else
+    constexpr int NUM_STAGES = 2;
+#endif
+
     const int n_tiles = N / TILE_N;
     const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
     const int tiles_per_split = (k_tiles + k_splits - 1) / k_splits;
@@ -1552,7 +1597,7 @@ __global__ void kbit_grouped_gemm_prod(
     const int tid = lane_id % 4;
     const int warp_n_base = warp_id * (TILE_N / NUM_WARPS);
 
-    // Double-buffered shared memory
+    // Multi-stage shared memory (NUM_STAGES stages)
     extern __shared__ char smem[];
     auto sh_a = [&](int stage) -> scalar_t* { return reinterpret_cast<scalar_t*>(smem + stage * STAGE_BYTES); };
     auto sh_b = [&](int stage) -> unsigned int* {
@@ -1750,22 +1795,30 @@ __global__ void kbit_grouped_gemm_prod(
             }
         };
 
-        // Pipeline: double-buffered cp.async over this split's k-tile range
-        fetch_tile(0, kt_start);
-        cp_async_fence();
+        // Pipeline: NUM_STAGES-deep cp.async (2 on consumer, 4 on datacenter)
+        {
+            int prefill_end = kt_start + NUM_STAGES - 1;
+            if (prefill_end > kt_end)
+                prefill_end = kt_end;
+            for (int pf = kt_start; pf < prefill_end; pf++) {
+                fetch_tile((pf - kt_start) % NUM_STAGES, pf);
+                cp_async_fence();
+            }
+        }
 
         for (int kt = kt_start; kt < kt_end; kt++) {
-            int cur = (kt - kt_start) % 2;
-            if (kt + 1 < kt_end) {
-                fetch_tile((kt - kt_start + 1) % 2, kt + 1);
+            int cur = (kt - kt_start) % NUM_STAGES;
+            int fetch_kt = kt + NUM_STAGES - 1;
+            if (fetch_kt < kt_end) {
+                fetch_tile((fetch_kt - kt_start) % NUM_STAGES, fetch_kt);
                 cp_async_fence();
-                // L2 prefetch for tile kt+2
-                if (kt + 2 < kt_end) {
-                    const int pf_tile = (kt + 2) * n_tiles + n_tile;
+                // L2 prefetch for tile beyond the pipeline
+                if (fetch_kt + 1 < kt_end) {
+                    const int pf_tile = (fetch_kt + 1) * n_tiles + n_tile;
                     prefetch_l2(B_packed + pf_tile * B_STAGE_WORDS);
                     prefetch_l2(B_absmax + pf_tile * ABS_STAGE_ELEMS);
                 }
-                cp_async_wait<1>();
+                cp_async_wait<NUM_STAGES - 1>();
             } else {
                 cp_async_wait<0>();
             }
@@ -1883,7 +1936,15 @@ static void kbitGroupedGemmProdLaunch(
     int grid_size = (k_splits == 1) ? min(num_sms, total_work) : min(target_blocks, total_work);
 
     dim3 block(BLOCK_DIM);
-    int smem_size = 2 * STAGE_BYTES;
+    int num_stages = pipelineNumStages();
+    int smem_size = num_stages * STAGE_BYTES;
+
+    if (smem_size > 48 * 1024) {
+        cudaFuncSetAttribute(
+            kbit_grouped_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T>,
+            cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
+        );
+    }
 
     kbit_grouped_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
         A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets, K_dim, N,
