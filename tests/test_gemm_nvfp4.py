@@ -74,6 +74,7 @@ def cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K):
     """Run GEMM using the CUDA kernel."""
     lib = get_lib()
     D_out = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
+    stream = torch.cuda.current_stream()
     lib.cgemm_nvfp4(
         ctypes.c_void_p(A_packed.data_ptr()),
         ctypes.c_void_p(B_packed.data_ptr()),
@@ -83,6 +84,7 @@ def cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K):
         ctypes.c_int(M),
         ctypes.c_int(N),
         ctypes.c_int(K),
+        ctypes.c_void_p(stream.cuda_stream),
     )
     torch.cuda.synchronize()
     return D_out
