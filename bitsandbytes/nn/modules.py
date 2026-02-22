@@ -872,6 +872,8 @@ class LinearKbit(nn.Linear):
         pass  # reserved for future use (e.g., registering buffer sizes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        from bitsandbytes.autograd._functions import MatMulKbit
+
         w = self.weight
         if not w.kbit_quantized:
             raise RuntimeError("LinearKbit weight not quantized. Call .to(device) first.")
@@ -887,24 +889,27 @@ class LinearKbit(nn.Linear):
         x_2d = x.reshape(-1, x.shape[-1])
         M = x_2d.shape[0]
 
-        if M <= 4 and not self.training:
+        if M <= 4 and not self.training and not x.requires_grad:
             # Decode path: scalar GEMV (flat layout, float32 absmax)
             out = torch.ops.bitsandbytes.kbit_scalar_gemv(
                 x_2d, w.packed, w.absmax, w.codebook, w.K_dim, w.N_padded, w.k,
             )
+        elif x.requires_grad:
+            # Training path: use autograd-aware MatMulKbit
+            out = MatMulKbit.apply(
+                x_2d, w.packed, w.absmax, w.codebook, w.k, w.K_dim, w.N_padded, w.N, compute_dtype,
+            )
         else:
-            # Prefill / training path: dequantize + cuBLAS matmul
+            # Prefill path (no grad): dequantize + cuBLAS matmul
             n_elements = w.N_padded * w.K_dim
-            buf = _GlobalWeightBuffer.get_buffer(x.device, n_elements, compute_dtype)
             w_deq = bnb.functional.dequantize_kbit(
                 w.packed, w.absmax, w.codebook, w.k, n_elements, compute_dtype,
             )
-            buf[:n_elements] = w_deq[:n_elements]
-            w_mat = buf[:n_elements].reshape(w.N_padded, w.K_dim)
-            out = torch.nn.functional.linear(x_2d, w_mat)
+            w_mat = w_deq[:n_elements].reshape(w.N_padded, w.K_dim)
+            out = torch.nn.functional.linear(x_2d, w_mat[:w.N, :])
 
-        # Slice off N-padding
-        if w.N_padded != w.N:
+        # Slice off N-padding (MatMulKbit handles this internally)
+        if w.N_padded != w.N and not x.requires_grad:
             out = out[:, :w.N]
 
         # Add bias

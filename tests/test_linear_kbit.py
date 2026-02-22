@@ -233,3 +233,79 @@ class TestGlobalWeightBuffer:
         max_new_alloc = 65536
         new_alloc = after - before
         assert new_alloc < max_new_alloc, f"New allocation: {new_alloc} bytes (expected < {max_new_alloc})"
+
+
+class TestMatMulKbit:
+    """Tests for the MatMulKbit autograd function."""
+
+    def test_gradient_flows(self):
+        """Gradient should flow through MatMulKbit to the input."""
+        layer = LinearKbit(512, 256, bias=False, k=4).to("cuda")
+        x = torch.randn(4, 512, dtype=torch.float16, device="cuda", requires_grad=True)
+        out = layer(x)
+        loss = out.sum()
+        loss.backward()
+        assert x.grad is not None
+        assert x.grad.shape == x.shape
+        assert not torch.all(x.grad == 0)
+
+    def test_gradient_correctness(self):
+        """Gradient should match manual dequant+matmul gradient."""
+        layer = LinearKbit(256, 128, bias=False, k=4).to("cuda")
+        w = layer.weight
+
+        x = torch.randn(2, 256, dtype=torch.float16, device="cuda", requires_grad=True)
+
+        # Autograd gradient from LinearKbit
+        out = layer(x)
+        loss = out.sum()
+        loss.backward()
+        grad_auto = x.grad.clone()
+
+        # Manual gradient: dequant W, compute grad_X = grad_output @ W
+        n_elements = w.N_padded * w.K_dim
+        w_deq = bnb.functional.dequantize_kbit(
+            w.packed, w.absmax, w.codebook, w.k, n_elements, torch.float16,
+        )
+        W = w_deq[:n_elements].reshape(w.N_padded, w.K_dim)[:w.N, :]
+        # grad_output is all ones (from loss = out.sum())
+        grad_manual = torch.ones(2, 128, dtype=torch.float16, device="cuda") @ W
+
+        diff = (grad_auto.float() - grad_manual.float()).abs()
+        scale = grad_manual.float().abs().clamp(min=1e-3)
+        rel_err = (diff / scale).max().item()
+        assert rel_err < 0.01, f"Gradient relative error: {rel_err:.4f}"
+
+    def test_bias_gradient(self):
+        """Bias gradient should be computed correctly."""
+        layer = LinearKbit(256, 128, bias=True, k=4).to("cuda")
+        # Make bias require grad
+        layer.bias.requires_grad_(True)
+        x = torch.randn(4, 256, dtype=torch.float16, device="cuda", requires_grad=True)
+        out = layer(x)
+        loss = out.sum()
+        loss.backward()
+        assert layer.bias.grad is not None
+        assert layer.bias.grad.shape == layer.bias.shape
+
+    def test_weight_no_gradient(self):
+        """Base kbit weight should NOT have gradient (frozen)."""
+        layer = LinearKbit(256, 128, bias=False, k=4).to("cuda")
+        assert not layer.weight.requires_grad
+        x = torch.randn(2, 256, dtype=torch.float16, device="cuda", requires_grad=True)
+        out = layer(x)
+        loss = out.sum()
+        loss.backward()
+        # Packed weights should not accumulate gradients
+        assert layer.weight.grad is None or torch.all(layer.weight.grad == 0)
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    def test_gradient_all_k(self, k):
+        """Gradient should flow for all bit widths."""
+        layer = LinearKbit(256, 128, bias=False, k=k).to("cuda")
+        x = torch.randn(2, 256, dtype=torch.float16, device="cuda", requires_grad=True)
+        out = layer(x)
+        loss = out.sum()
+        loss.backward()
+        assert x.grad is not None
+        assert x.grad.shape == x.shape

@@ -399,3 +399,73 @@ def matmul_4bit(
             return out
     else:
         return MatMul4Bit.apply(A, B, out, bias, quant_state)
+
+
+# ---------------------------------------------------------------------------
+# K-bit matmul autograd (2-5 bit, blocksize 32)
+# ---------------------------------------------------------------------------
+
+
+class MatMulKbit(torch.autograd.Function):
+    """Autograd function for matmul with k-bit quantized weights.
+
+    Forward:  out = X @ dequant(W_kbit)^T
+    Backward: grad_X = grad_output @ dequant(W_kbit)^T
+
+    The weight is dequantized on-the-fly using a global buffer to avoid
+    per-call allocation.  The base weight gradient is not computed (frozen).
+    """
+
+    @staticmethod
+    def forward(ctx, X, packed, absmax, codebook, k, K_dim, N_padded, N, compute_dtype):
+        from bitsandbytes.nn.modules import _GlobalWeightBuffer
+
+        n_elements = N_padded * K_dim
+        w_deq = F.dequantize_kbit(packed, absmax, codebook, k, n_elements, compute_dtype)
+        W = w_deq[:n_elements].reshape(N_padded, K_dim)
+
+        out = X @ W[:N, :].t()
+
+        # Save what we need for backward (lightweight references, not copies)
+        ctx.save_for_backward(packed, absmax, codebook)
+        ctx.k = k
+        ctx.K_dim = K_dim
+        ctx.N_padded = N_padded
+        ctx.N = N
+        ctx.compute_dtype = compute_dtype
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        packed, absmax, codebook = ctx.saved_tensors
+
+        grad_X = None
+        if ctx.needs_input_grad[0]:
+            n_elements = ctx.N_padded * ctx.K_dim
+            w_deq = F.dequantize_kbit(
+                packed, absmax, codebook, ctx.k, n_elements, ctx.compute_dtype,
+            )
+            W = w_deq[:n_elements].reshape(ctx.N_padded, ctx.K_dim)
+            grad_X = grad_output @ W[:ctx.N, :]
+
+        # No gradient for packed weights, absmax, codebook, or scalar params
+        return grad_X, None, None, None, None, None, None, None, None
+
+
+def matmul_kbit(
+    X: torch.Tensor,
+    packed: torch.Tensor,
+    absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    k: int,
+    K_dim: int,
+    N_padded: int,
+    N: int,
+    compute_dtype: torch.dtype,
+    bias: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Convenience wrapper for MatMulKbit with optional bias."""
+    out = MatMulKbit.apply(X, packed, absmax, codebook, k, K_dim, N_padded, N, compute_dtype)
+    if bias is not None:
+        out = out + bias
+    return out
