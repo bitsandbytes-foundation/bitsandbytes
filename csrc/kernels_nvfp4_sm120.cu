@@ -105,6 +105,18 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
     float* __restrict__ D,                 // M x N output (F32)
     int M, int N, int K
 ) {
+    // Split-K: compute this block's K-range from blockIdx.z / gridDim.z
+    // Each split handles a contiguous chunk of K, rounded to 64 (MMA step size)
+    int split_k = gridDim.z;
+    int split_id = blockIdx.z;
+    int k_per_split = ((K / split_k + 63) / 64) * 64; // round up to 64
+    int k_begin = split_id * k_per_split;
+    int k_end = k_begin + k_per_split;
+    if (k_end > K)
+        k_end = K;
+    if (k_begin >= K)
+        return;
+
     // Single-buffered shared memory
     __shared__ __align__(16) unsigned char smem[SMEM_TOTAL]; // 5760 bytes
     unsigned char* smem_A = smem;
@@ -274,13 +286,13 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
     uint32_t pipe_sfa, pipe_sfb;
 
     // Load first K-step directly into smem
-    ISSUE_LOADS(0, 0, pipe_a, pipe_b, pipe_sfa, pipe_sfb);
+    ISSUE_LOADS(k_begin / 2, k_begin / 16, pipe_a, pipe_b, pipe_sfa, pipe_sfb);
     STORE_TO_SMEM(pipe_a, pipe_b, pipe_sfa, pipe_sfb);
     __syncthreads();
 
-    for (int k_start = 0; k_start < K; k_start += 64) {
+    for (int k_start = k_begin; k_start < k_end; k_start += 64) {
         // Step 1: Issue loads for NEXT K-step into registers
-        bool has_next = (k_start + 64 < K);
+        bool has_next = (k_start + 64 < k_end);
         if (has_next) {
             ISSUE_LOADS((k_start + 64) / 2, (k_start + 64) / 16, pipe_a, pipe_b, pipe_sfa, pipe_sfb);
         }
@@ -307,11 +319,14 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
 #undef COMPUTE_STEP
 
     // ---- Write output ----
+    // Use atomicAdd when split-K is active (gridDim.z > 1) to accumulate
+    // partial results from different K-slices
     int octet = lane_id / 4;
     int quad = lane_id % 4;
     int out_row0 = tile_m + octet * 2;
     int out_row1 = out_row0 + 1;
     int out_col_base = quad * 2;
+    const bool use_atomic = (gridDim.z > 1);
 
 #pragma unroll
     for (int nt = 0; nt < N_TILES_PER_WARP; nt++) {
@@ -319,14 +334,25 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
         int c0 = this_tile_n + out_col_base;
         int c1 = c0 + 1;
 
-        if (out_row0 < M && c0 < N)
-            D[out_row0 * N + c0] = acc[nt][0];
-        if (out_row0 < M && c1 < N)
-            D[out_row0 * N + c1] = acc[nt][1];
-        if (out_row1 < M && c0 < N)
-            D[out_row1 * N + c0] = acc[nt][2];
-        if (out_row1 < M && c1 < N)
-            D[out_row1 * N + c1] = acc[nt][3];
+        if (use_atomic) {
+            if (out_row0 < M && c0 < N)
+                atomicAdd(&D[out_row0 * N + c0], acc[nt][0]);
+            if (out_row0 < M && c1 < N)
+                atomicAdd(&D[out_row0 * N + c1], acc[nt][1]);
+            if (out_row1 < M && c0 < N)
+                atomicAdd(&D[out_row1 * N + c0], acc[nt][2]);
+            if (out_row1 < M && c1 < N)
+                atomicAdd(&D[out_row1 * N + c1], acc[nt][3]);
+        } else {
+            if (out_row0 < M && c0 < N)
+                D[out_row0 * N + c0] = acc[nt][0];
+            if (out_row0 < M && c1 < N)
+                D[out_row0 * N + c1] = acc[nt][1];
+            if (out_row1 < M && c0 < N)
+                D[out_row1 * N + c0] = acc[nt][2];
+            if (out_row1 < M && c1 < N)
+                D[out_row1 * N + c1] = acc[nt][3];
+        }
     }
 }
 
@@ -481,17 +507,62 @@ __global__ void kGemmNVFP4_simple(
 }
 
 // ============================================================================
-// Host-side launcher — uses shared memory kernel
+// Host-side launcher — uses shared memory kernel with auto split-K
 // ============================================================================
+
+// Target: enough blocks to fill 84 SMs with 4 blocks/SM = 336 blocks
+static const int TARGET_BLOCKS = 336;
+
 extern "C" void cgemm_nvfp4(
     const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
     int N, int K, cudaStream_t stream
 ) {
     int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
     int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
-
-    dim3 grid(num_n_blocks, num_m_blocks);
+    int base_blocks = num_m_blocks * num_n_blocks;
     int threads_per_block = WARPS_PER_BLOCK * 32; // 256
 
+    // Auto split-K: split along K to fill the GPU when M/N tiles are sparse
+    // K must be split into multiples of 64 (MMA K-step size)
+    int max_k_splits = K / 64; // maximum possible splits
+    int split_k = 1;
+    if (base_blocks < TARGET_BLOCKS && max_k_splits > 1) {
+        split_k = (TARGET_BLOCKS + base_blocks - 1) / base_blocks;
+        if (split_k > max_k_splits)
+            split_k = max_k_splits;
+        // Cap at 16 to limit atomicAdd contention
+        if (split_k > 16)
+            split_k = 16;
+    }
+
+    // Zero output when using split-K (atomicAdd requires zeroed buffer)
+    if (split_k > 1) {
+        cudaMemsetAsync(D, 0, (size_t)M * N * sizeof(float), stream);
+    }
+
+    dim3 grid(num_n_blocks, num_m_blocks, split_k);
+    kGemmNVFP4_smem<<<grid, threads_per_block, 0, stream>>>(A, B, SFA, SFB, D, M, N, K);
+}
+
+// Overload: caller specifies split-K explicitly (for benchmarking)
+extern "C" void cgemm_nvfp4_splitk(
+    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
+    int N, int K, int split_k, cudaStream_t stream
+) {
+    int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
+    int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
+    int threads_per_block = WARPS_PER_BLOCK * 32;
+
+    if (split_k < 1)
+        split_k = 1;
+    int max_k_splits = K / 64;
+    if (split_k > max_k_splits)
+        split_k = max_k_splits;
+
+    if (split_k > 1) {
+        cudaMemsetAsync(D, 0, (size_t)M * N * sizeof(float), stream);
+    }
+
+    dim3 grid(num_n_blocks, num_m_blocks, split_k);
     kGemmNVFP4_smem<<<grid, threads_per_block, 0, stream>>>(A, B, SFA, SFB, D, M, N, K);
 }
