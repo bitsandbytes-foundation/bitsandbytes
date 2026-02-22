@@ -3008,3 +3008,258 @@ INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(2)
 INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(3)
 INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(4)
 INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(5)
+
+// ============================================================================
+// Training Kernels: SwiGLU, RMSNorm, RoPE
+// ============================================================================
+
+// ---------- SwiGLU forward+backward ----------
+// Forward: h = silu(gate) * up, where silu(x) = x * sigmoid(x)
+// Backward: dgate = dh * up * sigmoid(gate) * (1 + gate * (1 - sigmoid(gate)))
+//           dup   = dh * silu(gate)
+
+template <typename T>
+__global__ void kSwiGLUForward(const T* gate, const T* up, T* out, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    float g = float(gate[idx]);
+    float u = float(up[idx]);
+    float sig_g = 1.0f / (1.0f + expf(-g));
+    float silu_g = g * sig_g;
+    out[idx] = T(silu_g * u);
+}
+
+template <typename T>
+__global__ void kSwiGLUBackward(
+    const T* grad_h, const T* gate, const T* up,
+    T* grad_gate, T* grad_up, int n
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    float dh = float(grad_h[idx]);
+    float g = float(gate[idx]);
+    float u = float(up[idx]);
+    float sig_g = 1.0f / (1.0f + expf(-g));
+    float silu_g = g * sig_g;
+
+    // dgate = dh * up * sigmoid(gate) * (1 + gate * (1 - sigmoid(gate)))
+    grad_gate[idx] = T(dh * u * sig_g * (1.0f + g * (1.0f - sig_g)));
+    // dup = dh * silu(gate)
+    grad_up[idx] = T(dh * silu_g);
+}
+
+// C wrapper functions for SwiGLU
+template <typename T>
+void swiglu_forward(const T* gate, const T* up, T* out, int n) {
+    int blocks = (n + 255) / 256;
+    kSwiGLUForward<<<blocks, 256>>>(gate, up, out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <typename T>
+void swiglu_backward(const T* grad_h, const T* gate, const T* up,
+                     T* grad_gate, T* grad_up, int n) {
+    int blocks = (n + 255) / 256;
+    kSwiGLUBackward<<<blocks, 256>>>(grad_h, gate, up, grad_gate, grad_up, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Explicit instantiations for fp16 and bf16
+template void swiglu_forward<half>(const half*, const half*, half*, int);
+template void swiglu_forward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, int);
+template void swiglu_backward<half>(const half*, const half*, const half*, half*, half*, int);
+template void swiglu_backward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, __nv_bfloat16*, int);
+
+// ---------- RMSNorm forward+backward ----------
+// Forward: y = x * rsqrt(mean(x^2) + eps) * w
+// Stores rrms = rsqrt(mean(x^2) + eps) for backward
+// One thread block per row
+
+template <typename T, int BLOCK_SIZE>
+__global__ void kRMSNormForward(
+    const T* __restrict__ x,
+    const T* __restrict__ w,
+    T* __restrict__ out,
+    float* __restrict__ rrms_out,  // [num_rows] inverse RMS for backward
+    int rows, int cols, float eps, bool add_unit_offset
+) {
+    int row = blockIdx.x;
+    if (row >= rows) return;
+
+    const T* x_row = x + row * cols;
+    T* out_row = out + row * cols;
+
+    // Compute sum of squares using shared memory reduction
+    __shared__ float shared[BLOCK_SIZE];
+    float thread_sum = 0.0f;
+    for (int i = threadIdx.x; i < cols; i += BLOCK_SIZE) {
+        float val = float(x_row[i]);
+        thread_sum += val * val;
+    }
+    shared[threadIdx.x] = thread_sum;
+    __syncthreads();
+
+    // Tree reduction
+    for (int s = BLOCK_SIZE / 2; s > 0; s >>= 1) {
+        if (threadIdx.x < s) {
+            shared[threadIdx.x] += shared[threadIdx.x + s];
+        }
+        __syncthreads();
+    }
+
+    float mean_sq = shared[0] / float(cols);
+    float rrms = rsqrtf(mean_sq + eps);
+
+    // Store rrms for backward
+    if (threadIdx.x == 0) {
+        rrms_out[row] = rrms;
+    }
+
+    // Apply normalization: y = x * rrms * w
+    for (int i = threadIdx.x; i < cols; i += BLOCK_SIZE) {
+        float xi = float(x_row[i]);
+        float wi = add_unit_offset ? (float(w[i]) + 1.0f) : float(w[i]);
+        out_row[i] = T(xi * rrms * wi);
+    }
+}
+
+template <typename T, int BLOCK_SIZE>
+__global__ void kRMSNormBackward(
+    const T* __restrict__ grad_out,
+    const T* __restrict__ x,
+    const T* __restrict__ w,
+    const float* __restrict__ rrms,
+    T* __restrict__ grad_x,
+    float* __restrict__ grad_w_accum,  // [cols] accumulated across rows (atomicAdd)
+    int rows, int cols, bool add_unit_offset
+) {
+    int row = blockIdx.x;
+    if (row >= rows) return;
+
+    const T* g_row = grad_out + row * cols;
+    const T* x_row = x + row * cols;
+    T* dx_row = grad_x + row * cols;
+    float r = rrms[row];
+
+    // Compute c = sum(grad_out * x * w) / cols
+    __shared__ float shared[BLOCK_SIZE];
+    float thread_sum = 0.0f;
+    for (int i = threadIdx.x; i < cols; i += BLOCK_SIZE) {
+        float gi = float(g_row[i]);
+        float xi = float(x_row[i]);
+        float wi = add_unit_offset ? (float(w[i]) + 1.0f) : float(w[i]);
+        thread_sum += gi * xi * wi;
+    }
+    shared[threadIdx.x] = thread_sum;
+    __syncthreads();
+
+    for (int s = BLOCK_SIZE / 2; s > 0; s >>= 1) {
+        if (threadIdx.x < s) {
+            shared[threadIdx.x] += shared[threadIdx.x + s];
+        }
+        __syncthreads();
+    }
+    float c = shared[0] / float(cols);
+
+    // grad_x = rrms * (grad_out * w - x * c * rrms^2)
+    float rrms3 = r * r * r;
+    // Simplify: grad_x = rrms * (g * w - x * c * rrms^2)
+    //                   = rrms * g * w - x * c * rrms^3
+    //                   = rrms * (g * w - x * c / mean_sq_plus_eps)
+    // Actually: grad of y = x * rrms * w
+    //   dy/dx_i = rrms * w_i - x_i * rrms^3 * (sum_j x_j * g_j * w_j) / cols
+    //   so grad_x_i = g_i * rrms * w_i - x_i * rrms^3 * c
+
+    for (int i = threadIdx.x; i < cols; i += BLOCK_SIZE) {
+        float gi = float(g_row[i]);
+        float xi = float(x_row[i]);
+        float wi = add_unit_offset ? (float(w[i]) + 1.0f) : float(w[i]);
+        float dx = gi * r * wi - xi * rrms3 * c;
+        dx_row[i] = T(dx);
+
+        // Accumulate grad_w: dw_i += g_i * x_i * rrms (across all rows)
+        atomicAdd(&grad_w_accum[i], gi * xi * r);
+    }
+}
+
+// C wrapper functions
+template <typename T>
+void rmsnorm_forward(const T* x, const T* w, T* out, float* rrms,
+                     int rows, int cols, float eps, bool add_unit_offset) {
+    if (cols <= 256) {
+        kRMSNormForward<T, 256><<<rows, 256>>>(x, w, out, rrms, rows, cols, eps, add_unit_offset);
+    } else if (cols <= 512) {
+        kRMSNormForward<T, 512><<<rows, 512>>>(x, w, out, rrms, rows, cols, eps, add_unit_offset);
+    } else {
+        kRMSNormForward<T, 1024><<<rows, 1024>>>(x, w, out, rrms, rows, cols, eps, add_unit_offset);
+    }
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <typename T>
+void rmsnorm_backward(const T* grad_out, const T* x, const T* w, const float* rrms,
+                      T* grad_x, float* grad_w_accum,
+                      int rows, int cols, bool add_unit_offset) {
+    if (cols <= 256) {
+        kRMSNormBackward<T, 256><<<rows, 256>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
+    } else if (cols <= 512) {
+        kRMSNormBackward<T, 512><<<rows, 512>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
+    } else {
+        kRMSNormBackward<T, 1024><<<rows, 1024>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
+    }
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template void rmsnorm_forward<half>(const half*, const half*, half*, float*, int, int, float, bool);
+template void rmsnorm_forward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, float*, int, int, float, bool);
+template void rmsnorm_backward<half>(const half*, const half*, const half*, const float*, half*, float*, int, int, bool);
+template void rmsnorm_backward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, const float*, __nv_bfloat16*, float*, int, int, bool);
+
+// ---------- RoPE forward+backward ----------
+// In-place rotary position embedding:
+// Q_out[..., :half] = Q[..., :half] * cos - Q[..., half:] * sin
+// Q_out[..., half:] = Q[..., half:] * cos + Q[..., :half] * sin
+// Backward is the same kernel with sin negated.
+
+template <typename T>
+__global__ void kRoPEForward(
+    T* __restrict__ q,   // [total_tokens, n_heads, head_dim]
+    const T* __restrict__ cos_cache,  // [total_tokens, head_dim/2]
+    const T* __restrict__ sin_cache,  // [total_tokens, head_dim/2]
+    int total_tokens, int n_heads, int head_dim
+) {
+    int half_dim = head_dim / 2;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_elements = total_tokens * n_heads * half_dim;
+    if (tid >= total_elements) return;
+
+    int d = tid % half_dim;
+    int remaining = tid / half_dim;
+    int h = remaining % n_heads;
+    int t = remaining / n_heads;
+
+    int base_idx = t * n_heads * head_dim + h * head_dim;
+
+    float q_r = float(q[base_idx + d]);
+    float q_i = float(q[base_idx + half_dim + d]);
+    float c = float(cos_cache[t * half_dim + d]);
+    float s = float(sin_cache[t * half_dim + d]);
+
+    q[base_idx + d]            = T(q_r * c - q_i * s);
+    q[base_idx + half_dim + d] = T(q_i * c + q_r * s);
+}
+
+template <typename T>
+void rope_forward(T* q, const T* cos_cache, const T* sin_cache,
+                  int total_tokens, int n_heads, int head_dim) {
+    int half_dim = head_dim / 2;
+    int total = total_tokens * n_heads * half_dim;
+    int blocks = (total + 255) / 256;
+    kRoPEForward<<<blocks, 256>>>(q, cos_cache, sin_cache, total_tokens, n_heads, head_dim);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template void rope_forward<half>(half*, const half*, const half*, int, int, int);
+template void rope_forward<__nv_bfloat16>(__nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, int, int, int);

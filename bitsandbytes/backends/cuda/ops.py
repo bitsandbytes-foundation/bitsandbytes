@@ -1231,3 +1231,144 @@ def _(
         )
 
     return C_concat
+
+
+# ============================================================================
+# Training Kernels: SwiGLU, RMSNorm, RoPE
+# ============================================================================
+
+
+@register_kernel("bitsandbytes::swiglu_forward", "cuda")
+def _(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
+    torch._check(gate.shape == up.shape, lambda: "gate and up must have same shape")
+    torch._check(gate.is_contiguous(), lambda: "gate must be contiguous")
+    torch._check(up.is_contiguous(), lambda: "up must be contiguous")
+    torch._check(
+        gate.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"swiglu supports float16/bfloat16, got {gate.dtype}",
+    )
+
+    out = torch.empty_like(gate)
+    n = gate.numel()
+    dtype_suffix = "fp16" if gate.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(gate):
+        fn = getattr(lib, f"cswiglu_forward_{dtype_suffix}_c")
+        fn(get_ptr(gate), get_ptr(up), get_ptr(out), ct.c_int(n))
+
+    return out
+
+
+@register_kernel("bitsandbytes::swiglu_backward", "cuda")
+def _(grad_h: torch.Tensor, gate: torch.Tensor, up: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(grad_h.is_contiguous(), lambda: "grad_h must be contiguous")
+    torch._check(gate.is_contiguous(), lambda: "gate must be contiguous")
+    torch._check(up.is_contiguous(), lambda: "up must be contiguous")
+
+    grad_gate = torch.empty_like(gate)
+    grad_up = torch.empty_like(up)
+    n = gate.numel()
+    dtype_suffix = "fp16" if gate.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(gate):
+        fn = getattr(lib, f"cswiglu_backward_{dtype_suffix}_c")
+        fn(get_ptr(grad_h), get_ptr(gate), get_ptr(up), get_ptr(grad_gate), get_ptr(grad_up), ct.c_int(n))
+
+    return grad_gate, grad_up
+
+
+@register_kernel("bitsandbytes::rmsnorm_forward", "cuda")
+def _(
+    x: torch.Tensor,
+    w: torch.Tensor,
+    eps: float,
+    add_unit_offset: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(x.dim() == 2, lambda: "x must be 2D [rows, cols]")
+    torch._check(x.is_contiguous(), lambda: "x must be contiguous")
+    torch._check(
+        x.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"rmsnorm supports float16/bfloat16, got {x.dtype}",
+    )
+
+    rows, cols = x.shape
+    out = torch.empty_like(x)
+    rrms = torch.empty(rows, device=x.device, dtype=torch.float32)
+    dtype_suffix = "fp16" if x.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(x):
+        fn = getattr(lib, f"crmsnorm_forward_{dtype_suffix}_c")
+        fn(
+            get_ptr(x),
+            get_ptr(w),
+            get_ptr(out),
+            get_ptr(rrms),
+            ct.c_int(rows),
+            ct.c_int(cols),
+            ct.c_float(eps),
+            ct.c_bool(add_unit_offset),
+        )
+
+    return out, rrms
+
+
+@register_kernel("bitsandbytes::rmsnorm_backward", "cuda")
+def _(
+    grad_out: torch.Tensor,
+    x: torch.Tensor,
+    w: torch.Tensor,
+    rrms: torch.Tensor,
+    add_unit_offset: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(grad_out.is_contiguous(), lambda: "grad_out must be contiguous")
+    torch._check(x.is_contiguous(), lambda: "x must be contiguous")
+
+    rows, cols = x.shape
+    grad_x = torch.empty_like(x)
+    grad_w = torch.zeros(cols, device=x.device, dtype=torch.float32)
+    dtype_suffix = "fp16" if x.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(x):
+        fn = getattr(lib, f"crmsnorm_backward_{dtype_suffix}_c")
+        fn(
+            get_ptr(grad_out),
+            get_ptr(x),
+            get_ptr(w),
+            get_ptr(rrms),
+            get_ptr(grad_x),
+            get_ptr(grad_w),
+            ct.c_int(rows),
+            ct.c_int(cols),
+            ct.c_bool(add_unit_offset),
+        )
+
+    return grad_x, grad_w
+
+
+@register_kernel("bitsandbytes::rope_forward", "cuda")
+def _(
+    q: torch.Tensor,
+    cos_cache: torch.Tensor,
+    sin_cache: torch.Tensor,
+    n_heads: int,
+) -> None:
+    torch._check(q.is_contiguous(), lambda: "q must be contiguous")
+    torch._check(
+        q.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"rope supports float16/bfloat16, got {q.dtype}",
+    )
+
+    total_tokens = q.shape[0]
+    head_dim = q.shape[-1]
+    dtype_suffix = "fp16" if q.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(q):
+        fn = getattr(lib, f"crope_forward_{dtype_suffix}_c")
+        fn(
+            get_ptr(q),
+            get_ptr(cos_cache),
+            get_ptr(sin_cache),
+            ct.c_int(total_tokens),
+            ct.c_int(n_heads),
+            ct.c_int(head_dim),
+        )

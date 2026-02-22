@@ -602,6 +602,56 @@ MAKE_KBIT_GROUPED_SCALAR_GEMV(5)
 // Debug MMA test
 void testMMA(const half*, const half*, float*);
 
+// Forward declarations for training kernels
+template <typename T> void swiglu_forward(const T*, const T*, T*, int);
+template <typename T> void swiglu_backward(const T*, const T*, const T*, T*, T*, int);
+template <typename T> void rmsnorm_forward(const T*, const T*, T*, float*, int, int, float, bool);
+template <typename T> void rmsnorm_backward(const T*, const T*, const T*, const float*, T*, float*, int, int, bool);
+template <typename T> void rope_forward(T*, const T*, const T*, int, int, int);
+
+// Training kernel C wrappers (fp16)
+void cswiglu_forward_fp16(const half* gate, const half* up, half* out, int n) {
+    swiglu_forward<half>(gate, up, out, n);
+}
+void cswiglu_backward_fp16(const half* grad_h, const half* gate, const half* up,
+                           half* grad_gate, half* grad_up, int n) {
+    swiglu_backward<half>(grad_h, gate, up, grad_gate, grad_up, n);
+}
+void cswiglu_forward_bf16(const __nv_bfloat16* gate, const __nv_bfloat16* up, __nv_bfloat16* out, int n) {
+    swiglu_forward<__nv_bfloat16>(gate, up, out, n);
+}
+void cswiglu_backward_bf16(const __nv_bfloat16* grad_h, const __nv_bfloat16* gate, const __nv_bfloat16* up,
+                           __nv_bfloat16* grad_gate, __nv_bfloat16* grad_up, int n) {
+    swiglu_backward<__nv_bfloat16>(grad_h, gate, up, grad_gate, grad_up, n);
+}
+
+void crmsnorm_forward_fp16(const half* x, const half* w, half* out, float* rrms,
+                           int rows, int cols, float eps, bool add_unit_offset) {
+    rmsnorm_forward<half>(x, w, out, rrms, rows, cols, eps, add_unit_offset);
+}
+void crmsnorm_backward_fp16(const half* grad_out, const half* x, const half* w, const float* rrms,
+                            half* grad_x, float* grad_w, int rows, int cols, bool add_unit_offset) {
+    rmsnorm_backward<half>(grad_out, x, w, rrms, grad_x, grad_w, rows, cols, add_unit_offset);
+}
+void crmsnorm_forward_bf16(const __nv_bfloat16* x, const __nv_bfloat16* w, __nv_bfloat16* out, float* rrms,
+                           int rows, int cols, float eps, bool add_unit_offset) {
+    rmsnorm_forward<__nv_bfloat16>(x, w, out, rrms, rows, cols, eps, add_unit_offset);
+}
+void crmsnorm_backward_bf16(const __nv_bfloat16* grad_out, const __nv_bfloat16* x, const __nv_bfloat16* w,
+                            const float* rrms, __nv_bfloat16* grad_x, float* grad_w,
+                            int rows, int cols, bool add_unit_offset) {
+    rmsnorm_backward<__nv_bfloat16>(grad_out, x, w, rrms, grad_x, grad_w, rows, cols, add_unit_offset);
+}
+
+void crope_forward_fp16(half* q, const half* cos_cache, const half* sin_cache,
+                        int total_tokens, int n_heads, int head_dim) {
+    rope_forward<half>(q, cos_cache, sin_cache, total_tokens, n_heads, head_dim);
+}
+void crope_forward_bf16(__nv_bfloat16* q, const __nv_bfloat16* cos_cache, const __nv_bfloat16* sin_cache,
+                        int total_tokens, int n_heads, int head_dim) {
+    rope_forward<__nv_bfloat16>(q, cos_cache, sin_cache, total_tokens, n_heads, head_dim);
+}
+
 #endif // BUILD_CUDA || BUILD_HIP (kbit unmangled)
 
 extern "C" {
@@ -1306,6 +1356,49 @@ MAKE_CKBIT_GROUPED_SCALAR_GEMV(2)
 MAKE_CKBIT_GROUPED_SCALAR_GEMV(3)
 MAKE_CKBIT_GROUPED_SCALAR_GEMV(4)
 MAKE_CKBIT_GROUPED_SCALAR_GEMV(5)
+
+// Training kernel extern C wrappers
+void cswiglu_forward_fp16_c(const half* gate, const half* up, half* out, int n) {
+    cswiglu_forward_fp16(gate, up, out, n);
+}
+void cswiglu_backward_fp16_c(const half* grad_h, const half* gate, const half* up,
+                             half* grad_gate, half* grad_up, int n) {
+    cswiglu_backward_fp16(grad_h, gate, up, grad_gate, grad_up, n);
+}
+void cswiglu_forward_bf16_c(const __nv_bfloat16* gate, const __nv_bfloat16* up, __nv_bfloat16* out, int n) {
+    cswiglu_forward_bf16(gate, up, out, n);
+}
+void cswiglu_backward_bf16_c(const __nv_bfloat16* grad_h, const __nv_bfloat16* gate, const __nv_bfloat16* up,
+                             __nv_bfloat16* grad_gate, __nv_bfloat16* grad_up, int n) {
+    cswiglu_backward_bf16(grad_h, gate, up, grad_gate, grad_up, n);
+}
+
+void crmsnorm_forward_fp16_c(const half* x, const half* w, half* out, float* rrms,
+                             int rows, int cols, float eps, bool add_unit_offset) {
+    crmsnorm_forward_fp16(x, w, out, rrms, rows, cols, eps, add_unit_offset);
+}
+void crmsnorm_backward_fp16_c(const half* grad_out, const half* x, const half* w, const float* rrms,
+                              half* grad_x, float* grad_w, int rows, int cols, bool add_unit_offset) {
+    crmsnorm_backward_fp16(grad_out, x, w, rrms, grad_x, grad_w, rows, cols, add_unit_offset);
+}
+void crmsnorm_forward_bf16_c(const __nv_bfloat16* x, const __nv_bfloat16* w, __nv_bfloat16* out, float* rrms,
+                             int rows, int cols, float eps, bool add_unit_offset) {
+    crmsnorm_forward_bf16(x, w, out, rrms, rows, cols, eps, add_unit_offset);
+}
+void crmsnorm_backward_bf16_c(const __nv_bfloat16* grad_out, const __nv_bfloat16* x, const __nv_bfloat16* w,
+                              const float* rrms, __nv_bfloat16* grad_x, float* grad_w,
+                              int rows, int cols, bool add_unit_offset) {
+    crmsnorm_backward_bf16(grad_out, x, w, rrms, grad_x, grad_w, rows, cols, add_unit_offset);
+}
+
+void crope_forward_fp16_c(half* q, const half* cos_cache, const half* sin_cache,
+                          int total_tokens, int n_heads, int head_dim) {
+    crope_forward_fp16(q, cos_cache, sin_cache, total_tokens, n_heads, head_dim);
+}
+void crope_forward_bf16_c(__nv_bfloat16* q, const __nv_bfloat16* cos_cache, const __nv_bfloat16* sin_cache,
+                          int total_tokens, int n_heads, int head_dim) {
+    crope_forward_bf16(q, cos_cache, sin_cache, total_tokens, n_heads, head_dim);
+}
 
 #endif
 }

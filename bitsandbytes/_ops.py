@@ -705,3 +705,80 @@ def _(
     )
     total_M = A_concat.shape[0]
     return torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
+
+
+# ============================================================================
+# Training Kernels: SwiGLU, RMSNorm, RoPE
+# ============================================================================
+
+# SwiGLU forward: h = silu(gate) * up
+torch.library.define(
+    "bitsandbytes::swiglu_forward",
+    "(Tensor gate, Tensor up) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::swiglu_forward")
+def _(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
+    torch._check(gate.shape == up.shape, lambda: "gate and up must have same shape")
+    return torch.empty_like(gate)
+
+
+# SwiGLU backward: (grad_gate, grad_up) from grad_h
+torch.library.define(
+    "bitsandbytes::swiglu_backward",
+    "(Tensor grad_h, Tensor gate, Tensor up) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::swiglu_backward")
+def _(grad_h: torch.Tensor, gate: torch.Tensor, up: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    return torch.empty_like(gate), torch.empty_like(up)
+
+
+# RMSNorm forward: y = x * rsqrt(mean(x^2) + eps) * w, also returns rrms
+torch.library.define(
+    "bitsandbytes::rmsnorm_forward",
+    "(Tensor x, Tensor w, float eps, bool add_unit_offset) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::rmsnorm_forward")
+def _(x: torch.Tensor, w: torch.Tensor, eps: float, add_unit_offset: bool) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(x.dim() == 2, lambda: "x must be 2D [rows, cols]")
+    rows = x.shape[0]
+    out = torch.empty_like(x)
+    rrms = torch.empty(rows, device=x.device, dtype=torch.float32)
+    return out, rrms
+
+
+# RMSNorm backward: (grad_x, grad_w) from grad_out
+torch.library.define(
+    "bitsandbytes::rmsnorm_backward",
+    "(Tensor grad_out, Tensor x, Tensor w, Tensor rrms, bool add_unit_offset) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::rmsnorm_backward")
+def _(
+    grad_out: torch.Tensor,
+    x: torch.Tensor,
+    w: torch.Tensor,
+    rrms: torch.Tensor,
+    add_unit_offset: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    grad_x = torch.empty_like(x)
+    grad_w = torch.empty(x.shape[1], device=x.device, dtype=torch.float32)
+    return grad_x, grad_w
+
+
+# RoPE forward (in-place): applies rotary embeddings to Q (or Q+K)
+torch.library.define(
+    "bitsandbytes::rope_forward",
+    "(Tensor(a!) q, Tensor cos_cache, Tensor sin_cache, int n_heads) -> ()",
+)
+
+
+@register_fake("bitsandbytes::rope_forward")
+def _(q: torch.Tensor, cos_cache: torch.Tensor, sin_cache: torch.Tensor, n_heads: int) -> None:
+    pass
