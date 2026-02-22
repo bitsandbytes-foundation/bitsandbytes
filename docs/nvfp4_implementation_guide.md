@@ -851,33 +851,114 @@ IST-DASLab publishes pre-quantized models on HuggingFace:
 
 ---
 
-## 14. Implementation Considerations for bitsandbytes
+## 14. bitsandbytes NVFP4 Implementation
 
-When implementing NVFP4 support in bitsandbytes, consider the following:
+This section documents the actual NVFP4 implementation in bitsandbytes, targeting
+SM_120 (Blackwell consumer GPUs like RTX PRO 6000).
 
-### Pre-Blackwell Support (Software Emulation)
+### Architecture
 
-For GPUs without native FP4 tensor cores (Ampere, Hopper):
-- Implement quantization/dequantization kernels for storage compression
-- Dequantize to FP16/BF16 before GEMM (similar to existing NF4/FP4 in bitsandbytes)
-- The two-level scaling scheme must still be implemented correctly
-- Rotation can still provide accuracy benefits even without hardware FP4 MMA
+The implementation uses **raw CUDA with inline PTX** — no CUTLASS dependency. All
+kernels are owned code using the `mma.sync.aligned.block_scale` PTX instruction
+for SM_120 (consumer Blackwell), NOT `tcgen05.mma` (datacenter SM_100).
 
-### Blackwell Native Path
+```
+csrc/
+├── kernels.cu                 # Quantize/dequantize/Hadamard kernels
+├── kernels_nvfp4_sm120.cu     # Block-scaled GEMM kernel (SM_120 only)
+├── ops.cu                     # Host-side launchers
+└── pythonInterface.cpp        # extern "C" symbols for ctypes
 
-For sm_100/sm_120 GPUs:
-- Use CUTLASS or QuTLASS as backend for native FP4 MMA
-- Implement block-scale reordering to match hardware swizzle format
-- Fused rotation + quantization kernels for activation quantization
-- Support both W4A16 (weight-only) and W4A4 (weight + activation) modes
+bitsandbytes/
+├── _ops.py                    # torch.library op definitions
+├── backends/cuda/ops.py       # CUDA backend dispatch (ctypes → C)
+├── functional.py              # NVFP4QuantState, quantize/dequantize/gemm
+└── nn/modules.py              # LinearNVFP4 module
+```
 
 ### Key Design Decisions
 
-1. **Block size**: Fixed at 16 for NVFP4 (non-negotiable for hardware compatibility)
-2. **Scale format**: E4M3 for block scales, FP32 for tensor scale
-3. **Rotation**: Optional but strongly recommended; Had16 for NVFP4
-4. **Quantization method**: RTN for simplicity, GPTQ/MR-GPTQ for quality
-5. **Packing**: Two values per byte, LSB-first
+1. **SM_120 consumer GPUs only**: Uses `mma.sync.aligned.block_scale` (register-based,
+   Ampere-style). SM_100 datacenter uses `tcgen05.mma` with TMEM (separate implementation).
+2. **Block size fixed at 16**: Hardware requirement for NVFP4 (different from existing
+   bitsandbytes variable block sizes of 32-4096).
+3. **NVFP4=3 in DataType_t enum**: Separate from existing FP4=1 (custom bitsandbytes
+   format, not E2M1). No breaking changes to existing API.
+4. **Two-level scaling**: E4M3 block scales per 16 elements + FP32 tensor scale.
+5. **Optional Hadamard rotation**: Had16 matched to NVFP4's block size.
+6. **Separate kernel file**: `kernels_nvfp4_sm120.cu` isolates SM_120-specific code.
+
+### PTX Instruction
+
+```
+mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X
+    .m16n8k64.row.col.f32.e2m1.e2m1.f32.ue4m3
+```
+
+- MMA tile: m16 × n8 × k64
+- A: 4× uint32 registers (32 packed E2M1 nibbles each)
+- B: 2× uint32 registers
+- C/D: 4× float registers (accumulator)
+- SFA/SFB: 1× uint32 each (4 packed UE4M3 bytes)
+- Requires `-gencode=arch=compute_120a,code=sm_120a` (the `a` suffix is critical)
+
+### GEMM Kernel Optimizations
+
+The GEMM kernel (`kGemmNVFP4_smem`) evolved through several optimization stages:
+
+| Version | 4K×4K TFLOPS | Key Optimization |
+|---------|-------------|-----------------|
+| v1 | 18 | Correctness-first, per-nibble global loads |
+| v2 | 111 | Vectorized uint32/uint4 bulk loads |
+| v3 | 225 | Shared memory tiling (32×128 block tile, 8 warps) |
+| v4 | 239 | Register-based load/compute pipeline |
+| v5 | 240 | Auto split-K for small-batch GPU occupancy |
+
+Final kernel features:
+- **32×128 block tile**: 2 M-warps × 4 N-warps × 4 N-tiles/warp = 8 warps (256 threads)
+- **Shared memory tiling**: 5760 bytes per K-step (A: 1024, B: 4096, SFA: 128, SFB: 512)
+- **Register pipeline**: Issue global loads → compute MMA → sync → write to smem
+- **Auto split-K**: Two-tier heuristic fills GPU for small-batch LLM inference
+- **launch_bounds(256, 4)**: 4 blocks/SM for maximum occupancy
+
+### Performance Results (RTX PRO 6000)
+
+| Shape | NVFP4 TFLOPS | cuBLAS FP16 TFLOPS | Speedup |
+|-------|-------------|-------------------|---------|
+| 1×4096×4096 | 4.1 | 3.3 | **1.25x** |
+| 8×4096×4096 | 26.2 | 24.9 | **1.05x** |
+| 32×4096×4096 | 87.8 | 86.9 | **1.01x** |
+| 32×4096×11008 | 156.5 | 127.7 | **1.23x** |
+| 128×4096×4096 | 174.6 | 232.7 | 0.75x |
+| 4096×4096×4096 | 239.7 | 359.5 | 0.67x |
+
+For LLM inference (bs=1-32), the NVFP4 GEMM matches or exceeds cuBLAS FP16.
+Memory compression: **3.6x** (FP4 + scales vs FP16).
+
+### Quantization Error
+
+- E2M1 round-trip on standard normal data: mean abs error ~0.074
+- Hadamard rotation kurtosis reduction: 5.22 → 3.03 (Gaussian target: 3.0)
+- GEMM matches dequant→torch.matmul reference: 0.000000 relative error
+- LinearNVFP4 vs FP32 Linear: ~13.5% relative error (expected for FP4)
+
+### Python API
+
+```python
+import bitsandbytes.functional as F
+from bitsandbytes.nn import LinearNVFP4
+
+# Quantize/dequantize
+packed, state = F.quantize_nvfp4(tensor, tensor_scale, rotate=True)
+recovered = F.dequantize_nvfp4(packed, state)
+
+# GEMM
+output = F.gemm_nvfp4(A_data, A_state, B_data, B_state)
+
+# Linear module
+layer = LinearNVFP4(4096, 11008, rotate=True)
+output = layer(input)  # weight quantized lazily on first forward
+```
 
 ### Memory Layout
 
@@ -888,12 +969,12 @@ Quantized tensor storage:
 └── tensor_scale: [1] float32    (per-tensor global scale)
 ```
 
-### Integration Points
+### Future Optimizations
 
-- `Linear4bit` / `LinearNVFP4`: Replace existing NF4 linear with NVFP4 variant
-- Quantization: Can reuse existing block-wise quantization infrastructure with new format
-- The existing `QuantState` can be extended to store the two-level scale factors
-- For Blackwell, dispatch to CUTLASS/QuTLASS GEMM; for older GPUs, dequant + cuBLAS
+- **cp.async double buffering**: Overlap global→smem loads with MMA compute for large M
+- **SM_100 datacenter kernel**: Uses tcgen05.mma with TMEM (separate implementation)
+- **MR-GPTQ integration**: MSE grid search, static reordering, GPTQ pipeline
+- **LoRA fusion**: FP16 LoRA adapters with FP4 base in GEMM epilogue
 
 ---
 
