@@ -718,7 +718,7 @@ class LinearNVFP4(nn.Linear):
         if not self.weight_quantized:
             self._quantize_weight()
 
-        from bitsandbytes.functional import dequantize_nvfp4, gemm_nvfp4, quantize_nvfp4
+        from bitsandbytes.functional import gemm_nvfp4, quantize_nvfp4
 
         inp_dtype = x.dtype
         input_shape = x.shape
