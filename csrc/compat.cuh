@@ -25,8 +25,8 @@
 
 #if BNB_HIP
 
-#include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
+#include <hip/hip_fp16.h>
 #include <hip/hip_math_constants.h>
 #include <hip/hip_runtime.h>
 #include <hipblas/hipblas.h>
@@ -94,7 +94,9 @@ using bnb_error_t = cudaError_t;
 // ============================================================================
 
 #if BNB_HIP
-#define __syncwarp() do {} while(0)
+#define __syncwarp()                                                                                                   \
+    do {                                                                                                               \
+    } while (0)
 #endif
 
 // ============================================================================

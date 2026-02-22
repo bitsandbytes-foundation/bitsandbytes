@@ -331,19 +331,16 @@ __global__ void kQuantizeBlockwise(
     // block_dim=32 (from BLOCK_SIZE=64/NUM_PER_TH=2) is too small. Fall back
     // to DIRECT load/store in that case.
     static constexpr int THREADS = BLOCK_SIZE / NUM_PER_TH;
-    static constexpr auto LOAD_ALGO = (THREADS >= BNB_WARP_SIZE)
-        ? bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE : bnb_cub::BLOCK_LOAD_DIRECT;
-    static constexpr auto STORE_ALGO = (THREADS >= BNB_WARP_SIZE)
-        ? bnb_cub::BLOCK_STORE_WARP_TRANSPOSE : bnb_cub::BLOCK_STORE_DIRECT;
+    static constexpr auto LOAD_ALGO =
+        (THREADS >= BNB_WARP_SIZE) ? bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE : bnb_cub::BLOCK_LOAD_DIRECT;
+    static constexpr auto STORE_ALGO =
+        (THREADS >= BNB_WARP_SIZE) ? bnb_cub::BLOCK_STORE_WARP_TRANSPOSE : bnb_cub::BLOCK_STORE_DIRECT;
 
     typedef bnb_cub::BlockLoad<T, THREADS, NUM_PER_TH, LOAD_ALGO> LoadT;
-    typedef bnb_cub::BlockStore<
-        unsigned char, THREADS, (DATA_TYPE > 0) ? NUM_PER_TH / 2 : NUM_PER_TH,
-        STORE_ALGO>
+    typedef bnb_cub::BlockStore<unsigned char, THREADS, (DATA_TYPE > 0) ? NUM_PER_TH / 2 : NUM_PER_TH, STORE_ALGO>
         StoreChar;
     typedef bnb_cub::BlockReduce<float, THREADS> BlockReduce;
-    typedef bnb_cub::BlockLoad<float, THREADS, NUM_PER_TH, LOAD_ALGO>
-        LoadFloat;
+    typedef bnb_cub::BlockLoad<float, THREADS, NUM_PER_TH, LOAD_ALGO> LoadFloat;
 
     __shared__ typename LoadT::TempStorage loadt;
     __shared__ typename LoadFloat::TempStorage loadf;
