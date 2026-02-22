@@ -81,6 +81,67 @@ void dequantizeBlockwise(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+// ============================================================================
+// NVFP4 quantize/dequantize host-side launchers
+// ============================================================================
+
+template <typename T>
+void quantizeNVFP4(
+    const T* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    // Each thread handles 2 elements, so we need n/2 threads
+    const int threads_per_block = 256;
+    const int num_threads = (n + 1) / 2;
+    const int num_blocks = (num_threads + threads_per_block - 1) / threads_per_block;
+
+    kQuantizeNVFP4<T><<<num_blocks, threads_per_block>>>(
+        input, output, block_scales, tensor_scale, n
+    );
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <typename T>
+void dequantizeNVFP4(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, T* output, const int n, cudaStream_t stream
+) {
+    const int threads_per_block = 256;
+    const int num_threads = (n + 1) / 2;
+    const int num_blocks = (num_threads + threads_per_block - 1) / threads_per_block;
+
+    kDequantizeNVFP4<T><<<num_blocks, threads_per_block, 0, stream>>>(
+        input, block_scales, tensor_scale, output, n
+    );
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// NVFP4 template instantiations
+template void quantizeNVFP4<half>(
+    const half* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+);
+template void quantizeNVFP4<__nv_bfloat16>(
+    const __nv_bfloat16* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+);
+template void quantizeNVFP4<float>(
+    const float* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+);
+template void dequantizeNVFP4<half>(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, half* output, const int n, cudaStream_t stream
+);
+template void dequantizeNVFP4<__nv_bfloat16>(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, __nv_bfloat16* output, const int n, cudaStream_t stream
+);
+template void dequantizeNVFP4<float>(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, float* output, const int n, cudaStream_t stream
+);
+
 template <typename T, int OPTIMIZER>
 void optimizer32bit(
     T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, const float beta1,

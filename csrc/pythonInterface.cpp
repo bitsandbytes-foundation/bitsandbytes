@@ -204,6 +204,46 @@ void quantizeBlockwise_fp32_nf4(float* code, float* A, float* absmax, unsigned c
     quantizeBlockwise<float, 0, NF4>(nullptr, A, absmax, out, nullptr, 0, blocksize, n);
 }
 
+// NVFP4 quantize wrapper functions
+void quantizeNVFP4_fp16(
+    const half* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    quantizeNVFP4<half>(input, output, block_scales, tensor_scale, n);
+}
+void quantizeNVFP4_bf16(
+    const __nv_bfloat16* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    quantizeNVFP4<__nv_bfloat16>(input, output, block_scales, tensor_scale, n);
+}
+void quantizeNVFP4_fp32(
+    const float* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    quantizeNVFP4<float>(input, output, block_scales, tensor_scale, n);
+}
+
+// NVFP4 dequantize wrapper functions
+void dequantizeNVFP4_fp16(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, half* output, const int n, cudaStream_t stream
+) {
+    dequantizeNVFP4<half>(input, block_scales, tensor_scale, output, n, stream);
+}
+void dequantizeNVFP4_bf16(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, __nv_bfloat16* output, const int n, cudaStream_t stream
+) {
+    dequantizeNVFP4<__nv_bfloat16>(input, block_scales, tensor_scale, output, n, stream);
+}
+void dequantizeNVFP4_fp32(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, float* output, const int n, cudaStream_t stream
+) {
+    dequantizeNVFP4<float>(input, block_scales, tensor_scale, output, n, stream);
+}
+
 void dequantizeBlockwise_fp16(
     float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, cudaStream_t stream
 ) {
@@ -490,6 +530,46 @@ void cdequantize_blockwise_bf16_nf4(
     float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, int blocksize, const int n, cudaStream_t stream
 ) {
     dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n, stream);
+}
+
+// NVFP4 quantize extern "C" wrappers
+void cquantize_nvfp4_fp16(
+    const half* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    quantizeNVFP4_fp16(input, output, block_scales, tensor_scale, n);
+}
+void cquantize_nvfp4_bf16(
+    const __nv_bfloat16* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    quantizeNVFP4_bf16(input, output, block_scales, tensor_scale, n);
+}
+void cquantize_nvfp4_fp32(
+    const float* input, unsigned char* output, unsigned char* block_scales,
+    float tensor_scale, const int n
+) {
+    quantizeNVFP4_fp32(input, output, block_scales, tensor_scale, n);
+}
+
+// NVFP4 dequantize extern "C" wrappers
+void cdequantize_nvfp4_fp16(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, half* output, const int n, cudaStream_t stream
+) {
+    dequantizeNVFP4_fp16(input, block_scales, tensor_scale, output, n, stream);
+}
+void cdequantize_nvfp4_bf16(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, __nv_bfloat16* output, const int n, cudaStream_t stream
+) {
+    dequantizeNVFP4_bf16(input, block_scales, tensor_scale, output, n, stream);
+}
+void cdequantize_nvfp4_fp32(
+    const unsigned char* input, const unsigned char* block_scales,
+    float tensor_scale, float* output, const int n, cudaStream_t stream
+) {
+    dequantizeNVFP4_fp32(input, block_scales, tensor_scale, output, n, stream);
 }
 
 #define MAKE_CFUNC32(name, gtype, gbits)                                                                               \
