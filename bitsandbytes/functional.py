@@ -1179,6 +1179,7 @@ def dequantize_kbit(
     k: int,
     n: int,
     dtype: torch.dtype = torch.float16,
+    out: Optional[Tensor] = None,
 ) -> Tensor:
     """Dequantize a k-bit blockwise quantized tensor.
 
@@ -1190,12 +1191,25 @@ def dequantize_kbit(
         k: Bit width (2, 3, 4, or 5).
         n: Number of original elements.
         dtype: Output dtype. Defaults to float16.
+        out: Optional pre-allocated output tensor for CUDA graph compatibility.
+            Must have at least ceil(n/32)*32 elements and matching dtype.
 
     Returns:
         Dequantized tensor of shape (n,) with the given dtype.
     """
-    out = torch.ops.bitsandbytes.dequantize_kbit(packed, codebook, absmax, k, n, dtype)
-    return out[:n]
+    num_blocks = -(n // -32)
+    padded_n = num_blocks * 32
+
+    if out is not None:
+        if out.numel() < padded_n:
+            raise ValueError(f"out tensor has {out.numel()} elements, need at least {padded_n}")
+        if out.dtype != dtype:
+            raise ValueError(f"out dtype {out.dtype} does not match requested dtype {dtype}")
+        torch.ops.bitsandbytes.dequantize_kbit_(packed, codebook, absmax, k, n, dtype, out)
+        return out[:n]
+
+    result = torch.ops.bitsandbytes.dequantize_kbit(packed, codebook, absmax, k, n, dtype)
+    return result[:n]
 
 
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)

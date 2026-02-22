@@ -811,15 +811,15 @@ _KBIT_ABSMAX_SUFFIX = {
 }
 
 
-@register_kernel("bitsandbytes::dequantize_kbit", "cuda")
-def _(
+def _dequantize_kbit_impl(
     packed: torch.Tensor,
     codebook: torch.Tensor,
     absmax: torch.Tensor,
     k: int,
     n: int,
     dtype: torch.dtype,
-) -> torch.Tensor:
+    out: torch.Tensor,
+) -> None:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(
         dtype in _KBIT_DTYPE_SUFFIX,
@@ -831,8 +831,11 @@ def _(
         lambda: f"absmax must be float32, float16, or uint8 (E4M4), got {absmax.dtype}",
     )
 
-    num_blocks = -(n // -32)
-    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+    # If fp32 absmax, encode to E4M4 first
+    if absmax.dtype == torch.float32:
+        from bitsandbytes.functional import encode_absmax_e4m4
+
+        absmax = encode_absmax_e4m4(absmax)
 
     tname = _KBIT_DTYPE_SUFFIX[dtype]
     aname = _KBIT_ABSMAX_SUFFIX[absmax.dtype]
@@ -848,6 +851,33 @@ def _(
             _get_tensor_stream(packed),
         )
 
+
+@register_kernel("bitsandbytes::dequantize_kbit", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    num_blocks = -(n // -32)
+    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+    _dequantize_kbit_impl(packed, codebook, absmax, k, n, dtype, out)
+    return out
+
+
+@register_kernel("bitsandbytes::dequantize_kbit_", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    _dequantize_kbit_impl(packed, codebook, absmax, k, n, dtype, out)
     return out
 
 
