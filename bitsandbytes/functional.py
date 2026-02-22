@@ -1232,8 +1232,15 @@ def gemm_nvfp4(
     N = B_state.shape[0]
 
     return torch.ops.bitsandbytes.gemm_nvfp4(
-        A_data, B_data, A_state.block_scales, B_state.block_scales,
-        A_state.tensor_scale, B_state.tensor_scale, M, N, K,
+        A_data,
+        B_data,
+        A_state.block_scales,
+        B_state.block_scales,
+        A_state.tensor_scale,
+        B_state.tensor_scale,
+        M,
+        N,
+        K,
     )
 
 

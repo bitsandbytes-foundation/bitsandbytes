@@ -20,31 +20,23 @@
 // MMA wrapper: m16n8k64 E2M1 x E2M1 -> F32 with UE4M3 block scales
 // ============================================================================
 __device__ __forceinline__ void mma_nvfp4_m16n8k64(
-    float &d0, float &d1, float &d2, float &d3,
-    uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3,
-    uint32_t b0, uint32_t b1,
-    float c0, float c1, float c2, float c3,
-    uint32_t sfa, uint32_t sfb
+    float& d0, float& d1, float& d2, float& d3, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t b0,
+    uint32_t b1, float c0, float c1, float c2, float c3, uint32_t sfa, uint32_t sfb
 ) {
     uint16_t bidA = 0, tidA = 0, bidB = 0, tidB = 0;
-    asm volatile(
-        "mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X"
-        ".m16n8k64.row.col.f32.e2m1.e2m1.f32.ue4m3 "
-        "{%0,  %1,  %2,  %3},"
-        "{%4,  %5,  %6,  %7},"
-        "{%8,  %9},"
-        "{%10, %11, %12, %13},"
-        "{%14},"
-        "{%15, %16},"
-        "{%17},"
-        "{%18, %19};\n"
-        : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
-        : "r"(a0), "r"(a1), "r"(a2), "r"(a3),
-          "r"(b0), "r"(b1),
-          "f"(c0), "f"(c1), "f"(c2), "f"(c3),
-          "r"(sfa), "h"(bidA), "h"(tidA),
-          "r"(sfb), "h"(bidB), "h"(tidB)
-    );
+    asm volatile("mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X"
+                 ".m16n8k64.row.col.f32.e2m1.e2m1.f32.ue4m3 "
+                 "{%0,  %1,  %2,  %3},"
+                 "{%4,  %5,  %6,  %7},"
+                 "{%8,  %9},"
+                 "{%10, %11, %12, %13},"
+                 "{%14},"
+                 "{%15, %16},"
+                 "{%17},"
+                 "{%18, %19};\n"
+                 : "=f"(d0), "=f"(d1), "=f"(d2), "=f"(d3)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "f"(c0), "f"(c1), "f"(c2), "f"(c3), "r"(sfa),
+                   "h"(bidA), "h"(tidA), "r"(sfb), "h"(bidB), "h"(tidB));
 }
 
 // ============================================================================
@@ -118,9 +110,7 @@ __device__ __forceinline__ void mma_nvfp4_m16n8k64(
 // ============================================================================
 
 // Helper: extract 4-bit nibble from packed byte array
-__device__ __forceinline__ uint32_t pack_8_nibbles(
-    const unsigned char* data, int start_idx
-) {
+__device__ __forceinline__ uint32_t pack_8_nibbles(const unsigned char* data, int start_idx) {
     // Pack 8 consecutive 4-bit values from data starting at element index start_idx
     // data is packed 2 per byte (low nibble = even index, high nibble = odd index)
     uint32_t result = 0;
@@ -141,11 +131,11 @@ __device__ __forceinline__ uint32_t pack_8_nibbles(
 // Simple GEMM kernel: one warp per m16n8 output tile
 // Each warp iterates over K in steps of 64
 __global__ void kGemmNVFP4_simple(
-    const unsigned char* __restrict__ A,      // M x K/2 packed FP4 (row-major)
-    const unsigned char* __restrict__ B,      // N x K/2 packed FP4 (B transposed, row-major)
-    const unsigned char* __restrict__ SFA,    // M x K/16 UE4M3 scales
-    const unsigned char* __restrict__ SFB,    // N x K/16 UE4M3 scales
-    float* __restrict__ D,                     // M x N output (F32)
+    const unsigned char* __restrict__ A,   // M x K/2 packed FP4 (row-major)
+    const unsigned char* __restrict__ B,   // N x K/2 packed FP4 (B transposed, row-major)
+    const unsigned char* __restrict__ SFA, // M x K/16 UE4M3 scales
+    const unsigned char* __restrict__ SFB, // N x K/16 UE4M3 scales
+    float* __restrict__ D,                 // M x N output (F32)
     int M, int N, int K
 ) {
     // Warp-level tiling: each warp computes one m16n8 output tile
@@ -157,15 +147,16 @@ __global__ void kGemmNVFP4_simple(
     int tile_m = (warp_id / num_n_tiles) * 16;
     int tile_n = (warp_id % num_n_tiles) * 8;
 
-    if (tile_m >= M || tile_n >= N) return;
+    if (tile_m >= M || tile_n >= N)
+        return;
 
     // Accumulator registers
     float acc0 = 0.0f, acc1 = 0.0f, acc2 = 0.0f, acc3 = 0.0f;
 
     // CuTE thread decomposition: Shape<_4,_8> means first mode is fastest
     // T = t0 + t1*4, so t0 = T%4 (0-3), t1 = T/4 (0-7)
-    int t0 = lane_id % 4;  // 0-3
-    int t1 = lane_id / 4;  // 0-7
+    int t0 = lane_id % 4; // 0-3
+    int t1 = lane_id / 4; // 0-7
 
     // Iterate over K dimension in steps of 64
     for (int k_start = 0; k_start < K; k_start += 64) {
@@ -188,8 +179,8 @@ __global__ void kGemmNVFP4_simple(
                 int v2 = v / 16;
 
                 int coord = t0 * 128 + t1 + v0 * 16 + v1 * 8 + v2 * 512;
-                int cute_m = coord % 16;     // CuTE M index (interleaved)
-                int tile_col = coord / 16;   // K index within tile
+                int cute_m = coord % 16;   // CuTE M index (interleaved)
+                int tile_col = coord / 16; // K index within tile
                 // Remap from CuTE interleaved to sequential row order
                 int tile_row = (cute_m % 8) * 2 + cute_m / 8;
 
@@ -222,8 +213,8 @@ __global__ void kGemmNVFP4_simple(
                 int v1 = v / 8;
 
                 int coord = t0 * 64 + t1 + v0 * 8 + v1 * 256;
-                int tile_row = coord % 8;    // N index within tile (column-major)
-                int tile_col = coord / 8;    // K index within tile
+                int tile_row = coord % 8; // N index within tile (column-major)
+                int tile_col = coord / 8; // K index within tile
 
                 int global_n = tile_n + tile_row;
                 int global_k = k_start + tile_col;
@@ -253,8 +244,8 @@ __global__ void kGemmNVFP4_simple(
             int sf_thread_idx = (lane_id % 2) * 8 + (lane_id / 4);
             for (int sf_v = 0; sf_v < 4; sf_v++) {
                 int sf_element = sf_thread_idx + sf_v * 16;
-                int cute_sf_m = sf_element % 16;  // CuTE M index (interleaved)
-                int sf_col = sf_element / 16;     // K/16 index in tile
+                int cute_sf_m = sf_element % 16; // CuTE M index (interleaved)
+                int sf_col = sf_element / 16;    // K/16 index in tile
                 // Same remapping as A data: CuTE interleaved → sequential
                 int sf_row = (cute_sf_m % 8) * 2 + cute_sf_m / 8;
 
@@ -279,8 +270,8 @@ __global__ void kGemmNVFP4_simple(
             int sf_thread_idx = lane_id / 4;
             for (int sf_v = 0; sf_v < 4; sf_v++) {
                 int sf_element = sf_thread_idx + sf_v * 8;
-                int sf_row = sf_element % 8;   // N index in tile
-                int sf_col = sf_element / 8;   // K/16 index in tile
+                int sf_row = sf_element % 8; // N index in tile
+                int sf_col = sf_element / 8; // K/16 index in tile
 
                 int global_n = tile_n + sf_row;
                 int global_k_block = k_start / 16 + sf_col;
@@ -295,11 +286,8 @@ __global__ void kGemmNVFP4_simple(
 
         // Execute MMA
         mma_nvfp4_m16n8k64(
-            acc0, acc1, acc2, acc3,
-            a_regs[0], a_regs[1], a_regs[2], a_regs[3],
-            b_regs[0], b_regs[1],
-            acc0, acc1, acc2, acc3,
-            sfa_packed, sfb_packed
+            acc0, acc1, acc2, acc3, a_regs[0], a_regs[1], a_regs[2], a_regs[3], b_regs[0], b_regs[1], acc0, acc1, acc2,
+            acc3, sfa_packed, sfb_packed
         );
     }
 
@@ -317,20 +305,20 @@ __global__ void kGemmNVFP4_simple(
     int out_col0 = tile_n + quad * 2;
     int out_col1 = tile_n + quad * 2 + 1;
 
-    if (out_row0 < M && out_col0 < N) D[out_row0 * N + out_col0] = acc0;
-    if (out_row0 < M && out_col1 < N) D[out_row0 * N + out_col1] = acc1;
-    if (out_row1 < M && out_col0 < N) D[out_row1 * N + out_col0] = acc2;
-    if (out_row1 < M && out_col1 < N) D[out_row1 * N + out_col1] = acc3;
+    if (out_row0 < M && out_col0 < N)
+        D[out_row0 * N + out_col0] = acc0;
+    if (out_row0 < M && out_col1 < N)
+        D[out_row0 * N + out_col1] = acc1;
+    if (out_row1 < M && out_col0 < N)
+        D[out_row1 * N + out_col0] = acc2;
+    if (out_row1 < M && out_col1 < N)
+        D[out_row1 * N + out_col1] = acc3;
 }
 
 // Host-side launcher
 extern "C" void cgemm_nvfp4(
-    const unsigned char* A,
-    const unsigned char* B,
-    const unsigned char* SFA,
-    const unsigned char* SFB,
-    float* D,
-    int M, int N, int K
+    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
+    int N, int K
 ) {
     // Each warp handles one m16n8 output tile
     int num_m_tiles = (M + 15) / 16;
@@ -342,7 +330,5 @@ extern "C" void cgemm_nvfp4(
     int threads_per_block = warps_per_block * 32;
     int num_blocks = (total_warps + warps_per_block - 1) / warps_per_block;
 
-    kGemmNVFP4_simple<<<num_blocks, threads_per_block>>>(
-        A, B, SFA, SFB, D, M, N, K
-    );
+    kGemmNVFP4_simple<<<num_blocks, threads_per_block>>>(A, B, SFA, SFB, D, M, N, K);
 }

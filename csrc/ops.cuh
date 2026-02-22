@@ -121,23 +121,18 @@ void dequantizeBlockwise(
 );
 
 template <typename T>
-void quantizeNVFP4(
-    const T* input, unsigned char* output, unsigned char* block_scales,
-    float tensor_scale, const int n
-);
+void quantizeNVFP4(const T* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n);
 template <typename T>
 void dequantizeNVFP4(
-    const unsigned char* input, const unsigned char* block_scales,
-    float tensor_scale, T* output, const int n, cudaStream_t stream
+    const unsigned char* input, const unsigned char* block_scales, float tensor_scale, T* output, const int n,
+    cudaStream_t stream
 );
 
-template <typename T>
-void hadamardRotate16(T* data, const int n);
+template <typename T> void hadamardRotate16(T* data, const int n);
 
 template <typename T>
 void fusedHadamardQuantizeNVFP4(
-    const T* input, unsigned char* output, unsigned char* block_scales,
-    float tensor_scale, const int n
+    const T* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
 );
 
 template <typename T, int OPTIMIZER>

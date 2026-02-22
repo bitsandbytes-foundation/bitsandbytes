@@ -725,8 +725,6 @@ class LinearNVFP4(nn.Linear):
 
         # Reshape input: (*, K) -> (M, K)
         x_2d = x.reshape(-1, input_shape[-1]).float().contiguous()
-        M = x_2d.shape[0]
-        K = x_2d.shape[1]
         N = self.weight_state.shape[0]  # out_features
 
         # Quantize activations to NVFP4

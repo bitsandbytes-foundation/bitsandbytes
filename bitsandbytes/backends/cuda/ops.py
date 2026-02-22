@@ -793,11 +793,17 @@ def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tens
 
     with _cuda_device_of(A):
         if A.dtype == torch.float16:
-            lib.cquantize_nvfp4_fp16(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+            lib.cquantize_nvfp4_fp16(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
         elif A.dtype == torch.bfloat16:
-            lib.cquantize_nvfp4_bf16(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+            lib.cquantize_nvfp4_bf16(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
         else:
-            lib.cquantize_nvfp4_fp32(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+            lib.cquantize_nvfp4_fp32(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
 
     ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
     return packed, block_scales, ts_out
@@ -814,11 +820,32 @@ def _(
 
     with _cuda_device_of(packed):
         if dtype == torch.float16:
-            lib.cdequantize_nvfp4_fp16(get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), get_ptr(output), ct.c_int(numel), ct.c_void_p(0))
+            lib.cdequantize_nvfp4_fp16(
+                get_ptr(packed),
+                get_ptr(block_scales),
+                ct.c_float(tensor_scale),
+                get_ptr(output),
+                ct.c_int(numel),
+                ct.c_void_p(0),
+            )
         elif dtype == torch.bfloat16:
-            lib.cdequantize_nvfp4_bf16(get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), get_ptr(output), ct.c_int(numel), ct.c_void_p(0))
+            lib.cdequantize_nvfp4_bf16(
+                get_ptr(packed),
+                get_ptr(block_scales),
+                ct.c_float(tensor_scale),
+                get_ptr(output),
+                ct.c_int(numel),
+                ct.c_void_p(0),
+            )
         else:
-            lib.cdequantize_nvfp4_fp32(get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), get_ptr(output), ct.c_int(numel), ct.c_void_p(0))
+            lib.cdequantize_nvfp4_fp32(
+                get_ptr(packed),
+                get_ptr(block_scales),
+                ct.c_float(tensor_scale),
+                get_ptr(output),
+                ct.c_int(numel),
+                ct.c_void_p(0),
+            )
 
     return output
 
@@ -860,11 +887,17 @@ def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tens
 
     with _cuda_device_of(A):
         if A.dtype == torch.float16:
-            lib.cfused_hadamard_quantize_nvfp4_fp16(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+            lib.cfused_hadamard_quantize_nvfp4_fp16(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
         elif A.dtype == torch.bfloat16:
-            lib.cfused_hadamard_quantize_nvfp4_bf16(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+            lib.cfused_hadamard_quantize_nvfp4_bf16(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
         else:
-            lib.cfused_hadamard_quantize_nvfp4_fp32(get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n))
+            lib.cfused_hadamard_quantize_nvfp4_fp32(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
 
     ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
     return packed, block_scales, ts_out
@@ -887,10 +920,14 @@ def _(
 
     with _cuda_device_of(A_packed):
         lib.cgemm_nvfp4(
-            get_ptr(A_packed), get_ptr(B_packed),
-            get_ptr(A_scales), get_ptr(B_scales),
+            get_ptr(A_packed),
+            get_ptr(B_packed),
+            get_ptr(A_scales),
+            get_ptr(B_scales),
             get_ptr(D_out),
-            ct.c_int(M), ct.c_int(N), ct.c_int(K),
+            ct.c_int(M),
+            ct.c_int(N),
+            ct.c_int(K),
         )
 
     # Apply tensor scales (the GEMM kernel operates on raw quantized values)

@@ -177,7 +177,7 @@ class TestGemmNVFP4:
 
         D = cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K)
         expected = 1.0 * 2.0 * 1.0 * 3.0 * K  # = 384
-        print(f"Block scales test: expected={expected}, got first element={D[0,0].item():.1f}")
+        print(f"Block scales test: expected={expected}, got first element={D[0, 0].item():.1f}")
         assert torch.allclose(D, torch.full((M, N), expected, device="cuda"), rtol=0.01), (
             f"Expected all {expected}, got min={D.min():.1f} max={D.max():.1f}"
         )
@@ -231,8 +231,8 @@ class TestGemmNVFP4:
             # The only error source is the register layout mapping
             assert rel_err < 0.5, f"Relative error {rel_err:.4f} too large"
 
-        print(f"  Output[0,:4]: {D_out[0,:4].tolist()}")
-        print(f"  Reference[0,:4]: {D_ref[0,:4].tolist()}")
+        print(f"  Output[0,:4]: {D_out[0, :4].tolist()}")
+        print(f"  Reference[0,:4]: {D_ref[0, :4].tolist()}")
 
     def test_random_data_larger(self):
         """Test GEMM with CUDA-quantized data on a larger matrix (multiple tiles)."""
@@ -296,44 +296,44 @@ class TestGemmNVFP4:
 
     def test_gemm_medium(self):
         """Medium matrices (128x128x128) — multiple tiles in all dimensions."""
-        rel_err, max_err, mean_err, ref_mag = self._run_gemm_test(128, 128, 128)
+        rel_err, max_err, _mean_err, _ref_mag = self._run_gemm_test(128, 128, 128)
         print(f"Medium (128x128x128): rel_err={rel_err:.6f}, max_err={max_err:.4f}")
         assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large"
 
     def test_gemm_large(self):
         """Larger matrices (256x256x256)."""
-        rel_err, max_err, mean_err, ref_mag = self._run_gemm_test(256, 256, 256)
+        rel_err, max_err, _mean_err, _ref_mag = self._run_gemm_test(256, 256, 256)
         print(f"Large (256x256x256): rel_err={rel_err:.6f}, max_err={max_err:.4f}")
         assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large"
 
     @pytest.mark.parametrize(
         "M,N,K",
         [
-            (16, 8, 128),   # Single M/N tile, multi K
-            (48, 24, 64),   # M,N not multiples of tile (16,8)
-            (32, 8, 192),   # K not multiple of 64 (3 K-tiles)
-            (80, 40, 64),   # Larger non-aligned M,N
+            (16, 8, 128),  # Single M/N tile, multi K
+            (48, 24, 64),  # M,N not multiples of tile (16,8)
+            (32, 8, 192),  # K not multiple of 64 (3 K-tiles)
+            (80, 40, 64),  # Larger non-aligned M,N
         ],
         ids=["16x8x128", "48x24x64", "32x8x192", "80x40x64"],
     )
     def test_gemm_various_shapes(self, M, N, K):
         """Test various matrix shapes including non-tile-aligned."""
-        rel_err, max_err, mean_err, ref_mag = self._run_gemm_test(M, N, K)
+        rel_err, _max_err, _mean_err, ref_mag = self._run_gemm_test(M, N, K)
         print(f"Shape ({M}x{N}x{K}): rel_err={rel_err:.6f}, ref_mag={ref_mag:.4f}")
         assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large for {M}x{N}x{K}"
 
     @pytest.mark.parametrize(
         "M,N,K",
         [
-            (1, 128, 64),     # Single row (batch=1 inference)
-            (8, 128, 64),     # Small batch
-            (32, 128, 128),   # Medium batch
+            (1, 128, 64),  # Single row (batch=1 inference)
+            (8, 128, 64),  # Small batch
+            (32, 128, 128),  # Medium batch
         ],
         ids=["1x128x64", "8x128x64", "32x128x128"],
     )
     def test_gemm_tall_skinny(self, M, N, K):
         """Test tall/skinny shapes typical of LLM inference."""
-        rel_err, max_err, mean_err, ref_mag = self._run_gemm_test(M, N, K)
+        rel_err, _max_err, _mean_err, ref_mag = self._run_gemm_test(M, N, K)
         print(f"Tall/skinny ({M}x{N}x{K}): rel_err={rel_err:.6f}, ref_mag={ref_mag:.4f}")
         assert rel_err < 0.01, f"Relative error {rel_err:.6f} too large for {M}x{N}x{K}"
 
@@ -408,9 +408,7 @@ class TestGemmNVFP4Output:
         D_fp32 = gemm_nvfp4(A_packed, A_state, B_packed, B_state)
 
         # GEMM with alpha and NVFP4 output
-        out_packed, out_state = gemm_nvfp4_to_nvfp4(
-            A_packed, A_state, B_packed, B_state, alpha=alpha
-        )
+        out_packed, out_state = gemm_nvfp4_to_nvfp4(A_packed, A_state, B_packed, B_state, alpha=alpha)
         D_nvfp4 = dequantize_nvfp4(out_packed, out_state, out_dtype=torch.float32)
 
         # Reference: alpha * FP32 output

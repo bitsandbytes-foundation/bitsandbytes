@@ -28,22 +28,21 @@ __global__ void
 
 template <typename T>
 __global__ void kQuantizeNVFP4(
-    const T* __restrict__ input, unsigned char* __restrict__ output,
-    unsigned char* __restrict__ block_scales, const float tensor_scale, const int n
+    const T* __restrict__ input, unsigned char* __restrict__ output, unsigned char* __restrict__ block_scales,
+    const float tensor_scale, const int n
 );
 template <typename T>
 __global__ void kDequantizeNVFP4(
-    const unsigned char* __restrict__ input, const unsigned char* __restrict__ block_scales,
-    const float tensor_scale, T* __restrict__ output, const int n
+    const unsigned char* __restrict__ input, const unsigned char* __restrict__ block_scales, const float tensor_scale,
+    T* __restrict__ output, const int n
 );
 
-template <typename T>
-__global__ void kHadamardRotate16(T* __restrict__ data, const int n);
+template <typename T> __global__ void kHadamardRotate16(T* __restrict__ data, const int n);
 
 template <typename T>
 __global__ void kFusedHadamardQuantizeNVFP4(
-    const T* __restrict__ input, unsigned char* __restrict__ output,
-    unsigned char* __restrict__ block_scales, const float tensor_scale, const int n
+    const T* __restrict__ input, unsigned char* __restrict__ output, unsigned char* __restrict__ block_scales,
+    const float tensor_scale, const int n
 );
 
 template <typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>

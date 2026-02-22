@@ -11,6 +11,10 @@ extend-exclude = [
 [default]
 extend-ignore-re = [
     "@Ther-nul",  # valid Github user
+    "UE4M3",  # unsigned E4M3 floating point format (NVFP4 block scale type)
+    "ue4m3",  # unsigned E4M3 lowercase
+    "IST[ -]",  # IST Austria / IST-DASLab (Institute of Science and Technology)
+    "ist-",  # ist-daslab lowercase in anchor links
 ]
 extend-ignore-identifiers-re = [
     ".*arange.*",
@@ -24,3 +28,4 @@ extend-ignore-identifiers-re = [
 "subtile" = "subtile"
 "subtiles" = "subtiles"
 "transation" = "transation"  # TODO: is this transition, transaction, translation..?
+"ue" = "ue"  # UE4M3: unsigned E4M3 floating point format (NVFP4 block scale type)
