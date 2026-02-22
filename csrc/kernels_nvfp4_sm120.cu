@@ -510,10 +510,8 @@ __global__ void kGemmNVFP4_simple(
 // Host-side launcher — uses shared memory kernel with auto split-K
 // ============================================================================
 
-// Target: enough blocks to fill the GPU reasonably.
-// 84 SMs × 2 blocks/SM = 168. Only split-K when occupancy is clearly low.
-// Higher thresholds cause regression on medium-M shapes due to atomicAdd/memset overhead.
-static const int TARGET_BLOCKS = 168;
+// RTX PRO 6000: 84 SMs
+static const int NUM_SMS = 84;
 
 extern "C" void cgemm_nvfp4(
     const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
@@ -525,16 +523,28 @@ extern "C" void cgemm_nvfp4(
     int threads_per_block = WARPS_PER_BLOCK * 32; // 256
 
     // Auto split-K: split along K to fill the GPU when M/N tiles are sparse
-    // K must be split into multiples of 64 (MMA K-step size)
-    int max_k_splits = K / 64; // maximum possible splits
+    // Two-tier heuristic based on GPU occupancy:
+    //   - Very sparse (<1 block/SM): aggressive split to 4 blocks/SM
+    //   - Moderate (<2 blocks/SM): gentle split to 2 blocks/SM
+    //   - Sufficient (>=2 blocks/SM): no split
+    int max_k_splits = K / 64;
     int split_k = 1;
-    if (base_blocks < TARGET_BLOCKS && max_k_splits > 1) {
-        split_k = (TARGET_BLOCKS + base_blocks - 1) / base_blocks;
+    if (base_blocks < NUM_SMS && max_k_splits > 1) {
+        // Very sparse: target 4 blocks/SM for full occupancy
+        int target = NUM_SMS * 4;
+        split_k = (target + base_blocks - 1) / base_blocks;
         if (split_k > max_k_splits)
             split_k = max_k_splits;
-        // Cap at 16 to limit atomicAdd contention
         if (split_k > 16)
             split_k = 16;
+    } else if (base_blocks < NUM_SMS * 2 && max_k_splits > 1) {
+        // Moderate: target 2 blocks/SM
+        int target = NUM_SMS * 2;
+        split_k = (target + base_blocks - 1) / base_blocks;
+        if (split_k > max_k_splits)
+            split_k = max_k_splits;
+        if (split_k > 4)
+            split_k = 4; // limit atomicAdd overhead for larger outputs
     }
 
     // Zero output when using split-K (atomicAdd requires zeroed buffer)
