@@ -12,11 +12,12 @@
 // ============================================================================
 
 #if BNB_HIP
-// AMD GFX9 (CDNA) uses 64-wide warps; RDNA uses 32-wide
-#ifdef __GFX9__
-#define BNB_WARP_SIZE 64
+// Use the compiler-provided wavefront size, which is correctly defined in
+// both host and device compilation passes. CDNA (gfx9xx) = 64, RDNA = 32.
+#ifdef __AMDGCN_WAVEFRONT_SIZE
+#define BNB_WARP_SIZE __AMDGCN_WAVEFRONT_SIZE
 #else
-#define BNB_WARP_SIZE 32
+#define BNB_WARP_SIZE 64 // Safe default for HIP (matches CDNA)
 #endif
 #else
 #define BNB_WARP_SIZE 32
