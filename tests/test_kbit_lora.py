@@ -132,3 +132,75 @@ class TestKbitLoraModel:
         for name, p in kbit_model._lora_params.named_parameters():
             if "_A" in name:
                 assert p.grad is not None, f"No gradient for {name}"
+
+
+class TestMixedKQuantization:
+    """Tests for mixed-k quantization (different k for attention/MLP/LM head)."""
+
+    @pytest.fixture(scope="class")
+    def mixed_k_model(self, qwen3_model):
+        """Create KbitLoraModel with mixed k values."""
+        return KbitLoraModel(
+            qwen3_model,
+            lora_r=8,
+            lora_alpha=16.0,
+            k=4,  # default fallback
+            k_config={"attention": 4, "mlp": 3, "lm_head": 2},
+            attn_chunk_size=128,
+            mlp_chunk_size=128,
+            ce_chunk_size=1024,
+            compute_dtype=torch.bfloat16,
+        )
+
+    def test_mixed_k_creation(self, mixed_k_model):
+        """Mixed-k model should be created successfully."""
+        assert mixed_k_model.k_attention == 4
+        assert mixed_k_model.k_mlp == 3
+        assert mixed_k_model.k_lm_head == 2
+
+    def test_attention_uses_correct_k(self, mixed_k_model):
+        """Attention projections should use k=4."""
+        for layer_info in mixed_k_model._layer_data:
+            for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
+                assert layer_info[proj]["k"] == 4, \
+                    f"Attention {proj} should have k=4"
+
+    def test_mlp_uses_correct_k(self, mixed_k_model):
+        """MLP projections should use k=3."""
+        for layer_info in mixed_k_model._layer_data:
+            for proj in ["gate_proj", "up_proj", "down_proj"]:
+                assert layer_info[proj]["k"] == 3, \
+                    f"MLP {proj} should have k=3"
+
+    def test_lm_head_uses_correct_k(self, mixed_k_model):
+        """LM head should use k=2."""
+        assert mixed_k_model._lm_head_info["k"] == 2
+
+    def test_forward_with_mixed_k(self, mixed_k_model):
+        """Forward pass should work with mixed k values."""
+        input_ids = torch.randint(0, 100, (1, 32), device="cuda")
+        labels = input_ids.clone()
+
+        result = mixed_k_model(input_ids, labels=labels)
+        loss = result["loss"]
+        assert loss.isfinite(), f"Loss not finite: {loss.item()}"
+        assert loss.item() > 0
+
+    def test_backward_with_mixed_k(self, mixed_k_model):
+        """Backward pass should work with mixed k values."""
+        for p in mixed_k_model.get_trainable_parameters():
+            if p.grad is not None:
+                p.grad.zero_()
+
+        input_ids = torch.randint(0, 100, (1, 32), device="cuda")
+        labels = input_ids.clone()
+
+        result = mixed_k_model(input_ids, labels=labels)
+        result["loss"].backward()
+
+        has_grad = False
+        for p in mixed_k_model.get_trainable_parameters():
+            if p.grad is not None and p.grad.abs().sum() > 0:
+                has_grad = True
+                break
+        assert has_grad

@@ -36,7 +36,11 @@ class KbitLoraModel(nn.Module):
         model: HuggingFace CausalLM model (e.g., from AutoModelForCausalLM).
         lora_r: LoRA rank.
         lora_alpha: LoRA scaling factor (effective scale = lora_alpha / lora_r).
-        k: Bit width for quantization (2-5). Default 4.
+        k: Bit width for quantization (2-5). Default 4. Used as fallback
+            when k_config doesn't specify a value for a module type.
+        k_config: Optional dict mapping module types to bit widths.
+            Supported keys: "attention", "mlp", "lm_head", "experts",
+            "shared_expert". Example: {"attention": 4, "mlp": 3, "experts": 2}
         attn_chunk_size: Sequence chunk size for attention. Default 4096.
         mlp_chunk_size: Sequence chunk size for MLP. Default 4096.
         ce_chunk_size: Vocab chunk size for cross-entropy. Default 8192.
@@ -49,6 +53,7 @@ class KbitLoraModel(nn.Module):
         lora_r: int = 64,
         lora_alpha: float = 16.0,
         k: int = 4,
+        k_config: Optional[dict[str, int]] = None,
         attn_chunk_size: int = 4096,
         mlp_chunk_size: int = 4096,
         ce_chunk_size: int = 8192,
@@ -68,6 +73,10 @@ class KbitLoraModel(nn.Module):
         self.lora_r = lora_r
         self.lora_s = lora_alpha / lora_r
         self.k = k
+        self.k_config = k_config or {}
+        self.k_attention = self.k_config.get("attention", k)
+        self.k_mlp = self.k_config.get("mlp", k)
+        self.k_lm_head = self.k_config.get("lm_head", k)
         self.attn_chunk_size = attn_chunk_size
         self.mlp_chunk_size = mlp_chunk_size
         self.ce_chunk_size = ce_chunk_size
@@ -111,8 +120,10 @@ class KbitLoraModel(nn.Module):
         for p in self._norm_weights.parameters():
             p.requires_grad_(True)
 
-    def _quantize_weight(self, weight: torch.Tensor, name: str):
+    def _quantize_weight(self, weight: torch.Tensor, name: str, k: int | None = None):
         """Quantize a weight matrix and store packed data."""
+        if k is None:
+            k = self.k
         N, K = weight.shape
         N_padded = ((N + 127) // 128) * 128
         if N_padded != N:
@@ -121,7 +132,7 @@ class KbitLoraModel(nn.Module):
             w_padded = weight.float()
 
         packed, absmax, codebook = F.quantize_kbit(
-            w_padded.reshape(-1), k=self.k, absmax_format="fp32",
+            w_padded.reshape(-1), k=k, absmax_format="fp32",
         )
 
         # Store as non-trainable buffers
@@ -159,26 +170,32 @@ class KbitLoraModel(nn.Module):
 
             layer_info = {}
 
-            # Attention projections
+            # Attention projections (use k_attention)
             for proj_name in ["q_proj", "k_proj", "v_proj", "o_proj"]:
                 weight = getattr(attn, proj_name).weight.data.to(device)
                 name = f"{prefix}_attn_{proj_name}"
-                packed, absmax, codebook, N_padded, N, K = self._quantize_weight(weight, name)
+                packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
+                    weight, name, k=self.k_attention,
+                )
                 A, B = self._create_lora(name, N, K, device)
                 layer_info[proj_name] = {
                     "packed": packed, "absmax": absmax, "codebook": codebook,
                     "N_padded": N_padded, "N": N, "K": K, "A": A, "B": B,
+                    "k": self.k_attention,
                 }
 
-            # MLP projections
+            # MLP projections (use k_mlp)
             for proj_name in ["gate_proj", "up_proj", "down_proj"]:
                 weight = getattr(mlp, proj_name).weight.data.to(device)
                 name = f"{prefix}_mlp_{proj_name}"
-                packed, absmax, codebook, N_padded, N, K = self._quantize_weight(weight, name)
+                packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
+                    weight, name, k=self.k_mlp,
+                )
                 A, B = self._create_lora(name, N, K, device)
                 layer_info[proj_name] = {
                     "packed": packed, "absmax": absmax, "codebook": codebook,
                     "N_padded": N_padded, "N": N, "K": K, "A": A, "B": B,
+                    "k": self.k_mlp,
                 }
 
             # Norm weights (trainable, not quantized)
@@ -208,13 +225,16 @@ class KbitLoraModel(nn.Module):
             final_norm.weight.data.to(self.compute_dtype).clone()
         )
 
-        # LM head
+        # LM head (use k_lm_head)
         lm_weight = model.lm_head.weight.data.to(device)
         name = "lm_head"
-        packed, absmax, codebook, N_padded, N, K = self._quantize_weight(lm_weight, name)
+        packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
+            lm_weight, name, k=self.k_lm_head,
+        )
         self._lm_head_info = {
             "packed": packed, "absmax": absmax, "codebook": codebook,
             "N_padded": N_padded, "N": N, "K": K,
+            "k": self.k_lm_head,
         }
 
         # Precompute RoPE cos/sin cache
@@ -269,21 +289,21 @@ class KbitLoraModel(nn.Module):
         Q = LoRA_W_Kbit.apply(
             normed_2d, q_info["packed"], q_info["absmax"], q_info["codebook"],
             q_info["A"], q_info["B"], self.lora_s,
-            self.k, q_info["K"], q_info["N_padded"], q_info["N"], self.compute_dtype,
+            q_info["k"], q_info["K"], q_info["N_padded"], q_info["N"], self.compute_dtype,
         )  # [B*S, q_dim]
 
         k_info = info["k_proj"]
         K_proj = LoRA_W_Kbit.apply(
             normed_2d, k_info["packed"], k_info["absmax"], k_info["codebook"],
             k_info["A"], k_info["B"], self.lora_s,
-            self.k, k_info["K"], k_info["N_padded"], k_info["N"], self.compute_dtype,
+            k_info["k"], k_info["K"], k_info["N_padded"], k_info["N"], self.compute_dtype,
         )  # [B*S, kv_dim]
 
         v_info = info["v_proj"]
         V_proj = LoRA_W_Kbit.apply(
             normed_2d, v_info["packed"], v_info["absmax"], v_info["codebook"],
             v_info["A"], v_info["B"], self.lora_s,
-            self.k, v_info["K"], v_info["N_padded"], v_info["N"], self.compute_dtype,
+            v_info["k"], v_info["K"], v_info["N_padded"], v_info["N"], self.compute_dtype,
         )  # [B*S, kv_dim]
 
         # Reshape to [B*S, n_heads, head_dim] for RoPE
@@ -329,7 +349,7 @@ class KbitLoraModel(nn.Module):
         attn_out = LoRA_W_Kbit.apply(
             attn_out, o_info["packed"], o_info["absmax"], o_info["codebook"],
             o_info["A"], o_info["B"], self.lora_s,
-            self.k, o_info["K"], o_info["N_padded"], o_info["N"], self.compute_dtype,
+            o_info["k"], o_info["K"], o_info["N_padded"], o_info["N"], self.compute_dtype,
         )  # [B*S, hidden_size]
         attn_out = attn_out.reshape(B, S, H)
 
@@ -352,7 +372,7 @@ class KbitLoraModel(nn.Module):
             g["packed"], g["absmax"], g["codebook"], g["A"], g["B"], self.lora_s,
             u["packed"], u["absmax"], u["codebook"], u["A"], u["B"], self.lora_s,
             d["packed"], d["absmax"], d["codebook"], d["A"], d["B"], self.lora_s,
-            self.k, self.hidden_size, self.intermediate_size,
+            g["k"], self.hidden_size, self.intermediate_size,
             ((self.intermediate_size + 127) // 128) * 128,
             self.intermediate_size, self.hidden_size,
             ((self.hidden_size + 127) // 128) * 128,
@@ -416,7 +436,7 @@ class KbitLoraModel(nn.Module):
             loss = chunked_cross_entropy(
                 shift_hidden, lm["packed"], lm["absmax"], lm["codebook"],
                 shift_labels,
-                self.k, lm["K"], lm["N_padded"], lm["N"],
+                lm["k"], lm["K"], lm["N_padded"], lm["N"],
                 self.compute_dtype, self.ce_chunk_size,
             )
             result["loss"] = loss
@@ -426,7 +446,7 @@ class KbitLoraModel(nn.Module):
             lm = self._lm_head_info
             W_deq = F.dequantize_kbit(
                 lm["packed"], lm["absmax"], lm["codebook"],
-                self.k, lm["N_padded"] * lm["K"], self.compute_dtype,
+                lm["k"], lm["N_padded"] * lm["K"], self.compute_dtype,
             )
             W = W_deq[:lm["N_padded"] * lm["K"]].reshape(lm["N_padded"], lm["K"])[:lm["N"], :]
             logits = last_hidden @ W.t()
