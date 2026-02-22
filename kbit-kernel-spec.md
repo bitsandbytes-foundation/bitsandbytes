@@ -222,7 +222,7 @@ gives the compiler 8 independent FMA chains for ILP.
 
 **Reduction:**
 - Intra-warp: shuffle reduction (5 steps)
-- Inter-warp: 2-phase shared memory (32 bytes), single `__syncthreads`
+- Inter-warp: generalized loop over NUM_WARPS partial sums in shared memory
 - Thread 0 writes M output values to C
 
 **Design decisions:**
@@ -234,6 +234,14 @@ gives the compiler 8 independent FMA chains for ILP.
 | A storage | Global/L1 | No A reuse with C=1; A fits in L1 (~4-10 KB) |
 | B absmax | float32 | Uses quantize_kbit output directly, no repack |
 | Inner loop | Vectorized 4x8 | int4 A loads + sub-loop gives ILP without blowing registers |
+
+**Tiled v2 kernel (experimental, `kbit_scalar_gemv_tiled_v2`):**
+- 128 threads (4 warps), one N-tile (128 columns) per block
+- Cooperative cp.async loading of full B tile + absmax into shared memory
+- Split-K support with atomicAdd workspace and tile_counters
+- **Not adopted for production**: cooperative tile loading + __syncthreads overhead
+  dominates at M=1-2 (each thread uses only 1/128 of loaded tile data).
+  The per-column kernel is 10-45% faster for M=1. Kept in code for reference.
 
 ---
 
@@ -247,8 +255,9 @@ gives the compiler 8 independent FMA chains for ILP.
 - TILE_N=64 for M<=16 (128 threads, 4 warps, `__launch_bounds__(128, 12)`)
 - TILE_N=128 for M>16 (256 threads, 8 warps)
 - TILE_K=64, TILE_M=16*M_BLOCKS (M_BLOCKS=1..4)
-- Double-buffered cp.async pipeline for A, B, and absmax tiles
+- cp.async pipeline for A, B, and absmax tiles (NUM_STAGES: 4 on datacenter, 2 on consumer)
 - Persistent kernel with split-K when tiles < target SM occupancy
+- L2 prefetch hints for tile kt+2 on datacenter GPUs (`prefetch.global.L2`)
 
 **Data format:**
 - B_packed: tiled from `repack_kbit` — `[k_tiles * n_tiles * TILE_N * B_COL_WORDS]`
@@ -266,16 +275,24 @@ for each (k_sub, n_block) pair:
     mma.sync.aligned.m16n8k16
 ```
 
-**k_splits heuristic (TILE_N=64):**
+**k_splits heuristic:**
 ```
-target_blocks = 128 SMs * 4 blocks/SM = 512
-if mn_tiles < 512:
-    k_splits = min(k_tiles, ceil(512 / mn_tiles))
-grid = min(512, mn_tiles * k_splits)
+# Consumer (RTX 4090, 128 SMs):
+TARGET_BLOCKS_PER_SM = 4 (TN=64) or 1 (TN=128)
+target_blocks = 128 * TARGET_BLOCKS_PER_SM
+
+# Datacenter (H100, 132 SMs):
+TARGET_BLOCKS_PER_SM = 6 (TN=64) or 2 (TN=128)
+target_blocks = 132 * TARGET_BLOCKS_PER_SM
+
+k_splits = min(k_tiles, ceil(target_blocks / mn_tiles))
+grid = min(target_blocks, mn_tiles * k_splits)
 ```
 
-Split-K uses atomicAdd + tile_counters for the last-arriving split to
-do the final reduction.
+Higher targets on datacenter GPUs improve H100 MMA performance by 5-16%
+(more concurrent blocks per SM for better latency hiding with 3.35 TB/s
+bandwidth). Split-K uses atomicAdd + tile_counters for the last-arriving
+split to do the final reduction.
 
 **The fundamental constraint on Ada:**
 `mma.sync` is synchronous — the warp stalls until the MMA completes
@@ -512,3 +529,26 @@ On Hopper/datacenter-Blackwell, the MMA dequant kernel could be
 restructured to issue MMA asynchronously while doing ALU dequant in
 parallel. This would eliminate the 39:1 instruction overhead that
 limits the current kernel on Ada. That is a separate future effort.
+
+**Datacenter GPU optimizations (`BNB_DATACENTER_GPU`):**
+
+The macro `BNB_DATACENTER_GPU` targets sm_90 (H100/H200) and sm_100
+(B200/GB200) explicitly. sm_120 (RTX 5090) is consumer despite being
+>900 and must NOT match.
+
+Implemented optimizations (all behind `#if BNB_DATACENTER_GPU`):
+1. **L2 prefetch hints** — `asm("prefetch.global.L2 [%0];" :: "l"(ptr))`
+   for tile kt+2 in MMA/grouped MMA pipelines, and next K-block in
+   scalar GEMV inner loop
+2. **4-stage pipeline** — MMA and grouped MMA kernels use 4-stage cp.async
+   pipeline (vs 2-stage on consumer). H100 has 228KB shmem vs 100KB.
+   Neutral effect for current K_dim=2048-5120 (only 32-80 k-tiles); would
+   help more with larger K.
+3. **Higher k_splits targets** — TARGET_BLOCKS_PER_SM increased (TN=64:
+   4→6, TN=128: 1→2) for better SM occupancy on H100's 132 SMs. Provides
+   5-16% MMA improvement on Qwen3 70B shapes.
+
+Rejected: Scalar GEMV warp count 2→4 (128 threads per block) — harmful
+because K_dim=2048 gives only 64 k-blocks for 128 threads, leaving 50%
+idle. Skipped: TMA bulk copy — current cp.async does 1 copy per thread
+for these tile sizes, so TMA benefit is marginal.

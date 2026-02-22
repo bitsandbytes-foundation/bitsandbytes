@@ -149,6 +149,51 @@ kernel launches (dequant + matmul), doubling the dispatch tax.
    before calling `torch.ops`. Aligning the public API with the internal
    op signature would save ~9 us.
 
+## H100 datacenter optimizations
+
+H100 SXM (132 SMs, sm_90, 3.35 TB/s HBM3 bandwidth). Benchmarked on
+RunPod using CUDA graph replay (`--graph --iters 500 --trials 7`).
+
+### Datacenter-specific changes (behind `#if BNB_DATACENTER_GPU`)
+
+All changes use conditional compilation so consumer GPUs (RTX 4090, sm_89)
+are completely unaffected.
+
+| Change | Kernels affected | H100 effect | Consumer effect |
+|--------|-----------------|-------------|-----------------|
+| L2 prefetch hints | MMA, grouped MMA, scalar GEMV | Neutral | Zero (no-op) |
+| 4-stage pipeline (vs 2) | MMA, grouped MMA | Neutral (K_dim too small) | Zero (2-stage path) |
+| k_splits increase (TN=64: 4→6/SM, TN=128: 1→2/SM) | MMA, grouped MMA | **5-16% faster** | Zero (SMs < 130) |
+
+The k_splits tuning is the primary win: H100 has 3.35x more bandwidth
+than RTX 4090 but only 1.03x more SMs (132 vs 128). Higher occupancy
+targets create more concurrent blocks per SM, improving memory request
+pipelining.
+
+### k_splits tuning results (MMA kernel, CUDA graph, H100 SXM)
+
+Before (TARGET=4/SM for TN=64) vs after (TARGET=6/SM):
+
+| Shape | k | M | Before (us) | After (us) | Improvement |
+|-------|---|---|-------------|-----------|-------------|
+| gateup | 2 | 1 | 25.9 | 23.4 | -9.7% |
+| gateup | 4 | 1 | 30.6 | 28.8 | -5.9% |
+| gateup | 4 | 16 | 34.9 | 29.5 | -15.5% |
+| down | 5 | 1 | 31.4 | 29.3 | -6.7% |
+| Q | 2 | 1 | 23.0 | 21.4 | -7.0% |
+| O | 4 | 1 | 26.4 | 24.1 | -8.7% |
+| KV | 4 | 1 | 15.1 | 15.7 | +4.0% (noise) |
+
+### Rejected/skipped changes
+
+- **Scalar GEMV warp count 2→4**: With K_dim=2048, 128 threads means only
+  64 valid k-blocks, leaving 50% of threads idle. The extra threads waste
+  registers and occupancy without contributing work. Regressed +41% on H100.
+- **TMA bulk copy**: Current cp.async already achieves 1 copy per thread
+  for B tiles (2-5 KB). TMA's instruction reduction would be marginal for
+  these small tile sizes. High implementation complexity (tensor maps,
+  mbarrier, dual synchronization) for likely <2% gain.
+
 ## Conclusions
 
 1. **K-bit quantization provides significant speedups for low-concurrency
