@@ -1358,6 +1358,112 @@ def kbit_linear_workspace(M: int, K_dim: int, N: int, dtype: torch.dtype, device
     }
 
 
+def kbit_expert_linear(
+    A_concat: Tensor,
+    B_packed_all: Tensor,
+    B_absmax_all: Tensor,
+    codebook: Tensor,
+    expert_offsets: Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    num_experts: int,
+    max_M: int,
+    out: Optional[Tensor] = None,
+    workspace: Optional[dict] = None,
+) -> Tensor:
+    """Unified dispatch for k-bit quantized MoE expert linear.
+
+    Routes to the optimal kernel based on max_M (max tokens per expert):
+      - max_M <= 16: grouped MMA (single fused launch for all experts)
+      - max_M > 16:  per-expert dequantize + matmul
+
+    All paths read tiled B layout (from repack_kbit output).
+
+    Args:
+        A_concat: Concatenated activations [total_M, K_dim], fp16 or bf16.
+        B_packed_all: Tiled packed weights for all experts, concatenated.
+        B_absmax_all: Tiled absmax for all experts, concatenated.
+        codebook: float32 codebook with 2^k entries.
+        expert_offsets: int32 tensor [num_experts+1] with cumulative token offsets.
+        k: Bit width (2, 3, 4, or 5).
+        K_dim: Reduction dimension.
+        N: Output dimension per expert.
+        num_experts: Number of experts.
+        max_M: Maximum tokens routed to any single expert.
+        out: Optional pre-allocated output [total_M, N].
+        workspace: Optional dict with pre-allocated buffers.
+
+    Returns:
+        Output tensor [total_M, N] with same dtype as A_concat.
+    """
+    total_M = A_concat.shape[0]
+    dtype = A_concat.dtype
+
+    if max_M <= 16:
+        # Grouped MMA: single fused kernel launch
+        if out is not None and workspace is not None:
+            C_workspace = workspace["C_workspace"]
+            tile_counters = workspace["tile_counters"]
+            return torch.ops.bitsandbytes.kbit_grouped_gemm_(
+                A_concat,
+                B_packed_all,
+                B_absmax_all,
+                codebook,
+                expert_offsets,
+                K_dim,
+                N,
+                k,
+                num_experts,
+                max_M,
+                out,
+                C_workspace,
+                tile_counters,
+            )
+        return torch.ops.bitsandbytes.kbit_grouped_gemm(
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
+            max_M,
+        )
+
+    # max_M > 16: per-expert dequant + matmul
+    if out is None:
+        out = torch.empty(total_M, N, device=A_concat.device, dtype=dtype)
+
+    # Per-expert weight size in the packed/absmax tensors
+    TILE_K, TILE_N, BS = 64, 128, 32
+    k_blocks_per_tile = TILE_K // BS
+    k_tiles = K_dim // TILE_K
+    n_tiles = N // TILE_N
+    words_per_expert = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * k
+    absmax_per_expert = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+
+    offsets_cpu = expert_offsets.cpu()
+    for e in range(num_experts):
+        start = offsets_cpu[e].item()
+        end = offsets_cpu[e + 1].item()
+        expert_M = end - start
+        if expert_M == 0:
+            continue
+
+        A_expert = A_concat[start:end]  # [expert_M, K_dim]
+        B_packed_e = B_packed_all[e * words_per_expert : (e + 1) * words_per_expert]
+        B_absmax_e = B_absmax_all[e * absmax_per_expert : (e + 1) * absmax_per_expert]
+
+        W_flat = dequantize_kbit_tiled(B_packed_e, B_absmax_e, codebook, k, K_dim, N, dtype=dtype)
+        W = W_flat.view(N, K_dim)
+        torch.mm(A_expert, W.t(), out=out[start:end])
+
+    return out
+
+
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def quantize(
     A: Tensor,
