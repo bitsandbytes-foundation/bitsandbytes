@@ -390,16 +390,18 @@ void gemv_4bit_inference_fp32(
 #if BUILD_CUDA || BUILD_HIP
 
 // Forward declarations of ops.cu template functions
-template <typename T, int K> void quantizeBlockwise_kbit(const float*, const T*, unsigned char*, unsigned int*, int);
+template <typename T, int K>
+void quantizeBlockwise_kbit(const float*, const T*, unsigned char*, unsigned int*, int, cudaStream_t);
 template <typename T, int K, typename ABSMAX_T>
 void dequantizeBlockwise_kbit(const unsigned int*, const float*, const ABSMAX_T*, T*, int, cudaStream_t);
 
 // Unmangled quantize wrappers
 #define MAKE_KBIT_QUANT(tname, T, K)                                                                                   \
     void quantize_kbit_##tname##_k##K(                                                                                 \
-        const float* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n                      \
+        const float* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n,                     \
+        cudaStream_t stream                                                                                            \
     ) {                                                                                                                \
-        quantizeBlockwise_kbit<T, K>(codebook, A, absmax, packed_out, n);                                              \
+        quantizeBlockwise_kbit<T, K>(codebook, A, absmax, packed_out, n, stream);                                      \
     }
 
 MAKE_KBIT_QUANT(fp16, half, 2)
@@ -511,15 +513,16 @@ MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 4)
 MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 5)
 
 // Forward declaration of repack launcher
-template <int K> void repackKbit(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int);
+template <int K>
+void repackKbit(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t);
 
 // Unmangled repack wrappers
 #define MAKE_KBIT_REPACK(K)                                                                                            \
     void repack_kbit_k##K(                                                                                             \
         const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                 \
-        unsigned char* absmax_tiled, int K_dim, int N                                                                  \
+        unsigned char* absmax_tiled, int K_dim, int N, cudaStream_t stream                                             \
     ) {                                                                                                                \
-        repackKbit<K>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);                                 \
+        repackKbit<K>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N, stream);                         \
     }
 
 MAKE_KBIT_REPACK(2)
@@ -530,25 +533,27 @@ MAKE_KBIT_REPACK(5)
 // Forward declarations of GEMM launchers
 template <int K, typename scalar_t, typename ABSMAX_T>
 void kbitGemmProd(
-    const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, float*, int*, int, int, int, int
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, float*, int*, int, int, int, int,
+    cudaStream_t
 );
 
 // Production GEMM wrappers — uint8 E4M4 absmax
 #define MAKE_KBIT_GEMM_PROD(K)                                                                                         \
     void kbit_gemm_prod_fp16_k##K(                                                                                     \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
-        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                  \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream              \
     ) {                                                                                                                \
         kbitGemmProd<K, half, unsigned char>(                                                                          \
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
         );                                                                                                             \
     }                                                                                                                  \
     void kbit_gemm_prod_bf16_k##K(                                                                                     \
         const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
-        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks,               \
+        cudaStream_t stream                                                                                            \
     ) {                                                                                                                \
         kbitGemmProd<K, __nv_bfloat16, unsigned char>(                                                                 \
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
         );                                                                                                             \
     }
 
@@ -561,18 +566,19 @@ MAKE_KBIT_GEMM_PROD(5)
 #define MAKE_KBIT_GEMM_PROD_FP16ABS(K)                                                                                 \
     void kbit_gemm_prod_fp16_fp16abs_k##K(                                                                             \
         const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
-        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                  \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream              \
     ) {                                                                                                                \
         kbitGemmProd<K, half, half>(                                                                                   \
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
         );                                                                                                             \
     }                                                                                                                  \
     void kbit_gemm_prod_bf16_fp16abs_k##K(                                                                             \
         const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
-        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks,               \
+        cudaStream_t stream                                                                                            \
     ) {                                                                                                                \
         kbitGemmProd<K, __nv_bfloat16, half>(                                                                          \
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
         );                                                                                                             \
     }
 
@@ -585,7 +591,7 @@ MAKE_KBIT_GEMM_PROD_FP16ABS(5)
 template <int K, typename scalar_t, typename ABSMAX_T>
 void kbitGroupedGemmProd(
     const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, float*, int*, const int*, int, int,
-    int, int
+    int, int, cudaStream_t
 );
 
 // Unmangled grouped GEMM wrappers — uint8 E4M4 absmax
@@ -593,21 +599,21 @@ void kbitGroupedGemmProd(
     void kbit_grouped_gemm_prod_fp16_k##K(                                                                             \
         const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                     \
         const float* codebook, half* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets,      \
-        int K_dim, int N, int num_experts, int max_M                                                                   \
+        int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                                              \
     ) {                                                                                                                \
         kbitGroupedGemmProd<K, half, unsigned char>(                                                                   \
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
-            K_dim, N, num_experts, max_M                                                                               \
+            K_dim, N, num_experts, max_M, stream                                                                       \
         );                                                                                                             \
     }                                                                                                                  \
     void kbit_grouped_gemm_prod_bf16_k##K(                                                                             \
         const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
         const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
-        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                    \
     ) {                                                                                                                \
         kbitGroupedGemmProd<K, __nv_bfloat16, unsigned char>(                                                          \
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
-            K_dim, N, num_experts, max_M                                                                               \
+            K_dim, N, num_experts, max_M, stream                                                                       \
         );                                                                                                             \
     }
 
@@ -621,21 +627,21 @@ MAKE_KBIT_GROUPED_GEMM_PROD(5)
     void kbit_grouped_gemm_prod_fp16_fp16abs_k##K(                                                                     \
         const half* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all, const float* codebook,       \
         half* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets, int K_dim, int N,           \
-        int num_experts, int max_M                                                                                     \
+        int num_experts, int max_M, cudaStream_t stream                                                                \
     ) {                                                                                                                \
         kbitGroupedGemmProd<K, half, half>(                                                                            \
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
-            K_dim, N, num_experts, max_M                                                                               \
+            K_dim, N, num_experts, max_M, stream                                                                       \
         );                                                                                                             \
     }                                                                                                                  \
     void kbit_grouped_gemm_prod_bf16_fp16abs_k##K(                                                                     \
         const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all,                     \
         const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
-        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                    \
     ) {                                                                                                                \
         kbitGroupedGemmProd<K, __nv_bfloat16, half>(                                                                   \
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
-            K_dim, N, num_experts, max_M                                                                               \
+            K_dim, N, num_experts, max_M, stream                                                                       \
         );                                                                                                             \
     }
 
@@ -646,21 +652,23 @@ MAKE_KBIT_GROUPED_GEMM_PROD_FP16ABS(5)
 
 // Forward declaration of scalar GEMV launchers (flat layout, templated on absmax type)
 template <int K, typename scalar_t, typename ABSMAX_T>
-void kbitScalarGemv(const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, int, int, int);
+void kbitScalarGemv(
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, int, int, int, cudaStream_t
+);
 
 // Unmangled scalar GEMV wrappers — C=1, uint8 E4M4 absmax
 #define MAKE_KBIT_SCALAR_GEMV(K)                                                                                       \
     void kbit_scalar_gemv_fp16_k##K(                                                                                   \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
-        int M, int K_dim, int N                                                                                        \
+        int M, int K_dim, int N, cudaStream_t stream                                                                    \
     ) {                                                                                                                \
-        kbitScalarGemv<K, half, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                       \
+        kbitScalarGemv<K, half, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);               \
     }                                                                                                                  \
     void kbit_scalar_gemv_bf16_k##K(                                                                                   \
         const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
-        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
+        __nv_bfloat16* C, int M, int K_dim, int N, cudaStream_t stream                                                 \
     ) {                                                                                                                \
-        kbitScalarGemv<K, __nv_bfloat16, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);              \
+        kbitScalarGemv<K, __nv_bfloat16, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);      \
     }
 
 MAKE_KBIT_SCALAR_GEMV(2)
@@ -672,15 +680,15 @@ MAKE_KBIT_SCALAR_GEMV(5)
 #define MAKE_KBIT_SCALAR_GEMV_FP16ABS(K)                                                                               \
     void kbit_scalar_gemv_fp16_fp16abs_k##K(                                                                           \
         const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C, int M,      \
-        int K_dim, int N                                                                                               \
+        int K_dim, int N, cudaStream_t stream                                                                          \
     ) {                                                                                                                \
-        kbitScalarGemv<K, half, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                \
+        kbitScalarGemv<K, half, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);                        \
     }                                                                                                                  \
     void kbit_scalar_gemv_bf16_fp16abs_k##K(                                                                           \
         const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
-        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
+        __nv_bfloat16* C, int M, int K_dim, int N, cudaStream_t stream                                                 \
     ) {                                                                                                                \
-        kbitScalarGemv<K, __nv_bfloat16, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                       \
+        kbitScalarGemv<K, __nv_bfloat16, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);               \
     }
 
 MAKE_KBIT_SCALAR_GEMV_FP16ABS(2)
@@ -690,21 +698,23 @@ MAKE_KBIT_SCALAR_GEMV_FP16ABS(5)
 
 // Forward declaration of tiled scalar GEMV launchers
 template <int K, typename scalar_t, typename ABSMAX_T>
-void kbitScalarGemvTiled(const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, int, int, int);
+void kbitScalarGemvTiled(
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const float*, scalar_t*, int, int, int, cudaStream_t
+);
 
 // Tiled scalar GEMV wrappers — uint8 E4M4 absmax
 #define MAKE_KBIT_SCALAR_GEMV_TILED(K)                                                                                 \
     void kbit_scalar_gemv_tiled_fp16_k##K(                                                                             \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
-        int M, int K_dim, int N                                                                                        \
+        int M, int K_dim, int N, cudaStream_t stream                                                                    \
     ) {                                                                                                                \
-        kbitScalarGemvTiled<K, half, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                  \
+        kbitScalarGemvTiled<K, half, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);          \
     }                                                                                                                  \
     void kbit_scalar_gemv_tiled_bf16_k##K(                                                                             \
         const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
-        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
+        __nv_bfloat16* C, int M, int K_dim, int N, cudaStream_t stream                                                 \
     ) {                                                                                                                \
-        kbitScalarGemvTiled<K, __nv_bfloat16, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);         \
+        kbitScalarGemvTiled<K, __nv_bfloat16, unsigned char>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream); \
     }
 
 MAKE_KBIT_SCALAR_GEMV_TILED(2)
@@ -716,15 +726,15 @@ MAKE_KBIT_SCALAR_GEMV_TILED(5)
 #define MAKE_KBIT_SCALAR_GEMV_TILED_FP16ABS(K)                                                                         \
     void kbit_scalar_gemv_tiled_fp16_fp16abs_k##K(                                                                     \
         const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C, int M,      \
-        int K_dim, int N                                                                                               \
+        int K_dim, int N, cudaStream_t stream                                                                          \
     ) {                                                                                                                \
-        kbitScalarGemvTiled<K, half, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                           \
+        kbitScalarGemvTiled<K, half, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);                   \
     }                                                                                                                  \
     void kbit_scalar_gemv_tiled_bf16_fp16abs_k##K(                                                                     \
         const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
-        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
+        __nv_bfloat16* C, int M, int K_dim, int N, cudaStream_t stream                                                 \
     ) {                                                                                                                \
-        kbitScalarGemvTiled<K, __nv_bfloat16, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                  \
+        kbitScalarGemvTiled<K, __nv_bfloat16, half>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);          \
     }
 
 MAKE_KBIT_SCALAR_GEMV_TILED_FP16ABS(2)
@@ -1250,9 +1260,10 @@ bool has_avx512bf16_cpu() { return has_avx512bf16(); }
 // Production kernels (Stage 4-5) - quantize only
 #define MAKE_CKBIT(tname, T, K)                                                                                        \
     void cquantize_kbit_##tname##_k##K(                                                                                \
-        const float* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n                      \
+        const float* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n,                     \
+        cudaStream_t stream                                                                                            \
     ) {                                                                                                                \
-        quantize_kbit_##tname##_k##K(codebook, A, absmax, packed_out, n);                                              \
+        quantize_kbit_##tname##_k##K(codebook, A, absmax, packed_out, n, stream);                                      \
     }
 
 MAKE_CKBIT(fp16, half, 2)
@@ -1295,9 +1306,9 @@ MAKE_CKBIT_DEQUANT(fp32, float, u8abs, unsigned char, 5)
 #define MAKE_CKBIT_REPACK(K)                                                                                           \
     void crepack_kbit_k##K(                                                                                            \
         const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                 \
-        unsigned char* absmax_tiled, int K_dim, int N                                                                  \
+        unsigned char* absmax_tiled, int K_dim, int N, cudaStream_t stream                                             \
     ) {                                                                                                                \
-        repack_kbit_k##K(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);                              \
+        repack_kbit_k##K(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N, stream);                      \
     }
 
 MAKE_CKBIT_REPACK(2)
@@ -1374,18 +1385,19 @@ MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 5)
 #define MAKE_CKBIT_GEMM_PROD(K)                                                                                        \
     void ckbit_gemm_prod_fp16_k##K(                                                                                    \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
-        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                  \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream              \
     ) {                                                                                                                \
         kbit_gemm_prod_fp16_k##K(                                                                                      \
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
         );                                                                                                             \
     }                                                                                                                  \
     void ckbit_gemm_prod_bf16_k##K(                                                                                    \
         const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
-        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks,               \
+        cudaStream_t stream                                                                                            \
     ) {                                                                                                                \
         kbit_gemm_prod_bf16_k##K(                                                                                      \
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
         );                                                                                                             \
     }
 
@@ -1398,18 +1410,19 @@ MAKE_CKBIT_GEMM_PROD(5)
 #define MAKE_CKBIT_GEMM_PROD_FP16ABS(K)                                                                                \
     void ckbit_gemm_prod_fp16_fp16abs_k##K(                                                                            \
         const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C,             \
-        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                                  \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream              \
     ) {                                                                                                                \
         kbit_gemm_prod_fp16_fp16abs_k##K(                                                                              \
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
         );                                                                                                             \
     }                                                                                                                  \
     void ckbit_gemm_prod_bf16_fp16abs_k##K(                                                                            \
         const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
-        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks                \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks,               \
+        cudaStream_t stream                                                                                            \
     ) {                                                                                                                \
         kbit_gemm_prod_bf16_fp16abs_k##K(                                                                              \
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks                      \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
         );                                                                                                             \
     }
 
@@ -1425,21 +1438,21 @@ void ctest_mma(const half* A, const half* B, float* C) { testMMA(A, B, C); }
     void ckbit_grouped_gemm_prod_fp16_k##K(                                                                            \
         const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                     \
         const float* codebook, half* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets,      \
-        int K_dim, int N, int num_experts, int max_M                                                                   \
+        int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                                              \
     ) {                                                                                                                \
         kbit_grouped_gemm_prod_fp16_k##K(                                                                              \
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
-            K_dim, N, num_experts, max_M                                                                               \
+            K_dim, N, num_experts, max_M, stream                                                                       \
         );                                                                                                             \
     }                                                                                                                  \
     void ckbit_grouped_gemm_prod_bf16_k##K(                                                                            \
         const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
         const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
-        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                    \
     ) {                                                                                                                \
         kbit_grouped_gemm_prod_bf16_k##K(                                                                              \
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
-            K_dim, N, num_experts, max_M                                                                               \
+            K_dim, N, num_experts, max_M, stream                                                                       \
         );                                                                                                             \
     }
 
@@ -1453,21 +1466,21 @@ MAKE_CKBIT_GROUPED_GEMM_PROD(5)
     void ckbit_grouped_gemm_prod_fp16_fp16abs_k##K(                                                                    \
         const half* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all, const float* codebook,       \
         half* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets, int K_dim, int N,           \
-        int num_experts, int max_M                                                                                     \
+        int num_experts, int max_M, cudaStream_t stream                                                                \
     ) {                                                                                                                \
         kbit_grouped_gemm_prod_fp16_fp16abs_k##K(                                                                      \
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
-            K_dim, N, num_experts, max_M                                                                               \
+            K_dim, N, num_experts, max_M, stream                                                                       \
         );                                                                                                             \
     }                                                                                                                  \
     void ckbit_grouped_gemm_prod_bf16_fp16abs_k##K(                                                                    \
         const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const half* B_absmax_all,                     \
         const float* codebook, __nv_bfloat16* C_concat, float* C_workspace, int* tile_counters,                        \
-        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M                                        \
+        const int* expert_offsets, int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                    \
     ) {                                                                                                                \
         kbit_grouped_gemm_prod_bf16_fp16abs_k##K(                                                                      \
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets,      \
-            K_dim, N, num_experts, max_M                                                                               \
+            K_dim, N, num_experts, max_M, stream                                                                       \
         );                                                                                                             \
     }
 
@@ -1480,15 +1493,15 @@ MAKE_CKBIT_GROUPED_GEMM_PROD_FP16ABS(5)
 #define MAKE_CKBIT_SCALAR_GEMV(K)                                                                                      \
     void ckbit_scalar_gemv_fp16_k##K(                                                                                  \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
-        int M, int K_dim, int N                                                                                        \
+        int M, int K_dim, int N, cudaStream_t stream                                                                    \
     ) {                                                                                                                \
-        kbit_scalar_gemv_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                   \
+        kbit_scalar_gemv_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);                           \
     }                                                                                                                  \
     void ckbit_scalar_gemv_bf16_k##K(                                                                                  \
         const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
-        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
+        __nv_bfloat16* C, int M, int K_dim, int N, cudaStream_t stream                                                 \
     ) {                                                                                                                \
-        kbit_scalar_gemv_bf16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                                   \
+        kbit_scalar_gemv_bf16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);                           \
     }
 
 MAKE_CKBIT_SCALAR_GEMV(2)
@@ -1500,15 +1513,15 @@ MAKE_CKBIT_SCALAR_GEMV(5)
 #define MAKE_CKBIT_SCALAR_GEMV_FP16ABS(K)                                                                              \
     void ckbit_scalar_gemv_fp16_fp16abs_k##K(                                                                          \
         const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C, int M,      \
-        int K_dim, int N                                                                                               \
+        int K_dim, int N, cudaStream_t stream                                                                          \
     ) {                                                                                                                \
-        kbit_scalar_gemv_fp16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                           \
+        kbit_scalar_gemv_fp16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);                   \
     }                                                                                                                  \
     void ckbit_scalar_gemv_bf16_fp16abs_k##K(                                                                          \
         const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
-        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
+        __nv_bfloat16* C, int M, int K_dim, int N, cudaStream_t stream                                                 \
     ) {                                                                                                                \
-        kbit_scalar_gemv_bf16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                           \
+        kbit_scalar_gemv_bf16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);                   \
     }
 
 MAKE_CKBIT_SCALAR_GEMV_FP16ABS(2)
@@ -1520,15 +1533,15 @@ MAKE_CKBIT_SCALAR_GEMV_FP16ABS(5)
 #define MAKE_CKBIT_SCALAR_GEMV_TILED(K)                                                                                \
     void ckbit_scalar_gemv_tiled_fp16_k##K(                                                                            \
         const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, half* C,    \
-        int M, int K_dim, int N                                                                                        \
+        int M, int K_dim, int N, cudaStream_t stream                                                                    \
     ) {                                                                                                                \
-        kbit_scalar_gemv_tiled_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                             \
+        kbit_scalar_gemv_tiled_fp16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);                     \
     }                                                                                                                  \
     void ckbit_scalar_gemv_tiled_bf16_k##K(                                                                            \
         const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook,    \
-        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
+        __nv_bfloat16* C, int M, int K_dim, int N, cudaStream_t stream                                                 \
     ) {                                                                                                                \
-        kbit_scalar_gemv_tiled_bf16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                             \
+        kbit_scalar_gemv_tiled_bf16_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);                     \
     }
 
 MAKE_CKBIT_SCALAR_GEMV_TILED(2)
@@ -1540,15 +1553,15 @@ MAKE_CKBIT_SCALAR_GEMV_TILED(5)
 #define MAKE_CKBIT_SCALAR_GEMV_TILED_FP16ABS(K)                                                                        \
     void ckbit_scalar_gemv_tiled_fp16_fp16abs_k##K(                                                                    \
         const half* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook, half* C, int M,      \
-        int K_dim, int N                                                                                               \
+        int K_dim, int N, cudaStream_t stream                                                                          \
     ) {                                                                                                                \
-        kbit_scalar_gemv_tiled_fp16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                     \
+        kbit_scalar_gemv_tiled_fp16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);             \
     }                                                                                                                  \
     void ckbit_scalar_gemv_tiled_bf16_fp16abs_k##K(                                                                    \
         const __nv_bfloat16* A, const unsigned int* B_packed, const half* B_absmax, const float* codebook,             \
-        __nv_bfloat16* C, int M, int K_dim, int N                                                                      \
+        __nv_bfloat16* C, int M, int K_dim, int N, cudaStream_t stream                                                 \
     ) {                                                                                                                \
-        kbit_scalar_gemv_tiled_bf16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N);                     \
+        kbit_scalar_gemv_tiled_bf16_fp16abs_k##K(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream);             \
     }
 
 MAKE_CKBIT_SCALAR_GEMV_TILED_FP16ABS(2)

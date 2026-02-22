@@ -11,6 +11,7 @@
 #include <type_traits>
 #include <vector>
 
+
 #define ERR_NOT_IMPLEMENTED 100
 
 using std::cout;
@@ -844,10 +845,12 @@ __global__ void kDequantizeBlockwise_kbit_vec(
 // ---- Production kernel launchers (Stage 4-5) ----
 
 template <typename T, int K>
-void quantizeBlockwise_kbit(const float* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n) {
+void quantizeBlockwise_kbit(
+    const float* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n, cudaStream_t stream
+) {
     int num_blocks_quant = (n + 31) / 32;
     int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kQuantizeBlockwise_kbit<T, K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK>>>(codebook, A, absmax, packed_out, n);
+    kQuantizeBlockwise_kbit<T, K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(codebook, A, absmax, packed_out, n);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -999,12 +1002,12 @@ __global__ void kRepackKbit(
 template <int K>
 void repackKbit(
     const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,
-    unsigned char* absmax_tiled, int K_dim, int N
+    unsigned char* absmax_tiled, int K_dim, int N, cudaStream_t stream
 ) {
     int total_work = N * (K_dim / KBIT_BLOCKSIZE);
     int block_size = 256;
     int grid_size = (total_work + block_size - 1) / block_size;
-    kRepackKbit<K><<<grid_size, block_size>>>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);
+    kRepackKbit<K><<<grid_size, block_size, 0, stream>>>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -1370,7 +1373,7 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
 template <int K, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
 static void kbitGemmProdLaunch(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
-    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int num_sms
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int num_sms, cudaStream_t stream
 ) {
     constexpr int TILE_M = MB * 16;
     constexpr int TILE_K = 64;
@@ -1413,7 +1416,7 @@ static void kbitGemmProdLaunch(
     dim3 block(BLOCK_DIM);
     int smem_size = 2 * STAGE_BYTES;
 
-    kbit_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size>>>(
+    kbit_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
         A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_splits, total_work
     );
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
@@ -1422,7 +1425,7 @@ static void kbitGemmProdLaunch(
 template <int K, typename scalar_t, typename ABSMAX_T = unsigned char>
 void kbitGemmProd(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
-    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
 ) {
     // Query SM count for persistent kernel grid sizing and M_BLOCKS dispatch
     int dev;
@@ -1449,29 +1452,29 @@ void kbitGemmProd(
     if (use_tn64) {
         // TILE_N=64: 4 warps (128 threads), 2x more n-tiles
         kbitGemmProdLaunch<K, 1, 64, scalar_t, ABSMAX_T>(
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
         );
     } else {
         // TILE_N=128: original path
         switch (m_blocks) {
         case 4:
             kbitGemmProdLaunch<K, 4, 128, scalar_t, ABSMAX_T>(
-                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
         case 3:
             kbitGemmProdLaunch<K, 3, 128, scalar_t, ABSMAX_T>(
-                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
         case 2:
             kbitGemmProdLaunch<K, 2, 128, scalar_t, ABSMAX_T>(
-                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
         default:
             kbitGemmProdLaunch<K, 1, 128, scalar_t, ABSMAX_T>(
-                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
         }
@@ -1815,7 +1818,7 @@ template <int K, int MB, int TN, typename scalar_t, typename ABSMAX_T = unsigned
 static void kbitGroupedGemmProdLaunch(
     const scalar_t* A_concat, const unsigned int* B_packed_all, const ABSMAX_T* B_absmax_all, const float* codebook,
     scalar_t* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets, int K_dim, int N,
-    int num_experts, int max_M, int num_sms
+    int num_experts, int max_M, int num_sms, cudaStream_t stream
 ) {
     constexpr int TILE_M = MB * 16;
     constexpr int TILE_K = 64;
@@ -1853,7 +1856,7 @@ static void kbitGroupedGemmProdLaunch(
     dim3 block(BLOCK_DIM);
     int smem_size = 2 * STAGE_BYTES;
 
-    kbit_grouped_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size>>>(
+    kbit_grouped_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
         A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets, K_dim, N,
         num_experts, k_splits, total_work
     );
@@ -1867,7 +1870,7 @@ template <int K, typename scalar_t, typename ABSMAX_T = unsigned char>
 void kbitGroupedGemmProd(
     const scalar_t* A_concat, const unsigned int* B_packed_all, const ABSMAX_T* B_absmax_all, const float* codebook,
     scalar_t* C_concat, float* C_workspace, int* tile_counters, const int* d_expert_offsets, int K_dim, int N,
-    int num_experts, int max_M
+    int num_experts, int max_M, cudaStream_t stream
 ) {
     if (max_M == 0 || N == 0)
         return;
@@ -1891,32 +1894,32 @@ void kbitGroupedGemmProd(
     if (use_tn64) {
         kbitGroupedGemmProdLaunch<K, 1, 64, scalar_t, ABSMAX_T>(
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
-            K_dim, N, num_experts, max_M, num_sms
+            K_dim, N, num_experts, max_M, num_sms, stream
         );
     } else {
         switch (m_blocks) {
         case 4:
             kbitGroupedGemmProdLaunch<K, 4, 128, scalar_t, ABSMAX_T>(
                 A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
-                K_dim, N, num_experts, max_M, num_sms
+                K_dim, N, num_experts, max_M, num_sms, stream
             );
             break;
         case 3:
             kbitGroupedGemmProdLaunch<K, 3, 128, scalar_t, ABSMAX_T>(
                 A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
-                K_dim, N, num_experts, max_M, num_sms
+                K_dim, N, num_experts, max_M, num_sms, stream
             );
             break;
         case 2:
             kbitGroupedGemmProdLaunch<K, 2, 128, scalar_t, ABSMAX_T>(
                 A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
-                K_dim, N, num_experts, max_M, num_sms
+                K_dim, N, num_experts, max_M, num_sms, stream
             );
             break;
         default:
             kbitGroupedGemmProdLaunch<K, 1, 128, scalar_t, ABSMAX_T>(
                 A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
-                K_dim, N, num_experts, max_M, num_sms
+                K_dim, N, num_experts, max_M, num_sms, stream
             );
             break;
         }
@@ -2105,13 +2108,13 @@ __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) kbit_scalar_gemv(
 template <int K, int MV, bool TILED, typename scalar_t, typename ABSMAX_T>
 static void kbitScalarGemvLaunch(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
-    int M, int K_dim, int N
+    int M, int K_dim, int N, cudaStream_t stream
 ) {
     constexpr int BLOCK_SIZE = 64;
     int grid_size = N;
 
     kbit_scalar_gemv<K, MV, TILED, scalar_t, ABSMAX_T>
-        <<<grid_size, BLOCK_SIZE>>>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);
+        <<<grid_size, BLOCK_SIZE, 0, stream>>>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -2119,10 +2122,10 @@ static void kbitScalarGemvLaunch(
 template <int K, typename scalar_t, typename ABSMAX_T>
 void kbitScalarGemv(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
-    int M, int K_dim, int N
+    int M, int K_dim, int N, cudaStream_t stream
 ) {
 #define LAUNCH_SCALAR_GEMV(MV)                                                                                         \
-    kbitScalarGemvLaunch<K, MV, false, scalar_t, ABSMAX_T>(A, B_packed, B_absmax, codebook, C, M, K_dim, N)
+    kbitScalarGemvLaunch<K, MV, false, scalar_t, ABSMAX_T>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream)
 
     if (M <= 1) {
         LAUNCH_SCALAR_GEMV(1);
@@ -2141,10 +2144,10 @@ void kbitScalarGemv(
 template <int K, typename scalar_t, typename ABSMAX_T>
 void kbitScalarGemvTiled(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
-    int M, int K_dim, int N
+    int M, int K_dim, int N, cudaStream_t stream
 ) {
 #define LAUNCH_SCALAR_GEMV_TILED(MV)                                                                                   \
-    kbitScalarGemvLaunch<K, MV, true, scalar_t, ABSMAX_T>(A, B_packed, B_absmax, codebook, C, M, K_dim, N)
+    kbitScalarGemvLaunch<K, MV, true, scalar_t, ABSMAX_T>(A, B_packed, B_absmax, codebook, C, M, K_dim, N, stream)
 
     if (M <= 1) {
         LAUNCH_SCALAR_GEMV_TILED(1);
@@ -2218,7 +2221,7 @@ void testMMA(const half* A, const half* B, float* C) {
 // ---- Template instantiations ----
 
 #define INSTANTIATE_KBIT_QUANT(T, K)                                                                                   \
-    template void quantizeBlockwise_kbit<T, K>(const float*, const T*, unsigned char*, unsigned int*, int);
+    template void quantizeBlockwise_kbit<T, K>(const float*, const T*, unsigned char*, unsigned int*, int, cudaStream_t);
 
 INSTANTIATE_KBIT_QUANT(half, 2)
 INSTANTIATE_KBIT_QUANT(half, 3)
@@ -2317,7 +2320,7 @@ INSTANTIATE_KBIT_DEQUANT_TILED(float, 5, half)
 
 // Repack instantiations: one per K value
 #define INSTANTIATE_KBIT_REPACK(K)                                                                                     \
-    template void repackKbit<K>(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int);
+    template void repackKbit<K>(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t);
 
 INSTANTIATE_KBIT_REPACK(2)
 INSTANTIATE_KBIT_REPACK(3)
@@ -2327,11 +2330,12 @@ INSTANTIATE_KBIT_REPACK(5)
 // Production kernel instantiations — uint8 E4M4 absmax (default)
 #define INSTANTIATE_KBIT_GEMM_PROD_U8(K)                                                                               \
     template void kbitGemmProd<K, half, unsigned char>(                                                                \
-        const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int  \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int, \
+        cudaStream_t                                                                                                   \
     );                                                                                                                 \
     template void kbitGemmProd<K, __nv_bfloat16, unsigned char>(                                                       \
         const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, float*, int*,   \
-        int, int, int, int                                                                                             \
+        int, int, int, int, cudaStream_t                                                                               \
     );
 INSTANTIATE_KBIT_GEMM_PROD_U8(2)
 INSTANTIATE_KBIT_GEMM_PROD_U8(3)
@@ -2340,11 +2344,12 @@ INSTANTIATE_KBIT_GEMM_PROD_U8(5)
 // fp16 absmax
 #define INSTANTIATE_KBIT_GEMM_PROD_FP16(K)                                                                             \
     template void kbitGemmProd<K, half, half>(                                                                         \
-        const half*, const unsigned int*, const half*, const float*, half*, float*, int*, int, int, int, int           \
+        const half*, const unsigned int*, const half*, const float*, half*, float*, int*, int, int, int, int,          \
+        cudaStream_t                                                                                                   \
     );                                                                                                                 \
     template void kbitGemmProd<K, __nv_bfloat16, half>(                                                                \
         const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, float*, int*, int, int,  \
-        int, int                                                                                                       \
+        int, int, cudaStream_t                                                                                         \
     );
 INSTANTIATE_KBIT_GEMM_PROD_FP16(2)
 INSTANTIATE_KBIT_GEMM_PROD_FP16(3)
@@ -2355,11 +2360,11 @@ INSTANTIATE_KBIT_GEMM_PROD_FP16(5)
 #define INSTANTIATE_KBIT_GROUPED_GEMM_PROD_U8(K)                                                                       \
     template void kbitGroupedGemmProd<K, half, unsigned char>(                                                         \
         const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, const int*, int,    \
-        int, int, int                                                                                                  \
+        int, int, int, cudaStream_t                                                                                    \
     );                                                                                                                 \
     template void kbitGroupedGemmProd<K, __nv_bfloat16, unsigned char>(                                                \
         const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, float*, int*,   \
-        const int*, int, int, int, int                                                                                 \
+        const int*, int, int, int, int, cudaStream_t                                                                   \
     );
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD_U8(2)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD_U8(3)
@@ -2369,11 +2374,11 @@ INSTANTIATE_KBIT_GROUPED_GEMM_PROD_U8(5)
 #define INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(K)                                                                     \
     template void kbitGroupedGemmProd<K, half, half>(                                                                  \
         const half*, const unsigned int*, const half*, const float*, half*, float*, int*, const int*, int, int, int,   \
-        int                                                                                                            \
+        int, cudaStream_t                                                                                              \
     );                                                                                                                 \
     template void kbitGroupedGemmProd<K, __nv_bfloat16, half>(                                                         \
         const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, float*, int*,            \
-        const int*, int, int, int, int                                                                                 \
+        const int*, int, int, int, int, cudaStream_t                                                                   \
     );
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(2)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(3)
@@ -2384,10 +2389,11 @@ INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(5)
 // uint8 E4M4 absmax (default)
 #define INSTANTIATE_KBIT_SCALAR_GEMV_U8(K)                                                                             \
     template void kbitScalarGemv<K, half, unsigned char>(                                                              \
-        const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int                     \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int, cudaStream_t       \
     );                                                                                                                 \
     template void kbitScalarGemv<K, __nv_bfloat16, unsigned char>(                                                     \
-        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, int, int, int   \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, int, int, int,  \
+        cudaStream_t                                                                                                   \
     );
 INSTANTIATE_KBIT_SCALAR_GEMV_U8(2)
 INSTANTIATE_KBIT_SCALAR_GEMV_U8(3)
@@ -2396,10 +2402,11 @@ INSTANTIATE_KBIT_SCALAR_GEMV_U8(5)
 // fp16 absmax
 #define INSTANTIATE_KBIT_SCALAR_GEMV_FP16(K)                                                                           \
     template void kbitScalarGemv<K, half, half>(                                                                       \
-        const half*, const unsigned int*, const half*, const float*, half*, int, int, int                              \
+        const half*, const unsigned int*, const half*, const float*, half*, int, int, int, cudaStream_t                \
     );                                                                                                                 \
     template void kbitScalarGemv<K, __nv_bfloat16, half>(                                                              \
-        const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, int, int, int            \
+        const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, int, int, int,           \
+        cudaStream_t                                                                                                   \
     );
 INSTANTIATE_KBIT_SCALAR_GEMV_FP16(2)
 INSTANTIATE_KBIT_SCALAR_GEMV_FP16(3)
@@ -2409,10 +2416,11 @@ INSTANTIATE_KBIT_SCALAR_GEMV_FP16(5)
 // uint8 E4M4 absmax
 #define INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(K)                                                                       \
     template void kbitScalarGemvTiled<K, half, unsigned char>(                                                         \
-        const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int                     \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int, cudaStream_t       \
     );                                                                                                                 \
     template void kbitScalarGemvTiled<K, __nv_bfloat16, unsigned char>(                                                \
-        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, int, int, int   \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, int, int, int,  \
+        cudaStream_t                                                                                                   \
     );
 INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(2)
 INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(3)
@@ -2421,10 +2429,11 @@ INSTANTIATE_KBIT_SCALAR_GEMV_TILED_U8(5)
 // fp16 absmax
 #define INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(K)                                                                     \
     template void kbitScalarGemvTiled<K, half, half>(                                                                  \
-        const half*, const unsigned int*, const half*, const float*, half*, int, int, int                              \
+        const half*, const unsigned int*, const half*, const float*, half*, int, int, int, cudaStream_t                \
     );                                                                                                                 \
     template void kbitScalarGemvTiled<K, __nv_bfloat16, half>(                                                         \
-        const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, int, int, int            \
+        const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, int, int, int,           \
+        cudaStream_t                                                                                                   \
     );
 INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(2)
 INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(3)

@@ -192,7 +192,7 @@ template <typename T, int FUNC> void func(T* A, T* B, T value, long n);
 template <int K, typename scalar_t>
 void kbitScalarGemv(
     const scalar_t* A, const unsigned int* B_packed, const float* B_absmax, const float* codebook, scalar_t* C, int M,
-    int K_dim, int N
+    int K_dim, int N, cudaStream_t stream
 );
 
 #endif

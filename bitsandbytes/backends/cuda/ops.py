@@ -799,6 +799,7 @@ def _(A: torch.Tensor, codebook: torch.Tensor, k: int) -> tuple[torch.Tensor, to
             get_ptr(absmax),
             get_ptr(packed),
             ct.c_int(n),
+            _get_tensor_stream(A),
         )
 
     return packed, absmax
@@ -993,6 +994,7 @@ def _(
             get_ptr(absmax_tiled),
             ct.c_int(K_dim),
             ct.c_int(N),
+            _get_tensor_stream(packed_flat),
         )
 
     return packed_tiled, absmax_tiled
@@ -1036,6 +1038,7 @@ def _kbit_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, k, k_chunks,
             ct.c_int(K_dim),
             ct.c_int(N),
             ct.c_int(k_chunks),
+            _get_tensor_stream(A),
         )
 
 
@@ -1143,6 +1146,7 @@ def _kbit_grouped_gemm_impl(
             ct.c_int(N),
             ct.c_int(num_experts),
             ct.c_int(max_M),
+            _get_tensor_stream(A_concat),
         )
 
 
@@ -1259,6 +1263,7 @@ def _kbit_scalar_gemv_impl(
             ct.c_int(M),
             ct.c_int(K_dim),
             ct.c_int(N),
+            _get_tensor_stream(A),
         )
 
 
@@ -1330,6 +1335,7 @@ def _(
             ct.c_int(M),
             ct.c_int(K_dim),
             ct.c_int(N),
+            _get_tensor_stream(A),
         )
     return out
 
@@ -1366,5 +1372,6 @@ def _(
             ct.c_int(M),
             ct.c_int(K_dim),
             ct.c_int(N),
+            _get_tensor_stream(A),
         )
     return out
