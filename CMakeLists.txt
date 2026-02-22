@@ -229,12 +229,16 @@ if(BUILD_CUDA)
 
     # SM_120a NVFP4 GEMM kernel: requires compute_120a for block-scaled MMA
     # Only include if 120 or 121 is in the target architectures
+    # Check both COMPUTE_CAPABILITY (may have been popped) and _LATEST_CAPABILITY
     set(_HAS_SM120 FALSE)
     foreach(_cap IN LISTS COMPUTE_CAPABILITY)
         if(_cap MATCHES "^12[01]$")
             set(_HAS_SM120 TRUE)
         endif()
     endforeach()
+    if(_LATEST_CAPABILITY MATCHES "^12[01]$")
+        set(_HAS_SM120 TRUE)
+    endif()
     if(_HAS_SM120)
         set(SM120A_FILE csrc/kernels_nvfp4_sm120.cu)
         list(APPEND SRC_FILES ${SM120A_FILE})
