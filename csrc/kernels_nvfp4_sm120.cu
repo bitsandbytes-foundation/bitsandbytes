@@ -170,30 +170,24 @@ __global__ void kGemmNVFP4_simple(
     // Iterate over K dimension in steps of 64
     for (int k_start = 0; k_start < K; k_start += 64) {
         // Load A registers: 4 x uint32 (32 E2M1 values per thread)
-        // Using ALayout: element_idx = t0*128 + t1 + v0*16 + v1*8 + v2*512
-        // where v = v2*16 + v1*8 + v0 (v0=0..7, v1=0..1, v2=0..1)
+        // ALayout: coord = t0*128 + t1 + v0*16 + v1*8 + v2*512
+        // CuTE coord space is column-major in tile: m = coord%16, k = coord/16
+        // Value decomposition: v = v0 + v1*8 + v2*16 (v0=0..7, v1=0..1, v2=0..1)
         uint32_t a_regs[4];
         for (int reg = 0; reg < 4; reg++) {
             uint32_t packed = 0;
             for (int nib = 0; nib < 8; nib++) {
-                // v = reg * 8 + nib (value index 0..31)
-                int v0 = nib;          // 0..7
-                int v1 = (reg / 1) % 2;  // reg 0,1 -> v1=0; wait need to recompute
-                int v2 = reg / 2;        // reg 0,1 -> v2=0; reg 2,3 -> v2=1
-
-                // Actually reg maps to: reg0 = v[0..7], reg1 = v[8..15], etc.
-                // v = reg*8 + nib
                 int v = reg * 8 + nib;
-                v0 = v % 8;
-                v1 = (v / 8) % 2;
-                v2 = v / 16;
+                int v0 = v % 8;
+                int v1 = (v / 8) % 2;
+                int v2 = v / 16;
 
-                int element_idx = t0 * 128 + t1 * 1 + v0 * 16 + v1 * 8 + v2 * 512;
-                int row = element_idx / 64;  // M index within tile
-                int col = element_idx % 64;  // K index within tile
+                int coord = t0 * 128 + t1 + v0 * 16 + v1 * 8 + v2 * 512;
+                int tile_row = coord % 16;   // M index within tile (column-major)
+                int tile_col = coord / 16;   // K index within tile
 
-                int global_m = tile_m + row;
-                int global_k = k_start + col;
+                int global_m = tile_m + tile_row;
+                int global_k = k_start + tile_col;
 
                 uint32_t nibble = 0;
                 if (global_m < M && global_k < K) {
@@ -210,7 +204,8 @@ __global__ void kGemmNVFP4_simple(
         }
 
         // Load B registers: 2 x uint32 (16 E2M1 values per thread)
-        // BLayout: element_idx = t0*64 + t1 + v0*8 + v1*256
+        // BLayout: coord = t0*64 + t1 + v0*8 + v1*256
+        // CuTE coord space is column-major: n = coord%8, k = coord/8
         uint32_t b_regs[2];
         for (int reg = 0; reg < 2; reg++) {
             uint32_t packed = 0;
@@ -219,12 +214,12 @@ __global__ void kGemmNVFP4_simple(
                 int v0 = v % 8;
                 int v1 = v / 8;
 
-                int element_idx = t0 * 64 + t1 * 1 + v0 * 8 + v1 * 256;
-                int row = element_idx / 64;  // N index within tile
-                int col = element_idx % 64;  // K index within tile
+                int coord = t0 * 64 + t1 + v0 * 8 + v1 * 256;
+                int tile_row = coord % 8;    // N index within tile (column-major)
+                int tile_col = coord / 8;    // K index within tile
 
-                int global_n = tile_n + row;
-                int global_k = k_start + col;
+                int global_n = tile_n + tile_row;
+                int global_k = k_start + tile_col;
 
                 uint32_t nibble = 0;
                 if (global_n < N && global_k < K) {
