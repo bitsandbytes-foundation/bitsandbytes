@@ -1,7 +1,7 @@
 """Benchmark tiled vs flat scalar GEMV with pre-allocated output buffers.
 
 Measures kernel-only time by pre-allocating all buffers before the timing loop.
-No allocations inside the measured region — fair comparison between flat and tiled.
+No allocations inside the measured region — fair comparison between flat, tiled, and tiled v2.
 
 Usage:
     python benchmarks/bench_tiled_vs_flat.py
@@ -40,11 +40,20 @@ K_VALUES = [2, 3, 4, 5]
 M_VALUES = [1, 2, 4]
 
 if args.graph:
-    print(f"{'shape':<8} {'K_dim':>5} {'N':>5} {'k':>2} {'M':>2}  {'flat_us':>8} {'±flat':>6} {'tiled_us':>8} {'±tiled':>6} {'diff%':>7}")
-    print("-" * 76)
+    print(
+        f"{'shape':<8} {'K_dim':>5} {'N':>5} {'k':>2} {'M':>2}"
+        f"  {'flat_us':>8} {'±flat':>6}"
+        f" {'tiled_us':>8} {'±tl':>4}"
+        f" {'v2_us':>8} {'±v2':>4}"
+        f" {'tl/fl%':>7} {'v2/fl%':>7}"
+    )
+    print("-" * 100)
 else:
-    print(f"{'shape':<8} {'K_dim':>5} {'N':>5} {'k':>2} {'M':>2}  {'flat_us':>8} {'tiled_us':>8} {'diff%':>7}")
-    print("-" * 60)
+    print(
+        f"{'shape':<8} {'K_dim':>5} {'N':>5} {'k':>2} {'M':>2}"
+        f"  {'flat_us':>8} {'tiled_us':>8} {'v2_us':>8} {'tl/fl%':>7} {'v2/fl%':>7}"
+    )
+    print("-" * 75)
 
 for name, K_dim, N in SHAPES:
     for k in K_VALUES:
@@ -63,16 +72,27 @@ for name, K_dim, N in SHAPES:
             # Pre-allocate output buffers
             out_flat = torch.empty(M, N, dtype=torch.float16, device="cuda")
             out_tiled = torch.empty(M, N, dtype=torch.float16, device="cuda")
+            out_v2 = torch.empty(M, N, dtype=torch.float16, device="cuda")
+
+            # v2 workspace
+            n_tiles = N // 128
+            C_workspace = torch.zeros(M, N, dtype=torch.float32, device="cuda")
+            tile_counters = torch.zeros(n_tiles, dtype=torch.int32, device="cuda")
 
             if args.ncu:
-                # NCU mode: single call each, profiler captures kernel time
                 torch.ops.bitsandbytes.kbit_scalar_gemv.out(
                     A, packed_flat, absmax_flat, codebook, K_dim, N, k, out_flat
                 )
                 torch.ops.bitsandbytes.kbit_scalar_gemv_tiled_(
                     A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, out_tiled
                 )
-                print(f"{name:<8} {K_dim:>5} {N:>5} {k:>2} {M:>2}  {'ncu':>8} {'ncu':>8} {'ncu':>7}")
+                torch.ops.bitsandbytes.kbit_scalar_gemv_v2_(
+                    A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, out_v2, C_workspace, tile_counters
+                )
+                print(
+                    f"{name:<8} {K_dim:>5} {N:>5} {k:>2} {M:>2}"
+                    f"  {'ncu':>8} {'ncu':>8} {'ncu':>8} {'ncu':>7} {'ncu':>7}"
+                )
                 continue
 
             start = torch.cuda.Event(enable_timing=True)
@@ -88,11 +108,16 @@ for name, K_dim, N in SHAPES:
                     A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, out_tiled
                 )
 
+            def call_v2():
+                torch.ops.bitsandbytes.kbit_scalar_gemv_v2_(
+                    A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, out_v2, C_workspace, tile_counters
+                )
+
             if args.graph:
                 import statistics
 
                 # CUDA graph replay — measures kernel-only time
-                for fn in (call_flat, call_tiled):
+                for fn in (call_flat, call_tiled, call_v2):
                     for _ in range(3):
                         fn()
                 torch.cuda.synchronize()
@@ -117,38 +142,44 @@ for name, K_dim, N in SHAPES:
 
                 flat_us, flat_std = bench_graph(call_flat, args.trials, args.iters)
                 tiled_us, tiled_std = bench_graph(call_tiled, args.trials, args.iters)
+                v2_us, v2_std = bench_graph(call_v2, args.trials, args.iters)
             else:
-                # CUDA events timing (includes Python dispatch overhead)
-                for _ in range(args.warmup):
-                    call_flat()
-                torch.cuda.synchronize()
-                start.record()
-                for _ in range(args.iters):
-                    call_flat()
-                end.record()
-                torch.cuda.synchronize()
-                flat_us = start.elapsed_time(end) * 1000 / args.iters
+                def bench_events(fn):
+                    for _ in range(args.warmup):
+                        fn()
+                    torch.cuda.synchronize()
+                    start.record()
+                    for _ in range(args.iters):
+                        fn()
+                    end.record()
+                    torch.cuda.synchronize()
+                    return start.elapsed_time(end) * 1000 / args.iters
 
-                for _ in range(args.warmup):
-                    call_tiled()
-                torch.cuda.synchronize()
-                start.record()
-                for _ in range(args.iters):
-                    call_tiled()
-                end.record()
-                torch.cuda.synchronize()
-                tiled_us = start.elapsed_time(end) * 1000 / args.iters
+                flat_us = bench_events(call_flat)
+                tiled_us = bench_events(call_tiled)
+                v2_us = bench_events(call_v2)
 
-            diff_pct = (tiled_us - flat_us) / flat_us * 100
+            tl_pct = (tiled_us - flat_us) / flat_us * 100
+            v2_pct = (v2_us - flat_us) / flat_us * 100
             if args.graph:
                 print(
                     f"{name:<8} {K_dim:>5} {N:>5} {k:>2} {M:>2}"
-                    f"  {flat_us:>8.1f} {flat_std:>5.1f}σ {tiled_us:>8.1f} {tiled_std:>5.1f}σ {diff_pct:>+7.1f}%"
+                    f"  {flat_us:>8.1f} {flat_std:>5.1f}σ"
+                    f" {tiled_us:>8.1f} {tiled_std:>3.1f}σ"
+                    f" {v2_us:>8.1f} {v2_std:>3.1f}σ"
+                    f" {tl_pct:>+7.1f}% {v2_pct:>+7.1f}%"
                 )
             else:
-                print(f"{name:<8} {K_dim:>5} {N:>5} {k:>2} {M:>2}  {flat_us:>8.1f} {tiled_us:>8.1f} {diff_pct:>+7.1f}%")
+                print(
+                    f"{name:<8} {K_dim:>5} {N:>5} {k:>2} {M:>2}"
+                    f"  {flat_us:>8.1f} {tiled_us:>8.1f} {v2_us:>8.1f} {tl_pct:>+7.1f}% {v2_pct:>+7.1f}%"
+                )
 
         # Correctness check (once per shape/k)
         assert torch.equal(out_flat, out_tiled) or torch.allclose(out_flat, out_tiled, rtol=0.05, atol=0.1), (
-            f"MISMATCH {name} k={k}: max diff = {(out_flat - out_tiled).abs().max().item()}"
+            f"MISMATCH flat vs tiled {name} k={k}: max diff = {(out_flat - out_tiled).abs().max().item()}"
+        )
+        # v2 uses split-K so small FP diffs are expected
+        assert torch.allclose(out_flat.float(), out_v2.float(), rtol=0.1, atol=1.0), (
+            f"MISMATCH flat vs v2 {name} k={k}: max diff = {(out_flat.float() - out_v2.float()).abs().max().item()}"
         )

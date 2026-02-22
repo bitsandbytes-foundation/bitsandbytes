@@ -1011,6 +1011,23 @@ void repackKbit(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+// Datacenter GPU detection: Hopper (sm_90) and Blackwell datacenter (sm_100).
+// NOTE: sm_120 (RTX 5090, Blackwell consumer) lacks TMA/wgmma — must NOT match.
+#if defined(__CUDA_ARCH__)
+#define BNB_DATACENTER_GPU (__CUDA_ARCH__ == 900 || __CUDA_ARCH__ == 1000)
+#else
+#define BNB_DATACENTER_GPU 0
+#endif
+
+// L2 prefetch hint (datacenter GPUs only — consumer GPUs ignore it)
+__device__ __forceinline__ void prefetch_l2(const void* ptr) {
+#if BNB_DATACENTER_GPU
+    asm volatile("prefetch.global.L2 [%0];" ::"l"(ptr));
+#else
+    (void)ptr;
+#endif
+}
+
 // cp.async helpers (sm_80+) — used by production MMA and grouped MMA kernels
 __device__ __forceinline__ void cp_async_cg_16(void* __restrict__ smem, const void* __restrict__ gmem) {
     uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(smem));
@@ -1299,6 +1316,12 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
             if (kt + 1 < kt_end) {
                 fetch_tile((kt + 1 - kt_start) % 2, kt + 1);
                 cp_async_fence();
+                // L2 prefetch for tile kt+2 (warms L2 before next fetch_tile issues cp.async)
+                if (kt + 2 < kt_end) {
+                    const int pf_tile = (kt + 2) * n_tiles + n_tile;
+                    prefetch_l2(B_packed + pf_tile * B_STAGE_WORDS);
+                    prefetch_l2(B_absmax + pf_tile * ABS_STAGE_ELEMS);
+                }
                 cp_async_wait<1>();
             } else {
                 cp_async_wait<0>();
@@ -1736,6 +1759,12 @@ __global__ void kbit_grouped_gemm_prod(
             if (kt + 1 < kt_end) {
                 fetch_tile((kt - kt_start + 1) % 2, kt + 1);
                 cp_async_fence();
+                // L2 prefetch for tile kt+2
+                if (kt + 2 < kt_end) {
+                    const int pf_tile = (kt + 2) * n_tiles + n_tile;
+                    prefetch_l2(B_packed + pf_tile * B_STAGE_WORDS);
+                    prefetch_l2(B_absmax + pf_tile * ABS_STAGE_ELEMS);
+                }
                 cp_async_wait<1>();
             } else {
                 cp_async_wait<0>();
@@ -2009,6 +2038,21 @@ __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) kbit_scalar_gemv(
             abs_idx = tile_base * ABS_PER_TILE + col_in_tile * KB_PER_TILE + kb;
         }
 
+        // L2 prefetch for next iteration's B data
+        {
+            const int next_block_idx = block_idx + BLOCK_SIZE;
+            if (next_block_idx < num_k_blocks) {
+                if constexpr (!TILED) {
+                    prefetch_l2(&B_col[next_block_idx * K_BITS]);
+                } else {
+                    const int nk_tile = next_block_idx / KB_PER_TILE;
+                    const int nkb = next_block_idx % KB_PER_TILE;
+                    const int ntb = nk_tile * n_tiles + n_tile;
+                    prefetch_l2(&B_packed[ntb * WORDS_PER_TILE + (col_in_tile * KB_PER_TILE + nkb) * K_BITS]);
+                }
+            }
+        }
+
         // Load k bit-plane words (guarded; invalid threads get 0)
         // Vector loads for power-of-2 K_BITS, scalar for others.
         const unsigned int* B_src = TILED ? B_packed : B_col;
@@ -2092,12 +2136,15 @@ __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) kbit_scalar_gemv(
     }
     __syncthreads();
 
-    // Thread 0 sums both warps and writes output
+    // Thread 0 sums all warps and writes output
     if (threadIdx.x == 0) {
 #pragma unroll
         for (int m = 0; m < M_VAL; m++) {
             if (m < M) {
-                float sum = s_partial[0 * M_MAX + m] + s_partial[1 * M_MAX + m];
+                float sum = 0.0f;
+#pragma unroll
+                for (int w = 0; w < NUM_WARPS; w++)
+                    sum += s_partial[w * M_MAX + m];
                 C[m * N + col] = ScalarOps<scalar_t>::from_float(sum);
             }
         }
