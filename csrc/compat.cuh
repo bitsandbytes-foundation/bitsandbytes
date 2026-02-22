@@ -26,6 +26,7 @@
 #if BNB_HIP
 
 #include <hip/hip_fp16.h>
+#include <hip/hip_bfloat16.h>
 #include <hip/hip_math_constants.h>
 #include <hip/hip_runtime.h>
 #include <hipblas/hipblas.h>
@@ -84,6 +85,17 @@ using bnb_error_t = cudaError_t;
 
 // Keep backward compat for existing code during migration
 #define CUDA_CHECK_RETURN(value) BNB_CHECK_RETURN(value)
+
+// ============================================================================
+// Warp synchronization
+//
+// HIP warps are always in lockstep (no independent thread scheduling),
+// so __syncwarp() is a no-op. CUDA needs it for warp convergence.
+// ============================================================================
+
+#if BNB_HIP
+#define __syncwarp() do {} while(0)
+#endif
 
 // ============================================================================
 // BFloat16 type alias
