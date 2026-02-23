@@ -512,5 +512,116 @@ class TestNVFP4QuantStateSerialization:
         assert state.dtype == state2.dtype
 
 
+class TestScaleReorder:
+    """Test scale factor reordering for CUTLASS block-scaled GEMM."""
+
+    def test_scale_to_blocked_round_trip(self):
+        """Flat → swizzled → flat round-trip preserves scale values."""
+        lib = get_lib()
+        H, W = 128, 4  # Minimum block size
+        scales = torch.randint(0, 255, (H * W,), dtype=torch.uint8, device="cuda")
+
+        # to_blocked
+        n_row_blocks = (H + 127) // 128
+        n_col_blocks = (W + 3) // 4
+        out_size = n_row_blocks * n_col_blocks * 128 * 4
+        blocked = torch.empty(out_size, dtype=torch.uint8, device="cuda")
+        stream = torch.cuda.current_stream()
+        lib.cscale_to_blocked(
+            ctypes.c_void_p(scales.data_ptr()),
+            ctypes.c_void_p(blocked.data_ptr()),
+            ctypes.c_int(H),
+            ctypes.c_int(W),
+            ctypes.c_void_p(stream.cuda_stream),
+        )
+
+        # from_blocked (inverse)
+        recovered = torch.empty(H * W, dtype=torch.uint8, device="cuda")
+        lib.cscale_from_blocked(
+            ctypes.c_void_p(blocked.data_ptr()),
+            ctypes.c_void_p(recovered.data_ptr()),
+            ctypes.c_int(H),
+            ctypes.c_int(W),
+            ctypes.c_void_p(stream.cuda_stream),
+        )
+        torch.cuda.synchronize()
+
+        assert torch.equal(scales, recovered), "Round-trip failed: scales differ"
+
+    def test_scale_to_blocked_large(self):
+        """Test scale reordering with larger shapes matching real GEMM usage."""
+        lib = get_lib()
+        # Scales for M=256, K=4096 → H=256, W=256 (K/16)
+        H, W = 256, 256
+        scales = torch.randint(0, 255, (H * W,), dtype=torch.uint8, device="cuda")
+
+        n_row_blocks = (H + 127) // 128
+        n_col_blocks = (W + 3) // 4
+        out_size = n_row_blocks * n_col_blocks * 128 * 4
+        blocked = torch.empty(out_size, dtype=torch.uint8, device="cuda")
+        stream = torch.cuda.current_stream()
+
+        lib.cscale_to_blocked(
+            ctypes.c_void_p(scales.data_ptr()),
+            ctypes.c_void_p(blocked.data_ptr()),
+            ctypes.c_int(H),
+            ctypes.c_int(W),
+            ctypes.c_void_p(stream.cuda_stream),
+        )
+
+        recovered = torch.empty(H * W, dtype=torch.uint8, device="cuda")
+        lib.cscale_from_blocked(
+            ctypes.c_void_p(blocked.data_ptr()),
+            ctypes.c_void_p(recovered.data_ptr()),
+            ctypes.c_int(H),
+            ctypes.c_int(W),
+            ctypes.c_void_p(stream.cuda_stream),
+        )
+        torch.cuda.synchronize()
+
+        assert torch.equal(scales, recovered), "Round-trip failed for large shape"
+
+
+class TestGemmNVFP4LargeBatch:
+    """Test CUTLASS GEMM on large-batch shapes."""
+
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            (512, 512, 512),
+            (1024, 1024, 1024),
+            (4096, 4096, 4096),
+        ],
+        ids=["512x512x512", "1024x1024x1024", "4096x4096x4096"],
+    )
+    def test_gemm_large_batch(self, shape):
+        """Test CUTLASS GEMM on large shapes via the Python API."""
+        from bitsandbytes.functional import dequantize_nvfp4, gemm_nvfp4, quantize_nvfp4
+
+        M, N, K = shape
+        torch.manual_seed(42)
+
+        A = torch.randn(M, K, dtype=torch.bfloat16, device="cuda")
+        B = torch.randn(N, K, dtype=torch.bfloat16, device="cuda")
+
+        A_packed, A_state = quantize_nvfp4(A)
+        B_packed, B_state = quantize_nvfp4(B)
+
+        D = gemm_nvfp4(A_packed, A_state, B_packed, B_state)
+
+        # Reference: dequantize → matmul
+        A_deq = dequantize_nvfp4(A_packed, A_state, out_dtype=torch.float32)
+        B_deq = dequantize_nvfp4(B_packed, B_state, out_dtype=torch.float32)
+        D_ref = A_deq @ B_deq.T
+
+        assert D.shape == (M, N), f"Wrong shape: {D.shape}"
+
+        ref_mag = D_ref.abs().mean().item()
+        rel_err = (D - D_ref).abs().mean().item() / ref_mag if ref_mag > 0 else 0
+        print(f"Large batch ({M}x{N}x{K}): rel_err={rel_err:.6f}, ref_mag={ref_mag:.4f}")
+        # FP4 quantization + accumulation error grows with K
+        assert rel_err < 0.2, f"Relative error {rel_err:.4f} too large"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
