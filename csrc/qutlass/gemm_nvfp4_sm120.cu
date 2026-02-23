@@ -98,9 +98,6 @@ static int runGemm(
 
     Gemm gemm;
 
-    size_t workspace_size = Gemm::get_workspace_size(arguments);
-    cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
-
     cutlass::Status status;
 
     status = gemm.can_implement(arguments);
@@ -109,13 +106,13 @@ static int runGemm(
         return -1;
     }
 
-    status = gemm.initialize(arguments, workspace.get(), stream);
+    status = gemm.initialize(arguments, nullptr, stream);
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "CUTLASS GEMM initialize failed: %d\n", (int)status);
         return -2;
     }
 
-    status = gemm.run(arguments, workspace.get(), stream);
+    status = gemm.run(arguments, nullptr, stream);
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "CUTLASS GEMM run failed: %d\n", (int)status);
         return -3;
