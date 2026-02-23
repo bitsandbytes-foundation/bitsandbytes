@@ -334,6 +334,143 @@ class PipelineCheckpointer:
         return [CheckpointedStage(s, cpu_offload=cpu_offload) for s in stage_modules]
 
 
+class DistributedPipelineEngine:
+    """Distributed 1F1B pipeline engine using NCCL.
+
+    Each process runs one pipeline stage. Activations are transferred
+    between stages via torch.distributed.send/recv. Designed for use
+    with torchrun or torch.distributed.launch.
+
+    Each rank runs one stage. rank 0 = first stage, rank (world_size-1) = last.
+
+    Args:
+        stage_module: The nn.Module for this process's stage.
+        rank: This process's rank (stage index).
+        world_size: Total number of stages/processes.
+        loss_fn: Loss function (only used by the last stage).
+        num_micro_batches: Number of micro-batches per step.
+        hidden_shape: Shape of the hidden state tensor (without batch dim).
+            Used to pre-allocate receive buffers.
+        dtype: Data type for tensors (default: float32).
+    """
+
+    def __init__(
+        self,
+        stage_module: nn.Module,
+        rank: int,
+        world_size: int,
+        loss_fn=None,
+        num_micro_batches: int = 4,
+        hidden_shape: tuple = None,
+        dtype: torch.dtype = torch.float32,
+    ):
+        self.stage_module = stage_module
+        self.rank = rank
+        self.world_size = world_size
+        self.loss_fn = loss_fn
+        self.num_micro_batches = num_micro_batches
+        self.hidden_shape = hidden_shape
+        self.dtype = dtype
+        self.device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+
+        schedule = generate_1f1b_schedule(world_size, num_micro_batches)
+        self.my_schedule = schedule[rank]
+
+    def step(self, micro_batch_inputs=None, micro_batch_labels=None):
+        """Run one distributed training step.
+
+        Args:
+            micro_batch_inputs: List of M input tensors (only used by rank 0).
+            micro_batch_labels: List of M label tensors (only used by last rank).
+
+        Returns:
+            dict with loss info (only meaningful on last rank).
+        """
+        import torch.distributed as dist
+
+        M = self.num_micro_batches
+        s = self.rank
+        S = self.world_size
+
+        fwd_inputs = [None] * M
+        fwd_outputs = [None] * M
+        losses = [None] * M
+        grad_from_next = [None] * M
+
+        # Determine if we need CPU transfers (gloo doesn't support CUDA tensors)
+        backend = dist.get_backend()
+        use_cpu_comm = backend != "nccl"
+
+        def _send(tensor, dst):
+            if use_cpu_comm:
+                dist.send(tensor.cpu(), dst=dst)
+            else:
+                dist.send(tensor, dst=dst)
+
+        def _recv(shape, src, device, dtype):
+            if use_cpu_comm:
+                buf = torch.empty(*shape, dtype=dtype)
+                dist.recv(buf, src=src)
+                return buf.to(device)
+            else:
+                buf = torch.empty(*shape, device=device, dtype=dtype)
+                dist.recv(buf, src=src)
+                return buf
+
+        for op, m in self.my_schedule:
+            if op == "F":
+                # Get input
+                if s == 0:
+                    inp = micro_batch_inputs[m].to(self.device)
+                else:
+                    # Receive activation from previous stage
+                    inp = _recv(self.hidden_shape, src=s - 1,
+                                device=self.device, dtype=self.dtype)
+
+                inp = inp.requires_grad_(True)
+                fwd_inputs[m] = inp
+
+                # Forward
+                output = self.stage_module(inp)
+                fwd_outputs[m] = output
+
+                if s < S - 1:
+                    # Send activation to next stage
+                    _send(output.detach(), dst=s + 1)
+
+                # Last stage: compute loss
+                if s == S - 1 and self.loss_fn is not None and micro_batch_labels is not None:
+                    losses[m] = self.loss_fn(output, micro_batch_labels[m].to(self.device))
+
+            elif op == "B":
+                output = fwd_outputs[m]
+                inp = fwd_inputs[m]
+
+                if s == S - 1:
+                    # Last stage: backward from loss
+                    if losses[m] is not None:
+                        scaled_loss = losses[m] / M
+                        scaled_loss.backward(retain_graph=False)
+                else:
+                    # Receive gradient from next stage
+                    grad = _recv(output.shape, src=s + 1,
+                                 device=self.device, dtype=output.dtype)
+                    output.backward(grad, retain_graph=False)
+
+                if s > 0 and inp.grad is not None:
+                    # Send gradient to previous stage
+                    _send(inp.grad.detach(), dst=s - 1)
+
+        # Collect losses on last rank
+        valid_losses = [l.item() for l in losses if l is not None]
+        avg_loss = sum(valid_losses) / len(valid_losses) if valid_losses else 0.0
+
+        return {
+            "loss": avg_loss,
+            "losses": valid_losses,
+        }
+
+
 class SequentialStage(nn.Module):
     """A pipeline stage that sequentially runs a list of layers.
 
