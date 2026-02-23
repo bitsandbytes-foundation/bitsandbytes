@@ -903,7 +903,30 @@ def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tens
     return packed, block_scales, ts_out
 
 
-# NVFP4 GEMM
+# NVFP4 GEMM (CUTLASS-based)
+#
+# Uses the CUTLASS block-scaled GEMM for SM_120. Scale factors must be
+# reordered into CUTLASS's swizzled "to_blocked" layout before calling
+# the kernel. Tensor scales are folded into the CUTLASS epilogue alpha.
+# Output is BF16 from CUTLASS, converted to FP32 for API compatibility.
+
+
+def _scale_to_blocked(scales_flat: torch.Tensor, H: int, W: int, stream: int) -> torch.Tensor:
+    """Reorder flat row-major scales to CUTLASS block-scaled layout."""
+    n_row_blocks = (H + 127) // 128
+    n_col_blocks = (W + 3) // 4
+    out_size = n_row_blocks * n_col_blocks * 128 * 4
+    out = torch.empty(out_size, dtype=torch.uint8, device=scales_flat.device)
+    lib.cscale_to_blocked(
+        get_ptr(scales_flat),
+        get_ptr(out),
+        ct.c_int(H),
+        ct.c_int(W),
+        stream,
+    )
+    return out
+
+
 @register_kernel("bitsandbytes::gemm_nvfp4", "cuda")
 def _(
     A_packed: torch.Tensor,
@@ -916,21 +939,34 @@ def _(
     N: int,
     K: int,
 ) -> torch.Tensor:
-    D_out = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
-
     with _cuda_device_of(A_packed):
-        lib.cgemm_nvfp4(
+        stream = _get_tensor_stream(A_packed)
+
+        # Reorder scales to CUTLASS block-scaled layout
+        # A_scales: flat (M * K/16,) → 2D (M, K/16) → swizzled
+        # B_scales: flat (N * K/16,) → 2D (N, K/16) → swizzled
+        scale_w = K // 16  # number of scale columns (one per group of 16 elements)
+        A_sf_blocked = _scale_to_blocked(A_scales, M, scale_w, stream)
+        B_sf_blocked = _scale_to_blocked(B_scales, N, scale_w, stream)
+
+        # Alpha = tensor_scale_A * tensor_scale_B, passed to CUTLASS epilogue
+        alpha = torch.tensor([A_tensor_scale * B_tensor_scale], dtype=torch.float32, device=A_packed.device)
+
+        # Output is BF16 from CUTLASS
+        D_out = torch.empty(M, N, dtype=torch.bfloat16, device=A_packed.device)
+
+        lib.cgemm_nvfp4_cutlass(
             get_ptr(A_packed),
             get_ptr(B_packed),
-            get_ptr(A_scales),
-            get_ptr(B_scales),
+            get_ptr(A_sf_blocked),
+            get_ptr(B_sf_blocked),
             get_ptr(D_out),
             ct.c_int(M),
             ct.c_int(N),
             ct.c_int(K),
-            _get_tensor_stream(A_packed),
+            get_ptr(alpha),
+            stream,
         )
 
-    # Apply tensor scales (the GEMM kernel operates on raw quantized values)
-    D_out.mul_(A_tensor_scale * B_tensor_scale)
-    return D_out
+    # Convert to FP32 for API compatibility
+    return D_out.float()
