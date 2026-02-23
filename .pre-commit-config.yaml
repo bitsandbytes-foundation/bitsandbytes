@@ -1,13 +1,13 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.3
+    rev: 6ce4b4fc349b8881cbce40207dac3bf78824a88e  # frozen: v0.14.11
     hooks:
-      - id: ruff
+      - id: ruff-check
         args:
           - --fix
       - id: ruff-format
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       - id: check-merge-conflict
       - id: check-yaml
@@ -19,11 +19,11 @@ repos:
           - --fix=lf
         exclude: '\.bat$'
   - repo: https://github.com/crate-ci/typos
-    rev: v1.26.0
+    rev: bb4666ad77b539a6b4ce4eda7ebb6de553704021  # frozen: v1.42.0
     hooks:
       - id: typos
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v20.1.6
+    rev: 75ca4ad908dc4a99f57921f29b7e6c1521e10b26  # frozen: v21.1.8
     hooks:
     - id: clang-format
       types_or: [c++, c, cuda]

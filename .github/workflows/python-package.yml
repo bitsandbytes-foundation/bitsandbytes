@@ -42,17 +42,17 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0, to use cl
       - name: Build C++
         run: bash .github/scripts/build-cpu.sh
         env:
           build_os: ${{ matrix.os }}
           build_arch: ${{ matrix.arch }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: shared_library_${{ matrix.os }}_${{ matrix.arch }}
           path: output/*
@@ -77,9 +77,9 @@ jobs:
           ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2 # v0.2.29
+      - uses: Jimver/cuda-toolkit@b6fc3a9f3f15256d9d94ffe1254f9c5a2565cde6 # v0.2.30
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:
@@ -92,7 +92,7 @@ jobs:
           log-file-suffix: ${{matrix.os}}-${{matrix.cuda_version}}.txt
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0, to use cl
       - name: Build C++
         run: bash .github/scripts/build-cuda.sh
         env:
@@ -100,7 +100,7 @@ jobs:
           build_arch: ${{ matrix.arch }}
           cuda_version: ${{ matrix.cuda_version }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
           path: output/*
@@ -112,7 +112,7 @@ jobs:
         os: [ubuntu-22.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build C++ (Linux)
         if: runner.os == 'Linux'
         run: bash .github/scripts/build-xpu.sh
@@ -125,7 +125,7 @@ jobs:
         env:
           build_os: ${{ matrix.os }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: shared_library_xpu_${{ matrix.os }}_x86_64
           path: output/*
@@ -139,7 +139,10 @@ jobs:
         rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1", "7.2"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b
+        with:
+          python-version: '3.14'
       - name: Clean up disk space
         run: |
           echo "Disk space before cleanup:"
@@ -163,7 +166,7 @@ jobs:
           build_arch: ${{ matrix.arch }}
           rocm_version: ${{ matrix.rocm_version }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}
           path: output/*
@@ -196,9 +199,9 @@ jobs:
         python-version: ["3.10"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           merge-multiple: true
           pattern: "shared_library*_${{ matrix.os }}_${{ matrix.arch }}*"
@@ -209,20 +212,19 @@ jobs:
           ls -lR output/
           cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-      - run: pip install build wheel
-      - run: python -m build .
+          enable-cache: 'true'
+      - run: uv build
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |
           PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ matrix.arch }}")
           echo "PLATFORM_TAG=$PLATFORM_TAG"
-          wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
+          uvx wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
           path: dist/bitsandbytes-*.whl
@@ -238,7 +240,7 @@ jobs:
       - build-wheels
     steps:
       - name: Download and rename artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: tmp/
           pattern: "bdist_wheel_*"
@@ -279,7 +281,7 @@ jobs:
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: repo
 
@@ -348,7 +350,7 @@ jobs:
           cat body.md
 
       - name: Create new pre-release and upload artifacts
-        uses: softprops/action-gh-release@v2.2.1
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           files: wheels/*.whl
           prerelease: true
@@ -372,18 +374,14 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Download wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
           path: wheels/
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install auditwheel
-      - run: python ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
+      - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+      - run: uv run --no-sync --with=auditwheel ./.github/scripts/auditwheel_show.py wheels/* | tee $GITHUB_STEP_SUMMARY
 
   publish-wheels:
     name: Publish wheels to PyPI
@@ -399,13 +397,13 @@ jobs:
       id-token: write
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: dist/
           pattern: "bdist_wheel_*"
           merge-multiple: true
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
         with:
           print-hash: true
