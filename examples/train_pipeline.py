@@ -144,8 +144,9 @@ def main():
         print(f"Steps: {args.steps}")
         print()
 
-    # Load model — each rank loads the full HF model temporarily to extract
-    # its layer weights. We immediately delete the original after quantization.
+    # Load model on CPU, then stream weights to GPU layer by layer.
+    # This avoids the full model ever being on GPU — peak GPU memory is
+    # just ~1 fp16 layer at a time plus the growing quantized data.
     from transformers import AutoModelForCausalLM, AutoConfig
 
     config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
@@ -158,20 +159,21 @@ def main():
     print(f"  GPU {rank}: layers {layer_start}-{layer_end-1} ({role} stage)")
 
     if rank == 0:
-        print(f"\nLoading and quantizing (per-rank)...")
+        print(f"\nLoading HF model on CPU, streaming to GPU...")
     torch.cuda.reset_peak_memory_stats()
 
+    # Load on CPU — no GPU memory used yet
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
         dtype=torch.float16,
-        device_map={"": device},
+        device_map="cpu",
         trust_remote_code=True,
     )
 
-    mem_after_load = torch.cuda.memory_allocated() / 1024 / 1024
-    print(f"  GPU {rank}: {mem_after_load:.0f} MB after HF model load")
+    mem_before = torch.cuda.memory_allocated() / 1024 / 1024
+    print(f"  GPU {rank}: {mem_before:.0f} MB after HF model load (model on CPU)")
 
-    # Create KbitLoraModel with ONLY this rank's layers
+    # Create KbitLoraModel: streams weights CPU->GPU one layer at a time
     kbit_model = KbitLoraModel(
         model,
         lora_r=args.lora_r,
@@ -181,15 +183,17 @@ def main():
         layer_range=(layer_start, layer_end),
         include_embed=is_first,
         include_lm_head=is_last,
+        target_device=device,
     )
 
-    # Delete the original HF model to free memory
+    # Delete the original HF model to free CPU memory
     del model
-    torch.cuda.empty_cache()
 
     mem_after_quant = torch.cuda.memory_allocated() / 1024 / 1024
-    print(f"  GPU {rank}: {mem_after_quant:.0f} MB after quantize + cleanup "
-          f"({kbit_model._num_loaded_layers} layers, "
+    peak_during_quant = torch.cuda.max_memory_allocated() / 1024 / 1024
+    print(f"  GPU {rank}: {mem_after_quant:.0f} MB after quantize "
+          f"(peak during load: {peak_during_quant:.0f} MB, "
+          f"{kbit_model._num_loaded_layers} layers, "
           f"embed={'yes' if is_first else 'no'}, "
           f"lm_head={'yes' if is_last else 'no'})")
 

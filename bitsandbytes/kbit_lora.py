@@ -56,6 +56,10 @@ class KbitLoraModel(nn.Module):
             Set False for non-first pipeline stages.
         include_lm_head: Whether to quantize and keep the LM head. Default True.
             Set False for non-last pipeline stages.
+        target_device: Device for quantized weights and LoRA params. If None,
+            uses the model's device. Set this when loading the HF model on
+            CPU to stream weights to GPU one layer at a time (minimizes
+            peak GPU memory). Example: torch.device("cuda:0").
     """
 
     def __init__(
@@ -73,6 +77,7 @@ class KbitLoraModel(nn.Module):
         layer_range: Optional[tuple[int, int]] = None,
         include_embed: bool = True,
         include_lm_head: bool = True,
+        target_device: Optional[torch.device] = None,
     ):
         super().__init__()
 
@@ -123,10 +128,20 @@ class KbitLoraModel(nn.Module):
             self._layer_start, self._layer_end = 0, total_layers
         self._num_loaded_layers = self._layer_end - self._layer_start
 
+        # Determine target device for quantized weights.
+        # When target_device is explicitly set (streaming mode), we free each
+        # layer from the source model after quantization to save memory.
+        self._streaming = target_device is not None
+        if target_device is not None:
+            self._target_device = target_device
+        else:
+            self._target_device = next(model.parameters()).device
+
         # Keep reference to original model for embeddings
         self.model = model
         if include_embed:
-            self.embed_tokens = model.model.embed_tokens
+            # Move embedding to target device (may be CPU->GPU transfer)
+            self.embed_tokens = model.model.embed_tokens.to(self._target_device)
         else:
             self.embed_tokens = None
         self.lm_head_tied = hasattr(model, "lm_head") and (
@@ -140,7 +155,7 @@ class KbitLoraModel(nn.Module):
 
         self._quantize_and_create_lora(model)
 
-        # Freeze all base model parameters
+        # Freeze all base model parameters (any that remain)
         for p in model.parameters():
             p.requires_grad_(False)
 
@@ -151,19 +166,27 @@ class KbitLoraModel(nn.Module):
             p.requires_grad_(True)
 
     def _quantize_weight(self, weight: torch.Tensor, name: str, k: int | None = None):
-        """Quantize a weight matrix and store packed data."""
+        """Quantize a weight matrix and store packed data.
+
+        The weight is moved to _target_device for quantization (CUDA kernel),
+        then the original weight reference is no longer needed.
+        """
         if k is None:
             k = self.k
+        # Move to target device for quantization (CPU -> GPU transfer if needed)
+        weight = weight.to(self._target_device)
         N, K = weight.shape
         N_padded = ((N + 127) // 128) * 128
         if N_padded != N:
             w_padded = torch.nn.functional.pad(weight.float(), (0, 0, 0, N_padded - N))
         else:
             w_padded = weight.float()
+        del weight  # Free the fp16 copy on GPU
 
         packed, absmax, codebook = F.quantize_kbit(
             w_padded.reshape(-1), k=k, absmax_format="fp32",
         )
+        del w_padded  # Free the fp32 padded copy
 
         # Store as non-trainable buffers
         safe_name = name.replace(".", "_")
@@ -173,9 +196,10 @@ class KbitLoraModel(nn.Module):
 
         return packed, absmax, codebook, N_padded, N, K
 
-    def _create_lora(self, name: str, N: int, K: int, device: torch.device):
-        """Create LoRA A and B parameters for a weight matrix."""
+    def _create_lora(self, name: str, N: int, K: int):
+        """Create LoRA A and B parameters for a weight matrix on _target_device."""
         safe_name = name.replace(".", "_")
+        device = self._target_device
         # A: [r, K] initialized with Kaiming uniform
         A = nn.Parameter(torch.empty(self.lora_r, K, dtype=self.compute_dtype, device=device))
         nn.init.kaiming_uniform_(A, a=math.sqrt(5))
@@ -190,8 +214,13 @@ class KbitLoraModel(nn.Module):
 
         Only processes layers in [_layer_start, _layer_end) and optionally
         skips embedding and LM head for pipeline parallelism.
+
+        Streams weights one layer at a time: each layer's weights are moved
+        from the model's device (often CPU) to _target_device (GPU), quantized,
+        then the original layer is deleted. This keeps peak GPU memory at
+        ~1 layer of fp16 weights plus the growing quantized data.
         """
-        device = next(model.parameters()).device
+        device = self._target_device
 
         # Process only the decoder layers in our range
         layers = model.model.layers
@@ -207,12 +236,12 @@ class KbitLoraModel(nn.Module):
 
             # Attention projections (use k_attention)
             for proj_name in ["q_proj", "k_proj", "v_proj", "o_proj"]:
-                weight = getattr(attn, proj_name).weight.data.to(device)
+                weight = getattr(attn, proj_name).weight.data
                 name = f"{prefix}_attn_{proj_name}"
                 packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
                     weight, name, k=self.k_attention,
                 )
-                A, B = self._create_lora(name, N, K, device)
+                A, B = self._create_lora(name, N, K)
                 layer_info[proj_name] = {
                     "packed": packed, "absmax": absmax, "codebook": codebook,
                     "N_padded": N_padded, "N": N, "K": K, "A": A, "B": B,
@@ -221,24 +250,24 @@ class KbitLoraModel(nn.Module):
 
             # MLP projections (use k_mlp)
             for proj_name in ["gate_proj", "up_proj", "down_proj"]:
-                weight = getattr(mlp, proj_name).weight.data.to(device)
+                weight = getattr(mlp, proj_name).weight.data
                 name = f"{prefix}_mlp_{proj_name}"
                 packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
                     weight, name, k=self.k_mlp,
                 )
-                A, B = self._create_lora(name, N, K, device)
+                A, B = self._create_lora(name, N, K)
                 layer_info[proj_name] = {
                     "packed": packed, "absmax": absmax, "codebook": codebook,
                     "N_padded": N_padded, "N": N, "K": K, "A": A, "B": B,
                     "k": self.k_mlp,
                 }
 
-            # Norm weights (trainable, not quantized)
+            # Norm weights (trainable, not quantized) — move to target device
             for norm_name in ["input_layernorm", "post_attention_layernorm"]:
                 norm = getattr(layer, norm_name)
                 safe = f"{prefix}_{norm_name}_weight"
                 self._norm_weights[safe] = nn.Parameter(
-                    norm.weight.data.to(self.compute_dtype).clone()
+                    norm.weight.data.to(device=device, dtype=self.compute_dtype).clone()
                 )
                 layer_info[norm_name] = self._norm_weights[safe]
 
@@ -248,23 +277,31 @@ class KbitLoraModel(nn.Module):
                     norm = getattr(attn, norm_name)
                     safe = f"{prefix}_attn_{norm_name}_weight"
                     self._norm_weights[safe] = nn.Parameter(
-                        norm.weight.data.to(self.compute_dtype).clone()
+                        norm.weight.data.to(device=device, dtype=self.compute_dtype).clone()
                     )
                     layer_info[norm_name] = self._norm_weights[safe]
 
             self._layer_data.append(layer_info)
 
+            # In streaming mode, free each layer from the source model
+            # after quantization to release memory (typically CPU RAM).
+            if self._streaming:
+                layers[i] = nn.Module()
+                del layer
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+
         # Final norm (only needed by last stage or full model)
         if self.include_lm_head:
             final_norm = model.model.norm
             self._norm_weights["final_norm_weight"] = nn.Parameter(
-                final_norm.weight.data.to(self.compute_dtype).clone()
+                final_norm.weight.data.to(device=device, dtype=self.compute_dtype).clone()
             )
 
         # LM head (only needed by last stage or full model)
         self._lm_head_info = None
         if self.include_lm_head:
-            lm_weight = model.lm_head.weight.data.to(device)
+            lm_weight = model.lm_head.weight.data
             name = "lm_head"
             packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
                 lm_weight, name, k=self.k_lm_head,

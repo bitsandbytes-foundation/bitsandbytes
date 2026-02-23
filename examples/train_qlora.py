@@ -293,20 +293,22 @@ def main():
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Load base model
-    print("Loading base model...")
+    # Load base model on CPU, then stream weights to GPU during quantization.
+    # This keeps peak GPU memory minimal — only 1 layer of fp16 weights at a
+    # time on GPU, plus the growing quantized data.
+    print("Loading base model on CPU...")
     t0 = time.time()
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
         dtype=torch.float16,
-        device_map="cuda",
+        device_map="cpu",
         trust_remote_code=True,
     )
     print(f"  Loaded in {time.time() - t0:.1f}s")
-    print(f"  GPU memory after load: {get_gpu_memory_mb():.0f} MB")
+    print(f"  GPU memory after load: {get_gpu_memory_mb():.0f} MB (model on CPU)")
 
-    # Apply KbitLoraModel
-    print("\nQuantizing and creating LoRA adapters...")
+    # Apply KbitLoraModel — streams weights CPU->GPU one layer at a time
+    print("\nQuantizing and streaming to GPU...")
     t0 = time.time()
     kbit_model = KbitLoraModel(
         model,
@@ -318,15 +320,15 @@ def main():
         ce_chunk_size=args.ce_chunk,
         compute_dtype=torch.bfloat16,
         cpu_offload=args.cpu_offload,
+        target_device=torch.device("cuda"),
     )
     print(f"  Quantized in {time.time() - t0:.1f}s")
     print(f"  Trainable parameters: {kbit_model.num_trainable_parameters():,}")
     print(f"  GPU memory after quantization: {get_gpu_memory_mb():.0f} MB")
+    print(f"  Peak GPU memory during load: {get_gpu_peak_mb():.0f} MB")
 
-    # Free the original model weights (they're now quantized)
+    # Free the original model (CPU memory)
     del model
-    torch.cuda.empty_cache()
-    print(f"  GPU memory after cleanup: {get_gpu_memory_mb():.0f} MB")
 
     # Prepare dataset
     if not args.synthetic:
