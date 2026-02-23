@@ -962,8 +962,8 @@ The `COMPUTE_BACKEND` CMake variable selects the target:
 | Backend | Library name | Languages | Dependencies |
 |---|---|---|---|
 | `cpu` | `libbitsandbytes_cpu.so` | C++17 | OpenMP (optional) |
-| `cuda` | `libbitsandbytes_cuda{VER}.so` | C++17 + CUDA | cudart, cublas, cublasLt, cusparse |
-| `hip` | `libbitsandbytes_rocm{VER}.so` | C++17 + HIP | hipblas, hiprand, hipsparse |
+| `cuda` | `libbitsandbytes_cuda{VER}.so` | C++17 + CUDA | cudart, cublas, cublasLt |
+| `hip` | `libbitsandbytes_rocm{VER}.so` | C++17 + HIP | hipblas, hiprand |
 | `mps` | `libbitsandbytes_mps.dylib` | C++17 + ObjC++ | Metal framework |
 | `xpu` | `libbitsandbytes_xpu.so` | C++20 + SYCL | Intel oneAPI |
 

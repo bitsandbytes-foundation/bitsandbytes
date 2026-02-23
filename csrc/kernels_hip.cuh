@@ -67,12 +67,6 @@ __global__ void kOptimizerStatic8bit1StateBlockwise(
     const float gnorm_scale, const bool skip_zeros, const int n
 );
 
-template <typename T, int SPMM_ITEMS, int BITS>
-__global__ void kspmm_coo_very_sparse_naive(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, T* B, half* out,
-    float* __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB
-);
-
 template <int ITEMS_PER_THREAD, int THREADS>
 __global__ void kdequant_mm_int32_fp16(
     int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, half* out,
