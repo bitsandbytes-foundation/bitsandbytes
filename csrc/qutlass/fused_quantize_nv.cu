@@ -27,41 +27,39 @@ using LayoutInputA = cutlass::layout::RowMajor;
 using LayoutInputB = cutlass::layout::RowMajor;
 using LayoutOutput = cutlass::layout::RowMajor;
 
-template <typename ShapeMMAThreadBlock, typename ShapeMMAWarp,
-          typename InstructionShape, bool Quest = false,
-          int RotationSize = 16>
+template <
+    typename ShapeMMAThreadBlock, typename ShapeMMAWarp, typename InstructionShape, bool Quest = false,
+    int RotationSize = 16>
 using Gemm_ = cutlass::gemm::device::GemmQuantNv<
-    ElementInputA, LayoutInputA, ElementInputB, LayoutInputB,
-    ElementGemmOutput, LayoutOutput, ElementOutput, LayoutOutput,
-    ElementAccumulator, cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
-    ShapeMMAThreadBlock, ShapeMMAWarp, InstructionShape, Quest, RotationSize>;
+    ElementInputA, LayoutInputA, ElementInputB, LayoutInputB, ElementGemmOutput, LayoutOutput, ElementOutput,
+    LayoutOutput, ElementAccumulator, cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80, ShapeMMAThreadBlock,
+    ShapeMMAWarp, InstructionShape, Quest, RotationSize>;
 
-template <typename Gemm>
-struct GemmRunner {
-  bool run(const void *A, const void *B, void *D, void *D_sf,
-           const float *global_scale, int32_t M, int32_t N, int32_t K,
-           cudaStream_t stream) {
-    using GemmCoord = cutlass::gemm::GemmCoord;
-    Gemm gemmOp;
+template <typename Gemm> struct GemmRunner {
+    bool
+        run(const void* A, const void* B, void* D, void* D_sf, const float* global_scale, int32_t M, int32_t N,
+            int32_t K, cudaStream_t stream) {
+        using GemmCoord = cutlass::gemm::GemmCoord;
+        Gemm gemmOp;
 
-    typename Gemm::Arguments arguments{
-        {static_cast<GemmCoord::Index>(M),
-         static_cast<GemmCoord::Index>(N),
-         static_cast<GemmCoord::Index>(K)},
-        {(cutlass::bfloat16_t *)A, K},
-        {(cutlass::bfloat16_t *)B, N},
-        {(cutlass::float_e2m1_t *)D, N},
-        {(cutlass::float_e2m1_t *)D, N},
-        {(cutlass::float_ue4m3_t *)D_sf, M},
-        const_cast<float *>(global_scale),
-        cutlass::bfloat16_t(0)};
+        typename Gemm::Arguments arguments{
+            {static_cast<GemmCoord::Index>(M), static_cast<GemmCoord::Index>(N), static_cast<GemmCoord::Index>(K)},
+            {(cutlass::bfloat16_t*)A, K},
+            {(cutlass::bfloat16_t*)B, N},
+            {(cutlass::float_e2m1_t*)D, N},
+            {(cutlass::float_e2m1_t*)D, N},
+            {(cutlass::float_ue4m3_t*)D_sf, M},
+            const_cast<float*>(global_scale),
+            cutlass::bfloat16_t(0)
+        };
 
-    auto status = gemmOp.initialize(arguments, nullptr, stream);
-    if (status != cutlass::Status::kSuccess) return false;
+        auto status = gemmOp.initialize(arguments, nullptr, stream);
+        if (status != cutlass::Status::kSuccess)
+            return false;
 
-    status = gemmOp(arguments, nullptr, stream);
-    return status == cutlass::Status::kSuccess;
-  }
+        status = gemmOp(arguments, nullptr, stream);
+        return status == cutlass::Status::kSuccess;
+    }
 };
 
 // RotationSize=16, Quest=false (AbsMax)
@@ -72,24 +70,24 @@ using MmaShape16 = cutlass::gemm::GemmShape<16, 8, 16>;
 using GemmAbsMax16 = Gemm_<TileShape16, WarpShape16, MmaShape16, false, 16>;
 using GemmQuest16 = Gemm_<TileShape16, WarpShape16, MmaShape16, true, 16>;
 
-}  // namespace bitsandbytes
+} // namespace bitsandbytes
 
 extern "C" {
 
-void cfused_quantize_nvfp4_absmax(const void *A, const void *B, void *D,
-                                  void *D_sf, const float *global_scale,
-                                  int M, int N, int K,
-                                  cudaStream_t stream) {
-  bitsandbytes::GemmRunner<bitsandbytes::GemmAbsMax16> runner;
-  runner.run(A, B, D, D_sf, global_scale, M, N, K, stream);
+void cfused_quantize_nvfp4_absmax(
+    const void* A, const void* B, void* D, void* D_sf, const float* global_scale, int M, int N, int K,
+    cudaStream_t stream
+) {
+    bitsandbytes::GemmRunner<bitsandbytes::GemmAbsMax16> runner;
+    runner.run(A, B, D, D_sf, global_scale, M, N, K, stream);
 }
 
-void cfused_quantize_nvfp4_quest(const void *A, const void *B, void *D,
-                                 void *D_sf, const float *global_scale,
-                                 int M, int N, int K,
-                                 cudaStream_t stream) {
-  bitsandbytes::GemmRunner<bitsandbytes::GemmQuest16> runner;
-  runner.run(A, B, D, D_sf, global_scale, M, N, K, stream);
+void cfused_quantize_nvfp4_quest(
+    const void* A, const void* B, void* D, void* D_sf, const float* global_scale, int M, int N, int K,
+    cudaStream_t stream
+) {
+    bitsandbytes::GemmRunner<bitsandbytes::GemmQuest16> runner;
+    runner.run(A, B, D, D_sf, global_scale, M, N, K, stream);
 }
 
-}  // extern "C"
+} // extern "C"

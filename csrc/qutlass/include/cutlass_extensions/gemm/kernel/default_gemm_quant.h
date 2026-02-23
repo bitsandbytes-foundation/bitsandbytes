@@ -1,6 +1,6 @@
 /*
  * Modified by Roberto L. Castro (Roberto.LopezCastro@ist.ac.at).
-*/
+ */
 
 /***************************************************************************************************
  * Copyright (c) 2017 - 2023 NVIDIA CORPORATION & AFFILIATES. All rights
@@ -37,8 +37,9 @@
 
 #include "cutlass/gemm/kernel/default_gemm.h"
 
-#include "cutlass_extensions/gemm/kernel/gemm_quant.h"
 #include "cutlass_extensions/epilogue/threadblock/default_epilogue_tensor_op_quant.h"
+#include "cutlass_extensions/gemm/kernel/gemm_quant.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace cutlass {
@@ -96,9 +97,7 @@ template <
     /// Gather operand B by using an index array
     bool GatherB = false,
     /// Scatter result D by using an index array
-    bool ScatterD = false,
-    bool is_quartet = true,
-    int RotationSize = 32,
+    bool ScatterD = false, bool is_quartet = true, int RotationSize = 32,
     /// Permute result D
     typename PermuteDLayout = layout::NoPermute,
     /// Permute operand A
@@ -108,37 +107,29 @@ template <
     ///
     typename Enable = void>
 struct DefaultGemmQuantMx
-    : public DefaultGemm<ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_,
-                         kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
-                         arch::OpClassTensorOp, arch::Sm80, ThreadblockShape,
-                         WarpShape, InstructionShape, EpilogueOutputOp,
-                         ThreadblockSwizzle, Stages, SplitKSerial, Operator,
-                         SharedMemoryClear, GatherA, GatherB, ScatterD,
-                         PermuteDLayout, PermuteALayout, PermuteBLayout> {
-  static_assert((platform::is_same<LayoutC_, layout::RowMajor>::value ||
-                 platform::is_same<LayoutC_, layout::AffineRankN<2>>::value),
-                "Epilogue in the kernel level must be row major");
+    : public DefaultGemm<
+          ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_, kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
+          arch::OpClassTensorOp, arch::Sm80, ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp,
+          ThreadblockSwizzle, Stages, SplitKSerial, Operator, SharedMemoryClear, GatherA, GatherB, ScatterD,
+          PermuteDLayout, PermuteALayout, PermuteBLayout> {
+    static_assert(
+        (platform::is_same<LayoutC_, layout::RowMajor>::value ||
+         platform::is_same<LayoutC_, layout::AffineRankN<2>>::value),
+        "Epilogue in the kernel level must be row major"
+    );
 
-  using DefaultGemm =
-      DefaultGemm<ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_,
-                  kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
-                  arch::OpClassTensorOp, arch::Sm80, ThreadblockShape,
-                  WarpShape, InstructionShape, EpilogueOutputOp,
-                  ThreadblockSwizzle, Stages, SplitKSerial, Operator,
-                  SharedMemoryClear, GatherA, GatherB, ScatterD, PermuteDLayout,
-                  PermuteALayout, PermuteBLayout>;
+    using DefaultGemm = DefaultGemm<
+        ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_, kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
+        arch::OpClassTensorOp, arch::Sm80, ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp,
+        ThreadblockSwizzle, Stages, SplitKSerial, Operator, SharedMemoryClear, GatherA, GatherB, ScatterD,
+        PermuteDLayout, PermuteALayout, PermuteBLayout>;
 
-  using Epilogue =
-    typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOpQuantMx<
-          ThreadblockShape, typename DefaultGemm::Mma::Operator,
-          DefaultGemm::kPartitionsK, EpilogueOutputOp, EpilogueOutputOp::kCount,
-          ScatterD, PermuteDLayout, is_quartet, RotationSize>::Epilogue;
+    using Epilogue = typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOpQuantMx<
+        ThreadblockShape, typename DefaultGemm::Mma::Operator, DefaultGemm::kPartitionsK, EpilogueOutputOp,
+        EpilogueOutputOp::kCount, ScatterD, PermuteDLayout, is_quartet, RotationSize>::Epilogue;
 
-  using GemmKernel =
-      kernel::GemmQuantMx<typename DefaultGemm::Mma, Epilogue,
-                                     ThreadblockSwizzle, SplitKSerial>;
+    using GemmKernel = kernel::GemmQuantMx<typename DefaultGemm::Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
 };
-
 
 template <
     /// Element type for A matrix operand
@@ -201,35 +192,28 @@ template <
     ///
     typename Enable = void>
 struct DefaultGemmQuantMxMask
-    : public DefaultGemm<ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_,
-                         kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
-                         arch::OpClassTensorOp, arch::Sm80, ThreadblockShape,
-                         WarpShape, InstructionShape, EpilogueOutputOp,
-                         ThreadblockSwizzle, Stages, SplitKSerial, Operator,
-                         SharedMemoryClear, GatherA, GatherB, ScatterD,
-                         PermuteDLayout, PermuteALayout, PermuteBLayout> {
-  static_assert((platform::is_same<LayoutC_, layout::RowMajor>::value ||
-                 platform::is_same<LayoutC_, layout::AffineRankN<2>>::value),
-                "Epilogue in the kernel level must be row major");
+    : public DefaultGemm<
+          ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_, kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
+          arch::OpClassTensorOp, arch::Sm80, ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp,
+          ThreadblockSwizzle, Stages, SplitKSerial, Operator, SharedMemoryClear, GatherA, GatherB, ScatterD,
+          PermuteDLayout, PermuteALayout, PermuteBLayout> {
+    static_assert(
+        (platform::is_same<LayoutC_, layout::RowMajor>::value ||
+         platform::is_same<LayoutC_, layout::AffineRankN<2>>::value),
+        "Epilogue in the kernel level must be row major"
+    );
 
-  using DefaultGemm =
-      DefaultGemm<ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_,
-                  kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
-                  arch::OpClassTensorOp, arch::Sm80, ThreadblockShape,
-                  WarpShape, InstructionShape, EpilogueOutputOp,
-                  ThreadblockSwizzle, Stages, SplitKSerial, Operator,
-                  SharedMemoryClear, GatherA, GatherB, ScatterD, PermuteDLayout,
-                  PermuteALayout, PermuteBLayout>;
+    using DefaultGemm = DefaultGemm<
+        ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_, kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
+        arch::OpClassTensorOp, arch::Sm80, ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp,
+        ThreadblockSwizzle, Stages, SplitKSerial, Operator, SharedMemoryClear, GatherA, GatherB, ScatterD,
+        PermuteDLayout, PermuteALayout, PermuteBLayout>;
 
-  using Epilogue =
-    typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOpQuantMxMask<
-          ThreadblockShape, typename DefaultGemm::Mma::Operator,
-          DefaultGemm::kPartitionsK, EpilogueOutputOp, EpilogueOutputOp::kCount,
-          ScatterD, PermuteDLayout>::Epilogue;
+    using Epilogue = typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOpQuantMxMask<
+        ThreadblockShape, typename DefaultGemm::Mma::Operator, DefaultGemm::kPartitionsK, EpilogueOutputOp,
+        EpilogueOutputOp::kCount, ScatterD, PermuteDLayout>::Epilogue;
 
-  using GemmKernel =
-      kernel::GemmQuantMxMask<typename DefaultGemm::Mma, Epilogue,
-                                     ThreadblockSwizzle, SplitKSerial>;
+    using GemmKernel = kernel::GemmQuantMxMask<typename DefaultGemm::Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
 };
 
 template <
@@ -283,9 +267,7 @@ template <
     /// Gather operand B by using an index array
     bool GatherB = false,
     /// Scatter result D by using an index array
-    bool ScatterD = false,
-    bool is_quartet = true,
-    int RotationSize = 16,
+    bool ScatterD = false, bool is_quartet = true, int RotationSize = 16,
     /// Permute result D
     typename PermuteDLayout = layout::NoPermute,
     /// Permute operand A
@@ -295,39 +277,32 @@ template <
     ///
     typename Enable = void>
 struct DefaultGemmQuantNv
-    : public DefaultGemm<ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_,
-                         kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
-                         arch::OpClassTensorOp, arch::Sm80, ThreadblockShape,
-                         WarpShape, InstructionShape, EpilogueOutputOp,
-                         ThreadblockSwizzle, Stages, SplitKSerial, Operator,
-                         SharedMemoryClear, GatherA, GatherB, ScatterD,
-                         PermuteDLayout, PermuteALayout, PermuteBLayout> {
-  static_assert((platform::is_same<LayoutC_, layout::RowMajor>::value ||
-                 platform::is_same<LayoutC_, layout::AffineRankN<2>>::value),
-                "Epilogue in the kernel level must be row major");
+    : public DefaultGemm<
+          ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_, kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
+          arch::OpClassTensorOp, arch::Sm80, ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp,
+          ThreadblockSwizzle, Stages, SplitKSerial, Operator, SharedMemoryClear, GatherA, GatherB, ScatterD,
+          PermuteDLayout, PermuteALayout, PermuteBLayout> {
+    static_assert(
+        (platform::is_same<LayoutC_, layout::RowMajor>::value ||
+         platform::is_same<LayoutC_, layout::AffineRankN<2>>::value),
+        "Epilogue in the kernel level must be row major"
+    );
 
-  using DefaultGemm =
-      DefaultGemm<ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_,
-                  kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
-                  arch::OpClassTensorOp, arch::Sm80, ThreadblockShape,
-                  WarpShape, InstructionShape, EpilogueOutputOp,
-                  ThreadblockSwizzle, Stages, SplitKSerial, Operator,
-                  SharedMemoryClear, GatherA, GatherB, ScatterD, PermuteDLayout,
-                  PermuteALayout, PermuteBLayout>;
+    using DefaultGemm = DefaultGemm<
+        ElementA_, LayoutA_, kAlignmentA, ElementB_, LayoutB_, kAlignmentB, ElementC_, LayoutC_, ElementAccumulator,
+        arch::OpClassTensorOp, arch::Sm80, ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp,
+        ThreadblockSwizzle, Stages, SplitKSerial, Operator, SharedMemoryClear, GatherA, GatherB, ScatterD,
+        PermuteDLayout, PermuteALayout, PermuteBLayout>;
 
-  using Epilogue =
-    typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOpQuantNv<
-          ThreadblockShape, typename DefaultGemm::Mma::Operator,
-          DefaultGemm::kPartitionsK, EpilogueOutputOp, EpilogueOutputOp::kCount,
-          ScatterD, PermuteDLayout, is_quartet, RotationSize>::Epilogue;
+    using Epilogue = typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOpQuantNv<
+        ThreadblockShape, typename DefaultGemm::Mma::Operator, DefaultGemm::kPartitionsK, EpilogueOutputOp,
+        EpilogueOutputOp::kCount, ScatterD, PermuteDLayout, is_quartet, RotationSize>::Epilogue;
 
-  using GemmKernel =
-      kernel::GemmQuantNv<typename DefaultGemm::Mma, Epilogue,
-                                     ThreadblockSwizzle, SplitKSerial>;
+    using GemmKernel = kernel::GemmQuantNv<typename DefaultGemm::Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
-}  // namespace kernel
-}  // namespace gemm
-}  // namespace cutlass
+} // namespace kernel
+} // namespace gemm
+} // namespace cutlass

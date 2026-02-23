@@ -7,14 +7,11 @@ NVFP4 quantization with optional Hadamard rotation.
 import pytest
 import torch
 
-import bitsandbytes as bnb
 from bitsandbytes.functional import (
-    NVFP4QuantState,
     _has_cutlass_fused_quantize,
     dequantize_nvfp4,
     quantize_nvfp4,
 )
-
 
 pytestmark = [
     pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available"),
@@ -92,9 +89,7 @@ class TestFusedQuantizeQuest:
         assert err_rot < 0.15, f"Rotation error {err_rot:.4f} exceeds 15%"
         assert err_norot < 0.15, f"Non-rotation error {err_norot:.4f} exceeds 15%"
         # Rotation should not be more than 50% worse than non-rotated
-        assert err_rot < err_norot * 1.5, (
-            f"Rotation error {err_rot:.4f} much worse than non-rotated {err_norot:.4f}"
-        )
+        assert err_rot < err_norot * 1.5, f"Rotation error {err_rot:.4f} much worse than non-rotated {err_norot:.4f}"
 
 
 class TestFusedQuantizePadding:
@@ -140,10 +135,15 @@ class TestFusedQuantizeEndToEnd:
         packed_b, state_b = quantize_nvfp4(B, rotate=True)
 
         C = torch.ops.bitsandbytes.gemm_nvfp4(
-            packed_a, packed_b,
-            state_a.block_scales_blocked, state_b.block_scales_blocked,
-            state_a.tensor_scale, state_b.tensor_scale,
-            M, N, K,
+            packed_a,
+            packed_b,
+            state_a.block_scales_blocked,
+            state_b.block_scales_blocked,
+            state_a.tensor_scale,
+            state_b.tensor_scale,
+            M,
+            N,
+            K,
         )
 
         err = (C - ref).abs().mean() / ref.abs().mean()
@@ -161,10 +161,15 @@ class TestFusedQuantizeEndToEnd:
         packed_b, state_b = quantize_nvfp4(B, rotate=False)
 
         C = torch.ops.bitsandbytes.gemm_nvfp4(
-            packed_a, packed_b,
-            state_a.block_scales_blocked, state_b.block_scales_blocked,
-            state_a.tensor_scale, state_b.tensor_scale,
-            M, N, K,
+            packed_a,
+            packed_b,
+            state_a.block_scales_blocked,
+            state_b.block_scales_blocked,
+            state_a.tensor_scale,
+            state_b.tensor_scale,
+            M,
+            N,
+            K,
         )
 
         err = (C - ref).abs().mean() / ref.abs().mean()

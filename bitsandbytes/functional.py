@@ -1199,9 +1199,7 @@ def quantize_nvfp4(
         from bitsandbytes.backends.cuda.ops import _get_fused_quant_matrix
 
         B = _get_fused_quant_matrix(A.device, quest=rotate)
-        packed, block_scales, ts = torch.ops.bitsandbytes.cutlass_fused_quantize_nvfp4(
-            A_bf16, B, tensor_scale, rotate
-        )
+        packed, block_scales, ts = torch.ops.bitsandbytes.cutlass_fused_quantize_nvfp4(A_bf16, B, tensor_scale, rotate)
     elif rotate:
         if tensor_scale is None:
             tensor_scale = None  # let the kernel compute it

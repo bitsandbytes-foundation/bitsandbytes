@@ -858,14 +858,17 @@ SM_120 (Blackwell consumer GPUs like RTX PRO 6000).
 
 ### Architecture
 
-The GEMM uses **CUTLASS** (vendored from QuTLASS, compiled into the shared library).
-Quantization/dequantization/rotation kernels use raw CUDA with inline PTX.
+The GEMM and fused quantize use **CUTLASS** (vendored from QuTLASS, compiled into
+the shared library). Legacy quantize/dequantize/rotation kernels use raw CUDA with
+inline PTX and serve as fallback for non-Blackwell GPUs.
 
 ```
 csrc/
-├── kernels.cu                     # Quantize/dequantize/Hadamard kernels
+├── kernels.cu                     # Quantize/dequantize/Hadamard kernels (fallback)
 ├── kernels_nvfp4_sm120.cu         # Legacy hand-written GEMM (SM_120)
 ├── qutlass/gemm_nvfp4_sm120.cu    # CUTLASS-based GEMM (SM_120, from QuTLASS)
+├── qutlass/fused_quantize_nv.cu   # CUTLASS-based fused quantize (SM_80+, from QuTLASS)
+├── qutlass/include/               # Vendored CUTLASS extensions for quantize epilogue
 ├── qutlass/scale_reorder.cu       # Scale factor reordering for CUTLASS
 ├── ops.cu                         # Host-side launchers
 └── pythonInterface.cpp            # extern "C" symbols for ctypes
@@ -890,8 +893,13 @@ bitsandbytes/
 4. **NVFP4=3 in DataType_t enum**: Separate from existing FP4=1 (custom bitsandbytes
    format, not E2M1). No breaking changes to existing API.
 5. **Two-level scaling**: E4M3 block scales per 16 elements + FP32 tensor scale.
-6. **Optional Hadamard rotation**: Had16 matched to NVFP4's block size.
-7. **Scale reordering at quantize time**: CUTLASS expects block-scaled swizzled layout;
+6. **Hadamard rotation on by default**: `rotate=True` is the default for both
+   `quantize_nvfp4()` and `LinearNVFP4`. With the CUTLASS fused quantize, the Hadamard
+   rotation is applied via the B matrix in the GEMM at zero additional cost.
+7. **CUTLASS fused quantize**: Quantization formulated as a GEMM (SM_80 CUTLASS 2.x).
+   Each group of 16 elements becomes a GEMM row; B is identity (AbsMax) or Hadamard
+   (rotation). Falls back to the hand-written kernel on non-Blackwell builds.
+8. **Scale reordering at quantize time**: CUTLASS expects block-scaled swizzled layout;
    computed once at quantization and stored in `NVFP4QuantState.block_scales_blocked`.
 8. **BF16 output from CUTLASS**: Tensor scales folded into CUTLASS epilogue alpha;
    result converted to FP32 in Python dispatch for API compatibility.

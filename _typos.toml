@@ -13,6 +13,8 @@ extend-ignore-re = [
     "@Ther-nul",  # valid Github user
     "UE4M3",  # unsigned E4M3 floating point format (NVFP4 block scale type)
     "ue4m3",  # unsigned E4M3 lowercase
+    "UE8M0",  # unsigned E8M0 floating point format (MX block scale type)
+    "ue8m0",  # unsigned E8M0 lowercase
     "IST[ -]",  # IST Austria / IST-DASLab (Institute of Science and Technology)
     "ist-",  # ist-daslab lowercase in anchor links
 ]

@@ -122,8 +122,54 @@ bitsandbytes with zero runtime dependency:
 - Data type: `nv_float4_t<float_e2m1_t>`, scale type: `float_ue4m3_t`
 - Output: BF16 with FP32 accumulator, alpha epilogue fusion
 
+## Fused Quantize Results (QuTLASS CUTLASS-based Quantization)
+
+Replaces the hand-written `kQuantizeNVFP4` with a CUTLASS SM_80 GEMM that formulates
+quantization as a matrix multiply (each 16-element group becomes a GEMM row). The key
+advantage: **Hadamard rotation is free** — applied via the B matrix in the GEMM with
+zero additional compute cost.
+
+### Raw Kernel Comparison (no Python overhead)
+
+| Shape | Old plain (ms) | Old+Rotation (ms) | CUTLASS+Rotation (ms) | Rotation overhead |
+|-------|---------------|-------------------|----------------------|-------------------|
+| 1×4096 | 0.003 | 0.003 | 0.004 | Old: 0%, CUTLASS: 0% |
+| 128×4096 | 0.003 | 0.004 | 0.004 | Old: 52%, CUTLASS: 0% |
+| 4096×4096 | 0.023 | 0.043 | 0.039 | Old: 85%, CUTLASS: 0% |
+| 128×11008 | 0.004 | 0.006 | 0.006 | Old: 49%, CUTLASS: 0% |
+
+**Key finding**: The old hand-written kernel is ~1.5x faster for plain quantize (no rotation).
+But for quantize with Hadamard rotation (`rotate=True`, the new default):
+- Small shapes (M ≤ 32): CUTLASS 0.004ms vs old fused 0.003ms — old kernel wins
+- Large shapes (M = 4096): CUTLASS 0.039ms vs old fused 0.043ms — CUTLASS wins (1.1x)
+- The main value is rotation at zero cost, not raw quantize speed
+
+### CUTLASS Fused Quantize: AbsMax vs Quest (Rotation)
+
+| Shape | AbsMax (ms) | Quest/Rotation (ms) | Rotation overhead |
+|-------|------------|---------------------|-------------------|
+| 1×4096 | 0.004 | 0.004 | 0% |
+| 128×4096 | 0.004 | 0.004 | 0% |
+| 4096×4096 | 0.037 | 0.037 | 0% |
+
+Hadamard rotation adds **zero overhead** with the CUTLASS approach — the rotation matrix
+is applied as the B operand in the GEMM, which is already being executed.
+
+### End-to-End Pipeline (Quantize A + GEMM, B pre-quantized)
+
+| Shape | Old kernel (ms) | CUTLASS (ms) | cuBLAS FP16 (ms) | vs cuBLAS |
+|-------|----------------|-------------|------------------|-----------|
+| 1×4096×4096 | 0.082 | 0.095 | 0.012 | 0.13x |
+| 128×4096×4096 | 0.087 | 0.097 | 0.019 | 0.19x |
+| 4096×4096×4096 | 0.268 | 0.297 | 0.335 | 1.13x |
+
+For large M (≥ 4096), the NVFP4 pipeline (quantize + GEMM) exceeds cuBLAS FP16.
+The quantize overhead is significant for small M — a fused quantize-into-GEMM epilogue
+(future work) would eliminate this per-layer cost.
+
 ## Correctness
 All GEMM outputs match the dequantize→torch.matmul reference with 0.000000 relative
-error (identical quantized data, same FP32 accumulation). 36 tests pass including
+error (identical quantized data, same FP32 accumulation). 59 tests pass including
 non-aligned shapes, tall/skinny LLM shapes, large-batch shapes (up to 4096x4096x4096),
-scale reordering round-trip tests, and NVFP4 output epilogue tests.
+scale reordering round-trip tests, NVFP4 output epilogue tests, fused quantize tests
+(padding, rotation, fallback, dtype conversion), and end-to-end pipeline tests.
