@@ -242,13 +242,44 @@ if(BUILD_CUDA)
     if(_HAS_SM120)
         # Build as separate OBJECT library with its own CUDA_ARCHITECTURES
         # to avoid conflict with the global architecture settings
-        add_library(nvfp4_sm120a OBJECT csrc/kernels_nvfp4_sm120.cu)
+        set(_NVFP4_SM120_SOURCES csrc/kernels_nvfp4_sm120.cu)
+
+        # CUTLASS-based NVFP4 GEMM (requires CUDA 12.8+)
+        if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8" AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/cutlass/include")
+            list(APPEND _NVFP4_SM120_SOURCES
+                csrc/qutlass/gemm_nvfp4_sm120.cu
+                csrc/qutlass/scale_reorder.cu
+            )
+            set(_HAS_CUTLASS_NVFP4 TRUE)
+            message(STATUS "CUTLASS NVFP4 SM_120a GEMM enabled")
+        else()
+            set(_HAS_CUTLASS_NVFP4 FALSE)
+            message(STATUS "CUTLASS NVFP4 GEMM disabled (needs CUDA >= 12.8 and third_party/cutlass)")
+        endif()
+
+        add_library(nvfp4_sm120a OBJECT ${_NVFP4_SM120_SOURCES})
         set_target_properties(nvfp4_sm120a PROPERTIES
             CUDA_ARCHITECTURES "120a"
             POSITION_INDEPENDENT_CODE ON
             CUDA_SEPARABLE_COMPILATION OFF
         )
-        target_compile_options(nvfp4_sm120a PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>)
+        target_compile_options(nvfp4_sm120a PRIVATE
+            $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>
+        )
+
+        if(_HAS_CUTLASS_NVFP4)
+            target_include_directories(nvfp4_sm120a PRIVATE
+                "${CMAKE_SOURCE_DIR}/third_party/cutlass/include"
+                "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
+            )
+            target_compile_options(nvfp4_sm120a PRIVATE
+                $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+                $<$<COMPILE_LANGUAGE:CUDA>:-std=c++17>
+                $<$<COMPILE_LANGUAGE:CUDA>:-O3>
+                $<$<COMPILE_LANGUAGE:CUDA>:-DNDEBUG>
+            )
+        endif()
+
         message(STATUS "NVFP4 SM_120a GEMM kernel enabled")
     endif()
 
