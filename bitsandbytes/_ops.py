@@ -871,7 +871,5 @@ def _(
     torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
     torch._check(out.dtype == A.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A.dtype}")
     torch._check(C_workspace.dtype == torch.float32, lambda: f"C_workspace must be float32, got {C_workspace.dtype}")
-    torch._check(
-        tile_counters.dtype == torch.int32, lambda: f"tile_counters must be int32, got {tile_counters.dtype}"
-    )
+    torch._check(tile_counters.dtype == torch.int32, lambda: f"tile_counters must be int32, got {tile_counters.dtype}")
     return out

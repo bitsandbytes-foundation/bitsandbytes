@@ -11,7 +11,6 @@
 #include <type_traits>
 #include <vector>
 
-
 #define ERR_NOT_IMPLEMENTED 100
 
 using std::cout;
@@ -850,7 +849,8 @@ void quantizeBlockwise_kbit(
 ) {
     int num_blocks_quant = (n + 31) / 32;
     int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kQuantizeBlockwise_kbit<T, K><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(codebook, A, absmax, packed_out, n);
+    kQuantizeBlockwise_kbit<T, K>
+        <<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(codebook, A, absmax, packed_out, n);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -1007,7 +1007,8 @@ void repackKbit(
     int total_work = N * (K_dim / KBIT_BLOCKSIZE);
     int block_size = 256;
     int grid_size = (total_work + block_size - 1) / block_size;
-    kRepackKbit<K><<<grid_size, block_size, 0, stream>>>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);
+    kRepackKbit<K>
+        <<<grid_size, block_size, 0, stream>>>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -1034,8 +1035,7 @@ void repackKbit(
 template <int BLOCK_SIZE, typename T>
 __global__ void kHadamardRotate(T* __restrict__ data, const int n, const unsigned int* __restrict__ signs) {
     constexpr int ELEMS_PER_THREAD = BLOCK_SIZE / 32;
-    static_assert(BLOCK_SIZE >= 32 && (BLOCK_SIZE & (BLOCK_SIZE - 1)) == 0,
-                  "BLOCK_SIZE must be a power of 2 >= 32");
+    static_assert(BLOCK_SIZE >= 32 && (BLOCK_SIZE & (BLOCK_SIZE - 1)) == 0, "BLOCK_SIZE must be a power of 2 >= 32");
 
     const int warp_idx = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
     const int lane_id = threadIdx.x % 32;
@@ -1603,8 +1603,7 @@ static void kbitGemmProdLaunch(
     // If shared memory exceeds default 48KB limit, increase it
     if (smem_size > 48 * 1024) {
         cudaFuncSetAttribute(
-            kbit_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T>,
-            cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
+            kbit_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
         );
     }
 
@@ -2072,8 +2071,8 @@ static void kbitGroupedGemmProdLaunch(
 
     if (smem_size > 48 * 1024) {
         cudaFuncSetAttribute(
-            kbit_grouped_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T>,
-            cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
+            kbit_grouped_gemm_prod<K, MB, TN, scalar_t, ABSMAX_T>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+            smem_size
         );
     }
 
@@ -2407,22 +2406,17 @@ void kbitScalarGemvTiled(
 
 template <int K_BITS, int M_VAL, typename scalar_t = half, typename ABSMAX_T = unsigned char>
 __global__ void __launch_bounds__(128, 8) kbit_scalar_gemv_tiled_v2(
-    const scalar_t* __restrict__ A,
-    const unsigned int* __restrict__ B_packed,
-    const ABSMAX_T* __restrict__ B_absmax,
-    const float* __restrict__ codebook,
-    scalar_t* __restrict__ C,
-    float* __restrict__ C_workspace,
-    int* __restrict__ tile_counters,
-    const int M, const int K_dim, const int N, const int k_splits
+    const scalar_t* __restrict__ A, const unsigned int* __restrict__ B_packed, const ABSMAX_T* __restrict__ B_absmax,
+    const float* __restrict__ codebook, scalar_t* __restrict__ C, float* __restrict__ C_workspace,
+    int* __restrict__ tile_counters, const int M, const int K_dim, const int N, const int k_splits
 ) {
-    constexpr int BS = 32;            // quantization block size
+    constexpr int BS = 32; // quantization block size
     constexpr int TILE_K = 64;
     constexpr int TILE_N = 128;
-    constexpr int BLOCK_DIM = 128;    // threads per block
+    constexpr int BLOCK_DIM = 128; // threads per block
     constexpr int NUM_WARPS = 4;
     constexpr int M_MAX = 4;
-    constexpr int KB_PER_TILE = TILE_K / BS;  // 2
+    constexpr int KB_PER_TILE = TILE_K / BS; // 2
     constexpr int B_COL_WORDS = KB_PER_TILE * K_BITS;
     constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;
     constexpr int B_STAGE_BYTES = B_STAGE_WORDS * (int)sizeof(unsigned int);
@@ -2443,10 +2437,11 @@ __global__ void __launch_bounds__(128, 8) kbit_scalar_gemv_tiled_v2(
 
     const int kt_start = ks_id * tiles_per_split;
     const int kt_end = min(kt_start + tiles_per_split, k_tiles);
-    if (kt_start >= k_tiles) return;
+    if (kt_start >= k_tiles)
+        return;
 
     // This thread's column within the tile
-    const int col_in_tile = threadIdx.x;  // 0..127
+    const int col_in_tile = threadIdx.x; // 0..127
     const int col = n_base + col_in_tile;
 
     const int warp_id = threadIdx.x / 32;
@@ -2457,21 +2452,20 @@ __global__ void __launch_bounds__(128, 8) kbit_scalar_gemv_tiled_v2(
 
     // Double-buffered shared memory
     extern __shared__ char smem[];
-    auto sh_b = [&](int stage) -> unsigned int* {
-        return reinterpret_cast<unsigned int*>(smem + stage * STAGE_BYTES);
-    };
+    auto sh_b = [&](int stage) -> unsigned int* { return reinterpret_cast<unsigned int*>(smem + stage * STAGE_BYTES); };
     auto sh_abs = [&](int stage) -> ABSMAX_T* {
         return reinterpret_cast<ABSMAX_T*>(smem + stage * STAGE_BYTES + B_STAGE_BYTES);
     };
 
     // Accumulators
     float acc[M_VAL];
-    #pragma unroll
-    for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
+#pragma unroll
+    for (int m = 0; m < M_VAL; m++)
+        acc[m] = 0.0f;
 
     // Fetch tile: cooperative cp.async loading of B + absmax
     auto fetch_tile = [&](int stage, int kt) {
-        const int tile_idx = kt * n_tiles + n_tile;  // K-major tile ordering
+        const int tile_idx = kt * n_tiles + n_tile; // K-major tile ordering
 
         // B tile via cp.async (all 128 threads cooperatively load)
         const int b_global_base = tile_idx * B_STAGE_WORDS;
@@ -2496,24 +2490,28 @@ __global__ void __launch_bounds__(128, 8) kbit_scalar_gemv_tiled_v2(
         ABSMAX_T* abs_ptr = sh_abs(stage);
         const int k_base = kt * TILE_K;
 
-        // Process KB_PER_TILE (=2) K-blocks within this tile
-        #pragma unroll
+// Process KB_PER_TILE (=2) K-blocks within this tile
+#pragma unroll
         for (int kb = 0; kb < KB_PER_TILE; kb++) {
             const int block_k_base = k_base + kb * BS;
-            if (block_k_base >= K_dim) continue;
+            if (block_k_base >= K_dim)
+                continue;
 
             // Read bit-planes from shared memory for this column
             int b_addr = col_in_tile * B_COL_WORDS + kb * K_BITS;
             unsigned int planes[K_BITS];
             if constexpr (K_BITS == 2) {
                 uint2 pv = *reinterpret_cast<const uint2*>(&b_ptr[b_addr]);
-                planes[0] = pv.x; planes[1] = pv.y;
+                planes[0] = pv.x;
+                planes[1] = pv.y;
             } else if constexpr (K_BITS == 4) {
                 int4 pv = *reinterpret_cast<const int4*>(&b_ptr[b_addr]);
-                planes[0] = (unsigned int)pv.x; planes[1] = (unsigned int)pv.y;
-                planes[2] = (unsigned int)pv.z; planes[3] = (unsigned int)pv.w;
+                planes[0] = (unsigned int)pv.x;
+                planes[1] = (unsigned int)pv.y;
+                planes[2] = (unsigned int)pv.z;
+                planes[3] = (unsigned int)pv.w;
             } else {
-                #pragma unroll
+#pragma unroll
                 for (int b = 0; b < K_BITS; b++)
                     planes[b] = b_ptr[b_addr + b];
             }
@@ -2521,25 +2519,25 @@ __global__ void __launch_bounds__(128, 8) kbit_scalar_gemv_tiled_v2(
             // Load absmax from shared memory
             float amax = load_absmax(abs_ptr, col_in_tile * KB_PER_TILE + kb);
 
-            // Dequant-once loop: decode weight once, FMA across M rows
-            #pragma unroll
+// Dequant-once loop: decode weight once, FMA across M rows
+#pragma unroll
             for (int sub = 0; sub < 4; sub++) {
                 // Load A for all M rows (int4 = 8 fp16 values)
                 int4 av[M_VAL];
-                #pragma unroll
+#pragma unroll
                 for (int m = 0; m < M_VAL; m++)
                     av[m] = *reinterpret_cast<const int4*>(&A[m * K_dim + block_k_base + sub * 8]);
 
-                // Dequant each element once, then FMA across M rows
-                #pragma unroll
+// Dequant each element once, then FMA across M rows
+#pragma unroll
                 for (int j = 0; j < 8; j++) {
                     int idx = 0;
-                    #pragma unroll
+#pragma unroll
                     for (int b = 0; b < K_BITS; b++)
                         idx |= ((planes[b] >> (sub * 8 + j)) & 1) << b;
                     float w = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
 
-                    #pragma unroll
+#pragma unroll
                     for (int m = 0; m < M_VAL; m++) {
                         const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av[m]);
                         acc[m] += w * ScalarOps<scalar_t>::to_float(ap[j]);
@@ -2569,15 +2567,15 @@ __global__ void __launch_bounds__(128, 8) kbit_scalar_gemv_tiled_v2(
 
     // Write output
     if (k_splits == 1) {
-        // Direct write — this block owns the full K reduction
-        #pragma unroll
+// Direct write — this block owns the full K reduction
+#pragma unroll
         for (int m = 0; m < M_VAL; m++) {
             if (m < M && col < N)
                 C[m * N + col] = ScalarOps<scalar_t>::from_float(acc[m]);
         }
     } else {
-        // Partial K — atomicAdd to workspace
-        #pragma unroll
+// Partial K — atomicAdd to workspace
+#pragma unroll
         for (int m = 0; m < M_VAL; m++) {
             if (m < M && col < N)
                 atomicAdd(&C_workspace[m * N + col], acc[m]);
@@ -2607,9 +2605,8 @@ __global__ void __launch_bounds__(128, 8) kbit_scalar_gemv_tiled_v2(
 // ---- Tiled GEMV v2 launcher ----
 template <int K, int MV, typename scalar_t, typename ABSMAX_T>
 static void kbitScalarGemvTiledV2Launch(
-    const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax,
-    const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
-    int M, int K_dim, int N, int num_sms, cudaStream_t stream
+    const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int num_sms, cudaStream_t stream
 ) {
     constexpr int TILE_N = 128;
     constexpr int TILE_K = 64;
@@ -2632,37 +2629,39 @@ static void kbitScalarGemvTiledV2Launch(
     int k_splits = max(1, (target_blocks + n_tiles - 1) / n_tiles);
     k_splits = min(k_splits, k_tiles);
     int tiles_per_split = (k_tiles + k_splits - 1) / k_splits;
-    k_splits = (k_tiles + tiles_per_split - 1) / tiles_per_split;  // no empty splits
+    k_splits = (k_tiles + tiles_per_split - 1) / tiles_per_split; // no empty splits
 
     int grid_size = n_tiles * k_splits;
     int smem_size = 2 * STAGE_BYTES;
 
-    kbit_scalar_gemv_tiled_v2<K, MV, scalar_t, ABSMAX_T>
-        <<<grid_size, BLOCK_DIM, smem_size, stream>>>(
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters,
-            M, K_dim, N, k_splits
-        );
+    kbit_scalar_gemv_tiled_v2<K, MV, scalar_t, ABSMAX_T><<<grid_size, BLOCK_DIM, smem_size, stream>>>(
+        A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_splits
+    );
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 // Public entry point: selects M_VAL template, queries num_sms internally
 template <int K, typename scalar_t, typename ABSMAX_T>
 void kbitScalarGemvTiledV2(
-    const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax,
-    const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
-    int M, int K_dim, int N, cudaStream_t stream
+    const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, cudaStream_t stream
 ) {
     const int num_sms = cachedNumSMs();
 
-#define LAUNCH_GEMV_V2(MV) \
-    kbitScalarGemvTiledV2Launch<K, MV, scalar_t, ABSMAX_T>( \
-        A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, \
-        M, K_dim, N, num_sms, stream)
+#define LAUNCH_GEMV_V2(MV)                                                                                             \
+    kbitScalarGemvTiledV2Launch<K, MV, scalar_t, ABSMAX_T>(                                                            \
+        A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream                   \
+    )
 
-    if (M <= 1)      { LAUNCH_GEMV_V2(1); }
-    else if (M <= 2) { LAUNCH_GEMV_V2(2); }
-    else if (M <= 3) { LAUNCH_GEMV_V2(3); }
-    else             { LAUNCH_GEMV_V2(4); }
+    if (M <= 1) {
+        LAUNCH_GEMV_V2(1);
+    } else if (M <= 2) {
+        LAUNCH_GEMV_V2(2);
+    } else if (M <= 3) {
+        LAUNCH_GEMV_V2(3);
+    } else {
+        LAUNCH_GEMV_V2(4);
+    }
 
 #undef LAUNCH_GEMV_V2
 }
@@ -2726,7 +2725,9 @@ void testMMA(const half* A, const half* B, float* C) {
 // ---- Template instantiations ----
 
 #define INSTANTIATE_KBIT_QUANT(T, K)                                                                                   \
-    template void quantizeBlockwise_kbit<T, K>(const float*, const T*, unsigned char*, unsigned int*, int, cudaStream_t);
+    template void quantizeBlockwise_kbit<T, K>(                                                                        \
+        const float*, const T*, unsigned char*, unsigned int*, int, cudaStream_t                                       \
+    );
 
 INSTANTIATE_KBIT_QUANT(half, 2)
 INSTANTIATE_KBIT_QUANT(half, 3)
@@ -2825,7 +2826,9 @@ INSTANTIATE_KBIT_DEQUANT_TILED(float, 5, half)
 
 // Repack instantiations: one per K value
 #define INSTANTIATE_KBIT_REPACK(K)                                                                                     \
-    template void repackKbit<K>(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t);
+    template void repackKbit<K>(                                                                                       \
+        const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t               \
+    );
 
 INSTANTIATE_KBIT_REPACK(2)
 INSTANTIATE_KBIT_REPACK(3)
@@ -2946,12 +2949,12 @@ INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(4)
 INSTANTIATE_KBIT_SCALAR_GEMV_TILED_FP16(5)
 // Scalar GEMV v2 (tiled with shared memory) instantiations — uint8 E4M4 absmax
 #define INSTANTIATE_KBIT_SCALAR_GEMV_V2_U8(K)                                                                          \
-    template void kbitScalarGemvTiledV2<K, half, unsigned char>(                                                        \
-        const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*,                      \
-        int, int, int, cudaStream_t                                                                                    \
+    template void kbitScalarGemvTiledV2<K, half, unsigned char>(                                                       \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int,      \
+        cudaStream_t                                                                                                   \
     );                                                                                                                 \
     template void kbitScalarGemvTiledV2<K, __nv_bfloat16, unsigned char>(                                              \
-        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, float*, int*,    \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, float*, int*,   \
         int, int, int, cudaStream_t                                                                                    \
     );
 INSTANTIATE_KBIT_SCALAR_GEMV_V2_U8(2)
@@ -2961,12 +2964,11 @@ INSTANTIATE_KBIT_SCALAR_GEMV_V2_U8(5)
 // fp16 absmax
 #define INSTANTIATE_KBIT_SCALAR_GEMV_V2_FP16(K)                                                                        \
     template void kbitScalarGemvTiledV2<K, half, half>(                                                                \
-        const half*, const unsigned int*, const half*, const float*, half*, float*, int*,                              \
-        int, int, int, cudaStream_t                                                                                    \
+        const half*, const unsigned int*, const half*, const float*, half*, float*, int*, int, int, int, cudaStream_t  \
     );                                                                                                                 \
     template void kbitScalarGemvTiledV2<K, __nv_bfloat16, half>(                                                       \
-        const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, float*, int*,            \
-        int, int, int, cudaStream_t                                                                                    \
+        const __nv_bfloat16*, const unsigned int*, const half*, const float*, __nv_bfloat16*, float*, int*, int, int,  \
+        int, cudaStream_t                                                                                              \
     );
 INSTANTIATE_KBIT_SCALAR_GEMV_V2_FP16(2)
 INSTANTIATE_KBIT_SCALAR_GEMV_V2_FP16(3)

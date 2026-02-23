@@ -62,9 +62,7 @@ for name, K_dim, N in SHAPES:
 
         # Quantize and repack
         packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(W, codebook, k)
-        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat, absmax_flat, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax_flat, K_dim, N, k)
 
         for M in M_VALUES:
             A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
@@ -144,6 +142,7 @@ for name, K_dim, N in SHAPES:
                 tiled_us, tiled_std = bench_graph(call_tiled, args.trials, args.iters)
                 v2_us, v2_std = bench_graph(call_v2, args.trials, args.iters)
             else:
+
                 def bench_events(fn):
                     for _ in range(args.warmup):
                         fn()

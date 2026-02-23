@@ -18,6 +18,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
+
 from bitsandbytes.functional import create_normal_float_codebook
 
 WARMUP = 20
@@ -85,9 +86,7 @@ def prepare_dense_data(device):
             codebook = create_normal_float_codebook(k, device=device)
             W = torch.randn(K_dim * N, device=device, dtype=torch.float32)
             packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(W, codebook, k)
-            packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-                packed_flat, absmax_flat, K_dim, N, k
-            )
+            packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax_flat, K_dim, N, k)
             data[(name, k)] = (K_dim, N, packed_flat, absmax_flat, packed_tiled, absmax_tiled, codebook)
     return data
 
@@ -134,8 +133,17 @@ def bench_mma(data, m_vals, device):
                 tile_counters = torch.zeros(m_tiles * n_tiles, dtype=torch.int32, device=device)
 
                 fn = lambda: torch.ops.bitsandbytes.kbit_gemm_prod_(
-                    A, packed_tiled, absmax_tiled, codebook,
-                    K_dim, N, k, 1, out, C_workspace, tile_counters,
+                    A,
+                    packed_tiled,
+                    absmax_tiled,
+                    codebook,
+                    K_dim,
+                    N,
+                    k,
+                    1,
+                    out,
+                    C_workspace,
+                    tile_counters,
                 )
                 avg_us = bench_kernel(fn)
                 print(f"{name:<8} {k:>2} {M:>2} {avg_us:>10.2f}")
@@ -160,8 +168,14 @@ def bench_scalar(data, m_vals, device):
                 out = torch.empty(M, N, dtype=torch.float16, device=device)
 
                 fn = lambda: torch.ops.bitsandbytes.kbit_scalar_gemv_tiled_(
-                    A, packed_tiled, absmax_tiled, codebook,
-                    K_dim, N, k, out,
+                    A,
+                    packed_tiled,
+                    absmax_tiled,
+                    codebook,
+                    K_dim,
+                    N,
+                    k,
+                    out,
                 )
                 avg_us = bench_kernel(fn)
                 print(f"{name:<8} {k:>2} {M:>2} {avg_us:>10.2f}")
@@ -184,8 +198,16 @@ def bench_grouped(moe_data, m_vals, device):
 
                 # Grouped GEMM doesn't have an _ variant yet — use the allocating version
                 fn = lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
-                    A_concat, B_packed_all, B_absmax_all, codebook,
-                    expert_offsets, K_dim, N, k, NUM_EXPERTS, M,
+                    A_concat,
+                    B_packed_all,
+                    B_absmax_all,
+                    codebook,
+                    expert_offsets,
+                    K_dim,
+                    N,
+                    k,
+                    NUM_EXPERTS,
+                    M,
                 )
                 avg_us = bench_kernel(fn)
                 print(f"{name:<8} {k:>2} {M:>2} {avg_us:>10.2f}")

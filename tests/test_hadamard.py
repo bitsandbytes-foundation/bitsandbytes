@@ -105,10 +105,10 @@ class TestGEMMEquivalence:
     def test_gemm_qwen3_shapes(self):
         """GEMM equivalence on Qwen3-Coder-Next 70B shapes."""
         shapes = [
-            (1, 2048, 5120),   # gate/up at M=1
-            (4, 5120, 2048),   # down at M=4
-            (1, 2048, 4096),   # Q proj
-            (4, 4096, 2048),   # O proj
+            (1, 2048, 5120),  # gate/up at M=1
+            (4, 5120, 2048),  # down at M=4
+            (1, 2048, 4096),  # Q proj
+            (4, 4096, 2048),  # O proj
         ]
         for M, K, N in shapes:
             A = torch.randn(M, K, dtype=torch.float16, device="cuda")
