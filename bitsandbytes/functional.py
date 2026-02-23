@@ -1135,6 +1135,25 @@ def decode_absmax_e4m4(encoded: Tensor, bias: int = 11) -> Tensor:
     return result
 
 
+def hadamard_rotate(data: Tensor, block_size: int = 32) -> Tensor:
+    """Apply in-place Walsh-Hadamard rotation to contiguous blocks.
+
+    Spreads outliers across quantization blocks, improving kbit accuracy.
+    Since H is orthogonal, rotating both weights and activations preserves
+    the GEMM result: H(A) @ H(B)^T = A @ B^T.
+
+    Args:
+        data: Input tensor (float16 or bfloat16). Modified in-place.
+        block_size: Rotation block size (32, 64, 128, or 256).
+
+    Returns:
+        The input tensor, rotated in-place.
+    """
+    data_flat = data.contiguous().view(-1)
+    torch.ops.bitsandbytes.hadamard_rotate_(data_flat, block_size)
+    return data
+
+
 def quantize_kbit(
     A: Tensor,
     k: int = 4,

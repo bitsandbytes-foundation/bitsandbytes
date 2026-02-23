@@ -796,6 +796,26 @@ MAKE_KBIT_SCALAR_GEMV_V2_FP16ABS(5)
 // Debug MMA test
 void testMMA(const half*, const half*, float*);
 
+// Forward declarations of hadamard rotation template
+template <int BLOCK_SIZE, typename T>
+void hadamardRotate(T* data, int n, cudaStream_t stream);
+
+// Unmangled hadamard rotation wrappers (dispatch block_size at runtime)
+#define MAKE_HADAMARD_ROTATE(tname, T)                                                                                 \
+    void hadamard_rotate_##tname(T* data, int n, int block_size, cudaStream_t stream) {                                \
+        switch (block_size) {                                                                                          \
+        case 32: hadamardRotate<32, T>(data, n, stream); break;                                                        \
+        case 64: hadamardRotate<64, T>(data, n, stream); break;                                                        \
+        case 128: hadamardRotate<128, T>(data, n, stream); break;                                                      \
+        case 256: hadamardRotate<256, T>(data, n, stream); break;                                                      \
+        }                                                                                                              \
+    }
+
+MAKE_HADAMARD_ROTATE(fp16, half)
+MAKE_HADAMARD_ROTATE(bf16, __nv_bfloat16)
+
+#undef MAKE_HADAMARD_ROTATE
+
 #endif // BUILD_CUDA || BUILD_HIP (kbit unmangled)
 
 extern "C" {
@@ -1663,6 +1683,15 @@ MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(2)
 MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(3)
 MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(4)
 MAKE_CKBIT_SCALAR_GEMV_V2_FP16ABS(5)
+
+// Hadamard rotation extern C wrappers
+void chadamard_rotate_fp16(half* data, int n, int block_size, cudaStream_t stream) {
+    hadamard_rotate_fp16(data, n, block_size, stream);
+}
+
+void chadamard_rotate_bf16(__nv_bfloat16* data, int n, int block_size, cudaStream_t stream) {
+    hadamard_rotate_bf16(data, n, block_size, stream);
+}
 
 #endif
 }

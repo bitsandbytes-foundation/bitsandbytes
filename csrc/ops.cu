@@ -1011,6 +1011,107 @@ void repackKbit(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+// ===========================================================================
+// Hadamard rotation kernel (in-place, blocksize-templated)
+//
+// Applies a Walsh-Hadamard transform to contiguous blocks of BLOCK_SIZE
+// elements. Used to spread outliers before kbit quantization.
+// Since H is orthogonal, rotating both weights and activations preserves
+// the GEMM result: H(A) @ H(B)^T = A @ B^T.
+//
+// One warp per rotation block:
+//   BLOCK_SIZE=32:  1 elem/thread, 5 shuffle stages
+//   BLOCK_SIZE=64:  2 elem/thread, 1 register + 5 shuffle stages
+//   BLOCK_SIZE=128: 4 elem/thread, 2 register + 5 shuffle stages
+//   BLOCK_SIZE=256: 8 elem/thread, 3 register + 5 shuffle stages
+// ===========================================================================
+
+template <int BLOCK_SIZE, typename T>
+__global__ void kHadamardRotate(T* __restrict__ data, const int n) {
+    constexpr int ELEMS_PER_THREAD = BLOCK_SIZE / 32;
+    static_assert(BLOCK_SIZE >= 32 && (BLOCK_SIZE & (BLOCK_SIZE - 1)) == 0,
+                  "BLOCK_SIZE must be a power of 2 >= 32");
+
+    const int warp_idx = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_idx * BLOCK_SIZE;
+
+    if (block_start >= n)
+        return;
+
+    // Load ELEMS_PER_THREAD elements per thread.
+    // Thread t holds elements at global positions: block_start + t, t+32, t+64, ...
+    float vals[ELEMS_PER_THREAD];
+#pragma unroll
+    for (int j = 0; j < ELEMS_PER_THREAD; j++) {
+        int idx = block_start + lane_id + j * 32;
+        vals[j] = (idx < n) ? (float)data[idx] : 0.0f;
+    }
+
+    // In-register butterfly stages (strides >= 32).
+    // Stride S in global space corresponds to element index s = S/32.
+    // Element j pairs with element j ^ s (both in the same thread).
+#pragma unroll
+    for (int s = ELEMS_PER_THREAD / 2; s >= 1; s >>= 1) {
+#pragma unroll
+        for (int j = 0; j < ELEMS_PER_THREAD; j++) {
+            int partner = j ^ s;
+            if (partner > j) {
+                float a = vals[j], b = vals[partner];
+                vals[j] = a + b;
+                vals[partner] = a - b;
+            }
+        }
+    }
+
+    // Shuffle butterfly stages (strides 16, 8, 4, 2, 1).
+    // Each stage exchanges values between lanes within the warp.
+#pragma unroll
+    for (int s = 16; s >= 1; s >>= 1) {
+#pragma unroll
+        for (int j = 0; j < ELEMS_PER_THREAD; j++) {
+            float other = __shfl_xor_sync(0xFFFFFFFF, vals[j], s);
+            vals[j] = (lane_id & s) ? (other - vals[j]) : (vals[j] + other);
+        }
+    }
+
+    // Normalize by 1/sqrt(BLOCK_SIZE).
+    const float norm = rsqrtf((float)BLOCK_SIZE);
+#pragma unroll
+    for (int j = 0; j < ELEMS_PER_THREAD; j++)
+        vals[j] *= norm;
+
+    // Store back.
+#pragma unroll
+    for (int j = 0; j < ELEMS_PER_THREAD; j++) {
+        int idx = block_start + lane_id + j * 32;
+        if (idx < n)
+            data[idx] = (T)vals[j];
+    }
+}
+
+// ---- Hadamard rotation launch wrapper ----
+
+template <int BLOCK_SIZE, typename T>
+void hadamardRotate(T* data, int n, cudaStream_t stream) {
+    const int num_blocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    const int num_cuda_blocks = (num_blocks + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kHadamardRotate<BLOCK_SIZE, T><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(data, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Explicit instantiations: 4 block sizes x 2 dtypes
+#define INSTANTIATE_HADAMARD(BS) \
+    template void hadamardRotate<BS, half>(half*, int, cudaStream_t); \
+    template void hadamardRotate<BS, __nv_bfloat16>(__nv_bfloat16*, int, cudaStream_t);
+
+INSTANTIATE_HADAMARD(32)
+INSTANTIATE_HADAMARD(64)
+INSTANTIATE_HADAMARD(128)
+INSTANTIATE_HADAMARD(256)
+
+#undef INSTANTIATE_HADAMARD
+
 // Datacenter GPU detection: Hopper (sm_90) and Blackwell datacenter (sm_100).
 // NOTE: sm_120 (RTX 5090, Blackwell consumer) lacks TMA/wgmma — must NOT match.
 #if defined(__CUDA_ARCH__)

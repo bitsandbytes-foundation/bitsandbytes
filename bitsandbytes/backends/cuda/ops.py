@@ -1000,6 +1000,30 @@ def _(
     return packed_tiled, absmax_tiled
 
 
+@register_kernel("bitsandbytes::hadamard_rotate_", "cuda")
+def _(data: torch.Tensor, block_size: int) -> torch.Tensor:
+    torch._check(
+        block_size in (32, 64, 128, 256),
+        lambda: f"block_size must be 32, 64, 128, or 256, got {block_size}",
+    )
+    torch._check(
+        data.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"hadamard_rotate only supports float16/bfloat16, got {data.dtype}",
+    )
+
+    tname = _KBIT_DTYPE_SUFFIX[data.dtype]
+    with _cuda_device_of(data):
+        fn = getattr(lib, f"chadamard_rotate_{tname}")
+        fn(
+            get_ptr(data),
+            ct.c_int(data.numel()),
+            ct.c_int(block_size),
+            _get_tensor_stream(data),
+        )
+
+    return data
+
+
 def _kbit_gemm_prod_check(A, B_packed, B_absmax, codebook, N, k, k_chunks):
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(

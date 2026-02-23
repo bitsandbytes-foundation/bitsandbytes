@@ -584,6 +584,27 @@ def _(
     return packed_tiled, absmax_tiled
 
 
+# Hadamard rotation (in-place, for kbit quantization outlier spreading)
+
+torch.library.define(
+    "bitsandbytes::hadamard_rotate_",
+    "(Tensor(a!) data, int block_size) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::hadamard_rotate_")
+def _(data: torch.Tensor, block_size: int) -> torch.Tensor:
+    torch._check(
+        block_size in (32, 64, 128, 256),
+        lambda: f"block_size must be 32, 64, 128, or 256, got {block_size}",
+    )
+    torch._check(
+        data.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"hadamard_rotate only supports float16/bfloat16, got {data.dtype}",
+    )
+    return data
+
+
 # K-bit fused dequant + GEMM (production: fp16 + bf16)
 
 torch.library.define(
