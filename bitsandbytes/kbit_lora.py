@@ -21,6 +21,7 @@ from bitsandbytes.autograd.chunked_ce import chunked_cross_entropy
 from bitsandbytes.autograd.lora_kbit import LoRA_MLP_Kbit, LoRA_W_Kbit
 from bitsandbytes.autograd.training_kernels import rmsnorm, rope
 from bitsandbytes.chunked import chunked_mlp_forward
+from bitsandbytes.training import checkpoint_cpu_offload
 
 SUPPORTED_MODEL_TYPES = {"llama", "mistral", "qwen2", "qwen3"}
 
@@ -45,6 +46,9 @@ class KbitLoraModel(nn.Module):
         mlp_chunk_size: Sequence chunk size for MLP. Default 4096.
         ce_chunk_size: Vocab chunk size for cross-entropy. Default 8192.
         compute_dtype: Computation dtype. Default bf16.
+        cpu_offload: If True, offload inter-layer activations to CPU during
+            forward and reload during backward. Saves GPU memory at cost
+            of CPU<->GPU bandwidth. Default False.
     """
 
     def __init__(
@@ -58,6 +62,7 @@ class KbitLoraModel(nn.Module):
         mlp_chunk_size: int = 4096,
         ce_chunk_size: int = 8192,
         compute_dtype: torch.dtype = torch.bfloat16,
+        cpu_offload: bool = False,
     ):
         super().__init__()
 
@@ -81,6 +86,7 @@ class KbitLoraModel(nn.Module):
         self.mlp_chunk_size = mlp_chunk_size
         self.ce_chunk_size = ce_chunk_size
         self.compute_dtype = compute_dtype
+        self.cpu_offload = cpu_offload
 
         # Extract model dimensions from config
         self.hidden_size = config.hidden_size
@@ -416,7 +422,16 @@ class KbitLoraModel(nn.Module):
 
         # Decoder layers
         for i in range(self.num_layers):
-            hidden = self._layer_forward(i, hidden, position_ids)
+            if self.cpu_offload and self.training:
+                # Wrap each layer with CPU offload: saves inter-layer
+                # activations to CPU during forward, reloads during backward
+                def _make_layer_fn(layer_idx, pos_ids):
+                    def _fn(h):
+                        return self._layer_forward(layer_idx, h, pos_ids)
+                    return _fn
+                hidden = checkpoint_cpu_offload(_make_layer_fn(i, position_ids), hidden)
+            else:
+                hidden = self._layer_forward(i, hidden, position_ids)
 
         # Final norm
         hidden_2d = hidden.reshape(-1, self.hidden_size)
