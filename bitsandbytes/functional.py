@@ -11,7 +11,6 @@ from typing import Any, Optional
 import numpy as np
 import torch
 from torch import Tensor
-from typing_extensions import deprecated
 
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
@@ -20,32 +19,6 @@ from .cextension import lib
 name2qmap = {}
 
 """C FUNCTIONS FOR OPTIMIZERS"""
-str2optimizer8bit = {
-    "adam": (
-        lib.cadam_static_8bit_grad_32,
-        lib.cadam_static_8bit_grad_16,
-    ),
-    "momentum": (
-        lib.cmomentum_static_8bit_grad_32,
-        lib.cmomentum_static_8bit_grad_16,
-    ),
-    "rmsprop": (
-        lib.crmsprop_static_8bit_grad_32,
-        lib.crmsprop_static_8bit_grad_16,
-    ),
-    "lion": (
-        lib.clion_static_8bit_grad_32,
-        lib.clion_static_8bit_grad_16,
-    ),
-    "lamb": (
-        lib.cadam_static_8bit_grad_32,
-        lib.cadam_static_8bit_grad_16,
-    ),
-    "lars": (
-        lib.cmomentum_static_8bit_grad_32,
-        lib.cmomentum_static_8bit_grad_16,
-    ),
-}
 
 
 class GlobalPageManager:
@@ -1077,110 +1050,6 @@ def dequantize_4bit(
     return out
 
 
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def quantize(
-    A: Tensor,
-    code: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
-) -> tuple[Tensor, tuple[Tensor, Tensor]]:
-    if code is None:
-        if "dynamic" not in name2qmap:
-            name2qmap["dynamic"] = create_dynamic_map().to(A.device)
-        code = name2qmap["dynamic"]
-        code = code.to(A.device)
-
-    absmax = torch.abs(A).max()
-    if absmax.dtype != torch.float32:
-        absmax = absmax.float()
-    inp = A / absmax
-    out = quantize_no_absmax(inp, code, out)
-    return out, (absmax, code)
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def dequantize(
-    A: Tensor,
-    state: Optional[tuple[Tensor, Tensor]] = None,
-    absmax: Optional[torch.Tensor] = None,
-    code: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
-) -> Tensor:
-    assert state is not None or absmax is not None
-    if code is None and state is None:
-        if "dynamic" not in name2qmap:
-            name2qmap["dynamic"] = create_dynamic_map().to(A.device)
-        code = name2qmap["dynamic"]
-        code = code.to(A.device)
-
-    if state is None:
-        state = (absmax, code)
-    out = dequantize_no_absmax(A, state[1], out)
-    return out * state[0]
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def quantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = None) -> Tensor:
-    """
-    Quantizes input tensor to 8-bit.
-
-    Quantizes the 32-bit input tensor `A` to the 8-bit output tensor
-    `out` using the quantization map `code`.
-
-    Parameters
-    ----------
-    A : torch.Tensor
-        The input tensor.
-    code : torch.Tensor
-        The quantization map.
-    out : torch.Tensor, optional
-        The output tensor. Needs to be of type byte.
-
-    Returns
-    -------
-    torch.Tensor:
-        Quantized 8-bit tensor.
-    """
-    with _cuda_device_of(A):
-        if out is None:
-            out = torch.zeros_like(A, dtype=torch.uint8)
-        is_on_gpu([A, out])
-        lib.cquantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()))
-
-    return out
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def dequantize_no_absmax(A: Tensor, code: Tensor, out: Optional[torch.Tensor] = None) -> Tensor:
-    """
-    Dequantizes the 8-bit tensor to 32-bit.
-
-    Dequantizes the 8-bit tensor `A` to the 32-bit tensor `out` via
-    the quantization map `code`.
-
-    Parameters
-    ----------
-    A : torch.Tensor
-        The 8-bit input tensor.
-    code : torch.Tensor
-        The quantization map.
-    out : torch.Tensor
-        The 32-bit output tensor.
-
-    Returns
-    -------
-    torch.Tensor:
-        32-bit output tensor.
-    """
-    with _cuda_device_of(A):
-        if out is None:
-            out = torch.zeros_like(A, dtype=torch.float32)
-        is_on_gpu([code, A, out])
-        stream = _get_tensor_stream(A)
-        lib.cdequantize(get_ptr(code), get_ptr(A), get_ptr(out), ct.c_int(A.numel()), stream)
-
-    return out
-
-
 def optimizer_update_32bit(
     optimizer_name: str,
     g: Tensor,
@@ -1270,143 +1139,6 @@ def optimizer_update_32bit(
     )
 
 
-@deprecated(
-    "This function is deprecated and will be removed in a future release. "
-    "Please use optimizer_update_8bit_blockwise instead. ",
-    category=FutureWarning,
-)
-def optimizer_update_8bit(
-    optimizer_name: str,
-    g: Tensor,
-    p: Tensor,
-    state1: Tensor,
-    state2: Optional[torch.Tensor],
-    beta1: float,
-    beta2: float,
-    eps: float,
-    step: int,
-    lr: float,
-    qmap1: Tensor,
-    qmap2: Optional[torch.Tensor],
-    max1: Tensor,
-    max2: Optional[torch.Tensor],
-    new_max1: Tensor,
-    new_max2: Optional[torch.Tensor],
-    weight_decay: float = 0.0,
-    gnorm_scale: float = 1.0,
-    unorm_vec: Optional[torch.Tensor] = None,
-    max_unorm: float = 0.0,
-) -> None:
-    """
-    Performs an inplace Adam update.
-
-    Universal Adam update for 32/8-bit state and 32/16-bit gradients/weights.
-    Uses AdamW formulation if weight decay > 0.0.
-
-    Parameters
-    ----------
-    optimizer_name : str
-        The name of the optimizer. Choices {adam, momentum}
-    g : torch.Tensor
-        Gradient tensor.
-    p : torch.Tensor
-        Parameter tensor.
-    state1 : torch.Tensor
-        Adam state 1.
-    state2 : torch.Tensor
-        Adam state 2.
-    beta1 : float
-        Adam beta1.
-    beta2 : float
-        Adam beta2.
-    eps : float
-        Adam epsilon.
-    weight_decay : float
-        Weight decay.
-    step : int
-        Current optimizer step.
-    lr : float
-        The learning rate.
-    qmap1 : torch.Tensor
-        Quantization map for first Adam state.
-    qmap2 : torch.Tensor
-        Quantization map for second Adam state.
-    max1 : torch.Tensor
-        Max value for first Adam state update.
-    max2 : torch.Tensor
-        Max value for second Adam state update.
-    new_max1 : torch.Tensor
-        Max value for the next Adam update of the first state.
-    new_max2 : torch.Tensor
-        Max value for the next Adam update of the second state.
-    gnorm_scale : float
-        The factor to rescale the gradient to the max clip value.
-    unorm_vec : torch.Tensor
-        The tensor for the update norm.
-    max_unorm : float
-        The maximum update norm relative to the weight norm.
-    """
-
-    param_norm = 0.0
-    if max_unorm > 0.0:
-        param_norm = torch.norm(p.data.float())
-
-    with _cuda_device_of(g):
-        is_on_gpu([g, p, state1, state2, unorm_vec, qmap1, qmap2, max1, max2, new_max1, new_max2])
-        if g.dtype == torch.float32 and state1.dtype == torch.uint8:
-            str2optimizer8bit[optimizer_name][0](
-                get_ptr(p),
-                get_ptr(g),
-                get_ptr(state1),
-                get_ptr(state2),
-                get_ptr(unorm_vec),
-                ct.c_float(max_unorm),
-                ct.c_float(param_norm),
-                ct.c_float(beta1),
-                ct.c_float(beta2),
-                ct.c_float(eps),
-                ct.c_int32(step),
-                ct.c_float(lr),
-                get_ptr(qmap1),
-                get_ptr(qmap2),
-                get_ptr(max1),
-                get_ptr(max2),
-                get_ptr(new_max1),
-                get_ptr(new_max2),
-                ct.c_float(weight_decay),
-                ct.c_float(gnorm_scale),
-                ct.c_int32(g.numel()),
-            )
-        elif g.dtype == torch.float16 and state1.dtype == torch.uint8:
-            str2optimizer8bit[optimizer_name][1](
-                get_ptr(p),
-                get_ptr(g),
-                get_ptr(state1),
-                get_ptr(state2),
-                get_ptr(unorm_vec),
-                ct.c_float(max_unorm),
-                ct.c_float(param_norm),
-                ct.c_float(beta1),
-                ct.c_float(beta2),
-                ct.c_float(eps),
-                ct.c_int32(step),
-                ct.c_float(lr),
-                get_ptr(qmap1),
-                get_ptr(qmap2),
-                get_ptr(max1),
-                get_ptr(max2),
-                get_ptr(new_max1),
-                get_ptr(new_max2),
-                ct.c_float(weight_decay),
-                ct.c_float(gnorm_scale),
-                ct.c_int32(g.numel()),
-            )
-        else:
-            raise ValueError(
-                f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
-            )
-
-
 def optimizer_update_8bit_blockwise(
     optimizer_name: str,
     g: Tensor,
@@ -1451,48 +1183,6 @@ def optimizer_update_8bit_blockwise(
         gnorm_scale,
         skip_zeros,
     )
-
-
-@deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
-def percentile_clipping(grad: Tensor, gnorm_vec: Tensor, step: int, percentile: int = 5):
-    """Applies percentile clipping
-
-    grad: torch.Tensor
-        The gradient tensor.
-    gnorm_vec: torch.Tensor
-        Vector of gradient norms. 100 elements expected.
-    step: int
-        The current optimization steps (number of past gradient norms).
-
-    """
-    with _cuda_device_of(grad):
-        is_on_gpu([grad, gnorm_vec])
-        if grad.dtype == torch.float32:
-            lib.cpercentile_clipping_g32(
-                get_ptr(grad),
-                get_ptr(gnorm_vec),
-                ct.c_int32(step),
-                ct.c_int32(grad.numel()),
-            )
-        elif grad.dtype == torch.float16:
-            lib.cpercentile_clipping_g16(
-                get_ptr(grad),
-                get_ptr(gnorm_vec),
-                ct.c_int32(step),
-                ct.c_int32(grad.numel()),
-            )
-        else:
-            raise ValueError(f"Gradient type {grad.dtype} not supported!")
-
-    current_gnorm = torch.sqrt(gnorm_vec[step % 100])
-    vals, _ = torch.sort(gnorm_vec)
-    clip_value = torch.sqrt(vals[percentile])
-    gnorm_scale = 1.0
-
-    if current_gnorm > clip_value:
-        gnorm_scale = clip_value / current_gnorm
-
-    return current_gnorm, clip_value, gnorm_scale
 
 
 def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8):

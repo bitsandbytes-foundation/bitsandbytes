@@ -17,8 +17,6 @@ class SGD(Optimizer1State):
         optim_bits=32,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
     ):
         """
         Base SGD optimizer.
@@ -42,10 +40,6 @@ class SGD(Optimizer1State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
         """
         if momentum == 0:
             raise NotImplementedError("SGD without momentum is not supported!")
@@ -59,8 +53,6 @@ class SGD(Optimizer1State):
             optim_bits,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
         )
 
 
@@ -75,8 +67,6 @@ class SGD8bit(Optimizer1State):
         nesterov=False,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
     ):
         """
         8-bit SGD optimizer.
@@ -98,10 +88,6 @@ class SGD8bit(Optimizer1State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
         """
         if momentum == 0:
             raise NotImplementedError("SGD without momentum is not supported!")
@@ -115,8 +101,6 @@ class SGD8bit(Optimizer1State):
             8,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
         )
 
 
@@ -131,8 +115,6 @@ class SGD32bit(Optimizer1State):
         nesterov=False,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=True,
     ):
         """
         32-bit SGD optimizer.
@@ -154,10 +136,6 @@ class SGD32bit(Optimizer1State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
         """
         if momentum == 0:
             raise NotImplementedError("SGD without momentum is not supported!")
@@ -171,6 +149,4 @@ class SGD32bit(Optimizer1State):
             32,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
         )

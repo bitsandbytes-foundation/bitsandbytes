@@ -727,7 +727,6 @@ class TestLLMInt8Functional:
 
     @pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
     @pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
-    @pytest.mark.deprecated
     def test_int8_double_quant(self, dim1, dim2):
         for i in range(k):
             A = torch.randn(dim1, dim2, device="cuda").half()
