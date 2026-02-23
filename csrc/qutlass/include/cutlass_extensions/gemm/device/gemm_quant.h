@@ -201,8 +201,8 @@ class GemmQuantMx {
               scatter_D_indices(scatter_D_indices_) {}
     };
 
-  private:
-    /// Kernel parameters object
+  public:
+    /// Kernel parameters object (public for PersistentRunner graph-safe access)
     typename GemmKernel::Params params_;
 
   public:
@@ -500,8 +500,8 @@ class GemmQuantMxMask {
               scatter_D_indices(scatter_D_indices_) {}
     };
 
-  private:
-    /// Kernel parameters object
+  public:
+    /// Kernel parameters object (public for PersistentRunner graph-safe access)
     typename GemmKernel::Params params_;
 
   public:
@@ -802,8 +802,8 @@ class GemmQuantNv {
               scatter_D_indices(scatter_D_indices_) {}
     };
 
-  private:
-    /// Kernel parameters object
+  public:
+    /// Kernel parameters object (public for PersistentRunner graph-safe access)
     typename GemmKernel::Params params_;
 
   public:
