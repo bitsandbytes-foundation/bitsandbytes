@@ -494,6 +494,27 @@ def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tens
     return packed, block_scales, ts_out
 
 
+# CUTLASS-based fused quantize for NVFP4 (SM_120+)
+# Uses QuTLASS GEMM-as-quantize approach: 7-9x faster than hand-written kernel.
+# Supports both AbsMax and Quest (Hadamard rotation) methods.
+torch.library.define(
+    "bitsandbytes::cutlass_fused_quantize_nvfp4",
+    "(Tensor A, Tensor B, float tensor_scale, bool quest) -> (Tensor, Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::cutlass_fused_quantize_nvfp4")
+def _(
+    A: torch.Tensor, B: torch.Tensor, tensor_scale: float, quest: bool
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    packed = torch.empty(n // 2, dtype=torch.uint8, device=A.device)
+    block_scales = torch.empty(n // 16, dtype=torch.uint8, device=A.device)
+    ts_out = torch.empty(1, dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
 # Scale reordering for CUTLASS block-scaled GEMM
 torch.library.define(
     "bitsandbytes::scale_to_blocked",

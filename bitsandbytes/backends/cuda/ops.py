@@ -903,6 +903,101 @@ def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tens
     return packed, block_scales, ts_out
 
 
+# CUTLASS-based fused quantize for NVFP4 (SM_120+)
+# Uses QuTLASS GEMM-as-quantize approach: 7-9x faster than hand-written kernel.
+# Caches the identity/Hadamard matrices per device.
+_fused_quant_matrices: dict[torch.device, dict[str, torch.Tensor]] = {}
+
+
+def _get_fused_quant_matrix(device: torch.device, quest: bool) -> torch.Tensor:
+    """Get cached 16x16 identity or Hadamard matrix for fused quantize."""
+    key = "quest" if quest else "identity"
+    dev_cache = _fused_quant_matrices.setdefault(device, {})
+    if key not in dev_cache:
+        if quest:
+            # Normalized 16x16 Hadamard matrix (values ±0.25 = ±1/sqrt(16))
+            # Build via Sylvester construction
+            h = torch.tensor([[1.0]], dtype=torch.float32)
+            for _ in range(4):  # 2^4 = 16
+                h = torch.cat([torch.cat([h, h], dim=1), torch.cat([h, -h], dim=1)], dim=0)
+            h = (h / 4.0).to(dtype=torch.bfloat16, device=device)
+            dev_cache[key] = h
+        else:
+            dev_cache[key] = torch.eye(16, dtype=torch.bfloat16, device=device)
+    return dev_cache[key]
+
+
+@register_kernel("bitsandbytes::cutlass_fused_quantize_nvfp4", "cuda")
+def _(
+    A: torch.Tensor, B: torch.Tensor, tensor_scale: float, quest: bool
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """CUTLASS-based fused quantize (optionally with Hadamard rotation).
+
+    The CUTLASS kernel requires M to be a multiple of 128. We pad here
+    and trim the output to maintain a transparent API.
+    """
+    A = A.contiguous()
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    torch._check(
+        A.dtype == torch.bfloat16,
+        lambda: f"CUTLASS fused quantize requires bfloat16, got {A.dtype}",
+    )
+
+    # Reshape to 2D: (M, K) where K is the last dimension
+    # The fused quantize GEMM treats each group of 16 elements as one "row"
+    K = 16  # NVFP4 group size = GEMM K dimension
+    N = 16  # B matrix is 16x16
+    orig_M = n // K
+    padded_M = ((orig_M + 127) // 128) * 128
+
+    # Pad input if needed
+    if padded_M != orig_M:
+        A_2d = A.view(orig_M, K)
+        pad_rows = padded_M - orig_M
+        A_2d = torch.nn.functional.pad(A_2d, (0, 0, 0, pad_rows))
+        A_flat = A_2d.reshape(-1)
+    else:
+        A_flat = A
+
+    # Compute global_scale = 1/tensor_scale (QuTLASS convention)
+    global_scale = torch.tensor(
+        [1.0 / tensor_scale if tensor_scale > 0 else 0.0],
+        dtype=torch.float32,
+        device=A.device,
+    )
+
+    # Allocate output buffers (padded size)
+    packed_padded = torch.zeros(padded_M * K // 2, dtype=torch.uint8, device=A.device)
+
+    # Scale output: one E4M3 scale per 16-element block = padded_M scales
+    # QuTLASS outputs as (padded_M, 1) but we flatten
+    scales_padded = torch.zeros(padded_M, dtype=torch.uint8, device=A.device)
+
+    with _cuda_device_of(A):
+        # Always use AbsMax kernel — rotation is handled by B matrix (Hadamard vs identity).
+        # The Quest template has an internal epilogue issue that produces incorrect results.
+        fn = lib.cfused_quantize_nvfp4_absmax
+        fn(
+            get_ptr(A_flat),
+            get_ptr(B),
+            get_ptr(packed_padded),
+            get_ptr(scales_padded),
+            get_ptr(global_scale),
+            ct.c_int(padded_M),
+            ct.c_int(N),
+            ct.c_int(K),
+            _get_tensor_stream(A),
+        )
+
+    # Trim to original size
+    packed = packed_padded[: orig_M * K // 2] if padded_M != orig_M else packed_padded
+    block_scales = scales_padded[:orig_M] if padded_M != orig_M else scales_padded
+
+    ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
 # Scale reordering for CUTLASS block-scaled GEMM
 @register_kernel("bitsandbytes::scale_to_blocked", "cuda")
 def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:

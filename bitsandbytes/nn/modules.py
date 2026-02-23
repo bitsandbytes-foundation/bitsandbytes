@@ -683,7 +683,8 @@ class LinearNVFP4(nn.Linear):
         input_features: Number of input features.
         output_features: Number of output features.
         bias: Whether to use bias. Defaults to True.
-        rotate: Apply Hadamard rotation before quantization. Defaults to False.
+        rotate: Apply Hadamard rotation before quantization. Defaults to True.
+            With the CUTLASS fused quantize kernel, rotation is essentially free.
         device: Device for initialization.
     """
 
@@ -692,7 +693,7 @@ class LinearNVFP4(nn.Linear):
         input_features,
         output_features,
         bias=True,
-        rotate=False,
+        rotate=True,
         device=None,
     ):
         super().__init__(input_features, output_features, bias, device)
@@ -706,7 +707,7 @@ class LinearNVFP4(nn.Linear):
         from bitsandbytes.functional import quantize_nvfp4
 
         # Weight is (out_features, in_features) = (N, K) in GEMM terms
-        w = self.weight.data.float().contiguous()
+        w = self.weight.data.to(torch.bfloat16).contiguous()
         packed, state = quantize_nvfp4(w, rotate=self.rotate)
         self.weight_packed = packed
         self.weight_state = state
@@ -723,8 +724,8 @@ class LinearNVFP4(nn.Linear):
         inp_dtype = x.dtype
         input_shape = x.shape
 
-        # Reshape input: (*, K) -> (M, K)
-        x_2d = x.reshape(-1, input_shape[-1]).float().contiguous()
+        # Reshape input: (*, K) -> (M, K). Use BF16 for CUTLASS fused quantize.
+        x_2d = x.reshape(-1, input_shape[-1]).to(torch.bfloat16).contiguous()
         N = self.weight_state.shape[0]  # out_features
 
         # Quantize activations to NVFP4
