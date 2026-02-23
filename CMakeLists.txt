@@ -249,9 +249,10 @@ if(BUILD_CUDA)
             list(APPEND _NVFP4_SM120_SOURCES
                 csrc/qutlass/gemm_nvfp4_sm120.cu
                 csrc/qutlass/scale_reorder.cu
+                csrc/qutlass/fused_quantize_nv.cu
             )
             set(_HAS_CUTLASS_NVFP4 TRUE)
-            message(STATUS "CUTLASS NVFP4 SM_120a GEMM enabled")
+            message(STATUS "CUTLASS NVFP4 SM_120a GEMM + fused quantize enabled")
         else()
             set(_HAS_CUTLASS_NVFP4 FALSE)
             message(STATUS "CUTLASS NVFP4 GEMM disabled (needs CUDA >= 12.8 and third_party/cutlass)")
@@ -271,12 +272,14 @@ if(BUILD_CUDA)
             target_include_directories(nvfp4_sm120a PRIVATE
                 "${CMAKE_SOURCE_DIR}/third_party/cutlass/include"
                 "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
+                "${CMAKE_SOURCE_DIR}/csrc/qutlass/include"
             )
             target_compile_options(nvfp4_sm120a PRIVATE
                 $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
                 $<$<COMPILE_LANGUAGE:CUDA>:-std=c++17>
                 $<$<COMPILE_LANGUAGE:CUDA>:-O3>
                 $<$<COMPILE_LANGUAGE:CUDA>:-DNDEBUG>
+                $<$<COMPILE_LANGUAGE:CUDA>:-DQUTLASS_DISABLE_PYBIND>
             )
         endif()
 
