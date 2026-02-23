@@ -19,6 +19,7 @@
 #include "cutlass/gemm/device/gemm_universal_adapter.h"
 #include "cutlass/gemm/kernel/gemm_universal.hpp"
 #include "cutlass/util/packed_stride.hpp"
+#include "cutlass/util/device_memory.h"
 #include "cutlass/detail/sm100_blockscaled_layout.hpp"
 
 using namespace cute;
