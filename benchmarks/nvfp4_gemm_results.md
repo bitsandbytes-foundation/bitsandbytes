@@ -75,7 +75,55 @@ optimization with cp.async double buffering could close this gap.
 The L1 cache is the primary bottleneck for large matrices. The kernel achieves
 good SM occupancy (30 active warps, near-maximum for 4 blocks/SM × 8 warps/block).
 
+## CUTLASS GEMM Results (via QuTLASS)
+
+After replacing the hand-written kernel with CUTLASS (QuTLASS-derived), compiled into
+bitsandbytes with zero runtime dependency:
+
+### Standalone QuTLASS GEMM (GEMM-only, no Python overhead)
+
+| Shape | cuBLAS BF16 (ms) | cuBLAS TFLOPS | CUTLASS (ms) | CUTLASS TFLOPS | Speedup |
+|-------|-------------------|---------------|--------------|----------------|---------|
+| 1×4096×4096 | 0.017 | 2.0 | 0.026 | 1.3 | 0.64x |
+| 8×4096×4096 | 0.018 | 15.1 | 0.025 | 10.8 | 0.72x |
+| 32×4096×4096 | 0.018 | 60.8 | 0.025 | 43.3 | 0.71x |
+| 128×4096×4096 | 0.024 | 177.5 | 0.025 | 174.5 | 0.98x |
+| **4096×4096×4096** | **0.342** | **402.0** | **0.108** | **1276.0** | **3.17x** |
+| 32×4096×11008 | 0.028 | 103.5 | 0.045 | 64.0 | 0.62x |
+| 128×4096×11008 | 0.046 | 249.1 | 0.045 | 254.9 | 1.02x |
+
+### Integrated bitsandbytes GEMM (includes Python dispatch overhead)
+
+| Shape | cuBLAS BF16 (ms) | cuBLAS TFLOPS | BNB NVFP4 (ms) | BNB TFLOPS | Speedup |
+|-------|-------------------|---------------|----------------|------------|---------|
+| 1×4096×4096 | 0.016 | 2.1 | 0.038 | 0.9 | 0.43x |
+| 8×4096×4096 | 0.018 | 15.2 | 0.040 | 6.7 | 0.44x |
+| 32×4096×4096 | 0.018 | 60.6 | 0.039 | 27.4 | 0.45x |
+| 128×4096×4096 | 0.023 | 187.5 | 0.039 | 109.8 | 0.59x |
+| **4096×4096×4096** | **0.339** | **405.3** | **0.147** | **937.8** | **2.31x** |
+| 32×4096×11008 | 0.028 | 103.4 | 0.060 | 48.4 | 0.47x |
+| 128×4096×11008 | 0.046 | 250.3 | 0.060 | 193.6 | 0.77x |
+
+### Key Findings — CUTLASS vs Hand-written
+
+- **Large M (4096)**: CUTLASS achieves **1276 TFLOPS** (3.17x cuBLAS), **5.3x** faster than
+  the hand-written kernel (240 TFLOPS). CUTLASS uses SM_120 wgmma instructions with
+  CUTLASS's sophisticated pipeline scheduling.
+- **Small M (1-32)**: CUTLASS has higher launch overhead (~0.025ms floor) vs the hand-written
+  kernel (~0.008-0.012ms). For small shapes where compute is negligible, the hand-written
+  kernel with split-K still has an advantage.
+- **Medium M (128)**: Roughly parity between CUTLASS and cuBLAS.
+- **Memory compression**: Unchanged — 3.6x compression vs FP16 weights.
+
+### CUTLASS Configuration (SM_120)
+
+- Tile shapes: 128×128×128 (M<512), 256×128×128 (M≥512)
+- Cluster shape: 1×1×1 (no multi-SM clusters on consumer Blackwell)
+- Data type: `nv_float4_t<float_e2m1_t>`, scale type: `float_ue4m3_t`
+- Output: BF16 with FP32 accumulator, alpha epilogue fusion
+
 ## Correctness
 All GEMM outputs match the dequantize→torch.matmul reference with 0.000000 relative
-error (identical quantized data, same FP32 accumulation). 31 tests pass including
-non-aligned shapes, tall/skinny LLM shapes, and NVFP4 output epilogue tests.
+error (identical quantized data, same FP32 accumulation). 36 tests pass including
+non-aligned shapes, tall/skinny LLM shapes, large-batch shapes (up to 4096x4096x4096),
+scale reordering round-trip tests, and NVFP4 output epilogue tests.

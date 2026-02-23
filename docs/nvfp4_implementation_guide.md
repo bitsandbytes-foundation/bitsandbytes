@@ -858,16 +858,19 @@ SM_120 (Blackwell consumer GPUs like RTX PRO 6000).
 
 ### Architecture
 
-The implementation uses **raw CUDA with inline PTX** — no CUTLASS dependency. All
-kernels are owned code using the `mma.sync.aligned.block_scale` PTX instruction
-for SM_120 (consumer Blackwell), NOT `tcgen05.mma` (datacenter SM_100).
+The GEMM uses **CUTLASS** (vendored from QuTLASS, compiled into the shared library).
+Quantization/dequantization/rotation kernels use raw CUDA with inline PTX.
 
 ```
 csrc/
-├── kernels.cu                 # Quantize/dequantize/Hadamard kernels
-├── kernels_nvfp4_sm120.cu     # Block-scaled GEMM kernel (SM_120 only)
-├── ops.cu                     # Host-side launchers
-└── pythonInterface.cpp        # extern "C" symbols for ctypes
+├── kernels.cu                     # Quantize/dequantize/Hadamard kernels
+├── kernels_nvfp4_sm120.cu         # Legacy hand-written GEMM (SM_120)
+├── qutlass/gemm_nvfp4_sm120.cu    # CUTLASS-based GEMM (SM_120, from QuTLASS)
+├── qutlass/scale_reorder.cu       # Scale factor reordering for CUTLASS
+├── ops.cu                         # Host-side launchers
+└── pythonInterface.cpp            # extern "C" symbols for ctypes
+
+third_party/cutlass/               # CUTLASS headers (submodule, header-only)
 
 bitsandbytes/
 ├── _ops.py                    # torch.library op definitions
@@ -878,15 +881,20 @@ bitsandbytes/
 
 ### Key Design Decisions
 
-1. **SM_120 consumer GPUs only**: Uses `mma.sync.aligned.block_scale` (register-based,
-   Ampere-style). SM_100 datacenter uses `tcgen05.mma` with TMEM (separate implementation).
-2. **Block size fixed at 16**: Hardware requirement for NVFP4 (different from existing
+1. **SM_120 consumer GPUs only**: CUTLASS GEMM uses `wgmma` (SM_120 Blackwell path).
+   SM_100 datacenter uses `tcgen05.mma` with TMEM (separate implementation, future work).
+2. **CUTLASS GEMM, owned quantization**: The GEMM is vendored from QuTLASS with
+   PyTorch dependencies removed. Quantize/dequantize/rotation kernels are owned code.
+3. **Block size fixed at 16**: Hardware requirement for NVFP4 (different from existing
    bitsandbytes variable block sizes of 32-4096).
-3. **NVFP4=3 in DataType_t enum**: Separate from existing FP4=1 (custom bitsandbytes
+4. **NVFP4=3 in DataType_t enum**: Separate from existing FP4=1 (custom bitsandbytes
    format, not E2M1). No breaking changes to existing API.
-4. **Two-level scaling**: E4M3 block scales per 16 elements + FP32 tensor scale.
-5. **Optional Hadamard rotation**: Had16 matched to NVFP4's block size.
-6. **Separate kernel file**: `kernels_nvfp4_sm120.cu` isolates SM_120-specific code.
+5. **Two-level scaling**: E4M3 block scales per 16 elements + FP32 tensor scale.
+6. **Optional Hadamard rotation**: Had16 matched to NVFP4's block size.
+7. **Scale reordering at quantize time**: CUTLASS expects block-scaled swizzled layout;
+   computed once at quantization and stored in `NVFP4QuantState.block_scales_blocked`.
+8. **BF16 output from CUTLASS**: Tensor scales folded into CUTLASS epilogue alpha;
+   result converted to FP32 in Python dispatch for API compatibility.
 
 ### PTX Instruction
 
