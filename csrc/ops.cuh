@@ -17,9 +17,7 @@
 #include "compat.cuh"
 #include <common.h>
 
-// ============================================================================
 // Error checking helpers
-// ============================================================================
 
 inline void checkDeviceStatus(bnb_error_t status) {
     if (status != BNB_SUCCESS) {
@@ -36,9 +34,7 @@ inline int checkBlasLtStatus(bnb_blas_status_t status) {
     return 0;
 }
 
-// ============================================================================
 // Enums
-// ============================================================================
 
 typedef enum Operations_t {
     ksmul = 0,
@@ -60,9 +56,7 @@ typedef enum Funcs_t {
     _MUL = 2,
 } Funcs_t;
 
-// ============================================================================
 // Context classes
-// ============================================================================
 
 class Context {
   public:
@@ -107,9 +101,7 @@ class ContextSparse {
     }
 };
 
-// ============================================================================
 // Function declarations
-// ============================================================================
 
 void quantize(float* code, float* A, unsigned char* out, int n);
 void dequantize(float* code, unsigned char* A, float* out, int n, bnb_stream_t stream);

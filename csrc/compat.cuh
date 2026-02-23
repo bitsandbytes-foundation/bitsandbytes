@@ -9,9 +9,7 @@
 
 #pragma once
 
-// ============================================================================
 // Platform detection
-// ============================================================================
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #define BNB_HIP 1
@@ -19,9 +17,7 @@
 #define BNB_HIP 0
 #endif
 
-// ============================================================================
 // Runtime and FP16/BF16 headers
-// ============================================================================
 
 #if BNB_HIP
 
@@ -40,9 +36,7 @@
 
 #endif
 
-// ============================================================================
 // Stream and error types
-// ============================================================================
 
 #if BNB_HIP
 
@@ -70,9 +64,7 @@ using bnb_error_t = cudaError_t;
 
 #endif
 
-// ============================================================================
-// Error checking macro (unified name, platform-specific implementation)
-// ============================================================================
+// Error checking
 
 #define BNB_CHECK_RETURN(value)                                                                                        \
     {                                                                                                                  \
@@ -86,12 +78,10 @@ using bnb_error_t = cudaError_t;
 // Keep backward compat for existing code during migration
 #define CUDA_CHECK_RETURN(value) BNB_CHECK_RETURN(value)
 
-// ============================================================================
 // Warp synchronization
 //
 // HIP warps are always in lockstep (no independent thread scheduling),
 // so __syncwarp() is a no-op. CUDA needs it for warp convergence.
-// ============================================================================
 
 #if BNB_HIP
 #define __syncwarp()                                                                                                   \
@@ -99,11 +89,7 @@ using bnb_error_t = cudaError_t;
     } while (0)
 #endif
 
-// ============================================================================
 // BFloat16 type alias
-//
-// CUDA uses __nv_bfloat16, HIP uses hip_bfloat16. Unified as bnb_bfloat16.
-// ============================================================================
 
 #if BNB_HIP
 using bnb_bfloat16 = hip_bfloat16;
@@ -111,9 +97,7 @@ using bnb_bfloat16 = hip_bfloat16;
 using bnb_bfloat16 = __nv_bfloat16;
 #endif
 
-// ============================================================================
 // Data type enum aliases for BLAS/Sparse libraries
-// ============================================================================
 
 #if BNB_HIP
 
@@ -131,9 +115,7 @@ using bnb_bfloat16 = __nv_bfloat16;
 
 #endif
 
-// ============================================================================
 // BLAS Lt types and functions
-// ============================================================================
 
 #if BNB_HIP
 
@@ -198,9 +180,7 @@ using bnb_blas_status_t = cublasStatus_t;
 
 #endif
 
-// ============================================================================
 // Sparse library types
-// ============================================================================
 
 #if BNB_HIP
 

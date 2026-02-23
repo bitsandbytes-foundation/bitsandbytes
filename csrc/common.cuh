@@ -1,19 +1,13 @@
-// common.cuh — Merged architecture constants for CUDA and HIP
-//
-// This replaces both the old csrc/common.cuh and csrc/common_hip.cuh.
-// Platform detection uses compat.cuh's BNB_HIP macro.
+// common.cuh — Architecture constants and feature detection
 
 #pragma once
 
 #include "compat.cuh"
 
-// ============================================================================
 // Warp size
-// ============================================================================
 
 #if BNB_HIP
-// Use the compiler-provided wavefront size, which is correctly defined in
-// both host and device compilation passes. CDNA (gfx9xx) = 64, RDNA = 32.
+// CDNA (gfx9xx) = 64, RDNA = 32.
 #ifdef __AMDGCN_WAVEFRONT_SIZE
 #define BNB_WARP_SIZE __AMDGCN_WAVEFRONT_SIZE
 #else
@@ -23,9 +17,7 @@
 #define BNB_WARP_SIZE 32
 #endif
 
-// ============================================================================
 // BF16 availability
-// ============================================================================
 
 #if BNB_HIP
 // BF16 is available on all currently-supported ROCm architectures (CDNA2+, RDNA3+)
@@ -34,9 +26,7 @@
 #define BNB_BF16_AVAILABLE (__CUDA_ARCH__ >= BNB_CC_AMPERE)
 #endif
 
-// ============================================================================
-// CUDA compute capability constants (CUDA-only, but harmless to define on HIP)
-// ============================================================================
+// Compute capability constants
 
 #define BNB_CC_PASCAL 600
 #define BNB_CC_PASCAL_X2 620
@@ -50,9 +40,7 @@
 #define BNB_CC_HOPPER 900
 #define BNB_CC_BLACKWELL 1000
 
-// ============================================================================
-// Feature availability based on arch (CUDA uses __CUDA_ARCH__, HIP is simpler)
-// ============================================================================
+// Feature availability based on arch
 
 #if BNB_HIP
 // HIP: MMA not supported via mma.h; FP8 support varies by arch
@@ -65,9 +53,7 @@
 #define BNB_FP8_AVAILABLE (__CUDA_ARCH__ >= BNB_CC_ADA)
 #endif
 
-// ============================================================================
 // Maximum threads per SM/CU
-// ============================================================================
 
 #if BNB_HIP
 // For currently supported ROCm architectures (CDNA2, RDNA3)

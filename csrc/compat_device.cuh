@@ -7,12 +7,7 @@
 
 #include "compat.cuh"
 
-// ============================================================================
 // CUB / hipCUB — namespace alias
-//
-// Usage: bnb_cub::BlockLoad<...>, bnb_cub::BlockReduce<...>, etc.
-// This single alias eliminates ~90% of the cub:: vs hipcub:: differences.
-// ============================================================================
 
 #if BNB_HIP
 
@@ -34,9 +29,7 @@ namespace bnb_cub = cub;
 
 #endif
 
-// ============================================================================
-// Reduction operators — CUB's Max()/Sum() API differs across versions
-// ============================================================================
+// Reduction operators
 
 #if BNB_HIP
 
