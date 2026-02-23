@@ -23,8 +23,6 @@
 #define cudaStream_t hipStream_t
 #define __nv_bfloat16 hip_bfloat16
 #define cublasLtHandle_t hipblasLtHandle_t
-#define ContextCusparse ContextHipsparse
-#define cusparseHandle_t hipsparseHandle_t
 #define cudaMallocManaged hipMallocManaged
 #define cudaMemAttachHost hipMemAttachHost
 #define cudaPeekAtLastError hipPeekAtLastError
@@ -249,25 +247,6 @@ int igemmlt_8_rowscale(
     return igemmlt<8, 1>(ltHandle, m, n, k, A, B, C, row_scale, lda, ldb, ldc, stream);
 }
 
-void spmm_coo_very_sparse_naive_fp16(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, half* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
-) {
-    spmm_coo_very_sparse_naive<half, 16>(
-        max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz_rows, nnz, rowsA, rowsB,
-        colsB
-    );
-}
-
-void spmm_coo_very_sparse_naive_int8(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, signed char* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
-) {
-    spmm_coo_very_sparse_naive<signed char, 8>(
-        max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz_rows, nnz, rowsA, rowsB,
-        colsB
-    );
-}
 #endif
 
 #if BUILD_XPU
@@ -535,8 +514,6 @@ void cbatched_igemm(
 
 Context* get_context() { return new Context(); }
 
-ContextCusparse* get_cusparse() { return new ContextCusparse(); }
-
 int cigemmlt_32(
     Context* context, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale, int lda,
     int ldb, int ldc, cudaStream_t stream
@@ -568,36 +545,6 @@ void cint8_vector_quant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream
 ) {
     int8VectorQuant(A, out, rowStats, threshold, rows, cols, stream);
-}
-
-void cspmm_coo(
-    ContextCusparse* context, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols, int B_cols,
-    int ldb, half* B, int ldc, half* C, bool transposed_B
-) {
-    spmm_coo(
-        (cusparseHandle_t)context->m_handle, A_rowidx, A_colidx, A_vals, A_nnz, A_rows, A_cols, B_cols, ldb, B, ldc, C,
-        transposed_B
-    );
-}
-
-void cspmm_coo_very_sparse_naive_fp16(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, half* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
-) {
-    spmm_coo_very_sparse_naive_fp16(
-        max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz_rows, nnz, rowsA, rowsB,
-        colsB
-    );
-}
-
-void cspmm_coo_very_sparse_naive_int8(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, signed char* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
-) {
-    spmm_coo_very_sparse_naive_int8(
-        max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz_rows, nnz, rowsA, rowsB,
-        colsB
-    );
 }
 
 void* cget_managed_ptr(size_t bytes) {

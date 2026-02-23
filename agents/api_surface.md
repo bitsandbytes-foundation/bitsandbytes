@@ -860,57 +860,7 @@ F.batched_igemm(
 Batched int8 matrix multiplication.
 **Stability:** Stable (internal).
 
-### 4.9 Sparse Operations
-
-#### `COOSparseTensor`
-
-```python
-class F.COOSparseTensor:
-    def __init__(self, rows, cols, nnz, rowidx, colidx, values): ...
-```
-
-**Stability:** Legacy — used internally for sparse decomposition.
-
-#### `CSRSparseTensor` / `CSCSparseTensor`
-
-Similar sparse tensor containers.
-**Stability:** Legacy.
-
-#### `coo_zeros`
-
-```python
-F.coo_zeros(rows, cols, nnz, device, dtype=torch.half) -> COOSparseTensor
-```
-
-#### `coo2csr` / `coo2csc`
-
-```python
-F.coo2csr(cooA: COOSparseTensor) -> CSRSparseTensor
-F.coo2csc(cooA: COOSparseTensor) -> CSCSparseTensor
-```
-
-#### `spmm_coo`
-
-```python
-F.spmm_coo(
-    cooA: COOSparseTensor, B: torch.Tensor,
-    out: Optional[torch.Tensor] = None,
-) -> torch.Tensor
-```
-
-Sparse matrix-dense matrix multiply using cusparse.
-**Stability:** Legacy.
-
-#### `spmm_coo_very_sparse`
-
-```python
-F.spmm_coo_very_sparse(cooA, B, dequant_stats=None, out=None) -> torch.Tensor
-```
-
-Optimized for very sparse matrices with custom kernel.
-**Stability:** Legacy.
-
-### 4.10 Paged Memory
+### 4.9 Paged Memory
 
 #### `get_paged`
 
@@ -930,7 +880,7 @@ F.prefetch_tensor(A: torch.Tensor, to_cpu: bool = False) -> None
 Prefetch a paged tensor to GPU or CPU.
 **Stability:** Stable (internal).
 
-### 4.11 CPU-Specific Functions
+### 4.10 CPU-Specific Functions
 
 #### `_convert_weight_packed_for_cpu`
 
@@ -963,7 +913,7 @@ F.has_avx512bf16() -> bool
 Detects AVX512BF16 CPU support.
 **Stability:** Internal but may be useful externally.
 
-### 4.12 Utility Functions
+### 4.11 Utility Functions
 
 #### `is_on_gpu`
 
@@ -983,7 +933,7 @@ F.get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]
 Gets the data pointer of a tensor for ctypes calls.
 **Stability:** Internal.
 
-### 4.13 Singleton Managers
+### 4.12 Singleton Managers
 
 #### `GlobalPageManager`
 
@@ -1001,15 +951,6 @@ F.CUBLAS_Context.get_instance() -> CUBLAS_Context
 ```
 
 Manages cuBLAS context handles per device.
-**Stability:** Internal.
-
-#### `Cusparse_Context`
-
-```python
-F.Cusparse_Context.get_instance() -> Cusparse_Context
-```
-
-Manages cusparse context handle.
 **Stability:** Internal.
 
 ---
@@ -1234,7 +1175,7 @@ bitsandbytes.utils.replace_linear(
 | Class | Description |
 |-------|-------------|
 | `BNBNativeLibrary` | Base wrapper for the ctypes-loaded native library |
-| `CudaBNBNativeLibrary` | CUDA-specific subclass (sets up context/cusparse/managed ptr) |
+| `CudaBNBNativeLibrary` | CUDA-specific subclass (sets up context/managed ptr) |
 | `ErrorHandlerMockBNBNativeLibrary` | Fallback mock that defers error messages to call time |
 
 ### Module-level symbols
@@ -1396,11 +1337,9 @@ A PR that changes any of these symbols MUST consider downstream impact:
 
 - `bitsandbytes.cextension.*` (native library loading)
 - `bitsandbytes.functional.get_ptr`, `is_on_gpu`, `_get_tensor_stream`
-- `bitsandbytes.functional.GlobalPageManager`, `CUBLAS_Context`, `Cusparse_Context`
+- `bitsandbytes.functional.GlobalPageManager`, `CUBLAS_Context`
 - `bitsandbytes.functional._convert_weight_packed_for_cpu*`
 - `bitsandbytes.functional.check_matmul`, `elementwise_func`, `fill`, `_mul`
-- `bitsandbytes.functional.spmm_coo`, `spmm_coo_very_sparse`
-- `bitsandbytes.functional.COOSparseTensor`, `CSRSparseTensor`, `CSCSparseTensor`
 - `bitsandbytes.utils.pack_dict_to_tensor`, `unpack_tensor_to_dict`
 - `bitsandbytes.utils.execute_and_return`, `sync_gpu`
 - `bitsandbytes.optim.optimizer.MockArgs`

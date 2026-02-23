@@ -25,7 +25,6 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipsparse/hipsparse.h>
 #include <rocblas/rocblas.h>
 #include <vector>
 
@@ -34,17 +33,6 @@
         hipError_t _m_cudaStat = value;                                                                                \
         if (_m_cudaStat != hipSuccess) {                                                                               \
             fprintf(stderr, "Error %s at line %d in file %s\n", hipGetErrorString(_m_cudaStat), __LINE__, __FILE__);   \
-            exit(1);                                                                                                   \
-        }                                                                                                              \
-    }
-
-#define CHECK_HIPSPARSE(value)                                                                                         \
-    {                                                                                                                  \
-        hipsparseStatus_t _m_hipStat = value;                                                                          \
-        if (_m_hipStat != HIPSPARSE_STATUS_SUCCESS) {                                                                  \
-            fprintf(                                                                                                   \
-                stderr, "Error %s at line %d in file %s\n", hipsparseGetErrorString(_m_hipStat), __LINE__, __FILE__    \
-            );                                                                                                         \
             exit(1);                                                                                                   \
         }                                                                                                              \
     }
@@ -107,17 +95,6 @@ class ContextLt {
     }
 };
 
-class ContextHipsparse {
-  public:
-    hipsparseHandle_t m_handle;
-
-    ContextHipsparse() {
-        hipsparseHandle_t handle;
-        hipsparseCreate(&handle);
-        m_handle = handle;
-    }
-};
-
 template <typename T, int STOCHASTIC, int DATA_TYPE>
 void quantizeBlockwise(
     float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
@@ -164,17 +141,6 @@ void dequant_mm_int32_fp16(
 );
 void int8VectorQuant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, hipStream_t stream
-);
-
-void spmm_coo(
-    hipsparseHandle_t handle, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols, int B_cols,
-    int ldb, half* B, int ldc, half* C, bool transposed_B
-);
-
-template <typename T, int BITS>
-void spmm_coo_very_sparse_naive(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, T* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
 );
 
 template <typename T, int BITS>

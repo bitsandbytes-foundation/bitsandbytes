@@ -316,66 +316,6 @@ void int8VectorQuant(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-void spmm_coo(
-    cusparseHandle_t handle, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols, int B_cols,
-    int ldb, half* B, int ldc, half* C, bool transposed_B
-) {
-    cusparseSpMatDescr_t descA;
-    cusparseDnMatDescr_t descB, descC;
-
-    float alpha = 1.0f;
-    float beta = 0.0f;
-    void* dBuffer = NULL;
-    size_t bufferSize = 0;
-
-    CHECK_CUSPARSE(cusparseCreateCoo(
-        &descA, A_rows, A_cols, A_nnz, A_rowidx, A_colidx, A_vals, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO,
-        CUDA_R_16F
-    ));
-    // Create dense matrix C
-    CHECK_CUSPARSE(cusparseCreateDnMat(&descC, A_rows, B_cols, ldc, C, CUDA_R_16F, CUSPARSE_ORDER_ROW));
-    // Create dense matrix B
-    if (transposed_B) {
-        int tmp = A_cols;
-        A_cols = B_cols;
-        B_cols = tmp;
-    }
-
-    CHECK_CUSPARSE(cusparseCreateDnMat(&descB, A_cols, B_cols, ldb, B, CUDA_R_16F, CUSPARSE_ORDER_ROW));
-    // allocate an external buffer if needed
-    CHECK_CUSPARSE(cusparseSpMM_bufferSize(
-        handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-        transposed_B ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, descA, descB, &beta,
-        descC, CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize
-    ));
-    CUDA_CHECK_RETURN(cudaMalloc(&dBuffer, bufferSize));
-
-    // execute SpMM
-    CHECK_CUSPARSE(cusparseSpMM(
-        handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-        transposed_B ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, descA, descB, &beta,
-        descC, CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, dBuffer
-    ));
-
-    // destroy matrix/vector descriptors
-    CHECK_CUSPARSE(cusparseDestroySpMat(descA));
-    CHECK_CUSPARSE(cusparseDestroyDnMat(descB));
-    CHECK_CUSPARSE(cusparseDestroyDnMat(descC));
-    CUDA_CHECK_RETURN(cudaFree(dBuffer));
-}
-
-template <typename T, int BITS>
-void spmm_coo_very_sparse_naive(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, T* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
-) {
-
-    kspmm_coo_very_sparse_naive<T, 8, BITS><<<nnz_rows, 256>>>(
-        max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB
-    );
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
 template <typename T, int BITS>
 void gemm_4bit_inference_naive(
     int m, int n, int k, T* A, unsigned char* B, float* absmax, float* datatype, T* out, int lda, int ldb, int ldc,
@@ -417,15 +357,6 @@ template void gemm_4bit_inference_naive<__nv_bfloat16, 16>(
 template void gemm_4bit_inference_naive<float, 32>(
     int m, int n, int k, float* A, unsigned char* B, float* absmax, float* datatype, float* out, int lda, int ldb,
     int ldc, int blocksize, cudaStream_t stream
-);
-
-template void spmm_coo_very_sparse_naive<half, 16>(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, half* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
-);
-template void spmm_coo_very_sparse_naive<signed char, 8>(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, signed char* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
 );
 
 template int igemmlt<32, 0>(

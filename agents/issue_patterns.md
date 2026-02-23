@@ -34,9 +34,9 @@ These are the single largest category of issues. Most are environment problems o
 >
 > If you're still hitting problems on the **latest** bitsandbytes (v0.45+), please open a new issue with the output of `python -m bitsandbytes` and your environment details.
 
-### Missing `libcusparse.so.11` / shared library mismatch
+### Missing shared CUDA library / shared library mismatch
 
-**How to identify:** `OSError: libcusparse.so.11: cannot open shared object file: No such file or directory`. Or similar errors for `libcusparse.so.12`, `libcublasLt.so.11`, etc.
+**How to identify:** `OSError: libcublasLt.so.11: cannot open shared object file: No such file or directory`. Or similar errors for `libcudart`, `libcublas`, etc.
 
 **What happened:** The bnb binary was compiled against one CUDA version (e.g., 11.x) but the system only has another (e.g., 12.x). The shared library dependencies don't exist. Modern releases ship platform-specific wheels with better CUDA version detection and multiple binary variants.
 

@@ -10,7 +10,6 @@
 #include <kernels_hip.cuh>
 #include <hipcub/hipcub.hpp>
 #include <hipblas/hipblas.h>
-#include <hipsparse/hipsparse.h>
 #ifndef NO_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
 #endif
@@ -454,67 +453,6 @@ void int8VectorQuant(half * __restrict__ A, int8_t *out, float *rowStats, float 
   CUDA_CHECK_RETURN(hipPeekAtLastError());
 }
 
-void spmm_coo(hipsparseHandle_t handle, int *A_rowidx, int *A_colidx, half *A_vals, int A_nnz, int A_rows, int A_cols, int B_cols, int ldb, half *B, int ldc, half* C, bool transposed_B)
-{
-
-#ifdef NO_HIPBLASLT
-#else
-
-  hipsparseSpMatDescr_t descA;
-  hipsparseDnMatDescr_t descB, descC;
-
-  float alpha = 1.0f;
-  float beta = 0.0f;
-  void *dBuffer = NULL;
-  size_t bufferSize = 0;
-
-  CHECK_HIPSPARSE( hipsparseCreateCoo(&descA, A_rows, A_cols, A_nnz,
-                                    A_rowidx, A_colidx, A_vals,
-                                    HIPSPARSE_INDEX_32I,
-                                    HIPSPARSE_INDEX_BASE_ZERO, HIP_R_16F) );
-  // Create dense matrix C
-  CHECK_HIPSPARSE( hipsparseCreateDnMat(&descC, A_rows, B_cols, ldc, C,
-                                      HIP_R_16F, HIPSPARSE_ORDER_ROW) );
-  // Create dense matrix B
-  if(transposed_B)
-  {
-    int tmp = A_cols;
-    A_cols = B_cols;
-    B_cols = tmp;
-  }
-
-  CHECK_HIPSPARSE( hipsparseCreateDnMat(&descB, A_cols, B_cols, ldb, B,
-                                      HIP_R_16F, HIPSPARSE_ORDER_ROW) );
-  // allocate an external buffer if needed
-  CHECK_HIPSPARSE( hipsparseSpMM_bufferSize(
-                                handle,
-                                HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                transposed_B ? HIPSPARSE_OPERATION_TRANSPOSE : HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                &alpha, descA, descB, &beta, descC, HIP_R_32F,
-                                HIPSPARSE_SPMM_ALG_DEFAULT, &bufferSize) );
-  CUDA_CHECK_RETURN( hipMalloc(&dBuffer, bufferSize) );
-
-  // execute SpMM
-  CHECK_HIPSPARSE( hipsparseSpMM(handle,
-                                HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                transposed_B ? HIPSPARSE_OPERATION_TRANSPOSE : HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                &alpha, descA, descB, &beta, descC, HIP_R_32F,
-                                HIPSPARSE_SPMM_ALG_DEFAULT, dBuffer));
-
-  // destroy matrix/vector descriptors
-  CHECK_HIPSPARSE( hipsparseDestroySpMat(descA) );
-  CHECK_HIPSPARSE( hipsparseDestroyDnMat(descB) );
-  CHECK_HIPSPARSE( hipsparseDestroyDnMat(descC) );
-  CUDA_CHECK_RETURN( hipFree(dBuffer) );
-#endif
-}
-
-template <typename T, int BITS> void spmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB)
-{
-
-  hipLaunchKernelGGL(( kspmm_coo_very_sparse_naive<T, 8, BITS>), dim3(nnz_rows), dim3(256), 0, 0, max_count, max_idx, offset_rowidx, rowidx, colidx, values, B, out, dequant_stats, nnz, rowsA, rowsB, colsB);
-  CUDA_CHECK_RETURN(hipPeekAtLastError());
-}
 
 template <typename T, int BITS> void gemm_4bit_inference_naive(int m, int n, int k, T * A,  unsigned char* B,  float *absmax, float *datatype, T * out,  int lda, int ldb, int ldc, int blocksize, hipStream_t stream)
 {
@@ -553,8 +491,6 @@ template void gemm_4bit_inference_naive<half, 16>(int m, int n, int k, half * A,
 template void gemm_4bit_inference_naive<hip_bfloat16, 16>(int m, int n, int k, hip_bfloat16 * A,  unsigned char* B,  float *absmax, float *datatype, hip_bfloat16 * out,  int lda, int ldb, int ldc, int blocksize, hipStream_t stream);
 template void gemm_4bit_inference_naive<float, 32>(int m, int n, int k, float * A,  unsigned char* B,  float *absmax, float *datatype, float * out,  int lda, int ldb, int ldc, int blocksize, hipStream_t stream);
 
-template void spmm_coo_very_sparse_naive<half, 16>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, half *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
-template void spmm_coo_very_sparse_naive<signed char, 8>(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, signed char *B, half *out, float *dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB);
 
 template int igemmlt<32, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream);
 template int igemmlt<8, 0>(hipblasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, const int8_t *B, void *C, float *row_scale, int lda, int ldb, int ldc, hipStream_t stream);

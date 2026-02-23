@@ -152,7 +152,7 @@ class GlobalOptimManager:
 ```
 
 This pattern is used by: `GlobalOptimManager`, `GlobalPageManager`, `CUBLAS_Context`,
-`Cusparse_Context`, `GlobalOutlierPooler`, `OutlierTracer`.
+`GlobalOutlierPooler`, `OutlierTracer`.
 
 ---
 
@@ -867,7 +867,6 @@ Use the project's error checking macros:
 
 ```cpp
 CUDA_CHECK_RETURN(cudaMemcpy(...));
-CHECK_CUSPARSE(cusparseCreate(...));
 ```
 
 The `checkCublasStatus` function returns an error code rather than throwing — the Python
