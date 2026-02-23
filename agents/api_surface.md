@@ -390,8 +390,7 @@ bitsandbytes.optim.optimizer.Optimizer8bit(params, defaults, optim_bits=32, is_p
 bitsandbytes.optim.optimizer.Optimizer2State(
     optimizer_name, params, lr=1e-3, betas=(0.9, 0.999),
     eps=1e-8, weight_decay=0.0, optim_bits=32, args=None,
-    min_8bit_size=4096, percentile_clipping=100,
-    block_wise=True, max_unorm=0.0, skip_zeros=False,
+    min_8bit_size=4096, max_unorm=0.0, skip_zeros=False,
     is_paged=False, alpha=0.0, t_alpha=None, t_beta3=None,
 )
 ```
@@ -405,8 +404,7 @@ bitsandbytes.optim.optimizer.Optimizer2State(
 bitsandbytes.optim.optimizer.Optimizer1State(
     optimizer_name, params, lr=1e-3, betas=(0.9, 0.0),
     eps=1e-8, weight_decay=0.0, optim_bits=32, args=None,
-    min_8bit_size=4096, percentile_clipping=100,
-    block_wise=True, max_unorm=0.0, skip_zeros=False,
+    min_8bit_size=4096, max_unorm=0.0, skip_zeros=False,
     is_paged=False,
 )
 ```
@@ -532,8 +530,6 @@ All bnb optimizers share these parameters beyond the standard PyTorch ones:
 |-----------|------|---------|-------------|
 | `optim_bits` | `int` | 32 | 32 for full precision state, 8 for quantized state |
 | `min_8bit_size` | `int` | 4096 | Parameters smaller than this use 32-bit state even in 8-bit mode |
-| `percentile_clipping` | `int` | 100 | Gradient clipping at a percentile. 100 = disabled |
-| `block_wise` | `bool` | `True` | Block-wise quantization of optimizer states (vs global) |
 | `max_unorm` | `float` | 0.0 | Maximum update norm relative to weight norm. 0 = disabled |
 | `skip_zeros` | `bool` | `False` | Skip zero gradients in sparse models |
 | `is_paged` | `bool` | `False` | Use CUDA managed memory for state offloading |
@@ -1313,7 +1309,6 @@ removed in a future release.
 | `quantize_no_absmax` | `functional` | `quantize_blockwise` |
 | `dequantize_no_absmax` | `functional` | `dequantize_blockwise` |
 | `optimizer_update_8bit` | `functional` | `optimizer_update_8bit_blockwise` |
-| `percentile_clipping` | `functional` | N/A (still used internally by non-blockwise path) |
 
 ---
 

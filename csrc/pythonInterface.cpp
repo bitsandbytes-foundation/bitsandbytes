@@ -101,28 +101,6 @@ MAKE_FUNC32(ademamix, ADEMAMIX, float, fp32)
 MAKE_FUNC32(ademamix, ADEMAMIX, half, fp16)
 MAKE_FUNC32(ademamix, ADEMAMIX, __nv_bfloat16, bf16)
 
-#define MAKE_FUNC8(fname, oname, gtype, gbits)                                                                         \
-    void fname##_static_8bit_grad_##gbits(                                                                             \
-        gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, float* unorm, float max_unorm,               \
-        float param_norm, float beta1, float beta2, float eps, int step, float lr, float* quantiles1,                  \
-        float* quantiles2, float* max1, float* max2, float* new_max1, float* new_max2, float weight_decay,             \
-        float gnorm_scale, int n                                                                                       \
-    ) {                                                                                                                \
-        optimizerStatic8bit<gtype, oname>(                                                                             \
-            g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2,   \
-            max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n                                               \
-        );                                                                                                             \
-    }
-
-MAKE_FUNC8(adam, ADAM, float, 32)
-MAKE_FUNC8(adam, ADAM, half, 16)
-MAKE_FUNC8(momentum, MOMENTUM, float, 32)
-MAKE_FUNC8(momentum, MOMENTUM, half, 16)
-MAKE_FUNC8(rmsprop, RMSPROP, float, 32)
-MAKE_FUNC8(rmsprop, RMSPROP, half, 16)
-MAKE_FUNC8(lion, LION, float, 32)
-MAKE_FUNC8(lion, LION, half, 16)
-
 #define MAKE_BLOCKWISE8(fname, optim_name, gtype, gbits)                                                               \
     void fname##_8bit_blockwise_grad_##gbits(                                                                          \
         gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3,       \
@@ -153,14 +131,6 @@ MAKE_BLOCKWISE8(lion, LION, float, fp32)
 MAKE_BLOCKWISE8(ademamix, ADEMAMIX, half, fp16)
 MAKE_BLOCKWISE8(ademamix, ADEMAMIX, __nv_bfloat16, bf16)
 MAKE_BLOCKWISE8(ademamix, ADEMAMIX, float, fp32)
-
-void percentileClipping_g32(float* g, float* gnorm_vec, int step, const int n) {
-    percentileClipping<float>(g, gnorm_vec, step, n);
-}
-
-void percentileClipping_g16(half* g, float* gnorm_vec, int step, const int n) {
-    percentileClipping<half>(g, gnorm_vec, step, n);
-}
 
 void quantizeBlockwise_fp16(float* code, half* A, float* absmax, unsigned char* out, int blocksize, const int n) {
     quantizeBlockwise<half, 0, General8bit>(code, A, absmax, out, nullptr, 0, blocksize, n);
@@ -386,11 +356,6 @@ void gemv_4bit_inference_fp32(
 
 extern "C" {
 #if BUILD_CUDA || BUILD_HIP
-void cquantize(float* code, float* A, unsigned char* out, int n) { quantize(code, A, out, n); }
-
-void cdequantize(float* code, unsigned char* A, float* out, int n, cudaStream_t stream) {
-    dequantize(code, A, out, n, stream);
-}
 
 void cdequantize_blockwise_fp16_fp4(
     float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, cudaStream_t stream
@@ -521,28 +486,6 @@ MAKE_CFUNC32(ademamix, float, fp32)
 MAKE_CFUNC32(ademamix, half, fp16)
 MAKE_CFUNC32(ademamix, __nv_bfloat16, bf16)
 
-#define MAKE_CFUNC8(name, gtype, gbits)                                                                                \
-    void c##name##_static_8bit_grad_##gbits(                                                                           \
-        gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, float* unorm, float max_unorm,               \
-        float param_norm, float beta1, float beta2, float eps, int step, float lr, float* quantiles1,                  \
-        float* quantiles2, float* max1, float* max2, float* new_max1, float* new_max2, float weight_decay,             \
-        float gnorm_scale, int n                                                                                       \
-    ) {                                                                                                                \
-        name##_static_8bit_grad_##gbits(                                                                               \
-            g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, eps, step, lr, quantiles1, quantiles2,   \
-            max1, max2, new_max1, new_max2, weight_decay, gnorm_scale, n                                               \
-        );                                                                                                             \
-    }
-
-MAKE_CFUNC8(adam, float, 32)
-MAKE_CFUNC8(adam, half, 16)
-MAKE_CFUNC8(momentum, float, 32)
-MAKE_CFUNC8(momentum, half, 16)
-MAKE_CFUNC8(rmsprop, float, 32)
-MAKE_CFUNC8(rmsprop, half, 16)
-MAKE_CFUNC8(lion, float, 32)
-MAKE_CFUNC8(lion, half, 16)
-
 #define MAKE_CBLOCKWISE8(fname, optim_name, gtype, gbits)                                                              \
     void c##fname##_8bit_blockwise_grad_##gbits(                                                                       \
         gtype* p, gtype* g, unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3,       \
@@ -573,14 +516,6 @@ MAKE_CBLOCKWISE8(lion, LION, __nv_bfloat16, bf16)
 MAKE_CBLOCKWISE8(ademamix, ADEMAMIX, half, fp16)
 MAKE_CBLOCKWISE8(ademamix, ADEMAMIX, float, fp32)
 MAKE_CBLOCKWISE8(ademamix, ADEMAMIX, __nv_bfloat16, bf16)
-
-void cpercentile_clipping_g32(float* g, float* gnorm_vec, int step, const int n) {
-    percentileClipping_g32(g, gnorm_vec, step, n);
-}
-
-void cpercentile_clipping_g16(half* g, float* gnorm_vec, int step, const int n) {
-    percentileClipping_g16(g, gnorm_vec, step, n);
-}
 
 void cigemm(
     Context* context, bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda,
