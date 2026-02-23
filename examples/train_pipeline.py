@@ -1,11 +1,11 @@
 """Pipeline parallelism training example using bitsandbytes kbit quantization.
 
-Demonstrates distributed pipeline training across 2+ GPUs:
-- Loads a HuggingFace model and applies KbitLoraModel
-- Splits decoder layers across GPUs (first stage = embedding + first layers,
-  last stage = remaining layers + norm + LM head)
-- Trains using DistributedPipelineEngine with NCCL
-- Reports per-GPU memory and throughput
+Demonstrates distributed pipeline training across 2+ GPUs with per-rank
+model loading — each GPU only loads the decoder layers it needs:
+- First stage: embedding + first half of layers
+- Last stage: remaining layers + final norm + LM head (loss)
+
+This reduces per-GPU memory compared to loading the full model everywhere.
 
 Usage:
     # 2-GPU pipeline training on Qwen3-0.6B
@@ -50,13 +50,12 @@ class KbitFirstStage(nn.Module):
     """First pipeline stage: embedding + first layers.
 
     Takes input_ids [B, S], returns hidden states [B, S, H].
+    The KbitLoraModel has already been created with only this stage's layers.
     """
 
-    def __init__(self, kbit_model, layer_start, layer_end):
+    def __init__(self, kbit_model):
         super().__init__()
         self.km = kbit_model
-        self.layer_start = layer_start
-        self.layer_end = layer_end
 
     def forward(self, input_ids):
         B, S = input_ids.shape
@@ -64,7 +63,7 @@ class KbitFirstStage(nn.Module):
         position_ids = torch.arange(S, device=device).unsqueeze(0).expand(B, -1)
         self.km._extend_rope_cache(S, device)
         hidden = self.km.embed_tokens(input_ids).to(self.km.compute_dtype)
-        for i in range(self.layer_start, self.layer_end):
+        for i in range(self.km._num_loaded_layers):
             hidden = self.km._layer_forward(i, hidden, position_ids)
         return hidden
 
@@ -74,13 +73,13 @@ class KbitLastStage(nn.Module):
 
     Takes hidden states [B, S, H], returns hidden states after norm [B*S, H].
     Loss is computed externally by the engine's loss_fn.
+    The KbitLoraModel has already been created with only this stage's layers
+    plus the final norm and LM head.
     """
 
-    def __init__(self, kbit_model, layer_start, layer_end):
+    def __init__(self, kbit_model):
         super().__init__()
         self.km = kbit_model
-        self.layer_start = layer_start
-        self.layer_end = layer_end
 
     def forward(self, hidden):
         from bitsandbytes.autograd.training_kernels import rmsnorm
@@ -90,7 +89,7 @@ class KbitLastStage(nn.Module):
         position_ids = torch.arange(S, device=device).unsqueeze(0).expand(B, -1)
         self.km._extend_rope_cache(S, device)
 
-        for i in range(self.layer_start, self.layer_end):
+        for i in range(self.km._num_loaded_layers):
             hidden = self.km._layer_forward(i, hidden, position_ids)
 
         # Final norm
@@ -110,12 +109,6 @@ def make_loss_fn(kbit_model):
     lm = km._lm_head_info
 
     def loss_fn(hidden_2d, labels):
-        """Compute chunked cross-entropy loss.
-
-        Args:
-            hidden_2d: [B*S, H] hidden states from last stage.
-            labels: [B, S] target token IDs.
-        """
         shift_hidden = hidden_2d[:-1]
         shift_labels = labels.reshape(-1)[1:]
         loss = chunked_cross_entropy(
@@ -138,9 +131,12 @@ def main():
     device = torch.device(f"cuda:{rank}")
     torch.cuda.set_device(device)
 
+    is_first = (rank == 0)
+    is_last = (rank == world_size - 1)
+
     if rank == 0:
         print(f"{'=' * 60}")
-        print(f"Pipeline QLoRA Training ({world_size} GPUs)")
+        print(f"Pipeline QLoRA Training ({world_size} GPUs, per-rank loading)")
         print(f"{'=' * 60}")
         print(f"Model: {args.model}")
         print(f"LoRA rank: {args.lora_r}, k={args.k}")
@@ -148,11 +144,23 @@ def main():
         print(f"Steps: {args.steps}")
         print()
 
-    # Load model
-    from transformers import AutoModelForCausalLM
+    # Load model — each rank loads the full HF model temporarily to extract
+    # its layer weights. We immediately delete the original after quantization.
+    from transformers import AutoModelForCausalLM, AutoConfig
+
+    config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
+    num_layers = config.num_hidden_layers
+    layers_per_stage = num_layers // world_size
+    layer_start = rank * layers_per_stage
+    layer_end = (rank + 1) * layers_per_stage if rank < world_size - 1 else num_layers
+
+    role = "first" if is_first else ("last" if is_last else "mid")
+    print(f"  GPU {rank}: layers {layer_start}-{layer_end-1} ({role} stage)")
 
     if rank == 0:
-        print("Loading base model...")
+        print(f"\nLoading and quantizing (per-rank)...")
+    torch.cuda.reset_peak_memory_stats()
+
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
         dtype=torch.float16,
@@ -160,43 +168,39 @@ def main():
         trust_remote_code=True,
     )
 
-    # Quantize
-    if rank == 0:
-        print("Quantizing and creating LoRA adapters...")
+    mem_after_load = torch.cuda.memory_allocated() / 1024 / 1024
+    print(f"  GPU {rank}: {mem_after_load:.0f} MB after HF model load")
+
+    # Create KbitLoraModel with ONLY this rank's layers
     kbit_model = KbitLoraModel(
         model,
         lora_r=args.lora_r,
         lora_alpha=16.0,
         k=args.k,
         compute_dtype=torch.bfloat16,
+        layer_range=(layer_start, layer_end),
+        include_embed=is_first,
+        include_lm_head=is_last,
     )
+
+    # Delete the original HF model to free memory
     del model
     torch.cuda.empty_cache()
 
-    num_layers = kbit_model.num_layers
-    layers_per_stage = num_layers // world_size
-    layer_start = rank * layers_per_stage
-    layer_end = (rank + 1) * layers_per_stage if rank < world_size - 1 else num_layers
-
-    is_first = (rank == 0)
-    is_last = (rank == world_size - 1)
-
-    if is_first:
-        stage = KbitFirstStage(kbit_model, layer_start, layer_end)
-    else:
-        stage = KbitLastStage(kbit_model, layer_start, layer_end)
+    mem_after_quant = torch.cuda.memory_allocated() / 1024 / 1024
+    print(f"  GPU {rank}: {mem_after_quant:.0f} MB after quantize + cleanup "
+          f"({kbit_model._num_loaded_layers} layers, "
+          f"embed={'yes' if is_first else 'no'}, "
+          f"lm_head={'yes' if is_last else 'no'})")
 
     if rank == 0:
-        print(f"  Total layers: {num_layers}")
-        print(f"  Trainable params: {kbit_model.num_trainable_parameters():,}")
+        print(f"  Trainable params (rank 0): {kbit_model.num_trainable_parameters():,}")
 
-    for r in range(world_size):
-        if r == rank:
-            ls = r * layers_per_stage
-            le = (r + 1) * layers_per_stage if r < world_size - 1 else num_layers
-            role = "first" if r == 0 else ("last" if r == world_size - 1 else "mid")
-            print(f"  GPU {r}: layers {ls}-{le-1} ({role} stage)")
-        dist.barrier()
+    # Create pipeline stage wrappers
+    if is_first:
+        stage = KbitFirstStage(kbit_model)
+    else:
+        stage = KbitLastStage(kbit_model)
 
     # Loss function for the last stage
     loss_fn = make_loss_fn(kbit_model) if is_last else None
@@ -215,7 +219,7 @@ def main():
         dtype=torch.bfloat16,
     )
 
-    # Optimizer — each rank has its own view of the parameters
+    # Optimizer — each rank optimizes only its own trainable parameters
     trainable_params = kbit_model.get_trainable_parameters()
     optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, weight_decay=0.01)
 
@@ -233,8 +237,7 @@ def main():
         t_step = time.time()
         optimizer.zero_grad()
 
-        # Generate micro-batches (all ranks generate same data for labels)
-        # Use deterministic seed per step so last rank has correct labels
+        # All ranks generate same data with same seed (for label consistency)
         torch.manual_seed(step * 1000 + 42)
         micro_batch_inputs = []
         micro_batch_labels = []

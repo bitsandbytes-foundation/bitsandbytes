@@ -49,6 +49,13 @@ class KbitLoraModel(nn.Module):
         cpu_offload: If True, offload inter-layer activations to CPU during
             forward and reload during backward. Saves GPU memory at cost
             of CPU<->GPU bandwidth. Default False.
+        layer_range: Optional tuple (start, end) to only load decoder layers
+            [start, end). Used for pipeline parallelism so each rank only
+            loads its assigned layers. Default None (all layers).
+        include_embed: Whether to keep the embedding layer. Default True.
+            Set False for non-first pipeline stages.
+        include_lm_head: Whether to quantize and keep the LM head. Default True.
+            Set False for non-last pipeline stages.
     """
 
     def __init__(
@@ -63,6 +70,9 @@ class KbitLoraModel(nn.Module):
         ce_chunk_size: int = 8192,
         compute_dtype: torch.dtype = torch.bfloat16,
         cpu_offload: bool = False,
+        layer_range: Optional[tuple[int, int]] = None,
+        include_embed: bool = True,
+        include_lm_head: bool = True,
     ):
         super().__init__()
 
@@ -87,6 +97,8 @@ class KbitLoraModel(nn.Module):
         self.ce_chunk_size = ce_chunk_size
         self.compute_dtype = compute_dtype
         self.cpu_offload = cpu_offload
+        self.include_embed = include_embed
+        self.include_lm_head = include_lm_head
 
         # Extract model dimensions from config
         self.hidden_size = config.hidden_size
@@ -102,9 +114,21 @@ class KbitLoraModel(nn.Module):
         self.rope_theta = getattr(config, "rope_theta", 10000.0)
         self.has_qk_norm = self.model_type == "qwen3"
 
+        # Determine layer range
+        total_layers = config.num_hidden_layers
+        if layer_range is not None:
+            self._layer_start, self._layer_end = layer_range
+            assert 0 <= self._layer_start < self._layer_end <= total_layers
+        else:
+            self._layer_start, self._layer_end = 0, total_layers
+        self._num_loaded_layers = self._layer_end - self._layer_start
+
         # Keep reference to original model for embeddings
         self.model = model
-        self.embed_tokens = model.model.embed_tokens
+        if include_embed:
+            self.embed_tokens = model.model.embed_tokens
+        else:
+            self.embed_tokens = None
         self.lm_head_tied = hasattr(model, "lm_head") and (
             model.lm_head.weight.data_ptr() == model.model.embed_tokens.weight.data_ptr()
         )
@@ -162,14 +186,19 @@ class KbitLoraModel(nn.Module):
         return A, B
 
     def _quantize_and_create_lora(self, model: nn.Module):
-        """Walk model, quantize weights, create LoRA adapters."""
+        """Walk model, quantize weights, create LoRA adapters.
+
+        Only processes layers in [_layer_start, _layer_end) and optionally
+        skips embedding and LM head for pipeline parallelism.
+        """
         device = next(model.parameters()).device
 
-        # Process each decoder layer
+        # Process only the decoder layers in our range
         layers = model.model.layers
         self._layer_data = []
 
-        for i, layer in enumerate(layers):
+        for i in range(self._layer_start, self._layer_end):
+            layer = layers[i]
             attn = layer.self_attn
             mlp = layer.mlp
             prefix = f"layers_{i}"
@@ -225,23 +254,26 @@ class KbitLoraModel(nn.Module):
 
             self._layer_data.append(layer_info)
 
-        # Final norm
-        final_norm = model.model.norm
-        self._norm_weights["final_norm_weight"] = nn.Parameter(
-            final_norm.weight.data.to(self.compute_dtype).clone()
-        )
+        # Final norm (only needed by last stage or full model)
+        if self.include_lm_head:
+            final_norm = model.model.norm
+            self._norm_weights["final_norm_weight"] = nn.Parameter(
+                final_norm.weight.data.to(self.compute_dtype).clone()
+            )
 
-        # LM head (use k_lm_head)
-        lm_weight = model.lm_head.weight.data.to(device)
-        name = "lm_head"
-        packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
-            lm_weight, name, k=self.k_lm_head,
-        )
-        self._lm_head_info = {
-            "packed": packed, "absmax": absmax, "codebook": codebook,
-            "N_padded": N_padded, "N": N, "K": K,
-            "k": self.k_lm_head,
-        }
+        # LM head (only needed by last stage or full model)
+        self._lm_head_info = None
+        if self.include_lm_head:
+            lm_weight = model.lm_head.weight.data.to(device)
+            name = "lm_head"
+            packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
+                lm_weight, name, k=self.k_lm_head,
+            )
+            self._lm_head_info = {
+                "packed": packed, "absmax": absmax, "codebook": codebook,
+                "N_padded": N_padded, "N": N, "K": K,
+                "k": self.k_lm_head,
+            }
 
         # Precompute RoPE cos/sin cache
         self._build_rope_cache(device)
@@ -271,7 +303,7 @@ class KbitLoraModel(nn.Module):
         """Forward pass for one decoder layer.
 
         Args:
-            layer_idx: Index of the decoder layer.
+            layer_idx: Local index (0-based within this model's loaded layers).
             hidden: Input hidden states [B, S, H].
             position_ids: Position IDs [B, S].
 
@@ -417,11 +449,15 @@ class KbitLoraModel(nn.Module):
         # Extend RoPE cache if needed
         self._extend_rope_cache(S, device)
 
-        # Embedding
-        hidden = self.embed_tokens(input_ids).to(self.compute_dtype)
+        # Embedding (only if this model has the embedding layer)
+        if self.embed_tokens is not None:
+            hidden = self.embed_tokens(input_ids).to(self.compute_dtype)
+        else:
+            # input_ids is actually hidden states from previous pipeline stage
+            hidden = input_ids
 
-        # Decoder layers
-        for i in range(self.num_layers):
+        # Decoder layers (local indices, 0-based)
+        for i in range(self._num_loaded_layers):
             if self.cpu_offload and self.training:
                 # Wrap each layer with CPU offload: saves inter-layer
                 # activations to CPU during forward, reloads during backward
@@ -433,7 +469,10 @@ class KbitLoraModel(nn.Module):
             else:
                 hidden = self._layer_forward(i, hidden, position_ids)
 
-        # Final norm
+        # Final norm + LM head (only if this model has the LM head)
+        if not self.include_lm_head:
+            return {"hidden": hidden}
+
         hidden_2d = hidden.reshape(-1, self.hidden_size)
         hidden_2d = rmsnorm(
             hidden_2d, self._norm_weights["final_norm_weight"], eps=self.rms_norm_eps,
