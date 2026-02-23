@@ -10,7 +10,37 @@
 #                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90;100;120`
 #                        Check your compute capability here: https://developer.nvidia.com/cuda-gpus
 #  - PTXAS_VERBOSE: Pass the `-v` option to the PTX Assembler
+#  - ROCM_VERSION: Override the ROCm version shortcode used in the output library name.
+#                  Useful when PyTorch was built against a different ROCm version than the
+#                  system install. For example, `-DROCM_VERSION=70` produces
+#                  libbitsandbytes_rocm70.so even if the system has ROCm 7.2.
 cmake_minimum_required(VERSION 3.22.1)
+
+# On Windows with HIP backend, auto-detect compilers from ROCM_PATH before project()
+if(WIN32 AND COMPUTE_BACKEND STREQUAL "hip")
+    if(DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH $ENV{ROCM_PATH})
+    endif()
+    if(ROCM_PATH AND NOT DEFINED CMAKE_CXX_COMPILER)
+        set(CMAKE_CXX_COMPILER "${ROCM_PATH}/lib/llvm/bin/clang++.exe")
+    endif()
+    if(ROCM_PATH AND NOT DEFINED CMAKE_HIP_COMPILER)
+        set(CMAKE_HIP_COMPILER "${ROCM_PATH}/lib/llvm/bin/clang++.exe")
+    endif()
+    # On Windows, the HIP compiler needs explicit paths to find device libraries.
+    if(ROCM_PATH)
+        find_path(ROCM_DEVICE_LIB_PATH
+            NAMES oclc_abi_version_400.bc ocml.bc
+            PATHS "${ROCM_PATH}/amdgcn/bitcode"
+                  "${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
+            NO_DEFAULT_PATH
+        )
+        set(CMAKE_HIP_FLAGS "--rocm-path=${ROCM_PATH}")
+        if(ROCM_DEVICE_LIB_PATH)
+            set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_DEVICE_LIB_PATH}")
+        endif()
+    endif()
+endif()
 
 project(bitsandbytes LANGUAGES CXX)
 
@@ -199,17 +229,18 @@ if(BUILD_CUDA)
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
     add_compile_definitions(BUILD_CUDA)
 elseif(BUILD_HIP)
-    enable_language(HIP)
-    message(STATUS "HIP Compiler: ${CMAKE_HIP_COMPILER}")
+    # Set target architectures before enable_language(HIP), which would otherwise
+    # auto-detect a single GPU and override the defaults.
     if(DEFINED BNB_ROCM_ARCH)
       set(CMAKE_HIP_ARCHITECTURES ${BNB_ROCM_ARCH})
-    else()
-      if (NOT AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
-        set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1150;gfx1151;gfx1200;gfx1201")
-      elseif (AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
-        set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
-      endif()
+    elseif(AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
+      set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
+    elseif(NOT CMAKE_HIP_ARCHITECTURES)
+      set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1150;gfx1151;gfx1200;gfx1201")
     endif()
+
+    enable_language(HIP)
+    message(STATUS "HIP Compiler: ${CMAKE_HIP_COMPILER}")
     message(STATUS "HIP Targets: ${CMAKE_HIP_ARCHITECTURES}")
 
     list(APPEND SRC_FILES ${GPU_FILES})
@@ -221,7 +252,15 @@ elseif(BUILD_HIP)
     string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
     string(REPLACE "." "" HIP_VERSION_SHORT "${HIP_VERSION}")
 
-    string(APPEND BNB_OUTPUT_NAME "${HIP_VERSION_SHORT}")
+    # Expose a cache variable that the user can set to override the ROCm version in the library name
+    set(ROCM_VERSION "${HIP_VERSION_SHORT}" CACHE STRING "Expected ROCm Version Shortcode")
+
+    message(STATUS "ROCm Version: ${HIP_VERSION_SHORT} (from hipconfig)")
+    if(NOT ROCM_VERSION STREQUAL "${HIP_VERSION_SHORT}")
+        message(WARNING "Overriding ROCm version in library name: ${HIP_VERSION_SHORT} -> ${ROCM_VERSION}")
+    endif()
+
+    string(APPEND BNB_OUTPUT_NAME "${ROCM_VERSION}")
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     add_compile_definitions(__HIP_PLATFORM_HCC__)
     add_compile_definitions(BUILD_HIP)
@@ -262,6 +301,8 @@ endif()
 if(WIN32)
     # Export all symbols
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # Prevent Windows SDK min/max macros from conflicting with std::min/std::max
+    add_compile_definitions(NOMINMAX)
 endif()
 
 if(MSVC)
@@ -314,10 +355,11 @@ if(BUILD_CUDA)
     )
 endif()
 if(BUILD_HIP)
-    if(NOT DEFINED ENV{ROCM_PATH})
-      set(ROCM_PATH /opt/rocm)
-    else()
+    # Determine ROCM_PATH from environment variable, fallback to /opt/rocm on Linux
+    if(DEFINED ENV{ROCM_PATH})
       set(ROCM_PATH $ENV{ROCM_PATH})
+    else()
+      set(ROCM_PATH /opt/rocm)
     endif()
     list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
     macro(find_package_and_print_version PACKAGE_NAME)
@@ -329,13 +371,22 @@ if(BUILD_HIP)
     find_package_and_print_version(hipsparse REQUIRED)
 
     ## hacky way of excluding hip::amdhip64 (with it linked many tests unexpectedly fail e.g. adam8bit because of inaccuracies)
-    set_target_properties(hip::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
-    set_target_properties(hip-lang::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
-    set(CMAKE_HIP_IMPLICIT_LINK_LIBRARIES "")
+    ## On Windows, we need to link amdhip64 explicitly
+    if(NOT WIN32)
+        set_target_properties(hip::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
+        set_target_properties(hip-lang::host PROPERTIES INTERFACE_LINK_LIBRARIES "")
+        set(CMAKE_HIP_IMPLICIT_LINK_LIBRARIES "")
+    endif()
 
     target_include_directories(bitsandbytes PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include ${ROCM_PATH}/include /include)
     target_link_directories(bitsandbytes PRIVATE ${ROCM_PATH}/lib /lib)
     target_link_libraries(bitsandbytes PUBLIC roc::hipblas hip::hiprand roc::hipsparse)
+
+    # On Windows, rocblas is not pulled in transitively by roc::hipblas
+    # and is needed because ops_hip.cuh uses rocblas_handle directly.
+    if(WIN32)
+        target_link_libraries(bitsandbytes PUBLIC rocblas)
+    endif()
 
     target_compile_definitions(bitsandbytes PUBLIC BNB_USE_HIP)
     set_source_files_properties(${GPU_FILES} PROPERTIES LANGUAGE HIP)

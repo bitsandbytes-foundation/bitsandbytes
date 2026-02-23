@@ -118,6 +118,9 @@ class Test8BitBlockwiseQuantizeFunctional:
         for i in range(iters):
             A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested)
+            if i == 0:
+                d = S.as_dict()
+                S = F.QuantState.from_dict(d, device=torch.device(device))
             A2 = F.dequantize_blockwise(C, S)
             diff = torch.abs(A1 - A2).float()
             reldiff = diff / torch.abs(A1.float() + 1e-8)
@@ -134,6 +137,9 @@ class Test8BitBlockwiseQuantizeFunctional:
         for i in range(iters):
             A1 = torch.rand(1024, 1024, device=device, dtype=dtype)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested, code=code)
+            if i == 0:
+                d = S.as_dict()
+                S = F.QuantState.from_dict(d, device=torch.device(device))
             A2 = F.dequantize_blockwise(C, S)
             diff = torch.abs(A1 - A2).float()
             reldiff = diff / torch.abs(A1.float() + 1e-8)
@@ -271,6 +277,9 @@ class Test8BitBlockwiseQuantizeFunctional:
             for i in range(10):
                 A1 = torch.randn(1024, 1024, device=device)
                 C, SC = F.quantize_blockwise(A1, code=code)
+                if i == 0:
+                    d = SC.as_dict()
+                    SC = F.QuantState.from_dict(d, device=torch.device(device))
                 A2 = F.dequantize_blockwise(C, SC)
                 diff = torch.abs(A1 - A2)
                 reldiff = diff / torch.abs(A1 + 1e-8)
@@ -1118,6 +1127,8 @@ class TestQuantize4BitFunctional:
 
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
+        d = SA.as_dict()
+        SA = F.QuantState.from_dict(d, device=torch.device(device))
         A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
         del qa, SA
 

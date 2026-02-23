@@ -64,7 +64,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: [linux-x64]
-        gpu_type: [T4, L40S]
+        gpu_type: [T4, A10, L40S]
         cuda_version: ["11.8.0", "12.8.1", "13.0.2"]
 
         include:

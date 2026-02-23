@@ -329,6 +329,7 @@ GPU-specific functions are actually invoked.
 ### Environment variables
 
 - `BNB_CUDA_VERSION` — Override the auto-detected CUDA version for library selection
+    - `BNB_ROCM_VERSION` is the ROCm equivalent
 - Standard CUDA env vars (`CUDA_HOME`, `LD_LIBRARY_PATH`) affect library discovery
 
 ---

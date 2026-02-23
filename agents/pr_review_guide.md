@@ -148,6 +148,25 @@ From the metadata, note:
 - **Existing reviews and comments**: Has anyone already reviewed? Are there unresolved
   threads?
 
+### 3.2.1 Stop If Already Reviewed
+
+Before proceeding with a full review, check whether a substantive review has already been posted — by you, another agent, or a maintainer:
+
+```bash
+gh api repos/bitsandbytes-foundation/bitsandbytes/pulls/<NUMBER>/reviews \
+  --jq '.[] | "\(.user.login) | \(.state) | \(.submitted_at) | body_len=\(.body | length)"'
+```
+
+**Do not duplicate an existing review.** If a review with substantive feedback (body length > 500 characters) already exists and the author has NOT pushed new commits or responded since that review, stop here — the PR does not need another review. The ball is in the author's court.
+
+A new review is warranted only if:
+
+- No substantive review exists yet
+- The author has pushed commits after the last review (compare commit dates with review `submitted_at`)
+- The author has responded to feedback and the reviewer requested re-review
+
+This check prevents wasted effort reviewing PRs that are already waiting on the author.
+
 ### 3.3 Size Calibration
 
 Use the PR size to calibrate your review depth:

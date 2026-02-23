@@ -255,6 +255,43 @@ class Params4bit(torch.nn.Parameter):
         self.bnb_quantized = state["bnb_quantized"]
         self.module = state["module"]
 
+    # Map from state_dict key names (as produced by QuantState.as_dict) to
+    # the actual QuantState attribute/access path. FSDP's _get_fqns() resolves
+    # dotted FQN keys via getattr, so "weight.quant_map" becomes
+    # getattr(weight, "quant_map") — we must map that to quant_state.code.
+    _QUANT_STATE_ATTR_MAP = {
+        # Direct QuantState attributes
+        "absmax": lambda qs: qs.absmax,
+        "code": lambda qs: qs.code,
+        "blocksize": lambda qs: qs.blocksize,
+        "dtype": lambda qs: qs.dtype,
+        "shape": lambda qs: qs.shape,
+        "offset": lambda qs: qs.offset,
+        "state2": lambda qs: qs.state2,
+        # as_dict serializes code → "quant_map"
+        "quant_map": lambda qs: qs.code,
+        "quant_type": lambda qs: qs.quant_type,
+        # as_dict serializes nested state2 attributes under "nested_*" keys
+        "nested_absmax": lambda qs: qs.state2.absmax,
+        "nested_blocksize": lambda qs: qs.state2.blocksize,
+        "nested_quant_map": lambda qs: qs.state2.code,
+        "nested_dtype": lambda qs: qs.state2.dtype,
+        "nested_offset": lambda qs: qs.offset,
+    }
+
+    def __getattr__(self, name):
+        # Proxy known QuantState attributes so that PyTorch's FSDP state_dict
+        # machinery (which traverses FQN paths via getattr) can find them.
+        accessor = self._QUANT_STATE_ATTR_MAP.get(name)
+        if accessor is not None:
+            quant_state = self.__dict__.get("quant_state")
+            if quant_state is not None:
+                try:
+                    return accessor(quant_state)
+                except AttributeError:
+                    pass
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     def __deepcopy__(self, memo):
         new_instance = type(self).__new__(type(self))
         state = self.__getstate__()
@@ -434,7 +471,7 @@ class Linear4bit(nn.Linear):
     import torch.nn as nn
 
     import bitsandbytes as bnb
-    from bnb.nn import Linear4bit
+    from bitsandbytes.nn import Linear4bit
 
     fp16_model = nn.Sequential(
         nn.Linear(64, 64),
@@ -948,7 +985,7 @@ class Linear8bitLt(nn.Linear):
     import torch.nn as nn
 
     import bitsandbytes as bnb
-    from bnb.nn import Linear8bitLt
+    from bitsandbytes.nn import Linear8bitLt
 
     fp16_model = nn.Sequential(
         nn.Linear(64, 64),

@@ -578,6 +578,10 @@ str2optimizer32bit = {
         lib.cademamix32bit_grad_fp16,
         lib.cademamix32bit_grad_bf16,
     ),
+    "lars": (
+        lib.cmomentum32bit_grad_32,
+        lib.cmomentum32bit_grad_16,
+    ),
 }
 
 str2optimizer8bit_blockwise = {
@@ -637,7 +641,7 @@ def _optimizer_update_32bit_impl(
     optim_fns = str2optimizer32bit.get(optimizer_name, None)
     if optim_fns is None:
         raise ValueError(
-            f"Unsupported optimizer name: {optimizer_name}. Supported optimizers: {list(str2optimizer8bit_blockwise.keys())}"
+            f"Unsupported optimizer name: {optimizer_name}. Supported optimizers: {list(str2optimizer32bit.keys())}"
         )
     if g.dtype == torch.float32:
         optim_func = optim_fns[0]

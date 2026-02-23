@@ -487,6 +487,18 @@ class QuantState:
         self.state2 = state2
         self.nested = state2 is not None
 
+    def __getattr__(self, name):
+        # Support attribute access for packed state_dict keys like "bitsandbytes__nf4".
+        # PyTorch's FSDP state_dict traversal (_get_fqns) resolves dotted FQN paths via
+        # getattr. The packed key "quant_state.bitsandbytes__nf4" causes it to call
+        # getattr(quant_state_obj, "bitsandbytes__nf4"), which we handle here.
+        if name.startswith("bitsandbytes__"):
+            qs_dict = self.as_dict(packed=True)
+            packed_key = "quant_state." + name
+            if packed_key in qs_dict:
+                return qs_dict[packed_key]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     def __getitem__(self, idx):
         """
         ensures compatibility with older quant state scheme with nested lists.
@@ -520,12 +532,13 @@ class QuantState:
 
         # unpacking tensor with non-tensor components
         qs_key = [k for k, v in qs_dict.items() if "quant_state" in k and isinstance(v, torch.Tensor)]
-        if not len(qs_key) and "quant_type" not in qs_dict:
-            raise ValueError("Expected packed or unpacked quant_state items, found neither")
-        elif len(qs_key) != 1 or qs_key[0].split(".")[-1] not in cls.valid_qs_type_keys:
-            raise ValueError(
-                f"There should be exactly one `quant_state` item with ending from {cls.valid_qs_type_keys}.\nDetected {qs_key}.",
-            )
+        if "quant_type" not in qs_dict:
+            if not qs_key:
+                raise ValueError("Expected packed or unpacked quant_state items, found neither")
+            elif len(qs_key) != 1 or qs_key[0].split(".")[-1] not in cls.valid_qs_type_keys:
+                raise ValueError(
+                    f"There should be exactly one `quant_state` item with ending from {cls.valid_qs_type_keys}.\nDetected {qs_key}.",
+                )
 
         # unpacking minor and non-tensor quant state items if necessary
         if len(qs_key) == 1:
@@ -558,7 +571,7 @@ class QuantState:
         )
         return quant_state
 
-    def as_dict(self, packed=False):
+    def as_dict(self, packed: bool = False) -> dict[str, Any]:
         """
         returns dict of tensors and strings to use in serialization via _save_to_state_dict()
         param: packed -- returns dict[str, torch.Tensor] for state_dict fit for safetensors saving
@@ -569,7 +582,7 @@ class QuantState:
             "blocksize": self.blocksize,
             "quant_map": self.code,
             "dtype": str(self.dtype).strip("torch."),
-            "shape": tuple(self.shape),
+            "shape": tuple(self.shape) if self.shape is not None else None,
         }
         if self.nested:
             qs_dict.update(
@@ -581,13 +594,16 @@ class QuantState:
                     "nested_offset": self.offset.item(),
                 },
             )
-        if not packed:
+        if not packed or self.quant_type is None:
             return qs_dict
 
         # packed format allows serialization of non-tensor components, critical for saving in safetensors format
         qs_packed_dict = {k: v for k, v in qs_dict.items() if isinstance(v, torch.Tensor)}
         non_tensor_dict = {k: v for k, v in qs_dict.items() if not isinstance(v, torch.Tensor)}
-        qs_packed_dict["quant_state." + "bitsandbytes__" + self.quant_type] = pack_dict_to_tensor(non_tensor_dict)
+        key = "quant_state.bitsandbytes__"
+        if self.quant_type is not None:
+            key += self.quant_type
+        qs_packed_dict[key] = pack_dict_to_tensor(non_tensor_dict)
         return qs_packed_dict
 
     def to(self, device):
@@ -995,7 +1011,7 @@ def dequantize_4bit(
     """Dequantizes a packed 4-bit quantized tensor.
 
     The input tensor is dequantized by dividing it into blocks of `blocksize` values.
-    The the absolute maximum value within these blocks is used for scaling
+    The absolute maximum value within these blocks is used for scaling
     the non-linear dequantization.
 
     Args:

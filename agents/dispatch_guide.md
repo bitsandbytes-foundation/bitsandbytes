@@ -12,6 +12,27 @@ python3 agents/fetch_issues.py
 
 Read `agents/github_tools_guide.md` for the full reference on how to use the query tools.
 
+## Step 0: Check Existing Reviews on Open PRs
+
+Before looking at issues, check whether there are open PRs from external contributors that need review. But **do not assume a PR needs review just because it is open** — check whether a review has already been posted.
+
+```bash
+# List open PRs
+gh pr list --state open --limit 30
+
+# For each external contributor PR, check for existing reviews
+gh api repos/bitsandbytes-foundation/bitsandbytes/pulls/<NUMBER>/reviews \
+  --jq '.[] | "\(.user.login) | \(.state) | \(.submitted_at)"'
+```
+
+A PR only needs a new review if:
+
+- **No review exists at all** from a maintainer or agent
+- **The author has pushed new commits** since the last review (check commit dates vs review dates)
+- **The author has responded to review feedback** and the review needs a re-review
+
+If a review already exists and the author has not responded or pushed changes, the ball is in the author's court — skip that PR. Do not generate a prompt to re-review work that has already been reviewed.
+
 ## Step 1: Find Candidate Issues
 
 Start by getting the landscape of open issues:
