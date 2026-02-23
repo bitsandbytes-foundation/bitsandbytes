@@ -60,20 +60,41 @@ class TestCPUOffloadCheckpoint:
         assert x.grad.shape == x.shape
 
     def test_memory_reduction(self):
-        """CPU offload should use less GPU memory than standard checkpoint."""
-        dim = 1024
+        """CPU offload should reduce GPU memory by offloading activations.
 
-        # Standard forward (saves activations on GPU)
+        Uses lightweight parameterized functions that produce large
+        intermediate activations so the saved-activation memory
+        dominates over parameter gradient memory.
+        """
+        dim = 64
+        expand = 2048
+        n_layers = 8
+
+        class ExpandLayer(nn.Module):
+            """Lightweight params but large intermediate activations."""
+
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(dim) * 0.01)
+
+            def forward(self, x):
+                # x: [batch, dim]. Expand to [batch, dim, expand], sum back.
+                # The expanded tensor is large and saved for backward.
+                h = x * self.w  # element-wise, saves x and w for backward
+                h = h.unsqueeze(-1).expand(-1, -1, expand)  # large activation
+                h = h.mean(-1)  # back to [batch, dim]
+                return h
+
+        # Standard forward (saves all expanded activations on GPU)
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
-        layers = nn.ModuleList([nn.Linear(dim, dim).cuda() for _ in range(4)])
-        x = torch.randn(32, dim, device="cuda", requires_grad=True)
+        layers = nn.ModuleList([ExpandLayer().cuda() for _ in range(n_layers)])
+        x = torch.randn(512, dim, device="cuda", requires_grad=True)
 
-        # Standard: all activations stay on GPU
         h = x
         for layer in layers:
-            h = torch.nn.functional.gelu(layer(h))
+            h = layer(h)
         h.sum().backward()
         peak_standard = torch.cuda.max_memory_allocated()
 
@@ -85,15 +106,14 @@ class TestCPUOffloadCheckpoint:
         torch.cuda.reset_peak_memory_stats()
 
         # CPU offload: activations go to CPU
-        x = torch.randn(32, dim, device="cuda", requires_grad=True)
+        x = torch.randn(512, dim, device="cuda", requires_grad=True)
         h = x
         for layer in layers:
-            h = checkpoint_cpu_offload(lambda inp, l=layer: torch.nn.functional.gelu(l(inp)), h)
+            h = checkpoint_cpu_offload(layer, h)
         h.sum().backward()
         peak_offload = torch.cuda.max_memory_allocated()
 
         # CPU offload should use less peak memory
-        # Allow some margin since PyTorch internal allocations vary
         assert peak_offload < peak_standard, (
             f"CPU offload ({peak_offload / 1e6:.1f} MB) should use less peak memory "
             f"than standard ({peak_standard / 1e6:.1f} MB)"

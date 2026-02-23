@@ -273,6 +273,67 @@ class PipelineEngine:
         return stage_layers
 
 
+class CheckpointedStage(nn.Module):
+    """Pipeline stage with gradient checkpointing and optional CPU offload.
+
+    Wraps a stage module's forward with checkpoint_cpu_offload, so that
+    intermediate activations within the stage are offloaded to CPU during
+    forward and reloaded+recomputed during backward. Stage boundary
+    activations (input/output tensors) stay on GPU — they're managed by
+    the PipelineEngine for inter-stage communication.
+
+    Args:
+        stage_module: The stage module to wrap.
+        cpu_offload: If True, use checkpoint_cpu_offload (offloads to CPU).
+            If False, use torch.utils.checkpoint (GPU-only recomputation).
+    """
+
+    def __init__(self, stage_module, cpu_offload=True):
+        super().__init__()
+        self.stage_module = stage_module
+        self.cpu_offload = cpu_offload
+
+    def forward(self, x):
+        if self.training:
+            if self.cpu_offload:
+                from bitsandbytes.training import checkpoint_cpu_offload
+                return checkpoint_cpu_offload(self.stage_module, x)
+            else:
+                return torch.utils.checkpoint.checkpoint(
+                    self.stage_module, x, use_reentrant=False,
+                )
+        return self.stage_module(x)
+
+
+class PipelineCheckpointer:
+    """Wraps pipeline stages with gradient checkpointing.
+
+    Provides a static method to wrap each stage module with
+    CheckpointedStage. Stage boundary activations (passed between stages)
+    remain on GPU for pipeline communication; only internal layer
+    activations are checkpointed.
+
+    Usage:
+        stages = [SequentialStage(layers[:2]), SequentialStage(layers[2:])]
+        stages = PipelineCheckpointer.wrap_stages(stages, cpu_offload=True)
+        engine = PipelineEngine(stages, loss_fn=loss_fn, ...)
+    """
+
+    @staticmethod
+    def wrap_stages(stage_modules, cpu_offload=True):
+        """Wrap each stage with gradient checkpointing.
+
+        Args:
+            stage_modules: List of nn.Module stage modules.
+            cpu_offload: If True, offload activations to CPU. If False,
+                use standard gradient checkpointing (GPU recomputation only).
+
+        Returns:
+            List of CheckpointedStage modules.
+        """
+        return [CheckpointedStage(s, cpu_offload=cpu_offload) for s in stage_modules]
+
+
 class SequentialStage(nn.Module):
     """A pipeline stage that sequentially runs a list of layers.
 

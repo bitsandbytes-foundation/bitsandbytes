@@ -88,19 +88,16 @@ class _CPUOffloadCheckpointFunction(torch.autograd.Function):
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
 
-        # Compute gradients
-        input_grads = torch.autograd.grad(
-            outputs,
-            [inp for inp in inputs if isinstance(inp, torch.Tensor) and inp.requires_grad],
-            grad_outputs=grad_outputs,
-        )
+        # Use backward() to accumulate gradients into all leaf parameters
+        # (not just inputs). This is needed when the checkpointed function
+        # is an nn.Module with trainable parameters.
+        torch.autograd.backward(outputs, grad_outputs)
 
-        # Map gradients back to original input positions
-        grad_iter = iter(input_grads)
+        # Collect input gradients
         result = [None, None]  # for run_function and preserve_rng_state
-        for cpu_input, req_grad in zip(ctx.cpu_inputs, ctx.input_requires_grad):
-            if isinstance(cpu_input, torch.Tensor) and req_grad:
-                result.append(next(grad_iter))
+        for inp, req_grad in zip(inputs, ctx.input_requires_grad):
+            if isinstance(inp, torch.Tensor) and req_grad:
+                result.append(inp.grad if inp.grad is not None else torch.zeros_like(inp))
             else:
                 result.append(None)
 

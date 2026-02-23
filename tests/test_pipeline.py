@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 
 from bitsandbytes.pipeline import (
+    CheckpointedStage,
+    PipelineCheckpointer,
     PipelineEngine,
     SequentialStage,
     generate_1f1b_schedule,
@@ -479,6 +481,190 @@ class TestPipelineEngine:
             for layer in layers:
                 assert layer.linear.weight.grad is not None
                 assert (layer.linear.weight.grad != 0).any()
+
+
+# ─── Pipeline Checkpointing Tests ─────────────────────────────────────────
+
+class WideLayer(nn.Module):
+    """Linear layer with large intermediate for memory testing."""
+
+    def __init__(self, dim, intermediate):
+        super().__init__()
+        self.up = nn.Linear(dim, intermediate, bias=False)
+        self.down = nn.Linear(intermediate, dim, bias=False)
+
+    def forward(self, x):
+        return self.down(torch.relu(self.up(x)))
+
+
+class TestPipelineCheckpointer:
+
+    def test_checkpointed_gradient_correctness(self):
+        """Checkpointed pipeline should produce identical gradients to reference."""
+        dim = 32
+        M = 4
+        torch.manual_seed(42)
+
+        layers = [SimpleLayer(dim).cuda() for _ in range(4)]
+        micro_inputs = [torch.randn(4, dim, device="cuda") for _ in range(M)]
+        micro_labels = [torch.randn(4, dim, device="cuda") for _ in range(M)]
+        loss_fn = lambda out, labels: (out - labels).pow(2).mean()
+
+        # Reference: single-device gradient accumulation
+        ref_layers = [SimpleLayer(dim).cuda() for _ in range(4)]
+        for ref, orig in zip(ref_layers, layers):
+            ref.linear.weight.data.copy_(orig.linear.weight.data)
+        for ref in ref_layers:
+            ref.zero_grad()
+        for m in range(M):
+            x = micro_inputs[m]
+            for ref in ref_layers:
+                x = ref(x)
+            loss = loss_fn(x, micro_labels[m]) / M
+            loss.backward()
+        ref_grads = [ref.linear.weight.grad.clone() for ref in ref_layers]
+
+        # Pipeline with checkpointing
+        for layer in layers:
+            layer.zero_grad()
+        stages = [SequentialStage(layers[:2]).cuda(), SequentialStage(layers[2:]).cuda()]
+        stages = PipelineCheckpointer.wrap_stages(stages, cpu_offload=True)
+        engine = PipelineEngine(stages, loss_fn=loss_fn, num_micro_batches=M)
+
+        # Set to training mode
+        for s in stages:
+            s.train()
+
+        result = engine.step(micro_inputs, micro_labels)
+
+        for i, layer in enumerate(layers):
+            assert layer.linear.weight.grad is not None, f"Layer {i}: no gradient"
+            torch.testing.assert_close(
+                ref_grads[i], layer.linear.weight.grad,
+                atol=1e-5, rtol=1e-5,
+                msg=f"Layer {i}: gradient mismatch with checkpointing",
+            )
+
+    def test_checkpointed_no_cpu_offload(self):
+        """Checkpointing without CPU offload should also produce correct gradients."""
+        dim = 32
+        M = 4
+        torch.manual_seed(42)
+
+        layers = [SimpleLayer(dim).cuda() for _ in range(4)]
+        micro_inputs = [torch.randn(4, dim, device="cuda") for _ in range(M)]
+        micro_labels = [torch.randn(4, dim, device="cuda") for _ in range(M)]
+        loss_fn = lambda out, labels: (out - labels).pow(2).mean()
+
+        # Reference
+        ref_layers = [SimpleLayer(dim).cuda() for _ in range(4)]
+        for ref, orig in zip(ref_layers, layers):
+            ref.linear.weight.data.copy_(orig.linear.weight.data)
+        for ref in ref_layers:
+            ref.zero_grad()
+        for m in range(M):
+            x = micro_inputs[m]
+            for ref in ref_layers:
+                x = ref(x)
+            loss = loss_fn(x, micro_labels[m]) / M
+            loss.backward()
+        ref_grads = [ref.linear.weight.grad.clone() for ref in ref_layers]
+
+        # Pipeline with standard checkpointing (no CPU offload)
+        for layer in layers:
+            layer.zero_grad()
+        stages = [SequentialStage(layers[:2]).cuda(), SequentialStage(layers[2:]).cuda()]
+        stages = PipelineCheckpointer.wrap_stages(stages, cpu_offload=False)
+        engine = PipelineEngine(stages, loss_fn=loss_fn, num_micro_batches=M)
+        for s in stages:
+            s.train()
+        result = engine.step(micro_inputs, micro_labels)
+
+        for i, layer in enumerate(layers):
+            assert layer.linear.weight.grad is not None, f"Layer {i}: no gradient"
+            torch.testing.assert_close(
+                ref_grads[i], layer.linear.weight.grad,
+                atol=1e-5, rtol=1e-5,
+                msg=f"Layer {i}: gradient mismatch without CPU offload",
+            )
+
+    def test_checkpointed_memory_reduction(self):
+        """Checkpointing should reduce peak GPU memory for wide layers."""
+        dim = 64
+        intermediate = 4096  # Large intermediate to make memory difference visible
+        M = 4
+        batch = 32
+        torch.manual_seed(42)
+
+        loss_fn = lambda out, labels: (out - labels).pow(2).mean()
+
+        def run_pipeline(use_checkpoint):
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+
+            layers = [WideLayer(dim, intermediate).cuda() for _ in range(4)]
+            micro_inputs = [torch.randn(batch, dim, device="cuda") for _ in range(M)]
+            micro_labels = [torch.randn(batch, dim, device="cuda") for _ in range(M)]
+
+            for layer in layers:
+                layer.zero_grad()
+
+            stages = [
+                SequentialStage(layers[:2]).cuda(),
+                SequentialStage(layers[2:]).cuda(),
+            ]
+
+            if use_checkpoint:
+                stages = PipelineCheckpointer.wrap_stages(stages, cpu_offload=True)
+                for s in stages:
+                    s.train()
+
+            engine = PipelineEngine(stages, loss_fn=loss_fn, num_micro_batches=M)
+
+            result = engine.step(micro_inputs, micro_labels)
+
+            peak_mem = torch.cuda.max_memory_allocated()
+
+            # Verify gradients exist
+            for layer in layers:
+                for p in layer.parameters():
+                    assert p.grad is not None
+
+            # Cleanup
+            del layers, micro_inputs, micro_labels, stages, engine
+            torch.cuda.empty_cache()
+
+            return peak_mem
+
+        peak_no_ckpt = run_pipeline(use_checkpoint=False)
+        peak_with_ckpt = run_pipeline(use_checkpoint=True)
+
+        # Checkpointing should use less peak memory
+        assert peak_with_ckpt < peak_no_ckpt, (
+            f"Checkpointing should reduce memory: "
+            f"without={peak_no_ckpt / 1e6:.1f}MB, with={peak_with_ckpt / 1e6:.1f}MB"
+        )
+
+    def test_eval_mode_skips_checkpointing(self):
+        """In eval mode, checkpointed stages should skip checkpointing."""
+        dim = 32
+        torch.manual_seed(42)
+
+        layers = [SimpleLayer(dim).cuda() for _ in range(4)]
+        stage = SequentialStage(layers[:2]).cuda()
+        ckpt_stage = CheckpointedStage(stage, cpu_offload=True)
+
+        x = torch.randn(4, dim, device="cuda")
+
+        # Training mode: uses checkpointing
+        ckpt_stage.train()
+        out_train = ckpt_stage(x)
+
+        # Eval mode: skips checkpointing
+        ckpt_stage.eval()
+        out_eval = ckpt_stage(x)
+
+        torch.testing.assert_close(out_train, out_eval, atol=1e-6, rtol=1e-6)
 
 
 if __name__ == "__main__":
