@@ -1115,7 +1115,9 @@ class NVFP4QuantState:
             shape=self.shape,
             dtype=self.dtype,
             rotated=self.rotated,
-            block_scales_blocked=self.block_scales_blocked.to(device) if self.block_scales_blocked is not None else None,
+            block_scales_blocked=self.block_scales_blocked.to(device)
+            if self.block_scales_blocked is not None
+            else None,
         )
 
     def state_dict(self) -> dict:
