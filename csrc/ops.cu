@@ -1524,6 +1524,17 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
     } // end persistent work loop
 }
 
+// Cached SM count — queried once per process, safe for CUDA graph capture.
+static int cachedNumSMs() {
+    static int cached = -1;
+    if (cached < 0) {
+        int dev;
+        cudaGetDevice(&dev);
+        cudaDeviceGetAttribute(&cached, cudaDevAttrMultiProcessorCount, dev);
+    }
+    return cached;
+}
+
 // Pipeline stage count: 4 on datacenter GPUs (more shmem), 2 on consumer.
 static int pipelineNumStages() {
     static int cached = -1;
@@ -1608,11 +1619,7 @@ void kbitGemmProd(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const float* codebook, scalar_t* C,
     float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
 ) {
-    // Query SM count for persistent kernel grid sizing and M_BLOCKS dispatch
-    int dev;
-    cudaGetDevice(&dev);
-    int num_sms;
-    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, dev);
+    const int num_sms = cachedNumSMs();
 
     // Choose M_BLOCKS. With the persistent kernel, the grid always has
     // num_SMs blocks, so the SM utilization concern is gone. Choose the
@@ -2089,10 +2096,7 @@ void kbitGroupedGemmProd(
     if (max_M == 0 || N == 0)
         return;
 
-    int dev;
-    cudaGetDevice(&dev);
-    int num_sms;
-    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, dev);
+    const int num_sms = cachedNumSMs();
 
     int m_blocks = 1;
     if (max_M > 48)
@@ -2648,10 +2652,7 @@ void kbitScalarGemvTiledV2(
     const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
     int M, int K_dim, int N, cudaStream_t stream
 ) {
-    int dev;
-    cudaGetDevice(&dev);
-    int num_sms;
-    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, dev);
+    const int num_sms = cachedNumSMs();
 
 #define LAUNCH_GEMV_V2(MV) \
     kbitScalarGemvTiledV2Launch<K, MV, scalar_t, ABSMAX_T>( \
