@@ -1014,20 +1014,25 @@ void repackKbit(
 // ===========================================================================
 // Hadamard rotation kernel (in-place, blocksize-templated)
 //
-// Applies a Walsh-Hadamard transform to contiguous blocks of BLOCK_SIZE
-// elements. Used to spread outliers before kbit quantization.
-// Since H is orthogonal, rotating both weights and activations preserves
-// the GEMM result: H(A) @ H(B)^T = A @ B^T.
+// Applies a randomized Walsh-Hadamard transform (H*D) to contiguous blocks
+// of BLOCK_SIZE elements. D is a diagonal sign-flip matrix (optional).
+// Used to spread outliers before kbit quantization.
+// Since H*D is orthogonal, rotating both weights and activations preserves
+// the GEMM result: (H*D)(A) @ (H*D)(B)^T = A @ B^T.
 //
 // One warp per rotation block:
 //   BLOCK_SIZE=32:  1 elem/thread, 5 shuffle stages
 //   BLOCK_SIZE=64:  2 elem/thread, 1 register + 5 shuffle stages
 //   BLOCK_SIZE=128: 4 elem/thread, 2 register + 5 shuffle stages
 //   BLOCK_SIZE=256: 8 elem/thread, 3 register + 5 shuffle stages
+//
+// signs: optional bitmask of BLOCK_SIZE/32 uint32 words. If non-null, bit i
+// set means element i is negated before the Hadamard butterfly. Same sign
+// vector is applied to every block.
 // ===========================================================================
 
 template <int BLOCK_SIZE, typename T>
-__global__ void kHadamardRotate(T* __restrict__ data, const int n) {
+__global__ void kHadamardRotate(T* __restrict__ data, const int n, const unsigned int* __restrict__ signs) {
     constexpr int ELEMS_PER_THREAD = BLOCK_SIZE / 32;
     static_assert(BLOCK_SIZE >= 32 && (BLOCK_SIZE & (BLOCK_SIZE - 1)) == 0,
                   "BLOCK_SIZE must be a power of 2 >= 32");
@@ -1046,6 +1051,16 @@ __global__ void kHadamardRotate(T* __restrict__ data, const int n) {
     for (int j = 0; j < ELEMS_PER_THREAD; j++) {
         int idx = block_start + lane_id + j * 32;
         vals[j] = (idx < n) ? (float)data[idx] : 0.0f;
+    }
+
+    // Apply random sign flips (D matrix) before butterfly.
+    // Element at position lane_id + j*32 uses word j, bit lane_id.
+    if (signs != nullptr) {
+#pragma unroll
+        for (int j = 0; j < ELEMS_PER_THREAD; j++) {
+            if (signs[j] & (1u << lane_id))
+                vals[j] = -vals[j];
+        }
     }
 
     // In-register butterfly stages (strides >= 32).
@@ -1093,17 +1108,17 @@ __global__ void kHadamardRotate(T* __restrict__ data, const int n) {
 // ---- Hadamard rotation launch wrapper ----
 
 template <int BLOCK_SIZE, typename T>
-void hadamardRotate(T* data, int n, cudaStream_t stream) {
+void hadamardRotate(T* data, int n, const unsigned int* signs, cudaStream_t stream) {
     const int num_blocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
     const int num_cuda_blocks = (num_blocks + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
-    kHadamardRotate<BLOCK_SIZE, T><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(data, n);
+    kHadamardRotate<BLOCK_SIZE, T><<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(data, n, signs);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 // Explicit instantiations: 4 block sizes x 2 dtypes
-#define INSTANTIATE_HADAMARD(BS) \
-    template void hadamardRotate<BS, half>(half*, int, cudaStream_t); \
-    template void hadamardRotate<BS, __nv_bfloat16>(__nv_bfloat16*, int, cudaStream_t);
+#define INSTANTIATE_HADAMARD(BS)                                                                                       \
+    template void hadamardRotate<BS, half>(half*, int, const unsigned int*, cudaStream_t);                             \
+    template void hadamardRotate<BS, __nv_bfloat16>(__nv_bfloat16*, int, const unsigned int*, cudaStream_t);
 
 INSTANTIATE_HADAMARD(32)
 INSTANTIATE_HADAMARD(64)

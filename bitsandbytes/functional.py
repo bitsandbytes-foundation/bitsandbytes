@@ -1135,22 +1135,30 @@ def decode_absmax_e4m4(encoded: Tensor, bias: int = 11) -> Tensor:
     return result
 
 
-def hadamard_rotate(data: Tensor, block_size: int = 32) -> Tensor:
-    """Apply in-place Walsh-Hadamard rotation to contiguous blocks.
+def hadamard_rotate(
+    data: Tensor,
+    block_size: int = 32,
+    signs: Optional[Tensor] = None,
+) -> Tensor:
+    """Apply in-place randomized Walsh-Hadamard rotation (H*D) to contiguous blocks.
 
     Spreads outliers across quantization blocks, improving kbit accuracy.
-    Since H is orthogonal, rotating both weights and activations preserves
-    the GEMM result: H(A) @ H(B)^T = A @ B^T.
+    Since H*D is orthogonal, rotating both weights and activations with the
+    same signs preserves the GEMM result: (H*D)(A) @ (H*D)(B)^T = A @ B^T.
 
     Args:
         data: Input tensor (float16 or bfloat16). Modified in-place.
         block_size: Rotation block size (32, 64, 128, or 256).
+        signs: Optional int32 tensor of block_size//32 words. Each bit controls
+            the sign flip for one element within the block. If None, no sign
+            flips are applied (plain Hadamard). Generate once per model with
+            ``torch.randint(0, 2**32, (block_size // 32,), dtype=torch.int32)``.
 
     Returns:
         The input tensor, rotated in-place.
     """
     data_flat = data.contiguous().view(-1)
-    torch.ops.bitsandbytes.hadamard_rotate_(data_flat, block_size)
+    torch.ops.bitsandbytes.hadamard_rotate_(data_flat, block_size, signs)
     return data
 
 
