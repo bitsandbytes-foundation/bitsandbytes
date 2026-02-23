@@ -1097,6 +1097,7 @@ class NVFP4QuantState:
         shape: tuple,
         dtype: torch.dtype,
         rotated: bool = False,
+        block_scales_blocked: Optional[torch.Tensor] = None,
     ):
         self.packed_data = packed_data
         self.block_scales = block_scales
@@ -1104,6 +1105,7 @@ class NVFP4QuantState:
         self.shape = shape
         self.dtype = dtype
         self.rotated = rotated
+        self.block_scales_blocked = block_scales_blocked
 
     def to(self, device):
         return NVFP4QuantState(
@@ -1113,6 +1115,7 @@ class NVFP4QuantState:
             shape=self.shape,
             dtype=self.dtype,
             rotated=self.rotated,
+            block_scales_blocked=self.block_scales_blocked.to(device) if self.block_scales_blocked is not None else None,
         )
 
     def state_dict(self) -> dict:
@@ -1168,6 +1171,13 @@ def quantize_nvfp4(
     else:
         packed, block_scales, ts = torch.ops.bitsandbytes.quantize_nvfp4(A_flat, tensor_scale)
 
+    # Pre-compute CUTLASS block-scaled layout for GEMM. The 2D scale shape is
+    # (rows, K//16) where rows is the product of all dims except the last.
+    K = input_shape[-1]
+    rows = A_flat.numel() // K
+    scale_w = K // 16
+    block_scales_blocked = torch.ops.bitsandbytes.scale_to_blocked(block_scales, rows, scale_w)
+
     state = NVFP4QuantState(
         packed_data=packed,
         block_scales=block_scales,
@@ -1175,6 +1185,7 @@ def quantize_nvfp4(
         shape=input_shape,
         dtype=input_dtype,
         rotated=rotate,
+        block_scales_blocked=block_scales_blocked,
     )
     return packed, state
 
@@ -1231,11 +1242,15 @@ def gemm_nvfp4(
     K = A_state.shape[1]
     N = B_state.shape[0]
 
+    # Use pre-swizzled scales for CUTLASS GEMM (computed at quantization time)
+    A_scales = A_state.block_scales_blocked if A_state.block_scales_blocked is not None else A_state.block_scales
+    B_scales = B_state.block_scales_blocked if B_state.block_scales_blocked is not None else B_state.block_scales
+
     return torch.ops.bitsandbytes.gemm_nvfp4(
         A_data,
         B_data,
-        A_state.block_scales,
-        B_state.block_scales,
+        A_scales,
+        B_scales,
         A_state.tensor_scale,
         B_state.tensor_scale,
         M,

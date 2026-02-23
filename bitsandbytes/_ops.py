@@ -494,6 +494,21 @@ def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tens
     return packed, block_scales, ts_out
 
 
+# Scale reordering for CUTLASS block-scaled GEMM
+torch.library.define(
+    "bitsandbytes::scale_to_blocked",
+    "(Tensor scales, int H, int W) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::scale_to_blocked")
+def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
+    n_row_blocks = (H + 127) // 128
+    n_col_blocks = (W + 3) // 4
+    out_size = n_row_blocks * n_col_blocks * 128 * 4
+    return torch.empty(out_size, dtype=torch.uint8, device=scales.device)
+
+
 # NVFP4 GEMM (A @ B^T with block-scaled FP4 inputs)
 torch.library.define(
     "bitsandbytes::gemm_nvfp4",
