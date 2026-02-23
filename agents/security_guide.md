@@ -445,7 +445,6 @@ bitsandbytes/autograd/_functions.py:
 ```
 bitsandbytes/functional.py:
   - optimizer_update_8bit_blockwise() — 8-bit optimizer step
-  - percentile_clipping() — gradient clipping for optimizer stability
 
 csrc/ops.cu / kernels.cu:
   - Optimizer kernel implementations
