@@ -1001,7 +1001,7 @@ def _(
 
 
 @register_kernel("bitsandbytes::hadamard_rotate_", "cuda")
-def _(data: torch.Tensor, block_size: int, signs: Optional[torch.Tensor]) -> torch.Tensor:
+def _(data: torch.Tensor, block_size: int) -> torch.Tensor:
     torch._check(
         block_size in (32, 64, 128, 256),
         lambda: f"block_size must be 32, 64, 128, or 256, got {block_size}",
@@ -1012,14 +1012,12 @@ def _(data: torch.Tensor, block_size: int, signs: Optional[torch.Tensor]) -> tor
     )
 
     tname = _KBIT_DTYPE_SUFFIX[data.dtype]
-    signs_ptr = get_ptr(signs) if signs is not None else None
     with _cuda_device_of(data):
         fn = getattr(lib, f"chadamard_rotate_{tname}")
         fn(
             get_ptr(data),
             ct.c_int(data.numel()),
             ct.c_int(block_size),
-            signs_ptr,
             _get_tensor_stream(data),
         )
 

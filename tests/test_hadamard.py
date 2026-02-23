@@ -10,7 +10,7 @@ DTYPES = [torch.float16, torch.bfloat16]
 
 
 class TestOrthogonality:
-    """H(H(x)) ≈ x for plain Hadamard (no signs)."""
+    """H(H(x)) ≈ x — Hadamard is its own inverse (involutory)."""
 
     @pytest.mark.parametrize("block_size", BLOCK_SIZES)
     @pytest.mark.parametrize("dtype", DTYPES)
@@ -34,41 +34,12 @@ class TestOrthogonality:
         torch.testing.assert_close(x, x_orig, atol=atol, rtol=atol)
 
 
-class TestSignedOrthogonality:
-    """Randomized Hadamard: R=H*D is orthogonal (R^T*R=I)."""
-
-    @pytest.mark.parametrize("block_size", BLOCK_SIZES)
-    @pytest.mark.parametrize("dtype", DTYPES)
-    def test_signed_inverse(self, block_size, dtype):
-        """Verify inv(H*D) = D*H: forward then inverse recovers original."""
-        signs = torch.randint(0, 2**31, (block_size // 32,), dtype=torch.int32, device="cuda")
-        x = torch.randn(1024, dtype=dtype, device="cuda")
-        x_orig = x.clone()
-
-        # Forward: H*D*x
-        hadamard_rotate(x, block_size=block_size, signs=signs)
-
-        # Inverse: D*H*x' = first apply H (no signs), then sign flip
-        hadamard_rotate(x, block_size=block_size)  # H
-        # Apply D (sign flip)
-        x_flat = x.view(-1)
-        for j in range(block_size // 32):
-            word = signs[j].item()
-            for bit in range(32):
-                if word & (1 << bit):
-                    pos = j * 32 + bit
-                    x_flat[pos::block_size] *= -1
-
-        atol = 1e-2 if dtype == torch.bfloat16 else 1e-3
-        torch.testing.assert_close(x, x_orig, atol=atol, rtol=atol)
-
-
 class TestGEMMEquivalence:
     """H(A) @ H(B)^T ≈ A @ B^T (within quantization tolerance)."""
 
     @pytest.mark.parametrize("block_size", BLOCK_SIZES)
     @pytest.mark.parametrize("dtype", DTYPES)
-    def test_gemm_plain(self, block_size, dtype):
+    def test_gemm(self, block_size, dtype):
         M, K, N = 4, 256, 8
         A = torch.randn(M, K, dtype=dtype, device="cuda")
         B = torch.randn(N, K, dtype=dtype, device="cuda")
@@ -78,25 +49,6 @@ class TestGEMMEquivalence:
         B_rot = B.clone()
         hadamard_rotate(A_rot, block_size=block_size)
         hadamard_rotate(B_rot, block_size=block_size)
-        result = A_rot.float() @ B_rot.float().T
-
-        atol = 0.1 if dtype == torch.bfloat16 else 0.05
-        torch.testing.assert_close(result, ref, atol=atol, rtol=0.05)
-
-    @pytest.mark.parametrize("block_size", BLOCK_SIZES)
-    @pytest.mark.parametrize("dtype", DTYPES)
-    def test_gemm_signed(self, block_size, dtype):
-        """GEMM equivalence with random sign flips."""
-        M, K, N = 4, 256, 8
-        signs = torch.randint(0, 2**31, (block_size // 32,), dtype=torch.int32, device="cuda")
-        A = torch.randn(M, K, dtype=dtype, device="cuda")
-        B = torch.randn(N, K, dtype=dtype, device="cuda")
-        ref = A.float() @ B.float().T
-
-        A_rot = A.clone()
-        B_rot = B.clone()
-        hadamard_rotate(A_rot, block_size=block_size, signs=signs)
-        hadamard_rotate(B_rot, block_size=block_size, signs=signs)
         result = A_rot.float() @ B_rot.float().T
 
         atol = 0.1 if dtype == torch.bfloat16 else 0.05
@@ -192,16 +144,6 @@ class TestDeterminism:
         b = x.clone()
         hadamard_rotate(a, block_size=block_size)
         hadamard_rotate(b, block_size=block_size)
-        torch.testing.assert_close(a, b, atol=0, rtol=0)
-
-    @pytest.mark.parametrize("block_size", BLOCK_SIZES)
-    def test_deterministic_signed(self, block_size):
-        signs = torch.randint(0, 2**31, (block_size // 32,), dtype=torch.int32, device="cuda")
-        x = torch.randn(1024, dtype=torch.float16, device="cuda")
-        a = x.clone()
-        b = x.clone()
-        hadamard_rotate(a, block_size=block_size, signs=signs)
-        hadamard_rotate(b, block_size=block_size, signs=signs)
         torch.testing.assert_close(a, b, atol=0, rtol=0)
 
 

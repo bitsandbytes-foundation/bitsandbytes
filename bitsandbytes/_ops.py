@@ -588,12 +588,12 @@ def _(
 
 torch.library.define(
     "bitsandbytes::hadamard_rotate_",
-    "(Tensor(a!) data, int block_size, Tensor? signs) -> Tensor(a!)",
+    "(Tensor(a!) data, int block_size) -> Tensor(a!)",
 )
 
 
 @register_fake("bitsandbytes::hadamard_rotate_")
-def _(data: torch.Tensor, block_size: int, signs: Optional[torch.Tensor]) -> torch.Tensor:
+def _(data: torch.Tensor, block_size: int) -> torch.Tensor:
     torch._check(
         block_size in (32, 64, 128, 256),
         lambda: f"block_size must be 32, 64, 128, or 256, got {block_size}",
@@ -602,15 +602,6 @@ def _(data: torch.Tensor, block_size: int, signs: Optional[torch.Tensor]) -> tor
         data.dtype in (torch.float16, torch.bfloat16),
         lambda: f"hadamard_rotate only supports float16/bfloat16, got {data.dtype}",
     )
-    if signs is not None:
-        torch._check(
-            signs.dtype == torch.int32,
-            lambda: f"signs must be int32, got {signs.dtype}",
-        )
-        torch._check(
-            signs.numel() == block_size // 32,
-            lambda: f"signs must have {block_size // 32} elements for block_size={block_size}, got {signs.numel()}",
-        )
     return data
 
 
