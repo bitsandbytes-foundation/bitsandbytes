@@ -427,7 +427,10 @@ class DistributedPipelineEngine:
                     inp = _recv(self.hidden_shape, src=s - 1,
                                 device=self.device, dtype=self.dtype)
 
-                inp = inp.requires_grad_(True)
+                # Only set requires_grad for non-first stages (first stage may
+                # receive integer input_ids that can't track gradients)
+                if s > 0:
+                    inp = inp.requires_grad_(True)
                 fwd_inputs[m] = inp
 
                 # Forward
