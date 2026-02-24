@@ -8,7 +8,7 @@
 #include <ops.cuh>
 #endif
 #if BUILD_HIP
-#include <ops_hip.cuh>
+#include <ops.cuh>
 #endif
 #if BUILD_MPS
 // #include <mps_ops.h>

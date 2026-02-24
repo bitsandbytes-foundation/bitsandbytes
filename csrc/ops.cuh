@@ -8,41 +8,33 @@
 
 #include <assert.h>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <stdio.h>
-
-#include <common.h>
-#include <cublasLt.h>
-#include <cublas_v2.h>
-#include <cuda_fp16.h>
-#include <cuda_runtime_api.h>
-#include <functional>
 #include <vector>
 
-#define CUDA_CHECK_RETURN(value)                                                                                       \
-    {                                                                                                                  \
-        cudaError_t _m_cudaStat = value;                                                                               \
-        if (_m_cudaStat != cudaSuccess) {                                                                              \
-            fprintf(stderr, "Error %s at line %d in file %s\n", cudaGetErrorString(_m_cudaStat), __LINE__, __FILE__);  \
-            exit(1);                                                                                                   \
-        }                                                                                                              \
-    }
+#include "common.cuh"
+#include "compat.cuh"
+#include <common.h>
 
-inline void checkCudaStatus(cudaError_t status) {
-    if (status != cudaSuccess) {
-        printf("cuda API failed with status %d: %s\n", status, cudaGetErrorString(status));
-        throw std::logic_error("cuda API failed");
+// Error checking helpers
+
+inline void checkDeviceStatus(bnb_error_t status) {
+    if (status != BNB_SUCCESS) {
+        printf("Device API failed with status %d: %s\n", status, BNB_GET_ERROR_STRING(status));
+        throw std::logic_error("Device API failed");
     }
 }
 
-inline int checkCublasStatus(cublasStatus_t status) {
-    if (status != CUBLAS_STATUS_SUCCESS) {
-        printf("cuBLAS API failed with status %d\n", status);
-        // throw std::logic_error("cuBLAS API failed");
+inline int checkBlasLtStatus(bnb_blas_status_t status) {
+    if (status != BNB_BLAS_STATUS_SUCCESS) {
+        printf("BLAS Lt API failed with status %d\n", status);
         return 1;
     }
     return 0;
 }
+
+// Enums
 
 typedef enum Operations_t {
     ksmul = 0,
@@ -55,7 +47,7 @@ typedef enum Optimizer_t {
     LARS = 3,
     ADAGRAD = 4,
     LION = 5,
-    ADEMAMIX = 6
+    ADEMAMIX = 6,
 } Optimizer_t;
 
 typedef enum Funcs_t {
@@ -64,8 +56,19 @@ typedef enum Funcs_t {
     _MUL = 2,
 } Funcs_t;
 
+// Context classes
+
 class Context {
   public:
+#if BNB_HIP
+    rocblas_handle m_handle;
+
+    Context() {
+        rocblas_handle handle;
+        rocblas_create_handle(&handle);
+        m_handle = handle;
+    }
+#else
     cublasHandle_t m_handle;
 
     Context() {
@@ -73,18 +76,21 @@ class Context {
         cublasCreate_v2(&handle);
         m_handle = handle;
     }
+#endif
 };
 
 class ContextLt {
   public:
-    cublasLtHandle_t m_handle;
+    bnb_blasLt_handle_t m_handle;
 
     ContextLt() {
-        cublasLtHandle_t handle;
-        cublasLtCreate(&handle);
+        bnb_blasLt_handle_t handle;
+        bnb_blasLtCreate(&handle);
         m_handle = handle;
     }
 };
+
+// Function declarations
 
 template <typename T, int STOCHASTIC, int DATA_TYPE>
 void quantizeBlockwise(
@@ -92,7 +98,7 @@ void quantizeBlockwise(
 );
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(
-    float* code, unsigned char* A, float* absmax, T* out, int block_size, const int n, cudaStream_t stream
+    float* code, unsigned char* A, float* absmax, T* out, int block_size, const int n, bnb_stream_t stream
 );
 
 template <typename T, int OPTIMIZER>
@@ -120,24 +126,24 @@ void strided_gemmex(
 
 template <int DTYPE_OUT, int SCALE_ROWS>
 int igemmlt(
-    cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
-    int lda, int ldb, int ldc, cudaStream_t stream
+    bnb_blasLt_handle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
+    int lda, int ldb, int ldc, bnb_stream_t stream
 );
 
 void cutlass_igemm(
     bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda, int ldb, int ldc
 );
 void dequant_mm_int32_fp16(
-    int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, cudaStream_t stream
+    int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, bnb_stream_t stream
 );
 void int8VectorQuant(
-    half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream
+    half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
 );
 
 template <typename T, int BITS>
 void gemm_4bit_inference_naive(
     int m, int n, int k, T* A, unsigned char* B, float* absmax, float* datatype, T* out, int lda, int ldb, int ldc,
-    int blocksize, cudaStream_t stream
+    int blocksize, bnb_stream_t stream
 );
 
 template <typename T, int FUNC> void func(T* A, T* B, T value, long n);
