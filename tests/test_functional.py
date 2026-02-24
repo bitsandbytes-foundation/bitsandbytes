@@ -317,6 +317,23 @@ class Test8BitBlockwiseQuantizeFunctional:
             # print(3, sum(abserr)/len(abserr))
             # print(3, sum(relerr)/len(relerr))
 
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_quantize_blockwise_does_not_mutate_absmax(self, device):
+        """Regression test for #1587: quantize_blockwise should not mutate user-provided absmax."""
+        A = torch.randn(1024, device=device, dtype=torch.float32)
+        user_absmax = torch.ones(1, device=device, dtype=torch.float32)
+        original_absmax = user_absmax.clone()
+
+        out, quant_state = F.quantize_blockwise(A, absmax=user_absmax)
+
+        # The user's tensor must not be modified
+        torch.testing.assert_close(user_absmax, original_absmax)
+
+        # The quantization result should still be correct
+        A_recon = F.dequantize_blockwise(out, quant_state)
+        err = (A - A_recon).abs().float()
+        assert err.mean() < 0.05
+
     @pytest.mark.benchmark
     def test_bench_dequantization(self):
         a = torch.rand(1024, 1024, device="cuda").half()
@@ -917,6 +934,24 @@ class TestQuantize4BitFunctional:
 
         assert err < error_dict[quant_type]["err"][blocksize] + errtol
         assert relerr < error_dict[quant_type]["rel_err"][blocksize] + reltol
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    def test_quantize_4bit_does_not_mutate_absmax(self, device, quant_type):
+        """Regression test for #1587: quantize_4bit should not mutate user-provided absmax."""
+        A = torch.randn(1024, device=device, dtype=torch.float32)
+        user_absmax = torch.ones(16, device=device, dtype=torch.float32)
+        original_absmax = user_absmax.clone()
+
+        out, quant_state = F.quantize_4bit(A, absmax=user_absmax, quant_type=quant_type)
+
+        # The user's tensor must not be modified
+        torch.testing.assert_close(user_absmax, original_absmax)
+
+        # The quantization result should still be correct
+        A_recon = F.dequantize_4bit(out, quant_state, quant_type=quant_type)
+        err = (A - A_recon).abs().float()
+        assert err.mean() < 0.2
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
