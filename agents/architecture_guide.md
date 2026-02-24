@@ -231,10 +231,6 @@ All ops are defined with the namespace `bitsandbytes::`:
 **Optimizer ops:**
 - `optimizer_update_32bit` — 32-bit optimizer step (Adam, Lion, SGD, etc.)
 - `optimizer_update_8bit_blockwise` — 8-bit blockwise optimizer step
-- `optimizer_update_8bit` — 8-bit non-blockwise optimizer step (legacy)
-
-**Utility ops:**
-- `percentile_clipping` — adaptive gradient clipping by percentile
 
 ---
 
@@ -745,10 +741,8 @@ The base class `Optimizer2State.update_step()` then dispatches based on state dt
 def update_step(self, group, p, gindex, pindex):
     if state["state1"].dtype == torch.float:
         F.optimizer_update_32bit(self.optimizer_name, grad, p, state1, ...)
-    elif state["state1"].dtype == torch.uint8 and config["block_wise"]:
+    elif state["state1"].dtype == torch.uint8:
         F.optimizer_update_8bit_blockwise(self.optimizer_name, grad, p, state1, ...)
-    elif state["state1"].dtype == torch.uint8 and not config["block_wise"]:
-        F.optimizer_update_8bit(self.optimizer_name, grad, p, state1, ...)
 ```
 
 ### Optimizer state initialization
@@ -968,8 +962,8 @@ The `COMPUTE_BACKEND` CMake variable selects the target:
 | Backend | Library name | Languages | Dependencies |
 |---|---|---|---|
 | `cpu` | `libbitsandbytes_cpu.so` | C++17 | OpenMP (optional) |
-| `cuda` | `libbitsandbytes_cuda{VER}.so` | C++17 + CUDA | cudart, cublas, cublasLt, cusparse |
-| `hip` | `libbitsandbytes_rocm{VER}.so` | C++17 + HIP | hipblas, hiprand, hipsparse |
+| `cuda` | `libbitsandbytes_cuda{VER}.so` | C++17 + CUDA | cudart, cublas, cublasLt |
+| `hip` | `libbitsandbytes_rocm{VER}.so` | C++17 + HIP | hipblas, hiprand |
 | `mps` | `libbitsandbytes_mps.dylib` | C++17 + ObjC++ | Metal framework |
 | `xpu` | `libbitsandbytes_xpu.so` | C++20 + SYCL | Intel oneAPI |
 
@@ -1080,7 +1074,7 @@ Optimizer8bit.step():
       ├── p.data = p.data.contiguous()
       ├── config = self.get_config(gindex, pindex, group)
       │
-      ├── state["state1"].dtype == uint8 and block_wise:
+      ├── state["state1"].dtype == uint8:
       │   F.optimizer_update_8bit_blockwise("adam", grad, p, state1, state2,
       │       beta1, beta2, ..., qmap1, qmap2, absmax1, absmax2, ...)
       │     ↓

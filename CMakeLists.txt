@@ -348,7 +348,7 @@ endif()
 
 if(BUILD_CUDA)
     target_include_directories(bitsandbytes PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-    target_link_libraries(bitsandbytes PUBLIC CUDA::cudart CUDA::cublas CUDA::cublasLt CUDA::cusparse)
+    target_link_libraries(bitsandbytes PUBLIC CUDA::cudart CUDA::cublas CUDA::cublasLt)
     set_target_properties(bitsandbytes
         PROPERTIES
             CUDA_SEPARABLE_COMPILATION ON
@@ -368,7 +368,6 @@ if(BUILD_HIP)
     endmacro()
     find_package_and_print_version(hipblas REQUIRED)
     find_package_and_print_version(hiprand REQUIRED)
-    find_package_and_print_version(hipsparse REQUIRED)
 
     ## hacky way of excluding hip::amdhip64 (with it linked many tests unexpectedly fail e.g. adam8bit because of inaccuracies)
     ## On Windows, we need to link amdhip64 explicitly
@@ -380,7 +379,7 @@ if(BUILD_HIP)
 
     target_include_directories(bitsandbytes PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include ${ROCM_PATH}/include /include)
     target_link_directories(bitsandbytes PRIVATE ${ROCM_PATH}/lib /lib)
-    target_link_libraries(bitsandbytes PUBLIC roc::hipblas hip::hiprand roc::hipsparse)
+    target_link_libraries(bitsandbytes PUBLIC roc::hipblas hip::hiprand)
 
     # On Windows, rocblas is not pulled in transitively by roc::hipblas
     # and is needed because ops_hip.cuh uses rocblas_handle directly.

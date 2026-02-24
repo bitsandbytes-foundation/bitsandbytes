@@ -19,8 +19,6 @@ class LAMB(Optimizer2State):
         optim_bits=32,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=False,
         max_unorm=1.0,
     ):
         """
@@ -49,10 +47,6 @@ class LAMB(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             max_unorm (`float`, defaults to 1.0):
                 The maximum gradient norm.
         """
@@ -66,8 +60,6 @@ class LAMB(Optimizer2State):
             optim_bits,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             max_unorm=1.0,
         )
 
@@ -85,8 +77,6 @@ class LAMB8bit(Optimizer2State):
         adam_w_mode=True,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=False,
         max_unorm=1.0,
     ):
         """
@@ -113,10 +103,6 @@ class LAMB8bit(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             max_unorm (`float`, defaults to 1.0):
                 The maximum gradient norm.
         """
@@ -130,8 +116,6 @@ class LAMB8bit(Optimizer2State):
             8,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             max_unorm=1.0,
         )
 
@@ -149,8 +133,6 @@ class LAMB32bit(Optimizer2State):
         adam_w_mode=True,
         args=None,
         min_8bit_size=4096,
-        percentile_clipping=100,
-        block_wise=False,
         max_unorm=1.0,
     ):
         """
@@ -177,10 +159,6 @@ class LAMB32bit(Optimizer2State):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
-            percentile_clipping (`int`, defaults to 100):
-                Adapts clipping threshold automatically by tracking the last 100 gradient norms and clipping the gradient at a certain percentile to improve stability.
-            block_wise (`bool`, defaults to `True`):
-                Whether to independently quantize each block of tensors to reduce outlier effects and improve stability.
             max_unorm (`float`, defaults to 1.0):
                 The maximum gradient norm.
         """
@@ -194,7 +172,5 @@ class LAMB32bit(Optimizer2State):
             32,
             args,
             min_8bit_size,
-            percentile_clipping,
-            block_wise,
             max_unorm=1.0,
         )

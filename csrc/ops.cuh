@@ -90,21 +90,8 @@ class ContextLt {
     }
 };
 
-class ContextSparse {
-  public:
-    bnb_sparse_handle_t m_handle;
-
-    ContextSparse() {
-        bnb_sparse_handle_t handle;
-        bnb_sparseCreate(&handle);
-        m_handle = handle;
-    }
-};
-
 // Function declarations
 
-void quantize(float* code, float* A, unsigned char* out, int n);
-void dequantize(float* code, unsigned char* A, float* out, int n, bnb_stream_t stream);
 template <typename T, int STOCHASTIC, int DATA_TYPE>
 void quantizeBlockwise(
     float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
@@ -122,20 +109,11 @@ void optimizer32bit(
 );
 
 template <typename T, int OPTIMIZER>
-void optimizerStatic8bit(
-    T* p, T* g, unsigned char* state1, unsigned char* state2, float* unorm, float max_unorm, float param_norm,
-    float beta1, float beta2, float eps, int step, float lr, float* quantiles1, float* quantiles2, float* max1,
-    float* max2, float* new_max1, float* new_max2, float weight_decay, const float gnorm_scale, int n
-);
-
-template <typename T, int OPTIMIZER>
 void optimizerStatic8bitBlockwise(
     T* p, T* g, unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3, float alpha,
     float eps, int step, float lr, float* quantiles1, float* quantiles2, float* absmax1, float* absmax2,
     float weight_decay, const float gnorm_scale, bool skip_zeros, int n
 );
-
-template <typename T> void percentileClipping(T* g, float* gnorm_vec, int step, const int n);
 
 void gemmex(
     Context* context, bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda,
@@ -160,17 +138,6 @@ void dequant_mm_int32_fp16(
 );
 void int8VectorQuant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
-);
-
-void spmm_coo(
-    bnb_sparse_handle_t handle, int* A_rowidx, int* A_colidx, half* A_vals, int A_nnz, int A_rows, int A_cols,
-    int B_cols, int ldb, half* B, int ldc, half* C, bool transposed_B
-);
-
-template <typename T, int BITS>
-void spmm_coo_very_sparse_naive(
-    int* max_count, int* max_idx, int* offset_rowidx, int* rowidx, int* colidx, half* values, T* B, half* out,
-    float* dequant_stats, int nnz_rows, int nnz, int rowsA, int rowsB, int colsB
 );
 
 template <typename T, int BITS>

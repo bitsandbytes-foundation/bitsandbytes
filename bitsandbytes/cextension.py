@@ -90,7 +90,6 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
     def __init__(self, lib: ct.CDLL):
         super().__init__(lib)
         lib.get_context.restype = ct.c_void_p
-        lib.get_cusparse.restype = ct.c_void_p
         lib.cget_managed_ptr.restype = ct.c_void_p
 
 

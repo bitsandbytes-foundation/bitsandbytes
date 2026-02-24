@@ -171,7 +171,7 @@ def _(
     A: torch.Tensor,
     threshold=0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-    # Use CUDA kernel for rowwise and COO tensor
+    # Use CUDA kernel for rowwise quant and outlier column detection
     quant_row, row_stats, outlier_cols = torch.ops.bitsandbytes.int8_vectorwise_quant.default(
         A,
         threshold=threshold,

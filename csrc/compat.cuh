@@ -97,7 +97,7 @@ using bnb_bfloat16 = hip_bfloat16;
 using bnb_bfloat16 = __nv_bfloat16;
 #endif
 
-// Data type enum aliases for BLAS/Sparse libraries
+// Data type enum aliases for BLAS libraries
 
 #if BNB_HIP
 
@@ -177,73 +177,5 @@ using bnb_blasLt_layout_t = cublasLtMatrixLayout_t;
 
 using bnb_blas_status_t = cublasStatus_t;
 #define BNB_BLAS_STATUS_SUCCESS CUBLAS_STATUS_SUCCESS
-
-#endif
-
-// Sparse library types
-
-#if BNB_HIP
-
-#include <hipsparse/hipsparse.h>
-
-using bnb_sparse_handle_t = hipsparseHandle_t;
-using bnb_sparseSpMatDescr_t = hipsparseSpMatDescr_t;
-using bnb_sparseDnMatDescr_t = hipsparseDnMatDescr_t;
-
-#define bnb_sparseCreate hipsparseCreate
-#define bnb_sparseCreateCoo hipsparseCreateCoo
-#define bnb_sparseCreateDnMat hipsparseCreateDnMat
-#define bnb_sparseSpMM_bufSize hipsparseSpMM_bufferSize
-#define bnb_sparseSpMM hipsparseSpMM
-#define bnb_sparseDestroySpMat hipsparseDestroySpMat
-#define bnb_sparseDestroyDnMat hipsparseDestroyDnMat
-
-#define BNB_SPARSE_INDEX_32I HIPSPARSE_INDEX_32I
-#define BNB_SPARSE_INDEX_BASE_ZERO HIPSPARSE_INDEX_BASE_ZERO
-#define BNB_SPARSE_ORDER_ROW HIPSPARSE_ORDER_ROW
-#define BNB_SPARSE_OP_NON_TRANSPOSE HIPSPARSE_OPERATION_NON_TRANSPOSE
-#define BNB_SPARSE_OP_TRANSPOSE HIPSPARSE_OPERATION_TRANSPOSE
-#define BNB_SPARSE_SPMM_ALG_DEFAULT HIPSPARSE_SPMM_ALG_DEFAULT
-
-#define CHECK_SPARSE(value)                                                                                            \
-    {                                                                                                                  \
-        hipsparseStatus_t _stat = value;                                                                               \
-        if (_stat != HIPSPARSE_STATUS_SUCCESS) {                                                                       \
-            fprintf(stderr, "Error %s at line %d in file %s\n", hipsparseGetErrorString(_stat), __LINE__, __FILE__);   \
-            exit(1);                                                                                                   \
-        }                                                                                                              \
-    }
-
-#else // CUDA
-
-#include <cusparse.h>
-
-using bnb_sparse_handle_t = cusparseHandle_t;
-using bnb_sparseSpMatDescr_t = cusparseSpMatDescr_t;
-using bnb_sparseDnMatDescr_t = cusparseDnMatDescr_t;
-
-#define bnb_sparseCreate cusparseCreate
-#define bnb_sparseCreateCoo cusparseCreateCoo
-#define bnb_sparseCreateDnMat cusparseCreateDnMat
-#define bnb_sparseSpMM_bufSize cusparseSpMM_bufferSize
-#define bnb_sparseSpMM cusparseSpMM
-#define bnb_sparseDestroySpMat cusparseDestroySpMat
-#define bnb_sparseDestroyDnMat cusparseDestroyDnMat
-
-#define BNB_SPARSE_INDEX_32I CUSPARSE_INDEX_32I
-#define BNB_SPARSE_INDEX_BASE_ZERO CUSPARSE_INDEX_BASE_ZERO
-#define BNB_SPARSE_ORDER_ROW CUSPARSE_ORDER_ROW
-#define BNB_SPARSE_OP_NON_TRANSPOSE CUSPARSE_OPERATION_NON_TRANSPOSE
-#define BNB_SPARSE_OP_TRANSPOSE CUSPARSE_OPERATION_TRANSPOSE
-#define BNB_SPARSE_SPMM_ALG_DEFAULT CUSPARSE_SPMM_ALG_DEFAULT
-
-#define CHECK_SPARSE(value)                                                                                            \
-    {                                                                                                                  \
-        cusparseStatus_t _stat = value;                                                                                \
-        if (_stat != CUSPARSE_STATUS_SUCCESS) {                                                                        \
-            fprintf(stderr, "Error %s at line %d in file %s\n", cusparseGetErrorString(_stat), __LINE__, __FILE__);    \
-            exit(1);                                                                                                   \
-        }                                                                                                              \
-    }
 
 #endif
