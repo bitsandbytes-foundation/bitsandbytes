@@ -258,3 +258,45 @@ def test_matmul_4bit(
 
                 if req_grad[2]:
                     torch.testing.assert_close(gradBias1, gradBias2)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"], ids=id_formatter("quant_type"))
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=describe_dtype)
+@pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
+def test_matmul_4bit_out_parameter(device, quant_type, dtype, has_bias):
+    """Test that matmul_4bit(A, B, out=output) writes the result into output (issue #1235)."""
+    M, K, N = 32, 64, 48
+
+    # Create weight matrix (K, N) and quantize — matmul_4bit computes A @ dequant(B)
+    W = torch.randn(K, N, device=device, dtype=dtype)
+    torch.nn.init.xavier_uniform_(W)
+    B_quant, quant_state = bnb.functional.quantize_4bit(W, quant_type=quant_type)
+
+    bias = None
+    if has_bias:
+        bias = torch.randn(N, device=device, dtype=dtype)
+
+    # --- Test 2D input (matrix path through MatMul4Bit) ---
+    A_2d = torch.randn(M, K, device=device, dtype=dtype)
+    expected = bnb.matmul_4bit(A_2d, B_quant, quant_state, bias=bias)
+
+    out_2d = torch.zeros(M, N, device=device, dtype=dtype)
+    returned = bnb.matmul_4bit(A_2d, B_quant, quant_state, out=out_2d, bias=bias)
+
+    # out tensor should contain the result
+    torch.testing.assert_close(out_2d, expected)
+    # returned value should be the same object as out
+    assert returned.data_ptr() == out_2d.data_ptr(), "returned tensor should share storage with out"
+
+    # --- Test 1D input (gemv path) if on CUDA and blocksize divides K ---
+    # Skip bias for 1D: the gemv path has a pre-existing shape bug with bias when K != N.
+    if device == "cuda" and K % quant_state.blocksize == 0 and not has_bias:
+        A_1d = torch.randn(K, device=device, dtype=dtype)
+        expected_1d = bnb.matmul_4bit(A_1d, B_quant, quant_state)
+
+        out_1d = torch.zeros_like(expected_1d)
+        returned_1d = bnb.matmul_4bit(A_1d, B_quant, quant_state, out=out_1d)
+
+        torch.testing.assert_close(out_1d, expected_1d)
+        assert returned_1d.data_ptr() == out_1d.data_ptr(), "returned tensor should share storage with out"
