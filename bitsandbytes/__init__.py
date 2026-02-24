@@ -48,6 +48,9 @@ if importlib.util.find_spec("habana_frameworks") and importlib.util.find_spec("h
     if hasattr(torch, "hpu") and torch.hpu.is_available():
         from .backends.hpu import ops as hpu_ops
 
+if importlib.util.find_spec("torch") and importlib.util.find_spec("torch_npu"):
+    from .backends.npu import ops as npu_ops
+
 
 def _import_backends():
     """

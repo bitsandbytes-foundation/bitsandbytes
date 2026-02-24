@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 from typing import Optional
+import importlib
 
 import torch
 
@@ -56,6 +57,13 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
         )
 
     return PACKAGE_DIR / library_name
+
+
+def is_npu_available() -> bool:
+    """Checks if `torch_npu` is installed and potentially if a NPU is in the environment"""
+    if importlib.util.find_spec("torch") is None or importlib.util.find_spec("torch_npu") is None:
+        return False
+    return True
 
 
 class BNBNativeLibrary:
@@ -301,7 +309,8 @@ def get_native_library() -> BNBNativeLibrary:
             raise RuntimeError(f"Configured {BNB_BACKEND} binary not found at {cuda_binary_path}")
 
         binary_path = cuda_binary_path
-
+    elif is_npu_available():
+        binary_path = PACKAGE_DIR / f"libbitsandbytes_npu{DYNAMIC_LIBRARY_SUFFIX}"
     if torch._C._has_xpu:
         binary_path = PACKAGE_DIR / f"libbitsandbytes_xpu{DYNAMIC_LIBRARY_SUFFIX}"
 
@@ -324,6 +333,8 @@ BNB_BACKEND = "CPU"
 if torch.version.hip:
     HIP_ENVIRONMENT = True
     BNB_BACKEND = "ROCm"
+elif is_npu_available():
+    BNB_BACKEND = "NPU"
 elif torch.cuda.is_available():
     BNB_BACKEND = "CUDA"
 elif torch._C._has_xpu:

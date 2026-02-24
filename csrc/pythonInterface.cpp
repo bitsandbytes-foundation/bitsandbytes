@@ -13,6 +13,9 @@
 #if BUILD_MPS
 // #include <mps_ops.h>
 #endif
+#if BUILD_NPU
+#include <npu_ops.h>
+#endif
 #if BUILD_XPU
 #include <xpu_ops.h>
 #endif
@@ -607,6 +610,20 @@ void cgemm_4bit_inference_naive_fp32(
 
 #endif
 
+#if BUILD_NPU
+
+void cdequantize_blockwise_fp32_nf4(uint8_t *A, uint8_t *absmax, uint8_t *out, uint32_t blocksize, uint32_t n,
+    void* stream
+) {
+    dequantizeBlockwiseNf4(A, absmax, out, blocksize, n, stream, 1);
+}
+
+void cdequantize_blockwise_fp16_nf4(uint8_t *A, uint8_t *absmax, uint8_t *out, uint32_t blocksize, uint32_t n,
+    void* stream
+) {
+    dequantizeBlockwiseNf4(A, absmax, out, blocksize, n, stream, 2);
+}
+#endif
 #if BUILD_XPU
 
 void cdequantize_blockwise_fp16_fp4(
