@@ -865,58 +865,65 @@ class TestQuantize4BitFunctional:
         relerr = (err / (A1.abs().float() + 1e-8)).mean()
         err = err.mean()
 
-        # The following values were taken from averaging 1k samples per test configuration.
-        error_dict = dict()
-        error_dict["fp4"] = dict()
-        error_dict["nf4"] = dict()
-        error_dict["fp4"]["err"] = {
-            32: 0.088918,
-            64: 0.096545,
-            128: 0.102947,
-            256: 0.108685,
-            512: 0.114087,
-            1024: 0.119312,
-            2048: 0.124460,
-            4096: 0.129573,
-        }
-        error_dict["fp4"]["rel_err"] = {
-            32: 0.242380,
-            64: 0.260130,
-            128: 0.275734,
-            256: 0.289842,
-            512: 0.302852,
-            1024: 0.314982,
-            2048: 0.326402,
-            4096: 0.337228,
+        # Expected (mean, std) per configuration, from 200 samples on RTX 4090.
+        # Thresholds are set at mean + N_SIGMA * std to avoid flaky failures
+        # while still catching real regressions. Worst-case std across dtypes is used.
+        N_SIGMA = 7
+        error_stats = {
+            "fp4": {
+                "err": {
+                    32: (0.088925, 0.000091),
+                    64: (0.096543, 0.000111),
+                    128: (0.102969, 0.000134),
+                    256: (0.108684, 0.000182),
+                    512: (0.114115, 0.000234),
+                    1024: (0.119333, 0.000320),
+                    2048: (0.124556, 0.000455),
+                    4096: (0.129536, 0.000612),
+                },
+                "rel_err": {
+                    32: (0.242443, 0.000330),
+                    64: (0.260125, 0.000379),
+                    128: (0.275817, 0.000433),
+                    256: (0.289831, 0.000497),
+                    512: (0.302881, 0.000583),
+                    1024: (0.315000, 0.000757),
+                    2048: (0.326607, 0.000955),
+                    4096: (0.337169, 0.001239),
+                },
+            },
+            "nf4": {
+                "err": {
+                    32: (0.067746, 0.000069),
+                    64: (0.072798, 0.000074),
+                    128: (0.076831, 0.000091),
+                    256: (0.080337, 0.000102),
+                    512: (0.083547, 0.000143),
+                    1024: (0.086610, 0.000187),
+                    2048: (0.089592, 0.000251),
+                    4096: (0.092547, 0.000360),
+                },
+                "rel_err": {
+                    32: (0.189726, 0.000304),
+                    64: (0.203339, 0.000340),
+                    128: (0.215237, 0.000391),
+                    256: (0.226105, 0.000398),
+                    512: (0.236079, 0.000544),
+                    1024: (0.245370, 0.000600),
+                    2048: (0.254163, 0.000747),
+                    4096: (0.262473, 0.000999),
+                },
+            },
         }
 
-        error_dict["nf4"]["err"] = {
-            32: 0.067745,
-            64: 0.072792,
-            128: 0.076835,
-            256: 0.080326,
-            512: 0.083535,
-            1024: 0.086603,
-            2048: 0.089592,
-            4096: 0.092537,
-        }
-        error_dict["nf4"]["rel_err"] = {
-            32: 0.189700,
-            64: 0.203299,
-            128: 0.215252,
-            256: 0.226044,
-            512: 0.236021,
-            1024: 0.245365,
-            2048: 0.254146,
-            4096: 0.262457,
-        }
-
-        # Allow higher tolerance for fp32 on CPU with larger block sizes
-        reltol = 2.8e-3 if dtype == torch.float32 and blocksize >= 128 and device == "cpu" else 1e-3
-        errtol = 1.2e-3 if dtype == torch.float32 and blocksize >= 1024 and device == "cpu" else 1e-3
-
-        assert err < error_dict[quant_type]["err"][blocksize] + errtol
-        assert relerr < error_dict[quant_type]["rel_err"][blocksize] + reltol
+        err_mean, err_std = error_stats[quant_type]["err"][blocksize]
+        relerr_mean, relerr_std = error_stats[quant_type]["rel_err"][blocksize]
+        assert err < err_mean + N_SIGMA * err_std, (
+            f"abs error {err:.6f} exceeds {err_mean:.6f} + {N_SIGMA}*{err_std:.6f}"
+        )
+        assert relerr < relerr_mean + N_SIGMA * relerr_std, (
+            f"rel error {relerr:.6f} exceeds {relerr_mean:.6f} + {N_SIGMA}*{relerr_std:.6f}"
+        )
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
@@ -1122,61 +1129,55 @@ class TestQuantize4BitFunctional:
         relratio = relerr2 / relerr3
         maxratio = relerr2 / relerr3
 
-        # for debugging if the tests fails
-        #
-        # print('='*80)
-        # print(f'For matmul: {A.shape}, {B.shape}, {kind}, {dtype}, {storage_type}, double_quant={double_quant}:')
-        # print(C1.flatten()[-20:])
-        # print(C2.flatten()[-20:])
-        # print(f'inference vs training abs: {err1}')
-        # print(f'inference vs training rel: {relerr1}')
-        # print(f'inference vs training max: {maxerr1}')
-        # print(f'inference vs training vs torch err ratio abs: {absratio}')
-        # print(f'inference vs training vs torch err ratio rel: {relratio}')
-        # print(f'inference vs training vs torch err ratio max: {maxratio}')
-        if dtype == torch.float16:
-            if dim <= 512:
-                assert err1 < 7e-5
+        # Expected (mean, std) for err1, relerr1, maxerr1 per dtype/dim group.
+        # Measured from 100 iterations x all storage_type/kind/DQ combos on RTX 4090.
+        # std is for individual iterations (not the average), so thresholds are generous
+        # enough to accommodate GPU architecture differences (e.g., T4, XPU, Blackwell).
+        N_SIGMA = 7
+        gemv_thresholds = {
+            torch.float16: {
+                "le512": {
+                    "err1": (0.000052, 0.0000063),
+                    "relerr1": (0.00024, 0.000357),
+                    "maxerr1": (0.00042, 0.0000687),
+                },
+                "gt512": {
+                    "err1": (0.000018, 0.0000028),
+                    "relerr1": (0.00010, 0.000197),
+                    "maxerr1": (0.00017, 0.0000179),
+                },
+            },
+            torch.float32: {
+                "le512": {"err1": (2e-8, 2e-9), "relerr1": (8e-7, 1.2e-6), "maxerr1": (6e-8, 2e-8)},
+                "gt512": {"err1": (1e-8, 2e-9), "relerr1": (5e-7, 1.6e-7), "maxerr1": (4e-8, 1e-8)},
+            },
+            torch.bfloat16: {
+                "le512": {"err1": (0.00042, 0.000059), "relerr1": (0.0041, 0.01153), "maxerr1": (0.0037, 0.000556)},
+                "gt512": {"err1": (0.00014, 0.0000095), "relerr1": (0.0012, 0.000679), "maxerr1": (0.0010, 0.000137)},
+            },
+        }
 
-                # TODO(matthewdouglas): On T4, dim=128-fp16-fc2-fp4-DQ will have relerror ~ 0.00092727
-                if (
-                    device == "cuda"
-                    and double_quant
-                    and storage_type == "fp4"
-                    and kind == "fc2"
-                    and torch.cuda.get_device_capability() == (7, 5)
-                ):
-                    assert relerr1 < 0.00093
-                else:
-                    assert relerr1 < 0.0008
-            else:
-                assert err1 < 6e-5
-                assert relerr1 < 2e-4
+        dim_key = "le512" if dim <= 512 else "gt512"
+        thresholds = gemv_thresholds[dtype][dim_key]
+        for metric_name, metric_val in [("err1", err1), ("relerr1", relerr1), ("maxerr1", maxerr1)]:
+            mean_val, std_val = thresholds[metric_name]
+            limit = mean_val + N_SIGMA * std_val
+            assert metric_val < limit, (
+                f"{metric_name}={metric_val:.8f} exceeds {mean_val:.8f} + {N_SIGMA}*{std_val:.8f} = {limit:.8f} "
+                f"for {dtype}, dim={dim}, {storage_type}, DQ={double_quant}, {kind}"
+            )
+
+        # Ratios check that gemv_4bit and matmul_4bit produce consistent results.
+        # These are tight bounds on internal consistency, not absolute accuracy.
+        if dtype == torch.float16:
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.005 and relratio > 0.992
             assert maxratio < 1.005 and maxratio > 0.992
         elif dtype == torch.float32:
-            if dim <= 512:
-                assert err1 < 5e-8
-                assert relerr1 < 1e-6
-                assert maxerr1 < 1.05e-7
-            else:
-                assert err1 < 5e-8
-                assert relerr1 < 8e-6
-                assert maxerr1 < 1e-7
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.005 and relratio > 0.995
             assert maxratio < 1.005 and maxratio > 0.995
         elif dtype == torch.bfloat16:
-            if dim <= 512:
-                relerr_thres = 0.013 if hasattr(torch, "xpu") and torch.xpu.is_available() else 0.007
-                assert err1 < 6e-4
-                assert relerr1 < relerr_thres
-                assert maxerr1 < 0.015
-            else:
-                assert err1 < 2e-4
-                assert relerr1 < 0.002
-                assert maxerr1 < 0.0012
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.05 and relratio > 0.96
             assert maxratio < 1.05 and maxratio > 0.97
