@@ -1,244 +1,127 @@
-# bitsandbytes Documentation PR Draft
+# Quantization and Energy Efficiency
 
-## PR Title
-Add Energy Efficiency Guide for INT8 Quantization
+Quantization is often assumed to universally reduce energy consumption by lowering memory bandwidth requirements. However, systematic benchmarking reveals that **the relationship between quantization and energy efficiency is more nuanced than commonly assumed**. This guide helps you understand when quantization improves energy efficiency — and when it may not.
 
-## PR Description
+## INT8 Quantization (LLM.int8())
 
-### Summary
-This PR adds a comprehensive energy efficiency guide to help users understand and optimize the energy consumption of INT8 quantization.
+### How mixed-precision decomposition affects energy
 
-### Motivation
-Recent benchmarking on consumer GPUs (RTX 4090D, RTX 5090) revealed that **default LLM.int8() configuration can increase energy consumption by 17-33%** compared to FP16, contrary to common assumptions. This guide helps users:
+The default `LLM.int8()` implementation uses a mixed-precision decomposition scheme (`llm_int8_threshold=6.0`) that routes outlier features through FP16 while quantizing normal features to INT8. This design preserves model accuracy but introduces data movement overhead from continuous INT8↔FP16 type conversions.
 
-1. Understand the energy implications of different INT8 configurations
-2. Choose appropriate settings for their use cases
-3. Avoid unintended energy waste in production deployments
+**Measured impact on energy consumption (RTX 4090D, batch size=1):**
 
-### Changes
-- Added `docs/source/guides/energy_efficiency.md`
-- Added energy efficiency section to main documentation index
-- Included benchmark results and recommendations
+| Model | FP16 Energy (J/1k tok) | INT8 Default Energy (J/1k tok) | Energy Change |
+|---|---|---|---|
+| Yi-1.5-6B | 4,716 | 6,258 | **+32.7%** |
+| Mistral-7B | 5,661 | 7,401 | **+30.7%** |
+| Phi-3-mini (3.8B) | 3,003 | 3,940 | **+31.2%** |
+| Qwen2.5-7B | 5,217 | 6,127 | **+17.4%** |
 
-### References
-- Benchmark repository: https://github.com/hongping-zh/ecocompute-ai
-- Interactive dashboard: https://hongping-zh.github.io/ecocompute-dynamic-eval/
-- Full research paper: (arXiv link pending)
+The energy overhead is the cost of preserving accuracy. Perplexity measurements confirm the default threshold works as intended:
 
----
+| Configuration | Perplexity (Yi-1.5-6B) | Δ vs FP16 |
+|---|---|---|
+| FP16 (baseline) | 11.16 | — |
+| INT8 Default (threshold=6.0) | 11.20 | **+0.33%** |
+| INT8 Pure (threshold=0.0) | 14.00 | **+25.38%** |
 
-## File: `docs/source/guides/energy_efficiency.md`
+### Why threshold=0.0 is not recommended
 
-```markdown
-# Energy Efficiency Guide for INT8 Quantization
-
-## Overview
-
-While quantization is often assumed to reduce energy consumption, the actual energy impact depends on the specific configuration and hardware platform. This guide helps you optimize energy efficiency when using bitsandbytes INT8 quantization.
-
-## Key Findings
-
-### Default Configuration May Increase Energy Consumption
-
-On consumer GPUs (RTX 4090D, RTX 5090), the **default LLM.int8() configuration** (`llm_int8_threshold=6.0`) can **increase energy consumption by 17-33%** compared to FP16:
-
-| Model | FP16 Energy | INT8 Default Energy | Δ Energy |
-|-------|-------------|---------------------|----------|
-| Yi-1.5-6B | 4,716 J/1k tok | 6,258 J/1k tok | **+32.7%** |
-| Mistral-7B | 5,661 J/1k tok | 7,401 J/1k tok | **+30.7%** |
-| Phi-3-mini | 3,003 J/1k tok | 3,940 J/1k tok | **+31.2%** |
-| Qwen2.5-7B | 5,217 J/1k tok | 6,127 J/1k tok | **+17.4%** |
-
-*Benchmark platform: RTX 4090D (Ada Lovelace), batch size=1, sequence length=512*
-
-### Root Cause: Mixed-Precision Decomposition
-
-The default `llm_int8_threshold=6.0` enables **mixed-precision decomposition** for outlier handling:
-- Outlier features (magnitude > threshold) → FP16
-- Normal features → INT8
-
-This causes frequent **INT8↔FP16 type conversions**, which:
-1. Reduce throughput by ~50%
-2. Lower GPU utilization (~30% vs 45%+)
-3. Increase energy per token
-
-## Recommendations
-
-### For Energy-Critical Deployments
-
-Use **Pure INT8** configuration:
+Setting `llm_int8_threshold=0.0` disables mixed-precision decomposition entirely, forcing all columns through INT8 quantization — including outlier activation channels that INT8 cannot represent accurately. While this eliminates the type conversion overhead, it causes **significant accuracy degradation** (+25% perplexity increase) that outweighs the marginal energy savings (−3%).
 
 ```python
+# ✅ Recommended: default threshold preserves accuracy
 from transformers import BitsAndBytesConfig
 
-bnb_config = BitsAndBytesConfig(
+config = BitsAndBytesConfig(load_in_8bit=True)
+# llm_int8_threshold defaults to 6.0
+
+# ❌ Not recommended for quality-sensitive workloads
+config = BitsAndBytesConfig(
     load_in_8bit=True,
-    llm_int8_threshold=0.0  # Disable mixed-precision decomposition
-)
-
-model = AutoModelForCausalLM.from_pretrained(
-    "your-model-name",
-    quantization_config=bnb_config,
-    device_map="auto"
+    llm_int8_threshold=0.0,  # Significant accuracy loss
 )
 ```
 
-**Expected improvements** (vs default INT8):
-- Energy: −34% to −82%
-- Throughput: +80% to +92%
-- GPU utilization: +15% to +50%
+### When to use INT8 vs FP16
 
-### For Accuracy-Critical Deployments
+If your primary concern is **accuracy**: use default INT8 (`threshold=6.0`). The +0.33% perplexity increase is negligible for most applications.
 
-Keep the **default configuration** if accuracy is paramount:
+If your primary concern is **energy efficiency**: consider using FP16 instead of INT8 when GPU memory allows. FP16 avoids the mixed-precision decomposition overhead while maintaining full model accuracy.
 
-```python
-bnb_config = BitsAndBytesConfig(
-    load_in_8bit=True,
-    llm_int8_threshold=6.0  # Default, preserves outliers
-)
-```
+If your primary concern is **memory**: INT8 reduces memory usage by approximately 45% compared to FP16 (e.g., 6.7 GB vs 12.1 GB for Yi-1.5-6B), making it valuable when models need to fit within GPU memory constraints.
 
-**Trade-offs**:
-- ✅ Maintains accuracy (minimal PPL degradation)
-- ❌ Higher energy consumption than FP16
-- ❌ Lower throughput than pure INT8
+## NF4 Quantization
 
-### Validation Workflow
+### Small model overhead
 
-Before deploying pure INT8 in production:
+For models smaller than approximately 5 billion parameters on fast GPUs, NF4 quantization can **increase** energy consumption despite reducing memory usage. This occurs because the dequantization compute cost outweighs the memory bandwidth savings when the model already fits comfortably in GPU memory.
 
-1. **Quick PPL test** (30-60 minutes):
-   ```bash
-   python quick_ppl_test.py --model your-model --configs fp16,int8_pure
-   ```
+**Measured impact (RTX 5090, batch size=1):**
 
-2. **Downstream task evaluation** (2-4 hours):
-   ```bash
-   lm_eval --model hf \
-     --model_args pretrained=your-model,load_in_8bit=True,llm_int8_threshold=0.0 \
-     --tasks mmlu,hellaswag \
-     --batch_size 8
-   ```
+| Model | FP16 Energy (J/1k tok) | NF4 Energy (J/1k tok) | Energy Change |
+|---|---|---|---|
+| TinyLlama-1.1B | 1,659 | 2,098 | **+26.5%** |
+| Qwen2-1.5B | 2,411 | 3,120 | **+29.4%** |
+| Qwen2.5-3B | 3,383 | 3,780 | **+11.7%** |
+| Qwen2-7B | 5,509 | 4,878 | **−11.4%** |
 
-3. **Decision criteria**:
-   - PPL increase <1%: ✅ Safe to deploy
-   - PPL increase 1-2%: ⚠️ Validate on your specific tasks
-   - PPL increase >2%: ❌ Use default threshold or FP16
+### Crossover point
 
-## Batch Size Optimization
+Energy savings from NF4 quantization begin at approximately **5 billion parameters**, validated across both RTX 5090 (Blackwell) and RTX 4090D (Ada Lovelace) architectures. For models above this threshold, NF4 consistently reduces energy consumption:
 
-Energy efficiency improves dramatically with larger batch sizes:
+**RTX 4090D results (models ≥6B):**
 
-| Batch Size | Energy/Request | Δ vs BS=1 | GPU Util |
-|------------|----------------|-----------|----------|
-| 1 | 1,768 J | — | 45% |
-| 8 | 284 J | **−84%** | 50% |
-| 16 | 205 J | **−88%** | 77% |
-| 64 | 76 J | **−96%** | 91% |
+| Model | NF4 Energy Change vs FP16 |
+|---|---|
+| Yi-1.5-6B | **−30.2%** |
+| Mistral-7B | **−34.5%** |
+| Qwen2.5-7B | **−32.7%** |
 
-*Benchmark: A800 + Mistral-7B + Pure INT8*
+## Batch size impact
 
-**Recommendations**:
-- **Interactive apps**: BS=4-8 (balance latency and energy)
-- **Batch processing**: BS=16-32 (optimize throughput)
-- **Offline inference**: BS=64 (maximum efficiency)
-- **Avoid BS=1**: Wastes 55% GPU capacity, costs 23× more energy
+Energy efficiency improves dramatically with larger batch sizes. Single-request inference (batch size=1) wastes significant GPU capacity:
 
-## Hardware Considerations
+**A800 + Mistral-7B + Pure INT8 (threshold=0.0):**
 
-### Consumer GPUs (RTX 4090, RTX 5090)
-- Pure INT8 shows 3-34% energy savings vs FP16
-- Default INT8 shows 17-33% energy penalty vs FP16
-- Crossover point: ~5B parameters (smaller models may not benefit)
+| Batch Size | Energy per Request (J) | Δ vs BS=1 | GPU Utilization |
+|---|---|---|---|
+| 1 | 1,768 | — | 45% |
+| 8 | 284 | −84% | 50% |
+| 16 | 205 | −88% | 77% |
+| 64 | 76 | −96% | 91% |
 
-### Data Center GPUs (A100, H100)
-- INT8 Tensor Cores provide better acceleration
-- Energy benefits may be more consistent
-- Further validation needed
+For production deployments, using batch size ≥8 provides the most significant energy reduction regardless of quantization configuration.
 
-## Cost Impact Example
+## Configuration guidelines
 
-For a deployment serving **1 million requests/day**:
+### By priority
 
-| Configuration | Energy/Day | Cost/Day* | Cost/Year |
-|---------------|------------|-----------|-----------|
-| FP16 | 491 kWh | $59 | $21,535 |
-| INT8 Default | 643 kWh | $77 | $28,105 |
-| INT8 Pure | 57 kWh | $7 | $2,482 |
+**Memory-constrained** (model doesn't fit in FP16):
+- Use NF4 for ≥5B parameter models
+- Use INT8 when NF4 is not available or when you need higher accuracy than NF4
 
-*Assuming $0.12/kWh electricity rate*
+**Accuracy-first** (most production workloads):
+- Use default INT8 (`threshold=6.0`) — only +0.33% PPL increase
+- Or use FP16 if memory allows
 
-**Savings** (Pure INT8 vs Default INT8): **$70/day = $25,550/year**
+**Energy-first** (cost-sensitive batch processing):
+- Use FP16 when memory allows (avoids INT8 mixed-precision overhead)
+- Use NF4 for models ≥5B parameters (best energy efficiency)
+- Maximize batch size (BS≥8 gives 84%+ energy reduction vs BS=1)
 
-## Monitoring Recommendations
+### By model size
 
-Track these metrics in production:
+| Model Size | Recommended for Energy Efficiency |
+|---|---|
+| < 3B parameters | FP16 (quantization adds overhead on fast GPUs) |
+| 3B–5B parameters | FP16 or NF4 (test on your hardware) |
+| ≥ 5B parameters | NF4 (consistent energy savings of 30–35%) |
 
-```python
-import torch
+## Methodology
 
-# GPU utilization (target: >80%)
-nvidia-smi dmon -s u
+All measurements were collected using NVML-based power monitoring at 10 Hz sampling rate, with n=10 repetitions per configuration and coefficient of variation < 3%. Hardware platforms: RTX 5090 (Blackwell), RTX 4090D (Ada Lovelace), A800 (Ampere). Perplexity was measured on WikiText-2 (test split).
 
-# Throughput (tokens/second)
-throughput = total_tokens / elapsed_time
-
-# Energy per request (Joules)
-energy_per_request = (avg_power_watts * time_seconds) / num_requests
-```
-
-**Warning signs**:
-- GPU utilization <50%: Consider pure INT8 or larger batch size
-- Throughput <15 tok/s (7B model): Check for mixed-precision overhead
-- Energy increasing over time: Check for memory fragmentation
-
-## Benchmark Data
-
-Full benchmark results and reproducibility artifacts:
-- **Repository**: https://github.com/hongping-zh/ecocompute-ai
-- **Interactive Dashboard**: https://hongping-zh.github.io/ecocompute-dynamic-eval/
-- **Metadata**: [rtx4090d_metadata.json](https://github.com/hongping-zh/ecocompute-ai/blob/main/metadata/rtx4090d_metadata.json)
-
-## Citation
-
-If you use these findings in your research or production systems, please cite:
-
-```bibtex
-@software{zhang2026ecocompute,
-  author = {Zhang, Hongping},
-  title = {Energy Efficiency Benchmarks for Quantized LLM Inference},
-  year = {2026},
-  url = {https://github.com/hongping-zh/ecocompute-ai}
-}
-```
-
-## Contributing
-
-Found different results on your hardware? Please contribute:
-1. Run the benchmark: `python energy_benchmark.py`
-2. Share results via [GitHub Discussions](https://github.com/hongping-zh/ecocompute-ai/discussions)
-3. Help expand hardware coverage
-
-## Related Resources
-
-- [bitsandbytes Documentation](https://huggingface.co/docs/bitsandbytes)
-- [LLM.int8() Paper](https://arxiv.org/abs/2208.07339)
-- [Quantization Guide](https://huggingface.co/docs/transformers/main/en/quantization)
-```
-
----
-
-## Checklist
-
-- [ ] Documentation builds without errors
-- [ ] Links are valid
-- [ ] Code examples are tested
-- [ ] Follows bitsandbytes documentation style
-- [ ] Added to documentation index
-
-## Additional Notes
-
-This guide is based on systematic benchmarking across multiple GPU architectures and models. The findings challenge common assumptions about quantization energy efficiency and provide actionable guidance for practitioners.
-
-The research is ongoing, and we welcome community contributions to expand hardware and model coverage.
+Full benchmark data, scripts, and interactive dashboard are available at:
+- [Benchmark repository](https://github.com/hongping-zh/ecocompute-ai)
+- [Interactive dashboard](https://hongping-zh.github.io/ecocompute-dynamic-eval/)
