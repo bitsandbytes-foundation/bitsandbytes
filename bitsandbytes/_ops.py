@@ -614,6 +614,43 @@ def _(data: torch.Tensor, block_size: int, signs: Optional[torch.Tensor]) -> tor
     return data
 
 
+# Full-dimension Hadamard rotation (in-place, for kbit quantization outlier spreading)
+# Unlike hadamard_rotate_ which uses block-diagonal Hadamard, this rotates across
+# the entire last dimension of the input tensor.
+
+torch.library.define(
+    "bitsandbytes::hadamard_rotate_full_",
+    "(Tensor(a!) data, int dim, Tensor? signs) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::hadamard_rotate_full_")
+def _(data: torch.Tensor, dim: int, signs: Optional[torch.Tensor]) -> torch.Tensor:
+    supported_dims = (512, 1024, 2048, 4096, 8192)
+    torch._check(
+        dim in supported_dims,
+        lambda: f"dim must be one of {supported_dims}, got {dim}",
+    )
+    torch._check(
+        data.numel() % dim == 0,
+        lambda: f"data.numel() ({data.numel()}) must be divisible by dim ({dim})",
+    )
+    torch._check(
+        data.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"hadamard_rotate_full only supports float16/bfloat16, got {data.dtype}",
+    )
+    if signs is not None:
+        torch._check(
+            signs.dtype == torch.int32,
+            lambda: f"signs must be int32, got {signs.dtype}",
+        )
+        torch._check(
+            signs.numel() == dim // 32,
+            lambda: f"signs must have {dim // 32} elements for dim={dim}, got {signs.numel()}",
+        )
+    return data
+
+
 # K-bit fused dequant + GEMM (production: fp16 + bf16)
 
 torch.library.define(

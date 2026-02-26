@@ -1140,25 +1140,47 @@ def hadamard_rotate(
     block_size: int = 32,
     signs: Optional[Tensor] = None,
 ) -> Tensor:
-    """Apply in-place randomized Walsh-Hadamard rotation (H*D) to contiguous blocks.
+    """Apply in-place randomized Walsh-Hadamard rotation (H*D).
 
     Spreads outliers across quantization blocks, improving kbit accuracy.
     Since H*D is orthogonal, rotating both weights and activations with the
     same signs preserves the GEMM result: (H*D)(A) @ (H*D)(B)^T = A @ B^T.
 
+    Two modes:
+
+    **Block-diagonal** (block_size in {32, 64, 128, 256}): Applies independent
+    Hadamard rotations to contiguous blocks of ``block_size`` elements across
+    the flattened tensor. Fast and parallel, but only spreads outliers within
+    each block.
+
+    **Full-dimension** (block_size=0): Applies the Hadamard rotation across
+    the entire last dimension of the tensor. Matches the approach used by
+    QuIP#, QuaRot, and SpinQuant for maximal outlier suppression. The last
+    dimension must be a power of 2 in {512, 1024, 2048, 4096, 8192}.
+
     Args:
         data: Input tensor (float16 or bfloat16). Modified in-place.
-        block_size: Rotation block size (32, 64, 128, or 256).
-        signs: Optional int32 tensor of block_size//32 words. Each bit controls
-            the sign flip for one element within the block. If None, no sign
-            flips are applied (plain Hadamard). Generate once per model with
-            ``torch.randint(0, 2**32, (block_size // 32,), dtype=torch.int32)``.
+        block_size: Rotation block size (32, 64, 128, 256) for block-diagonal
+            mode, or 0 for full-dimension mode.
+        signs: Optional int32 tensor of sign-flip bits. For block-diagonal
+            mode: ``block_size // 32`` words (repeated per block). For
+            full-dimension mode: ``dim // 32`` words where ``dim`` is the
+            last dimension. Each bit controls the sign flip for one element.
+            If None, no sign flips (plain Hadamard). Generate once per model
+            with ``torch.randint(0, 2**32, (n_words,), dtype=torch.int32)``.
 
     Returns:
         The input tensor, rotated in-place.
     """
-    data_flat = data.contiguous().view(-1)
-    torch.ops.bitsandbytes.hadamard_rotate_(data_flat, block_size, signs)
+    if block_size == 0:
+        # Full-dimension mode: rotate across the entire last dimension.
+        dim = data.shape[-1]
+        data_flat = data.contiguous().view(-1)
+        torch.ops.bitsandbytes.hadamard_rotate_full_(data_flat, dim, signs)
+    else:
+        # Block-diagonal mode: independent rotations per block.
+        data_flat = data.contiguous().view(-1)
+        torch.ops.bitsandbytes.hadamard_rotate_(data_flat, block_size, signs)
     return data
 
 

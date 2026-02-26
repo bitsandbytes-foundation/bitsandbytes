@@ -1127,6 +1127,200 @@ INSTANTIATE_HADAMARD(256)
 
 #undef INSTANTIATE_HADAMARD
 
+// ===========================================================================
+// Full-dimension Hadamard rotation kernel.
+// One thread block processes one row of DIM elements using 3-4 butterfly levels:
+//   1. In-thread butterfly (strides 1..kNElts/2)
+//   2. Warp shuffle butterfly (strides kNElts..kNElts*16)
+//   3. Cross-warp butterfly via shared memory (strides across warps)
+//   4. Cross-chunk butterfly in registers (when kNChunks > 1)
+//
+// Grid: (num_rows,). Signs: DIM/32 uint32 words (one per full row, not per block).
+// ===========================================================================
+
+template <int kLogDim, int kNThreads, typename T>
+__global__ void kHadamardRotateFull(T* __restrict__ data, const int num_rows, const unsigned int* __restrict__ signs) {
+    constexpr int DIM = 1 << kLogDim;
+    constexpr int kNElts = 8; // elements per thread per chunk
+    constexpr int kNChunks = DIM / (kNThreads * kNElts);
+    constexpr int kNWarps = kNThreads / 32;
+
+    static_assert(DIM == kNThreads * kNElts * kNChunks, "dimension decomposition mismatch");
+    static_assert(kNElts == 8, "kNElts must be 8");
+    static_assert((kNThreads & (kNThreads - 1)) == 0, "kNThreads must be power of 2");
+
+    const int row = blockIdx.x;
+    if (row >= num_rows)
+        return;
+
+    T* row_data = data + (long long)row * DIM;
+
+    // Shared memory for cross-warp butterfly (only needed when kNWarps > 1).
+    // Use char[] to match other kernels in this TU, then cast to float*.
+    extern __shared__ char smem_raw[];
+    float* smem = reinterpret_cast<float*>(smem_raw);
+
+    const int tid = threadIdx.x;
+    const int warp_id = tid / 32;
+    const int lane_id = tid % 32;
+
+    // ---- Load elements (contiguous per thread) ----
+    float vals[kNChunks][kNElts];
+#pragma unroll
+    for (int c = 0; c < kNChunks; c++) {
+        const int base = c * kNThreads * kNElts + tid * kNElts;
+#pragma unroll
+        for (int i = 0; i < kNElts; i++) {
+            vals[c][i] = (float)row_data[base + i];
+        }
+    }
+
+    // ---- Apply sign flips (D matrix) before butterfly ----
+    // 8 contiguous elements at position 'base' always fit within one uint32 word
+    // since base is always a multiple of 8.
+    if (signs != nullptr) {
+#pragma unroll
+        for (int c = 0; c < kNChunks; c++) {
+            const int linear = c * kNThreads + tid; // which group of 8
+            const int word_idx = linear / 4;
+            const int byte_pos = (linear % 4) * 8;
+            const unsigned int byte_bits = (signs[word_idx] >> byte_pos) & 0xFFu;
+#pragma unroll
+            for (int i = 0; i < kNElts; i++) {
+                if (byte_bits & (1u << i))
+                    vals[c][i] = -vals[c][i];
+            }
+        }
+    }
+
+    // ---- Level 1: In-thread butterfly (strides 1, 2, 4) ----
+#pragma unroll
+    for (int c = 0; c < kNChunks; c++) {
+#pragma unroll
+        for (int s = 1; s < kNElts; s <<= 1) {
+#pragma unroll
+            for (int i = 0; i < kNElts; i++) {
+                int partner = i ^ s;
+                if (partner > i) {
+                    float a = vals[c][i], b = vals[c][partner];
+                    vals[c][i] = a + b;
+                    vals[c][partner] = a - b;
+                }
+            }
+        }
+    }
+
+    // ---- Level 2: Warp shuffle butterfly (shfl_xor s=1..16) ----
+#pragma unroll
+    for (int s = 1; s <= 16; s <<= 1) {
+#pragma unroll
+        for (int c = 0; c < kNChunks; c++) {
+#pragma unroll
+            for (int i = 0; i < kNElts; i++) {
+                float other = __shfl_xor_sync(0xFFFFFFFF, vals[c][i], s);
+                vals[c][i] = (lane_id & s) ? (other - vals[c][i]) : (vals[c][i] + other);
+            }
+        }
+    }
+
+    // ---- Level 3: Cross-warp butterfly via shared memory ----
+    if constexpr (kNWarps > 1) {
+        constexpr int VALS_PER_THREAD = kNChunks * kNElts;
+        // smem layout: smem[tid * VALS_PER_THREAD + c * kNElts + i]
+#pragma unroll
+        for (int ws = 1; ws < kNWarps; ws <<= 1) {
+            // Write my values to shared memory
+#pragma unroll
+            for (int c = 0; c < kNChunks; c++) {
+#pragma unroll
+                for (int i = 0; i < kNElts; i++) {
+                    smem[tid * VALS_PER_THREAD + c * kNElts + i] = vals[c][i];
+                }
+            }
+            __syncthreads();
+
+            // Read partner warp's values
+            const int partner_tid = (warp_id ^ ws) * 32 + lane_id;
+            const bool negate = (warp_id & ws) != 0;
+#pragma unroll
+            for (int c = 0; c < kNChunks; c++) {
+#pragma unroll
+                for (int i = 0; i < kNElts; i++) {
+                    float pval = smem[partner_tid * VALS_PER_THREAD + c * kNElts + i];
+                    vals[c][i] = negate ? (pval - vals[c][i]) : (vals[c][i] + pval);
+                }
+            }
+            __syncthreads();
+        }
+    }
+
+    // ---- Level 4: Cross-chunk butterfly (in-register, no communication) ----
+    if constexpr (kNChunks > 1) {
+#pragma unroll
+        for (int cs = 1; cs < kNChunks; cs <<= 1) {
+#pragma unroll
+            for (int c = 0; c < kNChunks; c++) {
+                int pc = c ^ cs;
+                if (pc > c) {
+#pragma unroll
+                    for (int i = 0; i < kNElts; i++) {
+                        float a = vals[c][i], b = vals[pc][i];
+                        vals[c][i] = a + b;
+                        vals[pc][i] = a - b;
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Normalize by 1/sqrt(DIM) ----
+    const float norm = rsqrtf((float)DIM);
+#pragma unroll
+    for (int c = 0; c < kNChunks; c++) {
+#pragma unroll
+        for (int i = 0; i < kNElts; i++)
+            vals[c][i] *= norm;
+    }
+
+    // ---- Store back ----
+#pragma unroll
+    for (int c = 0; c < kNChunks; c++) {
+        const int base = c * kNThreads * kNElts + tid * kNElts;
+#pragma unroll
+        for (int i = 0; i < kNElts; i++) {
+            row_data[base + i] = (T)vals[c][i];
+        }
+    }
+}
+
+// ---- Full-dimension Hadamard launch wrapper ----
+// kLogDim must match the dimension. kNThreads is the thread block size.
+
+template <int kLogDim, int kNThreads, typename T>
+void hadamardRotateFull(T* data, int num_rows, const unsigned int* signs, cudaStream_t stream) {
+    constexpr int DIM = 1 << kLogDim;
+    constexpr int kNElts = 8;
+    constexpr int kNChunks = DIM / (kNThreads * kNElts);
+    constexpr int smem_bytes = kNThreads * kNChunks * kNElts * sizeof(float);
+    kHadamardRotateFull<kLogDim, kNThreads, T><<<num_rows, kNThreads, smem_bytes, stream>>>(data, num_rows, signs);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Explicit instantiations: dim 512..8192, 2 dtypes
+#define INSTANTIATE_HADAMARD_FULL(LOG_DIM, NTHREADS)                                                                   \
+    template void hadamardRotateFull<LOG_DIM, NTHREADS, half>(half*, int, const unsigned int*, cudaStream_t);          \
+    template void hadamardRotateFull<LOG_DIM, NTHREADS, __nv_bfloat16>(                                                \
+        __nv_bfloat16*, int, const unsigned int*, cudaStream_t                                                         \
+    );
+
+INSTANTIATE_HADAMARD_FULL(9, 64)   // dim=512
+INSTANTIATE_HADAMARD_FULL(10, 128) // dim=1024
+INSTANTIATE_HADAMARD_FULL(11, 256) // dim=2048
+INSTANTIATE_HADAMARD_FULL(12, 256) // dim=4096
+INSTANTIATE_HADAMARD_FULL(13, 256) // dim=8192
+
+#undef INSTANTIATE_HADAMARD_FULL
+
 // Datacenter GPU detection: Hopper (sm_90) and Blackwell datacenter (sm_100).
 // NOTE: sm_120 (RTX 5090, Blackwell consumer) lacks TMA/wgmma — must NOT match.
 #if defined(__CUDA_ARCH__)

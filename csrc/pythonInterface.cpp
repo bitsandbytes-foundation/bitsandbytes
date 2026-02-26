@@ -827,6 +827,39 @@ MAKE_HADAMARD_ROTATE(bf16, __nv_bfloat16)
 
 #undef MAKE_HADAMARD_ROTATE
 
+// Forward declarations of full-dimension hadamard rotation template
+template <int kLogDim, int kNThreads, typename T>
+void hadamardRotateFull(T* data, int num_rows, const unsigned int* signs, cudaStream_t stream);
+
+// Unmangled full-dimension hadamard rotation wrappers (dispatch dim at runtime)
+#define MAKE_HADAMARD_ROTATE_FULL(tname, T)                                                                            \
+    void hadamard_rotate_full_##tname(                                                                                 \
+        T* data, int num_rows, int dim, const unsigned int* signs, cudaStream_t stream                                 \
+    ) {                                                                                                                \
+        switch (dim) {                                                                                                 \
+        case 512:                                                                                                      \
+            hadamardRotateFull<9, 64, T>(data, num_rows, signs, stream);                                               \
+            break;                                                                                                     \
+        case 1024:                                                                                                     \
+            hadamardRotateFull<10, 128, T>(data, num_rows, signs, stream);                                             \
+            break;                                                                                                     \
+        case 2048:                                                                                                     \
+            hadamardRotateFull<11, 256, T>(data, num_rows, signs, stream);                                             \
+            break;                                                                                                     \
+        case 4096:                                                                                                     \
+            hadamardRotateFull<12, 256, T>(data, num_rows, signs, stream);                                             \
+            break;                                                                                                     \
+        case 8192:                                                                                                     \
+            hadamardRotateFull<13, 256, T>(data, num_rows, signs, stream);                                             \
+            break;                                                                                                     \
+        }                                                                                                              \
+    }
+
+MAKE_HADAMARD_ROTATE_FULL(fp16, half)
+MAKE_HADAMARD_ROTATE_FULL(bf16, __nv_bfloat16)
+
+#undef MAKE_HADAMARD_ROTATE_FULL
+
 #endif // BUILD_CUDA || BUILD_HIP (kbit unmangled)
 
 extern "C" {
@@ -1705,6 +1738,17 @@ void chadamard_rotate_fp16(half* data, int n, int block_size, const unsigned int
 
 void chadamard_rotate_bf16(__nv_bfloat16* data, int n, int block_size, const unsigned int* signs, cudaStream_t stream) {
     hadamard_rotate_bf16(data, n, block_size, signs, stream);
+}
+
+// Full-dimension Hadamard rotation extern C wrappers
+void chadamard_rotate_full_fp16(half* data, int num_rows, int dim, const unsigned int* signs, cudaStream_t stream) {
+    hadamard_rotate_full_fp16(data, num_rows, dim, signs, stream);
+}
+
+void chadamard_rotate_full_bf16(
+    __nv_bfloat16* data, int num_rows, int dim, const unsigned int* signs, cudaStream_t stream
+) {
+    hadamard_rotate_full_bf16(data, num_rows, dim, signs, stream);
 }
 
 #endif

@@ -1026,6 +1026,34 @@ def _(data: torch.Tensor, block_size: int, signs: Optional[torch.Tensor]) -> tor
     return data
 
 
+@register_kernel("bitsandbytes::hadamard_rotate_full_", "cuda")
+def _(data: torch.Tensor, dim: int, signs: Optional[torch.Tensor]) -> torch.Tensor:
+    supported_dims = (512, 1024, 2048, 4096, 8192)
+    torch._check(
+        dim in supported_dims,
+        lambda: f"dim must be one of {supported_dims}, got {dim}",
+    )
+    torch._check(
+        data.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"hadamard_rotate_full only supports float16/bfloat16, got {data.dtype}",
+    )
+
+    num_rows = data.numel() // dim
+    tname = _KBIT_DTYPE_SUFFIX[data.dtype]
+    signs_ptr = get_ptr(signs) if signs is not None else None
+    with _cuda_device_of(data):
+        fn = getattr(lib, f"chadamard_rotate_full_{tname}")
+        fn(
+            get_ptr(data),
+            ct.c_int(num_rows),
+            ct.c_int(dim),
+            signs_ptr,
+            _get_tensor_stream(data),
+        )
+
+    return data
+
+
 def _kbit_gemm_prod_check(A, B_packed, B_absmax, codebook, N, k, k_chunks):
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(
