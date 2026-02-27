@@ -3,8 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import copy
+import logging
 from typing import Any, Optional, TypeVar, Union, overload
-import warnings
 
 import torch
 from torch import Tensor, device, dtype, nn
@@ -19,6 +19,8 @@ from bitsandbytes.functional import (
 )
 from bitsandbytes.optim import GlobalOptimManager
 from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, OutlierTracer
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -443,7 +445,7 @@ def fix_4bit_weight_quant_state_from_module(module: Union["Embedding4bit", "Line
         return
 
     if getattr(module, "quant_state", None) is None:
-        warnings.warn(
+        logger.warning(
             "FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.",
         )
 
@@ -536,15 +538,13 @@ class Linear4bit(nn.Linear):
             if self.compute_dtype in [None, torch.float32] and (x.numel() == x.shape[-1]):
                 # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference when it could be fast
                 # warn the user about this
-                warnings.warn(
+                logger.warning(
                     "Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference.",
                 )
-                warnings.filterwarnings("ignore", message=".*inference.")
             if self.compute_dtype in [None, torch.float32] and (x.numel() != x.shape[-1]):
-                warnings.warn(
+                logger.warning(
                     "Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference or training speed.",
                 )
-                warnings.filterwarnings("ignore", message=".*inference or training")
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         """
@@ -877,7 +877,7 @@ class Embedding4bit(nn.Embedding):
         blocksize = self.weight.blocksize
 
         if embedding_dim % blocksize != 0:
-            warnings.warn(
+            logger.warning(
                 f"Embedding size {embedding_dim} is not divisible by block size {blocksize}. "
                 "This will lead to slow inference.",
             )
@@ -1164,9 +1164,8 @@ class OutlierAwareLinear(nn.Linear):
         if self.outlier_dim is None:
             tracer = OutlierTracer.get_instance()
             if not tracer.is_initialized():
-                print("Please use OutlierTracer.initialize(model) before using the OutlierAwareLinear layer")
+                logger.warning("Please use OutlierTracer.initialize(model) before using the OutlierAwareLinear layer")
             outlier_idx = tracer.get_outliers(self.weight)
-            # print(outlier_idx, tracer.get_hvalue(self.weight))
             self.outlier_dim = outlier_idx
 
         if not self.is_quantized:

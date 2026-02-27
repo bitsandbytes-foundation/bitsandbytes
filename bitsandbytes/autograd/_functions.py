@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from math import prod
 from typing import Optional
 import warnings
@@ -7,6 +8,8 @@ from warnings import warn
 import torch
 
 import bitsandbytes.functional as F
+
+logger = logging.getLogger(__name__)
 
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
@@ -123,7 +126,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         # Cast A to fp16
         if A.dtype != torch.float16 and not _is_compiling():
-            warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
+            logger.warning("MatMul8bitLt: inputs will be cast from %s to float16 during quantization", A.dtype)
 
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
