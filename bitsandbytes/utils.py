@@ -1,8 +1,11 @@
 import json
+import logging
 import shlex
 import subprocess
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 def outlier_hook(module, input):
@@ -65,7 +68,7 @@ class OutlierTracer:
 
     def get_outliers(self, weight):
         if not self.is_initialized():
-            print("Outlier tracer is not initialized...")
+            logger.warning("Outlier tracer is not initialized...")
             return None
         hvalue = self.get_hvalue(weight)
         if hvalue in self.hvalue2outlier_idx:
