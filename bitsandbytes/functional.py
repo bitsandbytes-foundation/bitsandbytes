@@ -1247,6 +1247,15 @@ def dequantize_nvfp4(
     return out.reshape(quant_state.shape)
 
 
+# Dispatch threshold: use hand-written GEMM for small M (decode), CUTLASS for large M
+_GEMM_HW_M_THRESHOLD = 64
+
+
+def _has_hw_gemm() -> bool:
+    """Check if hand-written NVFP4 GEMM is available (SM_120+ builds only)."""
+    return hasattr(lib, "cgemm_nvfp4_bf16")
+
+
 def gemm_nvfp4(
     A_data: torch.Tensor,
     A_state: NVFP4QuantState,
@@ -1254,6 +1263,10 @@ def gemm_nvfp4(
     B_state: NVFP4QuantState,
 ) -> torch.Tensor:
     """NVFP4 GEMM: compute A @ B^T using block-scaled FP4 inputs.
+
+    Dispatches between two kernels based on M:
+    - M < 64: hand-written kernel (mma.sync + auto split-K, BF16 output)
+    - M >= 64: CUTLASS SM_120 GEMM (BF16 output)
 
     Args:
         A_data: Packed FP4 data for A (M*K/2 bytes).
@@ -1268,7 +1281,27 @@ def gemm_nvfp4(
     K = A_state.shape[1]
     N = B_state.shape[0]
 
-    # Use pre-swizzled scales for CUTLASS GEMM (computed at quantization time)
+    if M < _GEMM_HW_M_THRESHOLD and _has_hw_gemm() and A_data.is_cuda:
+        # Hand-written kernel: flat (non-swizzled) scales, BF16 output
+        from bitsandbytes.backends.cuda.ops import _gemm_nvfp4_hw_bf16_raw
+
+        D_out = torch.empty(M, N, dtype=torch.bfloat16, device=A_data.device)
+        workspace = torch.empty(M, N, dtype=torch.float32, device=A_data.device)
+        _gemm_nvfp4_hw_bf16_raw(
+            A_data,
+            B_data,
+            A_state.block_scales,
+            B_state.block_scales,
+            D_out,
+            workspace,
+            M,
+            N,
+            K,
+        )
+        # Apply tensor scales and convert to FP32 for API compatibility
+        return D_out.float() * (A_state.tensor_scale * B_state.tensor_scale)
+
+    # CUTLASS: pre-swizzled scales, BF16 output
     A_scales = A_state.block_scales_blocked if A_state.block_scales_blocked is not None else A_state.block_scales
     B_scales = B_state.block_scales_blocked if B_state.block_scales_blocked is not None else B_state.block_scales
 
