@@ -1241,7 +1241,7 @@ def dequantize_nvfp4(
         # so dequant gives approx x @ R. To recover x, multiply by R^{-1} = R^T.
         from bitsandbytes.backends.cuda.ops import _get_rotation_matrix
 
-        R = _get_rotation_matrix(out.device)
+        R = _get_rotation_matrix(out.device).to(dtype=out.dtype)
         out = (out.view(-1, 16) @ R.T).view(-1)
 
     return out.reshape(quant_state.shape)
