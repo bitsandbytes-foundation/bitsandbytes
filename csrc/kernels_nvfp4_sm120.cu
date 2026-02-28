@@ -15,6 +15,7 @@
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <type_traits>
 
 // ============================================================================
 // MMA wrapper: m16n8k64 E2M1 x E2M1 -> F32 with UE4M3 block scales
@@ -96,13 +97,36 @@ __device__ __forceinline__ uint32_t
 #define SMEM_SFB_BYTES (BLOCK_N_DIM * 4) // 512
 #define SMEM_TOTAL (SMEM_A_BYTES + SMEM_B_BYTES + SMEM_SFA_BYTES + SMEM_SFB_BYTES)
 
+// ============================================================================
+// Output conversion helpers
+// ============================================================================
+template <typename T> __device__ __forceinline__ T float_to_out(float v);
+
+template <> __device__ __forceinline__ float float_to_out<float>(float v) { return v; }
+
+template <> __device__ __forceinline__ __nv_bfloat16 float_to_out<__nv_bfloat16>(float v) {
+    return __float2bfloat16(v);
+}
+
+template <> __device__ __forceinline__ half float_to_out<half>(float v) { return __float2half(v); }
+
+// Tiny kernel: convert FP32 workspace to OutT after split-K reduction
+template <typename OutT> __global__ void kConvertOutput(const float* __restrict__ src, OutT* __restrict__ dst, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        dst[idx] = float_to_out<OutT>(src[idx]);
+    }
+}
+
 // 256 threads, target 4 blocks/SM for occupancy
+template <typename OutT>
 __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
     const unsigned char* __restrict__ A,   // M x K/2 packed FP4 (row-major)
     const unsigned char* __restrict__ B,   // N x K/2 packed FP4 (B transposed, row-major)
     const unsigned char* __restrict__ SFA, // M x K/16 UE4M3 scales
     const unsigned char* __restrict__ SFB, // N x K/16 UE4M3 scales
-    float* __restrict__ D,                 // M x N output (F32)
+    OutT* __restrict__ D,                  // M x N output
+    float* __restrict__ D_splitk,          // M x N FP32 workspace (only used when split-K > 1)
     int M, int N, int K
 ) {
     // Split-K: compute this block's K-range from blockIdx.z / gridDim.z
@@ -321,14 +345,14 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
 #undef COMPUTE_STEP
 
     // ---- Write output ----
-    // Use atomicAdd when split-K is active (gridDim.z > 1) to accumulate
-    // partial results from different K-slices
+    // split-K (gridDim.z > 1): atomicAdd to FP32 workspace, host converts later
+    // no split-K: convert and store directly to typed output
     int octet = lane_id / 4;
     int quad = lane_id % 4;
     int out_row0 = tile_m + octet * 2;
     int out_row1 = out_row0 + 1;
     int out_col_base = quad * 2;
-    const bool use_atomic = (gridDim.z > 1);
+    const bool use_splitk = (gridDim.z > 1);
 
 #pragma unroll
     for (int nt = 0; nt < N_TILES_PER_WARP; nt++) {
@@ -336,24 +360,26 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
         int c0 = this_tile_n + out_col_base;
         int c1 = c0 + 1;
 
-        if (use_atomic) {
+        if (use_splitk) {
+            // Accumulate partial sums in FP32 workspace via atomicAdd
             if (out_row0 < M && c0 < N)
-                atomicAdd(&D[out_row0 * N + c0], acc[nt][0]);
+                atomicAdd(&D_splitk[out_row0 * N + c0], acc[nt][0]);
             if (out_row0 < M && c1 < N)
-                atomicAdd(&D[out_row0 * N + c1], acc[nt][1]);
+                atomicAdd(&D_splitk[out_row0 * N + c1], acc[nt][1]);
             if (out_row1 < M && c0 < N)
-                atomicAdd(&D[out_row1 * N + c0], acc[nt][2]);
+                atomicAdd(&D_splitk[out_row1 * N + c0], acc[nt][2]);
             if (out_row1 < M && c1 < N)
-                atomicAdd(&D[out_row1 * N + c1], acc[nt][3]);
+                atomicAdd(&D_splitk[out_row1 * N + c1], acc[nt][3]);
         } else {
+            // Direct store with type conversion (no split-K)
             if (out_row0 < M && c0 < N)
-                D[out_row0 * N + c0] = acc[nt][0];
+                D[out_row0 * N + c0] = float_to_out<OutT>(acc[nt][0]);
             if (out_row0 < M && c1 < N)
-                D[out_row0 * N + c1] = acc[nt][1];
+                D[out_row0 * N + c1] = float_to_out<OutT>(acc[nt][1]);
             if (out_row1 < M && c0 < N)
-                D[out_row1 * N + c0] = acc[nt][2];
+                D[out_row1 * N + c0] = float_to_out<OutT>(acc[nt][2]);
             if (out_row1 < M && c1 < N)
-                D[out_row1 * N + c1] = acc[nt][3];
+                D[out_row1 * N + c1] = float_to_out<OutT>(acc[nt][3]);
         }
     }
 }
@@ -515,24 +541,13 @@ __global__ void kGemmNVFP4_simple(
 // RTX PRO 6000: 84 SMs
 static const int NUM_SMS = 84;
 
-extern "C" void cgemm_nvfp4(
-    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
-    int N, int K, cudaStream_t stream
-) {
-    int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
-    int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
-    int base_blocks = num_m_blocks * num_n_blocks;
-    int threads_per_block = WARPS_PER_BLOCK * 32; // 256
-
-    // Auto split-K: split along K to fill the GPU when M/N tiles are sparse
-    // Two-tier heuristic based on GPU occupancy:
-    //   - Very sparse (<1 block/SM): aggressive split to 4 blocks/SM
-    //   - Moderate (<2 blocks/SM): gentle split to 2 blocks/SM
-    //   - Sufficient (>=2 blocks/SM): no split
+// ============================================================================
+// Auto split-K heuristic (shared by all launchers)
+// ============================================================================
+static int compute_split_k(int base_blocks, int K) {
     int max_k_splits = K / 64;
     int split_k = 1;
     if (base_blocks < NUM_SMS && max_k_splits > 1) {
-        // Very sparse: target 4 blocks/SM for full occupancy
         int target = NUM_SMS * 4;
         split_k = (target + base_blocks - 1) / base_blocks;
         if (split_k > max_k_splits)
@@ -540,43 +555,102 @@ extern "C" void cgemm_nvfp4(
         if (split_k > 16)
             split_k = 16;
     } else if (base_blocks < NUM_SMS * 2 && max_k_splits > 1) {
-        // Moderate: target 2 blocks/SM
         int target = NUM_SMS * 2;
         split_k = (target + base_blocks - 1) / base_blocks;
         if (split_k > max_k_splits)
             split_k = max_k_splits;
         if (split_k > 4)
-            split_k = 4; // limit atomicAdd overhead for larger outputs
+            split_k = 4;
     }
-
-    // Zero output when using split-K (atomicAdd requires zeroed buffer)
-    if (split_k > 1) {
-        cudaMemsetAsync(D, 0, (size_t)M * N * sizeof(float), stream);
-    }
-
-    dim3 grid(num_n_blocks, num_m_blocks, split_k);
-    kGemmNVFP4_smem<<<grid, threads_per_block, 0, stream>>>(A, B, SFA, SFB, D, M, N, K);
+    return split_k;
 }
 
-// Overload: caller specifies split-K explicitly (for benchmarking)
-extern "C" void cgemm_nvfp4_splitk(
-    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
-    int N, int K, int split_k, cudaStream_t stream
+// ============================================================================
+// Generic typed launcher: works for float, __nv_bfloat16, half
+// ============================================================================
+template <typename OutT>
+static void launch_gemm_nvfp4(
+    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, OutT* D,
+    float* workspace, int M, int N, int K, int split_k, cudaStream_t stream
 ) {
     int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
     int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
     int threads_per_block = WARPS_PER_BLOCK * 32;
 
+    if (split_k > 1) {
+        // Split-K: accumulate in FP32 workspace, then convert to OutT
+        cudaMemsetAsync(workspace, 0, (size_t)M * N * sizeof(float), stream);
+        dim3 grid(num_n_blocks, num_m_blocks, split_k);
+        kGemmNVFP4_smem<OutT><<<grid, threads_per_block, 0, stream>>>(A, B, SFA, SFB, D, workspace, M, N, K);
+
+        // Convert FP32 workspace → OutT output (skip for FP32 when workspace == (float*)D)
+        if constexpr (!std::is_same_v<OutT, float>) {
+            int n_elem = M * N;
+            int conv_threads = 256;
+            int conv_blocks = (n_elem + conv_threads - 1) / conv_threads;
+            kConvertOutput<OutT><<<conv_blocks, conv_threads, 0, stream>>>(workspace, D, n_elem);
+        }
+    } else {
+        // No split-K: direct typed output
+        dim3 grid(num_n_blocks, num_m_blocks, 1);
+        kGemmNVFP4_smem<OutT><<<grid, threads_per_block, 0, stream>>>(A, B, SFA, SFB, D, nullptr, M, N, K);
+    }
+}
+
+// ============================================================================
+// C entry points — FP32 output (backward compatible)
+// ============================================================================
+extern "C" void cgemm_nvfp4(
+    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
+    int N, int K, cudaStream_t stream
+) {
+    int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
+    int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
+    int base_blocks = num_m_blocks * num_n_blocks;
+    int split_k = compute_split_k(base_blocks, K);
+
+    // FP32 output: D serves as both output and workspace for split-K
+    launch_gemm_nvfp4<float>(A, B, SFA, SFB, D, D, M, N, K, split_k, stream);
+}
+
+extern "C" void cgemm_nvfp4_splitk(
+    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
+    int N, int K, int split_k, cudaStream_t stream
+) {
     if (split_k < 1)
         split_k = 1;
     int max_k_splits = K / 64;
     if (split_k > max_k_splits)
         split_k = max_k_splits;
 
-    if (split_k > 1) {
-        cudaMemsetAsync(D, 0, (size_t)M * N * sizeof(float), stream);
-    }
+    // FP32 output: D serves as both output and workspace
+    launch_gemm_nvfp4<float>(A, B, SFA, SFB, D, D, M, N, K, split_k, stream);
+}
 
-    dim3 grid(num_n_blocks, num_m_blocks, split_k);
-    kGemmNVFP4_smem<<<grid, threads_per_block, 0, stream>>>(A, B, SFA, SFB, D, M, N, K);
+// ============================================================================
+// C entry points — BF16 output
+// ============================================================================
+extern "C" void cgemm_nvfp4_bf16(
+    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB,
+    __nv_bfloat16* D, float* workspace, int M, int N, int K, cudaStream_t stream
+) {
+    int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
+    int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
+    int base_blocks = num_m_blocks * num_n_blocks;
+    int split_k = compute_split_k(base_blocks, K);
+
+    launch_gemm_nvfp4<__nv_bfloat16>(A, B, SFA, SFB, D, workspace, M, N, K, split_k, stream);
+}
+
+extern "C" void cgemm_nvfp4_bf16_splitk(
+    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB,
+    __nv_bfloat16* D, float* workspace, int M, int N, int K, int split_k, cudaStream_t stream
+) {
+    if (split_k < 1)
+        split_k = 1;
+    int max_k_splits = K / 64;
+    if (split_k > max_k_splits)
+        split_k = max_k_splits;
+
+    launch_gemm_nvfp4<__nv_bfloat16>(A, B, SFA, SFB, D, workspace, M, N, K, split_k, stream);
 }
