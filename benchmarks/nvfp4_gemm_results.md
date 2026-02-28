@@ -139,7 +139,7 @@ zero additional compute cost.
 | 128×11008 | 0.004 | 0.006 | 0.006 | Old: 49%, CUTLASS: 0% |
 
 **Key finding**: The old hand-written kernel is ~1.5x faster for plain quantize (no rotation).
-But for quantize with Hadamard rotation (`rotate=True`, the new default):
+But for quantize with Hadamard rotation (always on):
 - Small shapes (M ≤ 32): CUTLASS 0.004ms vs old fused 0.003ms — old kernel wins
 - Large shapes (M = 4096): CUTLASS 0.039ms vs old fused 0.043ms — CUTLASS wins (1.1x)
 - The main value is rotation at zero cost, not raw quantize speed

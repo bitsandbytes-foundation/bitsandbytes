@@ -904,34 +904,43 @@ def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tens
 
 
 # CUTLASS-based fused quantize for NVFP4 (SM_120+)
-# Uses QuTLASS GEMM-as-quantize approach: 7-9x faster than hand-written kernel.
-# Caches the identity/Hadamard matrices per device.
-_fused_quant_matrices: dict[torch.device, dict[str, torch.Tensor]] = {}
+# Uses QuTLASS GEMM-as-quantize approach with always-on randomized Hadamard
+# rotation. The 16x16 rotation matrix is generated once per device and cached.
+_rotation_matrices: dict[torch.device, torch.Tensor] = {}
+
+# Fixed seed for reproducible rotation across weight quantization and inference.
+_ROTATION_SEED = 42
 
 
-def _get_fused_quant_matrix(device: torch.device, quest: bool) -> torch.Tensor:
-    """Get cached 16x16 identity or Hadamard matrix for fused quantize."""
-    key = "quest" if quest else "identity"
-    dev_cache = _fused_quant_matrices.setdefault(device, {})
-    if key not in dev_cache:
-        if quest:
-            # Normalized 16x16 Hadamard matrix (values ±0.25 = ±1/sqrt(16))
-            # Build via Sylvester construction
-            h = torch.tensor([[1.0]], dtype=torch.float32)
-            for _ in range(4):  # 2^4 = 16
-                h = torch.cat([torch.cat([h, h], dim=1), torch.cat([h, -h], dim=1)], dim=0)
-            h = (h / 4.0).to(dtype=torch.bfloat16, device=device)
-            dev_cache[key] = h
-        else:
-            dev_cache[key] = torch.eye(16, dtype=torch.bfloat16, device=device)
-    return dev_cache[key]
+def _get_rotation_matrix(device: torch.device) -> torch.Tensor:
+    """Get cached 16x16 randomized Hadamard matrix for fused quantize.
+
+    Builds H * D where H is the 16x16 normalized Hadamard matrix and D is a
+    diagonal sign-flip matrix (±1 per column) from a fixed seed. The same
+    matrix must be used for both weight and activation quantization.
+    """
+    if device not in _rotation_matrices:
+        # Build normalized 16x16 Hadamard via Sylvester construction
+        h = torch.tensor([[1.0]], dtype=torch.float32)
+        for _ in range(4):  # 2^4 = 16
+            h = torch.cat([torch.cat([h, h], dim=1), torch.cat([h, -h], dim=1)], dim=0)
+        h /= 4.0  # normalize by 1/sqrt(16)
+
+        # Apply random sign flips per column (H @ D)
+        gen = torch.Generator().manual_seed(_ROTATION_SEED)
+        signs = torch.randint(0, 2, (16,), generator=gen) * 2 - 1  # ±1
+        h = h * signs.float()
+
+        _rotation_matrices[device] = h.to(dtype=torch.bfloat16, device=device)
+    return _rotation_matrices[device]
 
 
 @register_kernel("bitsandbytes::cutlass_fused_quantize_nvfp4", "cuda")
 def _(
-    A: torch.Tensor, B: torch.Tensor, tensor_scale: float, quest: bool
+    A: torch.Tensor,
+    tensor_scale: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """CUTLASS-based fused quantize (optionally with Hadamard rotation).
+    """CUTLASS-based fused quantize with randomized Hadamard rotation.
 
     The CUTLASS kernel requires M to be a multiple of 128. We pad here
     and trim the output to maintain a transparent API.
@@ -974,9 +983,10 @@ def _(
     # QuTLASS outputs as (padded_M, 1) but we flatten
     scales_padded = torch.zeros(padded_M, dtype=torch.uint8, device=A.device)
 
+    # Get the cached randomized Hadamard rotation matrix for this device
+    B = _get_rotation_matrix(A.device)
+
     with _cuda_device_of(A):
-        # Always use AbsMax kernel — rotation is handled by B matrix (Hadamard vs identity).
-        # The Quest template has an internal epilogue issue that produces incorrect results.
         fn = lib.cfused_quantize_nvfp4_absmax
         fn(
             get_ptr(A_flat),

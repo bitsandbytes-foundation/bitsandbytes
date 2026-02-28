@@ -893,12 +893,12 @@ bitsandbytes/
 4. **NVFP4=3 in DataType_t enum**: Separate from existing FP4=1 (custom bitsandbytes
    format, not E2M1). No breaking changes to existing API.
 5. **Two-level scaling**: E4M3 block scales per 16 elements + FP32 tensor scale.
-6. **Hadamard rotation on by default**: `rotate=True` is the default for both
-   `quantize_nvfp4()` and `LinearNVFP4`. With the CUTLASS fused quantize, the Hadamard
-   rotation is applied via the B matrix in the GEMM at zero additional cost.
+6. **Hadamard rotation always on**: Randomized Hadamard rotation is always applied.
+   With the CUTLASS fused quantize, the rotation is applied via the B matrix in the
+   GEMM at zero additional cost.
 7. **CUTLASS fused quantize**: Quantization formulated as a GEMM (SM_80 CUTLASS 2.x).
-   Each group of 16 elements becomes a GEMM row; B is identity (AbsMax) or Hadamard
-   (rotation). Falls back to the hand-written kernel on non-Blackwell builds.
+   Each group of 16 elements becomes a GEMM row; B is the randomized Hadamard matrix.
+   Falls back to the hand-written kernel on non-Blackwell builds.
 8. **Scale reordering at quantize time**: CUTLASS expects block-scaled swizzled layout;
    computed once at quantization and stored in `NVFP4QuantState.block_scales_blocked`.
 8. **BF16 output from CUTLASS**: Tensor scales folded into CUTLASS epilogue alpha;
@@ -965,14 +965,14 @@ import bitsandbytes.functional as F
 from bitsandbytes.nn import LinearNVFP4
 
 # Quantize/dequantize
-packed, state = F.quantize_nvfp4(tensor, tensor_scale, rotate=True)
+packed, state = F.quantize_nvfp4(tensor, tensor_scale)
 recovered = F.dequantize_nvfp4(packed, state)
 
 # GEMM
 output = F.gemm_nvfp4(A_data, A_state, B_data, B_state)
 
 # Linear module
-layer = LinearNVFP4(4096, 11008, rotate=True)
+layer = LinearNVFP4(4096, 11008)
 output = layer(input)  # weight quantized lazily on first forward
 ```
 

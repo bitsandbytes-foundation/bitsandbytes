@@ -683,8 +683,6 @@ class LinearNVFP4(nn.Linear):
         input_features: Number of input features.
         output_features: Number of output features.
         bias: Whether to use bias. Defaults to True.
-        rotate: Apply Hadamard rotation before quantization. Defaults to True.
-            With the CUTLASS fused quantize kernel, rotation is essentially free.
         device: Device for initialization.
     """
 
@@ -693,11 +691,9 @@ class LinearNVFP4(nn.Linear):
         input_features,
         output_features,
         bias=True,
-        rotate=True,
         device=None,
     ):
         super().__init__(input_features, output_features, bias, device)
-        self.rotate = rotate
         self.weight_quantized = False
         self.weight_packed = None
         self.weight_state = None
@@ -708,7 +704,7 @@ class LinearNVFP4(nn.Linear):
 
         # Weight is (out_features, in_features) = (N, K) in GEMM terms
         w = self.weight.data.to(torch.bfloat16).contiguous()
-        packed, state = quantize_nvfp4(w, rotate=self.rotate)
+        packed, state = quantize_nvfp4(w)
         self.weight_packed = packed
         self.weight_state = state
         self.weight_quantized = True
@@ -729,7 +725,7 @@ class LinearNVFP4(nn.Linear):
         N = self.weight_state.shape[0]  # out_features
 
         # Quantize activations to NVFP4
-        x_packed, x_state = quantize_nvfp4(x_2d, rotate=self.rotate)
+        x_packed, x_state = quantize_nvfp4(x_2d)
 
         # Run NVFP4 GEMM: x @ weight^T
         out = gemm_nvfp4(x_packed, x_state, self.weight_packed, self.weight_state)

@@ -495,17 +495,19 @@ def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tens
 
 
 # CUTLASS-based fused quantize for NVFP4 (SM_120+)
-# Uses QuTLASS GEMM-as-quantize approach: 7-9x faster than hand-written kernel.
-# Supports both AbsMax and Quest (Hadamard rotation) methods.
+# Uses QuTLASS GEMM-as-quantize approach with always-on randomized Hadamard
+# rotation. The rotation is free (baked into the GEMM B operand) and improves
+# quantization quality by spreading outliers across blocks.
 torch.library.define(
     "bitsandbytes::cutlass_fused_quantize_nvfp4",
-    "(Tensor A, Tensor B, float tensor_scale, bool quest) -> (Tensor, Tensor, Tensor)",
+    "(Tensor A, float tensor_scale) -> (Tensor, Tensor, Tensor)",
 )
 
 
 @register_fake("bitsandbytes::cutlass_fused_quantize_nvfp4")
 def _(
-    A: torch.Tensor, B: torch.Tensor, tensor_scale: float, quest: bool
+    A: torch.Tensor,
+    tensor_scale: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     n = A.numel()
     torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")

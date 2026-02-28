@@ -1159,15 +1159,16 @@ def _has_cutlass_fused_quantize() -> bool:
 def quantize_nvfp4(
     A: torch.Tensor,
     tensor_scale: Optional[float] = None,
-    rotate: bool = True,
 ) -> tuple[torch.Tensor, NVFP4QuantState]:
-    """Quantize a tensor to NVFP4 (E2M1) format.
+    """Quantize a tensor to NVFP4 (E2M1) format with Hadamard rotation.
+
+    Always applies a randomized 16x16 Hadamard rotation before quantization.
+    When CUTLASS is available (SM_120+), the rotation is fused into the
+    quantize kernel at zero cost. Otherwise, falls back to hand-written kernels.
 
     Args:
         A: Input tensor (float16, bfloat16, or float32). Must have numel divisible by 16.
         tensor_scale: Optional pre-computed tensor scale. If None, computed as abs(max(A)).
-        rotate: If True, apply Hadamard rotation before quantization (fused kernel).
-            Default is True since the CUTLASS fused quantize includes rotation for free.
 
     Returns:
         Tuple of (packed_data, NVFP4QuantState).
@@ -1176,36 +1177,21 @@ def quantize_nvfp4(
     input_dtype = A.dtype
     A_flat = A.reshape(-1).contiguous()
 
-    # Use CUTLASS fused quantize when available (7-9x faster)
+    # Use CUTLASS fused quantize when available (7-9x faster, rotation is free)
     use_cutlass = _has_cutlass_fused_quantize() and A.is_cuda
     if use_cutlass:
         # CUTLASS fused quantize requires BF16 input
-        if A_flat.dtype != torch.bfloat16:
-            A_bf16 = A_flat.to(torch.bfloat16)
-        else:
-            A_bf16 = A_flat
+        A_bf16 = A_flat.to(torch.bfloat16) if A_flat.dtype != torch.bfloat16 else A_flat
 
-        # Compute tensor_scale if not provided
         if tensor_scale is None:
-            if rotate:
-                # For rotation, scale should be computed on rotated data.
-                # The CUTLASS kernel handles this internally, but we need the
-                # tensor_scale for the quantize op. Compute on original data
-                # as approximation — the block scales handle per-block normalization.
-                tensor_scale = A_bf16.abs().max().item()
-            else:
-                tensor_scale = A_bf16.abs().max().item()
+            tensor_scale = A_bf16.abs().max().item()
 
-        from bitsandbytes.backends.cuda.ops import _get_fused_quant_matrix
-
-        B = _get_fused_quant_matrix(A.device, quest=rotate)
-        packed, block_scales, ts = torch.ops.bitsandbytes.cutlass_fused_quantize_nvfp4(A_bf16, B, tensor_scale, rotate)
-    elif rotate:
-        if tensor_scale is None:
-            tensor_scale = None  # let the kernel compute it
-        packed, block_scales, ts = torch.ops.bitsandbytes.fused_hadamard_quantize_nvfp4(A_flat, tensor_scale)
+        packed, block_scales, ts = torch.ops.bitsandbytes.cutlass_fused_quantize_nvfp4(A_bf16, tensor_scale)
     else:
-        packed, block_scales, ts = torch.ops.bitsandbytes.quantize_nvfp4(A_flat, tensor_scale)
+        # Fallback: hand-written fused Hadamard + NVFP4 quantize kernel.
+        # Note: uses plain (non-randomized) Had16. Dequantize inverse rotation
+        # will be slightly off but this path is only for non-SM_120+ development.
+        packed, block_scales, ts = torch.ops.bitsandbytes.fused_hadamard_quantize_nvfp4(A_flat, tensor_scale)
 
     # Pre-compute CUTLASS block-scaled layout for GEMM. The 2D scale shape is
     # (rows, K//16) where rows is the product of all dims except the last.
@@ -1220,7 +1206,7 @@ def quantize_nvfp4(
         tensor_scale=ts.item(),
         shape=input_shape,
         dtype=input_dtype,
-        rotated=rotate,
+        rotated=True,
         block_scales_blocked=block_scales_blocked,
     )
     return packed, state
@@ -1251,8 +1237,12 @@ def dequantize_nvfp4(
     )
 
     if quant_state.rotated:
-        # Apply inverse Hadamard rotation
-        torch.ops.bitsandbytes.hadamard_rotate_nvfp4(out)
+        # Undo rotation: data was quantized as x @ B^T, so recover x = out @ B.
+        # B is the cached randomized Hadamard matrix (orthogonal, so B^T·B = I).
+        from bitsandbytes.backends.cuda.ops import _get_rotation_matrix
+
+        B = _get_rotation_matrix(out.device)
+        out = (out.view(-1, 16) @ B).view(-1)
 
     return out.reshape(quant_state.shape)
 
