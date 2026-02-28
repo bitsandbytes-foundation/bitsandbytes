@@ -59,6 +59,13 @@ def parse_args():
     parser.add_argument("--mlp-chunk", type=int, default=256, help="MLP chunk size")
     parser.add_argument("--ce-chunk", type=int, default=4096, help="CE vocab chunk size")
     parser.add_argument("--cpu-offload", action="store_true", help="Enable CPU offload for inter-layer activations")
+    parser.add_argument(
+        "--weight-streaming",
+        action="store_true",
+        help="Stream frozen weights from CPU pinned memory to GPU layer-by-layer. "
+        "Reduces GPU memory from O(n_layers) to O(1) for base weights. "
+        "Implies --cpu-offload. Effective when per-layer compute >= PCIe transfer.",
+    )
     parser.add_argument("--synthetic", action="store_true", help="Use synthetic data instead of Alpaca")
     parser.add_argument("--compare-memory", action="store_true", help="Run memory comparison: chunked vs unchunked")
     parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
@@ -100,10 +107,7 @@ def load_alpaca_dataset(tokenizer, seq_len, num_samples=None):
                 f"### Response:\n{sample['output']}"
             )
         else:
-            text = (
-                f"### Instruction:\n{sample['instruction']}\n\n"
-                f"### Response:\n{sample['output']}"
-            )
+            text = f"### Instruction:\n{sample['instruction']}\n\n### Response:\n{sample['output']}"
         return text
 
     # Pre-tokenize all samples
@@ -141,7 +145,7 @@ class AlpacaDataLoader:
 
             # Truncate or pad to seq_len
             if len(ids) > self.seq_len:
-                ids = ids[:self.seq_len]
+                ids = ids[: self.seq_len]
             pad_len = self.seq_len - len(ids)
             labels = list(ids)
 
@@ -197,7 +201,10 @@ def run_training(args, kbit_model, data_source, label):
                 input_ids, labels = next(data_iter)
             else:
                 input_ids, labels = generate_synthetic_batch(
-                    args.batch_size, args.seq_len, vocab_size, "cuda",
+                    args.batch_size,
+                    args.seq_len,
+                    vocab_size,
+                    "cuda",
                 )
 
             # Forward
@@ -273,14 +280,18 @@ def main():
     args = parse_args()
 
     print(f"{'=' * 60}")
-    print(f"QLoRA Training with bitsandbytes kbit quantization")
+    print("QLoRA Training with bitsandbytes kbit quantization")
     print(f"{'=' * 60}")
     print(f"Model: {args.model}")
     print(f"LoRA rank: {args.lora_r}, alpha: {args.lora_alpha}")
     print(f"Quantization: k={args.k}")
     print(f"Batch size: {args.batch_size}, Seq len: {args.seq_len}")
     print(f"Steps: {args.steps}, Grad accum: {args.grad_accum}")
+    # --weight-streaming implies --cpu-offload
+    if args.weight_streaming:
+        args.cpu_offload = True
     print(f"CPU offload: {args.cpu_offload}")
+    print(f"Weight streaming: {args.weight_streaming}")
     print(f"Data: {'synthetic' if args.synthetic else 'Alpaca'}")
     print(f"Chunks: attn={args.attn_chunk}, mlp={args.mlp_chunk}, ce={args.ce_chunk}")
     print()
@@ -320,6 +331,7 @@ def main():
         ce_chunk_size=args.ce_chunk,
         compute_dtype=torch.bfloat16,
         cpu_offload=args.cpu_offload,
+        weight_streaming=args.weight_streaming,
         target_device=torch.device("cuda"),
     )
     print(f"  Quantized in {time.time() - t0:.1f}s")
@@ -335,12 +347,16 @@ def main():
         print("\nLoading Alpaca dataset...")
         t0 = time.time()
         tokenized = load_alpaca_dataset(
-            tokenizer, args.seq_len,
+            tokenizer,
+            args.seq_len,
             num_samples=max(args.steps * args.batch_size * args.grad_accum * 2, 1000),
         )
         print(f"  Tokenized {len(tokenized)} samples in {time.time() - t0:.1f}s")
         data_source = AlpacaDataLoader(
-            tokenized, args.batch_size, args.seq_len, "cuda",
+            tokenized,
+            args.batch_size,
+            args.seq_len,
+            "cuda",
             pad_token_id=tokenizer.pad_token_id,
         )
     else:
@@ -369,7 +385,10 @@ def main():
         # Re-initialize optimizer (LoRA params may have accumulated state)
         if not args.synthetic:
             data_source_unchunked = AlpacaDataLoader(
-                tokenized, args.batch_size, args.seq_len, "cuda",
+                tokenized,
+                args.batch_size,
+                args.seq_len,
+                "cuda",
                 pad_token_id=tokenizer.pad_token_id,
             )
         else:
@@ -384,8 +403,8 @@ def main():
         print(f"{'=' * 60}")
         print(f"  Chunked peak:   {chunked_peak:.0f} MB")
         print(f"  Unchunked peak: {metrics_unchunked['peak_mb']:.0f} MB")
-        savings = metrics_unchunked['peak_mb'] - chunked_peak
-        pct = (savings / metrics_unchunked['peak_mb']) * 100 if metrics_unchunked['peak_mb'] > 0 else 0
+        savings = metrics_unchunked["peak_mb"] - chunked_peak
+        pct = (savings / metrics_unchunked["peak_mb"]) * 100 if metrics_unchunked["peak_mb"] > 0 else 0
         print(f"  Savings:        {savings:.0f} MB ({pct:.1f}%)")
 
 

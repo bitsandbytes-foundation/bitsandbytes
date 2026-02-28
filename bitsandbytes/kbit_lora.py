@@ -15,12 +15,12 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-import bitsandbytes.functional as F
 from bitsandbytes.attention import chunked_flash_attention
 from bitsandbytes.autograd.chunked_ce import chunked_cross_entropy
-from bitsandbytes.autograd.lora_kbit import LoRA_MLP_Kbit, LoRA_W_Kbit
+from bitsandbytes.autograd.lora_kbit import LoRA_W_Kbit
 from bitsandbytes.autograd.training_kernels import rmsnorm, rope
 from bitsandbytes.chunked import chunked_mlp_forward
+import bitsandbytes.functional as F
 from bitsandbytes.training import checkpoint_cpu_offload
 
 SUPPORTED_MODEL_TYPES = {"llama", "mistral", "qwen2", "qwen3"}
@@ -60,6 +60,15 @@ class KbitLoraModel(nn.Module):
             uses the model's device. Set this when loading the HF model on
             CPU to stream weights to GPU one layer at a time (minimizes
             peak GPU memory). Example: torch.device("cuda:0").
+        weight_streaming: If True, keep frozen quantized weights in CPU pinned
+            memory and stream them to GPU layer-by-layer during forward/backward.
+            Uses a double-buffered async pipeline: while the GPU computes on one
+            layer, the next layer's weights transfer via PCIe DMA on a dedicated
+            CUDA stream. Requires cpu_offload=True (gradient checkpointing) so
+            that backward also streams one layer at a time. This reduces GPU
+            memory from O(n_layers) to O(1) for frozen weights, at the cost of
+            PCIe bandwidth. Effective when per-layer compute time exceeds the
+            PCIe transfer time (~4K+ tokens on PCIe 3.0 for Llama-70B).
     """
 
     def __init__(
@@ -78,14 +87,14 @@ class KbitLoraModel(nn.Module):
         include_embed: bool = True,
         include_lm_head: bool = True,
         target_device: Optional[torch.device] = None,
+        weight_streaming: bool = False,
     ):
         super().__init__()
 
         config = model.config
         if config.model_type not in SUPPORTED_MODEL_TYPES:
             raise ValueError(
-                f"Unsupported architecture: {config.model_type}. "
-                f"Supported: {', '.join(sorted(SUPPORTED_MODEL_TYPES))}"
+                f"Unsupported architecture: {config.model_type}. Supported: {', '.join(sorted(SUPPORTED_MODEL_TYPES))}"
             )
 
         self.config = config
@@ -102,8 +111,16 @@ class KbitLoraModel(nn.Module):
         self.ce_chunk_size = ce_chunk_size
         self.compute_dtype = compute_dtype
         self.cpu_offload = cpu_offload
+        self.weight_streaming = weight_streaming
         self.include_embed = include_embed
         self.include_lm_head = include_lm_head
+
+        if weight_streaming and not cpu_offload:
+            raise ValueError(
+                "weight_streaming=True requires cpu_offload=True. "
+                "Without gradient checkpointing, autograd saves all layers' "
+                "weights on GPU for backward, defeating the memory savings."
+            )
 
         # Extract model dimensions from config
         self.hidden_size = config.hidden_size
@@ -155,6 +172,11 @@ class KbitLoraModel(nn.Module):
 
         self._quantize_and_create_lora(model)
 
+        # Set up weight streaming: move quantized weights to CPU pinned memory,
+        # pre-allocate GPU double-buffer slots and copy stream.
+        if self.weight_streaming:
+            self._init_weight_streaming()
+
         # Freeze all base model parameters (any that remain)
         for p in model.parameters():
             p.requires_grad_(False)
@@ -184,7 +206,9 @@ class KbitLoraModel(nn.Module):
         del weight  # Free the fp16 copy on GPU
 
         packed, absmax, codebook = F.quantize_kbit(
-            w_padded.reshape(-1), k=k, absmax_format="fp32",
+            w_padded.reshape(-1),
+            k=k,
+            absmax_format="fp32",
         )
         del w_padded  # Free the fp32 padded copy
 
@@ -239,12 +263,20 @@ class KbitLoraModel(nn.Module):
                 weight = getattr(attn, proj_name).weight.data
                 name = f"{prefix}_attn_{proj_name}"
                 packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
-                    weight, name, k=self.k_attention,
+                    weight,
+                    name,
+                    k=self.k_attention,
                 )
                 A, B = self._create_lora(name, N, K)
                 layer_info[proj_name] = {
-                    "packed": packed, "absmax": absmax, "codebook": codebook,
-                    "N_padded": N_padded, "N": N, "K": K, "A": A, "B": B,
+                    "packed": packed,
+                    "absmax": absmax,
+                    "codebook": codebook,
+                    "N_padded": N_padded,
+                    "N": N,
+                    "K": K,
+                    "A": A,
+                    "B": B,
                     "k": self.k_attention,
                 }
 
@@ -253,12 +285,20 @@ class KbitLoraModel(nn.Module):
                 weight = getattr(mlp, proj_name).weight.data
                 name = f"{prefix}_mlp_{proj_name}"
                 packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
-                    weight, name, k=self.k_mlp,
+                    weight,
+                    name,
+                    k=self.k_mlp,
                 )
                 A, B = self._create_lora(name, N, K)
                 layer_info[proj_name] = {
-                    "packed": packed, "absmax": absmax, "codebook": codebook,
-                    "N_padded": N_padded, "N": N, "K": K, "A": A, "B": B,
+                    "packed": packed,
+                    "absmax": absmax,
+                    "codebook": codebook,
+                    "N_padded": N_padded,
+                    "N": N,
+                    "K": K,
+                    "A": A,
+                    "B": B,
                     "k": self.k_mlp,
                 }
 
@@ -304,11 +344,17 @@ class KbitLoraModel(nn.Module):
             lm_weight = model.lm_head.weight.data
             name = "lm_head"
             packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
-                lm_weight, name, k=self.k_lm_head,
+                lm_weight,
+                name,
+                k=self.k_lm_head,
             )
             self._lm_head_info = {
-                "packed": packed, "absmax": absmax, "codebook": codebook,
-                "N_padded": N_padded, "N": N, "K": K,
+                "packed": packed,
+                "absmax": absmax,
+                "codebook": codebook,
+                "N_padded": N_padded,
+                "N": N,
+                "K": K,
                 "k": self.k_lm_head,
             }
 
@@ -318,10 +364,7 @@ class KbitLoraModel(nn.Module):
     def _build_rope_cache(self, device, max_seq_len: int = 8192):
         """Build rotary position embedding cos/sin cache."""
         inv_freq = 1.0 / (
-            self.rope_theta ** (
-                torch.arange(0, self.head_dim, 2, dtype=torch.float32, device=device)
-                / self.head_dim
-            )
+            self.rope_theta ** (torch.arange(0, self.head_dim, 2, dtype=torch.float32, device=device) / self.head_dim)
         )
         t = torch.arange(max_seq_len, dtype=torch.float32, device=device)
         freqs = torch.outer(t, inv_freq)  # [max_seq_len, head_dim/2]
@@ -330,13 +373,135 @@ class KbitLoraModel(nn.Module):
         self.register_buffer("_cos_cache", cos_cache)
         self.register_buffer("_sin_cache", sin_cache)
 
+    def _init_weight_streaming(self):
+        """Move quantized weights to CPU pinned memory and pre-allocate GPU buffers.
+
+        Called after _quantize_and_create_lora. Moves the packed/absmax/codebook
+        tensors from GPU to CPU pinned memory for streaming. Pre-allocates two
+        GPU buffer slots (double buffer) and a dedicated CUDA copy stream.
+        """
+        device = self._target_device
+        proj_names = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        weight_keys = ["packed", "absmax", "codebook"]
+
+        # Move quantized weights to CPU pinned memory
+        self._cpu_weights = []
+        for layer_info in self._layer_data:
+            cpu_layer = {}
+            for proj in proj_names:
+                cpu_proj = {}
+                for wk in weight_keys:
+                    gpu_tensor = layer_info[proj][wk]
+                    cpu_tensor = torch.empty_like(gpu_tensor, device="cpu", pin_memory=True)
+                    cpu_tensor.copy_(gpu_tensor)
+                    cpu_proj[wk] = cpu_tensor
+                    # Replace GPU tensor with None to free VRAM
+                    layer_info[proj][wk] = None
+                cpu_layer[proj] = cpu_proj
+            self._cpu_weights.append(cpu_layer)
+
+        # Free GPU memory from the now-None'd registered buffers
+        # (they were registered via register_buffer in _quantize_weight)
+        buffers_to_remove = []
+        for name, buf in self.named_buffers():
+            if name.startswith("_packed_") or name.startswith("_absmax_") or name.startswith("_codebook_"):
+                # Skip LM head buffers
+                if "lm_head" in name:
+                    continue
+                buffers_to_remove.append(name)
+        for name in buffers_to_remove:
+            delattr(self, name)
+        torch.cuda.empty_cache()
+
+        # Pre-allocate 2 GPU buffer slots using first layer as shape template
+        self._copy_stream = torch.cuda.Stream(device=device)
+        self._gpu_slots = []
+        for _slot in range(2):
+            slot_bufs = {}
+            for proj in proj_names:
+                proj_bufs = {}
+                for wk in weight_keys:
+                    template = self._cpu_weights[0][proj][wk]
+                    proj_bufs[wk] = torch.empty_like(template, device=device)
+                slot_bufs[proj] = proj_bufs
+            self._gpu_slots.append(slot_bufs)
+        self._current_slot = 0
+
+        # Log memory savings
+        total_cpu_bytes = sum(self._cpu_weights[0][p][w].nbytes for p in proj_names for w in weight_keys) * len(
+            self._cpu_weights
+        )
+        slot_bytes = sum(self._gpu_slots[0][p][w].nbytes for p in proj_names for w in weight_keys)
+        print(
+            f"Weight streaming: {total_cpu_bytes / 1e9:.1f} GB on CPU pinned, "
+            f"{2 * slot_bytes / 1e6:.0f} MB GPU double-buffer "
+            f"({len(self._cpu_weights)} layers)"
+        )
+
+    def _stream_load_layer(self, layer_idx: int, slot: int, sync: bool = False):
+        """Copy a layer's quantized weights from CPU pinned to a GPU slot.
+
+        Args:
+            layer_idx: Which layer to load.
+            slot: Which GPU buffer slot (0 or 1) to load into.
+            sync: If True, copy synchronously on the default stream.
+                  If False, copy asynchronously on the copy stream.
+        """
+        proj_names = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        weight_keys = ["packed", "absmax", "codebook"]
+        cpu_layer = self._cpu_weights[layer_idx]
+        gpu_slot = self._gpu_slots[slot]
+
+        if sync:
+            for proj in proj_names:
+                for wk in weight_keys:
+                    gpu_slot[proj][wk].copy_(cpu_layer[proj][wk])
+        else:
+            with torch.cuda.stream(self._copy_stream):
+                for proj in proj_names:
+                    for wk in weight_keys:
+                        gpu_slot[proj][wk].copy_(cpu_layer[proj][wk], non_blocking=True)
+
+    def _get_layer_gpu_weights(self, layer_idx: int, slot: int) -> dict:
+        """Build a layer_info-compatible dict with GPU weight references from a slot.
+
+        Merges the GPU slot's packed/absmax/codebook with the layer's LoRA params
+        and metadata (which are always on GPU).
+        """
+        proj_names = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        info = self._layer_data[layer_idx]
+        gpu_slot = self._gpu_slots[slot]
+        merged = {}
+        for proj in proj_names:
+            merged[proj] = {
+                "packed": gpu_slot[proj]["packed"],
+                "absmax": gpu_slot[proj]["absmax"],
+                "codebook": gpu_slot[proj]["codebook"],
+                "A": info[proj]["A"],
+                "B": info[proj]["B"],
+                "N_padded": info[proj]["N_padded"],
+                "N": info[proj]["N"],
+                "K": info[proj]["K"],
+                "k": info[proj]["k"],
+            }
+        # Norm weights and QK norms are always on GPU
+        for key in ["input_layernorm", "post_attention_layernorm", "q_norm", "k_norm"]:
+            if key in info:
+                merged[key] = info[key]
+        return merged
+
     def _extend_rope_cache(self, seq_len: int, device):
         """Extend RoPE cache if needed for longer sequences."""
         if seq_len <= self._cos_cache.shape[0]:
             return
         self._build_rope_cache(device, max_seq_len=seq_len)
 
-    def _layer_forward(self, layer_idx: int, hidden: torch.Tensor, position_ids: torch.Tensor):
+    def _layer_forward(
+        self,
+        layer_idx: int,
+        hidden: torch.Tensor,
+        position_ids: torch.Tensor,
+    ):
         """Forward pass for one decoder layer.
 
         Args:
@@ -347,7 +512,20 @@ class KbitLoraModel(nn.Module):
         Returns:
             Output hidden states [B, S, H].
         """
-        info = self._layer_data[layer_idx]
+        if self.weight_streaming:
+            if torch.is_grad_enabled():
+                # Backward recomputation (via checkpoint_cpu_offload):
+                # Weights are stale in the GPU buffer, reload synchronously.
+                # Always use slot 0 for backward (no double-buffering needed).
+                self._stream_load_layer(layer_idx, 0, sync=True)
+                info = self._get_layer_gpu_weights(layer_idx, 0)
+            else:
+                # Forward pass: _forward_streaming already loaded this layer's
+                # weights via async prefetch. Just read from the correct slot.
+                slot = layer_idx % 2
+                info = self._get_layer_gpu_weights(layer_idx, slot)
+        else:
+            info = self._layer_data[layer_idx]
         B, S, H = hidden.shape
 
         # --- Attention ---
@@ -355,30 +533,59 @@ class KbitLoraModel(nn.Module):
         residual = hidden
         hidden_2d = hidden.reshape(-1, H)
         normed = rmsnorm(
-            hidden_2d, info["input_layernorm"], eps=self.rms_norm_eps,
+            hidden_2d,
+            info["input_layernorm"],
+            eps=self.rms_norm_eps,
         ).reshape(B, S, H)
         normed_2d = normed.reshape(-1, H)
 
         # Q, K, V projections (separate calls to handle GQA dims)
         q_info = info["q_proj"]
         Q = LoRA_W_Kbit.apply(
-            normed_2d, q_info["packed"], q_info["absmax"], q_info["codebook"],
-            q_info["A"], q_info["B"], self.lora_s,
-            q_info["k"], q_info["K"], q_info["N_padded"], q_info["N"], self.compute_dtype,
+            normed_2d,
+            q_info["packed"],
+            q_info["absmax"],
+            q_info["codebook"],
+            q_info["A"],
+            q_info["B"],
+            self.lora_s,
+            q_info["k"],
+            q_info["K"],
+            q_info["N_padded"],
+            q_info["N"],
+            self.compute_dtype,
         )  # [B*S, q_dim]
 
         k_info = info["k_proj"]
         K_proj = LoRA_W_Kbit.apply(
-            normed_2d, k_info["packed"], k_info["absmax"], k_info["codebook"],
-            k_info["A"], k_info["B"], self.lora_s,
-            k_info["k"], k_info["K"], k_info["N_padded"], k_info["N"], self.compute_dtype,
+            normed_2d,
+            k_info["packed"],
+            k_info["absmax"],
+            k_info["codebook"],
+            k_info["A"],
+            k_info["B"],
+            self.lora_s,
+            k_info["k"],
+            k_info["K"],
+            k_info["N_padded"],
+            k_info["N"],
+            self.compute_dtype,
         )  # [B*S, kv_dim]
 
         v_info = info["v_proj"]
         V_proj = LoRA_W_Kbit.apply(
-            normed_2d, v_info["packed"], v_info["absmax"], v_info["codebook"],
-            v_info["A"], v_info["B"], self.lora_s,
-            v_info["k"], v_info["K"], v_info["N_padded"], v_info["N"], self.compute_dtype,
+            normed_2d,
+            v_info["packed"],
+            v_info["absmax"],
+            v_info["codebook"],
+            v_info["A"],
+            v_info["B"],
+            self.lora_s,
+            v_info["k"],
+            v_info["K"],
+            v_info["N_padded"],
+            v_info["N"],
+            self.compute_dtype,
         )  # [B*S, kv_dim]
 
         # Reshape to [B*S, n_heads, head_dim] for RoPE
@@ -411,7 +618,9 @@ class KbitLoraModel(nn.Module):
 
         # Chunked Flash Attention
         attn_out = chunked_flash_attention(
-            Q, K_proj, V_proj,
+            Q,
+            K_proj,
+            V_proj,
             chunk_size=self.attn_chunk_size,
             causal=True,
         )  # [B, S, num_heads, head_dim]
@@ -422,9 +631,18 @@ class KbitLoraModel(nn.Module):
         # Output projection
         o_info = info["o_proj"]
         attn_out = LoRA_W_Kbit.apply(
-            attn_out, o_info["packed"], o_info["absmax"], o_info["codebook"],
-            o_info["A"], o_info["B"], self.lora_s,
-            o_info["k"], o_info["K"], o_info["N_padded"], o_info["N"], self.compute_dtype,
+            attn_out,
+            o_info["packed"],
+            o_info["absmax"],
+            o_info["codebook"],
+            o_info["A"],
+            o_info["B"],
+            self.lora_s,
+            o_info["k"],
+            o_info["K"],
+            o_info["N_padded"],
+            o_info["N"],
+            self.compute_dtype,
         )  # [B*S, hidden_size]
         attn_out = attn_out.reshape(B, S, H)
 
@@ -435,7 +653,9 @@ class KbitLoraModel(nn.Module):
         residual = hidden
         hidden_2d = hidden.reshape(-1, H)
         normed = rmsnorm(
-            hidden_2d, info["post_attention_layernorm"], eps=self.rms_norm_eps,
+            hidden_2d,
+            info["post_attention_layernorm"],
+            eps=self.rms_norm_eps,
         )
 
         # Chunked MLP with gradient checkpointing
@@ -443,13 +663,32 @@ class KbitLoraModel(nn.Module):
         u = info["up_proj"]
         d = info["down_proj"]
         mlp_out = chunked_mlp_forward(
-            normed, self.mlp_chunk_size,
-            g["packed"], g["absmax"], g["codebook"], g["A"], g["B"], self.lora_s,
-            u["packed"], u["absmax"], u["codebook"], u["A"], u["B"], self.lora_s,
-            d["packed"], d["absmax"], d["codebook"], d["A"], d["B"], self.lora_s,
-            g["k"], self.hidden_size, self.intermediate_size,
+            normed,
+            self.mlp_chunk_size,
+            g["packed"],
+            g["absmax"],
+            g["codebook"],
+            g["A"],
+            g["B"],
+            self.lora_s,
+            u["packed"],
+            u["absmax"],
+            u["codebook"],
+            u["A"],
+            u["B"],
+            self.lora_s,
+            d["packed"],
+            d["absmax"],
+            d["codebook"],
+            d["A"],
+            d["B"],
+            self.lora_s,
+            g["k"],
+            self.hidden_size,
+            self.intermediate_size,
             ((self.intermediate_size + 127) // 128) * 128,
-            self.intermediate_size, self.hidden_size,
+            self.intermediate_size,
+            self.hidden_size,
             ((self.hidden_size + 127) // 128) * 128,
             self.compute_dtype,
             use_checkpoint=True,
@@ -457,6 +696,53 @@ class KbitLoraModel(nn.Module):
 
         mlp_out = mlp_out.reshape(B, S, H)
         hidden = residual + mlp_out
+
+        return hidden
+
+    def _forward_streaming(self, hidden: torch.Tensor, position_ids: torch.Tensor):
+        """Double-buffered streaming forward pass.
+
+        Pipelines PCIe transfers with GPU compute:
+        - Pre-load layer 0 into slot 0
+        - For each layer: start async prefetch of next layer into the other
+          slot while computing current layer on the active slot
+        - Each layer is wrapped in checkpoint_cpu_offload for backward
+
+        During backward (via checkpoint recomputation), _layer_forward detects
+        weight_streaming mode and loads weights synchronously — the pipelining
+        only applies to the forward pass.
+        """
+        n = self._num_loaded_layers
+
+        # Pre-load layer 0 synchronously into slot 0
+        self._current_slot = 0
+        self._stream_load_layer(0, slot=0, sync=True)
+
+        for i in range(n):
+            next_slot = 1 - (i % 2)
+
+            # Start async prefetch of next layer into the other slot
+            if i + 1 < n:
+                self._stream_load_layer(i + 1, slot=next_slot, sync=False)
+
+            # Compute current layer (weights already in slot i%2).
+            # _layer_forward detects no_grad (forward) vs enable_grad (backward)
+            # to decide whether to use the pre-loaded buffer or sync-load.
+            def _make_stream_fn(layer_idx, pos_ids):
+                def _fn(h):
+                    return self._layer_forward(layer_idx, h, pos_ids)
+
+                return _fn
+
+            hidden = checkpoint_cpu_offload(
+                _make_stream_fn(i, position_ids),
+                hidden,
+            )
+
+            # Wait for prefetch to complete before next iteration
+            # (so next iteration's compute doesn't read a partially-loaded slot)
+            if i + 1 < n:
+                torch.cuda.current_stream().wait_stream(self._copy_stream)
 
         return hidden
 
@@ -494,17 +780,21 @@ class KbitLoraModel(nn.Module):
             hidden = input_ids
 
         # Decoder layers (local indices, 0-based)
-        for i in range(self._num_loaded_layers):
-            if self.cpu_offload and self.training:
-                # Wrap each layer with CPU offload: saves inter-layer
-                # activations to CPU during forward, reloads during backward
-                def _make_layer_fn(layer_idx, pos_ids):
-                    def _fn(h):
-                        return self._layer_forward(layer_idx, h, pos_ids)
-                    return _fn
-                hidden = checkpoint_cpu_offload(_make_layer_fn(i, position_ids), hidden)
-            else:
-                hidden = self._layer_forward(i, hidden, position_ids)
+        if self.weight_streaming and self.training:
+            hidden = self._forward_streaming(hidden, position_ids)
+        else:
+            for i in range(self._num_loaded_layers):
+                if self.cpu_offload and self.training:
+
+                    def _make_layer_fn(layer_idx, pos_ids):
+                        def _fn(h):
+                            return self._layer_forward(layer_idx, h, pos_ids)
+
+                        return _fn
+
+                    hidden = checkpoint_cpu_offload(_make_layer_fn(i, position_ids), hidden)
+                else:
+                    hidden = self._layer_forward(i, hidden, position_ids)
 
         # Final norm + LM head (only if this model has the LM head)
         if not self.include_lm_head:
@@ -512,7 +802,9 @@ class KbitLoraModel(nn.Module):
 
         hidden_2d = hidden.reshape(-1, self.hidden_size)
         hidden_2d = rmsnorm(
-            hidden_2d, self._norm_weights["final_norm_weight"], eps=self.rms_norm_eps,
+            hidden_2d,
+            self._norm_weights["final_norm_weight"],
+            eps=self.rms_norm_eps,
         )
 
         result = {}
@@ -525,10 +817,17 @@ class KbitLoraModel(nn.Module):
             # Chunked cross-entropy (no logits materialization)
             lm = self._lm_head_info
             loss = chunked_cross_entropy(
-                shift_hidden, lm["packed"], lm["absmax"], lm["codebook"],
+                shift_hidden,
+                lm["packed"],
+                lm["absmax"],
+                lm["codebook"],
                 shift_labels,
-                lm["k"], lm["K"], lm["N_padded"], lm["N"],
-                self.compute_dtype, self.ce_chunk_size,
+                lm["k"],
+                lm["K"],
+                lm["N_padded"],
+                lm["N"],
+                self.compute_dtype,
+                self.ce_chunk_size,
             )
             result["loss"] = loss
         else:
@@ -536,10 +835,14 @@ class KbitLoraModel(nn.Module):
             last_hidden = hidden_2d[-B:]  # Last position per batch
             lm = self._lm_head_info
             W_deq = F.dequantize_kbit(
-                lm["packed"], lm["absmax"], lm["codebook"],
-                lm["k"], lm["N_padded"] * lm["K"], self.compute_dtype,
+                lm["packed"],
+                lm["absmax"],
+                lm["codebook"],
+                lm["k"],
+                lm["N_padded"] * lm["K"],
+                self.compute_dtype,
             )
-            W = W_deq[:lm["N_padded"] * lm["K"]].reshape(lm["N_padded"], lm["K"])[:lm["N"], :]
+            W = W_deq[: lm["N_padded"] * lm["K"]].reshape(lm["N_padded"], lm["K"])[: lm["N"], :]
             logits = last_hidden @ W.t()
             result["logits"] = logits
 
