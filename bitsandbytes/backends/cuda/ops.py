@@ -1046,6 +1046,66 @@ def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
     return out
 
 
+# Hand-written NVFP4 GEMM (SM_120+)
+#
+# Uses mma.sync.aligned.block_scale instructions for small-M decode.
+# Expects flat (non-swizzled) row-major scales. Output is FP32.
+# Uses automatic split-K when tile count is low relative to SM count.
+def _gemm_nvfp4_hw_raw(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    D_out: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
+) -> None:
+    """Raw hand-written NVFP4 GEMM — zero allocations, CUDA-graph-safe.
+
+    All buffers must be pre-allocated. D_out must be FP32 of shape (M, N).
+    Scales are flat row-major (not swizzled). Uses auto split-K internally
+    with cudaMemsetAsync (graph-capturable).
+    """
+    lib.cgemm_nvfp4(
+        get_ptr(A_packed),
+        get_ptr(B_packed),
+        get_ptr(A_scales),
+        get_ptr(B_scales),
+        get_ptr(D_out),
+        ct.c_int(M),
+        ct.c_int(N),
+        ct.c_int(K),
+        _get_tensor_stream(A_packed),
+    )
+
+
+def _gemm_nvfp4_hw_splitk_raw(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    D_out: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
+    split_k: int,
+) -> None:
+    """Raw hand-written NVFP4 GEMM with explicit split-K — CUDA-graph-safe."""
+    lib.cgemm_nvfp4_splitk(
+        get_ptr(A_packed),
+        get_ptr(B_packed),
+        get_ptr(A_scales),
+        get_ptr(B_scales),
+        get_ptr(D_out),
+        ct.c_int(M),
+        ct.c_int(N),
+        ct.c_int(K),
+        ct.c_int(split_k),
+        _get_tensor_stream(A_packed),
+    )
+
+
 # NVFP4 GEMM (CUTLASS-based)
 #
 # Expects pre-swizzled scales in CUTLASS block-scaled layout (computed at
