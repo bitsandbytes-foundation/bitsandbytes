@@ -1237,12 +1237,12 @@ def dequantize_nvfp4(
     )
 
     if quant_state.rotated:
-        # Undo rotation: data was quantized as x @ B^T, so recover x = out @ B.
-        # B is the cached randomized Hadamard matrix (orthogonal, so B^T·B = I).
+        # Undo rotation: the CUTLASS GEMM computes x @ R (no transpose on R),
+        # so dequant gives approx x @ R. To recover x, multiply by R^{-1} = R^T.
         from bitsandbytes.backends.cuda.ops import _get_rotation_matrix
 
-        B = _get_rotation_matrix(out.device)
-        out = (out.view(-1, 16) @ B).view(-1)
+        R = _get_rotation_matrix(out.device)
+        out = (out.view(-1, 16) @ R.T).view(-1)
 
     return out.reshape(quant_state.shape)
 

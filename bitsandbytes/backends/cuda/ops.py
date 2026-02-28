@@ -915,9 +915,10 @@ _ROTATION_SEED = 42
 def _get_rotation_matrix(device: torch.device) -> torch.Tensor:
     """Get cached 16x16 randomized Hadamard matrix for fused quantize.
 
-    Builds H * D where H is the 16x16 normalized Hadamard matrix and D is a
-    diagonal sign-flip matrix (±1 per column) from a fixed seed. The same
-    matrix must be used for both weight and activation quantization.
+    Builds R = H * D where H is the 16x16 normalized Hadamard matrix and D is
+    a diagonal sign-flip matrix (±1 per column) from a fixed seed. The CUTLASS
+    GEMM computes ``A @ R`` (no transpose), so dequant must apply ``@ R^T``.
+    The same matrix must be used for both weight and activation quantization.
     """
     if device not in _rotation_matrices:
         # Build normalized 16x16 Hadamard via Sylvester construction
