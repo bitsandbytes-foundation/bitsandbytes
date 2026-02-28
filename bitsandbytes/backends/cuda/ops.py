@@ -936,26 +936,41 @@ def _get_rotation_matrix(device: torch.device) -> torch.Tensor:
     return _rotation_matrices[device]
 
 
+def _fused_quantize_nvfp4_raw(
+    A_flat: torch.Tensor,
+    rotation: torch.Tensor,
+    packed_out: torch.Tensor,
+    scales_out: torch.Tensor,
+    global_scale: torch.Tensor,
+    M: int,
+) -> None:
+    """Raw CUTLASS fused quantize — zero allocations, CUDA-graph-safe.
+
+    All buffers must be pre-allocated and pre-filled by the caller. Input A
+    must already be padded so that M is a multiple of 128. The global_scale
+    buffer must contain ``1.0 / tensor_scale``.
+
+    This is the innermost call used by both the convenience wrapper and
+    CUDA graph capture paths.
+    """
+    lib.cfused_quantize_nvfp4_absmax(
+        get_ptr(A_flat),
+        get_ptr(rotation),
+        get_ptr(packed_out),
+        get_ptr(scales_out),
+        get_ptr(global_scale),
+        ct.c_int(M),
+        ct.c_int(16),
+        ct.c_int(16),
+        _get_tensor_stream(A_flat),
+    )
+
+
 def _fused_quantize_nvfp4_impl(
     A: torch.Tensor,
     tensor_scale: float,
-    packed_out: Optional[torch.Tensor] = None,
-    scales_out: Optional[torch.Tensor] = None,
-    global_scale_buf: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Core CUTLASS fused quantize implementation.
-
-    When output buffers are provided, no allocations occur — safe for CUDA
-    graph capture. When None, buffers are allocated (convenient but not
-    graph-safe).
-
-    Args:
-        A: BF16 input, numel must be divisible by 16.
-        tensor_scale: Global tensor scale.
-        packed_out: Pre-allocated uint8 output (padded_M * 8 bytes). None to allocate.
-        scales_out: Pre-allocated uint8 scales (padded_M bytes). None to allocate.
-        global_scale_buf: Pre-allocated float32 scalar buffer. None to allocate.
-    """
+    """Convenience wrapper that allocates outputs. Not graph-safe."""
     A = A.contiguous()
     n = A.numel()
     torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
@@ -965,49 +980,32 @@ def _fused_quantize_nvfp4_impl(
     )
 
     K = 16
-    N = 16
     orig_M = n // K
     padded_M = ((orig_M + 127) // 128) * 128
 
-    # Pad input if needed
     if padded_M != orig_M:
         A_2d = A.view(orig_M, K)
-        pad_rows = padded_M - orig_M
-        A_2d = torch.nn.functional.pad(A_2d, (0, 0, 0, pad_rows))
+        A_2d = torch.nn.functional.pad(A_2d, (0, 0, 0, padded_M - orig_M))
         A_flat = A_2d.reshape(-1)
     else:
         A_flat = A
 
-    # Use pre-allocated buffers or allocate new ones
-    if global_scale_buf is not None:
-        global_scale_buf.fill_(1.0 / tensor_scale if tensor_scale > 0 else 0.0)
-        global_scale = global_scale_buf
-    else:
-        global_scale = torch.tensor(
-            [1.0 / tensor_scale if tensor_scale > 0 else 0.0],
-            dtype=torch.float32,
-            device=A.device,
-        )
-
-    packed_padded = (
-        packed_out if packed_out is not None else torch.zeros(padded_M * K // 2, dtype=torch.uint8, device=A.device)
+    global_scale = torch.tensor(
+        [1.0 / tensor_scale if tensor_scale > 0 else 0.0],
+        dtype=torch.float32,
+        device=A.device,
     )
-    scales_padded = scales_out if scales_out is not None else torch.zeros(padded_M, dtype=torch.uint8, device=A.device)
+    packed_padded = torch.zeros(padded_M * K // 2, dtype=torch.uint8, device=A.device)
+    scales_padded = torch.zeros(padded_M, dtype=torch.uint8, device=A.device)
 
-    B = _get_rotation_matrix(A.device)
-
-    with _cuda_device_of(A):
-        lib.cfused_quantize_nvfp4_absmax(
-            get_ptr(A_flat),
-            get_ptr(B),
-            get_ptr(packed_padded),
-            get_ptr(scales_padded),
-            get_ptr(global_scale),
-            ct.c_int(padded_M),
-            ct.c_int(N),
-            ct.c_int(K),
-            _get_tensor_stream(A),
-        )
+    _fused_quantize_nvfp4_raw(
+        A_flat,
+        _get_rotation_matrix(A.device),
+        packed_padded,
+        scales_padded,
+        global_scale,
+        padded_M,
+    )
 
     packed = packed_padded[: orig_M * K // 2] if padded_M != orig_M else packed_padded
     block_scales = scales_padded[:orig_M] if padded_M != orig_M else scales_padded
@@ -1054,6 +1052,36 @@ def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
 # quantization time by scale_to_blocked). Tensor scales are folded into
 # the CUTLASS epilogue alpha. Output is BF16, converted to FP32 for
 # API compatibility.
+def _gemm_nvfp4_raw(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    D_out: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
+    alpha: torch.Tensor,
+) -> None:
+    """Raw NVFP4 GEMM — zero allocations, CUDA-graph-safe.
+
+    All buffers must be pre-allocated by the caller. The alpha buffer must
+    contain ``A_tensor_scale * B_tensor_scale``.
+    """
+    lib.cgemm_nvfp4_cutlass(
+        get_ptr(A_packed),
+        get_ptr(B_packed),
+        get_ptr(A_scales),
+        get_ptr(B_scales),
+        get_ptr(D_out),
+        ct.c_int(M),
+        ct.c_int(N),
+        ct.c_int(K),
+        get_ptr(alpha),
+        _get_tensor_stream(A_packed),
+    )
+
+
 def _gemm_nvfp4_impl(
     A_packed: torch.Tensor,
     B_packed: torch.Tensor,
@@ -1064,41 +1092,12 @@ def _gemm_nvfp4_impl(
     M: int,
     N: int,
     K: int,
-    D_out: Optional[torch.Tensor] = None,
-    alpha_buf: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Core NVFP4 GEMM implementation.
-
-    When D_out and alpha_buf are provided, no allocations occur — safe for
-    CUDA graph capture. When None, buffers are allocated.
-
-    Args:
-        D_out: Pre-allocated BF16 output (M, N). None to allocate.
-        alpha_buf: Pre-allocated float32 scalar buffer. None to allocate.
-    """
+    """Convenience wrapper that allocates outputs. Not graph-safe."""
     with _cuda_device_of(A_packed):
-        if alpha_buf is not None:
-            alpha_buf.fill_(A_tensor_scale * B_tensor_scale)
-            alpha = alpha_buf
-        else:
-            alpha = torch.tensor([A_tensor_scale * B_tensor_scale], dtype=torch.float32, device=A_packed.device)
-
-        if D_out is None:
-            D_out = torch.empty(M, N, dtype=torch.bfloat16, device=A_packed.device)
-
-        lib.cgemm_nvfp4_cutlass(
-            get_ptr(A_packed),
-            get_ptr(B_packed),
-            get_ptr(A_scales),
-            get_ptr(B_scales),
-            get_ptr(D_out),
-            ct.c_int(M),
-            ct.c_int(N),
-            ct.c_int(K),
-            get_ptr(alpha),
-            _get_tensor_stream(A_packed),
-        )
-
+        alpha = torch.tensor([A_tensor_scale * B_tensor_scale], dtype=torch.float32, device=A_packed.device)
+        D_out = torch.empty(M, N, dtype=torch.bfloat16, device=A_packed.device)
+        _gemm_nvfp4_raw(A_packed, B_packed, A_scales, B_scales, D_out, M, N, K, alpha)
     return D_out.float()
 
 
