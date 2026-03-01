@@ -69,6 +69,15 @@ def parse_args():
     parser.add_argument("--synthetic", action="store_true", help="Use synthetic data instead of Alpaca")
     parser.add_argument("--compare-memory", action="store_true", help="Run memory comparison: chunked vs unchunked")
     parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
+    parser.add_argument(
+        "--explicit-backward",
+        action="store_true",
+        help="Use explicit per-layer autograd.grad() backward pass. "
+        "Required for optimal NVMe streaming (gives control over weight loading order). "
+        "Implies --weight-streaming and --cpu-offload.",
+    )
+    parser.add_argument("--k-experts", type=int, default=None, help="Quantization bits for MoE experts (default: same as --k)")
+    parser.add_argument("--expert-chunk-size", type=int, default=32, help="Number of experts per chunk in MoE forward")
     return parser.parse_args()
 
 
@@ -249,6 +258,76 @@ def run_training(args, kbit_model, data_source, label):
     }
 
 
+def run_training_explicit(args, kbit_model, data_source, label):
+    """Run training with explicit per-layer autograd.grad() backward."""
+    trainable_params = kbit_model.get_trainable_parameters()
+    optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, weight_decay=0.01)
+
+    kbit_model.train()
+    vocab_size = kbit_model.vocab_size
+    losses = []
+    step_times = []
+    total_tokens = 0
+
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.empty_cache()
+
+    print(f"\n{'=' * 60}")
+    print(f"Training ({label})")
+    print(f"{'=' * 60}")
+
+    if isinstance(data_source, AlpacaDataLoader):
+        data_iter = iter(data_source)
+    else:
+        data_iter = None
+
+    for step in range(args.steps):
+        t_step = time.time()
+        optimizer.zero_grad()
+
+        # Get batch
+        if data_iter is not None:
+            input_ids, labels = next(data_iter)
+        else:
+            input_ids, labels = generate_synthetic_batch(
+                args.batch_size, args.seq_len, vocab_size, "cuda",
+            )
+
+        # Forward + backward via explicit autograd.grad() per layer
+        loss_val = kbit_model.forward_streaming_explicit(input_ids, labels)
+
+        optimizer.step()
+
+        step_tokens = (labels != -100).sum().item()
+        total_tokens += step_tokens
+        losses.append(loss_val.item())
+        dt = time.time() - t_step
+        step_times.append(dt)
+        tokens_per_sec = step_tokens / dt
+
+        if step % 10 == 0 or step == args.steps - 1:
+            peak_mb = get_gpu_peak_mb()
+            print(
+                f"  Step {step:4d}/{args.steps} | "
+                f"Loss: {loss_val.item():.4f} | "
+                f"Time: {dt:.2f}s | "
+                f"Tok/s: {tokens_per_sec:.0f} | "
+                f"Peak mem: {peak_mb:.0f} MB"
+            )
+
+    peak_mb = get_gpu_peak_mb()
+    avg_step_time = sum(step_times[1:]) / max(len(step_times) - 1, 1)
+    avg_tokens_per_sec = total_tokens / sum(step_times)
+
+    return {
+        "losses": losses,
+        "peak_mb": peak_mb,
+        "avg_step_time": avg_step_time,
+        "avg_tokens_per_sec": avg_tokens_per_sec,
+        "total_tokens": total_tokens,
+    }
+
+
 def print_results(metrics, label):
     """Print training results summary."""
     losses = metrics["losses"]
@@ -287,11 +366,14 @@ def main():
     print(f"Quantization: k={args.k}")
     print(f"Batch size: {args.batch_size}, Seq len: {args.seq_len}")
     print(f"Steps: {args.steps}, Grad accum: {args.grad_accum}")
-    # --weight-streaming implies --cpu-offload
+    # --explicit-backward implies --weight-streaming implies --cpu-offload
+    if args.explicit_backward:
+        args.weight_streaming = True
     if args.weight_streaming:
         args.cpu_offload = True
     print(f"CPU offload: {args.cpu_offload}")
     print(f"Weight streaming: {args.weight_streaming}")
+    print(f"Explicit backward: {args.explicit_backward}")
     print(f"Data: {'synthetic' if args.synthetic else 'Alpaca'}")
     print(f"Chunks: attn={args.attn_chunk}, mlp={args.mlp_chunk}, ce={args.ce_chunk}")
     print()
@@ -318,6 +400,11 @@ def main():
     print(f"  Loaded in {time.time() - t0:.1f}s")
     print(f"  GPU memory after load: {get_gpu_memory_mb():.0f} MB (model on CPU)")
 
+    # Build k_config
+    k_config = {}
+    if args.k_experts is not None:
+        k_config["experts"] = args.k_experts
+
     # Apply KbitLoraModel — streams weights CPU->GPU one layer at a time
     print("\nQuantizing and streaming to GPU...")
     t0 = time.time()
@@ -326,6 +413,7 @@ def main():
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         k=args.k,
+        k_config=k_config if k_config else None,
         attn_chunk_size=args.attn_chunk,
         mlp_chunk_size=args.mlp_chunk,
         ce_chunk_size=args.ce_chunk,
@@ -333,6 +421,7 @@ def main():
         cpu_offload=args.cpu_offload,
         weight_streaming=args.weight_streaming,
         target_device=torch.device("cuda"),
+        expert_chunk_size=args.expert_chunk_size,
     )
     print(f"  Quantized in {time.time() - t0:.1f}s")
     print(f"  Trainable parameters: {kbit_model.num_trainable_parameters():,}")
@@ -363,7 +452,10 @@ def main():
         data_source = None  # Will use synthetic
 
     # Run training
-    metrics = run_training(args, kbit_model, data_source, "full stack")
+    if args.explicit_backward:
+        metrics = run_training_explicit(args, kbit_model, data_source, "explicit backward")
+    else:
+        metrics = run_training(args, kbit_model, data_source, "full stack")
     print_results(metrics, "full stack")
 
     # Memory comparison mode

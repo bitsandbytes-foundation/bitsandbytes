@@ -158,3 +158,5 @@ cuda_build
 output/
 cuda-spec.md
 cuda-spec-additions.md
+spec.md
+spec_details.md

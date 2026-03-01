@@ -9,6 +9,7 @@ Tests:
   3. Raw matmul throughput at various batch sizes
   4. Overlap test: simultaneous transfer + compute on separate streams
   5. Full pipeline: double-buffered layer streaming with real matmul
+  6. NVMe→CPU→GPU pipeline: end-to-end from mmap'd safetensors file
 
 Usage:
   python stream_bench.py                    # auto-detect layer size
@@ -159,7 +160,7 @@ def test_nvme_bandwidth(nvme_path, size_mb=1024, n_iter=3):
         except Exception:
             pass
 
-        fd = os.open(fpath, os.O_RDONLY | os.O_DIRECT if hasattr(os, "O_DIRECT") else os.O_RDONLY)
+        fd = os.open(fpath, os.O_RDONLY)
         start = time.perf_counter()
         total_read = 0
         block_size = 4 * 1024 * 1024  # 4 MB blocks
@@ -507,6 +508,323 @@ def test_pipeline(n_layers=20, layer_mb=470, batch_tokens=4096, hidden=8192, int
     return baseline_ms, xfer_only_ms, pipeline_ms
 
 
+# ─── Test 6: NVMe → CPU → GPU pipeline ───
+
+
+def test_nvme_pipeline(
+    nvme_path,
+    n_layers=20,
+    layer_mb=1237,
+    batch_tokens=4096,
+    hidden=5120,
+    intermediate=12288,
+    expert_intermediate=1536,
+    n_active_experts=8,
+):
+    """
+    End-to-end NVMe→CPU→GPU pipeline benchmark using safetensors.
+
+    Creates a synthetic safetensors file on NVMe with layer-ordered tensors,
+    then benchmarks the full three-stage pipeline:
+      Stage 1: mmap'd read → CPU pinned staging buffer (triggers NVMe page faults)
+      Stage 2: Async copy from pinned → GPU double-buffer slot (copy stream)
+      Stage 3: Matmul compute on default stream (simulating layer forward)
+
+    This is the GATING STEP for the NVMe weight streaming project.
+    If overhead is unacceptable at viable batch sizes, the project fails.
+    """
+    print(f"\n{'=' * 70}")
+    print(f"  TEST 6: NVMe→CPU→GPU Pipeline — {n_layers} layers, {layer_mb} MB each")
+    print(f"  tokens={batch_tokens}, safetensors mmap, double-buffered")
+    print(f"{'=' * 70}")
+
+    if nvme_path is None:
+        print("  Skipped (use --nvme /path/to/mount to test)")
+        return None, None, None
+
+    try:
+        from safetensors.torch import save_file
+        from safetensors import safe_open
+    except ImportError:
+        print("  Skipped (safetensors not installed: pip install safetensors)")
+        return None, None, None
+
+    from collections import OrderedDict
+
+    K = hidden
+    n_elem_layer = (layer_mb * 1024 * 1024) // 4  # int32 elements
+
+    # ─ Create synthetic safetensors file ─
+    fpath = os.path.join(nvme_path, f"_stream_bench_sf_{os.getpid()}.safetensors")
+    print(f"  Creating {n_layers * layer_mb / 1024:.1f} GB safetensors file...")
+    print(f"  Path: {fpath}")
+
+    tensors = OrderedDict()
+    for i in range(n_layers):
+        # One flat tensor per layer (simulating concatenated packed weights)
+        tensors[f"layer.{i}.packed"] = torch.randint(
+            0, 2**31, (n_elem_layer,), dtype=torch.int32
+        )
+    save_file(tensors, fpath)
+    del tensors
+
+    file_size_gb = os.path.getsize(fpath) / 1024**3
+    print(f"  File size: {file_size_gb:.2f} GB")
+
+    # Drop page cache so we measure cold NVMe reads
+    try:
+        os.system("sync")
+        with open("/proc/sys/vm/drop_caches", "w") as f:
+            f.write("3")
+        print("  Page cache dropped.")
+    except (PermissionError, FileNotFoundError):
+        print("  Warning: cannot drop page cache (need root). First run may use cached data.")
+
+    # ─ Open via mmap ─
+    sf = safe_open(fpath, framework="pt", device="cpu")
+
+    # Pre-allocate: pinned staging buffer + GPU double-buffer
+    pinned_buf = torch.empty(n_elem_layer, dtype=torch.int32, pin_memory=True)
+    gpu_slot = [
+        torch.empty(n_elem_layer, dtype=torch.int32, device="cuda"),
+        torch.empty(n_elem_layer, dtype=torch.int32, device="cuda"),
+    ]
+    copy_stream = torch.cuda.Stream()
+
+    # Compute buffers (simulate MoE layer: attention + shared expert + active experts)
+    # Attention: QKV+O → [M, 4*K] matmul
+    # Shared expert: gate+up → [M, 2*inter], down → [M, K]
+    # Active experts: n_active × (gate+up+down) with small intermediate
+    N_shared = intermediate
+    N_expert = expert_intermediate
+    A = torch.randn(batch_tokens, K, dtype=torch.float16, device="cuda")
+    W_attn = torch.randn(K, 4 * K, dtype=torch.float16, device="cuda")
+    W_shared_gu = torch.randn(K, 2 * N_shared, dtype=torch.float16, device="cuda")
+    W_shared_d = torch.randn(N_shared, K, dtype=torch.float16, device="cuda")
+    # Expert weights (per active expert)
+    W_expert_gu = torch.randn(K, 2 * N_expert, dtype=torch.float16, device="cuda")
+    W_expert_d = torch.randn(N_expert, K, dtype=torch.float16, device="cuda")
+
+    # Pre-alloc outputs
+    O_attn = torch.empty(batch_tokens, 4 * K, dtype=torch.float16, device="cuda")
+    O_shared_gu = torch.empty(batch_tokens, 2 * N_shared, dtype=torch.float16, device="cuda")
+    O_shared_d = torch.empty(batch_tokens, K, dtype=torch.float16, device="cuda")
+    O_expert_gu = torch.empty(batch_tokens, 2 * N_expert, dtype=torch.float16, device="cuda")
+    O_expert_d = torch.empty(batch_tokens, K, dtype=torch.float16, device="cuda")
+
+    def do_moe_compute():
+        """Simulate one MoE layer forward (zero-alloc)."""
+        # Attention
+        torch.mm(A, W_attn, out=O_attn)
+        # Shared expert
+        torch.mm(A, W_shared_gu, out=O_shared_gu)
+        torch.mm(O_shared_gu[:, :N_shared], W_shared_d, out=O_shared_d)
+        # Active experts (simulate n_active_experts sequential expert forwards)
+        for _ in range(n_active_experts):
+            torch.mm(A, W_expert_gu, out=O_expert_gu)
+            torch.mm(O_expert_gu[:, :N_expert], W_expert_d, out=O_expert_d)
+
+    # ─ Warmup ─
+    sync()
+    for _ in range(3):
+        do_moe_compute()
+    sync()
+
+    # ─ Baseline: compute only ─
+    base_start = torch.cuda.Event(enable_timing=True)
+    base_end = torch.cuda.Event(enable_timing=True)
+    base_start.record()
+    for _ in range(n_layers):
+        do_moe_compute()
+    base_end.record()
+    sync()
+    baseline_ms = base_start.elapsed_time(base_end)
+
+    # ─ Transfer only: mmap → pinned → GPU for all layers ─
+    # Re-drop cache
+    try:
+        os.system("sync")
+        with open("/proc/sys/vm/drop_caches", "w") as f:
+            f.write("3")
+    except Exception:
+        pass
+
+    sync()
+    xfer_wall_start = time.perf_counter()
+    for i in range(n_layers):
+        # Stage 1: mmap → pinned (CPU work, triggers NVMe page faults)
+        tensor = sf.get_tensor(f"layer.{i}.packed")
+        pinned_buf[:tensor.numel()].copy_(tensor)
+        # Stage 2: pinned → GPU (sync for measurement)
+        gpu_slot[0][:tensor.numel()].copy_(pinned_buf[:tensor.numel()])
+    sync()
+    xfer_wall_end = time.perf_counter()
+    xfer_only_ms = (xfer_wall_end - xfer_wall_start) * 1000
+
+    # ─ Full pipeline: mmap → pinned → GPU with threading + double-buffering ─
+    # The mmap→pinned copy is CPU work. We run it on a background thread so
+    # it overlaps with GPU compute. Two pinned buffers avoid contention.
+    import threading
+
+    # Re-drop cache
+    try:
+        os.system("sync")
+        with open("/proc/sys/vm/drop_caches", "w") as f:
+            f.write("3")
+    except Exception:
+        pass
+
+    # Two pinned staging buffers for the background loader
+    pinned_bufs = [
+        pinned_buf,
+        torch.empty(n_elem_layer, dtype=torch.int32, pin_memory=True),
+    ]
+
+    # Pre-load layer 0 into pinned_bufs[0] and GPU slot 0
+    tensor0 = sf.get_tensor("layer.0.packed")
+    n0 = tensor0.numel()
+    pinned_bufs[0][:n0].copy_(tensor0)
+    gpu_slot[0][:n0].copy_(pinned_bufs[0][:n0])
+    sync()
+
+    # Shared state for background loader
+    load_ready = [threading.Event() for _ in range(n_layers)]
+    load_numel = [0] * n_layers
+
+    def bg_load(layer_idx, pinned_idx):
+        """Background: mmap→pinned for one layer."""
+        t = sf.get_tensor(f"layer.{layer_idx}.packed")
+        n = t.numel()
+        pinned_bufs[pinned_idx][:n].copy_(t)
+        load_numel[layer_idx] = n
+        load_ready[layer_idx].set()
+
+    pipe_wall_start = time.perf_counter()
+    pipe_start = torch.cuda.Event(enable_timing=True)
+    pipe_end = torch.cuda.Event(enable_timing=True)
+    pipe_start.record()
+
+    # Start background load of layer 1 while we compute layer 0
+    bg_thread = None
+    if n_layers > 1:
+        bg_thread = threading.Thread(target=bg_load, args=(1, 1))
+        bg_thread.start()
+
+    for i in range(n_layers):
+        cur_slot = i % 2
+        next_slot = 1 - cur_slot
+        cur_pinned = i % 2
+
+        # GPU compute on current layer (async launch)
+        do_moe_compute()
+
+        if i + 1 < n_layers:
+            next_pinned = (i + 1) % 2
+
+            # Wait for background mmap→pinned of layer i+1 to complete
+            load_ready[i + 1].wait()
+            if bg_thread is not None:
+                bg_thread.join()
+
+            # Queue async pinned→GPU copy on copy stream
+            n_next = load_numel[i + 1]
+            with torch.cuda.stream(copy_stream):
+                gpu_slot[next_slot][:n_next].copy_(
+                    pinned_bufs[next_pinned][:n_next], non_blocking=True
+                )
+
+            # Start background load of layer i+2 (if any) into the
+            # pinned buffer we're NOT currently copying from
+            if i + 2 < n_layers:
+                future_pinned = (i + 2) % 2
+                bg_thread = threading.Thread(
+                    target=bg_load, args=(i + 2, future_pinned)
+                )
+                bg_thread.start()
+            else:
+                bg_thread = None
+
+        # Wait for compute + copy before next iteration
+        if i + 1 < n_layers:
+            torch.cuda.current_stream().wait_stream(copy_stream)
+
+    pipe_end.record()
+    sync()
+    pipe_wall_end = time.perf_counter()
+    pipeline_ms = pipe_start.elapsed_time(pipe_end)
+    pipeline_wall_ms = (pipe_wall_end - pipe_wall_start) * 1000
+
+    # ─ Results ─
+    sequential_ms = baseline_ms + xfer_only_ms
+    overhead_gpu = (pipeline_ms / baseline_ms - 1) * 100
+    # Use wall-clock for the pipeline since mmap→pinned is CPU work not
+    # captured by CUDA events
+    overhead_wall = (pipeline_wall_ms / baseline_ms - 1) * 100
+
+    print("\n  Results:")
+    print(
+        f"  {'Compute only (GPU events):':40s} {fmt_time(baseline_ms):>10s}"
+        f"  ({fmt_time(baseline_ms / n_layers)}/layer)"
+    )
+    print(
+        f"  {'Transfer only (wall clock):':40s} {fmt_time(xfer_only_ms):>10s}"
+        f"  ({fmt_time(xfer_only_ms / n_layers)}/layer)"
+    )
+    print(f"  {'Sequential (compute + transfer):':40s} {fmt_time(sequential_ms):>10s}")
+    print(
+        f"  {'Pipeline (GPU events):':40s} {fmt_time(pipeline_ms):>10s}"
+        f"  ({fmt_time(pipeline_ms / n_layers)}/layer)"
+    )
+    print(
+        f"  {'Pipeline (wall clock):':40s} {fmt_time(pipeline_wall_ms):>10s}"
+        f"  ({fmt_time(pipeline_wall_ms / n_layers)}/layer)"
+    )
+    print()
+    print(f"  {'Overhead vs compute (GPU events):':40s} {overhead_gpu:+.1f}%")
+    print(f"  {'Overhead vs compute (wall clock):':40s} {overhead_wall:+.1f}%")
+
+    # The wall clock overhead is the more accurate measure because it captures
+    # CPU-side blocking on NVMe page faults that CUDA events miss
+    effective_overhead = max(overhead_gpu, overhead_wall)
+
+    if effective_overhead < 5:
+        print(
+            "\n  → EXCELLENT: NVMe→CPU→GPU transfer fully hidden behind compute."
+        )
+    elif effective_overhead < 20:
+        print(
+            f"\n  → GOOD: Most NVMe transfer hidden. {effective_overhead:.0f}% overhead."
+        )
+    elif effective_overhead < 50:
+        print(
+            f"\n  → MODERATE: Partial overlap. {effective_overhead:.0f}% overhead."
+            f" Try increasing batch size."
+        )
+    else:
+        print(
+            f"\n  → POOR: NVMe transfer dominates. {effective_overhead:.0f}% overhead."
+            f"\n    Increase batch size or use faster NVMe."
+        )
+
+    # Memory summary
+    gpu_mem = torch.cuda.max_memory_allocated() / 1024**3
+    total_weights = n_layers * layer_mb / 1024
+    print("\n  Memory:")
+    print(f"  {'Total weight data on disk:':40s} {total_weights:.1f} GB")
+    print(f"  {'GPU double-buffer (2 slots):':40s} {2 * layer_mb / 1024:.2f} GB")
+    print(f"  {'CPU pinned staging:':40s} {layer_mb / 1024:.2f} GB")
+    print(f"  {'GPU peak memory:':40s} {gpu_mem:.2f} GB")
+
+    # Cleanup
+    del sf, pinned_buf, gpu_slot, A, W_attn
+    del W_shared_gu, W_shared_d, W_expert_gu, W_expert_d
+    del O_attn, O_shared_gu, O_shared_d, O_expert_gu, O_expert_d
+    torch.cuda.empty_cache()
+    os.unlink(fpath)
+
+    return baseline_ms, xfer_only_ms, pipeline_wall_ms
+
+
 # ─── Main ───
 
 
@@ -520,6 +838,14 @@ def main():
     parser.add_argument("--pipeline-tokens", type=int, default=4096, help="Tokens for pipeline test (default: 4096)")
     parser.add_argument("--nvme", type=str, default=None, help="NVMe mount path for disk read test")
     parser.add_argument("--skip-matmul", action="store_true", help="Skip detailed matmul sweep")
+    parser.add_argument(
+        "--moe-experts", type=int, default=8,
+        help="Number of active experts for MoE compute simulation (default: 8)",
+    )
+    parser.add_argument(
+        "--expert-intermediate", type=int, default=1536,
+        help="Expert MLP intermediate dim (default: 1536 for GLM-4.7)",
+    )
     args = parser.parse_args()
 
     print(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -551,6 +877,19 @@ def main():
         hidden=args.hidden,
         intermediate=args.intermediate,
     )
+
+    # Test 6: NVMe→CPU→GPU pipeline
+    if args.nvme:
+        test_nvme_pipeline(
+            nvme_path=args.nvme,
+            n_layers=args.n_layers,
+            layer_mb=args.layer_mb,
+            batch_tokens=args.pipeline_tokens,
+            hidden=args.hidden,
+            intermediate=args.intermediate,
+            expert_intermediate=args.expert_intermediate,
+            n_active_experts=args.moe_experts,
+        )
 
     # ─ Summary ─
     print(f"\n{'=' * 70}")
