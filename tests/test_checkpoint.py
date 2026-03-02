@@ -787,6 +787,175 @@ class TestRAMStrategy:
             )
 
 
+class TestGDS:
+    """Test GDS/kvikio integration for NVMe → GPU weight streaming."""
+
+    @pytest.fixture
+    def quantized_path(self, kbit_model):
+        """Save kbit_model to a temporary quantized checkpoint."""
+        with tempfile.NamedTemporaryFile(suffix=".safetensors", delete=False) as f:
+            path = f.name
+        save_quantized(kbit_model, path)
+        yield path
+        os.unlink(path)
+
+    def test_gds_fallback_on_geforce(self, quantized_path):
+        """On GeForce GPUs, use_gds=True should warn and fall back to CPU path."""
+        import warnings
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            model = KbitLoraModel.from_quantized(
+                quantized_path, weight_streaming=True, use_gds=True,
+            )
+        # Should warn about GDS fallback (GeForce detected)
+        gds_warnings = [x for x in w if "GDS requested but not available" in str(x.message)]
+        assert len(gds_warnings) == 1, f"Expected GDS fallback warning, got: {w}"
+        # Model should work (fell back to non-GDS)
+        assert not model._use_gds
+        # If streaming is active, strategy should not be gds
+        if hasattr(model, "_ram_strategy"):
+            assert model._ram_strategy != "gds"
+
+    def test_gds_strategy_with_mock(self, quantized_path):
+        """With mocked GDS support, strategy should be 'gds'."""
+        from unittest.mock import patch
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
+        with patch.object(KbitLoraModel, "_detect_gds_support", return_value=True), \
+             patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+            model = KbitLoraModel.from_quantized(
+                quantized_path, weight_streaming=True, use_gds=True,
+            )
+        assert model._use_gds
+        assert model._ram_strategy == "gds"
+        # GDS layer info should be populated for all streamed layers
+        n_streamed = model._num_loaded_layers - model._n_resident
+        assert len(model._gds_layer_info) == n_streamed
+        # Each GDS layer should have offset info with correct structure
+        for si, gds_layer in model._gds_layer_info.items():
+            for key, value in gds_layer.items():
+                if isinstance(value, dict):
+                    # Nested projection: {packed: (off, size, shape, dtype), ...}
+                    for wk, info in value.items():
+                        assert len(info) == 4  # (offset, size, shape, dtype)
+                        offset, size, shape, dtype = info
+                        assert offset > 0
+                        assert size > 0
+                else:
+                    # Flat tensor: (offset, size, shape, dtype)
+                    offset, size, shape, dtype = value
+                    assert offset > 0
+                    assert size > 0
+        # GPU slots should be allocated
+        assert len(model._gpu_slots) == 2
+
+    def test_gds_forward_backward_compat_mode(self, quantized_path):
+        """Test full GDS path using kvikio in compat mode (works on GeForce)."""
+        from unittest.mock import patch
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
+        with patch.object(KbitLoraModel, "_detect_gds_support", return_value=True), \
+             patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+            model = KbitLoraModel.from_quantized(
+                quantized_path, weight_streaming=True, use_gds=True,
+            )
+        assert model._ram_strategy == "gds"
+
+        # Forward + backward
+        input_ids = torch.randint(0, 1000, (1, 32), device="cuda")
+        labels = torch.randint(0, 1000, (1, 32), device="cuda")
+        loss, ctx = model.forward_streaming(input_ids, labels)
+        assert loss.item() > 0
+        model.backward_streaming(ctx)
+
+        # Verify gradients exist (LoRA B should have non-zero grads)
+        has_nonzero_grad = False
+        for name, param in model._lora_params.named_parameters():
+            if param.grad is not None and "_B" in name:
+                if param.grad.abs().sum() > 0:
+                    has_nonzero_grad = True
+        assert has_nonzero_grad, "No non-zero gradients found for LoRA B"
+
+    def test_gds_matches_pinned_gradients(self, quantized_path):
+        """GDS path should produce identical gradients as pinned path."""
+        from unittest.mock import patch
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
+        # Load with pinned (zero-resident to force streaming)
+        torch.manual_seed(42)
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+            model_pinned = KbitLoraModel.from_quantized(
+                quantized_path, weight_streaming=True, use_gds=False,
+            )
+        # Load with GDS
+        torch.manual_seed(42)
+        with patch.object(KbitLoraModel, "_detect_gds_support", return_value=True), \
+             patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+            model_gds = KbitLoraModel.from_quantized(
+                quantized_path, weight_streaming=True, use_gds=True,
+            )
+
+        # Same forward + backward
+        torch.manual_seed(123)
+        input_ids = torch.randint(0, 1000, (1, 32), device="cuda")
+        labels = torch.randint(0, 1000, (1, 32), device="cuda")
+
+        loss_p, ctx_p = model_pinned.forward_streaming(input_ids.clone(), labels.clone())
+        model_pinned.backward_streaming(ctx_p)
+
+        loss_g, ctx_g = model_gds.forward_streaming(input_ids.clone(), labels.clone())
+        model_gds.backward_streaming(ctx_g)
+
+        # Loss should match
+        assert torch.allclose(
+            torch.tensor(loss_p.item()), torch.tensor(loss_g.item()), atol=1e-4
+        ), f"Loss mismatch: pinned={loss_p.item()}, gds={loss_g.item()}"
+
+        # Gradients should match
+        grads_pinned = {
+            name: param.grad.clone()
+            for name, param in model_pinned._lora_params.named_parameters()
+            if param.grad is not None
+        }
+        grads_gds = {
+            name: param.grad.clone()
+            for name, param in model_gds._lora_params.named_parameters()
+            if param.grad is not None
+        }
+        for name in grads_pinned:
+            assert torch.allclose(grads_pinned[name], grads_gds[name], atol=1e-4), (
+                f"Gradient mismatch for {name}"
+            )
+
+    def test_parse_safetensors_offsets(self, quantized_path):
+        """Test that parse_safetensors_offsets correctly reads tensor metadata."""
+        from bitsandbytes.kbit_lora import parse_safetensors_offsets
+        from safetensors import safe_open
+
+        offsets = parse_safetensors_offsets(quantized_path)
+        # Should have entries for all tensors
+        assert len(offsets) > 0
+
+        # Verify a few entries against safetensors API
+        sf = safe_open(quantized_path, framework="pt", device="cpu")
+        for name in list(offsets.keys())[:5]:
+            offset, size, shape, dtype = offsets[name]
+            tensor = sf.get_tensor(name)
+            assert list(shape) == list(tensor.shape), f"Shape mismatch for {name}"
+            assert size == tensor.nbytes, f"Size mismatch for {name}: {size} vs {tensor.nbytes}"
+
+    def test_detect_gds_support_geforce(self):
+        """Verify _detect_gds_support returns False on GeForce GPUs."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
+        gpu_name = torch.cuda.get_device_name(0)
+        result = KbitLoraModel._detect_gds_support()
+        if "GeForce" in gpu_name:
+            assert result is False, "GDS should not be supported on GeForce"
+
+
 class TestStreamingQuantize:
     """Test streaming_quantize produces bitwise-identical output to save_quantized."""
 

@@ -9,8 +9,11 @@ No PEFT dependency — manages LoRA adapters directly for efficiency.
 Supported model_types: llama, mistral, qwen2, qwen3, qwen3_moe, glm4
 """
 
+import json
 import math
 import os
+import struct
+import warnings
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -26,6 +29,34 @@ from bitsandbytes.chunked import chunked_mlp_forward
 import bitsandbytes.functional as F
 from bitsandbytes.moe import moe_expert_forward, moe_router_dispatch
 from bitsandbytes.training import checkpoint_cpu_offload
+
+
+def parse_safetensors_offsets(path: str) -> dict:
+    """Parse safetensors header to get tensor name → (byte_offset, byte_size, shape, dtype)."""
+    _dtype_map = {
+        "F16": (torch.float16, 2),
+        "BF16": (torch.bfloat16, 2),
+        "F32": (torch.float32, 4),
+        "I32": (torch.int32, 4),
+        "I64": (torch.int64, 8),
+        "I16": (torch.int16, 2),
+        "I8": (torch.int8, 1),
+        "U8": (torch.uint8, 1),
+    }
+    with open(path, "rb") as fp:
+        header_size = struct.unpack("<Q", fp.read(8))[0]
+        header = json.loads(fp.read(header_size))
+    data_start = 8 + header_size
+    offsets = {}
+    for name, info in header.items():
+        if name == "__metadata__":
+            continue
+        start, end = info["data_offsets"]
+        dtype_str = info["dtype"]
+        shape = info["shape"]
+        torch_dtype, _ = _dtype_map.get(dtype_str, (torch.uint8, 1))
+        offsets[name] = (data_start + start, end - start, shape, torch_dtype)
+    return offsets
 
 
 def get_available_ram_bytes() -> int:
@@ -260,6 +291,7 @@ class KbitLoraModel(nn.Module):
         expert_chunk_size: int = 32,
         batch_size: int = 8,
         seq_len: int = 1024,
+        use_gds: bool = False,
         lora_checkpoint: Optional[str] = None,
     ) -> "KbitLoraModel":
         """Load a pre-quantized model from a safetensors checkpoint.
@@ -283,6 +315,8 @@ class KbitLoraModel(nn.Module):
             expert_chunk_size: Experts processed at once in MoE forward.
             batch_size: Batch size hint for VRAM estimation (partial residency).
             seq_len: Sequence length hint for VRAM estimation (partial residency).
+            use_gds: If True, use GPUDirect Storage (kvikio) for NVMe→GPU
+                streaming. Falls back to CPU path if kvikio unavailable.
             lora_checkpoint: Optional path to saved LoRA weights to load.
         """
         from safetensors import safe_open
@@ -355,6 +389,15 @@ class KbitLoraModel(nn.Module):
         self._checkpoint_path = checkpoint_path
         self.model = None
         self.lm_head_tied = False
+
+        # GDS detection and fallback
+        if use_gds and not cls._detect_gds_support():
+            warnings.warn(
+                "GDS requested but not available (kvikio not installed or "
+                "GeForce GPU detected). Falling back to CPU path."
+            )
+            use_gds = False
+        self._use_gds = use_gds
 
         # 5. Initialize parameter containers
         self._quantized_weights = nn.ParameterDict()
@@ -849,6 +892,68 @@ class KbitLoraModel(nn.Module):
             return
         self._build_rope_cache(device, max_seq_len=seq_len)
 
+    # ─── GDS support ───
+
+    @staticmethod
+    def _detect_gds_support() -> bool:
+        """Check if GDS (GPUDirect Storage) is available and beneficial.
+
+        Returns False if kvikio is not installed or if the GPU is a GeForce
+        (which only supports GDS in compatibility mode with no benefit).
+        """
+        try:
+            import kvikio  # noqa: F401
+        except ImportError:
+            return False
+        # GeForce GPUs only support GDS in compat mode (bounce buffer through
+        # CPU), which is no faster than the CPU pinned path. Only workstation/
+        # datacenter GPUs (RTX PRO, Quadro, A100+) benefit from true GDS DMA.
+        gpu_name = torch.cuda.get_device_name(0)
+        if "GeForce" in gpu_name:
+            return False
+        return True
+
+    def _gds_load_to_gpu(self, cpu_idx: int, slot: int, sync: bool = False):
+        """Read from NVMe directly into GPU slot via kvikio.CuFile.
+
+        Uses kvikio's thread pool for parallel reads. The sync parameter is
+        currently ignored — all reads complete before returning. This ensures
+        correctness with the CUDA stream sync pattern used by the caller.
+        """
+        import kvikio
+
+        gds_info = self._gds_layer_info[cpu_idx]
+        gpu_slot = self._gpu_slots[slot]
+        file_path = self._checkpoint_path
+        futures = []
+
+        # CuFile must stay open until all futures complete — pread is async
+        # and the file handle must remain valid until the reads finish.
+        with kvikio.CuFile(file_path, "r") as f:
+            for key, value in gds_info.items():
+                if isinstance(value, dict):
+                    # Nested proj: {packed: (offset, size, shape, dtype), ...}
+                    for wk, (offset, size, shape, dtype) in value.items():
+                        fut = f.pread(
+                            buf=gpu_slot[key][wk],
+                            file_offset=offset,
+                            size=size,
+                        )
+                        futures.append(fut)
+                else:
+                    # Flat tensor: (offset, size, shape, dtype)
+                    offset, size, shape, dtype = value
+                    fut = f.pread(
+                        buf=gpu_slot[key],
+                        file_offset=offset,
+                        size=size,
+                    )
+                    futures.append(fut)
+
+            # Wait for all reads to complete while the file handle is still open
+            for fut in futures:
+                fut.get()
+
     # ─── Weight streaming ───
 
     def _get_streaming_weight_keys(self, layer_info: dict) -> list[str]:
@@ -1049,11 +1154,16 @@ class KbitLoraModel(nn.Module):
 
         # Select RAM strategy
         has_checkpoint = getattr(self, "_checkpoint_path", None) is not None
+        use_gds = getattr(self, "_use_gds", False)
         available_ram = get_available_ram_bytes()
         headroom = 4 * 1024**3  # 4 GB safety margin
         usable_ram = max(0, available_ram - headroom)
 
-        if usable_ram >= total_streamed_bytes or not has_checkpoint:
+        if use_gds and has_checkpoint:
+            # GDS: read directly from NVMe to GPU, no CPU memory needed
+            self._ram_strategy = "gds"
+            n_pinned = 0
+        elif usable_ram >= total_streamed_bytes or not has_checkpoint:
             # All-pinned: pre-load everything into CPU pinned RAM
             # Also forced when no checkpoint file (from __init__ path)
             self._ram_strategy = "pinned"
@@ -1078,6 +1188,7 @@ class KbitLoraModel(nn.Module):
         self._safetensors_file = None
         self._staging_buffers = []
         self._mmap_layer_names = {}
+        self._gds_layer_info = {}
 
         if self._ram_strategy in ("hybrid", "mmap") and has_checkpoint:
             from safetensors import safe_open
@@ -1085,13 +1196,42 @@ class KbitLoraModel(nn.Module):
                 self._checkpoint_path, framework="pt", device="cpu"
             )
 
-        # Move non-resident layers: pinned or leave for mmap
+        # Parse byte offsets for GDS path
+        _sf_offsets = None
+        if self._ram_strategy == "gds" and has_checkpoint:
+            _sf_offsets = parse_safetensors_offsets(self._checkpoint_path)
+
+        # Move non-resident layers: pinned, mmap, or GDS
         self._cpu_weights = []
         for si in range(n_streamed):
             layer_idx = self._n_resident + si
             layer_info = self._layer_data[layer_idx]
 
-            if si < n_pinned:
+            if self._ram_strategy == "gds":
+                # GDS: store byte offset info for each tensor
+                tensor_names = self._tensor_name_map[layer_idx]
+                gds_layer = {}
+                for key, names in tensor_names.items():
+                    if isinstance(names, dict):
+                        gds_layer[key] = {
+                            wk: _sf_offsets[tn]
+                            for wk, tn in names.items()
+                        }
+                    else:
+                        gds_layer[key] = _sf_offsets[names]
+                self._gds_layer_info[si] = gds_layer
+                # Clear weight tensors from _layer_data
+                proj_keys = self._get_streaming_weight_keys(layer_info)
+                for proj in proj_keys:
+                    for wk in weight_keys:
+                        layer_info[proj][wk] = None
+                if layer_info.get("is_moe"):
+                    for expert_proj in ["gate", "up", "down"]:
+                        for suffix in ["packed", "absmax"]:
+                            layer_info[f"expert_{expert_proj}_{suffix}"] = None
+                    layer_info["expert_codebook"] = None
+                self._cpu_weights.append(None)
+            elif si < n_pinned:
                 # Pinned: copy to CPU pinned memory
                 cpu_layer = {}
                 proj_keys = self._get_streaming_weight_keys(layer_info)
@@ -1173,6 +1313,21 @@ class KbitLoraModel(nn.Module):
                 else:
                     ref_layer[key] = self._safetensors_file.get_tensor(value)
 
+        if ref_layer is None and self._gds_layer_info:
+            # GDS path — build reference from offset info (shapes + dtypes)
+            first_gds_si = min(self._gds_layer_info.keys())
+            gds_info = self._gds_layer_info[first_gds_si]
+            ref_layer = {}
+            for key, value in gds_info.items():
+                if isinstance(value, dict):
+                    ref_layer[key] = {
+                        wk: torch.empty(shape, dtype=dtype, device="cpu")
+                        for wk, (offset, size, shape, dtype) in value.items()
+                    }
+                else:
+                    offset, size, shape, dtype = value
+                    ref_layer[key] = torch.empty(shape, dtype=dtype, device="cpu")
+
         def _entry_bytes(v):
             return sum(t.nbytes for t in v.values()) if isinstance(v, dict) else v.nbytes
 
@@ -1184,6 +1339,26 @@ class KbitLoraModel(nn.Module):
         for cpu_layer in self._cpu_weights:
             if cpu_layer is not None and _ref_bytes(cpu_layer) > _ref_bytes(largest_ref):
                 largest_ref = cpu_layer
+
+        # For GDS, also check all GDS layers by building temp ref from offsets
+        for si, gds_info in self._gds_layer_info.items():
+            gds_bytes = sum(
+                sum(info[1] for info in v.values()) if isinstance(v, dict)
+                else v[1]
+                for v in gds_info.values()
+            )
+            if gds_bytes > _ref_bytes(largest_ref):
+                # Build a temp ref from this GDS layer's shapes
+                largest_ref = {}
+                for key, value in gds_info.items():
+                    if isinstance(value, dict):
+                        largest_ref[key] = {
+                            wk: torch.empty(shape, dtype=dtype, device="cpu")
+                            for wk, (offset, size, shape, dtype) in value.items()
+                        }
+                    else:
+                        offset, size, shape, dtype = value
+                        largest_ref[key] = torch.empty(shape, dtype=dtype, device="cpu")
 
         self._gpu_slots = []
         for _ in range(2):
@@ -1242,7 +1417,8 @@ class KbitLoraModel(nn.Module):
     def _stream_load_layer(self, layer_idx: int, slot: int, sync: bool = False):
         """Load a layer's quantized weights into a GPU slot.
 
-        Handles both pinned (direct DMA) and mmap (safetensors → staging → GPU) sources.
+        Handles pinned (direct DMA), mmap (safetensors → staging → GPU),
+        and GDS (NVMe → GPU via kvikio) sources.
         """
         cpu_idx = layer_idx - self._n_resident
         cpu_layer = self._cpu_weights[cpu_idx]
@@ -1250,6 +1426,9 @@ class KbitLoraModel(nn.Module):
         if cpu_layer is not None:
             # Pinned path: async DMA from CPU pinned to GPU
             self._copy_pinned_to_gpu(cpu_layer, slot, sync)
+        elif self._ram_strategy == "gds":
+            # GDS path: read from NVMe directly into GPU slot
+            self._gds_load_to_gpu(cpu_idx, slot, sync)
         else:
             # Mmap path: load from safetensors → staging buffer → GPU
             self._mmap_load_to_gpu(cpu_idx, slot, sync)
