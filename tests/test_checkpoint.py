@@ -81,9 +81,59 @@ class TestSaveQuantized:
             save_quantized(kbit_model, path)
             sf = safe_open(path, framework="pt", device="cpu")
             meta = sf.metadata()
+
+            # Model architecture
             assert meta["model_type"] == "llama"
-            assert meta["k_attention"] == "4"
+            assert int(meta["hidden_size"]) == 256
             assert int(meta["num_layers"]) == 2
+            assert int(meta["num_attention_heads"]) == 4
+            assert int(meta["num_key_value_heads"]) == 2
+            assert int(meta["head_dim"]) == 64  # 256 / 4
+            assert int(meta["intermediate_size"]) == 512
+            assert int(meta["vocab_size"]) == 1000
+            assert float(meta["rms_norm_eps"]) > 0
+            assert float(meta["rope_theta"]) > 0
+
+            # Quantization config
+            assert meta["k_attention"] == "4"
+            assert meta["k_mlp"] == "4"
+            assert meta["k_lm_head"] == "4"
+            assert meta["k_experts"] == "4"
+            assert meta["k_shared_expert"] == "4"
+
+            # MoE config
+            assert meta["is_moe"] == "False"
+            assert meta["has_shared_expert"] == "False"
+            assert meta["has_qk_norm"] == "False"
+            assert meta["dense_layer_indices"] == ""
+
+            # Per-projection dims for layer 0 attention
+            assert int(meta["layer.0.attn.q_proj.N"]) == 256  # q_dim = 4 * 64
+            assert int(meta["layer.0.attn.q_proj.K"]) == 256  # hidden_size
+            assert int(meta["layer.0.attn.q_proj.N_padded"]) == 256  # already mult of 128
+            assert int(meta["layer.0.attn.q_proj.k"]) == 4
+
+            assert int(meta["layer.0.attn.k_proj.N"]) == 128  # kv_dim = 2 * 64
+            assert int(meta["layer.0.attn.k_proj.K"]) == 256
+
+            # MLP dims
+            assert int(meta["layer.0.mlp.gate_proj.N"]) == 512  # intermediate
+            assert int(meta["layer.0.mlp.gate_proj.K"]) == 256  # hidden
+
+            # LM head dims
+            assert int(meta["lm_head.N"]) == 1000  # vocab_size
+            assert int(meta["lm_head.K"]) == 256  # hidden_size
+
+            # Check all layers have dims
+            for i in range(2):
+                for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
+                    assert f"layer.{i}.attn.{proj}.N" in meta
+                    assert f"layer.{i}.attn.{proj}.K" in meta
+                    assert f"layer.{i}.attn.{proj}.N_padded" in meta
+                    assert f"layer.{i}.attn.{proj}.k" in meta
+                for proj in ["gate_proj", "up_proj", "down_proj"]:
+                    assert f"layer.{i}.mlp.{proj}.N" in meta
+                    assert f"layer.{i}.mlp.{proj}.K" in meta
         finally:
             os.unlink(path)
 
